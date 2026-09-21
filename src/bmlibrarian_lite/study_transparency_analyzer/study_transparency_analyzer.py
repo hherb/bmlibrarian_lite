@@ -15,13 +15,24 @@ License: MIT
 
 import re
 import json
-import time
 import logging
 from dataclasses import dataclass, field, asdict
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
 import requests
+
+from urllib3.util.retry import Retry
+
+from ..polite_session import mount_politely
+
+# Each client below owns its own request loop and its own error handling,
+# and made exactly one physical request per call before pacing was mounted.
+# The adapter must therefore retry a 429/503 zero times on its own: left to
+# the default of POLITE_MAX_THROTTLE_RETRIES, a persistent 503 would cost
+# four requests where it used to cost one, which is the opposite of being
+# polite -- and www.ebi.ac.uk's budget is shared with the main search path.
+_ADAPTER_OWNS_NO_THROTTLE_RETRIES = 0
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -911,16 +922,11 @@ class PubMedClient:
     def __init__(self, email: str, api_key: Optional[str] = None):
         self.email = email
         self.api_key = api_key
-        self.session = requests.Session()
-        self._last_request_time = 0
-
-    def _rate_limit(self):
-        """Enforce rate limiting (3 requests/sec without API key, 10 with)."""
-        min_interval = 0.1 if self.api_key else 0.34
-        elapsed = time.time() - self._last_request_time
-        if elapsed < min_interval:
-            time.sleep(min_interval - elapsed)
-        self._last_request_time = time.time()
+        self.session = mount_politely(
+            requests.Session(),
+            retry=Retry(total=_ADAPTER_OWNS_NO_THROTTLE_RETRIES),
+            api_key=api_key,
+        )
 
     def _make_request(self, endpoint: str, params: Dict[str, Any]) -> requests.Response:
         """Make a rate-limited E-utilities request.
@@ -950,7 +956,6 @@ class PubMedClient:
             requests.RequestException: If no response arrived at all
                 (connection failure, timeout).
         """
-        self._rate_limit()
         params['email'] = self.email
         if self.api_key:
             params['api_key'] = self.api_key
@@ -1114,22 +1119,16 @@ class CrossRefClient:
 
     def __init__(self, email: str):
         self.email = email
-        self.session = requests.Session()
+        self.session = mount_politely(
+            requests.Session(),
+            retry=Retry(total=_ADAPTER_OWNS_NO_THROTTLE_RETRIES),
+        )
         self.session.headers.update({
             'User-Agent': f'StudyTransparencyAnalyzer/1.0 (mailto:{email})'
         })
-        self._last_request_time = 0
-
-    def _rate_limit(self):
-        """Enforce polite rate limiting."""
-        elapsed = time.time() - self._last_request_time
-        if elapsed < 0.1:
-            time.sleep(0.1 - elapsed)
-        self._last_request_time = time.time()
 
     def get_work(self, doi: str) -> Optional[Dict]:
         """Get work metadata by DOI."""
-        self._rate_limit()
         # Clean DOI
         doi = doi.replace('https://doi.org/', '').replace('http://doi.org/', '')
 
@@ -1176,20 +1175,13 @@ class ClinicalTrialsClient:
     BASE_URL = "https://clinicaltrials.gov/api/v2"
 
     def __init__(self):
-        self.session = requests.Session()
-        self._last_request_time = 0
-
-    def _rate_limit(self):
-        """Enforce rate limiting."""
-        elapsed = time.time() - self._last_request_time
-        if elapsed < 0.2:
-            time.sleep(0.2 - elapsed)
-        self._last_request_time = time.time()
+        self.session = mount_politely(
+            requests.Session(),
+            retry=Retry(total=_ADAPTER_OWNS_NO_THROTTLE_RETRIES),
+        )
 
     def get_study(self, nct_id: str) -> Optional[Dict]:
         """Get study by NCT ID."""
-        self._rate_limit()
-
         # Normalize NCT ID
         nct_id = nct_id.upper()
         if not nct_id.startswith('NCT'):
@@ -1206,8 +1198,6 @@ class ClinicalTrialsClient:
 
     def search_by_publication(self, pmid: str = None, doi: str = None) -> List[str]:
         """Search for trials linked to a publication."""
-        self._rate_limit()
-
         # ClinicalTrials.gov doesn't have direct PMID/DOI search in v2
         # This would require scraping or using alternative APIs
         # Returning empty for now - we rely on PubMed DataBank links
@@ -1278,19 +1268,13 @@ class EuropePMCClient:
     BASE_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest"
 
     def __init__(self):
-        self.session = requests.Session()
-        self._last_request_time = 0
-
-    def _rate_limit(self):
-        elapsed = time.time() - self._last_request_time
-        if elapsed < 0.2:
-            time.sleep(0.2 - elapsed)
-        self._last_request_time = time.time()
+        self.session = mount_politely(
+            requests.Session(),
+            retry=Retry(total=_ADAPTER_OWNS_NO_THROTTLE_RETRIES),
+        )
 
     def get_article(self, pmid: str = None, pmcid: str = None, doi: str = None) -> Optional[Dict]:
         """Get article by various IDs."""
-        self._rate_limit()
-
         if pmid:
             query = f"ext_id:{pmid} src:med"
         elif pmcid:
@@ -1319,9 +1303,24 @@ class EuropePMCClient:
             return None
 
     def get_full_text_xml(self, pmcid: str) -> Optional[str]:
-        """Get full text XML for open access articles."""
-        self._rate_limit()
+        """Get full text XML for open access articles.
 
+        Args:
+            pmcid: The PMC identifier, with or without its ``PMC`` prefix.
+
+        Returns:
+            The full-text XML, or ``None`` when it could not be fetched.
+
+        Note:
+            ``None`` here is genuinely ambiguous to the caller: it means
+            either "this article has no open-access full text" or "we could
+            not reach Europe PMC". The caller treats both as the former and
+            goes on to report "no data availability statement", which for a
+            paper that has one is a fabricated finding shown to a clinician.
+            Silence is at least removed here -- the failure is logged with
+            the identifier and the reason -- but distinguishing the two
+            states needs an "unknown" in the report model itself (#346).
+        """
         pmcid = pmcid.upper()
         if not pmcid.startswith('PMC'):
             pmcid = f'PMC{pmcid}'
@@ -1331,7 +1330,16 @@ class EuropePMCClient:
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
             return response.text
-        except requests.RequestException:
+        except requests.RequestException as e:
+            # Never silently: a throttled Europe PMC and an article without
+            # full text are not the same thing, and only one of them is the
+            # article's fault (golden rule 8).
+            logger.warning(
+                "Europe PMC full text for %s could not be fetched, so any "
+                "statement it carries will be reported as absent: %s",
+                pmcid,
+                e,
+            )
             return None
 
 
@@ -1342,19 +1350,13 @@ class OpenAlexClient:
 
     def __init__(self, email: str):
         self.email = email
-        self.session = requests.Session()
-        self._last_request_time = 0
-
-    def _rate_limit(self):
-        elapsed = time.time() - self._last_request_time
-        if elapsed < 0.1:
-            time.sleep(0.1 - elapsed)
-        self._last_request_time = time.time()
+        self.session = mount_politely(
+            requests.Session(),
+            retry=Retry(total=_ADAPTER_OWNS_NO_THROTTLE_RETRIES),
+        )
 
     def get_work(self, doi: str = None, pmid: str = None) -> Optional[Dict]:
         """Get work by DOI or PMID."""
-        self._rate_limit()
-
         if doi:
             doi = doi.replace('https://doi.org/', '')
             url = f"{self.BASE_URL}/works/doi:{doi}"
@@ -2337,8 +2339,13 @@ class StudyTransparencyAnalyzer:
                         if 'data' in title and ('avail' in title or 'shar' in title or 'access' in title):
                             data_statement = ' '.join(section.itertext())
                             break
-                except ET.ParseError:
-                    pass
+                except ET.ParseError as e:
+                    logger.warning(
+                        "Europe PMC full text for %s did not parse, so any "
+                        "data availability statement in it is being missed: %s",
+                        report.pmcid,
+                        e,
+                    )
 
         report.data_availability = analyze_data_availability(data_statement)
 

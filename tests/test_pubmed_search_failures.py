@@ -99,11 +99,13 @@ def make_client(max_retries: int = 1) -> PubMedSearchClient:
     Returns:
         The client.
     """
-    client = PubMedSearchClient(
+    # No `client.request_delay = 0.0` any more: the attribute is gone, so
+    # that line had become a silent no-op claiming these tests do not sleep.
+    # They do not, for a better reason -- every one of them points the client
+    # at a loopback test server, and loopback is never paced.
+    return PubMedSearchClient(
         email="test@example.com", api_key=FAKE_API_KEY, max_retries=max_retries
     )
-    client.request_delay = 0.0
-    return client
 
 
 class TestAFailedSearchRaises:
@@ -179,7 +181,6 @@ class TestAFailedSearchRaises:
             email="test@example.com", api_key=FAKE_API_KEY, max_retries=1,
             timeout=SHORT_TIMEOUT_SECONDS,
         )
-        client.request_delay = 0.0
         with silent() as url:
             monkeypatch.setattr(search_client, "ESEARCH_URL", f"{url}{ESEARCH_PATH}")
 

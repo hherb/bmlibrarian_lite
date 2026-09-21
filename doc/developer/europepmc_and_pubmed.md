@@ -901,8 +901,20 @@ enum EuropePMCError: Error, RetryableError {
 
 ### Europe PMC Limits
 
-- No official rate limit documented
-- Recommended: 10 requests/second maximum
+- **Stated limit: 10 requests/second (500/minute), per IP** — from EBI staff
+  on the Europe PMC developer forum. Treat this as the published figure.
+- **Observed 2026-09-21:** two back-to-back `fullTextXML` fetches of a large
+  article (~150 KB, ~17 s each) were followed by sustained 503s with no
+  `Retry-After`, for up to ~70 s.
+- **Not reproducible on re-check the same day**: four rapid `search` calls
+  and three rapid `fullTextXML` calls all returned HTTP 200. So the 503s
+  above are best read as load-shedding under slow, large, concurrent
+  transfers, **not** as a hard "two requests per second" limit, and not as
+  evidence that the published 10/s is fiction.
+- We pace it at **1 request/second** anyway, with adaptive backoff beneath
+  that: it is well inside the published limit, it costs this client nothing
+  at the volumes it works at, and it removes the load-shedding case
+  entirely. See `doc/cross_platform/polite_request_pacing.md`.
 - Use cursor pagination to minimize requests
 
 ### PubMed E-utilities Limits

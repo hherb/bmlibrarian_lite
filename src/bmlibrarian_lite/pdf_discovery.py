@@ -46,10 +46,39 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote, urljoin, urlparse
 
 import requests
-from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from .constants import (
+    HTTP_ERROR_STATUS_MIN,
+    PAYWALL_HTTP_STATUSES,
+    POLITE_MAX_THROTTLE_RETRIES,
+)
+from .polite_session import is_loopback_host, mount_politely
+from .rate_limit import limiter_for
+
 logger = logging.getLogger(__name__)
+
+def _failure_description(exc: Exception) -> str:
+    """Describe a request failure without quoting the URL it came from.
+
+    ``str()`` on a ``requests`` exception embeds the request URL, and the
+    Unpaywall URL carries ``email=<the user's address>`` -- so the obvious
+    log line puts a personal identifier in the log file (the same leak as
+    #196/#330). The status code is what diagnosing this actually needs.
+
+    Args:
+        exc: The exception a request raised.
+
+    Returns:
+        The exception class, and the HTTP status where there was one.
+    """
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if status is not None:
+        return f"{type(exc).__name__} (HTTP {status})"
+    return type(exc).__name__
+
+
 
 # Global browser session manager (singleton, persists across downloads)
 _browser_session: Optional["BrowserSession"] = None
@@ -138,6 +167,16 @@ class BrowserSession:
 
             # Set up download handling
             output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # The browser fallback reaches the same publisher hosts as the
+            # requests path, so it shares their budget rather than opening a
+            # second one beside it. It is invoked precisely when a host has
+            # already refused us, which is the worst moment to stop being
+            # polite. No mounted adapter can do this for us: Playwright does
+            # not go through requests.
+            browser_host = urlparse(url).hostname or ""
+            if browser_host and not is_loopback_host(browser_host):
+                limiter_for(browser_host).acquire()
 
             # Navigate and wait for potential download
             with self._page.expect_download(timeout=timeout) as download_info:
@@ -357,18 +396,14 @@ class PDFDiscoverer:
             "Accept": "application/pdf,*/*",
         })
 
-        # Configure retry strategy
         retry_strategy = Retry(
-            total=3,
+            total=POLITE_MAX_THROTTLE_RETRIES,
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["HEAD", "GET"],
         )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-
-        return session
+        # Unpaywall, doi.org and publisher web servers, none of them ours
+        return mount_politely(session, retry=retry_strategy)
 
     def _emit_progress(self, stage: str, status: str) -> None:
         """Emit progress update."""
@@ -675,7 +710,17 @@ class PDFDiscoverer:
                         sources.append(ps)
 
         except requests.exceptions.RequestException as e:
-            logger.warning(f"Unpaywall API error for DOI {doi}: {e}")
+            # An empty source list is indistinguishable, to every caller,
+            # from "this article genuinely has no open-access PDF" -- so a
+            # throttled Unpaywall quietly narrows the evidence base and the
+            # reader is told the full text is unavailable. Recording it as a
+            # shortfall the reader actually sees needs #347; until then it is
+            # at least a warning that names the failure, not a debug line.
+            logger.warning(
+                f"Unpaywall could not be asked about DOI {doi}, so any "
+                f"open-access copy it knows of will be reported as absent: "
+                f"{_failure_description(e)}"
+            )
 
         return sources
 
@@ -820,7 +865,14 @@ class PDFDiscoverer:
                 ))
 
         except requests.exceptions.RequestException as e:
-            logger.debug(f"DOI direct resolution failed for {doi}: {e}")
+            # At debug, a throttled doi.org left no trace at all under the
+            # default INFO configuration: the reader saw "no full text" and
+            # the log said nothing had happened. Same ambiguity as the
+            # Unpaywall path above (#347).
+            logger.warning(
+                f"doi.org could not be asked about DOI {doi}, so any copy it "
+                f"resolves to will be reported as absent: {_failure_description(e)}"
+            )
 
         return sources
 
@@ -882,6 +934,21 @@ class PDFDiscoverer:
                 body_prefix = next(content_iter, b"")
             except Exception:
                 body_prefix = b""
+
+            # A broken server is not a paywall. The paywall sniff below
+            # treats any text/html body whose URL contains "access" as a
+            # paywall, which matches every ".../openaccess/..." URL, so a
+            # persistent 503 would be reported to the reader as "requires
+            # institutional subscription". Until this module owned its own
+            # throttle retries, urllib3's Retry raised on a persistent 503
+            # and the sniff was never reached; the status is now classified
+            # here instead, so any non-2xx that is not a genuine paywall
+            # signal takes the error path it always took.
+            if (
+                response.status_code >= HTTP_ERROR_STATUS_MIN
+                and response.status_code not in PAYWALL_HTTP_STATUSES
+            ):
+                response.raise_for_status()
 
             # Check for paywall indicators
             if self._is_paywall_response(response, source.url, body_prefix):
@@ -946,7 +1013,10 @@ class PDFDiscoverer:
             )
 
         except requests.exceptions.HTTPError as e:
-            if e.response is not None and e.response.status_code in [401, 403]:
+            if (
+                e.response is not None
+                and e.response.status_code in PAYWALL_HTTP_STATUSES
+            ):
                 return DiscoveryResult(
                     success=False,
                     is_paywall=True,
@@ -1040,7 +1110,7 @@ class PDFDiscoverer:
                 still needed to write the file.
         """
         # Check status code
-        if response.status_code in [401, 403]:
+        if response.status_code in PAYWALL_HTTP_STATUSES:
             return True
 
         # Check content type - HTML usually means landing page

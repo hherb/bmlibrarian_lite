@@ -44,7 +44,6 @@ from html import unescape
 from typing import Any
 
 import requests
-from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .constants import (
@@ -68,6 +67,7 @@ from .data_models import (
     SearchProvider,
 )
 from .exceptions import SourceRequestError
+from .polite_session import mount_politely
 from .search_failures import request_failure_from_exception
 
 logger = logging.getLogger(__name__)
@@ -209,11 +209,10 @@ class EuropePMCClient:
             allowed_methods=["HEAD", "GET"],
             raise_on_status=False,
         )
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-
-        return session
+        # Pacing is mounted here so no call site has to remember it. Europe
+        # PMC states 10/s per IP; we ask for 1/s, which is inside that and
+        # avoids the load-shedding seen under large full-text fetches (#341)
+        return mount_politely(session, retry=retry_strategy)
 
     def get_article_info(
         self,

@@ -31,6 +31,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from bmlibrarian_lite.rate_limit import reset_limiters
+
 
 @pytest.fixture
 def temp_dir() -> Generator[Path, None, None]:
@@ -151,3 +153,20 @@ def mock_requests_session():
         session_instance = MagicMock()
         mock_session.return_value = session_instance
         yield session_instance
+
+
+@pytest.fixture(autouse=True)
+def _forget_pacing_state() -> Generator[None, None, None]:
+    """Give every test an empty limiter registry.
+
+    The registry is process-wide, so a limiter one test penalised -- or one
+    built over a no-sleep fake -- otherwise leaks into every test that runs
+    after it. Both directions are bad: a real limiter left at a 20s interval
+    makes some later, unrelated test sleep for 20 real seconds with no
+    obvious cause, and a fake one silently disables the pacing a later test
+    means to assert. Autouse, because the tests that need this are exactly
+    the ones that have not thought about it.
+    """
+    reset_limiters()
+    yield
+    reset_limiters()

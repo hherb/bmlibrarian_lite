@@ -23,9 +23,17 @@ host name matched anywhere inside the string is not a publisher identity:
 happens to spell it out.
 """
 
-import pytest
+from collections.abc import Iterator
+from pathlib import Path
 
-from bmlibrarian_lite.pdf_discovery import PDFDiscoverer
+import pytest
+import requests
+
+from bmlibrarian_lite.pdf_discovery import (
+    PDFDiscoverer,
+    PDFSource,
+    PDFSourceType,
+)
 
 
 @pytest.fixture
@@ -161,3 +169,112 @@ def test_registrants_without_a_url_pattern_yield_nothing(
     wrong URL.
     """
     assert discovery._discover_publisher_specific(doi) == []
+
+
+class _ScriptedResponse:
+    """A response carrying only what ``_try_download`` reads off it.
+
+    Attributes:
+        status_code: The HTTP status the server answered with.
+        headers: The response headers.
+        url: The URL the response came from.
+    """
+
+    def __init__(self, status_code: int, content_type: str, url: str, body: bytes) -> None:
+        """Answer one scripted request.
+
+        Args:
+            status_code: The HTTP status to report.
+            content_type: The ``Content-Type`` header value.
+            url: The URL to report as the response's own.
+            body: The whole response body, served as a single chunk.
+        """
+        self.status_code = status_code
+        self.headers = {"Content-Type": content_type}
+        self.url = url
+        self._body = body
+
+    def iter_content(self, chunk_size: int = 8192) -> Iterator[bytes]:
+        """Yield the body in one chunk.
+
+        Args:
+            chunk_size: Ignored; the whole body fits in one chunk.
+
+        Yields:
+            The response body.
+        """
+        yield self._body
+
+    def raise_for_status(self) -> None:
+        """Raise for an error status, exactly as ``requests`` does.
+
+        Raises:
+            requests.exceptions.HTTPError: If the status is 400 or above.
+        """
+        if self.status_code >= 400:
+            raise requests.exceptions.HTTPError(
+                f"{self.status_code} Server Error", response=self
+            )
+
+
+class _ScriptedSession:
+    """A session that answers every GET with one scripted response."""
+
+    def __init__(self, response: _ScriptedResponse) -> None:
+        """Answer with this response.
+
+        Args:
+            response: What every ``get`` returns.
+        """
+        self._response = response
+
+    def get(self, url: str, **kwargs: object) -> _ScriptedResponse:
+        """Answer the scripted response.
+
+        Args:
+            url: Ignored.
+            **kwargs: Ignored.
+
+        Returns:
+            The scripted response.
+        """
+        return self._response
+
+
+def test_a_503_on_an_openaccess_url_is_not_reported_as_a_paywall(
+    discovery: PDFDiscoverer, tmp_path: Path
+) -> None:
+    """An outage must never be reported to the reader as "you must pay".
+
+    ``_is_paywall_response`` calls any ``text/html`` body whose URL contains
+    "access" a paywall, which matches every ``.../openaccess/...`` URL. Until
+    the adapter owned the throttle statuses, urllib3's ``Retry`` raised on a
+    persistent 503 and the sniff was never reached.
+    """
+    url = "https://publisher.example.org/openaccess/article.pdf"
+    source = PDFSource(url=url, source_type=PDFSourceType.DOI_DIRECT)
+    discovery._session = _ScriptedSession(
+        _ScriptedResponse(503, "text/html", url, b"<html>Service Unavailable</html>")
+    )
+
+    result = discovery._try_download(source, tmp_path / "out.pdf", None)
+
+    assert result.success is False
+    assert result.is_paywall is False
+    assert "subscription" not in (result.error or "")
+
+
+def test_a_403_on_an_openaccess_url_is_still_a_paywall(
+    discovery: PDFDiscoverer, tmp_path: Path
+) -> None:
+    """The control: a genuine paywall signal keeps its own reporting."""
+    url = "https://publisher.example.org/openaccess/article.pdf"
+    source = PDFSource(url=url, source_type=PDFSourceType.DOI_DIRECT)
+    discovery._session = _ScriptedSession(
+        _ScriptedResponse(403, "text/html", url, b"<html>Forbidden</html>")
+    )
+
+    result = discovery._try_download(source, tmp_path / "out.pdf", None)
+
+    assert result.success is False
+    assert result.is_paywall is True

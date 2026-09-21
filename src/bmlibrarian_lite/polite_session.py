@@ -1,0 +1,285 @@
+# BMLibrarian Lite - Biomedical Literature Research Tool
+# Copyright (C) 2024-2025 Dr Horst Herb
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+"""Pacing mounted on a session, so no call site has to remember it.
+
+``urllib3``'s own ``Retry`` re-sends inside one ``send()``, where the limiter
+cannot see it. So the throttle statuses are taken off ``Retry`` and retried
+here instead, one ``acquire()`` per attempt: a service that is shedding load
+is not asked again on the same breath.
+
+The contract is ``doc/cross_platform/polite_request_pacing.md``.
+"""
+
+import ipaddress
+import logging
+from typing import Any
+from urllib.parse import urlparse
+
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+from .constants import (
+    HTTP_ERROR_STATUS_MIN,
+    POLITE_MAX_THROTTLE_RETRIES,
+    POLITE_THROTTLE_STATUSES,
+)
+from .rate_limit import limiter_for
+
+logger = logging.getLogger(__name__)
+
+
+def is_loopback_host(host: str) -> bool:
+    """Whether a host is this machine, and so not somebody else's service.
+
+    Pacing exists to be polite to a *third party*. A loopback address is
+    this process's own machine -- ``tests/scripted_http_server.py``'s
+    ``ThreadingHTTPServer``, or a local Ollama on ``localhost:11434`` -- and
+    asking it twice in the same second is not rude. No DNS lookup is
+    performed here: only the literal host string is inspected, so checking
+    this never adds a resolution to the request path.
+
+    Args:
+        host: The hostname, as ``urlparse`` gives it.
+
+    Returns:
+        True if the host is loopback.
+    """
+    if host in ("localhost", "::1"):
+        return True
+    if host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def retry_after_seconds(response: requests.Response) -> float | None:
+    """How long the service asked us to wait, if it said.
+
+    Only the numeric form is read. The HTTP-date form is valid but rare
+    here, and a wrong parse would be worse than falling back to halving.
+
+    Args:
+        response: The throttled response.
+
+    Returns:
+        The seconds asked for, or ``None`` when the header is absent or is
+        not a plain number.
+    """
+    raw = response.headers.get("Retry-After")
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+class PoliteAdapter(HTTPAdapter):
+    """Acquires before every attempt, and yields when the host pushes back."""
+
+    def __init__(
+        self,
+        *args: Any,
+        api_key: str | None = None,
+        max_throttle_retries: int | None = None,
+        fault_statuses: tuple[int, ...] = (),
+        **kwargs: Any,
+    ) -> None:
+        """Build the adapter.
+
+        Args:
+            *args: Passed to :class:`HTTPAdapter`.
+            api_key: Raises the ceiling where the service offers one.
+            max_throttle_retries: How many extra attempts a retryable status
+                gets, on top of the first. Ordinarily this is the mounted
+                session's own ``Retry.total`` -- ``mount_politely`` passes
+                it through, so a client's configured retry budget is not
+                silently overridden by a fixed constant. ``None`` falls
+                back to :data:`POLITE_MAX_THROTTLE_RETRIES`, for an adapter
+                built without going through ``mount_politely``.
+            fault_statuses: The server-fault statuses the caller asked to
+                have retried (its ``Retry.status_forcelist``, less the
+                throttles). Retried here rather than by ``urllib3`` so that
+                one budget covers every status: nested, the two loops
+                multiplied, and a host alternating 500 and 503 cost eight
+                physical requests where four were configured.
+            **kwargs: Passed to :class:`HTTPAdapter`.
+        """
+        self._api_key = api_key
+        self._max_throttle_retries = (
+            max_throttle_retries
+            if max_throttle_retries is not None
+            else POLITE_MAX_THROTTLE_RETRIES
+        )
+        self._fault_statuses = fault_statuses
+        self._retry_statuses = tuple(
+            {*POLITE_THROTTLE_STATUSES, *fault_statuses}
+        )
+        super().__init__(*args, **kwargs)
+
+    def _send_once(self, request: requests.PreparedRequest, **kwargs: Any) -> Any:
+        """Make one underlying request.
+
+        Overridden in tests so no socket is opened.
+
+        Args:
+            request: The prepared request.
+            **kwargs: Passed to :class:`HTTPAdapter`.
+
+        Returns:
+            The response.
+        """
+        return super().send(request, **kwargs)
+
+    def send(
+        self,
+        request: requests.PreparedRequest,
+        stream: bool = False,
+        timeout: float | tuple[float | None, float | None] | None = None,
+        verify: bool | str = True,
+        cert: str | tuple[str, str] | None = None,
+        proxies: dict[str, str] | None = None,
+    ) -> requests.Response:
+        """Pace the request, and retry a throttle through the pacing.
+
+        Signature matches :meth:`HTTPAdapter.send` exactly, rather than
+        ``**kwargs``, so the override is type-checked against it.
+
+        Args:
+            request: The prepared request.
+            stream: Passed to :class:`HTTPAdapter`.
+            timeout: Passed to :class:`HTTPAdapter`.
+            verify: Passed to :class:`HTTPAdapter`.
+            cert: Passed to :class:`HTTPAdapter`.
+            proxies: Passed to :class:`HTTPAdapter`.
+
+        Returns:
+            The last response received. A throttle that outlives the
+            retries is handed back as it is, so the caller's existing
+            error handling reports it exactly as before.
+        """
+        raw_url = request.url
+        if isinstance(raw_url, bytes):
+            raw_url = raw_url.decode("utf-8", errors="replace")
+        host = urlparse(raw_url or "").hostname or ""
+        if not host:
+            # Every hostless URL would otherwise share one anonymous bucket,
+            # so unrelated hosts would throttle each other and serve each
+            # other's penalties. It is a malformed request either way, and
+            # the send below will say so -- but silently is not one of the
+            # options (golden rule 8).
+            logger.warning("A request carries no hostname; it cannot be paced")
+        # A loopback host is this machine, not a third party: no acquire(),
+        # no penalise(), no succeed(). The retry loop below still runs, so a
+        # genuine throttle status from a local test server is still retried.
+        limiter = None if is_loopback_host(host) else limiter_for(host, self._api_key)
+        send_kwargs: dict[str, Any] = {
+            "stream": stream,
+            "timeout": timeout,
+            "verify": verify,
+            "cert": cert,
+            "proxies": proxies,
+        }
+        response: requests.Response | None = None
+        # max(0, ...) rather than trusting the count: urllib3 permits a
+        # negative Retry.total, which gave range(0), a loop body that never
+        # ran, and an AssertionError with no context -- or, under python -O
+        # with the assert stripped, None returned where a Response was
+        # promised, failing somewhere deep inside requests instead.
+        for _attempt in range(max(0, self._max_throttle_retries) + 1):
+            if limiter is not None:
+                limiter.acquire()
+            response = self._send_once(request, **send_kwargs)
+            if response.status_code not in self._retry_statuses:
+                # Only an answer that actually worked earns the rate back. A
+                # host streaming 500/502/504 is failing, and crediting it
+                # with recovery would let it be asked faster and faster
+                # while it does so. The response is still returned either
+                # way: the retry behaviour is unchanged, only the signal.
+                if limiter is not None and response.status_code < HTTP_ERROR_STATUS_MIN:
+                    limiter.succeed()
+                return response
+            if response.status_code in POLITE_THROTTLE_STATUSES:
+                # "You are asking too fast" -- yield.
+                if limiter is not None:
+                    limiter.penalise(retry_after_seconds(response))
+                logger.info(f"{host} is throttling; paced down and retrying")
+            else:
+                # A genuine server fault. Retried, but not penalised: the
+                # host is broken, not busy, and slowing down does not help.
+                # It is still paced, because the next attempt goes through
+                # acquire() like any other.
+                logger.info(
+                    f"{host} answered {response.status_code}; retrying"
+                )
+            # A throttle we are about to replace. Under stream=True -- which
+            # is how pdf_discovery downloads -- its body is unread, so
+            # dropping it leaves the connection out of the pool until the
+            # garbage collector gets to it.
+            response.close()
+        if response is None:  # pragma: no cover - the loop always runs once
+            raise RuntimeError("A polite send made no attempt at all")
+        return response
+
+
+def mount_politely(
+    session: requests.Session,
+    retry: Retry | None = None,
+    api_key: str | None = None,
+) -> requests.Session:
+    """Mount polite pacing on a session, for both schemes.
+
+    Args:
+        session: The session to mount on.
+        retry: The retry strategy. **Every** status it forcelists is taken
+            off it and retried by the adapter instead, one ``acquire()`` per
+            attempt, so a logical request costs exactly the ``retry.total``
+            extra attempts the caller configured -- no more, and through the
+            pacing. Left nested, urllib3 re-sent below the limiter (its
+            first backoff is zero seconds, so a 500 from Europe PMC became
+            two requests in the same millisecond) and the two budgets
+            multiplied. What stays with urllib3 is what belongs there:
+            connection and read retries, which are transport faults with no
+            status to pace against.
+        api_key: Raises the ceiling where the service offers one.
+
+    Returns:
+        The same session, for chaining.
+    """
+    max_throttle_retries = POLITE_MAX_THROTTLE_RETRIES
+    fault_statuses: tuple[int, ...] = ()
+    if retry is not None:
+        fault_statuses = tuple(
+            status
+            for status in (retry.status_forcelist or [])
+            if status not in POLITE_THROTTLE_STATUSES
+        )
+        if retry.total is not None:
+            max_throttle_retries = retry.total
+        retry = retry.new(status_forcelist=[])
+    adapter = PoliteAdapter(
+        max_retries=retry or 0,
+        api_key=api_key,
+        max_throttle_retries=max_throttle_retries,
+        fault_statuses=fault_statuses,
+    )
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session

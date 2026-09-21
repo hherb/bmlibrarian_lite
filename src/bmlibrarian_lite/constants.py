@@ -827,3 +827,81 @@ def calculate_cost(
     input_cost = (tokens_input / 1_000_000) * pricing["input"]
     output_cost = (tokens_output / 1_000_000) * pricing["output"]
     return input_cost + output_cost
+
+
+# --- Polite request pacing -------------------------------------------------
+# An unknown host is somebody's web server until proven otherwise.
+DEFAULT_POLITE_RATE_PER_SECOND = 1.0
+
+# A ceiling in requests per second, per host, because the host is what does
+# the throttling. Europe PMC is stated by EBI staff to allow 10/s per IP; it
+# was seen shedding load (503) under back-to-back large fullTextXML fetches
+# on 2026-09-21, which a re-check the same day could not reproduce. 1/s is a
+# conservative choice well inside the published limit, not a measured
+# property of the host. See doc/cross_platform/polite_request_pacing.md.
+POLITE_RATE_CEILINGS: dict[str, float] = {
+    "eutils.ncbi.nlm.nih.gov": 3.0,  # NCBI_EUTILS_HOST, defined below
+    "www.ebi.ac.uk": 1.0,
+    "api.openalex.org": 10.0,
+    # Unpaywall publishes no per-second rate at all, only 100,000 calls per
+    # day (~1.16/s sustained). 5/s is a burst ceiling: a literature session
+    # makes hundreds of lookups, not tens of thousands, so the daily quota is
+    # not the binding constraint here -- but a caller that ever batches at
+    # scale must budget against the day, which this table cannot express.
+    "api.unpaywall.org": 5.0,
+    "api.crossref.org": 5.0,
+    # ClinicalTrials.gov publishes no limit; the figure reported consistently
+    # by independent API clients is ~50 requests/minute per IP, above which
+    # it answers 429. The 5.0 here was the old per-instance ad-hoc delay
+    # (0.2s) carried over, i.e. roughly six times the only rate anyone has
+    # measured, so it falls back to the conservative default instead.
+    "clinicaltrials.gov": DEFAULT_POLITE_RATE_PER_SECOND,
+    "doi.org": 1.0,
+    "dx.doi.org": 1.0,
+}
+
+
+# The E-utilities host, named once so the limiter, the policy lookup and the
+# ceilings table cannot drift apart on a string literal.
+NCBI_EUTILS_HOST = "eutils.ncbi.nlm.nih.gov"
+
+# NCBI raises the ceiling for a registered key.
+NCBI_RATE_WITH_API_KEY_PER_SECOND = 10.0
+
+# A penalised host is never driven to a standstill: one request every 30
+# seconds is slow enough to stop hammering and fast enough to notice that
+# the service has recovered. This bounds OUR OWN halving; it says nothing
+# about a Retry-After the service sent, which is bounded by
+# POLITE_MAX_PENALTY_SECONDS below.
+POLITE_PENALTY_FLOOR_SECONDS = 30.0
+
+# The longest a service's own Retry-After is allowed to pin a host for.
+# A Cloudflare-fronted publisher answers "Retry-After: 3600" readily, and an
+# uncapped honouring of it would park a desktop GUI thread for an hour.
+# Five minutes is long enough to be a real yield to a struggling service,
+# and short enough that the application stays answerable to its user.
+POLITE_MAX_PENALTY_SECONDS = 300.0
+
+# Consecutive successes before a penalised host earns its rate back. Long
+# enough that one lucky request does not undo a penalty.
+POLITE_RECOVERY_SUCCESSES = 10
+
+# A wait longer than this is worth explaining in the log.
+POLITE_SLOW_WAIT_LOG_SECONDS = 1.0
+
+# The statuses that mean "you are asking too fast", as opposed to a genuine
+# server fault.
+POLITE_THROTTLE_STATUSES = (429, 503)
+
+# How many times a throttled request is retried through the pacing before
+# the status is handed back to the caller.
+POLITE_MAX_THROTTLE_RETRIES = 3
+
+# The lowest status that means the request did not succeed. Only a status
+# below this earns rate back: a host streaming 500/502/504 is failing, and
+# must not be credited with recovery for doing so.
+HTTP_ERROR_STATUS_MIN = 400
+
+# The statuses that mean "this is yours only if you pay or log in". They are
+# a genuine paywall signal, unlike a 5xx, which is the server being broken.
+PAYWALL_HTTP_STATUSES = (401, 403)
