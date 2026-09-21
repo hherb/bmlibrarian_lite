@@ -39,9 +39,10 @@ import logging
 import re
 import time
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote, urljoin, urlparse
 
@@ -50,35 +51,42 @@ from urllib3.util.retry import Retry
 
 from .constants import (
     HTTP_ERROR_STATUS_MIN,
+    HTTP_NOT_FOUND,
     PAYWALL_HTTP_STATUSES,
     POLITE_MAX_THROTTLE_RETRIES,
+    SERVICE_DOI_RESOLVER,
+    SERVICE_PMC_ID_CONVERTER,
+    SERVICE_UNPAYWALL,
 )
+from .analysis_failures import (
+    no_pdf_sources_message,
+    paywall_message,
+    with_unestablished_access,
+)
+from .data_models import RequestFailure, RequestFailureKind, SourceLookupFailure
 from .polite_session import is_loopback_host, mount_politely
 from .rate_limit import limiter_for
+from .search_failures import request_failure_from_exception
 
 logger = logging.getLogger(__name__)
 
-def _failure_description(exc: Exception) -> str:
-    """Describe a request failure without quoting the URL it came from.
+#: How PubMed Central's ID converter reports a per-record failure. It is
+#: a refusal to answer, not an article without a PMC ID (#347).
+_ID_CONVERTER_ERROR_STATUS = "error"
 
-    ``str()`` on a ``requests`` exception embeds the request URL, and the
-    Unpaywall URL carries ``email=<the user's address>`` -- so the obvious
-    log line puts a personal identifier in the log file (the same leak as
-    #196/#330). The status code is what diagnosing this actually needs.
-
-    Args:
-        exc: The exception a request raised.
-
-    Returns:
-        The exception class, and the HTTP status where there was one.
-    """
-    response = getattr(exc, "response", None)
-    status = getattr(response, "status_code", None)
-    if status is not None:
-        return f"{type(exc).__name__} (HTTP {status})"
-    return type(exc).__name__
-
-
+# The lookup paths below -- ``_get_pmcid_from_pmid``, ``_discover_unpaywall``
+# and ``_discover_doi_direct`` -- describe every failure through
+# ``request_failure_from_exception(...).describe()``, which keeps the kind and
+# the HTTP status and nothing else. A local helper did the same job until #347
+# gave them a typed failure to carry. The rule they follow: ``str()`` on a
+# ``requests`` exception embeds the request URL, and the Unpaywall URL carries
+# ``email=<the user's address>`` (the same leak as #196/#330).
+#
+# The download paths (``_try_download``, ``_try_browser_download``) do NOT yet
+# follow it -- they still put ``str(e)`` into the reader-facing ``error`` and
+# ``verification_warning`` fields. Those URLs are publisher and PMC ones
+# rather than the credential-bearing lookups, so no secret leaks today, but
+# the migration is unfinished: see #350 before adding another handler there.
 
 # Global browser session manager (singleton, persists across downloads)
 _browser_session: Optional["BrowserSession"] = None
@@ -339,7 +347,29 @@ class PDFSource:
 
 @dataclass
 class DiscoveryResult:
-    """Result of PDF discovery attempt."""
+    """Result of PDF discovery attempt.
+
+    Attributes:
+        success: Whether a PDF was downloaded.
+        file_path: Where it was written, on success.
+        source: Which source served it, on success.
+        error: What to tell the reader, on failure.
+        is_paywall: Whether a source answered "pay or log in".
+        paywall_url: Where, so the caller can offer authentication.
+        verification_warning: What the content check doubted.
+        lookup_failures: The lookups that were attempted and failed (#347).
+            Empty means no attempted lookup failed -- **not** that every
+            lookup was attempted: Unpaywall is skipped entirely when no
+            email is configured, and the PMC id converter when the PMC ID
+            is already known. Independent of ``success``, which says only
+            whether a PDF arrived: a download can succeed while Unpaywall
+            was throttled, and that is worth knowing.
+
+            ``error`` already carries these failures in words on every
+            unsuccessful path, so a caller that only shows text needs
+            nothing from this field; it is here so a caller can group or
+            count them without parsing a sentence.
+    """
 
     success: bool
     file_path: Optional[Path] = None
@@ -348,6 +378,29 @@ class DiscoveryResult:
     is_paywall: bool = False
     paywall_url: Optional[str] = None
     verification_warning: Optional[str] = None
+    lookup_failures: tuple[SourceLookupFailure, ...] = ()
+
+    def with_lookup_failures(
+        self, failures: Sequence[SourceLookupFailure]
+    ) -> "DiscoveryResult":
+        """Add the lookups that could not be made to this result.
+
+        Merges rather than replaces. A download path records no lookup
+        failure of its own today, so ``replace()`` was harmless -- but a
+        discarded lookup failure becomes, downstream, an article reported
+        as having no open-access copy, which is the defect this field
+        exists to prevent (#347).
+
+        Args:
+            failures: The lookups that could not be made; may be empty.
+
+        Returns:
+            A copy carrying this result's own failures and then ``failures``,
+            with nothing dropped.
+        """
+        return replace(
+            self, lookup_failures=self.lookup_failures + tuple(failures)
+        )
 
 
 class PDFDiscoverer:
@@ -445,17 +498,24 @@ class PDFDiscoverer:
         self._cancelled = False
         self._emit_progress("discovery", "starting")
 
-        # Find all available PDF sources
-        sources = self._discover_sources(doi, pmid, pmcid)
+        # Find all available PDF sources, and what could not be asked at all
+        sources, lookup_failures = self._discover_sources(doi, pmid, pmcid)
 
         if self._cancelled:
-            return DiscoveryResult(success=False, error="Cancelled")
+            return DiscoveryResult(
+                success=False,
+                error="Cancelled",
+                lookup_failures=lookup_failures,
+            )
 
         if not sources:
             self._emit_progress("discovery", "not_found")
             return DiscoveryResult(
                 success=False,
-                error="No PDF sources found. The document may require institutional access.",
+                # A lookup we could not make says nothing about the licence,
+                # so the paywall claim is withheld when one failed (#347).
+                error=no_pdf_sources_message(lookup_failures),
+                lookup_failures=lookup_failures,
             )
 
         # Sort by priority
@@ -471,13 +531,17 @@ class PDFDiscoverer:
 
         for source in sources:
             if self._cancelled:
-                return DiscoveryResult(success=False, error="Cancelled")
+                return DiscoveryResult(
+                    success=False,
+                    error="Cancelled",
+                    lookup_failures=lookup_failures,
+                )
 
             self._emit_progress("discovery", "found_oa" if source.is_open_access else "found")
             result = self._try_download(source, output_path, expected_title or title)
 
             if result.success:
-                return result
+                return result.with_lookup_failures(lookup_failures)
 
             if result.is_paywall:
                 # For open access sources, a 403 might be bot protection, not paywall
@@ -488,8 +552,17 @@ class PDFDiscoverer:
                     last_paywall_result = result
                     continue
                 else:
-                    # For non-OA sources, return paywall result so caller can offer OpenAthens auth
-                    return result
+                    # For non-OA sources, return paywall result so caller can
+                    # offer OpenAthens auth. The refusal is this source's
+                    # answer, not the document's licence: where the lookup
+                    # that would have found a free copy could not be made,
+                    # the claim is withheld rather than asserted (#347).
+                    return replace(
+                        result.with_lookup_failures(lookup_failures),
+                        error=paywall_message(
+                            result.error or "", lookup_failures
+                        ),
+                    )
 
         # If we have blocked OA sources and browser fallback is enabled, try browser
         if blocked_oa_sources and self.use_browser_fallback:
@@ -498,19 +571,34 @@ class PDFDiscoverer:
 
             for source in blocked_oa_sources:
                 if self._cancelled:
-                    return DiscoveryResult(success=False, error="Cancelled")
+                    return DiscoveryResult(
+                        success=False,
+                        error="Cancelled",
+                        lookup_failures=lookup_failures,
+                    )
 
                 result = self._try_browser_download(source, output_path, expected_title or title)
                 if result.success:
-                    return result
+                    return result.with_lookup_failures(lookup_failures)
 
         # If we had a paywall result but no success, return it for OpenAthens option
         if last_paywall_result:
-            return last_paywall_result
+            return replace(
+                last_paywall_result.with_lookup_failures(lookup_failures),
+                error=paywall_message(
+                    last_paywall_result.error or "", lookup_failures
+                ),
+            )
 
         return DiscoveryResult(
             success=False,
-            error="Failed to download PDF from any available source.",
+            # A claim about our own attempts, which the unasked sources
+            # cannot falsify -- so it is qualified rather than withheld.
+            error=with_unestablished_access(
+                "Failed to download PDF from any available source.",
+                lookup_failures,
+            ),
+            lookup_failures=lookup_failures,
         )
 
     def _discover_sources(
@@ -518,19 +606,40 @@ class PDFDiscoverer:
         doi: Optional[str],
         pmid: Optional[str],
         pmcid: Optional[str],
-    ) -> List[PDFSource]:
-        """Discover all available PDF sources."""
+    ) -> tuple[list[PDFSource], tuple[SourceLookupFailure, ...]]:
+        """Discover all available PDF sources, and what could not be asked.
+
+        A lookup that failed and a lookup that answered "nothing" both used
+        to leave an empty list, so a throttled Unpaywall was reported to the
+        reader as an article behind a paywall (#347). The failures are
+        returned alongside the sources, not only logged: a log line cannot
+        reach the reader, and only the caller can.
+
+        Args:
+            doi: The article's DOI, if known.
+            pmid: Its PubMed ID, if known.
+            pmcid: Its PMC ID, if known.
+
+        Returns:
+            The sources found, and the lookups that could not be made. Both
+            may be empty; one being empty says nothing about the other.
+        """
         sources: List[PDFSource] = []
+        failures: list[SourceLookupFailure] = []
 
         # Try PMC first (most reliable for open access)
         if pmcid or pmid:
-            pmc_sources = self._discover_pmc(pmid, pmcid)
+            pmc_sources, pmc_failure = self._discover_pmc(pmid, pmcid)
             sources.extend(pmc_sources)
+            if pmc_failure is not None:
+                failures.append(pmc_failure)
 
         # Try Unpaywall
         if doi and self.unpaywall_email:
-            unpaywall_sources = self._discover_unpaywall(doi)
+            unpaywall_sources, unpaywall_failure = self._discover_unpaywall(doi)
             sources.extend(unpaywall_sources)
+            if unpaywall_failure is not None:
+                failures.append(unpaywall_failure)
 
         # Try publisher-specific patterns (even if Unpaywall didn't find it)
         if doi:
@@ -541,19 +650,33 @@ class PDFDiscoverer:
 
         # Try direct DOI resolution as last resort
         if doi:
-            doi_sources = self._discover_doi_direct(doi)
+            doi_sources, doi_failure = self._discover_doi_direct(doi)
             for ds in doi_sources:
                 if ds.url not in [s.url for s in sources]:
                     sources.append(ds)
+            if doi_failure is not None:
+                failures.append(doi_failure)
 
-        return sources
+        return sources, tuple(failures)
 
     def _discover_pmc(
         self,
         pmid: Optional[str],
         pmcid: Optional[str],
-    ) -> List[PDFSource]:
-        """Discover PDF from PubMed Central and Europe PMC."""
+    ) -> tuple[list[PDFSource], SourceLookupFailure | None]:
+        """Discover PDF from PubMed Central and Europe PMC.
+
+        Args:
+            pmid: The article's PubMed ID, if known.
+            pmcid: Its PMC ID, if known. With one, no lookup is needed and
+                no lookup can fail.
+
+        Returns:
+            The PMC sources, and the id-converter failure that prevented
+            finding any. A failed conversion leaves this path with nothing,
+            and it is the most reliable path, so it must not read as an
+            article that PMC does not hold (#347).
+        """
         sources: List[PDFSource] = []
 
         # If we have PMCID, construct direct links
@@ -579,11 +702,13 @@ class PDFDiscoverer:
                 host_type="repository",
                 version="publishedVersion",
             ))
-            return sources
+            return sources, None
 
         # If we only have PMID, try to get PMCID via eutils
         if pmid:
-            pmcid = self._get_pmcid_from_pmid(pmid)
+            pmcid, failure = self._get_pmcid_from_pmid(pmid)
+            if failure is not None:
+                return sources, failure
             if pmcid:
                 # Europe PMC first
                 europepmc_url = f"https://europepmc.org/backend/ptpmcrender.fcgi?accid={pmcid}&blobtype=pdf"
@@ -605,10 +730,26 @@ class PDFDiscoverer:
                     version="publishedVersion",
                 ))
 
-        return sources
+        return sources, None
 
-    def _get_pmcid_from_pmid(self, pmid: str) -> Optional[str]:
-        """Get PMCID from PMID using NCBI ID converter."""
+    def _get_pmcid_from_pmid(
+        self, pmid: str
+    ) -> tuple[str | None, SourceLookupFailure | None]:
+        """Get PMCID from PMID using NCBI ID converter.
+
+        Args:
+            pmid: The article's PubMed ID.
+
+        Returns:
+            The PMC ID, and the failure that prevented looking it up. At
+            most one is ever set, and both are ``None`` only for the two
+            answers that are about the article: the converter holds no
+            record for this PMID, or it holds one that names no ``pmcid``.
+            Every other outcome -- unreached, unreadable body, a record
+            reporting an error, a ``pmcid`` we cannot read -- is our failure
+            and is returned as one, because unreachable is not absent and
+            this path takes out the whole PMC route (#347).
+        """
         try:
             url = (
                 f"https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/"
@@ -617,22 +758,116 @@ class PDFDiscoverer:
             response = self._session.get(url, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
 
+            # Network data, not a promise (golden rule 1): the converter's
+            # body is only trusted to the depth it is actually checked. A
+            # bare `except Exception` used to hide every shape error here
+            # along with the request failures; narrowing it means each shape
+            # is now tested for rather than caught after the fact.
             data = response.json()
+            if not isinstance(data, dict):
+                return None, self._unreadable_id_converter(pmid, "not an object")
             records = data.get("records", [])
-            if records and "pmcid" in records[0]:
-                return records[0]["pmcid"]
+            if not isinstance(records, list):
+                return None, self._unreadable_id_converter(pmid, "records is not a list")
+            if not records:
+                # The converter answered and named no record at all. That is
+                # about the article: PMC holds nothing for this PMID.
+                logger.info(
+                    "PubMed Central's ID converter holds no record for PMID %s.",
+                    pmid,
+                )
+                return None, None
+            first = records[0]
+            if not isinstance(first, dict):
+                return None, self._unreadable_id_converter(pmid, "a record is not an object")
+            if first.get("status") == _ID_CONVERTER_ERROR_STATUS:
+                # The converter's own per-record error shape. It declined to
+                # answer, so it has told us nothing about the article.
+                return None, self._unreadable_id_converter(pmid, "a record reports an error")
+            if "pmcid" not in first:
+                # The key is absent: the converter knows this article and
+                # says PMC has no ID for it. An absence, and the article's.
+                return None, None
+            pmcid = first.get("pmcid")
+            if isinstance(pmcid, str) and pmcid:
+                return pmcid, None
+            # The key is there but unreadable -- an int, a list, or empty.
+            # Unreadable is not absent: a PMC ID may well exist (#347).
+            return None, self._unreadable_id_converter(
+                pmid, "pmcid is not a non-empty string"
+            )
 
-        except Exception as e:
-            logger.debug(f"Failed to convert PMID to PMCID: {e}")
+        except requests.exceptions.RequestException as e:
+            failure = request_failure_from_exception(e)
+            if failure.kind is RequestFailureKind.MALFORMED_RESPONSE:
+                # It was asked, and answered something we cannot read. Say so
+                # rather than blaming the reach: the two are different, and
+                # the log is what a maintainer diagnoses this from.
+                return None, self._unreadable_id_converter(pmid, "not JSON")
+            logger.warning(
+                "PubMed Central's ID converter could not be asked about PMID "
+                "%s (%s), so the PMC path found nothing for reasons that are "
+                "not the article's.",
+                pmid,
+                failure.describe(),
+            )
+            return None, SourceLookupFailure(SERVICE_PMC_ID_CONVERTER, failure)
+        except ValueError:
+            # A body that is not JSON at all. `requests`' own JSONDecodeError
+            # subclasses both RequestException and ValueError, so the arm
+            # above claims it; this one catches a plain `json` error from a
+            # stubbed session in a test.
+            return None, self._unreadable_id_converter(pmid, "not JSON")
 
-        return None
+        return None, None
 
-    def _discover_unpaywall(self, doi: str) -> List[PDFSource]:
-        """Discover PDF sources via Unpaywall API."""
+    @staticmethod
+    def _unreadable_id_converter(pmid: str, shape: str) -> SourceLookupFailure:
+        """Record that the ID converter answered in a shape we cannot read.
+
+        Unreadable is not absent: the converter may well know a PMC ID for
+        this article, so the PMC path finding nothing is our failure and
+        must not reach the reader as the article's (#347).
+
+        Args:
+            pmid: The PubMed ID being converted, for the log.
+            shape: What was wrong with the body, for the log only -- never
+                the body itself, which is untrusted network data.
+
+        Returns:
+            The failure to hand back with no PMC ID.
+        """
+        logger.warning(
+            "PubMed Central's ID converter answered PMID %s unreadably (%s), "
+            "so the PMC path found nothing for reasons that are not the "
+            "article's.",
+            pmid,
+            shape,
+        )
+        return SourceLookupFailure(
+            SERVICE_PMC_ID_CONVERTER,
+            RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
+        )
+
+    def _discover_unpaywall(
+        self, doi: str
+    ) -> tuple[list[PDFSource], SourceLookupFailure | None]:
+        """Discover PDF sources via Unpaywall API.
+
+        Args:
+            doi: The article's DOI.
+
+        Returns:
+            The open-access sources Unpaywall knows of, and the failure that
+            stopped it being asked. An empty list with no failure means
+            Unpaywall answered and knows of none; with a failure it means we
+            never found out, which is not the same thing and must not reach
+            the reader as one (#347).
+        """
         sources: List[PDFSource] = []
 
         if not self.unpaywall_email:
-            return sources
+            return sources, None
 
         try:
             # Clean DOI
@@ -643,9 +878,11 @@ class PDFDiscoverer:
 
             response = self._session.get(url, timeout=REQUEST_TIMEOUT)
 
-            if response.status_code == 404:
+            if response.status_code == HTTP_NOT_FOUND:
+                # Unpaywall answered: it holds no record of this DOI. That is
+                # about the article, so it is an absence, not a failure.
                 logger.debug(f"DOI not found in Unpaywall: {doi}")
-                return sources
+                return sources, None
 
             response.raise_for_status()
             data = response.json()
@@ -710,19 +947,19 @@ class PDFDiscoverer:
                         sources.append(ps)
 
         except requests.exceptions.RequestException as e:
-            # An empty source list is indistinguishable, to every caller,
-            # from "this article genuinely has no open-access PDF" -- so a
-            # throttled Unpaywall quietly narrows the evidence base and the
-            # reader is told the full text is unavailable. Recording it as a
-            # shortfall the reader actually sees needs #347; until then it is
-            # at least a warning that names the failure, not a debug line.
+            # An empty source list used to be indistinguishable, to every
+            # caller, from "this article genuinely has no open-access PDF",
+            # so a throttled Unpaywall quietly narrowed the evidence base.
+            # The failure now travels back with the (empty) list (#347).
+            failure = request_failure_from_exception(e)
             logger.warning(
-                f"Unpaywall could not be asked about DOI {doi}, so any "
-                f"open-access copy it knows of will be reported as absent: "
-                f"{_failure_description(e)}"
+                f"Unpaywall could not be asked about DOI {doi} "
+                f"({failure.describe()}), so any open-access copy it knows "
+                f"of is not assessed."
             )
+            return sources, SourceLookupFailure(SERVICE_UNPAYWALL, failure)
 
-        return sources
+        return sources, None
 
     def _extract_pmcid_from_url(self, url: str) -> Optional[str]:
         """Extract PMCID from a PMC URL."""
@@ -832,8 +1069,20 @@ class PDFDiscoverer:
 
         return sources
 
-    def _discover_doi_direct(self, doi: str) -> List[PDFSource]:
-        """Try to discover PDF via direct DOI resolution."""
+    def _discover_doi_direct(
+        self, doi: str
+    ) -> tuple[list[PDFSource], SourceLookupFailure | None]:
+        """Try to discover PDF via direct DOI resolution.
+
+        Args:
+            doi: The article's DOI.
+
+        Returns:
+            Whatever ``doi.org`` resolved to, and the failure that stopped it
+            being asked. ``doi.org`` is paced at one request a second, so a
+            batch will meet this, and an exhausted throttle must not read as
+            an article with no copy (#347).
+        """
         sources: List[PDFSource] = []
 
         try:
@@ -867,14 +1116,16 @@ class PDFDiscoverer:
         except requests.exceptions.RequestException as e:
             # At debug, a throttled doi.org left no trace at all under the
             # default INFO configuration: the reader saw "no full text" and
-            # the log said nothing had happened. Same ambiguity as the
-            # Unpaywall path above (#347).
+            # the log said nothing had happened.
+            failure = request_failure_from_exception(e)
             logger.warning(
-                f"doi.org could not be asked about DOI {doi}, so any copy it "
-                f"resolves to will be reported as absent: {_failure_description(e)}"
+                f"doi.org could not be asked about DOI {doi} "
+                f"({failure.describe()}), so any copy it resolves to is not "
+                f"assessed."
             )
+            return sources, SourceLookupFailure(SERVICE_DOI_RESOLVER, failure)
 
-        return sources
+        return sources, None
 
     def _clean_doi(self, doi: str) -> str:
         """Clean and normalize a DOI to its bare ``10.x/...`` form.
