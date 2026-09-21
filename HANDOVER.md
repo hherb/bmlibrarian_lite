@@ -53,10 +53,16 @@ deliberately left on #341. Compress into **Recently landed** once merged.
   now lives in `_not_before`. Added a test asserting the **departure**;
   mutating `penalise()` back to the pre-#345 form fails it with the issue's
   own headline, `assert 30.0 >= 300.0`. Closed.
-- **Verified:** `pytest tests/` — 1910 passed, 3 xfailed;
+- **Narrowing an `except Exception` moves the work into the body.**
+  `_get_pmcid_from_pmid` caught everything, so a converter answering a JSON
+  *array* was swallowed with the request failures. Catching only the request
+  errors let the `TypeError` escape and end the discovery outright, so each
+  shape is now tested for — golden rule 1, and the log names the shape, never
+  the body.
+- **Verified:** `pytest tests/` — 1913 passed, 3 xfailed;
   `lint_delta.py --base-ref origin/master` 0 new ruff or mypy findings (6
   fewer ruff, 1 fewer mypy than base). `tests/test_unreachable_is_not_absent.py`
-  is 23 tests, and **9 mutations of the behaviour above each fail a test**,
+  is 26 tests, and **9 mutations of the behaviour above each fail a test**,
   no survivors.
 - **Lodged, not fixed:** #348 (the COI path fetches a Europe PMC article,
   credits `data_sources_used` with it, and discards it unread — whether the

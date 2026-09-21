@@ -695,10 +695,25 @@ class PDFDiscoverer:
             response = self._session.get(url, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
 
+            # Network data, not a promise (golden rule 1): the converter's
+            # body is only trusted to the depth it is actually checked. A
+            # bare `except Exception` used to hide every shape error here
+            # along with the request failures; narrowing it means each shape
+            # is now tested for rather than caught after the fact.
             data = response.json()
+            if not isinstance(data, dict):
+                return None, self._unreadable_id_converter(pmid, "not an object")
             records = data.get("records", [])
-            if records and "pmcid" in records[0]:
-                return records[0]["pmcid"], None
+            if not isinstance(records, list):
+                return None, self._unreadable_id_converter(pmid, "records is not a list")
+            if not records:
+                return None, None
+            first = records[0]
+            if not isinstance(first, dict):
+                return None, self._unreadable_id_converter(pmid, "a record is not an object")
+            pmcid = first.get("pmcid")
+            if isinstance(pmcid, str) and pmcid:
+                return pmcid, None
 
         except requests.exceptions.RequestException as e:
             failure = request_failure_from_exception(e)
@@ -710,20 +725,41 @@ class PDFDiscoverer:
                 failure.describe(),
             )
             return None, SourceLookupFailure(SERVICE_PMC_ID_CONVERTER, failure)
-        except ValueError as e:
-            # A body that is not JSON: the converter answered, unreadably.
-            logger.warning(
-                "PubMed Central's ID converter answered PMID %s unreadably, "
-                "so the PMC path found nothing: %s",
-                pmid,
-                type(e).__name__,
-            )
-            return None, SourceLookupFailure(
-                SERVICE_PMC_ID_CONVERTER,
-                RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
-            )
+        except ValueError:
+            # A body that is not JSON at all. `requests`' own JSONDecodeError
+            # is a RequestException and is classified by the arm above; this
+            # catches a plain `json` one from a session that is not `requests`.
+            return None, self._unreadable_id_converter(pmid, "not JSON")
 
         return None, None
+
+    @staticmethod
+    def _unreadable_id_converter(pmid: str, shape: str) -> SourceLookupFailure:
+        """Record that the ID converter answered in a shape we cannot read.
+
+        Unreadable is not absent: the converter may well know a PMC ID for
+        this article, so the PMC path finding nothing is our failure and
+        must not reach the reader as the article's (#347).
+
+        Args:
+            pmid: The PubMed ID being converted, for the log.
+            shape: What was wrong with the body, for the log only -- never
+                the body itself, which is untrusted network data.
+
+        Returns:
+            The failure to hand back with no PMC ID.
+        """
+        logger.warning(
+            "PubMed Central's ID converter answered PMID %s unreadably (%s), "
+            "so the PMC path found nothing for reasons that are not the "
+            "article's.",
+            pmid,
+            shape,
+        )
+        return SourceLookupFailure(
+            SERVICE_PMC_ID_CONVERTER,
+            RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
+        )
 
     def _discover_unpaywall(
         self, doi: str

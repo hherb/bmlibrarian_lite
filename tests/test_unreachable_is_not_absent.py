@@ -358,6 +358,68 @@ class TestDiscoveryReportsUnreachableLookups:
         assert failures == ()
 
 
+class TestTheIdConverterDistrustsItsInput:
+    """Golden rule 1: the converter's body is network data, not a promise."""
+
+    class _JsonSession:
+        """A session that answers 200 with whatever JSON it was given."""
+
+        def __init__(self, payload) -> None:
+            """Record the body to answer with.
+
+            Args:
+                payload: What ``response.json()`` should return.
+            """
+            self._payload = payload
+
+        def get(self, *_args, **_kwargs):
+            """Answer 200 with the recorded body.
+
+            Returns:
+                A response whose ``json()`` is the recorded payload.
+            """
+            response = requests.Response()
+            response.status_code = 200
+            response.json = lambda **_kw: self._payload
+            return response
+
+    def test_a_json_array_is_malformed_not_a_crash(self, discoverer) -> None:
+        """``data.get`` on a list raises, and used to be swallowed whole.
+
+        Narrowing the old bare ``except Exception`` to the request errors
+        would otherwise let this escape and end the discovery outright.
+        """
+        discoverer._session = self._JsonSession([1, 2, 3])
+
+        pmcid, failure = discoverer._get_pmcid_from_pmid("12345")
+
+        assert pmcid is None
+        assert failure is not None
+        assert failure.failure.kind is RequestFailureKind.MALFORMED_RESPONSE
+
+    def test_a_record_that_is_not_an_object_is_malformed(
+        self, discoverer
+    ) -> None:
+        """``"pmcid" in records[0]`` raises when the record is a number."""
+        discoverer._session = self._JsonSession({"records": [7]})
+
+        pmcid, failure = discoverer._get_pmcid_from_pmid("12345")
+
+        assert pmcid is None
+        assert failure is not None
+
+    def test_a_converter_naming_no_pmcid_is_an_absence(
+        self, discoverer
+    ) -> None:
+        """The control: a well-formed answer of "no PMC ID" is not a failure."""
+        discoverer._session = self._JsonSession({"records": [{"pmid": "1"}]})
+
+        pmcid, failure = discoverer._get_pmcid_from_pmid("12345")
+
+        assert pmcid is None
+        assert failure is None
+
+
 class TestDiscoveryResultSaysWhyItFoundNothing:
     """The sentence the reader sees stops asserting a paywall (#347)."""
 
