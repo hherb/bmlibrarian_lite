@@ -24,6 +24,7 @@ is not asked again on the same breath.
 The contract is ``doc/cross_platform/polite_request_pacing.md``.
 """
 
+import ipaddress
 import logging
 from typing import Any
 from urllib.parse import urlparse
@@ -39,6 +40,32 @@ from .constants import (
 from .rate_limit import limiter_for
 
 logger = logging.getLogger(__name__)
+
+
+def is_loopback_host(host: str) -> bool:
+    """Whether a host is this machine, and so not somebody else's service.
+
+    Pacing exists to be polite to a *third party*. A loopback address is
+    this process's own machine -- ``tests/scripted_http_server.py``'s
+    ``ThreadingHTTPServer``, or a local Ollama on ``localhost:11434`` -- and
+    asking it twice in the same second is not rude. No DNS lookup is
+    performed here: only the literal host string is inspected, so checking
+    this never adds a resolution to the request path.
+
+    Args:
+        host: The hostname, as ``urlparse`` gives it.
+
+    Returns:
+        True if the host is loopback.
+    """
+    if host in ("localhost", "::1"):
+        return True
+    if host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def retry_after_seconds(response: requests.Response) -> float | None:
@@ -66,15 +93,33 @@ def retry_after_seconds(response: requests.Response) -> float | None:
 class PoliteAdapter(HTTPAdapter):
     """Acquires before every attempt, and yields when the host pushes back."""
 
-    def __init__(self, *args: Any, api_key: str | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        api_key: str | None = None,
+        max_throttle_retries: int | None = None,
+        **kwargs: Any,
+    ) -> None:
         """Build the adapter.
 
         Args:
             *args: Passed to :class:`HTTPAdapter`.
             api_key: Raises the ceiling where the service offers one.
+            max_throttle_retries: How many extra attempts a throttle status
+                gets, on top of the first. Ordinarily this is the mounted
+                session's own ``Retry.total`` -- ``mount_politely`` passes
+                it through, so a client's configured retry budget is not
+                silently overridden by a fixed constant. ``None`` falls
+                back to :data:`POLITE_MAX_THROTTLE_RETRIES`, for an adapter
+                built without going through ``mount_politely``.
             **kwargs: Passed to :class:`HTTPAdapter`.
         """
         self._api_key = api_key
+        self._max_throttle_retries = (
+            max_throttle_retries
+            if max_throttle_retries is not None
+            else POLITE_MAX_THROTTLE_RETRIES
+        )
         super().__init__(*args, **kwargs)
 
     def _send_once(self, request: requests.PreparedRequest, **kwargs: Any) -> Any:
@@ -122,7 +167,10 @@ class PoliteAdapter(HTTPAdapter):
         if isinstance(raw_url, bytes):
             raw_url = raw_url.decode("utf-8", errors="replace")
         host = urlparse(raw_url or "").hostname or ""
-        limiter = limiter_for(host, self._api_key)
+        # A loopback host is this machine, not a third party: no acquire(),
+        # no penalise(), no succeed(). The retry loop below still runs, so a
+        # genuine throttle status from a local test server is still retried.
+        limiter = None if is_loopback_host(host) else limiter_for(host, self._api_key)
         send_kwargs: dict[str, Any] = {
             "stream": stream,
             "timeout": timeout,
@@ -131,13 +179,16 @@ class PoliteAdapter(HTTPAdapter):
             "proxies": proxies,
         }
         response: requests.Response | None = None
-        for _attempt in range(POLITE_MAX_THROTTLE_RETRIES + 1):
-            limiter.acquire()
+        for _attempt in range(self._max_throttle_retries + 1):
+            if limiter is not None:
+                limiter.acquire()
             response = self._send_once(request, **send_kwargs)
             if response.status_code not in POLITE_THROTTLE_STATUSES:
-                limiter.succeed()
+                if limiter is not None:
+                    limiter.succeed()
                 return response
-            limiter.penalise(retry_after_seconds(response))
+            if limiter is not None:
+                limiter.penalise(retry_after_seconds(response))
             logger.info(f"{host} is throttling; paced down and retrying")
         assert response is not None  # the loop always runs at least once
         return response
@@ -153,20 +204,31 @@ def mount_politely(
     Args:
         session: The session to mount on.
         retry: The retry strategy for genuine server faults. The throttle
-            statuses are removed from it, because this module owns those.
+            statuses are removed from it, because this module owns those --
+            but the budget they carried is not lost: the mounted adapter
+            retries a throttle status ``retry.total`` times, the same
+            number of attempts the caller configured, rather than a fixed
+            constant that would silently override it.
         api_key: Raises the ceiling where the service offers one.
 
     Returns:
         The same session, for chaining.
     """
+    max_throttle_retries = POLITE_MAX_THROTTLE_RETRIES
     if retry is not None:
         allowed = [
             status
             for status in (retry.status_forcelist or [])
             if status not in POLITE_THROTTLE_STATUSES
         ]
+        if retry.total is not None:
+            max_throttle_retries = retry.total
         retry = retry.new(status_forcelist=allowed)
-    adapter = PoliteAdapter(max_retries=retry or 0, api_key=api_key)
+    adapter = PoliteAdapter(
+        max_retries=retry or 0,
+        api_key=api_key,
+        max_throttle_retries=max_throttle_retries,
+    )
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session

@@ -20,8 +20,10 @@ from unittest.mock import MagicMock
 import requests
 from urllib3.util.retry import Retry
 
+from bmlibrarian_lite.constants import POLITE_MAX_THROTTLE_RETRIES
 from bmlibrarian_lite.polite_session import (
     PoliteAdapter,
+    is_loopback_host,
     mount_politely,
     retry_after_seconds,
 )
@@ -185,6 +187,128 @@ class TestTheAdapterPaces:
         adapter.send(request_to("https://www.ebi.ac.uk/x"))
 
         assert limiter_for("api.crossref.org").interval == untouched
+
+
+class _AlwaysThrottled:
+    """A stand-in ``_send_once`` that always answers 503, counting its calls.
+
+    A plain callable rather than a ``PoliteAdapter`` subclass, so it can be
+    assigned onto an adapter that ``mount_politely`` itself built -- the
+    point of these tests is that the *wiring* from ``Retry.total`` through
+    to the mounted adapter's attempt budget is correct, not just that
+    ``PoliteAdapter`` behaves when built by hand.
+    """
+
+    def __init__(self) -> None:
+        """Start with nothing sent."""
+        self.sent = 0
+
+    def __call__(self, request: Any, **kwargs: Any) -> Any:
+        """Answer 503 and record the call.
+
+        Args:
+            request: Ignored.
+            **kwargs: Ignored.
+
+        Returns:
+            The stand-in 503 response.
+        """
+        self.sent += 1
+        return response_with(503)
+
+
+class TestLoopbackHostsAreNeverPaced:
+    """A loopback address is this machine, not a third party to be polite to.
+
+    ``tests/scripted_http_server.py`` binds a real ``ThreadingHTTPServer`` on
+    a loopback address, and several test files drive the real clients
+    against it. Before this fix, the limiter saw an unknown host, applied
+    ``DEFAULT_POLITE_RATE_PER_SECOND`` (1/s), and slept a full second before
+    every request -- and Ollama's default ``localhost:11434`` would have
+    been throttled the same way.
+    """
+
+    def setup_method(self) -> None:
+        """Start with an empty registry, so a stray ``acquire()`` would show.
+
+        If the loopback skip failed, ``limiter_for`` would create a real
+        registry entry for the loopback host; an empty registry after the
+        test is what proves it was skipped.
+        """
+        reset_limiters()
+
+    def teardown_method(self) -> None:
+        """Forget anything a test did create, so it cannot leak."""
+        reset_limiters()
+
+    def test_localhost_and_loopback_ips_are_recognised(self) -> None:
+        """The literal forms the adapter sees, with no DNS lookup involved."""
+        assert is_loopback_host("localhost")
+        assert is_loopback_host("127.0.0.1")
+        assert is_loopback_host("::1")
+        assert is_loopback_host("sub.localhost")
+        assert not is_loopback_host("www.ebi.ac.uk")
+        assert not is_loopback_host("")
+
+    def test_a_loopback_host_is_not_paced(self) -> None:
+        """Two back-to-back sends create no registry entry for the host."""
+        adapter = RecordingAdapter([200, 200])
+
+        adapter.send(request_to("http://127.0.0.1:9/x"))
+        adapter.send(request_to("http://127.0.0.1:9/x"))
+
+        assert "127.0.0.1" not in _registry
+
+    def test_a_loopback_throttle_status_is_still_retried(self) -> None:
+        """The retry loop keeps running; only the limiter calls are skipped."""
+        adapter = RecordingAdapter([503, 200])
+
+        response = adapter.send(request_to("http://127.0.0.1:9/x"))
+
+        assert adapter.sent == 2
+        assert response.status_code == 200
+        assert "127.0.0.1" not in _registry
+
+
+class TestThrottleRetryBudgetFollowsMountedRetry:
+    """The throttle-retry budget is the caller's own ``Retry.total``.
+
+    Taking 429/503 off ``Retry`` and retrying them in the adapter must not
+    silently override each client's configured retry budget:
+    ``tests/test_europepmc_search_failures.py`` sets ``EUROPEPMC_MAX_RETRIES
+    = 1`` and asserts a 503 produces exactly 2 requests.
+    """
+
+    def setup_method(self) -> None:
+        """Seed a no-sleep limiter for the host these tests exercise."""
+        reset_limiters()
+        _registry["www.ebi.ac.uk"] = RateLimiter(policy_for_host("www.ebi.ac.uk"), sleep=_no_sleep)
+
+    def teardown_method(self) -> None:
+        """Forget the fake limiter."""
+        reset_limiters()
+
+    def test_the_budget_is_the_mounted_retrys_total(self) -> None:
+        """``Retry(total=1)`` means 2 attempts, matching ``EUROPEPMC_MAX_RETRIES = 1``."""
+        session = mount_politely(requests.Session(), retry=Retry(total=1, status_forcelist=[503]))
+        adapter = mounted_adapter(session)
+        always_throttled = _AlwaysThrottled()
+        adapter._send_once = always_throttled  # type: ignore[method-assign]
+
+        adapter.send(request_to("https://www.ebi.ac.uk/x"))
+
+        assert always_throttled.sent == 2
+
+    def test_no_retry_falls_back_to_the_constant(self) -> None:
+        """``retry=None`` means ``POLITE_MAX_THROTTLE_RETRIES + 1`` attempts."""
+        session = mount_politely(requests.Session())
+        adapter = mounted_adapter(session)
+        always_throttled = _AlwaysThrottled()
+        adapter._send_once = always_throttled  # type: ignore[method-assign]
+
+        adapter.send(request_to("https://www.ebi.ac.uk/x"))
+
+        assert always_throttled.sent == POLITE_MAX_THROTTLE_RETRIES + 1
 
 
 class TestMountPolitely:
