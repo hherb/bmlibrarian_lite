@@ -1303,7 +1303,24 @@ class EuropePMCClient:
             return None
 
     def get_full_text_xml(self, pmcid: str) -> Optional[str]:
-        """Get full text XML for open access articles."""
+        """Get full text XML for open access articles.
+
+        Args:
+            pmcid: The PMC identifier, with or without its ``PMC`` prefix.
+
+        Returns:
+            The full-text XML, or ``None`` when it could not be fetched.
+
+        Note:
+            ``None`` here is genuinely ambiguous to the caller: it means
+            either "this article has no open-access full text" or "we could
+            not reach Europe PMC". The caller treats both as the former and
+            goes on to report "no data availability statement", which for a
+            paper that has one is a fabricated finding shown to a clinician.
+            Silence is at least removed here -- the failure is logged with
+            the identifier and the reason -- but distinguishing the two
+            states needs an "unknown" in the report model itself (#346).
+        """
         pmcid = pmcid.upper()
         if not pmcid.startswith('PMC'):
             pmcid = f'PMC{pmcid}'
@@ -1313,7 +1330,16 @@ class EuropePMCClient:
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
             return response.text
-        except requests.RequestException:
+        except requests.RequestException as e:
+            # Never silently: a throttled Europe PMC and an article without
+            # full text are not the same thing, and only one of them is the
+            # article's fault (golden rule 8).
+            logger.warning(
+                "Europe PMC full text for %s could not be fetched, so any "
+                "statement it carries will be reported as absent: %s",
+                pmcid,
+                e,
+            )
             return None
 
 
@@ -2313,8 +2339,13 @@ class StudyTransparencyAnalyzer:
                         if 'data' in title and ('avail' in title or 'shar' in title or 'access' in title):
                             data_statement = ' '.join(section.itertext())
                             break
-                except ET.ParseError:
-                    pass
+                except ET.ParseError as e:
+                    logger.warning(
+                        "Europe PMC full text for %s did not parse, so any "
+                        "data availability statement in it is being missed: %s",
+                        report.pmcid,
+                        e,
+                    )
 
         report.data_availability = analyze_data_availability(data_statement)
 

@@ -28,6 +28,7 @@ The contract is ``doc/cross_platform/polite_request_pacing.md``.
 """
 
 import logging
+import math
 import threading
 import time
 from collections.abc import Callable
@@ -35,6 +36,8 @@ from dataclasses import dataclass
 
 from .constants import (
     DEFAULT_POLITE_RATE_PER_SECOND,
+    NCBI_EUTILS_HOST,
+    NCBI_RATE_WITH_API_KEY_PER_SECOND,
     POLITE_MAX_PENALTY_SECONDS,
     POLITE_PENALTY_FLOOR_SECONDS,
     POLITE_RATE_CEILINGS,
@@ -53,8 +56,8 @@ class HostPolicy:
         ceiling_per_second: Requests per second, never exceeded.
 
     Raises:
-        ValueError: On construction, if the ceiling is not positive. A
-            ceiling of zero is not a policy, it is a deadlock.
+        ValueError: On construction, if the ceiling is not a positive finite
+            number. A ceiling of zero is not a policy, it is a deadlock.
     """
 
     ceiling_per_second: float
@@ -62,11 +65,32 @@ class HostPolicy:
     def __post_init__(self) -> None:
         """Refuse a ceiling that cannot be obeyed.
 
+        ``NaN`` and ``inf`` are rejected as well as zero and the negatives:
+        ``nan <= 0`` is False, so a NaN slipped through into an interval of
+        ``nan``, and every ``wait > 0`` test against it is False -- a
+        limiter that silently paced nothing at all. ``inf`` gives an
+        interval of ``0.0``, which breaks the promise in
+        :meth:`RateLimiter._claim_slot` that two threads are never handed
+        the same instant.
+
         Raises:
-            ValueError: If the ceiling is not a positive number.
+            ValueError: If the ceiling is not a positive finite number.
         """
-        if self.ceiling_per_second <= 0:
+        if not math.isfinite(self.ceiling_per_second) or self.ceiling_per_second <= 0:
             raise ValueError("A host policy allows at least some requests")
+
+    @property
+    def min_interval_seconds(self) -> float:
+        """The shortest gap between requests this policy permits.
+
+        The one place the rate is turned into an interval, so the limiter
+        can read as "never below the policy's minimum interval" rather than
+        repeating the division at each comparison.
+
+        Returns:
+            Seconds between requests at the ceiling.
+        """
+        return 1.0 / self.ceiling_per_second
 
 
 def policy_for_host(host: str, api_key: str | None = None) -> HostPolicy:
@@ -81,9 +105,7 @@ def policy_for_host(host: str, api_key: str | None = None) -> HostPolicy:
         The host's published or measured policy, or the safe default for a
         host we know nothing about.
     """
-    if api_key and host == "eutils.ncbi.nlm.nih.gov":
-        from .constants import NCBI_RATE_WITH_API_KEY_PER_SECOND
-
+    if api_key and host == NCBI_EUTILS_HOST:
         return HostPolicy(NCBI_RATE_WITH_API_KEY_PER_SECOND)
     return HostPolicy(
         POLITE_RATE_CEILINGS.get(host, DEFAULT_POLITE_RATE_PER_SECOND)
@@ -122,10 +144,17 @@ class RateLimiter:
         self._sleep = sleep
         self._host = host
         self._lock = threading.Lock()
-        self._interval = 1.0 / policy.ceiling_per_second
+        self._interval = policy.min_interval_seconds
         self._successes = 0
         self._has_requested = False
-        self.last_request_at = 0.0
+        self._last_request_at = 0.0
+        # A one-shot deadline, on the injected clock: the service's own
+        # Retry-After, which is a pause and not a rate. Keeping the two apart
+        # is what stops a Retry-After from setting the steady-state interval
+        # (and so outliving the incident by hours), and what stops a later
+        # header-less penalty from *shortening* an interval a Retry-After had
+        # widened.
+        self._not_before = 0.0
 
     @property
     def interval(self) -> float:
@@ -150,10 +179,15 @@ class RateLimiter:
         """Reserve the next departure time for this caller.
 
         Held under the lock, and deliberately short: no waiting happens here.
-        ``last_request_at`` is advanced to the claimed time *before* the lock
+        ``_last_request_at`` is advanced to the claimed time *before* the lock
         is released, so the next caller's claim is one interval later and two
         threads can never be handed the same instant (the interval is always
-        positive, because a :class:`HostPolicy` ceiling is always positive).
+        positive, because a :class:`HostPolicy` ceiling is always positive and
+        finite).
+
+        A claim also never lands before ``_not_before``, so a ``Retry-After``
+        pause is served by every caller that has yet to claim, not only by
+        the one that received it.
 
         Returns:
             The claimed departure time, and how long the caller must wait for
@@ -162,12 +196,12 @@ class RateLimiter:
         with self._lock:
             now = self._clock()
             if self._has_requested:
-                earliest = self.last_request_at + self._interval
+                earliest = self._last_request_at + self._interval
             else:
                 self._has_requested = True
                 earliest = now
-            departure = max(earliest, now)
-            self.last_request_at = departure
+            departure = max(earliest, now, self._not_before)
+            self._last_request_at = departure
             return departure, departure - now
 
     def acquire(self) -> float:
@@ -176,48 +210,84 @@ class RateLimiter:
         The wait happens with the lock released, so a host under a long
         penalty does not also hold every other thread that wants it.
 
+        A claim taken before a penalty arrived would otherwise depart into
+        the pause the service asked for: with N workers on one host, the
+        first response can be a ``Retry-After`` while N-1 requests are
+        already holding slots at the old spacing. So the deadline is
+        re-read after waking, and a caller whose slot now falls inside it
+        claims again behind it. ``_not_before`` only moves forward, so this
+        settles.
+
         Returns:
             The claimed departure time, on the injected clock. Callers that
             only want the pacing may ignore it; it is what lets a test assert
             that no two threads were given the same instant.
         """
-        departure, wait = self._claim_slot()
-        if wait > 0:
-            if wait > POLITE_SLOW_WAIT_LOG_SECONDS:
-                logger.info(
-                    f"Pacing {self._host or 'request'}: waiting {wait:.1f}s"
-                )
-            self._sleep(wait)
-        return departure
+        while True:
+            departure, wait = self._claim_slot()
+            if wait > 0:
+                if wait > POLITE_SLOW_WAIT_LOG_SECONDS:
+                    logger.info(
+                        f"Pacing {self._host or 'request'}: waiting {wait:.1f}s"
+                    )
+                self._sleep(wait)
+            with self._lock:
+                if self._not_before <= departure:
+                    return departure
 
     def penalise(self, retry_after: float | None = None) -> None:
         """Yield: this host says it is being asked too fast.
 
+        A penalty never makes this limiter faster. The two effects are kept
+        apart, because they are different things:
+
+        * ``retry_after`` becomes a **deadline**, timed from now -- that is,
+          from when the throttle was *received*, which is what HTTP defines
+          it to mean. Measuring it from the last departure instead made it
+          `max(retry_after - latency, 0)`, so a service shedding load, whose
+          answers are slow by definition, could send ``Retry-After: 2``,
+          have it arrive 3s later, and be re-asked on the same breath. It is
+          honoured in full up to five minutes
+          (:data:`POLITE_MAX_PENALTY_SECONDS`) and clamped beyond that,
+          because an arbitrary publisher answering ``Retry-After: 3600``
+          must not park the application for an hour.
+        * The **interval** -- the steady-state rate -- is always doubled,
+          down to :data:`POLITE_PENALTY_FLOOR_SECONDS`, and never shortened.
+          Writing ``retry_after`` straight into it was two bugs at once: a
+          short ``Retry-After`` drove the rate *above* the host's own
+          ceiling and stayed there (``succeed`` only recovers *towards* the
+          ceiling, so nothing pulled it back), and a later header-less
+          penalty computed ``min(2 x 300, 30)`` and so answered a second
+          throttle by going ten times faster, while logging "Backing off".
+
         Args:
             retry_after: What the service asked for, in seconds, when it
-                said. It is honoured in full up to five minutes
-                (:data:`POLITE_MAX_PENALTY_SECONDS`) -- including past
-                ``POLITE_PENALTY_FLOOR_SECONDS``, which bounds our own
-                halving and not the service's word -- and clamped beyond
-                that, because an arbitrary publisher answering
-                ``Retry-After: 3600`` must not park the application for an
-                hour. Without the header, the rate is halved, down to the
-                floor.
+                said. ``None`` when it did not, or when the header could not
+                be read.
         """
         with self._lock:
             self._successes = 0
             if retry_after is not None and retry_after > 0:
-                self._interval = min(retry_after, POLITE_MAX_PENALTY_SECONDS)
-            else:
-                self._interval = min(
-                    self._interval * 2, POLITE_PENALTY_FLOOR_SECONDS
+                self._not_before = max(
+                    self._not_before,
+                    self._clock() + min(retry_after, POLITE_MAX_PENALTY_SECONDS),
                 )
+            self._interval = max(
+                self._interval,
+                min(self._interval * 2, POLITE_PENALTY_FLOOR_SECONDS),
+                self._policy.min_interval_seconds,
+            )
             logger.info(
                 f"Backing off: now one request every {self._interval:.1f}s"
             )
 
-    def raise_ceiling_to(self, policy: HostPolicy) -> bool:
+    def _raise_ceiling_to(self, policy: HostPolicy) -> bool:
         """Adopt a faster policy for this host, never a slower one.
+
+        Private, because the rule that only a *registered key* buys a higher
+        rate lives one layer up in :func:`policy_for_host`. Public, this
+        mutator let any holder of a limiter handle raise the process-wide
+        ceiling on a host that never sanctioned it.
 
         A registered API key raises what a service permits, and the limiter
         for that host may already exist because an unkeyed caller got there
@@ -236,16 +306,22 @@ class RateLimiter:
         with self._lock:
             if policy.ceiling_per_second <= self._policy.ceiling_per_second:
                 return False
-            was_unpenalised = self._interval <= 1.0 / self._policy.ceiling_per_second
+            was_unpenalised = self._interval <= self._policy.min_interval_seconds
+            previous = self._policy
             self._policy = policy
             if was_unpenalised:
-                self._interval = 1.0 / policy.ceiling_per_second
+                self._interval = policy.min_interval_seconds
+            logger.info(
+                f"Ceiling for {self._host or 'host'} raised from "
+                f"{previous.ceiling_per_second:.0f} to "
+                f"{policy.ceiling_per_second:.0f} req/s on a presented API key"
+            )
             return True
 
     def succeed(self) -> None:
         """Record a request the host answered, and earn the rate back slowly."""
         with self._lock:
-            ceiling = 1.0 / self._policy.ceiling_per_second
+            ceiling = self._policy.min_interval_seconds
             if self._interval <= ceiling:
                 return
             self._successes += 1
@@ -272,20 +348,26 @@ def limiter_for(host: str, api_key: str | None = None) -> RateLimiter:
     caller arriving after an unkeyed one is not stuck at the unkeyed rate.
 
     Args:
-        host: The hostname.
+        host: The hostname. Normalised here rather than trusted, so a direct
+            caller passing ``EUTILS.NCBI.NLM.NIH.GOV`` or a trailing-dot FQDN
+            cannot open a second budget for a host that already has one --
+            which is the exact defect the single registry exists to prevent.
+            ``urlparse`` already lowercases, so this only matters off the
+            adapter's path.
         api_key: Raises the ceiling where the service offers one.
 
     Returns:
         The limiter, created on first use.
     """
+    key = host.strip().rstrip(".").lower()
     with _registry_lock:
-        existing = _registry.get(host)
+        existing = _registry.get(key)
         if existing is None:
-            created = RateLimiter(policy_for_host(host, api_key), host=host)
-            _registry[host] = created
+            created = RateLimiter(policy_for_host(key, api_key), host=key)
+            _registry[key] = created
             return created
         if api_key:
-            existing.raise_ceiling_to(policy_for_host(host, api_key))
+            existing._raise_ceiling_to(policy_for_host(key, api_key))
         return existing
 
 

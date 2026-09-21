@@ -16,7 +16,7 @@ Python (`rate_limit.py`, `polite_session.py`, the `POLITE_*` block in
 |----------|--------|
 | Python | Conforms |
 | Swift (BioMedLit) | **Unchecked.** `EuropePMCService`, `FullTextService` and `EutilsRequest` (`Packages/BioMedLit/Sources/BioMedLit/Services/`) make outbound requests with no pacing at all. `ClinicalTrialsService` and `CrossRefService` have `enforceRateLimit()`, but it is per service instance rather than per host: two services calling the same host each keep a full budget, and concurrent analysis multiplies it again |
-| Android | **Unchecked.** Only `PubMedService.kt` paces (`delay(delayMs)`, ~line 478). `EuropePMCApi`, `UnpaywallApi` and `FullTextService` (`app/src/main/java/com/bmlibrarian/factchecker/data/remote/`) have none |
+| Android | **Unchecked.** Only `PubMedService.kt` paces (a `delay(delayMs)` in its request path). Under `app/src/main/java/com/bmlibrarian/factchecker/data/remote/`: `pubmed/PubMedService.kt`, `europepmc/EuropePMCApi.kt`, `fulltext/UnpaywallApi.kt`, `fulltext/FullTextService.kt` — the last three have no pacing |
 
 ## Why
 
@@ -34,10 +34,11 @@ multiplied the budget again by its worker count. They were:
 `EuropePMCClient` (`europepmc.py`, the main search path — not the
 transparency analyzer's client of the same name above) and the PDF/full-text
 discovery clients (`pdf_discovery.py`) had no pacing at all. Europe PMC in
-particular serves 503 after about two rapid requests (see "Europe PMC
-Limits" in `doc/developer/europepmc_and_pubmed.md`), so an unpaced client or
-a per-instance one racing several workers throttled itself within seconds of
-starting a review.
+particular has been seen shedding load (503, no `Retry-After`) under
+back-to-back large full-text fetches (see "Europe PMC Limits" in
+`doc/developer/europepmc_and_pubmed.md`), so an unpaced client — or a
+per-instance one racing several workers — could throttle itself early in a
+review.
 
 `transparency/transparency_manager.py` also holds a `Lock` and a
 `_min_request_interval`, and **keeps it deliberately** — it is not a seventh
@@ -86,20 +87,55 @@ neither. Python's table (`constants.POLITE_RATE_CEILINGS`, default
 | `api.openalex.org` | 10 |
 | `api.unpaywall.org` | 5 |
 | `api.crossref.org` | 5 |
-| `clinicaltrials.gov` | 5 |
+| `clinicaltrials.gov` | 1 (the default) |
 | `doi.org`, `dx.doi.org` | 1 |
 | any other host | 1 (the default) |
 
-Europe PMC's ceiling is measured, not published: its own documentation once
-claimed 10/s, which is plausibly why it shipped with no pacing at all
-(`doc/developer/europepmc_and_pubmed.md`, "Europe PMC Limits").
+Europe PMC's ceiling is a **deliberately conservative choice, not a measured
+property of the host**. EBI staff have stated a limit of 10 requests/second
+(500/minute) per IP on the Europe PMC developer forum, and that figure should
+be treated as the published one. What was observed on 2026-09-21 was
+narrower: two back-to-back `fullTextXML` fetches of a large article (~150 KB,
+about 17 s each) were followed by sustained 503s. A re-check on the same day
+could not reproduce any throttling on either endpoint — four rapid `search`
+calls and three rapid `fullTextXML` calls all returned 200. So the honest
+statement is that Europe PMC can shed load under slow, large, concurrent
+full-text transfers, not that it refuses a second request per second. 1/s is
+kept because it is safe and this client's volumes do not need more; it is not
+evidence that 10/s is untrue.
 
-**3. An explicit `Retry-After` is honoured in full, up to five minutes.**
-When a throttled response names how long to wait, that is the new interval —
-a service that asks for 60 seconds gets 60, because shortening what it asked
-for is less polite than asking. **The 30-second floor applies only to the
-halving path** (rule 4), when the service pushed back without saying for how
-long; it never caps an explicit `Retry-After`.
+Two of these services cap per **day** rather than per second, which this
+table cannot express: Unpaywall publishes 100,000 calls/day and no
+per-second figure at all, and OpenAlex publishes 10/s *and* 100,000/day. A
+port that conforms to this table exactly can still exhaust a daily quota;
+budgeting against the day is out of scope for this contract.
+
+Some of these services also expect to be **identified**, which is likewise
+out of scope here but is not optional: Unpaywall requires an `email=`
+parameter, OpenAlex and Crossref grant their polite pool on a `mailto`, and
+NCBI wants an email and honours an API key. Pacing a request correctly while
+sending it anonymously is only half of being polite.
+
+**3. An explicit `Retry-After` is honoured in full, up to five minutes, as a
+pause and not as a rate.** When a throttled response names how long to wait,
+nothing is sent to that host until that much time has passed **counted from
+when the response arrived** — which is what HTTP defines `Retry-After` to
+mean. Counting it from the last request *departed* silently reduces it by the
+response latency, and a service shedding load is slow by definition: a
+`Retry-After` shorter than its own latency then became no wait at all.
+
+A `Retry-After` **never becomes the steady-state interval**, and so can never
+make the client *faster*. Writing it into the interval breached the host's own
+ceiling when the value was short (and recovery only aims *towards* the
+ceiling, so nothing pulled it back), and let a later header-less penalty
+compute `min(2 × 300, 30)` and answer a second throttle by going ten times
+faster. The interval is owned solely by the halving path (rule 4); the
+deadline is owned solely by `Retry-After`. **The 30-second floor applies only
+to the halving path**; it never caps an explicit `Retry-After`.
+
+A pause also applies to callers that had already claimed a slot before it
+arrived — with N workers on one host, N-1 requests are in flight when the
+first throttle comes back, and they must serve the pause too.
 
 The one bound on it is a separate, much higher ceiling of five minutes
 (`constants.POLITE_MAX_PENALTY_SECONDS`). Pacing reaches arbitrary publisher
@@ -146,22 +182,33 @@ own retry loop**, and the retry budget for them is inherited from the
 client's own configured total rather than invented. A transport-level retry
 (urllib3's `Retry` on `requests`, or the platform equivalent) re-sends
 inside a single logical send, where a limiter sitting below it cannot pace
-the resend. So throttle statuses (429, 503;
-`constants.POLITE_THROTTLE_STATUSES`) are taken out of the transport's own
+the resend. So **every** status the transport was configured to retry — the
+throttle statuses (429, 503; `constants.POLITE_THROTTLE_STATUSES`) *and* the
+server-fault ones (500, 502, 504) — is taken out of the transport's
 retry-on-status list and retried by the pacing layer instead, one
-`acquire()` per attempt — capped at `constants.POLITE_MAX_THROTTLE_RETRIES`
-by default, but a client that configures its own retry budget on the
-mounted session has that budget honoured instead, so the two do not silently
-disagree. A client whose own calling code already retries (PubMed's search
+`acquire()` per attempt, capped at `constants.POLITE_MAX_THROTTLE_RETRIES`
+by default or at the client's own configured total when it sets one.
+
+Taking only the throttles left the two loops **nested**, and their budgets
+multiplied: a host alternating 503 and 500 cost eight physical requests
+where four were configured, and urllib3's first retry backoff is zero
+seconds regardless of `backoff_factor`, so a single 500 produced a second
+request in the same millisecond — unpaced, and invisible to the limiter.
+Only a throttle penalises; a server fault is retried and paced but earns no
+penalty, because the host is broken rather than busy. What stays with the
+transport is what belongs there: connection and read retries, which are
+transport faults with no status to pace against. A client whose own calling code already retries (PubMed's search
 client), or which makes exactly one request per call and reports the result
 itself (the five transparency clients), mounts with a retry total of zero,
 so mounting pacing does not multiply that client's request count. Adding
 pacing must never increase the traffic it exists to reduce: the default
 budget would turn one physical request into four on a persistent 503, and
-those extra requests are charged to a budget other call sites share. Python: `polite_session.mount_politely` strips the
-throttle statuses from the passed-in `Retry` and passes its `total` through
-to `PoliteAdapter` as `max_throttle_retries`; `PoliteAdapter.send` runs the
-acquire/send/penalise loop.
+those extra requests are charged to a budget other call sites share.
+
+Python: `polite_session.mount_politely` clears the passed-in `Retry`'s
+status forcelist, passing those statuses to `PoliteAdapter` as
+`fault_statuses` and its `total` as `max_throttle_retries`;
+`PoliteAdapter.send` runs the acquire/send/penalise loop.
 
 **7. Pacing never invents a failure, and never re-classifies one.**
 `acquire()` only delays; it never raises and never turns a request into an
@@ -197,11 +244,21 @@ not add.
   `POLITE_THROTTLE_STATUSES`, `POLITE_MAX_THROTTLE_RETRIES`, and
   `HTTP_ERROR_STATUS_MIN` (the recovery signal's threshold).
 
-Every client that makes outbound requests to a third-party host mounts
+Every client that reaches a third-party host **over `requests`** mounts
 pacing on its `requests.Session` through `mount_politely` at construction,
 rather than pacing itself: `pubmed/search_client.py`, `europepmc.py`,
 `pdf_discovery.py`, and the five clients in
 `study_transparency_analyzer/study_transparency_analyzer.py`.
+
+Two named exceptions, so this stays an "every" that is actually true:
+
+- `pdf_discovery.py`'s `BrowserSession` drives Chromium through Playwright,
+  which does not go through `requests`, so no mounted adapter can pace it.
+  It calls `limiter_for(host).acquire()` itself before navigating, sharing
+  the same per-host budget — it reaches the same publisher hosts, and it is
+  invoked exactly when one has already refused us.
+- The LLM clients (`llm/`) are deliberately unpaced: Anthropic is a paid
+  API with its own rate limiting, and Ollama is normally loopback (rule 5).
 
 ## Ports
 

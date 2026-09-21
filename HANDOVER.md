@@ -8,6 +8,54 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
+**#341 — every outbound request is paced, per host**, branch
+`feat/polite-request-pacing`, PR #345. Python only. Compress into **Recently
+landed** once merged.
+
+- **One limiter per host, process-wide** (`rate_limit.py`, `polite_session.py`).
+  Six ad-hoc limiters were per *instance*, so a `ThreadPoolExecutor`
+  multiplied the budget by its worker count and two clients calling one host
+  each kept a full budget. The host is the key, because the host is what does
+  the throttling. Pacing is mounted on the session (`mount_politely`), so no
+  call site has to remember it.
+- **A `Retry-After` is a pause, not a rate.** It is timed from when the
+  response *arrived* (HTTP's own definition) and kept in `_not_before`,
+  separate from `_interval`. Timed from the last *departure* it was silently
+  reduced by the response latency, so a service shedding load — slow by
+  definition — could send `Retry-After: 2`, have it arrive 3s later, and be
+  re-asked immediately. Written into the interval it also breached the host's
+  ceiling when short, and let a later header-less penalty compute
+  `min(2 × 300, 30)` and answer a second throttle by going ten times faster.
+  **A penalty now never shortens the interval**, and a pause is served by
+  callers that claimed a slot before it arrived.
+- **One retry budget, not two nested.** `mount_politely` now takes *every*
+  forcelisted status off the transport's `Retry` and retries it in the pacing
+  loop. Nested, the budgets multiplied: a host alternating 503 and 500 cost
+  eight physical requests where four were configured, and urllib3's first
+  backoff is zero seconds, so one 500 produced a second request in the same
+  millisecond, unpaced. Only a throttle penalises; a server fault is paced
+  but not penalised.
+- **503 is a throttle for Europe PMC, an outage for NCBI.** The advice engine
+  matched only 429, so a search cut short by the throttling this branch
+  exists to handle told the user "Try again later." It now reads 503 as
+  throttling **only** for the provider that means it that way.
+- **The Europe PMC justification was overstated.** "503 after about two rapid
+  requests" did not reproduce (four rapid `search` and three rapid
+  `fullTextXML` calls all returned 200), and the 10/s this repo called "never
+  true" is EBI's own published figure. 1/s is kept as a conservative choice,
+  and the docs now say that rather than asserting a measurement.
+- **Tests assert the wait, not the `interval` property.** Four mutations used
+  to survive the whole suite — the adapter never pacing, the penalty never
+  reaching a claim, the PubMed client bypassing its session, and
+  `Retry-After` never wired through. Each now fails a test. `conftest.py`
+  resets the process-wide registry autouse.
+- **Lodged, not fixed:** #346 (a failed full-text fetch is reported to the
+  reader as an absent data-availability or COI statement — needs an
+  "unknown" in the report model, and so lands in Swift and Android too) and
+  #347 (a throttled Unpaywall or doi.org is reported as "no full text
+  available", bypassing the shortfall machinery). Both now log rather than
+  fail silently; neither yet reports to the user.
+
 **#324 — cancelling a benchmark stops it, and says what it evaluated**,
 branch `fix/cancelled-benchmark-324`, PR #329. Python only. Compress into **Recently
 landed** once merged.

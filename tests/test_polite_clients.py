@@ -14,8 +14,10 @@ gained a ``_session`` attribute of its own.
 import pytest
 
 from bmlibrarian_lite.europepmc import EuropePMCClient
+from bmlibrarian_lite.exceptions import SourceRequestError
 from bmlibrarian_lite.pdf_discovery import PDFDiscoverer
 from bmlibrarian_lite.polite_session import PoliteAdapter
+from bmlibrarian_lite.pubmed.constants import ESEARCH_URL
 from bmlibrarian_lite.pubmed.search_client import PubMedSearchClient
 from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
     ClinicalTrialsClient,
@@ -73,13 +75,60 @@ class TestTheAdHocLimitersAreGone:
 
         assert "_rate_limit" not in inspect.getsource(module)
 
-    def test_the_pubmed_client_has_no_private_delay(self) -> None:
-        """Its 0.34s was right, and right per instance only."""
-        import inspect
 
-        from bmlibrarian_lite.pubmed import search_client
+class TestTheRequestGoesThroughTheMountedSession:
+    """Mounting pacing is worth nothing if the call site bypasses it.
 
-        assert "self.request_delay" not in inspect.getsource(search_client)
+    Asserting that the session *has* polite adapters does not test this: the
+    PubMed client is the one that used to call ``requests.post`` directly,
+    and reverting it to that restored completely unpaced NCBI traffic under
+    a thread pool while every test stayed green. A source grep for the old
+    attribute name did not catch it either -- a revert need not bring the
+    name back.
+    """
+
+    def test_the_pubmed_client_posts_through_its_own_session(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A bare ``requests.post`` would be unpaced, and is now a failure."""
+        import requests
+
+        client = PubMedSearchClient()
+        used: list[str] = []
+
+        def refuse(*args: object, **kwargs: object) -> None:
+            """Fail loudly if the module-level requests API is used.
+
+            Args:
+                *args: Ignored.
+                **kwargs: Ignored.
+
+            Raises:
+                AssertionError: Always; this path must not be taken.
+            """
+            raise AssertionError("the client bypassed its polite session")
+
+        def record(*args: object, **kwargs: object) -> object:
+            """Record that the session was used, and stop the request there.
+
+            Args:
+                *args: Ignored.
+                **kwargs: Ignored.
+
+            Raises:
+                requests.ConnectionError: To end the call without a socket.
+            """
+            used.append("session")
+            raise requests.ConnectionError("stopped in the test")
+
+        monkeypatch.setattr(requests, "post", refuse)
+        monkeypatch.setattr(client._session, "post", record)
+        client.max_retries = 1
+
+        with pytest.raises(SourceRequestError):
+            client._make_request(ESEARCH_URL, {"term": "aspirin"})
+
+        assert used == ["session"]
 
 
 #: The transparency clients, each of which owns its own request loop and so

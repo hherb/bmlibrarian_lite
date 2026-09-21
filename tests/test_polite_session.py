@@ -17,11 +17,13 @@ during the 503-retry tests.
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
 import requests
 from urllib3.util.retry import Retry
 
 from bmlibrarian_lite.constants import (
     POLITE_MAX_THROTTLE_RETRIES,
+    POLITE_RATE_CEILINGS,
     POLITE_RECOVERY_SUCCESSES,
 )
 from bmlibrarian_lite.polite_session import (
@@ -49,6 +51,54 @@ def _no_sleep(seconds: float) -> None:
     Args:
         seconds: How long the caller would have waited. Ignored.
     """
+
+
+class RecordingClock:
+    """A clock that only moves when the limiter sleeps.
+
+    Injected wherever a test asserts the *wait*, so the assertion is exact
+    rather than "about an interval, give or take however long the machine
+    took" -- which on a loaded CI runner is how a pacing test starts
+    flaking.
+    """
+
+    def __init__(self) -> None:
+        """Start at zero, recording every sleep."""
+        self.now = 0.0
+        self.slept: list[float] = []
+
+    def time(self) -> float:
+        """The current time.
+
+        Returns:
+            Seconds since the clock started.
+        """
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        """Record the wait and advance instead of performing it.
+
+        Args:
+            seconds: How long the caller would have waited.
+        """
+        self.slept.append(seconds)
+        self.now += seconds
+
+
+def paced_host(host: str) -> RecordingClock:
+    """Seed the registry with a limiter for one host over a recording clock.
+
+    Args:
+        host: The hostname to seed.
+
+    Returns:
+        The clock, so a test can assert what was waited.
+    """
+    clock = RecordingClock()
+    _registry[host] = RateLimiter(
+        policy_for_host(host), clock=clock.time, sleep=clock.sleep, host=host
+    )
+    return clock
 
 
 def response_with(status: int, headers: dict[str, str] | None = None) -> Any:
@@ -154,6 +204,61 @@ class TestTheAdapterPaces:
         seeded here.
         """
         reset_limiters()
+
+    def test_a_second_request_to_one_host_waits_the_interval(self) -> None:
+        """The headline claim of the whole module, asserted on the wait.
+
+        Every other test here reads ``penalise``/``succeed`` side effects off
+        the ``interval`` property, all of which the adapter reaches without
+        pacing anything: replacing its ``acquire()`` with a no-op left the
+        entire suite green.
+        """
+        clock = paced_host("www.ebi.ac.uk")
+        adapter = RecordingAdapter([200, 200])
+
+        adapter.send(request_to("https://www.ebi.ac.uk/x"))
+        adapter.send(request_to("https://www.ebi.ac.uk/y"))
+
+        assert clock.slept == [
+            pytest.approx(1.0 / POLITE_RATE_CEILINGS["www.ebi.ac.uk"])
+        ]
+
+    def test_each_retry_of_a_throttle_claims_its_own_slot(self) -> None:
+        """"Not asked again on the same breath" is the module's own claim."""
+        clock = paced_host("www.ebi.ac.uk")
+        adapter = RecordingAdapter([503, 200])
+
+        adapter.send(request_to("https://www.ebi.ac.uk/x"))
+
+        assert adapter.sent == 2
+        assert len(clock.slept) == 1 and clock.slept[0] > 0
+
+    def test_a_loopback_host_is_not_paced(self) -> None:
+        """The control: pacing exists for third parties, not for ourselves."""
+        clock = paced_host("127.0.0.1")
+        adapter = RecordingAdapter([200, 200])
+
+        adapter.send(request_to("http://127.0.0.1:9/x"))
+        adapter.send(request_to("http://127.0.0.1:9/y"))
+
+        assert clock.slept == []
+
+    def test_a_retry_after_reaches_the_limiter(self) -> None:
+        """The header is parsed and the limiter honours it, but never joined.
+
+        ``retry_after_seconds`` and ``penalise(retry_after=...)`` were each
+        tested alone, so passing ``None`` in between changed nothing.
+        """
+        adapter = RecordingAdapter([200])
+        adapter.statuses = []
+        throttle = response_with(503, {"Retry-After": "30"})
+        good = response_with(200)
+        answers = [throttle, good]
+        adapter._send_once = lambda request, **kwargs: answers.pop(0)  # type: ignore[method-assign]
+
+        adapter.send(request_to("https://www.ebi.ac.uk/x"))
+
+        assert limiter_for("www.ebi.ac.uk")._not_before > 0.0
 
     def test_a_throttled_response_penalises_that_host(self) -> None:
         """Europe PMC's 503 is the case this was built for."""
@@ -352,15 +457,29 @@ class TestMountPolitely:
     less -- and must carry every other ``Retry`` setting through unchanged.
     """
 
-    def test_throttle_statuses_are_filtered_from_the_forcelist(self) -> None:
-        """429 and 503 are ours; a genuine fault like 500 stays with urllib3."""
+    def test_no_status_is_left_for_urllib3_to_retry(self) -> None:
+        """Every forcelisted status is retried here, through the pacing.
+
+        Left nested, urllib3 re-sent inside one ``send()`` where the limiter
+        cannot see it, and the two budgets multiplied.
+        """
         retry = Retry(status_forcelist=[429, 500, 503])
 
         session = mount_politely(requests.Session(), retry=retry)
 
         mounted_retry = mounted_adapter(session).max_retries
         assert isinstance(mounted_retry, Retry)
-        assert set(mounted_retry.status_forcelist or []) == {500}
+        assert set(mounted_retry.status_forcelist or []) == set()
+
+    def test_the_server_fault_statuses_move_to_the_adapter(self) -> None:
+        """The control: they are taken off urllib3, not dropped."""
+        retry = Retry(status_forcelist=[429, 500, 503])
+
+        session = mount_politely(requests.Session(), retry=retry)
+
+        adapter = mounted_adapter(session)
+        assert set(adapter._fault_statuses) == {500}
+        assert {429, 503}.issubset(set(adapter._retry_statuses))
 
     def test_other_retry_settings_survive_the_filtering(self) -> None:
         """``retry.new(...)`` must not drop the caller's other settings."""

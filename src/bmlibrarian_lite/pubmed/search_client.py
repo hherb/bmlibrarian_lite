@@ -70,7 +70,11 @@ from .data_types import (
     SearchResult,
     ArticleMetadata,
 )
-from ..constants import NCBI_RATE_WITH_API_KEY_PER_SECOND, POLITE_RATE_CEILINGS
+from ..constants import (
+    DEFAULT_POLITE_RATE_PER_SECOND,
+    NCBI_RATE_WITH_API_KEY_PER_SECOND,
+    POLITE_RATE_CEILINGS,
+)
 from ..data_models import RequestFailure, RequestFailureKind, SearchProvider
 from ..exceptions import SourceRequestError
 from ..polite_session import mount_politely
@@ -322,7 +326,11 @@ class PubMedSearchClient:
             api_key=self.api_key,
         )
 
-        base_rate = POLITE_RATE_CEILINGS[_EUTILS_HOST]
+        # .get, not a subscript: a changed EUTILS_BASE_URL would otherwise
+        # raise KeyError while merely building a client.
+        base_rate = POLITE_RATE_CEILINGS.get(
+            _EUTILS_HOST, DEFAULT_POLITE_RATE_PER_SECOND
+        )
         rate = NCBI_RATE_WITH_API_KEY_PER_SECOND if self.api_key else base_rate
         logger.info(f"PubMed search client initialized (rate limit: {rate:.0f} req/s)")
 

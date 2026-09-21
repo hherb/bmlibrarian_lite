@@ -901,15 +901,20 @@ enum EuropePMCError: Error, RetryableError {
 
 ### Europe PMC Limits
 
-- No official rate limit documented
-- **Measured 2026-09-21: nginx serves 503 after about two rapid requests**,
-  with no `Retry-After`, and stays throttled for up to ~70s after a burst.
-  This holds for the light `search` endpoint as well as `fullTextXML`.
-- An earlier version of this document recommended 10 requests/second. That
-  was never true, and is plausibly why `EuropePMCClient` shipped with no
-  pacing at all.
-- We pace it at **1 request/second**, with adaptive backoff beneath that:
-  see `doc/cross_platform/polite_request_pacing.md`.
+- **Stated limit: 10 requests/second (500/minute), per IP** — from EBI staff
+  on the Europe PMC developer forum. Treat this as the published figure.
+- **Observed 2026-09-21:** two back-to-back `fullTextXML` fetches of a large
+  article (~150 KB, ~17 s each) were followed by sustained 503s with no
+  `Retry-After`, for up to ~70 s.
+- **Not reproducible on re-check the same day**: four rapid `search` calls
+  and three rapid `fullTextXML` calls all returned HTTP 200. So the 503s
+  above are best read as load-shedding under slow, large, concurrent
+  transfers, **not** as a hard "two requests per second" limit, and not as
+  evidence that the published 10/s is fiction.
+- We pace it at **1 request/second** anyway, with adaptive backoff beneath
+  that: it is well inside the published limit, it costs this client nothing
+  at the volumes it works at, and it removes the load-shedding case
+  entirely. See `doc/cross_platform/polite_request_pacing.md`.
 - Use cursor pagination to minimize requests
 
 ### PubMed E-utilities Limits

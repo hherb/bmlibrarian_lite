@@ -233,6 +233,13 @@ def without_search_shortfall_notice(text: str) -> str:
 
 
 _RATE_LIMITED_STATUS = HTTPStatus.TOO_MANY_REQUESTS
+# Europe PMC says "you are asking too fast" with 503 and no Retry-After --
+# it is the reason the pacing layer counts 503 among
+# POLITE_THROTTLE_STATUSES at all. NCBI's 503, by contrast, is a genuine
+# outage, and answering that with "wait a minute, and get an API key" would
+# be wrong advice for a service that is simply down. So the wider reading of
+# 503 is scoped to the provider it is true of, rather than applied to both.
+_THROTTLES_WITH_UNAVAILABLE = (SearchProvider.EUROPEPMC,)
 # What NCBI answers a request whose API key it does not accept (checked live
 # for 400, #243); 401 and 403 are refusals of the same kind.
 _REFUSED_KEY_STATUSES = (
@@ -273,6 +280,23 @@ def _has_http_status(shortfall: RetrievalShortfall, statuses: Sequence[int]) -> 
     )
 
 
+def _is_throttled(shortfall: RetrievalShortfall) -> bool:
+    """Whether a shortfall is the service saying it is being asked too fast.
+
+    Args:
+        shortfall: The shortfall.
+
+    Returns:
+        True for a 429 from any provider, and for a 503 from a provider that
+        uses it to mean throttling rather than an outage.
+    """
+    if _has_http_status(shortfall, (_RATE_LIMITED_STATUS,)):
+        return True
+    return shortfall.provider in _THROTTLES_WITH_UNAVAILABLE and _has_http_status(
+        shortfall, (HTTPStatus.SERVICE_UNAVAILABLE,)
+    )
+
+
 def search_failure_advice(shortfalls: Sequence[RetrievalShortfall]) -> str:
     """Say what the user can do about a failed search.
 
@@ -286,7 +310,7 @@ def search_failure_advice(shortfalls: Sequence[RetrievalShortfall]) -> str:
         not process; checking the connection. Otherwise, trying again later.
     """
     advice: list[str] = []
-    rate_limited = [s for s in shortfalls if _has_http_status(s, (_RATE_LIMITED_STATUS,))]
+    rate_limited = [s for s in shortfalls if _is_throttled(s)]
     if rate_limited:
         advice.append(_RATE_LIMIT_ADVICE)
         if any(s.provider is SearchProvider.PUBMED for s in rate_limited):

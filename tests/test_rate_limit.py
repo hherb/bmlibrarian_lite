@@ -232,21 +232,118 @@ class TestBackoff:
 
         assert rl.interval == pytest.approx(1.0)
 
+    def test_a_halved_rate_is_what_the_next_request_waits(self) -> None:
+        """The penalty has to reach ``acquire()`` to be a penalty at all.
+
+        Every other assertion in this class reads the ``interval`` property,
+        which a claim need not consult: computing the next departure from
+        the policy ceiling instead of the penalised interval left the whole
+        suite green while every backoff became dead bookkeeping.
+        """
+        rl, clock = limiter(rate=2.0)
+        rl.acquire()
+        rl.penalise()
+
+        rl.acquire()
+
+        assert clock.slept == [pytest.approx(1.0)]
+
+    def test_a_recovered_rate_is_what_the_next_request_waits(self) -> None:
+        """The mirror: recovery is equally worthless if it never reaches a wait."""
+        rl, clock = limiter(rate=2.0)
+        rl.penalise()
+        for _ in range(POLITE_RECOVERY_SUCCESSES):
+            rl.succeed()
+        rl.acquire()
+
+        rl.acquire()
+
+        assert clock.slept == [pytest.approx(0.5)]
+
     def test_retry_after_is_honoured_when_given(self) -> None:
-        """The service said how long; that is not ours to shorten."""
-        rl, _clock = limiter(rate=2.0)
+        """The service said how long; that is not ours to shorten.
+
+        Asserted as the wait a following request actually takes, not as the
+        interval property: a penalty that never reaches ``acquire()`` is not
+        a penalty.
+        """
+        rl, clock = limiter(rate=2.0)
+        rl.acquire()
 
         rl.penalise(retry_after=12.0)
+        rl.acquire()
 
-        assert rl.interval == pytest.approx(12.0)
+        assert clock.slept == [pytest.approx(12.0)]
 
     def test_retry_after_past_the_floor_is_not_clamped(self) -> None:
         """The floor bounds our own halving, not the service's own word."""
-        rl, _clock = limiter(rate=2.0)
+        rl, clock = limiter(rate=2.0)
+        rl.acquire()
 
         rl.penalise(retry_after=60.0)
+        rl.acquire()
 
-        assert rl.interval == pytest.approx(60.0)
+        assert clock.slept == [pytest.approx(60.0)]
+
+    def test_retry_after_is_timed_from_when_it_arrived(self) -> None:
+        """HTTP defines Retry-After as a delay from receipt of the response.
+
+        Timed from the last *departure* instead, it was silently reduced by
+        the response latency -- and a service shedding load is slow by
+        definition, so a Retry-After shorter than its own latency became no
+        wait at all and the retry went out on the same breath.
+        """
+        rl, clock = limiter(rate=1.0)
+        rl.acquire()
+        clock.now += 3.0  # the 503 takes three seconds to come back
+
+        rl.penalise(retry_after=2.0)
+        rl.acquire()
+
+        assert clock.slept == [pytest.approx(2.0)]
+
+    def test_a_penalty_never_shortens_the_interval(self) -> None:
+        """A second throttle must not answer by going ten times faster.
+
+        ``Retry-After`` used to be written straight into the interval, so a
+        following header-less penalty computed ``min(2 x 300, 30)`` and sped
+        the client up, while logging that it had backed off.
+        """
+        rl, _clock = limiter(rate=1.0)
+        rl.penalise(retry_after=POLITE_MAX_PENALTY_SECONDS)
+        after_retry_after = rl.interval
+
+        rl.penalise()
+
+        assert rl.interval >= after_retry_after
+
+    def test_a_retry_after_never_breaches_the_ceiling(self) -> None:
+        """The host's own ceiling is not a number the host may raise.
+
+        A ``Retry-After`` below the policy interval used to become the
+        interval, driving the rate *above* the ceiling -- and ``succeed()``
+        only recovers towards the ceiling, so nothing ever pulled it back.
+        """
+        rl, _clock = limiter(rate=1.0)
+
+        rl.penalise(retry_after=0.001)
+
+        assert rl.interval >= 1.0
+
+    def test_a_penalty_reaches_a_slot_already_claimed(self) -> None:
+        """With N workers on one host, N-1 claims predate the first throttle.
+
+        Those callers must still serve the pause, or the host that just said
+        "stop for a minute" is asked N-1 more times at the old spacing.
+        """
+        rl, clock = limiter(rate=1.0)
+        rl.acquire()
+        rl._claim_slot()  # a worker holding a slot at the old spacing
+
+        rl.penalise(retry_after=50.0)
+        rl.acquire()
+
+        assert any(slept >= 50.0 for slept in clock.slept)
 
     def test_the_penalty_has_a_floor(self) -> None:
         """Halving forever tends to a standstill."""
@@ -287,19 +384,23 @@ class TestBackoff:
 
     def test_an_absurd_retry_after_is_clamped(self) -> None:
         """A Cloudflare-fronted publisher says 3600; a GUI cannot wait an hour."""
-        rl, _clock = limiter(rate=2.0)
+        rl, clock = limiter(rate=2.0)
+        rl.acquire()
 
         rl.penalise(retry_after=3600.0)
+        rl.acquire()
 
-        assert rl.interval == pytest.approx(POLITE_MAX_PENALTY_SECONDS)
+        assert clock.slept == [pytest.approx(POLITE_MAX_PENALTY_SECONDS)]
 
     def test_a_retry_after_inside_the_cap_is_honoured_in_full(self) -> None:
         """The control: the clamp is a ceiling, not a replacement."""
-        rl, _clock = limiter(rate=2.0)
+        rl, clock = limiter(rate=2.0)
+        rl.acquire()
 
         rl.penalise(retry_after=POLITE_MAX_PENALTY_SECONDS - 1.0)
+        rl.acquire()
 
-        assert rl.interval == pytest.approx(POLITE_MAX_PENALTY_SECONDS - 1.0)
+        assert clock.slept == [pytest.approx(POLITE_MAX_PENALTY_SECONDS - 1.0)]
 
 
 class TestAnApiKeyRaisesTheSharedCeiling:
@@ -346,13 +447,21 @@ class TestAnApiKeyRaisesTheSharedCeiling:
         )
 
     def test_raising_the_ceiling_does_not_cancel_a_penalty(self) -> None:
-        """A host that is shedding load is still shedding load."""
+        """A host that is shedding load is still shedding load.
+
+        Asserted against the interval the penalty left in force, rather than
+        a literal: a ``Retry-After`` is a pause with its own deadline now,
+        and it is the widened interval that a raised ceiling could wrongly
+        reset to the new, faster rate.
+        """
         first = limiter_for("eutils.ncbi.nlm.nih.gov")
         first.penalise(retry_after=20.0)
+        penalised = first.interval
 
         limiter_for("eutils.ncbi.nlm.nih.gov", api_key="secret")
 
-        assert first.interval == pytest.approx(20.0)
+        assert first.interval == pytest.approx(penalised)
+        assert first.interval > 1.0 / NCBI_RATE_WITH_API_KEY_PER_SECOND
 
 
 class TestALongStallIsExplained:
@@ -387,3 +496,91 @@ class TestALongStallIsExplained:
             rl.acquire()
 
         assert not [r for r in caplog.records if "Pacing" in r.message]
+
+
+class TestTheCeilingGuardIsReachable:
+    """The never-lower rule, exercised directly rather than through a key.
+
+    ``test_an_unkeyed_caller_second_does_not_lower_the_ceiling`` cannot reach
+    the guard at all: ``limiter_for`` only calls ``_raise_ceiling_to`` under
+    ``if api_key:``, and that test passes none. Deleting the guard left the
+    suite green.
+    """
+
+    def setup_method(self) -> None:
+        """Start each test with an empty registry."""
+        reset_limiters()
+
+    def test_a_slower_policy_is_refused(self) -> None:
+        """Lowering would silently slow every caller that presented a key."""
+        rl, _clock = limiter(rate=10.0)
+
+        raised = rl._raise_ceiling_to(HostPolicy(3.0))
+
+        assert raised is False
+        assert rl.interval == pytest.approx(0.1)
+
+    def test_an_equal_policy_is_refused(self) -> None:
+        """The boundary: not faster is not a raise."""
+        rl, _clock = limiter(rate=10.0)
+
+        assert rl._raise_ceiling_to(HostPolicy(10.0)) is False
+
+    def test_a_faster_policy_is_adopted(self) -> None:
+        """The control: a key really does buy the higher rate."""
+        rl, _clock = limiter(rate=3.0)
+
+        raised = rl._raise_ceiling_to(HostPolicy(10.0))
+
+        assert raised is True
+        assert rl.interval == pytest.approx(0.1)
+
+
+class TestTheRegistryIsBuiltOnceUnderConcurrency:
+    """Two limiters for one host would hand it two budgets.
+
+    That is the defect the whole feature exists to remove, and the lock in
+    ``limiter_for`` that prevents it had no test: replacing it with ``if
+    True:`` left the suite green.
+    """
+
+    def setup_method(self) -> None:
+        """Start with an empty registry."""
+        reset_limiters()
+
+    def test_racing_callers_all_get_one_limiter(self) -> None:
+        """A barrier makes the race as likely as it can be made."""
+        workers = 16
+        start = threading.Barrier(workers)
+        seen: list[RateLimiter] = []
+        seen_lock = threading.Lock()
+
+        def claim() -> None:
+            """Ask for the shared limiter at the same instant as the others."""
+            start.wait()
+            limiter_instance = limiter_for("www.ebi.ac.uk")
+            with seen_lock:
+                seen.append(limiter_instance)
+
+        threads = [threading.Thread(target=claim) for _ in range(workers)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert len({id(limiter_instance) for limiter_instance in seen}) == 1
+
+
+class TestTheRegistryKeyIsNormalised:
+    """One host is one budget, however a direct caller spells it."""
+
+    def setup_method(self) -> None:
+        """Start with an empty registry."""
+        reset_limiters()
+
+    def test_case_and_a_trailing_dot_do_not_open_a_second_budget(self) -> None:
+        """A fully-qualified name and a shouted one are the same host."""
+        first = limiter_for("www.ebi.ac.uk")
+
+        assert limiter_for("WWW.EBI.AC.UK") is first
+        assert limiter_for("www.ebi.ac.uk.") is first

@@ -31,11 +31,13 @@ EINFO_URL = f"{EUTILS_BASE_URL}/einfo.fcgi"
 MESH_BROWSER_API_URL = "https://id.nlm.nih.gov/mesh/lookup/descriptor"
 MESH_SPARQL_URL = "https://id.nlm.nih.gov/mesh/sparql"
 
-# Rate limiting (NCBI policy)
-RATE_LIMIT_WITH_KEY = 10  # requests per second with API key
-RATE_LIMIT_WITHOUT_KEY = 3  # requests per second without API key
-REQUEST_DELAY_WITH_KEY = 0.1  # seconds between requests with key
-REQUEST_DELAY_WITHOUT_KEY = 0.34  # seconds between requests without key
+# Rate limiting is no longer decided here. The rates NCBI publishes live in
+# bmlibrarian_lite.constants.POLITE_RATE_CEILINGS and
+# NCBI_RATE_WITH_API_KEY_PER_SECOND, and the shared host-keyed limiter
+# applies them. The four constants that used to sit here went unreferenced
+# when that landed, and a block headed "NCBI policy" that disagreed with the
+# real table (0.34s implies 2.94/s, against a published 3.0) is exactly the
+# stale second source of truth the next reader would have trusted.
 
 # Default search parameters
 DEFAULT_MAX_RESULTS = 200

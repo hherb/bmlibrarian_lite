@@ -830,23 +830,40 @@ def calculate_cost(
 
 
 # --- Polite request pacing -------------------------------------------------
+# An unknown host is somebody's web server until proven otherwise.
+DEFAULT_POLITE_RATE_PER_SECOND = 1.0
+
 # A ceiling in requests per second, per host, because the host is what does
-# the throttling. Europe PMC publishes no limit and its own documentation
-# once claimed 10/s; measured on 2026-09-21 it serves 503 after about two
-# rapid requests, so it is paced far below what it claims to allow.
+# the throttling. Europe PMC is stated by EBI staff to allow 10/s per IP; it
+# was seen shedding load (503) under back-to-back large fullTextXML fetches
+# on 2026-09-21, which a re-check the same day could not reproduce. 1/s is a
+# conservative choice well inside the published limit, not a measured
+# property of the host. See doc/cross_platform/polite_request_pacing.md.
 POLITE_RATE_CEILINGS: dict[str, float] = {
-    "eutils.ncbi.nlm.nih.gov": 3.0,
+    "eutils.ncbi.nlm.nih.gov": 3.0,  # NCBI_EUTILS_HOST, defined below
     "www.ebi.ac.uk": 1.0,
     "api.openalex.org": 10.0,
+    # Unpaywall publishes no per-second rate at all, only 100,000 calls per
+    # day (~1.16/s sustained). 5/s is a burst ceiling: a literature session
+    # makes hundreds of lookups, not tens of thousands, so the daily quota is
+    # not the binding constraint here -- but a caller that ever batches at
+    # scale must budget against the day, which this table cannot express.
     "api.unpaywall.org": 5.0,
     "api.crossref.org": 5.0,
-    "clinicaltrials.gov": 5.0,
+    # ClinicalTrials.gov publishes no limit; the figure reported consistently
+    # by independent API clients is ~50 requests/minute per IP, above which
+    # it answers 429. The 5.0 here was the old per-instance ad-hoc delay
+    # (0.2s) carried over, i.e. roughly six times the only rate anyone has
+    # measured, so it falls back to the conservative default instead.
+    "clinicaltrials.gov": DEFAULT_POLITE_RATE_PER_SECOND,
     "doi.org": 1.0,
     "dx.doi.org": 1.0,
 }
 
-# An unknown host is somebody's web server until proven otherwise.
-DEFAULT_POLITE_RATE_PER_SECOND = 1.0
+
+# The E-utilities host, named once so the limiter, the policy lookup and the
+# ceilings table cannot drift apart on a string literal.
+NCBI_EUTILS_HOST = "eutils.ncbi.nlm.nih.gov"
 
 # NCBI raises the ceiling for a registered key.
 NCBI_RATE_WITH_API_KEY_PER_SECOND = 10.0

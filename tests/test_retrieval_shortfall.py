@@ -43,6 +43,10 @@ from bmlibrarian_lite.search_failures import (
 
 RATE_LIMITED = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=429)
 UNAVAILABLE = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=503)
+#: A status with no advice of its own. 503 no longer serves here: it is one
+#: of POLITE_THROTTLE_STATUSES, so it now earns the rate-limit advice, which
+#: is the point of that change.
+NO_SPECIFIC_ADVICE = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=404)
 BAD_REQUEST = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=400)
 TIMED_OUT = RequestFailure(RequestFailureKind.TIMEOUT)
 CONNECTION_FAILED = RequestFailure(RequestFailureKind.CONNECTION)
@@ -594,7 +598,7 @@ class TestSearchFailureAdvice:
                 SERVICE_ERROR_ADVICE,
             ),
             (
-                [RetrievalShortfall(SearchProvider.PUBMED, UNAVAILABLE)],
+                [RetrievalShortfall(SearchProvider.PUBMED, NO_SPECIFIC_ADVICE)],
                 FALLBACK_ADVICE,
             ),
             (
@@ -640,3 +644,54 @@ class TestSearchFailureAdvice:
     ) -> None:
         """A rate limit, a refused key, a network fault and an outage need different next steps."""
         assert search_failure_advice(shortfalls) == expected
+
+
+class TestAThrottleIsRecognisedHoweverTheServiceSaysIt:
+    """Europe PMC throttles with 503, not 429.
+
+    The pacing layer treats both as "you are asking too fast"
+    (``POLITE_THROTTLE_STATUSES``), and this module used to match only 429 --
+    so the search cut short by the very throttling the pacing exists to
+    handle was answered with "Try again later." instead of the one piece of
+    advice that would have helped.
+    """
+
+    def test_a_503_earns_the_rate_limit_advice(self) -> None:
+        """The case the pacing branch is about."""
+        shortfall = RetrievalShortfall(
+            SearchProvider.EUROPEPMC,
+            RequestFailure(RequestFailureKind.HTTP_STATUS, 503),
+        )
+
+        assert search_failure_advice([shortfall]) == RATE_LIMIT_ADVICE
+
+    def test_a_429_still_earns_it(self) -> None:
+        """The control: the older spelling did not stop meaning this."""
+        shortfall = RetrievalShortfall(
+            SearchProvider.EUROPEPMC,
+            RequestFailure(RequestFailureKind.HTTP_STATUS, 429),
+        )
+
+        assert search_failure_advice([shortfall]) == RATE_LIMIT_ADVICE
+
+    def test_a_500_does_not(self) -> None:
+        """The control the other way: a fault is not a throttle."""
+        shortfall = RetrievalShortfall(
+            SearchProvider.EUROPEPMC,
+            RequestFailure(RequestFailureKind.HTTP_STATUS, 500),
+        )
+
+        assert search_failure_advice([shortfall]) != RATE_LIMIT_ADVICE
+
+    def test_a_503_from_pubmed_is_an_outage_not_a_throttle(self) -> None:
+        """NCBI rate-limits with 429; its 503 means it is down.
+
+        Reading 503 as throttling for every provider would tell a user whose
+        NCBI is simply unavailable to wait a minute and buy an API key.
+        """
+        shortfall = RetrievalShortfall(
+            SearchProvider.PUBMED,
+            RequestFailure(RequestFailureKind.HTTP_STATUS, 503),
+        )
+
+        assert search_failure_advice([shortfall]) == FALLBACK_ADVICE

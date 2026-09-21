@@ -48,10 +48,37 @@ from urllib.parse import quote, urljoin, urlparse
 import requests
 from urllib3.util.retry import Retry
 
-from .constants import HTTP_ERROR_STATUS_MIN, PAYWALL_HTTP_STATUSES
-from .polite_session import mount_politely
+from .constants import (
+    HTTP_ERROR_STATUS_MIN,
+    PAYWALL_HTTP_STATUSES,
+    POLITE_MAX_THROTTLE_RETRIES,
+)
+from .polite_session import is_loopback_host, mount_politely
+from .rate_limit import limiter_for
 
 logger = logging.getLogger(__name__)
+
+def _failure_description(exc: Exception) -> str:
+    """Describe a request failure without quoting the URL it came from.
+
+    ``str()`` on a ``requests`` exception embeds the request URL, and the
+    Unpaywall URL carries ``email=<the user's address>`` -- so the obvious
+    log line puts a personal identifier in the log file (the same leak as
+    #196/#330). The status code is what diagnosing this actually needs.
+
+    Args:
+        exc: The exception a request raised.
+
+    Returns:
+        The exception class, and the HTTP status where there was one.
+    """
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if status is not None:
+        return f"{type(exc).__name__} (HTTP {status})"
+    return type(exc).__name__
+
+
 
 # Global browser session manager (singleton, persists across downloads)
 _browser_session: Optional["BrowserSession"] = None
@@ -140,6 +167,16 @@ class BrowserSession:
 
             # Set up download handling
             output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # The browser fallback reaches the same publisher hosts as the
+            # requests path, so it shares their budget rather than opening a
+            # second one beside it. It is invoked precisely when a host has
+            # already refused us, which is the worst moment to stop being
+            # polite. No mounted adapter can do this for us: Playwright does
+            # not go through requests.
+            browser_host = urlparse(url).hostname or ""
+            if browser_host and not is_loopback_host(browser_host):
+                limiter_for(browser_host).acquire()
 
             # Navigate and wait for potential download
             with self._page.expect_download(timeout=timeout) as download_info:
@@ -359,9 +396,8 @@ class PDFDiscoverer:
             "Accept": "application/pdf,*/*",
         })
 
-        # Configure retry strategy
         retry_strategy = Retry(
-            total=3,
+            total=POLITE_MAX_THROTTLE_RETRIES,
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["HEAD", "GET"],
@@ -674,7 +710,17 @@ class PDFDiscoverer:
                         sources.append(ps)
 
         except requests.exceptions.RequestException as e:
-            logger.warning(f"Unpaywall API error for DOI {doi}: {e}")
+            # An empty source list is indistinguishable, to every caller,
+            # from "this article genuinely has no open-access PDF" -- so a
+            # throttled Unpaywall quietly narrows the evidence base and the
+            # reader is told the full text is unavailable. Recording it as a
+            # shortfall the reader actually sees needs #347; until then it is
+            # at least a warning that names the failure, not a debug line.
+            logger.warning(
+                f"Unpaywall could not be asked about DOI {doi}, so any "
+                f"open-access copy it knows of will be reported as absent: "
+                f"{_failure_description(e)}"
+            )
 
         return sources
 
@@ -819,7 +865,14 @@ class PDFDiscoverer:
                 ))
 
         except requests.exceptions.RequestException as e:
-            logger.debug(f"DOI direct resolution failed for {doi}: {e}")
+            # At debug, a throttled doi.org left no trace at all under the
+            # default INFO configuration: the reader saw "no full text" and
+            # the log said nothing had happened. Same ambiguity as the
+            # Unpaywall path above (#347).
+            logger.warning(
+                f"doi.org could not be asked about DOI {doi}, so any copy it "
+                f"resolves to will be reported as absent: {_failure_description(e)}"
+            )
 
         return sources
 

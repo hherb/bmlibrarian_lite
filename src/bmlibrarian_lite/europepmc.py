@@ -210,8 +210,8 @@ class EuropePMCClient:
             raise_on_status=False,
         )
         # Pacing is mounted here so no call site has to remember it. Europe
-        # PMC serves 503 after about two rapid requests, and the 10/s this
-        # repo once documented for it was never true (#341)
+        # PMC states 10/s per IP; we ask for 1/s, which is inside that and
+        # avoids the load-shedding seen under large full-text fetches (#341)
         return mount_politely(session, retry=retry_strategy)
 
     def get_article_info(

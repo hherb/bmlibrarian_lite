@@ -51,8 +51,8 @@ search_merger.py      # Deduplication (PMID/DOI/PMC/title)
 query_translator.py   # Natural language → structured query
 fulltext_discovery.py # Europe PMC XML → Unpaywall PDF → DOI fallback
 pdf_discovery.py      # PDF source discovery
-rate_limit.py        # Host-keyed, thread-safe pacing for outbound requests
-polite_session.py     # The adapter that mounts it on a requests.Session
+rate_limit.py         # Host-keyed, thread-safe pacing for outbound requests
+polite_session.py     # PoliteAdapter + mount_politely for requests.Session
 embeddings.py         # LiteEmbedder (FastEmbed)
 chunking.py           # Text chunking utilities
 pdf_utils.py          # PDF text extraction
