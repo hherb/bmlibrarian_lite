@@ -15,13 +15,14 @@ License: MIT
 
 import re
 import json
-import time
 import logging
 from dataclasses import dataclass, field, asdict
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
 import requests
+
+from ..polite_session import mount_politely
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -911,16 +912,7 @@ class PubMedClient:
     def __init__(self, email: str, api_key: Optional[str] = None):
         self.email = email
         self.api_key = api_key
-        self.session = requests.Session()
-        self._last_request_time = 0
-
-    def _rate_limit(self):
-        """Enforce rate limiting (3 requests/sec without API key, 10 with)."""
-        min_interval = 0.1 if self.api_key else 0.34
-        elapsed = time.time() - self._last_request_time
-        if elapsed < min_interval:
-            time.sleep(min_interval - elapsed)
-        self._last_request_time = time.time()
+        self.session = mount_politely(requests.Session(), api_key=api_key)
 
     def _make_request(self, endpoint: str, params: Dict[str, Any]) -> requests.Response:
         """Make a rate-limited E-utilities request.
@@ -950,7 +942,6 @@ class PubMedClient:
             requests.RequestException: If no response arrived at all
                 (connection failure, timeout).
         """
-        self._rate_limit()
         params['email'] = self.email
         if self.api_key:
             params['api_key'] = self.api_key
@@ -1114,22 +1105,13 @@ class CrossRefClient:
 
     def __init__(self, email: str):
         self.email = email
-        self.session = requests.Session()
+        self.session = mount_politely(requests.Session())
         self.session.headers.update({
             'User-Agent': f'StudyTransparencyAnalyzer/1.0 (mailto:{email})'
         })
-        self._last_request_time = 0
-
-    def _rate_limit(self):
-        """Enforce polite rate limiting."""
-        elapsed = time.time() - self._last_request_time
-        if elapsed < 0.1:
-            time.sleep(0.1 - elapsed)
-        self._last_request_time = time.time()
 
     def get_work(self, doi: str) -> Optional[Dict]:
         """Get work metadata by DOI."""
-        self._rate_limit()
         # Clean DOI
         doi = doi.replace('https://doi.org/', '').replace('http://doi.org/', '')
 
@@ -1176,20 +1158,10 @@ class ClinicalTrialsClient:
     BASE_URL = "https://clinicaltrials.gov/api/v2"
 
     def __init__(self):
-        self.session = requests.Session()
-        self._last_request_time = 0
-
-    def _rate_limit(self):
-        """Enforce rate limiting."""
-        elapsed = time.time() - self._last_request_time
-        if elapsed < 0.2:
-            time.sleep(0.2 - elapsed)
-        self._last_request_time = time.time()
+        self.session = mount_politely(requests.Session())
 
     def get_study(self, nct_id: str) -> Optional[Dict]:
         """Get study by NCT ID."""
-        self._rate_limit()
-
         # Normalize NCT ID
         nct_id = nct_id.upper()
         if not nct_id.startswith('NCT'):
@@ -1206,8 +1178,6 @@ class ClinicalTrialsClient:
 
     def search_by_publication(self, pmid: str = None, doi: str = None) -> List[str]:
         """Search for trials linked to a publication."""
-        self._rate_limit()
-
         # ClinicalTrials.gov doesn't have direct PMID/DOI search in v2
         # This would require scraping or using alternative APIs
         # Returning empty for now - we rely on PubMed DataBank links
@@ -1278,19 +1248,10 @@ class EuropePMCClient:
     BASE_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest"
 
     def __init__(self):
-        self.session = requests.Session()
-        self._last_request_time = 0
-
-    def _rate_limit(self):
-        elapsed = time.time() - self._last_request_time
-        if elapsed < 0.2:
-            time.sleep(0.2 - elapsed)
-        self._last_request_time = time.time()
+        self.session = mount_politely(requests.Session())
 
     def get_article(self, pmid: str = None, pmcid: str = None, doi: str = None) -> Optional[Dict]:
         """Get article by various IDs."""
-        self._rate_limit()
-
         if pmid:
             query = f"ext_id:{pmid} src:med"
         elif pmcid:
@@ -1320,8 +1281,6 @@ class EuropePMCClient:
 
     def get_full_text_xml(self, pmcid: str) -> Optional[str]:
         """Get full text XML for open access articles."""
-        self._rate_limit()
-
         pmcid = pmcid.upper()
         if not pmcid.startswith('PMC'):
             pmcid = f'PMC{pmcid}'
@@ -1342,19 +1301,10 @@ class OpenAlexClient:
 
     def __init__(self, email: str):
         self.email = email
-        self.session = requests.Session()
-        self._last_request_time = 0
-
-    def _rate_limit(self):
-        elapsed = time.time() - self._last_request_time
-        if elapsed < 0.1:
-            time.sleep(0.1 - elapsed)
-        self._last_request_time = time.time()
+        self.session = mount_politely(requests.Session())
 
     def get_work(self, doi: str = None, pmid: str = None) -> Optional[Dict]:
         """Get work by DOI or PMID."""
-        self._rate_limit()
-
         if doi:
             doi = doi.replace('https://doi.org/', '')
             url = f"{self.BASE_URL}/works/doi:{doi}"

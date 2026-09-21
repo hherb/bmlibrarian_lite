@@ -44,17 +44,18 @@ import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from typing import Optional, List, Dict, Any
+from urllib.parse import urlparse
 import requests
+from urllib3.util.retry import Retry
 
 from .constants import (
     ESEARCH_URL,
     EFETCH_URL,
+    EUTILS_BASE_URL,
     REQUEST_TIMEOUT_SECONDS,
     MAX_RETRIES,
     INITIAL_RETRY_DELAY_SECONDS,
     RETRY_BACKOFF_MULTIPLIER,
-    REQUEST_DELAY_WITH_KEY,
-    REQUEST_DELAY_WITHOUT_KEY,
     DEFAULT_MAX_RESULTS,
     MAX_RESULTS_LIMIT,
     DEFAULT_BATCH_SIZE,
@@ -69,8 +70,10 @@ from .data_types import (
     SearchResult,
     ArticleMetadata,
 )
+from ..constants import NCBI_RATE_WITH_API_KEY_PER_SECOND, POLITE_RATE_CEILINGS
 from ..data_models import RequestFailure, RequestFailureKind, SearchProvider
 from ..exceptions import SourceRequestError
+from ..polite_session import mount_politely
 from ..search_failures import request_failure_from_exception
 
 logger = logging.getLogger(__name__)
@@ -82,6 +85,20 @@ EFETCH_ERROR_ROOT_TAG = "eFetchResult"
 
 # Marks an answer body that did not decode as JSON (JSON null is a value).
 _NOT_JSON = object()
+
+# _make_request below already owns the full retry loop (attempt count,
+# backoff, logging): the mounted adapter must retry a 429/503 zero times on
+# its own, or a single _session.post() call would silently make several
+# physical requests, multiplying every attempt count this client's callers
+# and tests rely on. Pacing still happens on every physical attempt: the
+# adapter's acquire() runs again each time _make_request calls post() anew.
+_ADAPTER_OWNS_NO_THROTTLE_RETRIES = 0
+
+# The host the shared limiter paces E-utilities requests by, for the
+# human-readable rate description logged in __init__. EUTILS_BASE_URL is a
+# fixed, valid https:// URL, so hostname is never actually None; the
+# fallback only narrows the type for mypy.
+_EUTILS_HOST: str = urlparse(EUTILS_BASE_URL).hostname or ""
 
 
 def _malformed_answer(reason: str) -> SourceRequestError:
@@ -295,11 +312,19 @@ class PubMedSearchClient:
                 "NCBI recommends providing a valid email for identification."
             )
 
-        # Rate limiting based on API key presence
-        self.request_delay = REQUEST_DELAY_WITH_KEY if self.api_key else REQUEST_DELAY_WITHOUT_KEY
+        # A session, not a bare requests.post: pacing is mounted on it, and
+        # it pools connections rather than opening one per request. total=0
+        # keeps the adapter's own throttle-retry loop out of the way of the
+        # hand-rolled one below (see _ADAPTER_OWNS_NO_THROTTLE_RETRIES).
+        self._session = mount_politely(
+            requests.Session(),
+            retry=Retry(total=_ADAPTER_OWNS_NO_THROTTLE_RETRIES),
+            api_key=self.api_key,
+        )
 
-        rate_desc = f"{1/self.request_delay:.1f} req/s" if self.request_delay > 0 else "unlimited"
-        logger.info(f"PubMed search client initialized (rate limit: {rate_desc})")
+        base_rate = POLITE_RATE_CEILINGS[_EUTILS_HOST]
+        rate = NCBI_RATE_WITH_API_KEY_PER_SECOND if self.api_key else base_rate
+        logger.info(f"PubMed search client initialized (rate limit: {rate:.0f} req/s)")
 
     def _make_request(
         self,
@@ -346,10 +371,7 @@ class PubMedSearchClient:
 
         for attempt in range(self.max_retries):
             try:
-                # Rate limiting
-                time.sleep(self.request_delay)
-
-                response = requests.post(
+                response = self._session.post(
                     url, data=params, timeout=self.timeout, allow_redirects=False
                 )
                 if response.is_redirect:
