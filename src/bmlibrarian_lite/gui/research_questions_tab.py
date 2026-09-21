@@ -177,8 +177,11 @@ def pass_cancelled_text(
         1 failed. The other 6 were not re-scored." What was done before
         the cancel stays done, so it is counted, not called off (#320).
 
-        The "after N of M" here counts documents *attempted*, failures
-        included, and breaks them down in the same sentence.
+        The "after N of M" here counts documents *attempted*, and every one
+        of them is broken down in the same sentence: those the pass
+        finished, those it could not, and those the model named no study
+        design for. They add up, because a reader who cannot make the
+        numbers add up cannot tell what happened to the difference (#327).
         :func:`~bmlibrarian_lite.benchmarking.display.benchmark_cancelled_text`
         borrows the phrasing for evaluations *held* -- same words, a
         different count, so do not read one from the other.
@@ -189,6 +192,8 @@ def pass_cancelled_text(
     )
     if outcome.failed:
         text += f", {outcome.failed} failed"
+    if outcome.unclassified:
+        text += f", {outcome.unclassified} with no study design named"
     text += "."
     remaining = outcome.not_attempted
     if remaining == 1:
@@ -207,11 +212,17 @@ def pass_finished_text(pass_name: str, verb: str, outcome: PassOutcome) -> str:
         outcome: What it did with the documents it was given.
 
     Returns:
-        e.g. "Re-scoring complete: 27 re-scored, 3 failed."
+        e.g. "Re-scoring complete: 27 re-scored, 3 failed." Every document
+        the pass answered about is counted here, the ones the model named no
+        study design for included: the label is what the user is left
+        looking at once the dialog is dismissed, so it has to add up on its
+        own (#327).
     """
     text = f"{pass_name} complete: {outcome.succeeded} {verb}"
     if outcome.failed:
         text += f", {outcome.failed} failed"
+    if outcome.unclassified:
+        text += f", {outcome.unclassified} with no study design named"
     return text + "."
 
 
@@ -1086,8 +1097,20 @@ class ResearchQuestionsTab(QWidget):
         QTimer.singleShot(100, self._cleanup_reclassify_worker)
 
     def _on_reclassify_error(self, error_message: str) -> None:
-        """Handle reclassify error."""
+        """A re-classification that ended on an error.
+
+        The pass saves each classification as it makes it, so a run that
+        aborted part way has already changed the stored designs of every
+        document it got to. The table is refreshed for the same reason the
+        cancelled path refreshes it: left showing the values from before,
+        it says nothing happened (#320).
+
+        Args:
+            error_message: The cause, classified. The provider's own words
+                are not shown: they can carry a credential (#330).
+        """
         self._reset_ui()
+        self._load_questions()  # Refresh the table
         self.progress_label.setText(f"Re-classify error: {error_message}")
 
         QMessageBox.warning(
@@ -1116,13 +1139,17 @@ class ResearchQuestionsTab(QWidget):
         )
         self.progress_label.setText(message)
         # A failed classification is recorded nowhere, so this dialog is the
-        # only lasting notice of it -- the label the next click overwrites
-        if outcome.failed or error:
-            explanation = pass_failure_explanation(outcome)
+        # only lasting notice of it -- the label the next click overwrites.
+        # The gate is what there is to say, not only what went wrong: a
+        # cancel that classified nothing still leaves documents the model
+        # named no design for, and that sentence was written to explain
+        # them (#327)
+        explanation = pass_failure_explanation(outcome)
+        if outcome.failed or error or explanation:
             QMessageBox.warning(
                 self,
                 "Re-classification Cancelled",
-                f"{message}\n\n{explanation}" if explanation else message,
+                f"{message}\n\n{explanation.lstrip()}" if explanation else message,
             )
         QTimer.singleShot(100, self._cleanup_reclassify_worker)
 
@@ -1230,8 +1257,17 @@ class ResearchQuestionsTab(QWidget):
         QTimer.singleShot(100, self._cleanup_rescore_worker)
 
     def _on_rescore_error(self, error_message: str) -> None:
-        """Handle rescore error."""
+        """A re-scoring that ended on an error.
+
+        The pass stores each score as it makes it, so the table is refreshed
+        for the reason :meth:`_on_reclassify_error` gives (#320).
+
+        Args:
+            error_message: The cause, classified. The provider's own words
+                are not shown: they can carry a credential (#330).
+        """
         self._reset_ui()
+        self._load_questions()  # Refresh the table
         self.progress_label.setText(f"Re-score error: {error_message}")
 
         QMessageBox.warning(
@@ -1255,9 +1291,9 @@ class ResearchQuestionsTab(QWidget):
         self._load_questions()  # Refresh the table
         message = pass_cancelled_text("Re-scoring", "re-scored", outcome, error)
         self.progress_label.setText(message)
-        if outcome.failed or error:
-            explanation = pass_failure_explanation(outcome)
-            detail = f"{message}\n\n{explanation}" if explanation else message
+        explanation = pass_failure_explanation(outcome)
+        if outcome.failed or error or explanation:
+            detail = f"{message}\n\n{explanation.lstrip()}" if explanation else message
             QMessageBox.warning(
                 self,
                 "Re-scoring Cancelled",

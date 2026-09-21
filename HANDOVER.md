@@ -21,7 +21,7 @@ branch `fix/silent-cancels-and-failure-causes-326`, PR #333. Python only. Compre
   signal no `cancel` can raise is the same silence.
 - **`QualityFilterWorker`, `PDFDiscoveryWorker`, `FulltextDiscoveryWorker`**
   gained `cancelled` and end every run through `_end`. The discovery workers'
-  carries the error that also ended the run, or `""`; the quality worker's
+  signal carries the error that also ended the run, or `""`; the quality worker's
   carries `(filtered, assessments, total, error)`, because what it assessed
   before the cancel is real and is kept.
 - **A cancel the runner cannot see is not a cancel.**
@@ -52,9 +52,14 @@ branch `fix/silent-cancels-and-failure-causes-326`, PR #333. Python only. Compre
   advice for **every** cause among them; `advice_for_causes()` was extracted
   from `analysis_failure_advice` so a shortfall and a per-document failure
   cannot advise differently.
-- **The raw provider text never reaches the screen** (user's call,
-  2026-09-20, over #327's own suggested wording): it can carry a credential
-  (#330). `classify_analysis_exception()` (new, `utils.py`) is the "classify
+- **The raw provider text never reaches the screen *on these paths*** (user's
+  call, 2026-09-20, over #327's own suggested wording): it can carry a
+  credential (#330). That covers the per-document failures **and**, since the
+  review of PR #333, the error that ends a whole pass: both workers now emit
+  `failure_cause_text(cause)` rather than `str(e)`, which used to be rendered
+  verbatim into a `QMessageBox`. `also_failed_text` still takes raw text at
+  its **six** remaining call sites — #330 is open for those, and said three.
+  `classify_analysis_exception()` (new, `utils.py`) is the "classify
   the failure, not the wrapper" expression both benchmark runners had inline;
   `scoring_failure_cause()` (new, `audit_records.py`) reads the cause out of
   the row the agent *returned*, since it returns a failure rather than raising.
@@ -62,15 +67,50 @@ branch `fix/silent-cancels-and-failure-causes-326`, PR #333. Python only. Compre
   nothing broke and the model was honest, so it is `unclassified` and the user
   is told its stored design is unchanged. Counted as a failure it made "6
   documents failed classification" out of a clean pass.
-- **Lodged, not fixed: #332** — `QualityFilterWorker` is never constructed;
-  `_quality_worker` in `systematic_review_tab.py` is always `None`, so its
-  cancel and cleanup can never run. Fixed to the contract and kept rather than
-  deleted (user's call, 2026-09-20).
-- **Verified:** `pytest tests/` — 1859 passed, 3 xfailed; `lint_delta.py
-  --base-ref master` 0 new ruff or mypy findings.
-  `tests/test_silent_cancels.py` is 88 tests, and **21 mutations of the
-  behaviour above each fail a test**, no survivors. Both rules are now in
-  `doc/cross_platform/analysis_failure_reporting.md`.
+- **#332 — `QualityFilterWorker` is never constructed**; `_quality_worker` in
+  `systematic_review_tab.py` is always `None`, so its cancel and cleanup can
+  never run. Brought onto the contract and kept rather than deleted (user's
+  call, 2026-09-20). The review of PR #333 found the sting in this: the
+  `should_cancel` work above had landed **only** on that dead class, while the
+  quality filtering a user can actually start — inside `WorkflowWorker` —
+  still ran every remaining document after a cancel. That live call now passes
+  `should_cancel`; #332 stays open for the dead class itself.
+- **What the review of this PR changed** (2026-09-21). Three of the PR's own
+  claims did not hold, and each is now closed with a test that fails without
+  the fix:
+  - the `should_cancel` work had landed only on a class nothing constructs —
+    see #332 above;
+  - **the provider text still reached a dialog** by the other door: both
+    passes emitted `str(e)` on `error`/`cancelled` and
+    `_on_*_error` rendered it verbatim. They now emit
+    `failure_cause_text(cause)`;
+  - **`unclassified` documents fell out of the arithmetic on a cancel.**
+    `attempted` folds them in, but the sentence broke down only successes and
+    failures, so "after 9 of 20: 7 re-classified, other 11" lost two
+    documents — and the dialog explaining them was gated on something having
+    *failed*, so a clean cancel said nothing at all. The breakdown now names
+    them, on both the cancelled and the finished label, and the dialog is
+    gated on there being something to say.
+  Also: a superseded discovery's late `cancelled` used to close the *new*
+  run's dialog and drop its worker, leaving it running and uncancellable —
+  the connection now binds the emitting worker and a stale one is ignored;
+  `QualityFilterWorker` reports the assessments made before a failure instead
+  of two empty lists; both `_on_*_error` handlers refresh the table, since
+  each pass saves as it goes; and a document with no id can no longer abort a
+  whole pass through `PassFailure`'s own invariant.
+- **Verified** (2026-09-21, after the review fixes): `pytest tests/` — 1809
+  passed, 3 xfailed, with `tests/test_europepmc_integration.py` deselected;
+  `lint_delta.py --base <merge-base>` 0 new ruff or mypy findings.
+  `tests/test_silent_cancels.py` is 101 tests, and **21 mutations of the
+  behaviour above each fail a test**, no survivors (that sweep predates the
+  review fixes; the new tests were each confirmed to fail without their fix
+  instead). Both rules are in
+  `doc/cross_platform/analysis_failure_reporting.md`, the first now scoped to
+  what Python actually holds — see #334.
+- **`tests/test_europepmc_integration.py` hits Europe PMC live** and was
+  failing on 2026-09-21 (3 failed, 9 errors) **identically on a clean
+  checkout of the merge base**, so it is the service, not this branch. Re-run
+  it before reading anything into those numbers.
 - **Trap this slice walked into:** the mutation harness restored five files
   from a `cp` backup *and* `git checkout`-ed a sixth it had not backed up,
   `data_models.py`, which held the new value objects. Every later mutation
@@ -342,11 +382,22 @@ Open issues by family; each issue carries the detail. None blocks another.
   **#327** are the slice in flight above.
 - Lodged by PR #329, Python: **#330** `also_failed_text` interpolates the raw
   provider error into a progress label and a dialog, and it can carry a
-  credential — three call sites, and the fix (classify, log the raw text) is
-  golden rule 13, so it was put to the user rather than made silently;
-  **#331** a stored quality benchmark result has no reader, so a cancelled
-  one's partiality is lost the moment anyone adds a history view (mirror the
-  relevance `get_benchmark_result`, status cross-check included).
+  credential — **six** production call sites, not the three recorded here
+  until the review of PR #333 counted them; the remedy (classify, log the raw
+  text) is golden rule 13, so it was put to the user rather than made
+  silently; **#331** a stored quality benchmark result has no reader, so a
+  cancelled one's partiality is lost the moment anyone adds a history view
+  (mirror the relevance `get_benchmark_result`, status cross-check included).
+- Lodged by the review of PR #333, Python: **#334** `WorkflowWorker` — the
+  whole systematic review — is not on the single-terminal-signal contract and
+  reports a cancel as `finished`; **#335** a storage failure inside a pass is
+  classified as a *provider* failure, so a full disk is advised to "check that
+  Ollama is running"; **#336** a pass that ends on an error does not say how
+  far it got; **#337** the pass workers' `_run_once` fallback reports a
+  cancelled run as an outright error; **#338** the contract sweep checks
+  inheritance rather than use, and reaches one module; **#339** type-design
+  cleanups around `PassOutcome`/`PassFailure`; **#340** a cancelled re-run
+  discards the search shortfalls it recorded.
 - **#319** the review's quality filter records a failed classification as an
   "unknown" design, which `passes_filter()` then decides on (what the filter
   does with such a document is a maintainer decision).

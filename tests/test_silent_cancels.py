@@ -32,6 +32,7 @@ from PySide6.QtCore import QThread  # noqa: E402
 from bmlibrarian_lite.analysis_failures import (  # noqa: E402
     advice_for_causes,
     analysis_failure_advice,
+    failure_cause_text,
     pass_failure_detail,
     unclassified_text,
 )
@@ -1310,6 +1311,47 @@ class TestTheInterrogationTabHearsTheCancel:
         assert tab._pdf_worker is not None
         assert tab._pdf_worker.stopped
 
+    def test_a_superseded_run_does_not_clobber_the_one_that_replaced_it(
+        self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """A cancelled download can take many seconds to notice.
+
+        The reference is kept until the worker says it stopped (#326), so a
+        second fetch started in that window is the current one. Acting on
+        the stale run's ``cancelled`` closed the new run's dialog and
+        dropped its worker, leaving it running and no longer cancellable.
+        """
+        tab = interrogation_tab(monkeypatch, tmp_path)
+        tab._start_pdf_discovery({"doi": "10.1000/first"}, "First")
+        stale = tab._pdf_worker
+        tab._cancel_pdf_discovery()
+
+        tab._start_pdf_discovery({"doi": "10.1000/second"}, "Second")
+        current = tab._pdf_worker
+        assert current is not stale
+
+        stale.cancelled.emit("")
+
+        assert tab._pdf_worker is current
+        assert tab._pdf_progress_dialog is not None
+
+    def test_a_superseded_full_text_run_leaves_the_current_dialog_alone(
+        self, qapp: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """Both paths share one progress dialog, so this cuts both ways."""
+        tab = interrogation_tab(monkeypatch, tmp_path)
+        tab._start_fulltext_discovery({"doi": "10.1000/first"}, "First", MagicMock())
+        stale = tab._fulltext_worker
+        tab._cancel_fulltext_discovery()
+
+        tab._start_fulltext_discovery({"doi": "10.1000/second"}, "Second", MagicMock())
+        current = tab._fulltext_worker
+
+        stale.cancelled.emit("")
+
+        assert tab._fulltext_worker is current
+        assert tab._pdf_progress_dialog is not None
+
 
 class StubWorker:
     """A worker that starts nothing and emits when the test says so."""
@@ -1378,3 +1420,253 @@ def interrogation_tab(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> Any:
     widget = tab_module.DocumentInterrogationTab(config=config, storage=MagicMock())
     widget.document_view = MagicMock()
     return widget
+
+
+# ---------------------------------------------------------------------------
+# #326: the cancel has to reach the filter the user can actually start
+# ---------------------------------------------------------------------------
+
+
+class TestTheReviewsQualityFilterHonoursACancel:
+    """``QualityFilterWorker`` is never constructed (#332).
+
+    The quality filtering a user can actually start runs inside the
+    systematic review's own worker, and it was calling ``filter_documents``
+    without ``should_cancel`` -- so a cancel muted the progress callback
+    while every remaining document was still assessed and paid for. That is
+    #324's mistake one worker along, which is what #326 set out to end.
+    """
+
+    def test_a_cancelled_review_stops_assessing_documents(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The run stops at the cancel, not at the end of the documents."""
+        from bmlibrarian_lite.gui import systematic_review_tab
+
+        documents = [make_document(str(i)) for i in range(1, 6)]
+        assessed: list[str] = []
+        manager = QualityManager.__new__(QualityManager)
+        config = LiteConfig()
+        monkeypatch.setattr(config.transparency, "enabled", False)
+        worker = systematic_review_tab.WorkflowWorker(
+            question="Does aspirin help?",
+            config=config,
+            storage=MagicMock(),
+            quality_filter=QualityFilter(minimum_tier=QualityTier.TIER_1_ANECDOTAL),
+            quality_manager=manager,
+            preloaded_documents=documents,
+        )
+
+        def assess_document(document: LiteDocument, _settings: Any) -> QualityAssessment:
+            assessed.append(document.id)
+            if len(assessed) == 2:
+                worker.cancel()
+            return make_assessment()
+
+        manager.assess_document = assess_document  # type: ignore[method-assign]
+
+        worker.run()
+
+        assert assessed == ["pmid-1", "pmid-2"], (
+            "the cancel was seen only after every document had been paid for"
+        )
+
+
+# ---------------------------------------------------------------------------
+# #330: the error that ends a whole pass is classified too
+# ---------------------------------------------------------------------------
+
+
+class TestAFailedPassDoesNotLeakTheProviderText:
+    """``PassFailure`` kept the provider's words off the screen per document.
+
+    The failure that ends the *whole* pass reached the screen by another
+    door: the worker emitted ``str(e)`` and the dialog printed it, so an
+    error that echoes the request put the API key in a box the user can
+    screenshot (#330).
+    """
+
+    def test_a_pass_that_dies_at_the_start_reports_a_cause(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The classifier could not even be built."""
+
+        def explode(**_kwargs: Any) -> Any:
+            raise APIError(LEAKY_ERROR, status_code=401)
+
+        monkeypatch.setattr(
+            "bmlibrarian_lite.quality.study_classifier.LiteStudyClassifier", explode
+        )
+        worker = ReclassifyWorker(
+            config=LiteConfig(), storage=MagicMock(), documents=[make_document("1")]
+        )
+        recorder = Recorder(worker)
+
+        worker.run()
+
+        name, args = recorder.only()
+        assert name == "error"
+        assert "SECRET" not in args[0]
+        assert EvaluationErrorCode.API_AUTH_ERROR.description in args[0]
+
+    def test_a_rescore_that_dies_at_the_start_reports_a_cause(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same door, on the other pass."""
+
+        def explode(**_kwargs: Any) -> Any:
+            raise APIError(LEAKY_ERROR, status_code=401)
+
+        monkeypatch.setattr(
+            "bmlibrarian_lite.agents.scoring_agent.LiteScoringAgent", explode
+        )
+        worker = RescoreWorker(
+            config=LiteConfig(),
+            storage=MagicMock(),
+            documents=[make_document("1")],
+            question="Does aspirin help?",
+        )
+        recorder = Recorder(worker)
+
+        worker.run()
+
+        name, args = recorder.only()
+        assert name == "error"
+        assert "SECRET" not in args[0]
+
+    def test_the_cause_carries_the_advice_for_it(self) -> None:
+        """A cause with nothing to do about it is still only half a sentence."""
+        text = failure_cause_text(EvaluationErrorCode.API_AUTH_ERROR)
+
+        assert EvaluationErrorCode.API_AUTH_ERROR.description in text
+        assert advice_for_causes((EvaluationErrorCode.API_AUTH_ERROR,)) in text
+
+
+# ---------------------------------------------------------------------------
+# #327: a cancel must account for every document it reached
+# ---------------------------------------------------------------------------
+
+
+class TestACancelledPassAccountsForEveryDocument:
+    """``attempted`` folds in the documents the model named no design for.
+
+    The sentence broke down only the successes and the failures, so those
+    documents vanished between "after 9" and "7 re-classified, other 11" --
+    and the dialog that would have explained them was gated on something
+    having *failed*. A pass in which nothing went wrong said nothing about
+    six documents whose stored designs it had left unchanged (#327).
+    """
+
+    def test_the_numbers_add_up(self) -> None:
+        """Every attempted document is in the breakdown."""
+        outcome = PassOutcome(succeeded=7, total=20, unclassified=2)
+
+        text = questions_module_text(outcome)
+
+        assert "9 of 20 documents" in text
+        assert "7 re-classified" in text
+        assert "2 with no study design named" in text
+
+    def test_a_clean_cancel_still_explains_the_unclassified(
+        self, questions_tab: Any
+    ) -> None:
+        """Nothing failed, so nothing was said -- about six documents."""
+        questions_tab._reclassify_worker = MagicMock()
+        outcome = PassOutcome(succeeded=34, total=100, unclassified=6)
+
+        questions_tab._on_reclassify_cancelled(outcome, "")
+
+        shown = questions_tab._module.QMessageBox.warning.call_args
+        assert shown is not None, "a cancel that left 6 documents said nothing"
+        assert "no study design" in shown[0][2]
+
+    def test_a_cancel_with_nothing_to_report_stays_quiet(
+        self, questions_tab: Any
+    ) -> None:
+        """The control: a clean cancel does not invent a warning."""
+        questions_tab._module.QMessageBox.reset_mock()
+        questions_tab._reclassify_worker = MagicMock()
+
+        questions_tab._on_reclassify_cancelled(
+            PassOutcome(succeeded=4, total=10), ""
+        )
+
+        assert questions_tab._module.QMessageBox.warning.call_args is None
+
+    def test_a_finished_pass_label_accounts_for_them_too(self) -> None:
+        """The label is what the user is left looking at."""
+        from bmlibrarian_lite.gui.research_questions_tab import pass_finished_text
+
+        text = pass_finished_text(
+            "Re-classification",
+            "re-classified",
+            PassOutcome(succeeded=4, total=10, unclassified=6),
+        )
+
+        assert "6 with no study design named" in text
+
+
+def questions_module_text(outcome: PassOutcome) -> str:
+    """The cancelled-pass sentence for an outcome.
+
+    Args:
+        outcome: What the pass did.
+
+    Returns:
+        The sentence.
+    """
+    from bmlibrarian_lite.gui.research_questions_tab import pass_cancelled_text
+
+    return pass_cancelled_text("Re-classification", "re-classified", outcome, "")
+
+
+class TestAPassThatErrorsSaysWhatBecameOfTheTable:
+    """Both passes save each document as they go (#320).
+
+    A run that aborted part way had already changed everything it reached,
+    but the error handlers left the table showing the values from before --
+    so it read as though nothing had happened, and the user re-ran it.
+    """
+
+    @pytest.mark.parametrize(
+        "handler",
+        ["_on_reclassify_error", "_on_rescore_error"],
+    )
+    def test_the_table_is_refreshed(
+        self, questions_tab: Any, monkeypatch: pytest.MonkeyPatch, handler: str
+    ) -> None:
+        """The cancelled path refreshes it; the error path has to as well."""
+        questions_tab._reclassify_worker = MagicMock()
+        questions_tab._rescore_worker = MagicMock()
+        reloaded = MagicMock()
+        monkeypatch.setattr(questions_tab, "_load_questions", reloaded)
+
+        getattr(questions_tab, handler)("The provider refused the request.")
+
+        assert reloaded.called, "the table still showed the pre-pass values"
+
+
+class TestACancelThatAlsoFailedKeepsWhatWasAssessed:
+    """The signal's own docstring promises the partial result.
+
+    ``filtered``/``assessments`` only exist once ``filter_documents`` comes
+    back, so a failure part way emitted two empty lists -- while the
+    progress callback had already shown the user those assessments being
+    made (#326).
+    """
+
+    def test_the_assessments_made_before_the_failure_survive(self) -> None:
+        """Three documents were assessed; three are reported."""
+        worker, recorder, assessed = quality_worker(
+            count=5, cancel_at=3, raises=RuntimeError("the database went away")
+        )
+
+        worker.run()
+
+        name, args = recorder.only()
+        assert name == "cancelled"
+        assert len(assessed) == 3
+        assert len(args[1]) == 2, (
+            "the assessments completed before the failure were thrown away"
+        )
+        assert args[2] == 5

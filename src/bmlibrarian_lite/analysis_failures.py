@@ -23,16 +23,28 @@ document with nothing to say -- but both used to leave the pipeline as the
 same thing: a document that is not in the result.
 
 :class:`~bmlibrarian_lite.data_models.AnalysisShortfall` records what a stage
-lost and why; the functions here turn that record into what a reader sees.
+lost and why, and :class:`~bmlibrarian_lite.data_models.PassFailure` records
+the same for one document of a re-classification or re-scoring; the functions
+here turn either record into what a reader sees.
 
 - :func:`describe_analysis_shortfalls`, :func:`format_analysis_shortfall_notice`
   and :func:`with_analysis_shortfall_notice` and
   :func:`without_analysis_shortfall_notice` turn shortfalls into what the
   report, the GUI and MCP callers see.
-- :func:`analysis_failure_advice` says what the user can do about it.
+- :func:`advice_for_causes` says what the user can do about a set of causes,
+  and is the one place that decides it. :func:`analysis_failure_advice` is
+  its shortfall-shaped caller; a per-document failure reaches it through
+  :func:`pass_failure_detail`, so the two cannot advise differently.
+- :func:`pass_failure_detail` says what a pass's failures mostly were, with
+  one example and the advice; :func:`unclassified_text` says what became of
+  the documents the model named no study design for, which is not a failure;
+  :func:`failure_cause_text` says what ended a whole pass.
 - :func:`also_failed_text` names an error that ended a run alongside
   something else -- a cancel. It takes a bare error rather than a shortfall:
   cancelling is not failing, but a failure is never hidden (golden rule 8).
+
+None of these put the provider's own words on the screen: those can print the
+request, credentials and all, and stay in the log (#330).
 
 The wording follows the search contract in
 ``doc/cross_platform/search_failure_reporting.md``; this family's own contract
@@ -244,6 +256,28 @@ def pass_failure_detail(failures: Sequence[PassFailure]) -> str:
     else:
         lead, where = f"Most failures ({count:,} of {total:,}) were:", f"first: {example}"
     return f"{lead} {cause.description} ({where}). {advice_for_causes(counts)}"
+
+
+def failure_cause_text(cause: EvaluationErrorCode) -> str:
+    """What ended a pass, in the reader's words, with what to do about it.
+
+    :func:`pass_failure_detail` keeps the provider's own text off the screen
+    for the documents a pass could not finish. A failure that ends the whole
+    pass reached the screen by another door: the worker emitted ``str(e)``
+    and the dialog printed it, so an ``httpx`` error that echoes the request
+    put the API key in a box the user can screenshot (#330). This is what is
+    shown instead; the raw text stays in the log.
+
+    Args:
+        cause: What went wrong, classified.
+
+    Returns:
+        The cause as the user reads it, followed by what they can do. The
+        descriptions are written as sentence fragments, without a full stop,
+        because :func:`pass_failure_detail` puts them before a parenthetical;
+        standing alone here, one needs its own.
+    """
+    return f"{cause.description.rstrip('.')}. {advice_for_causes((cause,))}"
 
 
 def unclassified_text(unclassified: int) -> str:

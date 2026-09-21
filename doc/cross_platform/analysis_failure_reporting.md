@@ -12,7 +12,7 @@ is the reference.
 
 | Platform | Status |
 |----------|--------|
-| Python | Conforms (#261, #262, #263, #264, #302, #303, #304, #306, #307, #310, #314, #315, #316, #320, #324), except one known gap: the review's quality filter records a failed classification as an "unknown" design (#319) |
+| Python | Conforms (#261, #262, #263, #264, #302, #303, #304, #306, #307, #310, #314, #315, #316, #320, #324, #326, #327), except two known gaps: the review's quality filter records a failed classification as an "unknown" design (#319), and its `WorkflowWorker` is not yet on the single-terminal-signal contract (#334) |
 | Swift (BioMedLit + app) | **Unchecked.** `ParallelScoringService` and `ParallelCitationService` have the same shape; see #300 |
 | Android | **Unchecked.** `domain/workflow/` has the same shape; see #300 |
 
@@ -322,6 +322,12 @@ to read a record written elsewhere.
   worker that cannot be cancelled has nothing to say and no such signal. A
   cancel the runner cannot see is not a cancel: it mutes the progress
   reporting while the run goes on paying for every remaining document.
+  *Reference-platform scope:* Python enforces this through `SingleOutcome`
+  for every worker in `gui/workers.py` and the two benchmark workers. The
+  systematic review's own `WorkflowWorker` is **not** on it yet — it reports
+  a cancel as `finished`, and a `BaseException` still leaves it silent — so
+  a port that mirrors that worker mirrors a known gap, not the contract
+  (#334).
 - **A failed pass says what failed and why, not only how many** (#327). A
   re-classification or re-scoring reports one entry per document it could not
   finish, each naming the document and a **classified** cause; from those the

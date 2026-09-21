@@ -20,6 +20,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from bmlibrarian_lite.analysis_failures import failure_cause_text  # noqa: E402
 from bmlibrarian_lite.config import LiteConfig  # noqa: E402
 from bmlibrarian_lite.data_models import (  # noqa: E402
     DocumentSource,
@@ -459,7 +460,11 @@ class TestTheReclassifyWorker:
     def test_an_error_while_cancelling_carries_the_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A crash mid-cancel read as an orderly stop (golden rule 8)."""
+        """A crash mid-cancel read as an orderly stop (golden rule 8).
+
+        The error is the cause, classified: emitted raw it reached a dialog
+        the user can screenshot, request and credentials included (#330).
+        """
         worker, recorder = reclassify_worker(monkeypatch, count=3, cancel_at=None)
 
         def cancel_then_fail(config: Any) -> Any:
@@ -473,7 +478,14 @@ class TestTheReclassifyWorker:
 
         worker.run()
 
-        assert pass_counts(recorder) == ("cancelled", 0, 0, 3, "no model configured")
+        assert pass_counts(recorder) == (
+            "cancelled",
+            0,
+            0,
+            3,
+            failure_cause_text(EvaluationErrorCode.UNKNOWN_ERROR),
+        )
+        assert "no model configured" not in pass_counts(recorder)[4]
 
     def test_the_same_failure_uncancelled_is_still_an_error(
         self, monkeypatch: pytest.MonkeyPatch
@@ -490,7 +502,10 @@ class TestTheReclassifyWorker:
 
         worker.run()
 
-        assert recorder.only() == ("error", ("no model configured",))
+        assert recorder.only() == (
+            "error",
+            (failure_cause_text(EvaluationErrorCode.UNKNOWN_ERROR),),
+        )
 
 
 class TestTheRescoreWorker:
@@ -558,7 +573,14 @@ class TestTheRescoreWorker:
 
         worker.run()
 
-        assert pass_counts(recorder) == ("cancelled", 0, 0, 3, "database is locked")
+        assert pass_counts(recorder) == (
+            "cancelled",
+            0,
+            0,
+            3,
+            failure_cause_text(EvaluationErrorCode.UNKNOWN_ERROR),
+        )
+        assert "database is locked" not in pass_counts(recorder)[4]
 
 
 @pytest.fixture(scope="module")

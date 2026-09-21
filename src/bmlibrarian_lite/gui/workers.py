@@ -44,6 +44,7 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 from PySide6.QtCore import QThread, Signal, SignalInstance
 from PySide6.QtWidgets import QWidget
 
+from ..analysis_failures import failure_cause_text
 from ..data_models import EvaluationErrorCode, PassFailure, PassOutcome
 from ..pdf_discovery import PDFDiscoverer, DiscoveryResult
 from ..pdf_utils import generate_pdf_path
@@ -633,12 +634,20 @@ class QualityFilterWorker(SingleOutcome, QThread):
         filtered: list[LiteDocument] = []
         assessments: list[QualityAssessment] = []
 
+        # What the run got through, kept as it happens. The returned pair
+        # only exists once ``filter_documents`` comes back, so a failure
+        # part way left the signal saying nothing was assessed -- while the
+        # docstring promised the opposite, and the progress callback had
+        # already shown the user those assessments being made (#326)
+        assessed: list[QualityAssessment] = []
+
         def progress_callback(
             current: int,
             total: int,
             assessment: "QualityAssessment",
         ) -> None:
-            """Emit progress signal if not cancelled."""
+            """Record the assessment, and emit progress if not cancelled."""
+            assessed.append(assessment)
             if not self._cancelled:
                 self.progress.emit(current, total, assessment)
 
@@ -653,7 +662,15 @@ class QualityFilterWorker(SingleOutcome, QThread):
             logger.exception("Quality filtering failed")
             # Cancelling is not failing -- but the failure is still reported
             if self._cancelled:
-                self._end(self.cancelled, filtered, assessments, total, str(e))
+                # One assessment per document, in the order they were given,
+                # so the documents that passed are the ones that go with an
+                # assessment that passes
+                kept = [
+                    doc
+                    for doc, assessment in zip(self.documents, assessed, strict=False)
+                    if assessment.passes_filter(self.filter_settings)
+                ]
+                self._end(self.cancelled, kept, assessed, total, str(e))
             else:
                 self._end(self.error, str(e))
             return
@@ -1120,7 +1137,16 @@ class ReclassifyWorker(SingleOutcome, QThread):
                     # The provider's text stays in the log: it can print the
                     # request, credentials and all (#330)
                     cause = classify_analysis_exception(e)
-                    failures.append(PassFailure(document_id=doc.id, cause=cause))
+                    # A document with no id would make PassFailure raise, and
+                    # that ValueError would escape this handler and end the
+                    # whole pass on a message about pass failures rather
+                    # than about what actually went wrong
+                    failures.append(
+                        PassFailure(
+                            document_id=doc.id or f"document {i + 1}",
+                            cause=cause,
+                        )
+                    )
                     logger.warning(
                         f"Failed to classify document {doc.id} ({cause.name}): {e}"
                     )
@@ -1132,12 +1158,16 @@ class ReclassifyWorker(SingleOutcome, QThread):
                 self._end(self.finished, outcome())
 
         except Exception as e:
-            logger.exception("Reclassification failed")
+            # The provider's text stays in the log here too: emitted raw, it
+            # reached a dialog the user can screenshot, request and
+            # credentials included (#330)
+            cause = classify_analysis_exception(e)
+            logger.exception(f"Reclassification failed ({cause.name})")
             # Cancelling is not failing -- but the failure is still reported
             if self._cancelled:
-                self._end(self.cancelled, outcome(), str(e))
+                self._end(self.cancelled, outcome(), failure_cause_text(cause))
             else:
-                self._end(self.error, str(e))
+                self._end(self.error, failure_cause_text(cause))
 
     def cancel(self) -> None:
         """Request cancellation of the operation."""
@@ -1272,7 +1302,16 @@ class RescoreWorker(SingleOutcome, QThread):
                     # The provider's text stays in the log: it can print the
                     # request, credentials and all (#330)
                     cause = classify_analysis_exception(e)
-                    failures.append(PassFailure(document_id=doc.id, cause=cause))
+                    # A document with no id would make PassFailure raise, and
+                    # that ValueError would escape this handler and end the
+                    # whole pass on a message about pass failures rather
+                    # than about what actually went wrong
+                    failures.append(
+                        PassFailure(
+                            document_id=doc.id or f"document {i + 1}",
+                            cause=cause,
+                        )
+                    )
                     logger.warning(
                         f"Failed to score document {doc.id} ({cause.name}): {e}"
                     )
@@ -1284,12 +1323,16 @@ class RescoreWorker(SingleOutcome, QThread):
                 self._end(self.finished, outcome())
 
         except Exception as e:
-            logger.exception("Re-scoring failed")
+            # The provider's text stays in the log here too: emitted raw, it
+            # reached a dialog the user can screenshot, request and
+            # credentials included (#330)
+            cause = classify_analysis_exception(e)
+            logger.exception(f"Re-scoring failed ({cause.name})")
             # Cancelling is not failing -- but the failure is still reported
             if self._cancelled:
-                self._end(self.cancelled, outcome(), str(e))
+                self._end(self.cancelled, outcome(), failure_cause_text(cause))
             else:
-                self._end(self.error, str(e))
+                self._end(self.error, failure_cause_text(cause))
 
     def cancel(self) -> None:
         """Request cancellation of the operation."""
