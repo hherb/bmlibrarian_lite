@@ -902,7 +902,14 @@ enum EuropePMCError: Error, RetryableError {
 ### Europe PMC Limits
 
 - No official rate limit documented
-- Recommended: 10 requests/second maximum
+- **Measured 2026-09-21: nginx serves 503 after about two rapid requests**,
+  with no `Retry-After`, and stays throttled for up to ~70s after a burst.
+  This holds for the light `search` endpoint as well as `fullTextXML`.
+- An earlier version of this document recommended 10 requests/second. That
+  was never true, and is plausibly why `EuropePMCClient` shipped with no
+  pacing at all.
+- We pace it at **1 request/second**, with adaptive backoff beneath that:
+  see `doc/cross_platform/polite_request_pacing.md`.
 - Use cursor pagination to minimize requests
 
 ### PubMed E-utilities Limits
