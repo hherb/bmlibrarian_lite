@@ -35,6 +35,7 @@ from bmlibrarian_lite.analysis_failures import (
 )
 from bmlibrarian_lite.data_models import (
     FullTextFetch,
+    LookupRecord,
     RequestFailure,
     RequestFailureKind,
     SourceLookupFailure,
@@ -242,15 +243,27 @@ class TestDataAvailabilityFromAnUnreachableSource:
             "control: a level that is about the study must raise one"
         )
 
-    def test_a_reachable_source_with_no_statement_still_says_not_stated(
+    def test_a_read_full_text_with_no_statement_still_says_not_stated(
         self, analyzer
     ) -> None:
         """The control: the fix must not mute the honest finding.
 
         Without this, returning UNKNOWN unconditionally would pass every
         other test in this class.
+
+        The reachable source has to *serve the article's text* for its
+        silence to be the article's. This test used to stub a 404, but
+        "Europe PMC holds no open-access copy" is a fact about Europe PMC's
+        holdings, not about what the paper states -- see the sibling test
+        below, which pins that case the other way (#353).
         """
-        analyzer.europepmc.session = RaisingSession(_http_error(404))
+        analyzer.europepmc.get_full_text_xml = lambda *_a, **_k: (
+            FullTextFetch.served(
+                "<article><body>"
+                "<sec><title>Methods</title><p>We did things.</p></sec>"
+                "</body></article>"
+            )
+        )
         report = self._report()
 
         analyzer._analyze_data_availability(report)
@@ -260,6 +273,29 @@ class TestDataAvailabilityFromAnUnreachableSource:
             is DataDisclosureLevel.NOT_STATED
         )
         assert not report.warnings
+
+    def test_no_open_access_copy_is_not_the_article_saying_nothing(
+        self, analyzer
+    ) -> None:
+        """A 404 is about Europe PMC's holdings, not the paper (#353).
+
+        Every sibling state in this branch was handled -- unreachable,
+        unparseable, parsed-but-sectionless -- and this one fell through to
+        ``analyze_data_availability(None)``, charging five points and
+        telling a clinician the study publishes no data statement, with no
+        warning at all. The population is every embargoed deposit and
+        author manuscript that is in PMC but outside the OA subset.
+        """
+        analyzer.europepmc.session = RaisingSession(_http_error(404))
+        report = self._report()
+
+        analyzer._analyze_data_availability(report)
+
+        assert (
+            report.data_availability.disclosure_level
+            is DataDisclosureLevel.UNKNOWN
+        )
+        assert any("open-access" in w for w in report.warnings)
 
 
 class TestUnreachableSourceCaveat:
@@ -360,40 +396,40 @@ class TestDiscoveryReportsUnreachableLookups:
         """Unpaywall refusing us says nothing about the article's licence."""
         discoverer._session = RaisingHttpSession(_http_error(429))
 
-        _sources, failures = discoverer._discover_sources(
+        _sources, record = discoverer._discover_sources(
             doi="10.1/abc", pmid=None, pmcid=None
         )
 
-        assert any(f.service == "Unpaywall" for f in failures)
+        assert any(f.service == "Unpaywall" for f in record.failures)
 
     def test_a_throttled_doi_resolver_is_reported(self, discoverer) -> None:
         """doi.org is paced at 1/s, so a batch will meet this."""
         discoverer._session = RaisingHttpSession(_http_error(429))
 
-        _sources, failures = discoverer._discover_sources(
+        _sources, record = discoverer._discover_sources(
             doi="10.1/abc", pmid=None, pmcid=None
         )
 
-        assert any(f.service == "doi.org" for f in failures)
+        assert any(f.service == "doi.org" for f in record.failures)
 
     def test_a_throttled_id_converter_is_reported(self, discoverer) -> None:
         """It kills the whole PMC path, which is the most reliable source."""
         discoverer._session = RaisingHttpSession(_http_error(429))
 
-        sources, failures = discoverer._discover_sources(
+        sources, record = discoverer._discover_sources(
             doi=None, pmid="12345", pmcid=None
         )
 
         assert sources == []
-        assert any("PubMed Central" in f.service for f in failures)
+        assert any("PubMed Central" in f.service for f in record.failures)
 
     def test_a_reachable_lookup_reports_no_failure(self, discoverer) -> None:
         """The control: a PMC ID needs no lookup and must stay clean."""
-        _sources, failures = discoverer._discover_sources(
+        _sources, record = discoverer._discover_sources(
             doi=None, pmid=None, pmcid="PMC7654321"
         )
 
-        assert failures == ()
+        assert record == LookupRecord()
 
 
 class TestTheIdConverterDistrustsItsInput:
@@ -483,9 +519,9 @@ class TestDiscoveryResultSaysWhyItFoundNothing:
             output_path=tmp_path / "out.pdf", doi="10.1/abc"
         )
 
-        assert result.lookup_failures
+        assert result.lookups.failures
         assert all(
-            isinstance(f.failure, RequestFailure) for f in result.lookup_failures
+            isinstance(f.failure, RequestFailure) for f in result.lookups.failures
         )
 
     def test_the_sentence_carries_no_provider_text(
@@ -503,20 +539,75 @@ class TestDiscoveryResultSaysWhyItFoundNothing:
         assert "test@example.com" not in result.error
 
     def test_a_clean_lookup_that_finds_nothing_keeps_todays_wording(
-        self, discoverer, tmp_path
+        self, discoverer, tmp_path, monkeypatch
     ) -> None:
         """The control: an article really without an OA PDF is unchanged.
 
         Without this, naming a failure unconditionally would pass every
         other test in this class.
+
+        Every applicable lookup is made and answers: Unpaywall is
+        configured and holds no open-access location for the DOI, and
+        doi.org resolves to nothing. That is the one shape in which the
+        access claim stands.
         """
+        from bmlibrarian_lite.pdf_discovery import PDFDiscoverer
+
+        monkeypatch.setattr(
+            PDFDiscoverer, "_discover_unpaywall", lambda *_a, **_k: ([], None)
+        )
+        monkeypatch.setattr(
+            PDFDiscoverer, "_discover_doi_direct", lambda *_a, **_k: ([], None)
+        )
+
         result = discoverer.discover_and_download(
-            output_path=tmp_path / "out.pdf"
+            output_path=tmp_path / "out.pdf", doi="10.1/abc"
         )
 
         assert not result.success
-        assert result.lookup_failures == ()
+        assert result.lookups == LookupRecord()
         assert "institutional access" in result.error
+
+    def test_an_article_we_hold_no_doi_for_withholds_the_claim(
+        self, discoverer, tmp_path, monkeypatch
+    ) -> None:
+        """Unpaywall indexes what PMC does not, and was never asked (#355).
+
+        A PMID that PMC holds nothing for leaves no source and no DOI to
+        ask Unpaywall by, so "the document may require institutional
+        access" rests on one source having said no -- the #347 harm with an
+        identifier cause rather than a throttle.
+        """
+        from bmlibrarian_lite.pdf_discovery import PDFDiscoverer
+
+        monkeypatch.setattr(
+            PDFDiscoverer, "_get_pmcid_from_pmid", lambda *_a, **_k: (None, None)
+        )
+
+        result = discoverer.discover_and_download(
+            output_path=tmp_path / "out.pdf", pmid="12345"
+        )
+
+        assert not result.success
+        assert "institutional access" not in result.error
+        assert "Unpaywall" in result.error
+
+    def test_a_pmc_id_that_finds_sources_needs_no_unpaywall_caveat(
+        self, discoverer, tmp_path, monkeypatch
+    ) -> None:
+        """The control for the test above: PMC established the open access.
+
+        Recording the skip whenever no DOI is held would caveat every
+        PMC-only article, where Unpaywall could only have agreed.
+        """
+        from bmlibrarian_lite.pdf_discovery import PDFDiscoverer
+
+        sources, record = PDFDiscoverer(
+            unpaywall_email="test@example.com", use_browser_fallback=False
+        )._discover_sources(doi=None, pmid=None, pmcid="PMC1")
+
+        assert sources
+        assert record == LookupRecord()
 
 
 class AnsweringSession:
@@ -844,7 +935,10 @@ class TestThePaywallClaimIsWithheld:
             source_type=PDFSourceType.DOI_DIRECT,
             is_open_access=False,
         )
-        discoverer._discover_sources = lambda *_a, **_k: ([source], failures)
+        discoverer._discover_sources = lambda *_a, **_k: (
+            [source],
+            LookupRecord(failures=failures),
+        )
         return discoverer
 
     def _paywall_result(self):
@@ -923,7 +1017,7 @@ class TestThePaywallClaimIsWithheld:
 
 
 class TestTheFailuresSurviveEveryPath:
-    """``lookup_failures`` is dropped on no return path (#347)."""
+    """The unanswered lookups are dropped on no return path (#347)."""
 
     def _stub(self, discoverer, failures, result):
         """Stub discovery to find one source and downloading to answer.
@@ -942,7 +1036,10 @@ class TestTheFailuresSurviveEveryPath:
             url="https://publisher.example/a.pdf",
             source_type=PDFSourceType.DOI_DIRECT,
         )
-        discoverer._discover_sources = lambda *_a, **_k: ([source], failures)
+        discoverer._discover_sources = lambda *_a, **_k: (
+            [source],
+            LookupRecord(failures=failures),
+        )
         discoverer._try_download = lambda *_a, **_k: result
         return discoverer
 
@@ -976,7 +1073,7 @@ class TestTheFailuresSurviveEveryPath:
         )
 
         assert result.success
-        assert result.lookup_failures
+        assert result.lookups.failures
 
     def test_a_failed_download_names_them_to_the_reader(
         self, discoverer, tmp_path
@@ -998,7 +1095,7 @@ class TestTheFailuresSurviveEveryPath:
             output_path=tmp_path / "out.pdf", doi="10.1/abc"
         )
 
-        assert result.lookup_failures
+        assert result.lookups.failures
         assert "Unpaywall" in result.error
         assert "was not established" in result.error
 
@@ -1014,11 +1111,11 @@ class TestTheFailuresSurviveEveryPath:
             "doi.org", RequestFailure(RequestFailureKind.TIMEOUT)
         )
         merged = DiscoveryResult(
-            success=False, lookup_failures=(own,)
-        ).with_lookup_failures((self._failure(),))
+            success=False, lookups=LookupRecord(failures=(own,))
+        ).with_lookups(LookupRecord(failures=(self._failure(),)))
 
-        assert own in merged.lookup_failures
-        assert len(merged.lookup_failures) == 2
+        assert own in merged.lookups.failures
+        assert len(merged.lookups.failures) == 2
 
 
 class TestUnpaywallsOwn404StaysAnAbsence:
@@ -1071,25 +1168,25 @@ class TestTheSentencesAreTestedWithoutTheNetwork:
 
     def test_no_sources_keeps_todays_wording_when_nothing_failed(self) -> None:
         """The control: an honest absence must read exactly as before."""
-        assert no_pdf_sources_message([]) == (
+        assert no_pdf_sources_message(LookupRecord()) == (
             "No PDF sources found. The document may require institutional "
             "access."
         )
 
     def test_no_sources_withholds_the_claim_when_a_lookup_failed(self) -> None:
         """A throttled Unpaywall knows nothing about the licence."""
-        text = no_pdf_sources_message([self._failure()])
+        text = no_pdf_sources_message(LookupRecord(failures=(self._failure(),)))
 
         assert "may require institutional access" not in text
         assert "was not established" in text
 
     def test_the_paywall_claim_is_kept_when_nothing_failed(self) -> None:
         """The control: a real paywall is worth reporting plainly."""
-        assert paywall_message("Pay up.", []) == "Pay up."
+        assert paywall_message("Pay up.", LookupRecord()) == "Pay up."
 
     def test_the_paywall_claim_is_dropped_when_a_lookup_failed(self) -> None:
         """Stating it and then retracting it leaves the claim standing."""
-        text = paywall_message("Pay up.", [self._failure()])
+        text = paywall_message("Pay up.", LookupRecord(failures=(self._failure(),)))
 
         assert "Pay up." not in text
         assert "Unpaywall" in text
@@ -1101,8 +1198,8 @@ class TestTheSentencesAreTestedWithoutTheNetwork:
         own, is the harm: it repeats the claim in order to negate it.
         """
         for text in (
-            no_pdf_sources_message([self._failure()]),
-            paywall_message("Pay up.", [self._failure()]),
+            no_pdf_sources_message(LookupRecord(failures=(self._failure(),))),
+            paywall_message("Pay up.", LookupRecord(failures=(self._failure(),))),
         ):
             assert "not evidence" not in text
             assert "does not require" not in text

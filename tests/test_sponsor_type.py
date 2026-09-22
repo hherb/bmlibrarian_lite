@@ -35,6 +35,11 @@ import re
 
 import pytest
 
+from bmlibrarian_lite.data_models import (
+    RecordFetch,
+    RequestFailure,
+    RequestFailureKind,
+)
 from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
     ACADEMIC_PATTERNS,
     GOVERNMENT_PATTERNS,
@@ -229,7 +234,7 @@ class TestTheAnalyzerUsesTheSharedFunction:
     def test_a_va_funded_report_is_government(self) -> None:
         """The user-visible half of #147, end to end."""
         analyzer = StudyTransparencyAnalyzer(self.CONTACT_EMAIL, use_browser_fallback=False)
-        report = TransparencyReport(pmid="1")
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._pubmed_grants = [
             {"agency": "U.S. Department of Veterans Affairs", "grant_id": "G1"}
         ]
@@ -242,7 +247,7 @@ class TestTheAnalyzerUsesTheSharedFunction:
     def test_an_industry_funded_report_is_still_industry(self) -> None:
         """The industry tiers must survive the rewiring."""
         analyzer = StudyTransparencyAnalyzer(self.CONTACT_EMAIL, use_browser_fallback=False)
-        report = TransparencyReport(pmid="1")
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._pubmed_grants = [{"agency": "Genentech Inc.", "grant_id": "G1"}]
 
         analyzer._fetch_funder_info(report)
@@ -259,7 +264,7 @@ class TestTheAnalyzerUsesTheSharedFunction:
         label on most reports.
         """
         analyzer = StudyTransparencyAnalyzer(self.CONTACT_EMAIL, use_browser_fallback=False)
-        report = TransparencyReport(pmid="1")
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._pubmed_grants = [{"agency": "Fondation Zzyzx", "grant_id": "G1"}]
 
         analyzer._fetch_funder_info(report)
@@ -271,7 +276,7 @@ class TestTheAnalyzerUsesTheSharedFunction:
     def test_a_recognised_funder_is_not_warned_about(self) -> None:
         """The warning must be specific to the fallback, not attached to every report."""
         analyzer = StudyTransparencyAnalyzer(self.CONTACT_EMAIL, use_browser_fallback=False)
-        report = TransparencyReport(pmid="1")
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._pubmed_grants = [{"agency": "National Institutes of Health", "grant_id": "G1"}]
 
         analyzer._fetch_funder_info(report)
@@ -290,7 +295,7 @@ class TestTheAnalyzerUsesTheSharedFunction:
         most consequential, not least.
         """
         analyzer = StudyTransparencyAnalyzer(self.CONTACT_EMAIL, use_browser_fallback=False)
-        report = TransparencyReport(pmid="1")
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._pubmed_grants = [
             {"agency": "Fondation Zzyzx", "grant_id": "G1"},
             {"agency": "Pfizer Inc", "grant_id": "G2"},
@@ -313,7 +318,7 @@ class TestTheAnalyzerUsesTheSharedFunction:
         ()" — an empty parenthetical.
         """
         analyzer = StudyTransparencyAnalyzer(self.CONTACT_EMAIL, use_browser_fallback=False)
-        report = TransparencyReport(pmid="1")
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._pubmed_grants = [{"agency": agency, "grant_id": "G1"}]
 
         analyzer._fetch_funder_info(report)
@@ -329,7 +334,7 @@ class TestTheAnalyzerUsesTheSharedFunction:
         study carrying both must report the registry's confidence.
         """
         analyzer = StudyTransparencyAnalyzer(self.CONTACT_EMAIL, use_browser_fallback=False)
-        report = TransparencyReport(pmid="1")
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._crossref_funders = [
             {"name": "Pfizer", "DOI": "10.13039/100004319"},
             {"name": "Genentech Inc."},
@@ -359,16 +364,16 @@ class _StubClinicalTrials:
         """
         self._sponsor_class = sponsor_class
 
-    def get_study(self, trial_id: str) -> dict:
+    def get_study(self, trial_id: str) -> RecordFetch:
         """Return a non-empty placeholder study.
 
         Args:
             trial_id: Ignored; the stub is indifferent to which trial is asked for.
 
         Returns:
-            A truthy placeholder, since only ``extract_trial_info`` reads it.
+            A served fetch, since only ``extract_trial_info`` reads it.
         """
-        return {"id": trial_id}
+        return RecordFetch.served({"id": trial_id})
 
     def extract_trial_info(self, study: dict) -> TrialRegistration:
         """Build a registration carrying the configured sponsor class.
@@ -389,21 +394,24 @@ class _StubClinicalTrials:
 class _UnreachableClinicalTrials:
     """Stand-in for a ClinicalTrials.gov client that cannot reach the registry.
 
-    ``ClinicalTrialsClient.get_study`` catches ``RequestException``, logs it and
-    returns ``None``, so an outage is indistinguishable from an unregistered
-    study to everything downstream. This models that return.
+    ``ClinicalTrialsClient.get_study`` catches ``RequestException`` and
+    returns an unreachable fetch. Before #356 it returned ``None``, which an
+    outage shared with a registry that holds no such trial -- so the two
+    reached the reader as one sentence. This models the outage.
     """
 
-    def get_study(self, trial_id: str) -> None:
-        """Return nothing, as the real client does on a request failure.
+    def get_study(self, trial_id: str) -> RecordFetch:
+        """Answer as the real client does on a request failure.
 
         Args:
             trial_id: Ignored.
 
         Returns:
-            ``None``, always.
+            An unreachable fetch, always.
         """
-        return None
+        return RecordFetch.unreachable(
+            RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=503)
+        )
 
 
 class TestTheTrialRegistryUpgrade:
@@ -490,7 +498,7 @@ class TestTheAnalyzerUsesTheSharedUpgrade:
         a self-contradictory row in the batch CSV export.
         """
         analyzer = self._analyzer_with_trial("INDUSTRY")
-        report = TransparencyReport(pmid="1")
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._pubmed_grants = [{"agency": "Fondation Zzyzx", "grant_id": "G1"}]
         report._databanks = [
             {"name": "ClinicalTrials.gov", "accession_numbers": ["NCT01234567"]}
@@ -514,7 +522,7 @@ class TestTheAnalyzerUsesTheSharedUpgrade:
         is phrased as a statement about the funder names, which stays true.
         """
         analyzer = self._analyzer_with_trial("INDUSTRY")
-        report = TransparencyReport(pmid="1")
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._pubmed_grants = [{"agency": "Fondation Zzyzx", "grant_id": "G1"}]
         report._databanks = [
             {"name": "ClinicalTrials.gov", "accession_numbers": ["NCT01234567"]}
@@ -530,7 +538,7 @@ class TestTheAnalyzerUsesTheSharedUpgrade:
     def test_a_government_funded_industry_trial_is_still_mixed(self) -> None:
         """The tiers that already worked must survive the rewiring."""
         analyzer = self._analyzer_with_trial("INDUSTRY")
-        report = TransparencyReport(pmid="1")
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._pubmed_grants = [{"agency": "National Institutes of Health", "grant_id": "G1"}]
         report._databanks = [
             {"name": "ClinicalTrials.gov", "accession_numbers": ["NCT01234567"]}
@@ -557,7 +565,7 @@ class TestTheAnalyzerUsesTheSharedUpgrade:
         :func:`is_industry_trial_sponsor`.
         """
         analyzer = self._analyzer_with_trial(sponsor_class)
-        report = TransparencyReport(pmid="1")
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._pubmed_grants = [{"agency": "Fondation Zzyzx", "grant_id": "G1"}]
         report._databanks = [
             {"name": "ClinicalTrials.gov", "accession_numbers": ["NCT01234567"]}
@@ -577,7 +585,7 @@ class TestTheAnalyzerUsesTheSharedUpgrade:
         which was indistinguishable from a well-formed ``'NIH'``.
         """
         analyzer = self._analyzer_with_trial(None)
-        report = TransparencyReport(pmid="1")
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._pubmed_grants = [{"agency": "National Institutes of Health", "grant_id": "G1"}]
         report._databanks = [
             {"name": "ClinicalTrials.gov", "accession_numbers": ["NCT01234567"]}
@@ -601,7 +609,7 @@ class TestTheAnalyzerUsesTheSharedUpgrade:
         """
         analyzer = self._analyzer_with_trial("INDUSTRY")
         analyzer.clinicaltrials = _UnreachableClinicalTrials()
-        report = TransparencyReport(pmid="1")
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._databanks = [
             {"name": "ClinicalTrials.gov", "accession_numbers": ["NCT01234567"]}
         ]
@@ -621,7 +629,7 @@ class TestTheAnalyzerUsesTheSharedUpgrade:
         only in ISRCTN read as "Trial Registration: None found".
         """
         analyzer = self._analyzer_with_trial("INDUSTRY")
-        report = TransparencyReport(pmid="1")
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._databanks = [{"name": "ISRCTN", "accession_numbers": ["ISRCTN12345678"]}]
 
         analyzer._fetch_trial_info(report)
@@ -632,7 +640,7 @@ class TestTheAnalyzerUsesTheSharedUpgrade:
     def test_a_non_industry_trial_leaves_the_funder_tier_alone(self) -> None:
         """An NIH-sponsored registration must not flip anything to mixed."""
         analyzer = self._analyzer_with_trial("NIH")
-        report = TransparencyReport(pmid="1")
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._pubmed_grants = [{"agency": "National Institutes of Health", "grant_id": "G1"}]
         report._databanks = [
             {"name": "ClinicalTrials.gov", "accession_numbers": ["NCT01234567"]}

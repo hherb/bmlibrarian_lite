@@ -252,7 +252,12 @@ TOOLS = [
             "Tries Europe PMC XML, cached PDFs, and PDF download in order. "
             "Returns markdown-formatted content. Also loads the document for "
             "subsequent ask_document calls: interrogation_available says "
-            "whether that succeeded, and interrogation_error why it did not."
+            "whether that succeeded, and interrogation_error why it did not. "
+            "On failure, absence_established says whether this article was "
+            "shown to have no retrievable full text. When it is false, the "
+            "sources were not all asked or did not all answer, so the absence "
+            "is ours and not the article's: do not report that no full text "
+            "exists."
         ),
         inputSchema={
             "type": "object",
@@ -644,10 +649,20 @@ def _handle_fulltext(args: dict[str, Any], ctx: _AgentsContext) -> dict[str, Any
     )
 
     if not result.success or not result.markdown_content:
+        # "Not available" is a claim about the article, and a calling agent
+        # reads it as the literature's answer -- which is the harm #262 was
+        # opened for. It may only be made where every lookup that could be
+        # made was made and answered (#354).
         return {
             "success": False,
             "source": result.source_type.value,
-            "error": "Full text not available for this article.",
+            "absence_established": result.absence_established,
+            "error": (
+                "Full text not available for this article."
+                if result.absence_established
+                else result.error
+                or "Whether a full text is available was not established."
+            ),
         }
 
     # Build a document ID from available identifiers

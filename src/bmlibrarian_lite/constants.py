@@ -916,6 +916,21 @@ SERVICE_DOI_RESOLVER = "doi.org"
 SERVICE_PMC_ID_CONVERTER = "PubMed Central's ID converter"
 SERVICE_EUROPE_PMC = "Europe PMC"
 
+# The metadata sources a transparency analysis reads an article's record
+# from. Same rule: each name travels into a sentence the user reads (#356).
+SERVICE_PUBMED = "PubMed"
+SERVICE_CROSSREF = "CrossRef"
+
+# Not a host but a document: the PDF a source did serve us, named so that a
+# file we could not read is reported as the thing that went unread, rather
+# than blamed on a lookup that answered perfectly well (#354).
+SERVICE_RETRIEVED_PDF = "the retrieved PDF"
+
+# The PDF download step itself, named for the case where a caller asks for
+# discovery without it. Not a host either, but it is a lookup the reader's
+# answer depends on, so a skipped one is reportable (#355).
+SERVICE_PDF_DOWNLOAD = "the PDF download"
+
 # The statuses that mean "this is yours only if you pay or log in". They are
 # a genuine paywall signal, unlike a 5xx, which is the server being broken.
 PAYWALL_HTTP_STATUSES = (401, 403)
