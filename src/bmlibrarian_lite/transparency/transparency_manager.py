@@ -25,7 +25,12 @@ from typing import TYPE_CHECKING, Callable, Optional
 from PySide6.QtCore import QObject, Signal
 
 from ..study_transparency_analyzer.study_transparency_analyzer import StudyTransparencyAnalyzer
-from .transparency_models import TransparencyResult, TransparencyRisk, calculate_risk_level
+from .transparency_models import (
+    COI_NOT_ASSESSED,
+    TransparencyResult,
+    TransparencyRisk,
+    calculate_risk_level,
+)
 from .transparency_settings import TransparencySettings
 
 # Rate limiting: minimum seconds between API requests
@@ -129,7 +134,11 @@ class TransparencyManager(QObject):
             document_id: Internal document ID
             pmid: PubMed ID (optional if DOI provided)
             doi: DOI (optional if PMID provided)
-            full_text: Full text content (future enhancement, currently unused)
+            full_text: Full text content. Passed straight to the analyzer,
+                which uses it instead of discovering the article itself --
+                and whether it arrives is what separates a study that
+                declares no conflicts from one nobody read, so it is not
+                an argument to drop as unused.
         """
         if not self.settings.enabled:
             return
@@ -226,15 +235,24 @@ class TransparencyManager(QObject):
         if report.data_availability:
             data_availability_level = report.data_availability.disclosure_level.value
 
-        # Determine if COI was disclosed
-        coi_disclosed = report.coi_info is not None and report.coi_info.statement is not None
+        # What is known about the study's COI disclosure. A report with no
+        # coi_info at all has had nothing established either way, so it is
+        # not assessed. The expression this replaced answered False on
+        # exactly this branch and True on every other one, and neither was
+        # ever established, so the badge read "Disclosed" for every study an
+        # analysis actually ran on (#352).
+        coi_disclosure = (
+            report.coi_info.disclosure_level.value
+            if report.coi_info
+            else COI_NOT_ASSESSED
+        )
 
         # Calculate risk level
         risk_level = calculate_risk_level(
             score=int(report.transparency_score),
             industry_funding=report.industry_funding_detected,
             data_availability=data_availability_level,
-            coi_disclosed=coi_disclosed,
+            coi_disclosure=coi_disclosure,
             settings=self.settings,
         )
 
@@ -251,12 +269,15 @@ class TransparencyManager(QObject):
             industry_funding_detected=report.industry_funding_detected,
             industry_funding_confidence=report.industry_funding_confidence,
             data_availability_level=data_availability_level,
-            coi_disclosed=coi_disclosed,
+            coi_disclosure=coi_disclosure,
             trial_registered=len(report.trial_registrations) > 0,
             trial_results_compliant=results_compliant,
             outcome_switching_detected=report.outcome_switching_detected,
-            risk_indicators=report.risk_of_bias_indicators,
-            warnings=report.warnings,
+            # Both copied, not aliased: the report stays alive in the
+            # worker and a later append would silently edit a stored
+            # result.
+            risk_indicators=list(report.risk_of_bias_indicators),
+            warnings=list(report.warnings),
             tier_downgrade_applied=(
                 self.settings.tier_downgrade_amount
                 if risk_level == TransparencyRisk.HIGH
@@ -264,7 +285,6 @@ class TransparencyManager(QObject):
             ),
             full_text_analyzed=(
                 full_text is not None
-                or "Full-text" in report.data_sources_used
                 or any("Full-text" in s for s in report.data_sources_used)
             ),
         )

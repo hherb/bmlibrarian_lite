@@ -19,6 +19,7 @@ from .study_transparency_analyzer import (
     TransparencyReport,
     SponsorType,
     DataDisclosureLevel,
+    COIDisclosureLevel,
     ResultsComplianceStatus,
     FunderInfo,
     TrialRegistration,
@@ -53,6 +54,7 @@ __all__ = [
     # Enums
     "SponsorType",
     "DataDisclosureLevel",
+    "COIDisclosureLevel",
     "ResultsComplianceStatus",
 
     # Batch processing

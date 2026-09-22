@@ -108,8 +108,10 @@ logged **and reported**).
   neutral. `NOT_STATED` scores −5 and tells a clinician the study publishes no
   data availability statement — a number and a claim invented out of our own
   throttling. No risk-of-bias indicator may be raised from a source that was
-  never read — a rule the data-availability path now keeps and the COI path
-  does not yet (#351, #352).
+  never read. The conflict of interest path keeps the same rule through
+  `COIDisclosureLevel`: `NOT_STATED` costs five points and raises the
+  missing-statement indicator, `NOT_ASSESSED` costs nothing and raises
+  nothing (#352).
 - **One status is genuinely about the article.** Europe PMC answers `404` for
   a PMC ID it holds no open-access full text for, and Unpaywall answers `404`
   for a DOI it has no record of. Those stay absences. Every other failure —
@@ -140,6 +142,33 @@ logged **and reported**).
   every unsuccessful return — the paywall, the failed download, and the
   "no sources" sentence alike. A field nobody reads reproduces the defect
   one layer up.
+- **A source nobody read is the same defect as one we could not reach.**
+  Only the article's own text can establish that a study declares no
+  conflicts. A PubMed record without a `CoiStatement` has not said the
+  article carries none: publishers deposit the field unevenly, for 36.5% of
+  a 2018 sample and 79.7% of a 2024 one, so its silence is the publisher's
+  and not the study's. `ConflictOfInterest` therefore has no default level
+  and refuses a "disclosed" with no statement behind it, or a finding drawn
+  from a statement that was never read (#352).
+- **Unparsed is not absent either.** The rule keeps going down a layer. A
+  full text we obtained but could not segment is not the article declaring
+  nothing: `extract_fulltext_sections` anchored its heading match, so
+  "Declaration of Competing Interest" (Elsevier's standard heading) and
+  "Conflict of Interest Statement" (the standard PMC/JATS one) both missed,
+  and the article was recorded as declaring no conflicts, charged five
+  points and downgraded. Two things follow. Recognise the spellings real
+  journals print, and require *positive evidence that the relevant part was
+  parsed* before recording an absence — the COI path now records
+  `NOT_ASSESSED` with a caveat when no end-matter section was recognised at
+  all (#359). Watch especially for a fix that **activates previously dead
+  code**: #352 made `missing_coi_triggers_downgrade` live for the first
+  time, which turned a latent extractor miss into a forced high-risk badge.
+- **Delete a lookup that reads nothing rather than reporting it honestly.**
+  The COI path fetched a `resultType=core` Europe PMC record per document,
+  named Europe PMC in `data_sources_used`, and read no part of the response
+  — which carries no conflict of interest field at all. The fix was to
+  remove the fetch and, with it, its ambiguous `Optional[Dict]` (#348,
+  #351). A source is named as provenance only when it contributed.
 - **Keep a control test for the honest finding, and for the success path.**
   Returning "unknown" unconditionally passes every test that only checks the
   unreachable path. A reachable source that answers "no statement" must still
@@ -148,21 +177,29 @@ logged **and reported**).
   shown to have it read, or the whole fix can silently become "nothing is
   ever fetched".
 
-**Ports.** Python is canonical and has landed this for the two paths #346 and
-#347 name: the Europe PMC full-text fetch behind data availability, and the
-three full-text discovery lookups. Swift
+**Ports.** Python is canonical and has landed this for four paths: the
+Europe PMC full-text fetch behind data availability and the three full-text
+discovery lookups (#346, #347), and the conflict of interest disclosure
+(#352, #348, #351). Swift
 (`Packages/BioMedLit/Sources/BioMedLit/Transparency/`) and Android still read
-an unreachable source as an absence — tracked on #346. No transparency
-*pattern* changes here, so the parity fixtures are not involved.
+an unreachable source as an absence — tracked on #346. Swift does **not**
+share the always-true `coi_disclosed` Python has just removed: `COIAnalysisResult.hasStatement`
+is an honest two-state boolean. It has the other half of #352 instead — only
+two states where three are needed. `TransparencyAnalysisService` takes a COI
+statement from the full text alone, so every article whose full text it
+never obtained is scored and badged as declaring no conflicts (#357).
+Android
+analyses no COI at all today (#116). No transparency *pattern* changes here,
+so the parity fixtures are not involved; the COI **score** does move, for
+studies nobody read.
 
 **Still outstanding in Python**, so do not read the rule as fully enforced
-before checking: `EuropePMCClient.get_article` remains an ambiguous
-`Optional` and feeds COI (#351); the COI badge reads "Disclosed" for every
-study (#352); data availability still fabricates `NOT_STATED` for articles
-outside PMC (#353); `FulltextDiscoverer` maps every failure to `NOT_FOUND`
-(#354); a lookup skipped for want of configuration records nothing (#355);
-and trial registration and funding read an unreachable source as an absence
-(#356).
+before checking: data availability still fabricates `NOT_STATED` for
+articles outside PMC (#353); `FulltextDiscoverer` maps every failure to
+`NOT_FOUND` (#354); a lookup skipped for want of configuration records
+nothing (#355); trial registration and funding read an unreachable source as
+an absence (#356); and the download paths still put the provider's own error
+text in reader-facing fields (#350).
 
 ## What a stage records
 

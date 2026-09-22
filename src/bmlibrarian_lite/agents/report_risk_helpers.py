@@ -16,7 +16,11 @@
 
 """Helper functions for report risk warnings."""
 
-from ..transparency.transparency_models import TransparencyResult, TransparencyRisk
+from ..transparency.transparency_models import (
+    COI_NOT_STATED,
+    TransparencyResult,
+    TransparencyRisk,
+)
 from ..transparency.transparency_settings import (
     ReportRiskThreshold,
     TransparencySettings,
@@ -46,7 +50,7 @@ def select_inline_warning(
 
     if result.industry_funding_detected:
         risk_factors.append("industry_funding")
-    if not result.coi_disclosed:
+    if result.coi_disclosure == COI_NOT_STATED:
         risk_factors.append("missing_coi")
     if result.trial_registered and not result.trial_results_compliant:
         risk_factors.append("missing_results")
@@ -117,7 +121,7 @@ def build_risk_context_for_prompt(
         concerns = []
         if result.industry_funding_detected:
             concerns.append("Industry funding detected")
-        if not result.coi_disclosed:
+        if result.coi_disclosure == COI_NOT_STATED:
             concerns.append("Conflicts of interest not disclosed")
         if result.trial_registered and not result.trial_results_compliant:
             concerns.append("Trial results not posted to registry")
@@ -193,7 +197,7 @@ def format_reference_risk_annotation(
         confidence_pct = int(result.industry_funding_confidence * 100)
         lines.append(f"    - Funding: Industry-funded (confidence: {confidence_pct}%)")
 
-    if not result.coi_disclosed:
+    if result.coi_disclosure == COI_NOT_STATED:
         lines.append("    - COI disclosure: Not stated")
 
     if result.trial_registered and not result.trial_results_compliant:

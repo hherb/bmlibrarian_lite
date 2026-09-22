@@ -21,6 +21,9 @@ from datetime import datetime
 import pytest
 
 from bmlibrarian_lite.transparency import (
+    COI_DISCLOSED,
+    COI_NOT_ASSESSED,
+    COI_NOT_STATED,
     TransparencyResult,
     TransparencyRisk,
     TransparencySettings,
@@ -75,7 +78,7 @@ class TestTransparencyResult:
         assert result.risk_level == TransparencyRisk.LOW
         # Check defaults
         assert result.industry_funding_detected is False
-        assert result.coi_disclosed is True
+        assert result.coi_disclosure == COI_NOT_ASSESSED
         assert result.risk_indicators == []
 
     def test_creation_full(self):
@@ -88,7 +91,7 @@ class TestTransparencyResult:
             industry_funding_detected=True,
             industry_funding_confidence=0.85,
             data_availability_level="restricted",
-            coi_disclosed=False,
+            coi_disclosure=COI_NOT_STATED,
             trial_registered=True,
             trial_results_compliant=False,
             outcome_switching_detected=True,
@@ -102,7 +105,7 @@ class TestTransparencyResult:
         assert result.industry_funding_detected is True
         assert result.industry_funding_confidence == 0.85
         assert result.data_availability_level == "restricted"
-        assert result.coi_disclosed is False
+        assert result.coi_disclosure == COI_NOT_STATED
         assert result.trial_registered is True
         assert result.trial_results_compliant is False
         assert result.outcome_switching_detected is True
@@ -141,7 +144,7 @@ class TestTransparencyResult:
             "industry_funding_detected": False,
             "industry_funding_confidence": 0.1,
             "data_availability_level": "full_open",
-            "coi_disclosed": True,
+            "coi_disclosure": COI_DISCLOSED,
             "trial_registered": True,
             "trial_results_compliant": True,
             "outcome_switching_detected": False,
@@ -159,7 +162,7 @@ class TestTransparencyResult:
         assert result.risk_level == TransparencyRisk.LOW
         assert result.industry_funding_detected is False
         assert result.data_availability_level == "full_open"
-        assert result.coi_disclosed is True
+        assert result.coi_disclosure == COI_DISCLOSED
 
     def test_roundtrip_serialization(self):
         """Test that to_dict/from_dict roundtrips correctly."""
@@ -170,7 +173,7 @@ class TestTransparencyResult:
             industry_funding_detected=True,
             industry_funding_confidence=0.75,
             data_availability_level="on_request",
-            coi_disclosed=True,
+            coi_disclosure=COI_DISCLOSED,
             trial_registered=True,
             trial_results_compliant=False,
             outcome_switching_detected=False,
@@ -201,7 +204,7 @@ class TestTransparencyResult:
 
         assert result.document_id == "minimal-doc"
         assert result.industry_funding_detected is False  # Default
-        assert result.coi_disclosed is True  # Default
+        assert result.coi_disclosure == COI_NOT_ASSESSED  # Default
         assert result.risk_indicators == []  # Default
 
 
@@ -216,7 +219,7 @@ class TestCalculateRiskLevel:
             score=30,
             industry_funding=False,
             data_availability="full_open",
-            coi_disclosed=True,
+            coi_disclosure=COI_DISCLOSED,
             settings=settings,
         )
 
@@ -230,7 +233,7 @@ class TestCalculateRiskLevel:
             score=75,  # Good score
             industry_funding=True,
             data_availability="restricted",
-            coi_disclosed=True,
+            coi_disclosure=COI_DISCLOSED,
             settings=settings,
         )
 
@@ -244,7 +247,7 @@ class TestCalculateRiskLevel:
             score=75,
             industry_funding=False,
             data_availability="full_open",
-            coi_disclosed=False,
+            coi_disclosure=COI_NOT_STATED,
             settings=settings,
         )
 
@@ -258,7 +261,7 @@ class TestCalculateRiskLevel:
             score=55,
             industry_funding=False,
             data_availability="full_open",
-            coi_disclosed=True,
+            coi_disclosure=COI_DISCLOSED,
             settings=settings,
         )
 
@@ -272,7 +275,7 @@ class TestCalculateRiskLevel:
             score=85,  # Good score
             industry_funding=True,
             data_availability="full_open",  # Open data
-            coi_disclosed=True,
+            coi_disclosure=COI_DISCLOSED,
             settings=settings,
         )
 
@@ -286,7 +289,7 @@ class TestCalculateRiskLevel:
             score=85,
             industry_funding=False,
             data_availability="full_open",
-            coi_disclosed=True,
+            coi_disclosure=COI_DISCLOSED,
             settings=settings,
         )
 
@@ -300,7 +303,7 @@ class TestCalculateRiskLevel:
             score=75,
             industry_funding=True,
             data_availability="restricted",
-            coi_disclosed=True,
+            coi_disclosure=COI_DISCLOSED,
             settings=settings,
         )
 
@@ -315,7 +318,7 @@ class TestCalculateRiskLevel:
             score=85,
             industry_funding=False,
             data_availability="full_open",
-            coi_disclosed=False,  # Missing COI
+            coi_disclosure=COI_NOT_STATED,  # Missing COI
             settings=settings,
         )
 
@@ -330,7 +333,7 @@ class TestCalculateRiskLevel:
             score=40,  # At threshold
             industry_funding=False,
             data_availability="full_open",
-            coi_disclosed=True,
+            coi_disclosure=COI_DISCLOSED,
             settings=settings,
         )
 
@@ -345,7 +348,7 @@ class TestCalculateRiskLevel:
             score=70,
             industry_funding=False,
             data_availability="full_open",
-            coi_disclosed=True,
+            coi_disclosure=COI_DISCLOSED,
             settings=settings,
         )
 
@@ -361,7 +364,7 @@ class TestCalculateRiskLevel:
             score=75,
             industry_funding=True,
             data_availability="not_available",
-            coi_disclosed=True,
+            coi_disclosure=COI_DISCLOSED,
             settings=settings,
         )
         assert risk == TransparencyRisk.HIGH
@@ -371,7 +374,7 @@ class TestCalculateRiskLevel:
             score=75,
             industry_funding=True,
             data_availability="not_stated",
-            coi_disclosed=True,
+            coi_disclosure=COI_DISCLOSED,
             settings=settings,
         )
         assert risk == TransparencyRisk.HIGH
@@ -381,7 +384,7 @@ class TestCalculateRiskLevel:
             score=75,
             industry_funding=True,
             data_availability="on_request",
-            coi_disclosed=True,
+            coi_disclosure=COI_DISCLOSED,
             settings=settings,
         )
         assert risk == TransparencyRisk.MEDIUM
@@ -603,7 +606,7 @@ class TestTransparencySettings:
             score=30,
             industry_funding=False,
             data_availability="full_open",
-            coi_disclosed=True,
+            coi_disclosure=COI_DISCLOSED,
             settings=settings,
         )
         assert risk == TransparencyRisk.HIGH
@@ -613,7 +616,7 @@ class TestTransparencySettings:
             score=85,
             industry_funding=False,
             data_availability="full_open",
-            coi_disclosed=True,
+            coi_disclosure=COI_DISCLOSED,
             settings=settings,
         )
         assert risk == TransparencyRisk.LOW

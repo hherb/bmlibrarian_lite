@@ -11,6 +11,8 @@ import pytest
 from bmlibrarian_lite.agents.reporting_agent import LiteReportingAgent
 from bmlibrarian_lite.data_models import Citation, LiteDocument
 from bmlibrarian_lite.transparency.transparency_models import (
+    COI_DISCLOSED,
+    COI_NOT_STATED,
     TransparencyResult,
     TransparencyRisk,
 )
@@ -82,7 +84,7 @@ def high_risk_transparency():
         risk_level=TransparencyRisk.HIGH,
         industry_funding_detected=True,
         industry_funding_confidence=0.95,
-        coi_disclosed=False,
+        coi_disclosure=COI_NOT_STATED,
     )
 
 
@@ -93,7 +95,7 @@ def low_risk_transparency():
         document_id="pmid-67890",
         transparency_score=85,
         risk_level=TransparencyRisk.LOW,
-        coi_disclosed=True,
+        coi_disclosure=COI_DISCLOSED,
     )
 
 

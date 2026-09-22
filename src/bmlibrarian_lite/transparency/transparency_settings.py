@@ -31,7 +31,10 @@ class ReportRiskThreshold(Enum):
 
 DEFAULT_INLINE_WARNING_TEMPLATES: dict[str, str] = {
     "industry_funding": "⚠️ funding concerns",
-    "missing_coi": "⚠️ COI not disclosed",
+    # "in the article", not a bare "not disclosed": the flag is raised
+    # only for an article we read that declares nothing, never for one
+    # whose disclosure was not assessed (#352).
+    "missing_coi": "⚠️ No COI statement in the article",
     "missing_results": "⚠️ results not posted",
     "data_not_available": "⚠️ data not shared",
     "multiple_risks": "⚠️ transparency concerns",
@@ -57,7 +60,9 @@ class TransparencySettings:
         score_threshold: Score below this = high risk (0-100)
         tier_downgrade_amount: How many tiers to downgrade for high risk (1-4)
         industry_funding_triggers_downgrade: Downgrade if industry funding + restricted data
-        missing_coi_triggers_downgrade: Downgrade if COI not disclosed
+        missing_coi_triggers_downgrade: Downgrade when the article was
+            read and carries no conflict of interest statement. A study
+            whose disclosure was never assessed is not downgraded.
         missing_trial_results_triggers_downgrade: Downgrade if trial results not posted
         analyze_in_background: Run analysis in background thread
         max_concurrent_analyses: Rate limiting for API calls (1-10)

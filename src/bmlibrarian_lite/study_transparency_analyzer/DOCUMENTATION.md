@@ -558,7 +558,10 @@ section_headers = {
 
 Full-text sections take priority over API-sourced data:
 
-1. **COI:** Full-text `coi` section > PubMed COI statement > Europe PMC
+1. **COI:** Full-text `coi` section > PubMed COI statement. Nothing else
+   is consulted: only the article's own text can establish that a study
+   declares no conflicts, and neither source having been read is recorded
+   as `not_assessed` rather than charged (#352).
 2. **Data availability:** Full-text `data_sharing` section > Europe PMC XML extraction
 
 ### Example
@@ -661,11 +664,12 @@ class DataDisclosureLevel(Enum):
 ### ConflictOfInterest
 
 ```python
-@dataclass
+@dataclass(frozen=True)
 class ConflictOfInterest:
-    statement: str                         # Raw COI statement text
+    statement: str                         # Raw COI statement text, empty unless DISCLOSED
+    disclosure_level: COIDisclosureLevel   # DISCLOSED / NOT_STATED / NOT_ASSESSED, no default
     has_industry_ties: bool                # Whether industry ties detected
-    disclosed_relationships: List[str]     # Extracted relationship descriptions
+    disclosed_relationships: Tuple[str, ...]  # Extracted relationship descriptions
     confidence: float                      # 0.0 to 1.0
 ```
 
@@ -736,8 +740,12 @@ class StudyTransparencyAnalyzer:
 ### Standalone Functions
 
 ```python
-def analyze_coi_statement(coi_text: Optional[str]) -> ConflictOfInterest:
-    """Analyze a COI statement for industry ties using multi-pass detection."""
+def analyze_coi_statement(coi_text: str) -> ConflictOfInterest:
+    """Analyze a COI statement for industry ties using multi-pass detection.
+
+    Raises ValueError on a blank statement: which kind of absence it is, is
+    the caller's to say, through ConflictOfInterest.not_stated() or
+    .not_assessed()."""
 
 def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
     """Analyze a data availability statement with effective refusal detection."""
@@ -823,7 +831,7 @@ KEY FINDINGS:
   * Industry Funding: NO
   * Data Availability: Not Available
   * Trial Registration: None found
-  * COI Disclosed: YES (confidence: 98%)
+  * COI Statement: Disclosed (industry ties)
 
 RISK INDICATORS:
   * Authors have disclosed industry financial ties
@@ -942,7 +950,8 @@ The transparency score (0-100) is calculated from a base of 50 points:
 | **COI Disclosure** | | |
 | Has COI statement (no industry ties) | +5 | Credit for disclosure |
 | Has COI statement (with industry ties) | 0 | +5 for disclosure, -5 for industry ties |
-| No COI statement | -5 | |
+| No COI statement, article read | -5 | `NOT_STATED`: the study's own answer |
+| COI never assessed | 0 | `NOT_ASSESSED`: no source carrying one was read |
 | **Trial Registration** | | |
 | Has registration | +10 | |
 | Results posted (compliant) | +5 | |
