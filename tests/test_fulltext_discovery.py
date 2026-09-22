@@ -36,7 +36,7 @@ from bmlibrarian_lite.fulltext_discovery import (
     FulltextDiscoverer,
     discover_fulltext,
 )
-from bmlibrarian_lite.europepmc import ArticleInfo
+from bmlibrarian_lite.europepmc import ArticleInfo, ArticleInfoFetch
 
 
 class TestFulltextSourceType:
@@ -153,7 +153,7 @@ class TestFulltextDiscovererDiscover:
             has_fulltext_xml=True,
             year=2024,
         )
-        mock_client.get_article_info.return_value = mock_info
+        mock_client.fetch_article_info.return_value = ArticleInfoFetch.served(mock_info)
         mock_client.get_fulltext_xml.return_value = "<article>Test</article>"
         mock_client.xml_to_markdown.return_value = "# Converted Content"
         mock_client_class.return_value = mock_client
@@ -187,7 +187,7 @@ class TestFulltextDiscovererDiscover:
         with patch("bmlibrarian_lite.fulltext_discovery.EuropePMCClient") as mock_client_class:
             mock_client = MagicMock()
             mock_info = ArticleInfo(pmid="12345", has_fulltext_xml=False)
-            mock_client.get_article_info.return_value = mock_info
+            mock_client.fetch_article_info.return_value = ArticleInfoFetch.served(mock_info)
             mock_client_class.return_value = mock_client
 
             with patch("bmlibrarian_lite.fulltext_discovery.extract_pdf_text") as mock_extract:
@@ -207,7 +207,7 @@ class TestFulltextDiscovererDiscover:
 
         with patch("bmlibrarian_lite.fulltext_discovery.EuropePMCClient") as mock_client_class:
             mock_client = MagicMock()
-            mock_client.get_article_info.return_value = None
+            mock_client.fetch_article_info.return_value = ArticleInfoFetch.absent()
             mock_client_class.return_value = mock_client
 
             discoverer = FulltextDiscoverer()
@@ -215,7 +215,12 @@ class TestFulltextDiscovererDiscover:
             result = discoverer.discover_fulltext(pmid="12345", skip_pdf=True)
 
         assert result.success is False
-        assert "PDF download skipped" in result.error
+        # The sentence withholds the claim rather than making it: the GUI
+        # shows result.error verbatim, and "No full-text available" for a
+        # download nobody attempted is a claim about the article (#355).
+        assert "was skipped" in result.error
+        assert "not established" in result.error
+        assert not result.absence_established
 
     @patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext")
     def test_cancel_stops_discovery(self, mock_find: MagicMock) -> None:
@@ -244,7 +249,7 @@ class TestFulltextDiscovererDiscover:
 
         with patch("bmlibrarian_lite.fulltext_discovery.EuropePMCClient") as mock_client_class:
             mock_client = MagicMock()
-            mock_client.get_article_info.return_value = None
+            mock_client.fetch_article_info.return_value = ArticleInfoFetch.absent()
             mock_client_class.return_value = mock_client
 
             discoverer = FulltextDiscoverer(progress_callback=callback)
@@ -267,7 +272,7 @@ class TestFulltextDiscovererDiscover:
                 year=2025,
                 has_fulltext_xml=False,
             )
-            mock_client.get_article_info.return_value = mock_info
+            mock_client.fetch_article_info.return_value = ArticleInfoFetch.served(mock_info)
             mock_client_class.return_value = mock_client
 
             discoverer = FulltextDiscoverer()

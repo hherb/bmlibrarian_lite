@@ -46,12 +46,18 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from .constants import SERVICE_EUROPE_PMC
+from .constants import (
+    SERVICE_EUROPE_PMC,
+    SERVICE_PDF_DOWNLOAD,
+    SERVICE_RETRIEVED_PDF,
+)
 from .data_models import (
     LookupRecord,
+    LookupSkipReason,
     RequestFailure,
     RequestFailureKind,
     SourceLookupFailure,
+    SourceLookupSkipped,
 )
 from .europepmc import EuropePMCClient, ArticleInfo
 from .search_failures import request_failure_from_exception
@@ -129,17 +135,21 @@ class FulltextResult:
     def absence_established(self) -> bool:
         """Whether this article was shown to have no retrievable full text.
 
-        Two conditions, because either alone lies. A ``NOT_FOUND`` resting
-        on a lookup that was never made or never answered is our silence,
-        not the article's; and a lookup record is only meaningful once the
-        chain has finished answering.
+        Three conditions, because any one alone lies. A ``NOT_FOUND``
+        resting on a lookup that was never made or never answered is our
+        silence, not the article's; a lookup record is only meaningful once
+        the chain has finished answering; and a result that *served* a full
+        text has plainly not established that there is none -- ``success``
+        and ``source_type`` are set by hand at every construction site, so
+        this does not take their agreement on trust.
 
         Returns:
             ``True`` only when every lookup that could be made was made and
             answered, and none of them holds a full text.
         """
         return (
-            self.source_type is FulltextSourceType.NOT_FOUND
+            not self.success
+            and self.source_type is FulltextSourceType.NOT_FOUND
             and not self.lookups.anything_unasked
         )
 
@@ -322,8 +332,17 @@ class FulltextDiscoverer:
                         file_path=cached_pdf,
                         lookups=lookups,
                     )
+                logger.warning(
+                    "No text could be extracted from the cached PDF for this "
+                    "article."
+                )
             except Exception as e:
                 logger.warning(f"Failed to extract text from cached PDF: {e}")
+            # We hold this article's PDF and cannot read it. Recorded, not
+            # only logged: without this the run continues and can end in a
+            # NOT_FOUND whose record says every lookup answered, so a corrupt
+            # cache entry becomes "this article has no full text" (rule 8).
+            lookups = lookups.merged(_unreadable_pdf_record())
 
         if self._cancelled:
             return self._cancelled_result(lookups)
@@ -331,12 +350,26 @@ class FulltextDiscoverer:
         if skip_pdf:
             # A lookup the caller chose not to make. It leaves exactly the
             # empty result an article without a PDF leaves, so it must not
-            # read as one (#355).
+            # read as one (#355). The sentence says so too: "No full-text
+            # available" is a claim about the article, and the GUI shows
+            # this string to the user verbatim.
             return FulltextResult(
                 success=False,
                 source_type=FulltextSourceType.NOT_ASSESSED,
-                error="No full-text available (PDF download skipped)",
-                lookups=lookups,
+                error=(
+                    "The PDF download was skipped, so whether a full text "
+                    "is available was not established."
+                ),
+                lookups=lookups.merged(
+                    LookupRecord(
+                        skipped=(
+                            SourceLookupSkipped(
+                                SERVICE_PDF_DOWNLOAD,
+                                LookupSkipReason.NOT_REQUESTED,
+                            ),
+                        )
+                    )
+                ),
             )
 
         # 4. Try PDF download as last resort
@@ -375,15 +408,46 @@ class FulltextDiscoverer:
     ) -> FulltextResult:
         """Try to get full-text from Europe PMC XML API."""
         try:
-            # First check if article is in Europe PMC
-            info = self._europepmc.get_article_info(pmid=pmid, pmcid=pmcid, doi=doi)
+            # First check if article is in Europe PMC. The typed fetch, not
+            # ``get_article_info``: that answers "not in Europe PMC" and "we
+            # could not ask" with one None, and reading the second as the
+            # first let a throttled Europe PMC leave an empty lookup record,
+            # so the chain ended NOT_FOUND with nothing unasked and MCP told
+            # a calling agent the absence was established (#363, #354).
+            fetch = self._europepmc.fetch_article_info(
+                pmid=pmid, pmcid=pmcid, doi=doi
+            )
+            info = fetch.info
 
-            if not info:
+            if fetch.failure is not None:
+                logger.warning(
+                    "Europe PMC could not be asked about this article (%s).",
+                    fetch.failure.describe(),
+                )
+                return FulltextResult(
+                    success=False,
+                    source_type=FulltextSourceType.NOT_ASSESSED,
+                    error=(
+                        f"Europe PMC could not be asked about this article "
+                        f"({fetch.failure.describe()})."
+                    ),
+                    lookups=LookupRecord(
+                        failures=(
+                            SourceLookupFailure(
+                                SERVICE_EUROPE_PMC, fetch.failure
+                            ),
+                        )
+                    ),
+                )
+
+            if info is None:
+                # Europe PMC answered, and holds no record. An absence about
+                # this source, and the chain goes on to ask the others.
                 logger.debug("Article not found in Europe PMC")
                 return FulltextResult(
                     success=False,
-                    source_type=FulltextSourceType.NOT_FOUND,
-                    error="Article not found in Europe PMC",
+                    source_type=FulltextSourceType.NOT_ASSESSED,
+                    error="Europe PMC holds no record of this article.",
                 )
 
             # Update doc_dict with info from Europe PMC
@@ -394,12 +458,17 @@ class FulltextDiscoverer:
                 doc_dict['year'] = info.year
 
             if not info.has_fulltext_xml:
+                # One source's answer about itself, not the chain's answer
+                # about the article: the PDF paths below have not been asked
+                # yet. NOT_FOUND is reserved for the end of the chain, so
+                # that no intermediate can be mistaken for an established
+                # absence if it ever escapes (#354).
                 logger.debug(f"No full-text XML available for {info.pmcid or info.pmid}")
                 return FulltextResult(
                     success=False,
-                    source_type=FulltextSourceType.NOT_FOUND,
+                    source_type=FulltextSourceType.NOT_ASSESSED,
                     article_info=info,
-                    error="Full-text XML not available in Europe PMC",
+                    error="Europe PMC holds no full-text XML for this article.",
                 )
 
             # Get full-text XML
@@ -611,8 +680,20 @@ class FulltextDiscoverer:
                             file_path=pdf_result.file_path,
                             lookups=pdf_result.lookups,
                         )
+                    logger.warning(
+                        "No text could be extracted from the PDF downloaded "
+                        "for this article, so whether it holds a full text "
+                        "is not assessed."
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to extract text from downloaded PDF: {e}")
+                # The sources answered and one of them served the document.
+                # Our own extractor is what came up empty, so this is not
+                # the article's answer: returning NOT_FOUND here made
+                # ``absence_established`` true and MCP told a calling agent
+                # no full text exists, with the PDF sitting in the cache
+                # (#354, the rule of #359 one layer down).
+                return _pdf_unreadable(pdf_result)
 
             # A source that demanded payment answered about itself, not
             # about the article: a free copy may exist elsewhere, and
@@ -646,10 +727,18 @@ class FulltextDiscoverer:
             logger.warning(
                 "PDF discovery could not be completed (%s).", failure.describe()
             )
+            # Records its own failure, unlike its three siblings: without
+            # this the service that went unread is named nowhere, and the
+            # reader is told only that something went wrong.
             return FulltextResult(
                 success=False,
                 source_type=FulltextSourceType.NOT_ASSESSED,
                 error=f"No PDF could be looked for ({failure.describe()}).",
+                lookups=LookupRecord(
+                    failures=(
+                        SourceLookupFailure(SERVICE_PDF_DOWNLOAD, failure),
+                    )
+                ),
             )
 
 
@@ -699,6 +788,48 @@ def _classify(exc: Exception) -> RequestFailure:
     if isinstance(exc, requests.RequestException):
         return request_failure_from_exception(exc)
     return RequestFailure(RequestFailureKind.REQUEST_FAILED)
+
+
+def _unreadable_pdf_record() -> LookupRecord:
+    """Record that a PDF we hold could not be turned into text.
+
+    The service named is the document's own PDF rather than a lookup host:
+    no source refused us, and telling the reader "Unpaywall could not be
+    asked" for a file we already have would point them at the wrong thing.
+
+    Returns:
+        A record naming the retrieved PDF as the source that went unread.
+    """
+    return LookupRecord(
+        failures=(
+            SourceLookupFailure(
+                SERVICE_RETRIEVED_PDF,
+                RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
+            ),
+        )
+    )
+
+
+def _pdf_unreadable(pdf_result: PDFDiscoveryResult) -> FulltextResult:
+    """Say that a PDF we obtained could not be turned into text.
+
+    Args:
+        pdf_result: The successful discovery whose file would not read,
+            whose own lookup record is carried forward.
+
+    Returns:
+        A result establishing nothing, naming the PDF as the unread source.
+    """
+    return FulltextResult(
+        success=False,
+        source_type=FulltextSourceType.NOT_ASSESSED,
+        error=(
+            "A PDF was retrieved for this article but no text could be "
+            "extracted from it, so whether it holds a full text was not "
+            "established."
+        ),
+        lookups=pdf_result.lookups.merged(_unreadable_pdf_record()),
+    )
 
 
 def _europepmc_pdf_unassessed(

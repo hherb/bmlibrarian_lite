@@ -186,8 +186,9 @@ logged **and reported**).
     second is the reader's to act on: an unconfigured Unpaywall earns a
     sentence of advice, a throttled one does not (#355). Advice the reader
     cannot act on reads as confidently as advice they can (#335).
-  - **`NOT_FOUND` is a claim about the article, so only one path may reach
-    it.** `FulltextDiscoverer` mapped every failure, every cancel and every
+  - **`NOT_FOUND` is a claim about the article, so only the end of the
+    chain may reach it.** Every per-source "this one holds nothing" is
+    `NOT_ASSESSED`, because the sources after it have not been asked yet. `FulltextDiscoverer` mapped every failure, every cancel and every
     skipped download to it, erasing #347's distinction one layer up (#354).
     Whether an absence was established is now derived --
     `FulltextResult.absence_established` is true only when the source type
@@ -226,7 +227,8 @@ logged **and reported**).
   shown to have it read, or the whole fix can silently become "nothing is
   ever fetched".
 
-**Ports.** Python is canonical and has landed this for every path it has:
+**Ports.** Python is canonical and has landed this for every path listed
+here (see *Still outstanding* below for what it has not):
 the Europe PMC full-text fetch behind data availability and the three
 full-text discovery lookups (#346, #347), the conflict of interest
 disclosure (#352, #348, #351), and the sources nobody asked -- data
@@ -249,11 +251,46 @@ studies nobody read.
 before checking: the download paths still put the provider's own error text
 in reader-facing fields (#350); nothing re-analyses a stored row, so a
 corrected analyser reaches no existing document (#360); `analysis_failed`
-has no connected slot (#361); a DOI-only document never asks PubMed at all,
-so its record is honestly reported as unread rather than being read (#362);
-and `europepmc.get_article_info` still answers "not in Europe PMC" and "we
-could not ask" with one `None` (#363), which is why a Europe PMC that holds
-no record contributes nothing to the lookup record.
+has no connected slot (#361); and a DOI-only document never asks PubMed at
+all, so its record is honestly reported as unread rather than being read
+(#362).
+
+**Four feed sites found in review of the above.** The types were right and
+the claim was still made, because a correct `absence_established` can only
+be as honest as what it is fed:
+
+- **Europe PMC holding no open-access copy is not the article saying
+  nothing.** `FullTextFetch.absent()` sets neither `failure` nor `xml`, so
+  it fell past the unreachable guard *and* the sections guard onto
+  `analyze_data_availability(None)` -- `NOT_STATED`, five points, no
+  warning. Every embargoed deposit and author manuscript in PMC but outside
+  the OA subset. A three-state value needs three arms; two arms and a
+  fall-through is how the third state becomes the default (#353).
+- **A PDF we hold and cannot read is not an article without one.** An empty
+  text extraction fell through to `NOT_FOUND` with a record saying every
+  lookup answered -- which is true, and irrelevant: our extractor is what
+  came up empty. *Unparsed is not absent*, one layer below #359 (#354).
+- **An unreachable Europe PMC recorded nothing.** `get_article_info`
+  answered "not in Europe PMC" and "we could not ask" with one `None`
+  (#363, now fixed): `fetch_article_info` returns `ArticleInfoFetch`, and
+  `get_article_info` keeps the `Optional` for callers that only want the
+  record. Until then a throttled Europe PMC left an empty record, so the
+  chain's `NOT_FOUND` was an *established* absence and MCP stated it.
+- **A source that answered must never be described as unread.**
+  `pubmed_record_read` / `crossref_record_read` are set only when a record
+  is *served*, so a CrossRef 404 -- the absence the design works hard to
+  preserve -- produced "CrossRef was not read". The inverse of the error the
+  types exist to prevent, so the flags now carry `*_record_unreachable`
+  beside them and the wording is chosen from the state (#356).
+- **A withheld claim must stay withheld at every surface.** The risk
+  indicator still read an empty `trial_registrations` as "unregistered"
+  while the warnings said "not assessed"; `format_report_summary` still
+  printed "Trial Registration: None found" and "Industry Funding: NO"; and
+  the CSV still exported `0` and `False`. A caveat elsewhere in the document
+  does not withhold a claim under KEY FINDINGS.
+- `ClinicalTrialsClient.get_study` had the same `Optional[Dict]` shape two
+  screens below `RecordFetch`, so a mistyped accession read as an outage.
+  Now a `RecordFetch` too.
 
 ## What a stage records
 

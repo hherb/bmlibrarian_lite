@@ -383,9 +383,10 @@ class SourceLookupFailure:
         service: The source that could not be asked, named as the reader
             knows it, for example ``"Unpaywall"``. Stripped on construction,
             because equality of this string is the grouping contract:
-            :func:`~bmlibrarian_lite.analysis_failures.unreachable_lookups_clause`
-            names each service once, and a stray space would make one
-            throttled host read to the reader as two.
+            :func:`~bmlibrarian_lite.analysis_failures.unasked_lookups_clause`
+            names each service once -- and names a service that both failed
+            and was skipped by its failure -- so a stray space would make
+            one throttled host read to the reader as two.
         failure: Why, carrying the kind and HTTP status only -- never the
             provider's text, which for Unpaywall embeds the user's email
             address (#330).
@@ -424,8 +425,13 @@ class LookupSkipReason(Enum):
     NOT_CONFIGURED = "not_configured"
 
     #: Nothing was known about the article that this service could be asked
-    #: about, such as an id conversion with neither a PMC ID nor a PMID.
+    #: about, such as Unpaywall when no DOI was resolved.
     NO_IDENTIFIER = "no_identifier"
+
+    #: The caller chose not to make this lookup on this run, such as a
+    #: search that asks for metadata only. Nobody's fault and nothing to
+    #: configure, but it still leaves the question open (#355).
+    NOT_REQUESTED = "not_requested"
 
 
 #: What each skip reason tells the reader, as a parenthetical in the clause.
@@ -434,7 +440,16 @@ class LookupSkipReason(Enum):
 _SKIP_REASONS: dict[LookupSkipReason, str] = {
     LookupSkipReason.NOT_CONFIGURED: "not configured",
     LookupSkipReason.NO_IDENTIFIER: "no identifier to ask it about",
+    LookupSkipReason.NOT_REQUESTED: "not requested on this run",
 }
+
+# The wording map is what :meth:`SourceLookupSkipped.describe` indexes, and
+# its docstring promises the enum and its words cannot drift apart. Nothing
+# enforced that, so a member added without wording would raise a bare
+# KeyError while rendering a report. Checked here, at import, instead.
+assert set(_SKIP_REASONS) == set(LookupSkipReason), (
+    "every LookupSkipReason needs the words the reader is told"
+)
 
 
 @dataclass(frozen=True)
@@ -514,7 +529,8 @@ class LookupRecord:
 
         Merging rather than replacing: a caller that overwrote the record it
         was given would silently drop the layer below's findings, which is
-        how ``with_lookup_failures`` came to merge (#349).
+        how :meth:`DiscoveryResult.with_lookups` -- then named
+        ``with_lookup_failures`` -- came to merge (#349).
 
         Args:
             other: The record to add to this one.

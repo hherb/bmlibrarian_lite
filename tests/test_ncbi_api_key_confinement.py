@@ -402,6 +402,41 @@ class TestBatchAnalyzerExport:
         assert FAKE_API_KEY not in exported
         assert_key_arrived_outside_the_url(rate_limiting_server)
 
+    def test_a_failed_analysis_exports_its_error_without_the_key(
+        self,
+        rate_limiting_server: RecordingServer,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """``result.errors`` is still a live route to the user's file (#196).
+
+        The caveat route above replaced this test's predecessor, but it did
+        not replace the route: ``batch_analyzer`` still records ``str(e)``
+        for any exception ``analyze`` raises, and ``str(e)`` on a requests
+        exception carries the URL. Something must exercise it, or the next
+        exception to escape ``analyze`` writes the key to a file.
+        """
+        monkeypatch.setattr(PubMedClient, "BASE_URL", rate_limiting_server.url)
+        monkeypatch.setattr(StudyTransparencyAnalyzer, "_discover_fulltext", _no_fulltext)
+        monkeypatch.setattr(
+            StudyTransparencyAnalyzer, "analyze", _raise_from_a_real_request
+        )
+        batch = BatchAnalyzer(TEST_EMAIL, FAKE_API_KEY, max_workers=1)
+
+        result = batch.analyze_batch([{"pmid": TEST_PMID}], delay_between=0.0)
+
+        assert result.errors, "the exception must be recorded, not swallowed"
+        recorded = " ".join(result.errors.values())
+        assert RATE_LIMITED_REASON in recorded
+        assert FAKE_API_KEY not in recorded
+
+        export_path = tmp_path / "failed.json"
+        export_to_json(result, str(export_path))
+        exported = export_path.read_text(encoding="utf-8")
+        assert RATE_LIMITED_REASON in exported
+        assert FAKE_API_KEY not in exported
+        assert_key_arrived_outside_the_url(rate_limiting_server)
+
     def test_an_unread_pubmed_does_not_end_the_analysis(
         self,
         rate_limiting_server: RecordingServer,

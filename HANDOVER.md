@@ -81,16 +81,72 @@ Python only. Compress into **Recently landed** once merged.
   NOT_ASSESSED either way. Both controls now assert the **caveat**, which
   is what distinguishes "nobody read the article" from "we read it and
   recognised nothing in it".
-- **Verified:** `pytest tests/` — 2133 passed, 3 xfailed; `lint_delta.py`
-  **0 new** ruff or mypy findings. `tests/test_absence_needs_a_lookup.py`
-  is 65 tests; the sweep is **39 mutation sites, 39 caught, no survivors**,
-  across six modules, under both guards (a printed `__file__` probe on the
-  copy, and a baseline asserting 322 passed).
+- **A review pass found four feed sites and two report surfaces** that
+  still made the claim. The types were right and were being handed
+  non-answers — worth reading before adding a fifth producer, because
+  every one of these passed the suite:
+  - **Europe PMC holding no open-access copy is not the article saying
+    nothing.** `FullTextFetch.absent()` sets neither `failure` nor `xml`,
+    so it fell past the unreachable guard **and** the sections guard onto
+    `analyze_data_availability(None)` — `NOT_STATED`, −5, **no warning at
+    all**, for every embargoed deposit and author manuscript in PMC but
+    outside the OA subset. #353's own harm in the one branch #353 left.
+    *A three-state value needs three arms; two and a fall-through makes
+    the third state the default.*
+  - **A PDF we hold and cannot read is not an article without one.** An
+    empty text extraction fell through to `NOT_FOUND` with a record saying
+    every lookup answered — true, and irrelevant: our extractor came up
+    empty. `absence_established` was **true**, so MCP stated the absence
+    with the PDF in the cache. Now `_pdf_unreadable`, and the cached-PDF
+    branch records it too instead of logging and stepping over it.
+  - **#363 is fixed, because it was load-bearing.** `get_article_info`
+    answered "not in Europe PMC" and "we could not ask" with one `None`, so
+    a *throttled* Europe PMC left an empty record and the chain's
+    `NOT_FOUND` became an established absence. New
+    `EuropePMCClient.fetch_article_info` → `ArticleInfoFetch`;
+    `get_article_info` keeps its `Optional` for callers that only want the
+    record.
+  - **A source that answered must never be called unread.**
+    `pubmed_record_read` / `crossref_record_read` are set only when a record
+    is *served*, so a CrossRef 404 — the absence this design works hardest
+    to preserve — produced "CrossRef was not read". They now carry
+    `*_record_unreachable` beside them and `unread_records_clause` picks the
+    words from the state.
+  - **A withheld claim must stay withheld at every surface.** The risk
+    indicator read an empty `trial_registrations` as "unregistered" while
+    the warnings said "not assessed"; `format_report_summary` printed
+    "Trial Registration: None found" and "Industry Funding: NO"; the CSV
+    exported `0` and `False`. New `trial_registration_assessed` and
+    `funding_was_assessed()` gate all five. **A caveat elsewhere in the
+    document does not withhold a claim under KEY FINDINGS.**
+  - `ClinicalTrialsClient.get_study` had the same `Optional[Dict]` two
+    screens below `RecordFetch`, so a mistyped accession read as an outage.
+    Now a `RecordFetch` too.
+- **Two survivors were the assertion, not the code.** The analyser-side
+  nudge test matched `"onfigur"`, which the skip reason's own phrase
+  ("not configured") already contains, so `configuration_nudge` could be
+  deleted; and both funding-caveat tests matched "CrossRef could not be
+  read", which `_fetch_basic_metadata` **also** emits. Assert the built
+  sentence, not a substring that another caveat shares.
+- **Verified:** `pytest tests/` — **2168 passed**, 3 xfailed;
+  `lint_delta.py` **0 new** ruff or mypy findings (net −7 ruff, −6 mypy).
+  `tests/test_absence_needs_a_lookup.py` is **97 tests**; the second sweep
+  is **16 sites, 16 caught**, under both guards (a `__file__` probe that
+  the mutated copy is the imported one, and a green baseline).
+- **The sweep's restore must not use `git`, and must not use `for f in
+  $FILES` in zsh.** zsh does not word-split unquoted parameters, so the
+  restore silently copied nothing and six mutations accumulated in the
+  tree; every later result was meaningless. Drive the sweep from Python and
+  assert the file matches its backup after each restore.
 - **Expect scores to move.** Data availability goes from −5 to neutral for
   the majority of articles, and `RISK_INDICATOR_DATA_EFFECTIVELY_UNAVAILABLE`
   / `..._RESTRICTED_DATA` stop firing for papers nobody read. Stored rows
   keep their old scores (#145) and old and new documents will disagree
-  until **#360**.
+  until **#360**. Data availability moves again after the review pass: PMC
+  articles Europe PMC serves no OA copy for go from −5 to neutral too.
+- **Still deferred:** #350, #360, #361, #362, and #357 / #300 for Swift and
+  Android. **#363 is now closed** as part of this slice — it was not
+  cosmetic: it was what let a throttled Europe PMC establish an absence.
 
 ## Recently landed (context)
 

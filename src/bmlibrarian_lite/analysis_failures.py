@@ -44,11 +44,17 @@ here turn either record into what a reader sees.
   cancelling is not failing, but a failure is never hidden (golden rule 8).
 - :func:`unreachable_source_caveat` says a source could not be read, so what
   it would have told us is not assessed rather than absent (#346).
-  :func:`unreachable_lookups_clause` names the sources a full-text discovery
-  could not ask, each once; :func:`no_pdf_sources_message`,
+  :func:`unasked_lookups_clause` names every source that went unasked, failed
+  or skipped, each once; :func:`no_pdf_sources_message`,
   :func:`paywall_message` and :func:`with_unestablished_access` are the three
   sentences that carry it to the reader, and none of them claims a licence
-  that the lookup we could not make was the one to establish (#347).
+  that the lookup we could not make was the one to establish (#347, #355).
+  :func:`configuration_nudge` adds the remedy, but only where the reader has
+  one to act on (#335). :func:`unreachable_lookups_clause` is the failures-only
+  spelling, kept for callers that hold no skips.
+- :func:`unread_records_clause` does the same for the metadata sources behind
+  funding, naming a source that *answered* "no such record" for what it said
+  rather than calling it unread (#356).
 - :func:`unassessed_caveat` is the one sentence shape all of these share --
   why something could not be checked, and that the result is therefore not a
   finding against the study. :func:`coi_not_assessed_caveat` builds the two
@@ -477,8 +483,10 @@ def unasked_lookups_clause(record: LookupRecord) -> str:
         record: What went unasked; may be empty.
 
     Returns:
-        For example ``"Unpaywall (not configured) and doi.org (HTTP 429 Too
-        Many Requests)"``. Empty when every lookup was made and answered.
+        For example ``"doi.org (HTTP 429 Too Many Requests) and Unpaywall
+        (not configured)"`` -- failures are named before skips, because the
+        failures are what seed the mapping. Empty when every lookup was made
+        and answered.
     """
     named = _named(record.failures)
     for skip in record.skipped:
@@ -562,6 +570,40 @@ def _and_list(names: Sequence[str]) -> str:
     if len(names) == 1:
         return names[0]
     return f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def unread_records_clause(
+    unreachable: Sequence[str], absent: Sequence[str]
+) -> str:
+    """Name the sources whose record did not reach us, each as it answered.
+
+    A source that could not be reached and a source that answered "I hold no
+    such article" both leave the analysis without a record, and the first
+    wording for this said "was not read" of both. That is false of the
+    second and inverts the distinction
+    :class:`~bmlibrarian_lite.data_models.RecordFetch` exists to draw: a
+    CrossRef 404 *was* read, and told us something (#356).
+
+    Args:
+        unreachable: Sources that could not be read at all; may be empty.
+        absent: Sources that answered, and hold no record of the study; may
+            be empty.
+
+    Returns:
+        A clause naming each source and how it answered, for example
+        ``"CrossRef could not be read and PubMed holds no record of this
+        study"``. Empty when every source that could be asked served a
+        record, which is the ordinary case and says nothing to the reader.
+    """
+    clauses = []
+    if unreachable:
+        clauses.append(f"{_and_list(list(unreachable))} could not be read")
+    if absent:
+        held = "hold" if len(absent) > 1 else "holds"
+        clauses.append(
+            f"{_and_list(list(absent))} {held} no record of this study"
+        )
+    return _and_list(clauses) if clauses else ""
 
 
 def unestablished_access_clause(record: LookupRecord) -> str:
@@ -661,7 +703,8 @@ def no_pdf_sources_message(record: LookupRecord) -> str:
         record: What went unasked; may be empty.
 
     Returns:
-        Two to four sentences for the reader, ending in a full stop.
+        Two or three sentences for the reader, ending in a full stop: the
+        third is the configuration advice, when there is any to give.
     """
     if not record.anything_unasked:
         return (

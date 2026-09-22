@@ -243,15 +243,27 @@ class TestDataAvailabilityFromAnUnreachableSource:
             "control: a level that is about the study must raise one"
         )
 
-    def test_a_reachable_source_with_no_statement_still_says_not_stated(
+    def test_a_read_full_text_with_no_statement_still_says_not_stated(
         self, analyzer
     ) -> None:
         """The control: the fix must not mute the honest finding.
 
         Without this, returning UNKNOWN unconditionally would pass every
         other test in this class.
+
+        The reachable source has to *serve the article's text* for its
+        silence to be the article's. This test used to stub a 404, but
+        "Europe PMC holds no open-access copy" is a fact about Europe PMC's
+        holdings, not about what the paper states -- see the sibling test
+        below, which pins that case the other way (#353).
         """
-        analyzer.europepmc.session = RaisingSession(_http_error(404))
+        analyzer.europepmc.get_full_text_xml = lambda *_a, **_k: (
+            FullTextFetch.served(
+                "<article><body>"
+                "<sec><title>Methods</title><p>We did things.</p></sec>"
+                "</body></article>"
+            )
+        )
         report = self._report()
 
         analyzer._analyze_data_availability(report)
@@ -261,6 +273,29 @@ class TestDataAvailabilityFromAnUnreachableSource:
             is DataDisclosureLevel.NOT_STATED
         )
         assert not report.warnings
+
+    def test_no_open_access_copy_is_not_the_article_saying_nothing(
+        self, analyzer
+    ) -> None:
+        """A 404 is about Europe PMC's holdings, not the paper (#353).
+
+        Every sibling state in this branch was handled -- unreachable,
+        unparseable, parsed-but-sectionless -- and this one fell through to
+        ``analyze_data_availability(None)``, charging five points and
+        telling a clinician the study publishes no data statement, with no
+        warning at all. The population is every embargoed deposit and
+        author manuscript that is in PMC but outside the OA subset.
+        """
+        analyzer.europepmc.session = RaisingSession(_http_error(404))
+        report = self._report()
+
+        analyzer._analyze_data_availability(report)
+
+        assert (
+            report.data_availability.disclosure_level
+            is DataDisclosureLevel.UNKNOWN
+        )
+        assert any("open-access" in w for w in report.warnings)
 
 
 class TestUnreachableSourceCaveat:

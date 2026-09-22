@@ -252,7 +252,12 @@ TOOLS = [
             "Tries Europe PMC XML, cached PDFs, and PDF download in order. "
             "Returns markdown-formatted content. Also loads the document for "
             "subsequent ask_document calls: interrogation_available says "
-            "whether that succeeded, and interrogation_error why it did not."
+            "whether that succeeded, and interrogation_error why it did not. "
+            "On failure, absence_established says whether this article was "
+            "shown to have no retrievable full text. When it is false, the "
+            "sources were not all asked or did not all answer, so the absence "
+            "is ours and not the article's: do not report that no full text "
+            "exists."
         ),
         inputSchema={
             "type": "object",

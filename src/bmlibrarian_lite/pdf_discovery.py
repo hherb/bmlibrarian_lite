@@ -514,8 +514,9 @@ class PDFDiscoverer:
             self._emit_progress("discovery", "not_found")
             return DiscoveryResult(
                 success=False,
-                # A lookup we could not make says nothing about the licence,
-                # so the paywall claim is withheld when one failed (#347).
+                # A lookup we did not make says nothing about the licence,
+                # so the paywall claim is withheld whenever one went unasked
+                # -- skipped as well as failed (#347, #355).
                 error=no_pdf_sources_message(lookups),
                 lookups=lookups,
             )
@@ -902,20 +903,25 @@ class PDFDiscoverer:
             Unpaywall answered and knows of none; with a failure it means we
             never found out, which is not the same thing and must not reach
             the reader as one (#347).
+
+        Raises:
+            ValueError: If no Unpaywall email is configured. The caller
+                records a ``NOT_CONFIGURED`` skip instead of asking, and a
+                lookup that never happened has no answer to return.
         """
         sources: List[PDFSource] = []
 
         # Defensive: _discover_sources records a NOT_CONFIGURED skip rather
         # than calling here without an address (#355), so this is a guard
-        # against a future caller, not a live path. Returning "no sources,
-        # nothing failed" is what it must not become again -- that is
-        # exactly the silence #355 was opened for -- so it says so.
+        # against a future caller, not a live path. It raises rather than
+        # returning "no sources, nothing failed": that return value is the
+        # silence #355 was opened for, and a log line cannot stop a future
+        # caller acting on it. Unrepresentable beats documented.
         if not self.unpaywall_email:
-            logger.warning(
-                "Unpaywall was asked for %s with no email configured; no "
-                "lookup was made and none is recorded here.", doi,
+            raise ValueError(
+                "Unpaywall cannot be asked with no email configured; record "
+                "a NOT_CONFIGURED skip instead of calling this"
             )
-            return sources, None
 
         try:
             # Clean DOI

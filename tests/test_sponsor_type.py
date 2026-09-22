@@ -35,6 +35,11 @@ import re
 
 import pytest
 
+from bmlibrarian_lite.data_models import (
+    RecordFetch,
+    RequestFailure,
+    RequestFailureKind,
+)
 from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
     ACADEMIC_PATTERNS,
     GOVERNMENT_PATTERNS,
@@ -359,16 +364,16 @@ class _StubClinicalTrials:
         """
         self._sponsor_class = sponsor_class
 
-    def get_study(self, trial_id: str) -> dict:
+    def get_study(self, trial_id: str) -> RecordFetch:
         """Return a non-empty placeholder study.
 
         Args:
             trial_id: Ignored; the stub is indifferent to which trial is asked for.
 
         Returns:
-            A truthy placeholder, since only ``extract_trial_info`` reads it.
+            A served fetch, since only ``extract_trial_info`` reads it.
         """
-        return {"id": trial_id}
+        return RecordFetch.served({"id": trial_id})
 
     def extract_trial_info(self, study: dict) -> TrialRegistration:
         """Build a registration carrying the configured sponsor class.
@@ -389,21 +394,24 @@ class _StubClinicalTrials:
 class _UnreachableClinicalTrials:
     """Stand-in for a ClinicalTrials.gov client that cannot reach the registry.
 
-    ``ClinicalTrialsClient.get_study`` catches ``RequestException``, logs it and
-    returns ``None``, so an outage is indistinguishable from an unregistered
-    study to everything downstream. This models that return.
+    ``ClinicalTrialsClient.get_study`` catches ``RequestException`` and
+    returns an unreachable fetch. Before #356 it returned ``None``, which an
+    outage shared with a registry that holds no such trial -- so the two
+    reached the reader as one sentence. This models the outage.
     """
 
-    def get_study(self, trial_id: str) -> None:
-        """Return nothing, as the real client does on a request failure.
+    def get_study(self, trial_id: str) -> RecordFetch:
+        """Answer as the real client does on a request failure.
 
         Args:
             trial_id: Ignored.
 
         Returns:
-            ``None``, always.
+            An unreachable fetch, always.
         """
-        return None
+        return RecordFetch.unreachable(
+            RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=503)
+        )
 
 
 class TestTheTrialRegistryUpgrade:

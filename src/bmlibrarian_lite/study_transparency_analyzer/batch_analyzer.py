@@ -22,6 +22,7 @@ from .study_transparency_analyzer import (
     SponsorType,
     DataDisclosureLevel,
     COIDisclosureLevel,
+    funding_was_assessed,
     ResultsComplianceStatus
 )
 
@@ -294,13 +295,29 @@ def export_to_csv(result: BatchResult, filepath: str):
                 'title': (report.title or '')[:100],  # Truncate long titles
                 'journal': report.journal or '',
                 'sponsor_type': report.sponsor_type.value,
-                'industry_funding': report.industry_funding_detected,
+                # Blank, not False, unless every funder source we could ask
+                # served its record: an analyst filtering on False would
+                # otherwise count every study whose CrossRef went unread as
+                # one with no industry funding (#356, the rule
+                # ``coi_has_industry_ties`` below already follows).
+                'industry_funding': (
+                    report.industry_funding_detected
+                    if report.industry_funding_detected
+                    or funding_was_assessed(report)
+                    else ''
+                ),
                 'industry_funding_confidence': f"{report.industry_funding_confidence:.2f}",
                 'data_disclosure_level': (
                     report.data_availability.disclosure_level.value
                     if report.data_availability else 'unknown'
                 ),
-                'trial_registration_count': len(report.trial_registrations),
+                # Blank, not 0, where the registration question never reached
+                # a source: 0 reads as "this trial is unregistered" (#356).
+                'trial_registration_count': (
+                    len(report.trial_registrations)
+                    if report.trial_registration_assessed
+                    else ''
+                ),
                 'results_compliance': report.results_compliance.value,
                 'coi_disclosure_level': (
                     report.coi_info.disclosure_level.value

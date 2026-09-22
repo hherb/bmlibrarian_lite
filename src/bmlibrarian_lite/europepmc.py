@@ -140,6 +140,90 @@ def _extract_free_pdf_url(result: dict) -> str | None:
     return None
 
 
+@dataclass(frozen=True)
+class ArticleInfoFetch:
+    """What asking Europe PMC about an article produced (#363).
+
+    The sibling of :class:`FullTextFetch`, for the availability lookup that
+    precedes it. :meth:`EuropePMCClient.get_article_info` answers both "this
+    article is not in Europe PMC" and "we could not reach Europe PMC" with
+    one ``None``, and its caller read both as the first -- so a throttled
+    Europe PMC produced a full-text result whose record said every lookup
+    had been made and answered, and the absence was reported as
+    established.
+
+    ``get_article_info`` keeps its ``Optional[ArticleInfo]`` signature for
+    the callers that only want the record; :meth:`fetch_article_info` is the
+    one that can tell the reader which of the two happened.
+
+    Attributes:
+        info: What Europe PMC said about the article, when it answered.
+        failure: Why it could not be read, when it could not be reached.
+            ``None`` with no ``info`` means Europe PMC answered, and holds
+            no record of this article.
+
+    Raises:
+        ValueError: On construction, if both an info and a failure are
+            given.
+    """
+
+    info: "ArticleInfo | None" = None
+    failure: RequestFailure | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse the state that would mean two things at once.
+
+        Raises:
+            ValueError: If both an info and a failure are given.
+        """
+        if self.info is not None and self.failure is not None:
+            raise ValueError(
+                "An article info fetch is served or unreachable, never both"
+            )
+
+    @classmethod
+    def served(cls, info: "ArticleInfo") -> "ArticleInfoFetch":
+        """Europe PMC answered with a record.
+
+        Args:
+            info: What it said about the article.
+
+        Returns:
+            The fetch.
+        """
+        return cls(info=info)
+
+    @classmethod
+    def absent(cls) -> "ArticleInfoFetch":
+        """Europe PMC was read, and holds no record of this article.
+
+        Returns:
+            The fetch. This is the one state that is about the article.
+        """
+        return cls()
+
+    @classmethod
+    def unreachable(cls, failure: RequestFailure) -> "ArticleInfoFetch":
+        """Europe PMC could not be read.
+
+        Args:
+            failure: Why.
+
+        Returns:
+            The fetch.
+        """
+        return cls(failure=failure)
+
+    @property
+    def is_unreachable(self) -> bool:
+        """Whether Europe PMC could not be read.
+
+        Returns:
+            ``True`` when nothing about the article was established.
+        """
+        return self.failure is not None
+
+
 @dataclass
 class ArticleInfo:
     """Information about an article from Europe PMC.
@@ -230,7 +314,35 @@ class EuropePMCClient:
             doi: Digital Object Identifier
 
         Returns:
-            ArticleInfo with availability details, or None if not found
+            ArticleInfo with availability details, or None if not found.
+
+        Note:
+            The ``None`` answers two questions -- "not in Europe PMC" and
+            "we could not ask" -- so a caller that reports an absence to a
+            reader must use :meth:`fetch_article_info` instead and branch on
+            its three states (#363).
+        """
+        return self.fetch_article_info(pmid=pmid, pmcid=pmcid, doi=doi).info
+
+    def fetch_article_info(
+        self,
+        pmid: str | None = None,
+        pmcid: str | None = None,
+        doi: str | None = None,
+    ) -> ArticleInfoFetch:
+        """Ask Europe PMC about an article, and say which answer we got.
+
+        Args:
+            pmid: PubMed ID
+            pmcid: PubMed Central ID (with or without 'PMC' prefix)
+            doi: Digital Object Identifier
+
+        Returns:
+            The fetch: what Europe PMC said, its answer that it holds no
+            such record, or why it could not be read. An empty result list
+            is Europe PMC's own answer and stays an absence; a transport
+            failure does not, because a throttled search establishes nothing
+            about the article (#346, #363).
         """
         # Build search query
         if pmcid:
@@ -242,8 +354,12 @@ class EuropePMCClient:
         elif doi:
             query = f'DOI:"{doi}"'
         else:
+            # Nothing to ask about is not Europe PMC answering "no such
+            # article": we never put a question (#355).
             logger.warning("No identifier provided for article lookup")
-            return None
+            return ArticleInfoFetch.unreachable(
+                RequestFailure(RequestFailureKind.REQUEST_FAILED)
+            )
 
         try:
             response = self._session.get(
@@ -260,8 +376,10 @@ class EuropePMCClient:
 
             results = data.get("resultList", {}).get("result", [])
             if not results:
+                # Europe PMC answered, with an empty result list. That is
+                # its own statement that it holds no such record.
                 logger.debug(f"No results found for query: {query}")
-                return None
+                return ArticleInfoFetch.absent()
 
             result = results[0]
 
@@ -282,7 +400,7 @@ class EuropePMCClient:
                 except ValueError:
                     pass
 
-            return ArticleInfo(
+            return ArticleInfoFetch.served(ArticleInfo(
                 pmid=result.get("pmid"),
                 pmcid=result.get("pmcid"),
                 doi=result.get("doi"),
@@ -295,11 +413,20 @@ class EuropePMCClient:
                 has_fulltext_xml=result.get("inEPMC") == "Y" or result.get("inPMC") == "Y",
                 has_pdf=result.get("hasPDF") == "Y",
                 pdf_render_url=_extract_free_pdf_url(result),
-            )
+            ))
 
         except requests.exceptions.RequestException as e:
-            logger.warning(f"Europe PMC API error: {e}")
-            return None
+            # Never an absence: a throttled or unreachable Europe PMC has
+            # said nothing about this article, and a caller that read this
+            # as "not in Europe PMC" went on to report an established
+            # absence (#346, #363).
+            failure = request_failure_from_exception(e)
+            logger.warning(
+                "Europe PMC could not be asked about this article (%s), so "
+                "whether it holds a record is not assessed.",
+                failure.describe(),
+            )
+            return ArticleInfoFetch.unreachable(failure)
 
     def _get_search_page(self, params: dict[str, Any]) -> dict[str, Any]:
         """Request one page of search results.
