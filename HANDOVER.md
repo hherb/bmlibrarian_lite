@@ -9,7 +9,8 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#360 + #361 (+ #249) — a correction nothing re-analyses reaches no reader**,
-branch `fix/a-corrected-analyser-reaches-stored-rows-360-361`. Python only.
+branch `fix/a-corrected-analyser-reaches-stored-rows-360-361`, **PR #366**.
+Python only.
 Compress into **Recently landed** once merged.
 
 - **The contract is `doc/cross_platform/analysis_failure_reporting.md`**,
