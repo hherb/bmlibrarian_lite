@@ -9,8 +9,8 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#352 + #348 + #351 — the COI path states a finding it never established**,
-branch `fix/coi-not-assessed-352-348-351`. Python only. Compress into
-**Recently landed** once merged.
+branch `fix/coi-not-assessed-352-348-351`, **PR #358**. Python only.
+Compress into **Recently landed** once merged.
 
 - **The contract is `doc/cross_platform/analysis_failure_reporting.md`**,
   which gained two bullets and a rewritten **Ports** paragraph — read it
