@@ -8,113 +8,72 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#352 + #348 + #351 — the COI path states a finding it never established**,
-branch `fix/coi-not-assessed-352-348-351`, **PR #358**. Python only.
-Compress into **Recently landed** once merged.
-
-- **The contract is `doc/cross_platform/analysis_failure_reporting.md`**,
-  which gained two bullets and a rewritten **Ports** paragraph — read it
-  before touching any of this. It is #346 applied to the other half of
-  `study_transparency_analyzer.py`.
-- **#352: `coi_disclosed` was unconditionally `True`.** The test was
-  `report.coi_info.statement is not None` and `analyze_coi_statement(None)`
-  returned `statement=""`, never `None`, so every study's badge read
-  "Conflicts of Interest: Disclosed" — often beside its own contradictory
-  "No conflict of interest statement found" risk indicator.
-  `missing_coi_triggers_downgrade` (default on) and three branches of
-  `report_risk_helpers` were dead code in consequence.
-- **Three states, chosen, never defaulted.** `COIDisclosureLevel` is
-  `DISCLOSED` / `NOT_STATED` / `NOT_ASSESSED`; `ConflictOfInterest` has **no
-  default level** and `__post_init__` refuses a "disclosed" with no
-  statement behind it and a finding drawn from a statement never read.
-  `analyze_coi_statement` now *raises* on a blank statement rather than
-  answering an absence on the caller's behalf. NOT_ASSESSED scores neutral
-  and raises no indicator; NOT_STATED still costs −5 and still raises
-  `RISK_INDICATOR_MISSING_COI_STATEMENT`.
-- **Only the article's own text can establish an absence** (user's call,
-  2026-09-22). A MEDLINE record without `CoiStatement` has not said the
-  paper carries none: measured live, the field is present for 36.5% of a
-  2018 sample and 79.7% of a 2024 one. PubMed's *positive* answer is still a
-  disclosure. This moves real transparency scores for the majority of
-  articles — largely retiring the −5 outside PMC full text.
-- **#348 + #351 were answered by deleting the fetch.** Verified against the
-  live API: a `resultType=core` result has 51–52 keys and **no COI field**,
-  so the per-document search on a 1/s service read nothing, and
-  `data_sources_used` credited Europe PMC for it. `get_article` went with
-  it, which is why #351 needs no `ArticleFetch` type (user's call).
-- **The caveat is pure and names what was asked.** `unassessed_caveat()`
-  is now the one sentence shape, with `unreachable_source_caveat()`
-  delegating to it, and `coi_not_assessed_caveat(pubmed_record_read)` has
-  two forms so the reader knows whether the PDF is the remaining place to
-  look. No provider text, by construction.
-- **Two defects found on the way, both fixed here.** `warnings` was in
-  `to_dict` and in **no column**, so every caveat — this slice's and #346's
-  — was lost on reload; and `transparency_results` had no test at all.
-  `_migrate_transparency_coi_and_warnings` adds `coi_disclosure` and
-  `warnings` and **drops** `coi_disclosed`, whose stored 1 carries no
-  information, so no later reader can pick it back up. Stored scores and
-  risk levels are *not* recomputed (#145).
-- **#359, found reviewing this PR and fixed in it: unparsed is not absent.**
-  The family one layer down, and the review's most important finding.
-  `extract_fulltext_sections` anchored its heading match, so **7 of 12**
-  real-world COI headings missed — including Elsevier's "Declaration of
-  Competing Interest" and the standard PMC/JATS "Conflict of Interest
-  Statement" — and the article was then recorded as declaring no conflicts.
-  **The timing is the lesson**: #352 made `missing_coi_triggers_downgrade`
-  live for the first time, turning a latent extractor miss into a forced
-  HIGH-risk badge on a paper that discloses. A fix that activates dead code
-  changes what every other defect on that path costs. Two answers, both
-  pinned: recognise the spellings journals actually print (16/16, prose
-  about conflicts still rejected — this fixes "Data Availability Statement"
-  too), and require **positive evidence that the end matter was parsed**
-  before recording `NOT_STATED`, else `NOT_ASSESSED` with a caveat.
-- **Also from the review.** `to_dict()` emitted a raw `COIDisclosureLevel`,
-  so `json.dumps` raised for *every* report (`--output json`, `examples.py`)
-  and `batch_analyzer` wrote `"COIDisclosureLevel.NOT_ASSESSED"`. The
-  migration now **retracts** `RISK_INDICATOR_MISSING_COI_STATEMENT` from
-  rows it converts — dropping the column but leaving the sentence showed a
-  clinician the retracted claim beside its own retraction. A failed `DROP
-  COLUMN` is logged and tolerated rather than fatal: Python commits DDL as
-  it goes, so a hard failure left the ADDs applied and failed identically on
-  every later start. `ConflictOfInterest` is **frozen** with a tuple of
-  relationships, `confidence` is range-checked on all levels, storage
-  validates `coi_disclosure` and reports an unreadable JSON column as a
-  caveat rather than a silently shorter list. The constants are pinned to
-  the enum **name by name** — set equality passed a swap. The import-cycle
-  comment was false (no cycle exists; the real reason is keeping
-  `transparency_models` a leaf, free of `requests`).
-- **Verified:** `pytest tests/` — **2058 passed**, 3 xfailed; `lint_delta.py`
-  **0 new** ruff or mypy findings. `tests/test_coi_is_not_assessed.py` is 59
-  tests and `tests/test_coi_unparsed_is_not_absent.py` 42; **29 + 10
-  mutations each fail a test**, no survivors.
-- **The sweep lied twice before it was worth anything.** First it named a
-  test file that does not exist (`tests/test_storage.py`), so pytest exited
-  non-zero having collected **0 tests** and every mutation read CAUGHT.
-  Then, with the list fixed, every mutation read SURVIVED: the editable
-  install resolves `bmlibrarian_lite` to the **real working tree**, so a
-  mutation of the copy is a no-op. A sweep needs both guards —
-  `PYTHONPATH=<copy>/src` plus a printed probe of `m.__file__`, and a
-  baseline run asserting `N passed` before any mutation.
-- **Lodged, not fixed: `#357`** — Swift has the *other* half of #352. Its
-  `hasStatement` boolean is honest, but `TransparencyAnalysisService` reads
-  COI from the full text alone, so every article whose full text was not
-  retrieved is scored and badged as declaring no conflicts. Android
-  analyses no COI at all (#116).
-- **Lodged from the review, not fixed here:** **#360** nothing ever
-  re-analyses a stored row (`analyzer_version` has no consumer), so the fix
-  reaches no existing document; **#361** `analysis_failed` has no connected
-  slot, so every worker exception disappears; **#362** a DOI-only document
-  never asks PubMed for the statement it reports as unavailable; **#363**
-  `europepmc.get_article_info` is the surviving half of #351, on the path
-  that now decides NOT_STATED vs NOT_ASSESSED; **#364** type cleanup
-  (stringly-typed `coi_disclosure`, `coi_info: Optional` as an implicit
-  fourth absence, substring-sniffed provenance).
+Nothing. PR #358 merged to master 2026-09-22 (`8f40b2b`); its slice is
+compressed into **Recently landed** below. Pick the next slice from
+**Potential follow-ups**.
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
+
+- **A COI statement nobody read is not a disclosure** (Python; #352, #348,
+  #351, #359, PR #358, merged 2026-09-22). Same contract as #346 above —
+  `doc/cross_platform/analysis_failure_reporting.md`, which gained two
+  bullets and a rewritten **Ports** paragraph — applied to the other half of
+  `study_transparency_analyzer.py`. What still binds:
+  **`COIDisclosureLevel` has three states and no default.**
+  `DISCLOSED` / `NOT_STATED` / `NOT_ASSESSED`; `ConflictOfInterest` is frozen
+  and `__post_init__` refuses a "disclosed" with no statement behind it, and
+  a finding drawn from a statement never read. `analyze_coi_statement`
+  *raises* on a blank statement rather than answering an absence for its
+  caller. NOT_ASSESSED scores neutral and raises no indicator; NOT_STATED
+  still costs −5 and still raises `RISK_INDICATOR_MISSING_COI_STATEMENT`.
+  **Only the article's own text can establish an absence** (user's call,
+  2026-09-22): a MEDLINE record without `CoiStatement` has not said the paper
+  carries none — the field is present for 36.5% of a 2018 sample and 79.7% of
+  a 2024 one — though PubMed's *positive* answer is still a disclosure. This
+  largely retires the −5 outside PMC full text.
+  **A fix that activates dead code changes what every other defect on that
+  path costs** (#359, found reviewing the PR): `coi_disclosed` had been
+  unconditionally `True`, so `missing_coi_triggers_downgrade` was dead;
+  making it live turned a latent extractor miss into a forced HIGH-risk badge
+  on papers that *do* disclose. `extract_fulltext_sections` had anchored its
+  heading match and missed **7 of 12** real COI headings, Elsevier's
+  "Declaration of Competing Interest" and JATS' "Conflict of Interest
+  Statement" among them. Two answers, both pinned: recognise the spellings
+  journals print (16/16, prose about conflicts still rejected — this fixes
+  "Data Availability Statement" too), and require **positive evidence that
+  the end matter was parsed** before recording `NOT_STATED`.
+  **A caveat carries no provider text, by construction**: `unassessed_caveat()`
+  is the one sentence shape, `unreachable_source_caveat()` delegates to it,
+  and `coi_not_assessed_caveat(pubmed_record_read)` has two forms so the
+  reader knows whether the PDF is the remaining place to look.
+  **A field in `to_dict` and in no column is lost on reload** — every caveat,
+  this slice's and #346's, was. `_migrate_transparency_coi_and_warnings` adds
+  `coi_disclosure` and `warnings`, **drops** `coi_disclosed` (its stored 1
+  carries no information, so no later reader can pick it back up) and
+  **retracts** `RISK_INDICATOR_MISSING_COI_STATEMENT` from converted rows —
+  dropping the column but leaving the sentence showed a clinician the
+  retracted claim beside its own retraction. Stored scores and risk levels are
+  *not* recomputed (#145). A failed `DROP COLUMN` is logged and tolerated:
+  Python commits DDL as it goes, so a hard failure left the ADDs applied and
+  failed identically on every later start.
+  **`to_dict()` must emit primitives** — a raw `COIDisclosureLevel` made
+  `json.dumps` raise for *every* report (`--output json`, `examples.py`) and
+  `batch_analyzer` wrote `"COIDisclosureLevel.NOT_ASSESSED"`. Constants are
+  pinned to the enum **name by name**; set equality passed a swap.
+  **#348 + #351 were answered by deleting the fetch**: verified live, a
+  `resultType=core` result has 51–52 keys and no COI field, so a per-document
+  search on a 1/s service read nothing while `data_sources_used` credited
+  Europe PMC for it.
+  **The mutation sweep lied twice before it was worth anything** — it named a
+  test file that does not exist (0 collected, every mutation CAUGHT), then
+  measured the editable install's real tree (every mutation SURVIVED). Both
+  guards are needed: `PYTHONPATH=<copy>/src` with a printed `m.__file__`
+  probe, and a baseline asserting `N passed`.
+  Lodged, not fixed: **#357** (Swift's half), **#360**–**#364**.
 
 - **A source we could not reach is not a finding** (Python; #346, #347, #344,
   PR #349, merged 2026-09-21). The rule is a section of
@@ -386,11 +345,20 @@ Open issues by family; each issue carries the detail. None blocks another.
   skipped for want of configuration records nothing; **#356** an unreachable
   PubMed/CrossRef reads as unregistered and unfunded; **#350** the download
   paths still put `str(e)` in reader-facing fields (no secret leaks today).
-  **#352**, **#348** and **#351** are the slice in flight above.
-- Lodged by that slice: **#357** Swift has the other half of #352 — its
-  `hasStatement` boolean is honest, but COI is read from the full text
-  alone, so every article whose full text was not retrieved is scored and
-  badged as declaring no conflicts. Android analyses no COI at all (#116).
+  **#352**, **#348** and **#351** landed in PR #358.
+- Lodged by PR #358, Python: **#360** nothing ever re-analyses a stored row
+  (`analyzer_version` has no consumer), so a corrected analyser reaches no
+  existing document; **#361** `TransparencyManager.analysis_failed` has no
+  connected slot, so every worker exception disappears; **#362** a DOI-only
+  document never asks PubMed for the statement it reports as unavailable;
+  **#363** `europepmc.get_article_info` is the surviving half of #351, on the
+  path that now decides NOT_STATED vs NOT_ASSESSED; **#364** type cleanup
+  (stringly-typed `coi_disclosure`, `coi_info: Optional` as an implicit
+  fourth absence, substring-sniffed provenance). Also **#357**: Swift has the
+  other half of #352 — its `hasStatement` boolean is honest, but COI is read
+  from the full text alone, so every article whose full text was not
+  retrieved is scored and badged as declaring no conflicts. Android analyses
+  no COI at all (#116).
 - Lodged by PR #325, Python: **#328** a re-scored failure supersedes a
   document's good score under latest-wins, and the Scored column does not show
   it (a cancelled re-score also leaves an empty checkpoint).
@@ -539,9 +507,14 @@ All want one decision across Python, Swift and Kotlin.
 ### Verify
 
 - **Closing an issue is a claim; check the commit made it true.** #183, #192,
-  #217 and #219 were closed by commits listing them as deferred: "Lodged rather
-  than fixed: #217" contains `fixed: #217`, and only the *first* number closes,
-  so it is easy to miss twice. No closing keyword before a deferred number.
+  #217, #219 and now **#360** were closed by commits listing them as deferred:
+  "Lodged rather than fixed: #217" contains `fixed: #217`, and only the *first*
+  number closes, so it is easy to miss twice. **"not fixed: #N" is not a
+  negation as far as GitHub is concerned** — that exact wording took #360 with
+  #359 in commit `9caf78b`, five rounds after the rule was written down. No
+  closing keyword *at all* before a deferred number: write "Deferred: #N" or
+  "Lodged, unaddressed: #N". After every merge, re-read the list of issues the
+  commit said it deferred and confirm each is still open.
 - Touching any data-availability pattern? Run all three parity suites; a change
   that does not update `doc/cross_platform/transparency_parity/` **and** all
   three platforms is meant to fail.
