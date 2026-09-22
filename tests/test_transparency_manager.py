@@ -23,6 +23,9 @@ import time
 import pytest
 
 from bmlibrarian_lite.transparency import (
+    COI_DISCLOSED,
+    COI_NOT_ASSESSED,
+    COI_NOT_STATED,
     TransparencyManager,
     TransparencyResult,
     TransparencyRisk,
@@ -33,6 +36,7 @@ from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer im
     DataAvailabilityInfo,
     DataDisclosureLevel,
     ConflictOfInterest,
+    COIDisclosureLevel,
     ResultsComplianceStatus,
 )
 
@@ -70,6 +74,7 @@ def mock_report():
         ),
         coi_info=ConflictOfInterest(
             statement="No conflicts declared",
+            disclosure_level=COIDisclosureLevel.DISCLOSED,
             has_industry_ties=False,
         ),
         trial_registrations=[],
@@ -229,7 +234,7 @@ class TestAnalyzeWorker:
         assert result.document_id == "doc1"
         assert result.transparency_score == 75
         assert result.industry_funding_detected is False
-        assert result.coi_disclosed is True
+        assert result.coi_disclosure == COI_DISCLOSED
         assert result.data_availability_level == "on_request"
 
     def test_worker_saves_result(self, manager, mock_storage, mock_report):
@@ -248,7 +253,10 @@ class TestAnalyzeWorker:
             data_availability=DataAvailabilityInfo(
                 disclosure_level=DataDisclosureLevel.FULL_OPEN,
             ),
-            coi_info=ConflictOfInterest(statement="None declared"),
+            coi_info=ConflictOfInterest(
+                statement="None declared",
+                disclosure_level=COIDisclosureLevel.DISCLOSED,
+            ),
         )
         manager._analyzer.analyze = MagicMock(return_value=low_score_report)
 
@@ -265,7 +273,10 @@ class TestAnalyzeWorker:
             data_availability=DataAvailabilityInfo(
                 disclosure_level=DataDisclosureLevel.FULL_OPEN,
             ),
-            coi_info=ConflictOfInterest(statement="None declared"),
+            coi_info=ConflictOfInterest(
+                statement="None declared",
+                disclosure_level=COIDisclosureLevel.DISCLOSED,
+            ),
         )
         manager._analyzer.analyze = MagicMock(return_value=high_score_report)
 
@@ -275,22 +286,53 @@ class TestAnalyzeWorker:
         assert result.tier_downgrade_applied == 0
 
     def test_worker_handles_missing_coi(self, manager, mock_storage):
-        """Test handling of missing COI info."""
+        """A report that established nothing about COI downgrades nothing.
+
+        This used to assert the opposite, and it was the only way the old
+        ``coi_disclosed`` ever came out false: an analysis that produced no
+        ``coi_info`` at all. Reading that as "the study discloses no
+        conflicts" downgraded it to high risk on the strength of nothing
+        (#352).
+        """
         report = TransparencyReport(
             transparency_score=75.0,
             industry_funding_detected=False,
             data_availability=DataAvailabilityInfo(
                 disclosure_level=DataDisclosureLevel.FULL_OPEN,
             ),
-            coi_info=None,  # Missing COI
+            coi_info=None,  # Nothing was established either way
         )
         manager._analyzer.analyze = MagicMock(return_value=report)
 
         result = manager._analyze_worker("doc1", "12345678", None, None)
 
-        assert result.coi_disclosed is False
-        # Missing COI triggers high risk by default
+        assert result.coi_disclosure == COI_NOT_ASSESSED
+        assert result.risk_level == TransparencyRisk.LOW
+
+    def test_worker_downgrades_a_study_read_to_declare_nothing(
+        self, manager, mock_storage
+    ):
+        """The control: a real missing statement still triggers the downgrade.
+
+        Without this, recording every study as "not assessed" would pass the
+        test above and the ``missing_coi_triggers_downgrade`` setting would
+        go back to being dead code by a different route.
+        """
+        report = TransparencyReport(
+            transparency_score=75.0,
+            industry_funding_detected=False,
+            data_availability=DataAvailabilityInfo(
+                disclosure_level=DataDisclosureLevel.FULL_OPEN,
+            ),
+            coi_info=ConflictOfInterest.not_stated(),
+        )
+        manager._analyzer.analyze = MagicMock(return_value=report)
+
+        result = manager._analyze_worker("doc1", "12345678", None, None)
+
+        assert result.coi_disclosure == COI_NOT_STATED
         assert result.risk_level == TransparencyRisk.HIGH
+        assert result.tier_downgrade_applied == 1
 
 
 class TestAnalyzeBatch:

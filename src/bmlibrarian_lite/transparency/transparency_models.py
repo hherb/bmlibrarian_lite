@@ -28,6 +28,16 @@ if TYPE_CHECKING:
 # Threshold for medium vs low risk (score above this = low risk potential)
 MEDIUM_RISK_SCORE_THRESHOLD = 70
 
+# The three states a conflict of interest finding can be in, as they are
+# stored and serialised. They are the values of
+# ``study_transparency_analyzer.COIDisclosureLevel``, repeated here rather
+# than imported because importing the analyzer from this module would close
+# a cycle through ``transparency/__init__``. A test pins them to the enum so
+# the copy cannot drift.
+COI_DISCLOSED = "disclosed"
+COI_NOT_STATED = "not_stated"
+COI_NOT_ASSESSED = "not_assessed"
+
 
 class TransparencyRisk(Enum):
     """Risk level based on transparency analysis."""
@@ -54,7 +64,12 @@ class TransparencyResult:
         industry_funding_detected: Whether industry funding was detected
         industry_funding_confidence: Confidence in industry funding detection (0-1)
         data_availability_level: Data disclosure level
-        coi_disclosed: Whether conflicts of interest were disclosed
+        coi_disclosure: What is known about the study's conflict of interest
+            disclosure: ``COI_DISCLOSED``, ``COI_NOT_STATED`` (the article
+            was read and declares none) or ``COI_NOT_ASSESSED`` (no source
+            carrying a statement was read). The boolean this replaced could
+            not tell the last two apart, and in practice was always true, so
+            every badge read "Disclosed" (#352).
         trial_registered: Whether clinical trial was registered
         trial_results_compliant: Whether trial results were posted as required
         outcome_switching_detected: Whether outcome switching was detected
@@ -77,7 +92,7 @@ class TransparencyResult:
     industry_funding_detected: bool = False
     industry_funding_confidence: float = 0.0
     data_availability_level: str = "unknown"
-    coi_disclosed: bool = True
+    coi_disclosure: str = COI_NOT_ASSESSED
     trial_registered: bool = False
     trial_results_compliant: bool = False
     outcome_switching_detected: bool = False
@@ -112,7 +127,7 @@ class TransparencyResult:
             "industry_funding_detected": self.industry_funding_detected,
             "industry_funding_confidence": self.industry_funding_confidence,
             "data_availability_level": self.data_availability_level,
-            "coi_disclosed": self.coi_disclosed,
+            "coi_disclosure": self.coi_disclosure,
             "trial_registered": self.trial_registered,
             "trial_results_compliant": self.trial_results_compliant,
             "outcome_switching_detected": self.outcome_switching_detected,
@@ -142,7 +157,7 @@ class TransparencyResult:
             industry_funding_detected=data.get("industry_funding_detected", False),
             industry_funding_confidence=data.get("industry_funding_confidence", 0.0),
             data_availability_level=data.get("data_availability_level", "unknown"),
-            coi_disclosed=data.get("coi_disclosed", True),
+            coi_disclosure=data.get("coi_disclosure", COI_NOT_ASSESSED),
             trial_registered=data.get("trial_registered", False),
             trial_results_compliant=data.get("trial_results_compliant", False),
             outcome_switching_detected=data.get("outcome_switching_detected", False),
@@ -159,22 +174,28 @@ def calculate_risk_level(
     score: int,
     industry_funding: bool,
     data_availability: str,
-    coi_disclosed: bool,
+    coi_disclosure: str,
     settings: "TransparencySettings",
 ) -> TransparencyRisk:
     """
     Determine risk level from transparency metrics.
 
     Risk levels:
-    - High Risk: score < threshold OR (industry + restricted data) OR missing COI
+    - High Risk: score < threshold OR (industry + restricted data) OR a COI
+      statement the article was read to be missing
     - Medium Risk: score 40-70 OR industry with disclosure
     - Low Risk: score > 70, transparent
+
+    Only ``COI_NOT_STATED`` raises the risk. ``COI_NOT_ASSESSED`` is not a
+    finding about the study, so it cannot downgrade it -- the whole point of
+    keeping the two apart (#352).
 
     Args:
         score: Transparency score (0-100)
         industry_funding: Whether industry funding was detected
         data_availability: Data availability level string
-        coi_disclosed: Whether conflicts of interest were disclosed
+        coi_disclosure: One of ``COI_DISCLOSED``, ``COI_NOT_STATED`` or
+            ``COI_NOT_ASSESSED``
         settings: Transparency settings with thresholds
 
     Returns:
@@ -193,7 +214,7 @@ def calculate_risk_level(
         if industry_funding and restricted_data:
             return TransparencyRisk.HIGH
 
-    if settings.missing_coi_triggers_downgrade and not coi_disclosed:
+    if settings.missing_coi_triggers_downgrade and coi_disclosure == COI_NOT_STATED:
         return TransparencyRisk.HIGH
 
     # Medium risk conditions

@@ -8,112 +8,109 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#346 + #347 + #344 — a source we could not reach is not a finding**, branch
-`fix/unreachable-is-not-absent-346-347`. Python only. The tail #345
-deliberately left on #341. Compress into **Recently landed** once merged.
+**#352 + #348 + #351 — the COI path states a finding it never established**,
+branch `fix/coi-not-assessed-352-348-351`. Python only. Compress into
+**Recently landed** once merged.
 
 - **The contract is `doc/cross_platform/analysis_failure_reporting.md`**,
-  which gained the rule as its own section — read it before touching any of
-  this. It is #186/#187 one layer down: a source that answered "nothing" and
-  one we could not reach are opposite answers, and only the first is the
-  article's fault.
-- **#346: an unreachable Europe PMC left `NOT_STATED`**, which scores −5 and
-  tells a clinician the study publishes no data availability statement.
-  `get_full_text_xml` now returns **`FullTextFetch`** (frozen,
-  `data_models.py`), which carries the XML *or* a `RequestFailure` and
-  refuses both — the ambiguity made unrepresentable rather than documented,
-  since the docstring warning it was ambiguous stopped no caller.
-  `_analyze_data_availability` leaves `DataDisclosureLevel.UNKNOWN`, which
-  already scored neutral, and appends a caveat. **No risk indicator reads
-  UNKNOWN**, so none fires from a source nobody read.
-- **404 is the one status that is about the article.** Europe PMC answers it
-  for a PMC ID it holds no open-access text for, so it stays an *absence*.
-  Read as unreachable it would put a caveat on every closed-access paper.
-  The same for Unpaywall's 404 on a DOI it has no record of.
-- **#347: `_discover_sources` now returns `(sources, failures)`**, and
-  `DiscoveryResult` carries `lookup_failures`. Three lookups swallowed a
-  throttle into an empty list — Unpaywall, doi.org and
-  `_get_pmcid_from_pmid`, which catches the whole PMC path (the most
-  reliable one) and logged at DEBUG behind a bare `except Exception`. The
-  reader's sentence is the pure `no_pdf_sources_message()`; it **withholds
-  the paywall claim rather than denying it**, because "may require
-  institutional access" read in isolation is the harm.
-- **A field nobody reads is not reporting** — the review's main finding.
-  `lookup_failures` first reached the reader only on the "no sources at
-  all" branch, which a known PMC ID or a publisher URL pattern skips, so
-  the common case kept the confident claim: a throttled Unpaywall and a
-  403 from the publisher still produced "Access requires institutional
-  subscription or purchase." Every unsuccessful return now builds its
-  sentence through a pure function — `paywall_message()` withholds the
-  licence claim, `with_unestablished_access()` qualifies a claim about our
-  own attempts — and `with_lookup_failures()` **merges** rather than
-  replacing, so a download path that starts recording its own failure
-  cannot have it silently dropped.
-- **Unreadable is not absent either.** A 2xx with an empty body, XML that
-  does not parse, and a `pmcid` key holding an int all used to land as the
-  article's absence. `FullTextFetch` refuses a blank XML and is built
-  through `served()` / `absent()` / `unreachable()`, so the dangerous claim
-  is no longer what a caller gets by writing `FullTextFetch()`. A `pmcid`
-  key that is genuinely *missing*, and a converter with no record at all,
-  stay the article's answer — those are the controls.
-- **The caveats carry no provider text**, by construction: they are built
-  from `RequestFailure.describe()` (kind and HTTP status only). A `requests`
-  exception embeds the request URL, and the Unpaywall URL carries the user's
-  email address (#196, #330). `_failure_description` in `pdf_discovery.py`
-  was deleted — `request_failure_from_exception(...).describe()` supersedes
-  it.
-- **Both fixes keep a control test.** Returning "unknown" or naming a
-  failure unconditionally passes every test on the unreachable path; a
-  reachable source that answers "no statement" must still say `NOT_STATED`,
-  and an article genuinely without an OA PDF must still get today's wording.
-- **#344 was already fixed by #345** — verified, not assumed. Its scenario
-  was unpinned, though: the existing test asserts `interval`, and the pause
-  now lives in `_not_before`. Added a test asserting the **departure**;
-  mutating `penalise()` back to the pre-#345 form fails it with the issue's
-  own headline, `assert 30.0 >= 300.0`. Closed.
-- **Narrowing an `except Exception` moves the work into the body.**
-  `_get_pmcid_from_pmid` caught everything, so a converter answering a JSON
-  *array* was swallowed with the request failures. Catching only the request
-  errors let the `TypeError` escape and end the discovery outright, so each
-  shape is now tested for — golden rule 1, and the log names the shape, never
-  the body.
-- **The success path needed a control too.** No test fetched a full text
-  that *arrived*: mutating `get_full_text_xml` to return `absent()`
-  unconditionally — every article silently losing its full text — passed
-  the entire suite. That is the failure mode of this kind of fix, and the
-  reason `TestAFetchedFullTextIsActuallyUsed` exists.
-- **Verified:** `pytest tests/` — 1954 passed, 3 xfailed;
-  `lint_delta.py` 0 new ruff or mypy findings (6 fewer ruff, 1 fewer mypy
-  than base). `tests/test_unreachable_is_not_absent.py` is 67 tests, and
-  **14 mutations of the behaviour above each fail a test**, no survivors —
-  swept in an isolated copy under the scratchpad, never the working tree.
-- **Lodged rather than fixed** — all reachability defects of the same
-  family, each needing callers changed or moving real transparency scores,
-  so none belongs in this slice. Read them as the honest scope of what
-  "Python has landed this" means, which the contract doc now says too:
-  - `#350` the download paths still put `str(e)` in reader-facing fields
-    (no secret leaks today; publisher URLs, not the credentialled lookups)
-  - `#351` `EuropePMCClient.get_article` is still an ambiguous `Optional`,
-    and it feeds COI
-  - `#352` **`coi_disclosed` is unconditionally `True`** — every study's
-    badge reads "Conflicts of Interest: Disclosed", and the
-    `missing_coi_triggers_downgrade` setting is therefore dead code. Worst
-    of these: a *positive* fabricated finding
-  - `#353` data availability still fabricates `NOT_STATED` for every
-    article outside PMC — the larger population this PR does not reach
-  - `#354` `FulltextDiscoverer` maps every failure to `NOT_FOUND`
-  - `#355` a lookup skipped for want of configuration records nothing
-  - `#356` unreachable PubMed/CrossRef read as unregistered and unfunded
-  - `#348` the COI path fetches a Europe PMC article and discards it unread
-- **#346 stays open for Swift and Android**, which still read an unreachable
-  source as an absence; no transparency *pattern* changed, so the parity
-  fixtures are not involved.
+  which gained two bullets and a rewritten **Ports** paragraph — read it
+  before touching any of this. It is #346 applied to the other half of
+  `study_transparency_analyzer.py`.
+- **#352: `coi_disclosed` was unconditionally `True`.** The test was
+  `report.coi_info.statement is not None` and `analyze_coi_statement(None)`
+  returned `statement=""`, never `None`, so every study's badge read
+  "Conflicts of Interest: Disclosed" — often beside its own contradictory
+  "No conflict of interest statement found" risk indicator.
+  `missing_coi_triggers_downgrade` (default on) and three branches of
+  `report_risk_helpers` were dead code in consequence.
+- **Three states, chosen, never defaulted.** `COIDisclosureLevel` is
+  `DISCLOSED` / `NOT_STATED` / `NOT_ASSESSED`; `ConflictOfInterest` has **no
+  default level** and `__post_init__` refuses a "disclosed" with no
+  statement behind it and a finding drawn from a statement never read.
+  `analyze_coi_statement` now *raises* on a blank statement rather than
+  answering an absence on the caller's behalf. NOT_ASSESSED scores neutral
+  and raises no indicator; NOT_STATED still costs −5 and still raises
+  `RISK_INDICATOR_MISSING_COI_STATEMENT`.
+- **Only the article's own text can establish an absence** (user's call,
+  2026-09-22). A MEDLINE record without `CoiStatement` has not said the
+  paper carries none: measured live, the field is present for 36.5% of a
+  2018 sample and 79.7% of a 2024 one. PubMed's *positive* answer is still a
+  disclosure. This moves real transparency scores for the majority of
+  articles — largely retiring the −5 outside PMC full text.
+- **#348 + #351 were answered by deleting the fetch.** Verified against the
+  live API: a `resultType=core` result has 51–52 keys and **no COI field**,
+  so the per-document search on a 1/s service read nothing, and
+  `data_sources_used` credited Europe PMC for it. `get_article` went with
+  it, which is why #351 needs no `ArticleFetch` type (user's call).
+- **The caveat is pure and names what was asked.** `unassessed_caveat()`
+  is now the one sentence shape, with `unreachable_source_caveat()`
+  delegating to it, and `coi_not_assessed_caveat(pubmed_record_read)` has
+  two forms so the reader knows whether the PDF is the remaining place to
+  look. No provider text, by construction.
+- **Two defects found on the way, both fixed here.** `warnings` was in
+  `to_dict` and in **no column**, so every caveat — this slice's and #346's
+  — was lost on reload; and `transparency_results` had no test at all.
+  `_migrate_transparency_coi_and_warnings` adds `coi_disclosure` and
+  `warnings` and **drops** `coi_disclosed`, whose stored 1 carries no
+  information, so no later reader can pick it back up. Stored scores and
+  risk levels are *not* recomputed (#145).
+- **Verified:** `pytest tests/` — 2014 passed, 3 xfailed; `lint_delta.py`
+  0 new ruff or mypy findings. `tests/test_coi_is_not_assessed.py` is 58
+  tests, and **29 mutations of the behaviour above each fail a test**, no
+  survivors.
+- **The sweep lied twice before it was worth anything.** First it named a
+  test file that does not exist (`tests/test_storage.py`), so pytest exited
+  non-zero having collected **0 tests** and every mutation read CAUGHT.
+  Then, with the list fixed, every mutation read SURVIVED: the editable
+  install resolves `bmlibrarian_lite` to the **real working tree**, so a
+  mutation of the copy is a no-op. A sweep needs both guards —
+  `PYTHONPATH=<copy>/src` plus a printed probe of `m.__file__`, and a
+  baseline run asserting `N passed` before any mutation.
+- **Lodged, not fixed: `#357`** — Swift has the *other* half of #352. Its
+  `hasStatement` boolean is honest, but `TransparencyAnalysisService` reads
+  COI from the full text alone, so every article whose full text was not
+  retrieved is scored and badged as declaring no conflicts. Android
+  analyses no COI at all (#116).
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
+
+- **A source we could not reach is not a finding** (Python; #346, #347, #344,
+  PR #349, merged 2026-09-21). The rule is a section of
+  `doc/cross_platform/analysis_failure_reporting.md`: a source that answered
+  "nothing" and one we could not reach are opposite answers, and only the
+  first is the article's fault. **`FullTextFetch`** (frozen, `data_models.py`)
+  carries the XML *or* a `RequestFailure` and refuses both, built through
+  `served()` / `absent()` / `unreachable()` — the ambiguity made
+  unrepresentable, because the docstring warning of it stopped no caller. An
+  unreachable Europe PMC now leaves `DataDisclosureLevel.UNKNOWN` (neutral,
+  read by no risk indicator) plus a caveat, instead of `NOT_STATED` at −5.
+  **404 is the one status that is about the article** — Europe PMC's for a PMC
+  ID with no open-access text, Unpaywall's for an unknown DOI — so it stays an
+  absence; read as unreachable it would caveat every closed-access paper.
+  **Unreadable is not absent either**: an empty 2xx body, unparseable XML, a
+  `pmcid` holding an int. `_discover_sources` returns `(sources, failures)`
+  and `DiscoveryResult` carries `lookup_failures`. **A field nobody reads is
+  not reporting** — the review's main finding: every unsuccessful return now
+  builds its sentence through a pure function (`no_pdf_sources_message()`,
+  `paywall_message()` withholding the licence claim,
+  `with_unestablished_access()`), and `with_lookup_failures()` **merges**
+  rather than replaces. **Caveats carry no provider text** by construction —
+  `RequestFailure.describe()` only, because a `requests` exception embeds the
+  URL and Unpaywall's carries the user's email (#196, #330).
+  **Controls matter more than the fix here**: no test fetched a full text that
+  *arrived*, so mutating `get_full_text_xml` to `absent()` unconditionally
+  passed the whole suite — hence `TestAFetchedFullTextIsActuallyUsed`.
+  **Narrowing an `except Exception` moves work into the body**: a converter
+  answering a JSON array used to be swallowed with the request failures.
+  #344 was verified fixed by #345 and pinned by a test asserting the
+  *departure*. Lodged, all the same family: **#350**–**#356** and **#348**
+  (#352, #348, #351 are the slice in flight above); **#346 stays open for
+  Swift and Android**, no transparency *pattern* changed so the parity
+  fixtures are not involved.
 
 - **Every outbound request is paced, per host** (Python; #341, PR #345, merged
   2026-09-21). The contract is `doc/cross_platform/polite_request_pacing.md`.
@@ -132,9 +129,9 @@ the rest.
   a measurement: "503 after about two rapid requests" did **not** reproduce, and
   the 10/s this repo called "never true" is EBI's own published figure. Tests
   assert the wait, not the `interval` property (four mutations used to survive);
-  `conftest.py` resets the registry autouse. Lodged: **#344** (fixed here and
-  closed), **#346** and **#347** (the slice in flight above), and the ports
-  **#342** (Swift) / **#343** (Android), which are what is left of #341.
+  `conftest.py` resets the registry autouse. Lodged: **#344**, **#346** and
+  **#347** (all closed by PR #349 above, bar #346's Swift/Android halves), and
+  the ports **#342** (Swift) / **#343** (Android), what is left of #341.
 
 - **A cancelled worker ends, and a failed pass names its cause** (Python; #326,
   #327, PR #333, merged 2026-09-21). Rules in
@@ -171,39 +168,23 @@ the rest.
 
 - **The cancel-and-failure rounds** (Python; #306/#307/#310/#315 PR #317,
   #314/#316 PR #321, #320 PR #325, #324 PR #329 — merged 2026-09-19/20).
-  The contract is `doc/cross_platform/analysis_failure_reporting.md`; what
-  follows is only what it does not already hold.
+  The contract is `doc/cross_platform/analysis_failure_reporting.md` and it
+  holds the rules; what is easiest to get wrong again:
   **`SingleOutcome`** (`gui/workers.py`) enforces the outcome contract
-  instead of documenting it: a worker emits through `_end()` (first terminal
-  signal only) and runs its body inside `_run_once()`, which reports whatever
-  escapes. A docstring did not hold it — an import failing inside the body
-  left `SearchFailedError` unbound, so the first `except` raised in turn and
-  the thread ended in silence. **Imports belong before the `try`.**
-  **A cancel the runner cannot see is not a cancel**: `should_cancel` is
-  asked *before* each item, so a run stops before paying for one more.
-  Whether a run was cancelled is the **runner's** answer, not the flag's; a
-  cancel landing after the last item stopped nothing, so the run `finished`;
-  one landing before the first **publishes nothing**.
-  **What ran is kept**: a cancelled benchmark stores `CANCELLED` and stays so
-  even if it then crashed — stored `FAILED`, its evaluations fell outside the
-  reuse lookup and the user bought them twice. Only `COMPLETED` is the
-  question's latest benchmark, and **reuse is relevance-only**, the quality
-  benchmark storing no per-document evaluation. `BenchmarkCancellation` and
-  `QualityEvaluation` (one of `assessment`/`failure`) refuse impossible
-  states; `get_benchmark_result` cross-checks status against cancellation and
-  raises `StoredResultUnreadableError` for the misleading pair. **A rerun
-  skips the judged and retries the failed**; a replayed assessment is
-  `reused`, outside cost, tokens and latency, and only via
-  `is_reusable_assessment()`.
-  **A partial comparison never reads as a whole one**: the pure texts in
-  `benchmarking/display.py` reach both results tabs, both progress lines, the
-  status bar and **both exports**, and say what was *not started*, never what
-  was paid for. **One parser** — the benchmark reads answers with the review's
-  `parse_score_response()`; an answer holding no score on the scale is `None`
-  → retried → `JSON_PARSE_ERROR`, never clamped or defaulted to 1. **`None` is
-  "not recorded", never "none failed".** **`QProgressDialog.close()` emits
-  `canceled`** — use `_close_progress_dialog()`. Lodged, still open: **#318**,
-  **#328**, **#330**, **#331**.
+  instead of documenting it — a docstring did not hold it, because an import
+  failing inside a body left `SearchFailedError` unbound and the thread ended
+  in silence. **Imports belong before the `try`.** **Whether a run was
+  cancelled is the runner's answer, not the flag's**, and `should_cancel` is
+  asked *before* each item. **What ran is kept**: a cancelled benchmark
+  stores `CANCELLED` even if it then crashed, or its evaluations fall outside
+  the reuse lookup and the user buys them twice; **reuse is relevance-only**.
+  **A partial comparison never reads as a whole one** — the pure texts in
+  `benchmarking/display.py` reach both tabs, both progress lines, the status
+  bar and **both exports**, and say what was *not started*. **One parser**,
+  and **`None` is "not recorded", never "none failed".**
+  **`QProgressDialog.close()` emits `canceled`** — use
+  `_close_progress_dialog()`. Lodged, still open: **#318**, **#328**,
+  **#330**, **#331**.
 
 - **An unreadable store is kept whole, and a report records what its search
   lost** (iOS/macOS; #285 + #284, PR #291, merged 2026-09-17).
@@ -223,36 +204,28 @@ the rest.
   #255 closed everywhere 2026-09-17). The contract, one section per platform,
   is `doc/cross_platform/search_failure_reporting.md`; **read it before
   touching any of this.** Easiest to get wrong again: **failures that leave
-  nothing are an error**, never "No documents found" (user, 2026-09-14), and a
-  failure travels as kind + HTTP status only — **no exception, body or parser
-  message is kept** (each can print the NCBI API key). **An HTTP 200 can be a
-  failure**, a missing count is malformed rather than 0, and **PubMed lists
-  only 9,999 records**. **Shortfalls ride with the documents into the review**
-  — a dialog alone left the report claiming a complete search; notice and
-  Methodology line are added by code, never the LLM. **A page that failures
-  leave with no new document changes nothing**; a failed later Europe PMC page
-  ends the cursor, and **an ended cursor misses every hit not received**. A
-  failed alternative (smart-search) query has **its own clause**. **Swift
-  shape**: the clients raise (`SourceRequestError`), the app decides; paging
-  travels as a `SearchContinuation`, and **`SourceRequestError` must conform to
-  `RetryableError`** or a 429 stops being retried. **A lookup is not a page**,
-  and `refreshPaginationState` replays pages already held — **no** shortfall,
-  since finding nothing new is ordinary. Lodged across the three rounds: #258,
-  #259, #261–#266 (Python), #267–#275, #277–#280 (Android), #281, #283–#290
-  (Swift).
+  nothing are an error**, never "No documents found" (user, 2026-09-14); a
+  failure travels as kind + HTTP status only, because an exception, body or
+  parser message can print the NCBI API key; **an HTTP 200 can be a failure**;
+  and **shortfalls ride with the documents into the review** — a dialog alone
+  left the report claiming a complete search. **A page that failures leave
+  with no new document changes nothing**, but a failed later Europe PMC page
+  ends the cursor, and **an ended cursor misses every hit not received**.
+  **Swift shape**: the clients raise (`SourceRequestError`), the app decides,
+  and `SourceRequestError` must conform to `RetryableError` or a 429 stops
+  being retried. Lodged across the three rounds: #258, #259, #261–#266
+  (Python), #267–#275, #277–#280 (Android), #281, #283–#290 (Swift).
 
 - **A credential never travels in a URL, nor follows a redirect** (#196 in PR
   #246, #243 in PR #254, merged 2026-09-13/14). Every platform POSTs
   E-utilities parameters in the body; **a URL is what error text and HTTP
-  logging print**, and redacting would chase each printer. **A 307/308 re-sends
-  a body, so a redirect is a failed request.** Enforcement points, tests and
-  port differences are tabled in `doc/developer/europepmc_and_pubmed.md`.
-  Traps: **Android uses a client derived for PubMed only** (Unpaywall and PDF
-  links need redirects) and drops Retrofit's `Invocation` tag, which holds the
-  key; a Swift `URLProtocol` gets the body as `httpBodyStream`; **a redirect
-  test needs a control that a followed redirect is observable**; **NCBI's 400
-  for a bad key echoes the key in its body** (checked live); **a `nil` next
-  offset means no next page** (#251). Credential files go through
+  logging print**, and redacting would chase each printer. **A 307/308
+  re-sends a body, so a redirect is a failed request.** Enforcement points,
+  tests and port differences are tabled in
+  `doc/developer/europepmc_and_pubmed.md`; read it before touching this.
+  Two traps that doc cannot make obvious: **NCBI's 400 for a bad key echoes
+  the key in its body** (checked live), and **a redirect test needs a control
+  that a followed redirect is observable**. Credential files go through
   `write_owner_only_file`.
 
 - **Older rounds, compressed further**; each rule below cost a defect.
@@ -368,10 +341,21 @@ Open issues by family; each issue carries the detail. None blocks another.
   `doc/cross_platform/analysis_failure_reporting.md`**, now several rules
   longer (#302–#304, #306, #307, #310, #315). Both run the same pipeline with the
   same shape. The largest remaining slice of this family.
+- Lodged by PR #349, Python, all "a source we could not read is not a finding"
+  one layer further out: **#353** data availability fabricates `NOT_STATED` for
+  every article outside PMC (the larger population); **#354**
+  `FulltextDiscoverer` maps every failure to `NOT_FOUND`; **#355** a lookup
+  skipped for want of configuration records nothing; **#356** an unreachable
+  PubMed/CrossRef reads as unregistered and unfunded; **#350** the download
+  paths still put `str(e)` in reader-facing fields (no secret leaks today).
+  **#352**, **#348** and **#351** are the slice in flight above.
+- Lodged by that slice: **#357** Swift has the other half of #352 — its
+  `hasStatement` boolean is honest, but COI is read from the full text
+  alone, so every article whose full text was not retrieved is scored and
+  badged as declaring no conflicts. Android analyses no COI at all (#116).
 - Lodged by PR #325, Python: **#328** a re-scored failure supersedes a
   document's good score under latest-wins, and the Scored column does not show
-  it (a cancelled re-score also leaves an empty checkpoint). **#326** and
-  **#327** are the slice in flight above.
+  it (a cancelled re-score also leaves an empty checkpoint).
 - Lodged by PR #329, Python: **#330** `also_failed_text` interpolates the raw
   provider error into a progress label and a dialog, and it can carry a
   credential — **six** production call sites, not the three recorded here

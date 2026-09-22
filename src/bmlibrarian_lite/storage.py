@@ -160,6 +160,7 @@ class LiteStorage:
             # Run migrations for existing data
             self._migrate_benchmark_question_hashes()
             self._migrate_scored_documents_constraint()
+            self._migrate_transparency_coi_and_warnings()
             logger.debug(f"SQLite initialized at {self._storage_config.sqlite_path}")
         except sqlite3.Error as e:
             raise SQLiteError(
@@ -213,6 +214,69 @@ class LiteStorage:
                     )
         except sqlite3.Error as e:
             logger.warning(f"Failed to migrate benchmark question hashes: {e}")
+
+    def _migrate_transparency_coi_and_warnings(self) -> None:
+        """Replace the always-true coi_disclosed column, and keep the caveats.
+
+        Two changes to ``transparency_results`` for rows written by an older
+        build:
+
+        * ``coi_disclosed`` was computed as ``statement is not None``, and the
+          statement was never ``None``, so every stored row says 1 -- "this
+          study discloses its conflicts of interest" -- whether or not any
+          statement was ever found (#352). The value carries no information,
+          which is exactly what ``not_assessed`` means, so existing rows are
+          left with a NULL ``coi_disclosure`` that the readers below map to
+          it. The old column is dropped rather than left behind, so that no
+          later reader can pick the fabricated value back up.
+        * ``warnings`` was on the result and in ``to_dict`` but in no column,
+          so every caveat -- including "not assessed" -- was lost the moment a
+          result was reloaded from disk. A caveat nobody can read again is not
+          reporting.
+
+        Neither the stored ``transparency_score`` nor the stored
+        ``risk_level`` is recomputed here: they were derived by the old code
+        and are stale for other reasons too (#145). A re-analysis replaces
+        the row.
+        """
+        try:
+            with self._sqlite_connection() as conn:
+                cursor = conn.execute("PRAGMA table_info(transparency_results)")
+                columns = [row["name"] for row in cursor.fetchall()]
+                if "coi_disclosure" not in columns:
+                    conn.execute(
+                        "ALTER TABLE transparency_results "
+                        "ADD COLUMN coi_disclosure TEXT"
+                    )
+                    logger.info(
+                        "Added coi_disclosure column to transparency_results; "
+                        "rows written before it read as not assessed."
+                    )
+                if "warnings" not in columns:
+                    conn.execute(
+                        "ALTER TABLE transparency_results ADD COLUMN warnings TEXT"
+                    )
+                    logger.info(
+                        "Added warnings column to transparency_results; "
+                        "caveats stored before it were never written down."
+                    )
+                if "coi_disclosed" in columns:
+                    conn.execute(
+                        "ALTER TABLE transparency_results DROP COLUMN coi_disclosed"
+                    )
+                    logger.info(
+                        "Dropped the transparency_results.coi_disclosed column, "
+                        "which was 1 for every row regardless of what was found."
+                    )
+                conn.commit()
+        except sqlite3.Error as e:
+            # Reported, not just logged: without the columns the reader loses
+            # the caveats and every badge falls back to "not assessed", and a
+            # storage failure is not something to discover later (rule 8).
+            raise SQLiteError(
+                f"Failed to migrate transparency_results at "
+                f"{self._storage_config.sqlite_path}: {e}"
+            ) from e
 
     def _migrate_scored_documents_constraint(self) -> None:
         """
@@ -548,11 +612,12 @@ class LiteStorage:
             industry_funding_detected INTEGER NOT NULL DEFAULT 0,
             industry_funding_confidence REAL DEFAULT 0.0,
             data_availability_level TEXT DEFAULT 'unknown',
-            coi_disclosed INTEGER DEFAULT 1,
+            coi_disclosure TEXT DEFAULT 'not_assessed',
             trial_registered INTEGER DEFAULT 0,
             trial_results_compliant INTEGER DEFAULT 0,
             outcome_switching_detected INTEGER DEFAULT 0,
             risk_indicators TEXT,  -- JSON array
+            warnings TEXT,  -- JSON array
             tier_downgrade_applied INTEGER DEFAULT 0,
             analyzed_at TEXT NOT NULL,
             analyzer_version TEXT DEFAULT '1.0',
@@ -3141,11 +3206,11 @@ class LiteStorage:
             INSERT OR REPLACE INTO transparency_results (
                 document_id, transparency_score, risk_level,
                 industry_funding_detected, industry_funding_confidence,
-                data_availability_level, coi_disclosed, trial_registered,
+                data_availability_level, coi_disclosure, trial_registered,
                 trial_results_compliant, outcome_switching_detected,
-                risk_indicators, tier_downgrade_applied, analyzed_at,
+                risk_indicators, warnings, tier_downgrade_applied, analyzed_at,
                 analyzer_version, full_text_analyzed
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         with self._sqlite_connection() as conn:
@@ -3158,11 +3223,12 @@ class LiteStorage:
                     1 if result.industry_funding_detected else 0,
                     result.industry_funding_confidence,
                     result.data_availability_level,
-                    1 if result.coi_disclosed else 0,
+                    result.coi_disclosure,
                     1 if result.trial_registered else 0,
                     1 if result.trial_results_compliant else 0,
                     1 if result.outcome_switching_detected else 0,
                     json.dumps(result.risk_indicators),
+                    json.dumps(result.warnings),
                     result.tier_downgrade_applied,
                     result.analyzed_at.isoformat(),
                     result.analyzer_version,
@@ -3184,7 +3250,11 @@ class LiteStorage:
         Returns:
             TransparencyResult if found, None otherwise
         """
-        from .transparency import TransparencyResult, TransparencyRisk
+        from .transparency import (
+            COI_NOT_ASSESSED,
+            TransparencyResult,
+            TransparencyRisk,
+        )
 
         query = "SELECT * FROM transparency_results WHERE document_id = ?"
 
@@ -3202,11 +3272,12 @@ class LiteStorage:
                 industry_funding_detected=bool(row["industry_funding_detected"]),
                 industry_funding_confidence=row["industry_funding_confidence"],
                 data_availability_level=row["data_availability_level"],
-                coi_disclosed=bool(row["coi_disclosed"]),
+                coi_disclosure=row["coi_disclosure"] or COI_NOT_ASSESSED,
                 trial_registered=bool(row["trial_registered"]),
                 trial_results_compliant=bool(row["trial_results_compliant"]),
                 outcome_switching_detected=bool(row["outcome_switching_detected"]),
                 risk_indicators=json.loads(row["risk_indicators"] or "[]"),
+                warnings=json.loads(row["warnings"] or "[]"),
                 tier_downgrade_applied=row["tier_downgrade_applied"],
                 analyzed_at=datetime.fromisoformat(row["analyzed_at"]),
                 analyzer_version=row["analyzer_version"],
@@ -3229,7 +3300,11 @@ class LiteStorage:
         if not document_ids:
             return {}
 
-        from .transparency import TransparencyResult, TransparencyRisk
+        from .transparency import (
+            COI_NOT_ASSESSED,
+            TransparencyResult,
+            TransparencyRisk,
+        )
 
         placeholders = ",".join("?" * len(document_ids))
         query = f"SELECT * FROM transparency_results WHERE document_id IN ({placeholders})"
@@ -3247,11 +3322,12 @@ class LiteStorage:
                     industry_funding_detected=bool(row["industry_funding_detected"]),
                     industry_funding_confidence=row["industry_funding_confidence"],
                     data_availability_level=row["data_availability_level"],
-                    coi_disclosed=bool(row["coi_disclosed"]),
+                    coi_disclosure=row["coi_disclosure"] or COI_NOT_ASSESSED,
                     trial_registered=bool(row["trial_registered"]),
                     trial_results_compliant=bool(row["trial_results_compliant"]),
                     outcome_switching_detected=bool(row["outcome_switching_detected"]),
                     risk_indicators=json.loads(row["risk_indicators"] or "[]"),
+                    warnings=json.loads(row["warnings"] or "[]"),
                     tier_downgrade_applied=row["tier_downgrade_applied"],
                     analyzed_at=datetime.fromisoformat(row["analyzed_at"]),
                     analyzer_version=row["analyzer_version"],

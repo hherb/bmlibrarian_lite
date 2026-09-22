@@ -25,7 +25,12 @@ from typing import TYPE_CHECKING, Callable, Optional
 from PySide6.QtCore import QObject, Signal
 
 from ..study_transparency_analyzer.study_transparency_analyzer import StudyTransparencyAnalyzer
-from .transparency_models import TransparencyResult, TransparencyRisk, calculate_risk_level
+from .transparency_models import (
+    COI_NOT_ASSESSED,
+    TransparencyResult,
+    TransparencyRisk,
+    calculate_risk_level,
+)
 from .transparency_settings import TransparencySettings
 
 # Rate limiting: minimum seconds between API requests
@@ -226,15 +231,22 @@ class TransparencyManager(QObject):
         if report.data_availability:
             data_availability_level = report.data_availability.disclosure_level.value
 
-        # Determine if COI was disclosed
-        coi_disclosed = report.coi_info is not None and report.coi_info.statement is not None
+        # What is known about the study's COI disclosure. A report with no
+        # coi_info at all has had nothing established either way, so it is
+        # not assessed rather than disclosed -- the default this replaced
+        # made every badge read "Disclosed" (#352).
+        coi_disclosure = (
+            report.coi_info.disclosure_level.value
+            if report.coi_info
+            else COI_NOT_ASSESSED
+        )
 
         # Calculate risk level
         risk_level = calculate_risk_level(
             score=int(report.transparency_score),
             industry_funding=report.industry_funding_detected,
             data_availability=data_availability_level,
-            coi_disclosed=coi_disclosed,
+            coi_disclosure=coi_disclosure,
             settings=self.settings,
         )
 
@@ -251,7 +263,7 @@ class TransparencyManager(QObject):
             industry_funding_detected=report.industry_funding_detected,
             industry_funding_confidence=report.industry_funding_confidence,
             data_availability_level=data_availability_level,
-            coi_disclosed=coi_disclosed,
+            coi_disclosure=coi_disclosure,
             trial_registered=len(report.trial_registrations) > 0,
             trial_results_compliant=results_compliant,
             outcome_switching_detected=report.outcome_switching_detected,

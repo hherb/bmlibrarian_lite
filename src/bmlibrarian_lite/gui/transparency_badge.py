@@ -29,7 +29,13 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QWidget
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
-from ..transparency import TransparencyResult, TransparencyRisk
+from ..transparency import (
+    COI_DISCLOSED,
+    COI_NOT_ASSESSED,
+    COI_NOT_STATED,
+    TransparencyResult,
+    TransparencyRisk,
+)
 
 
 # Color scheme for risk levels: (background_color, text_color)
@@ -64,6 +70,15 @@ DATA_AVAILABILITY_LABELS: Dict[str, str] = {
     "not_available": "Not Available",
     "not_stated": "Not Stated",
     "unknown": "Unknown",
+}
+
+# Conflict of interest labels for tooltips. Three entries, not two: a study
+# whose article declares no conflicts and one nobody read are different
+# things to tell a clinician, and both used to read "Disclosed" (#352).
+COI_DISCLOSURE_LABELS: dict[str, str] = {
+    COI_DISCLOSED: "Disclosed",
+    COI_NOT_STATED: "Not stated in the article",
+    COI_NOT_ASSESSED: "Not assessed",
 }
 
 # Badge styling constants
@@ -199,7 +214,10 @@ class TransparencyBadge(QFrame):
         lines.append(f"<b>Data Availability:</b> {data_label}")
 
         # COI disclosure
-        coi_status = "Disclosed" if r.coi_disclosed else "Not Disclosed"
+        coi_status = COI_DISCLOSURE_LABELS.get(
+            r.coi_disclosure,
+            r.coi_disclosure.replace("_", " ").capitalize(),
+        )
         lines.append(f"<b>Conflicts of Interest:</b> {coi_status}")
 
         # Trial registration

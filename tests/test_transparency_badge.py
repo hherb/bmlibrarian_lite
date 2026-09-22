@@ -23,7 +23,13 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication
 
-from bmlibrarian_lite.transparency import TransparencyResult, TransparencyRisk
+from bmlibrarian_lite.transparency import (
+    COI_DISCLOSED,
+    COI_NOT_ASSESSED,
+    COI_NOT_STATED,
+    TransparencyResult,
+    TransparencyRisk,
+)
 from bmlibrarian_lite.gui.transparency_badge import (
     TransparencyBadge,
     TransparencyBadgeSmall,
@@ -52,7 +58,7 @@ def low_risk_result() -> TransparencyResult:
         risk_level=TransparencyRisk.LOW,
         industry_funding_detected=False,
         data_availability_level="full_open",
-        coi_disclosed=True,
+        coi_disclosure=COI_DISCLOSED,
     )
 
 
@@ -66,7 +72,7 @@ def medium_risk_result() -> TransparencyResult:
         industry_funding_detected=True,
         industry_funding_confidence=0.75,
         data_availability_level="on_request",
-        coi_disclosed=True,
+        coi_disclosure=COI_DISCLOSED,
     )
 
 
@@ -80,7 +86,7 @@ def high_risk_result() -> TransparencyResult:
         industry_funding_detected=True,
         industry_funding_confidence=0.9,
         data_availability_level="not_available",
-        coi_disclosed=False,
+        coi_disclosure=COI_NOT_STATED,
         outcome_switching_detected=True,
         risk_indicators=["Undisclosed COI", "Outcome switching", "Missing data"],
         tier_downgrade_applied=1,
@@ -178,13 +184,27 @@ class TestTransparencyBadge:
         """Tooltip should show COI disclosed status."""
         badge = TransparencyBadge(result=low_risk_result)
         tooltip = badge.toolTip()
-        assert "Disclosed" in tooltip
+        assert "Conflicts of Interest:</b> Disclosed" in tooltip
 
-    def test_tooltip_shows_coi_status_not_disclosed(self, qapp, high_risk_result) -> None:
-        """Tooltip should show COI not disclosed status."""
+    def test_tooltip_shows_coi_status_not_stated(self, qapp, high_risk_result) -> None:
+        """A study whose article declares no conflicts says so."""
         badge = TransparencyBadge(result=high_risk_result)
         tooltip = badge.toolTip()
-        assert "Not Disclosed" in tooltip
+        assert "Conflicts of Interest:</b> Not stated in the article" in tooltip
+
+    def test_tooltip_does_not_claim_disclosure_nobody_established(
+        self, qapp, low_risk_result
+    ) -> None:
+        """A study nobody read must not read as having disclosed (#352).
+
+        This is the badge half of the defect: ``coi_disclosed`` was
+        ``statement is not None`` and the statement was never ``None``, so
+        every study in the library said "Disclosed".
+        """
+        low_risk_result.coi_disclosure = COI_NOT_ASSESSED
+        badge = TransparencyBadge(result=low_risk_result)
+        tooltip = badge.toolTip()
+        assert "Conflicts of Interest:</b> Not assessed" in tooltip
 
     def test_tooltip_shows_outcome_switching(self, qapp, high_risk_result) -> None:
         """Tooltip should show outcome switching warning."""

@@ -25,7 +25,7 @@ import requests
 from urllib3.util.retry import Retry
 
 from ..polite_session import mount_politely
-from ..analysis_failures import unreachable_source_caveat
+from ..analysis_failures import coi_not_assessed_caveat, unreachable_source_caveat
 from ..constants import HTTP_NOT_FOUND, SERVICE_EUROPE_PMC
 from ..data_models import FullTextFetch, RequestFailure, RequestFailureKind
 from ..search_failures import request_failure_from_exception
@@ -67,6 +67,20 @@ class DataDisclosureLevel(Enum):
     UNKNOWN = "unknown"
 
 
+class COIDisclosureLevel(Enum):
+    """What is known about a study's conflict of interest disclosure.
+
+    Three states, not two. ``NOT_STATED`` is a finding about the article and
+    costs it five points; ``NOT_ASSESSED`` says nobody looked, or nobody could,
+    and costs it nothing. Collapsing the two is how every study came to be
+    charged for a statement that may be right there in a paper we never read
+    (#352, ``doc/cross_platform/analysis_failure_reporting.md``).
+    """
+    DISCLOSED = "disclosed"          # A conflict of interest statement was read
+    NOT_STATED = "not_stated"        # The article's own text carries none
+    NOT_ASSESSED = "not_assessed"    # No source that carries one was read
+
+
 class ResultsComplianceStatus(Enum):
     """ClinicalTrials.gov results posting compliance."""
     COMPLIANT = "compliant"               # Results posted on time
@@ -102,11 +116,75 @@ class TrialRegistration:
 
 @dataclass
 class ConflictOfInterest:
-    """Conflict of interest information."""
+    """Conflict of interest information.
+
+    ``disclosure_level`` has no default: the state has to be chosen, because
+    the state that used to be implied -- an empty ``statement`` -- meant both
+    "this article declares no conflicts" and "we never read a source that
+    would have said". Only the first is a fact about the study.
+
+    Attributes:
+        statement: The disclosure as published, empty unless the level is
+            ``DISCLOSED``.
+        disclosure_level: Which of the three states this is.
+        has_industry_ties: Whether the statement discloses industry ties.
+            False unless the level is ``DISCLOSED``.
+        disclosed_relationships: Named relationships found in the statement.
+        confidence: How far ``has_industry_ties`` can be trusted, 0.0 unless
+            the level is ``DISCLOSED``.
+
+    Raises:
+        ValueError: If the fields contradict the level -- a ``DISCLOSED``
+            with nothing to show for it, or a finding drawn from a statement
+            that was never read.
+    """
     statement: str
+    disclosure_level: COIDisclosureLevel
     has_industry_ties: bool = False
     disclosed_relationships: List[str] = field(default_factory=list)
     confidence: float = 0.0
+
+    def __post_init__(self) -> None:
+        """Refuse the combinations that would state an unestablished finding.
+
+        Raises:
+            ValueError: If the level and the evidence disagree.
+        """
+        if self.disclosure_level is COIDisclosureLevel.DISCLOSED:
+            if not self.statement.strip():
+                raise ValueError(
+                    "A disclosed conflict of interest needs the statement it "
+                    "was read from."
+                )
+            return
+        if self.statement.strip():
+            raise ValueError(
+                f"A statement was read, so the level cannot be "
+                f"{self.disclosure_level.value}."
+            )
+        if self.has_industry_ties or self.disclosed_relationships or self.confidence:
+            raise ValueError(
+                f"No statement was read, so nothing can be concluded about "
+                f"industry ties (level {self.disclosure_level.value})."
+            )
+
+    @classmethod
+    def not_stated(cls) -> "ConflictOfInterest":
+        """The article itself was read and carries no disclosure.
+
+        Returns:
+            The absence, as a finding about the study.
+        """
+        return cls(statement="", disclosure_level=COIDisclosureLevel.NOT_STATED)
+
+    @classmethod
+    def not_assessed(cls) -> "ConflictOfInterest":
+        """Nothing that could carry a disclosure was read.
+
+        Returns:
+            The non-finding, which costs the study nothing.
+        """
+        return cls(statement="", disclosure_level=COIDisclosureLevel.NOT_ASSESSED)
 
 
 @dataclass
@@ -146,6 +224,12 @@ class TransparencyReport:
 
     # Conflicts of interest
     coi_info: Optional[ConflictOfInterest] = None
+
+    # Whether a PubMed record for this study was read. It is the second of
+    # the two places a conflict of interest statement can come from, and
+    # knowing that it was consulted is what lets the caveat tell the reader
+    # which sources were actually asked (#352).
+    pubmed_record_read: bool = False
 
     # Data availability
     data_availability: Optional[DataAvailabilityInfo] = None
@@ -1277,53 +1361,12 @@ class EuropePMCClient:
             retry=Retry(total=_ADAPTER_OWNS_NO_THROTTLE_RETRIES),
         )
 
-    def get_article(self, pmid: str = None, pmcid: str = None, doi: str = None) -> Optional[Dict]:
-        """Get article by various IDs."""
-        if pmid:
-            query = f"ext_id:{pmid} src:med"
-        elif pmcid:
-            pmcid = pmcid.upper().replace('PMC', '')
-            query = f"PMCID:PMC{pmcid}"
-        elif doi:
-            query = f'DOI:"{doi}"'
-        else:
-            return None
-
-        url = f"{self.BASE_URL}/search"
-        params = {
-            'query': query,
-            'format': 'json',
-            'resultType': 'core',
-        }
-
-        try:
-            response = self.session.get(url, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            results = data.get('resultList', {}).get('result', [])
-            return results[0] if results else None
-        except requests.RequestException as e:
-            # Never the provider's own text: a requests exception embeds the
-            # request URL, which for our credentialled lookups carries the
-            # API key or the user's email (#196, #330).
-            failure = request_failure_from_exception(e)
-            logger.warning(
-                "Europe PMC could not be asked about %s (%s), so anything it "
-                "holds on this article is not assessed, not absent.",
-                pmcid or pmid,
-                failure.describe(),
-            )
-            return None
-        except (KeyError, TypeError, AttributeError):
-            # The body was not the shape we assumed. Unreadable is not
-            # absent, and this still returns None: the ambiguity that
-            # remains here is #351, which needs the callers changed too.
-            logger.warning(
-                "Europe PMC answered about %s in a shape we cannot read, so "
-                "anything it holds on this article is not assessed.",
-                pmcid or pmid,
-            )
-            return None
+    # ``get_article`` used to live here: a ``resultType=core`` search whose
+    # ``Optional[Dict]`` return meant either "Europe PMC holds no record of
+    # this article" or "we could not reach Europe PMC" (#351). Its only
+    # caller was the COI path, which never read the response (#348) -- and
+    # could not have, since a core result carries no conflict of interest
+    # field. Both defects are answered by the method not existing.
 
     def get_full_text_xml(self, pmcid: str) -> FullTextFetch:
         """Get full text XML for open access articles.
@@ -1422,8 +1465,16 @@ class OpenAlexClient:
 # ANALYSIS FUNCTIONS
 # =============================================================================
 
-def analyze_coi_statement(coi_text: Optional[str]) -> ConflictOfInterest:
-    """Analyze conflict of interest statement for industry ties.
+def analyze_coi_statement(coi_text: str) -> ConflictOfInterest:
+    """Analyze a conflict of interest statement that was actually read.
+
+    The absence of a statement is not this function's answer to give. It
+    used to be: passing ``None`` returned an empty ``ConflictOfInterest``,
+    which every caller downstream read as "this study discloses nothing" --
+    including the callers that had simply never asked anybody (#352). The
+    two absences are now chosen by the caller, through
+    :meth:`ConflictOfInterest.not_stated` and
+    :meth:`ConflictOfInterest.not_assessed`.
 
     Uses a multi-pass approach:
     1. Scan for named pharmaceutical companies (highest signal).
@@ -1435,12 +1486,21 @@ def analyze_coi_statement(coi_text: Optional[str]) -> ConflictOfInterest:
        Long, detailed COI statements that name pharma companies are
        disclosures, not denials, even if they contain phrases like
        "no personal funding".
+
+    Args:
+        coi_text: The statement as published. It must be non-blank; which
+            kind of absence a blank one is, is the caller's to say.
+
+    Returns:
+        The analysed disclosure, always at ``COIDisclosureLevel.DISCLOSED``.
+
+    Raises:
+        ValueError: If ``coi_text`` is blank.
     """
-    if not coi_text:
-        return ConflictOfInterest(
-            statement="",
-            has_industry_ties=False,
-            confidence=0.0
+    if not coi_text or not coi_text.strip():
+        raise ValueError(
+            "analyze_coi_statement needs a statement; use "
+            "ConflictOfInterest.not_stated() or .not_assessed() for an absence."
         )
 
     coi_lower = coi_text.lower()
@@ -1488,6 +1548,7 @@ def analyze_coi_statement(coi_text: Optional[str]) -> ConflictOfInterest:
     if blanket_denial:
         return ConflictOfInterest(
             statement=coi_text,
+            disclosure_level=COIDisclosureLevel.DISCLOSED,
             has_industry_ties=False,
             confidence=0.9
         )
@@ -1551,10 +1612,33 @@ def analyze_coi_statement(coi_text: Optional[str]) -> ConflictOfInterest:
 
     return ConflictOfInterest(
         statement=coi_text,
+        disclosure_level=COIDisclosureLevel.DISCLOSED,
         has_industry_ties=has_industry,
         disclosed_relationships=clean_relationships,
         confidence=confidence
     )
+
+
+def coi_disclosure_summary(coi_info: ConflictOfInterest) -> str:
+    """Describe a conflict of interest finding in one line.
+
+    The line this replaced read ``COI Disclosed: YES`` when industry ties
+    were found and ``NO/None stated`` otherwise, so a study that disclosed
+    "the authors declare no competing interests" and one nobody had looked
+    at printed the same words.
+
+    Args:
+        coi_info: The finding to describe.
+
+    Returns:
+        A phrase, without a trailing full stop.
+    """
+    if coi_info.disclosure_level is COIDisclosureLevel.DISCLOSED:
+        ties = "industry ties" if coi_info.has_industry_ties else "no industry ties"
+        return f"Disclosed ({ties})"
+    if coi_info.disclosure_level is COIDisclosureLevel.NOT_STATED:
+        return "None stated in the article"
+    return "Not assessed"
 
 
 def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
@@ -1849,14 +1933,17 @@ def calculate_transparency_score(report: TransparencyReport) -> float:
 
     # COI disclosure (+/- 15 points)
     if report.coi_info:
-        if report.coi_info.statement:
+        coi_level = report.coi_info.disclosure_level
+        if coi_level is COIDisclosureLevel.DISCLOSED:
             score += 5  # Credit for having a statement at all
             if report.coi_info.has_industry_ties:
                 # Disclosed industry ties: credit for transparency,
                 # but the underlying situation carries bias risk
                 score -= 5
-        else:
-            score -= 5  # No COI statement
+        elif coi_level is COIDisclosureLevel.NOT_STATED:
+            score -= 5  # The article was read and declares nothing
+        # NOT_ASSESSED scores neither way: a study is not charged for a
+        # statement nobody looked for (#352).
 
     # Trial registration (+/- 15 points)
     if report.trial_registrations:
@@ -1994,7 +2081,7 @@ class StudyTransparencyAnalyzer:
         self._fetch_trial_info(report)
 
         # Step 5: Analyze COI statement (full text overrides API data)
-        self._analyze_conflicts(report, fulltext_sections)
+        self._analyze_conflicts(report, fulltext_sections, bool(fulltext))
 
         # Step 6: Analyze data availability (full text overrides API data)
         self._analyze_data_availability(report, fulltext_sections)
@@ -2095,6 +2182,7 @@ class StudyTransparencyAnalyzer:
             pubmed_data = self.pubmed.fetch_article(report.pmid)
 
             if pubmed_data:
+                report.pubmed_record_read = True
                 report.data_sources_used.append("PubMed")
                 report.title = pubmed_data.get('title')
                 report.journal = pubmed_data.get('journal')
@@ -2314,16 +2402,34 @@ class StudyTransparencyAnalyzer:
         self,
         report: TransparencyReport,
         fulltext_sections: Optional[Dict[str, str]] = None,
+        fulltext_read: bool = False,
     ):
         """Analyze conflict of interest disclosures.
+
+        Only the article's own text can establish that a study declares no
+        conflicts. A PubMed record that carries no ``CoiStatement`` has not
+        said the article carries none -- publishers deposit the field
+        unevenly, for 36.5% of a 2018 sample and 79.7% of a 2024 one -- so
+        that case is recorded as not assessed rather than charged five points
+        and a risk indicator (#352).
+
+        There used to be a third source here: a ``resultType=core`` search
+        against Europe PMC, made once per document with no COI statement, on
+        a service paced at one request a second. Nothing read its response,
+        because that response carries no conflict of interest field at all,
+        and yet the report named Europe PMC among its data sources. It is
+        deleted rather than wired up (#348).
 
         Args:
             report: TransparencyReport being built.
             fulltext_sections: Optional dict from extract_fulltext_sections().
                 The 'coi' key, if present, takes priority over API data
                 because it contains the complete disclosure text.
+            fulltext_read: Whether the article's own full text was obtained.
+                It is what separates "this article declares no conflicts"
+                from "nobody read the article".
         """
-        # Priority: full-text COI section > PubMed COI statement > Europe PMC
+        # Priority: full-text COI section > PubMed COI statement
         coi_text = None
 
         if fulltext_sections and fulltext_sections.get('coi'):
@@ -2332,23 +2438,28 @@ class StudyTransparencyAnalyzer:
         else:
             coi_text = getattr(report, '_coi_statement', None)
 
-        # Try to get from Europe PMC if still missing
-        if not coi_text and (report.pmid or report.pmcid):
-            europepmc_data = self.europepmc.get_article(
-                pmid=report.pmid,
-                pmcid=report.pmcid
+        if coi_text and coi_text.strip():
+            report.coi_info = analyze_coi_statement(coi_text)
+        elif fulltext_read:
+            # The article itself was read and carries no disclosure. That is
+            # the study's own answer, and the only one that costs it points.
+            report.coi_info = ConflictOfInterest.not_stated()
+        else:
+            report.coi_info = ConflictOfInterest.not_assessed()
+            report.warnings.append(
+                coi_not_assessed_caveat(report.pubmed_record_read)
             )
-            if europepmc_data:
-                report.data_sources_used.append("Europe PMC")
 
-        report.coi_info = analyze_coi_statement(coi_text)
-
-        # Cross-check COI with funding
-        if report.industry_funding_detected and report.coi_info:
-            if not report.coi_info.has_industry_ties:
-                report.warnings.append(
-                    "Industry funding detected but COI statement does not mention industry ties"
-                )
+        # Cross-check COI with funding. Only a statement we read can fail to
+        # mention industry ties; an unread one cannot contradict anything.
+        if (
+            report.industry_funding_detected
+            and report.coi_info.disclosure_level is COIDisclosureLevel.DISCLOSED
+            and not report.coi_info.has_industry_ties
+        ):
+            report.warnings.append(
+                "Industry funding detected but COI statement does not mention industry ties"
+            )
 
     @staticmethod
     def _record_data_availability_unassessed(
@@ -2455,7 +2566,8 @@ class StudyTransparencyAnalyzer:
         if report.results_compliance == ResultsComplianceStatus.MISSING:
             indicators.append(RISK_INDICATOR_RESULTS_NOT_POSTED)
 
-        # COI concerns
+        # COI concerns. No risk-of-bias indicator may be raised from a source
+        # that was never read, so NOT_ASSESSED raises none (#352).
         if report.coi_info:
             if report.coi_info.has_industry_ties:
                 indicators.append(RISK_INDICATOR_INDUSTRY_TIES_DISCLOSED)
@@ -2465,7 +2577,7 @@ class StudyTransparencyAnalyzer:
                     if re.search(pattern, coi_lower):
                         indicators.append(RISK_INDICATOR_INSTITUTIONAL_INTERMEDIARY)
                         break
-            if not report.coi_info.statement:
+            if report.coi_info.disclosure_level is COIDisclosureLevel.NOT_STATED:
                 indicators.append(RISK_INDICATOR_MISSING_COI_STATEMENT)
 
         # Data availability concerns
@@ -2637,7 +2749,9 @@ def format_report_summary(report: TransparencyReport) -> str:
         lines.append("  • Trial Registration: None found")
 
     if report.coi_info:
-        lines.append(f"  • COI Disclosed: {'YES' if report.coi_info.has_industry_ties else 'NO/None stated'}")
+        lines.append(
+            f"  • COI Statement: {coi_disclosure_summary(report.coi_info)}"
+        )
 
     if report.risk_of_bias_indicators:
         lines.append("")

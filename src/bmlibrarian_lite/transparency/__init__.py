@@ -17,6 +17,9 @@
 """Transparency analysis integration for BMLibrarian Lite."""
 
 from .transparency_models import (
+    COI_DISCLOSED,
+    COI_NOT_ASSESSED,
+    COI_NOT_STATED,
     TransparencyResult,
     TransparencyRisk,
     calculate_risk_level,
@@ -28,6 +31,9 @@ from .transparency_settings import (
 from .transparency_manager import TransparencyManager
 
 __all__ = [
+    "COI_DISCLOSED",
+    "COI_NOT_ASSESSED",
+    "COI_NOT_STATED",
     "TransparencyResult",
     "TransparencyRisk",
     "calculate_risk_level",

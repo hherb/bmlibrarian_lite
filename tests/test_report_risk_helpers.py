@@ -14,6 +14,8 @@ from bmlibrarian_lite.agents.report_risk_helpers import (
     should_warn_for_citation,
 )
 from bmlibrarian_lite.transparency.transparency_models import (
+    COI_DISCLOSED,
+    COI_NOT_STATED,
     TransparencyResult,
     TransparencyRisk,
 )
@@ -33,7 +35,7 @@ def high_risk_result():
         risk_level=TransparencyRisk.HIGH,
         industry_funding_detected=True,
         industry_funding_confidence=0.95,
-        coi_disclosed=False,
+        coi_disclosure=COI_NOT_STATED,
         trial_results_compliant=False,
         risk_indicators=["Industry funding detected", "COI not disclosed"],
     )
@@ -48,7 +50,7 @@ def medium_risk_result():
         risk_level=TransparencyRisk.MEDIUM,
         industry_funding_detected=True,
         industry_funding_confidence=0.8,
-        coi_disclosed=True,
+        coi_disclosure=COI_DISCLOSED,
         data_availability_level="on_request",
     )
 
@@ -60,7 +62,7 @@ def low_risk_result():
         document_id="pmid-11111",
         transparency_score=85,
         risk_level=TransparencyRisk.LOW,
-        coi_disclosed=True,
+        coi_disclosure=COI_DISCLOSED,
         data_availability_level="full_open",
     )
 
@@ -83,7 +85,7 @@ class TestSelectInlineWarning:
             transparency_score=60,
             risk_level=TransparencyRisk.MEDIUM,
             industry_funding_detected=True,
-            coi_disclosed=True,
+            coi_disclosure=COI_DISCLOSED,
         )
         warning = select_inline_warning(result, DEFAULT_INLINE_WARNING_TEMPLATES)
         assert warning == "⚠️ funding concerns"
@@ -94,7 +96,7 @@ class TestSelectInlineWarning:
             document_id="test",
             transparency_score=50,
             risk_level=TransparencyRisk.HIGH,
-            coi_disclosed=False,
+            coi_disclosure=COI_NOT_STATED,
         )
         warning = select_inline_warning(result, DEFAULT_INLINE_WARNING_TEMPLATES)
         assert warning == "⚠️ COI not disclosed"

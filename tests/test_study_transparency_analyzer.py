@@ -24,6 +24,7 @@ mirrored by the Swift implementation in
 import pytest
 
 from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
+    COIDisclosureLevel,
     ConflictOfInterest,
     DataAvailabilityInfo,
     DataDisclosureLevel,
@@ -81,7 +82,7 @@ class TestIdentifyRiskIndicators:
                 disclosure_level=DataDisclosureLevel.NOT_AVAILABLE,
             ),
             results_compliance=ResultsComplianceStatus.MISSING,
-            coi_info=ConflictOfInterest(statement="", has_industry_ties=False),
+            coi_info=ConflictOfInterest.not_stated(),
             outcome_switching_detected=True,
         )
 
@@ -661,7 +662,11 @@ class TestCalculateTransparencyScore:
             data_availability=DataAvailabilityInfo(
                 disclosure_level=DataDisclosureLevel.FULL_OPEN
             ),
-            coi_info=ConflictOfInterest(statement="No conflicts", has_industry_ties=False),
+            coi_info=ConflictOfInterest(
+                statement="No conflicts",
+                disclosure_level=COIDisclosureLevel.DISCLOSED,
+                has_industry_ties=False,
+            ),
             trial_registrations=[
                 TrialRegistration(registry="ClinicalTrials.gov", registration_id="NCT12345678")
             ],
@@ -675,7 +680,11 @@ class TestCalculateTransparencyScore:
             data_availability=DataAvailabilityInfo(
                 disclosure_level=DataDisclosureLevel.AVAILABLE_ON_REQUEST
             ),
-            coi_info=ConflictOfInterest(statement="None", has_industry_ties=False),
+            coi_info=ConflictOfInterest(
+                statement="None",
+                disclosure_level=COIDisclosureLevel.DISCLOSED,
+                has_industry_ties=False,
+            ),
         )
         assert calculate_transparency_score(report) == 60
 
@@ -685,7 +694,7 @@ class TestCalculateTransparencyScore:
             data_availability=DataAvailabilityInfo(
                 disclosure_level=DataDisclosureLevel.NOT_AVAILABLE
             ),
-            coi_info=ConflictOfInterest(statement="", has_industry_ties=False),
+            coi_info=ConflictOfInterest.not_stated(),
             industry_funding_detected=True,
             outcome_switching_detected=True,
         )
@@ -698,7 +707,9 @@ class TestCalculateTransparencyScore:
                 disclosure_level=DataDisclosureLevel.FULL_OPEN
             ),
             coi_info=ConflictOfInterest(
-                statement="Grants from a foundation", has_industry_ties=False
+                statement="Grants from a foundation",
+                disclosure_level=COIDisclosureLevel.DISCLOSED,
+                has_industry_ties=False,
             ),
         )
         with_ties = TransparencyReport(
@@ -706,7 +717,9 @@ class TestCalculateTransparencyScore:
                 disclosure_level=DataDisclosureLevel.FULL_OPEN
             ),
             coi_info=ConflictOfInterest(
-                statement="Grants from Pfizer", has_industry_ties=True
+                statement="Grants from Pfizer",
+                disclosure_level=COIDisclosureLevel.DISCLOSED,
+                has_industry_ties=True,
             ),
         )
         assert calculate_transparency_score(without_ties) == 75
@@ -719,7 +732,9 @@ class TestCalculateTransparencyScore:
                 disclosure_level=DataDisclosureLevel.RESTRICTED
             ),
             coi_info=ConflictOfInterest(
-                statement="Grants from Pfizer", has_industry_ties=True
+                statement="Grants from Pfizer",
+                disclosure_level=COIDisclosureLevel.DISCLOSED,
+                has_industry_ties=True,
             ),
         )
         # 50 - 5 (restricted) + 5 (statement) - 5 (ties) - 10 (combined) = 35

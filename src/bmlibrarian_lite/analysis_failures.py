@@ -351,11 +351,74 @@ def unreachable_source_caveat(
         absence reported elsewhere -- a caller that raises this caveat
         records "not assessed", so there is no absence to discount.
     """
-    return (
-        f"{service} could not be read ({failure.describe()}), so {sought} "
-        f"could not be checked. It is recorded as not assessed, which is "
-        f"not a finding against the study."
+    return unassessed_caveat(
+        f"{service} could not be read ({failure.describe()})", sought
     )
+
+
+def unassessed_caveat(because: str, sought: str) -> str:
+    """Say that something about a study was not established, and why.
+
+    One sentence shape for every "not assessed" caveat, so that the reason a
+    source went unread -- throttled, unparseable, or never consulted at all --
+    cannot drift into reading like a finding in one place and a non-finding in
+    another.
+
+    Args:
+        because: Why it could not be checked, as a capitalised clause that
+            opens the sentence, for example ``"Europe PMC could not be read
+            (HTTP 429)"``.
+        sought: What was being looked for, substituted into "so ... could not
+            be checked", for example ``"its data availability statement"``.
+
+    Returns:
+        Two sentences, ending in a full stop: why it could not be checked,
+        and that the result is therefore not a finding against the study.
+        The second says what *was* recorded rather than warning about an
+        absence reported elsewhere -- a caller that raises this caveat
+        records "not assessed", so there is no absence to discount.
+    """
+    return (
+        f"{because}, so {sought} could not be checked. It is recorded as "
+        f"not assessed, which is not a finding against the study."
+    )
+
+
+#: What the COI caveats say was not established, as the reader is told it.
+#: One place, because both reasons below end in it and they must not drift.
+COI_DISCLOSURE_SOUGHT = "this study's conflict of interest disclosure"
+
+
+def coi_not_assessed_caveat(pubmed_record_read: bool) -> str:
+    """Say that nothing carrying a COI statement was read for this study.
+
+    A conflict of interest statement reaches the analysis from the article's
+    own full text, or from the ``CoiStatement`` of a PubMed record. Neither
+    having been read is not the study declaring no conflicts -- but that is
+    what it was reported as, for every study, until #352.
+
+    The two reasons are kept apart because they tell the reader different
+    things about what to do next: a study whose full text we never obtained
+    may still carry a disclosure in its PDF, and so may one whose publisher
+    simply never deposited the statement with PubMed. Measured over samples
+    of 2018 and 2024 records, PubMed carries a ``CoiStatement`` for 36.5%
+    and 79.7% of articles respectively, so its silence is not the article's.
+
+    Args:
+        pubmed_record_read: Whether a PubMed record for this study was read.
+            When it was, it held no conflict of interest statement.
+
+    Returns:
+        Two sentences, ending in a full stop.
+    """
+    if pubmed_record_read:
+        because = (
+            "The article's full text was not read, and the PubMed record "
+            "carries no conflict of interest statement"
+        )
+    else:
+        because = "Neither the article's full text nor a PubMed record was read"
+    return unassessed_caveat(because, COI_DISCLOSURE_SOUGHT)
 
 
 #: What a lookup we could not make leaves open, as the reader is told it.
