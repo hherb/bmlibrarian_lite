@@ -916,6 +916,11 @@ SERVICE_DOI_RESOLVER = "doi.org"
 SERVICE_PMC_ID_CONVERTER = "PubMed Central's ID converter"
 SERVICE_EUROPE_PMC = "Europe PMC"
 
+# The metadata sources a transparency analysis reads an article's record
+# from. Same rule: each name travels into a sentence the user reads (#356).
+SERVICE_PUBMED = "PubMed"
+SERVICE_CROSSREF = "CrossRef"
+
 # The statuses that mean "this is yours only if you pay or log in". They are
 # a genuine paywall signal, unlike a 5xx, which is the server being broken.
 PAYWALL_HTTP_STATUSES = (401, 403)

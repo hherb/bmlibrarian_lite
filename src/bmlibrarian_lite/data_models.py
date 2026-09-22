@@ -271,6 +271,100 @@ class FullTextFetch:
 
 
 @dataclass(frozen=True)
+class RecordFetch:
+    """What asking a metadata source for an article's record produced (#356).
+
+    The sibling of :class:`FullTextFetch`, for the sources that answer with
+    a record rather than a document: PubMed's efetch and CrossRef's works
+    endpoint. Both returned ``Optional[Dict]``, which answered two questions
+    with one ``None`` -- "this source holds no such article" and "we could
+    not read this source" -- so an unreachable PubMed left ``trial_ids``
+    empty and the report printed "Trial Registration: None found", and an
+    unreachable CrossRef left the study looking unfunded. Neither raised a
+    caveat, because neither had anything to raise one from.
+
+    The three states -- served, absent, unreachable -- are reached through
+    :meth:`served`, :meth:`absent` and :meth:`unreachable` rather than by
+    choosing which fields to pass, because the dangerous one is the claim
+    about the article and it must not be what a caller gets by default.
+
+    Attributes:
+        record: The record, when one was read. Never empty: a source that
+            answers with an empty object has told us nothing about the
+            article, so that is a malformed answer, not an absence.
+        failure: Why it could not be read, when the source could not be
+            reached or its answer could not be parsed. ``None`` with no
+            ``record`` means the source answered, and answered that it holds
+            no such article.
+
+    Raises:
+        ValueError: On construction, if both a record and a failure are
+            given, or if the record is present but empty.
+    """
+
+    record: dict[str, Any] | None = None
+    failure: RequestFailure | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse the states that would mean two things at once.
+
+        Raises:
+            ValueError: If both a record and a failure are given, or if the
+                record is present but empty.
+        """
+        if self.record is not None and self.failure is not None:
+            raise ValueError(
+                "A record fetch is served or unreachable, never both"
+            )
+        if self.record is not None and not self.record:
+            raise ValueError(
+                "An empty record is a malformed answer, not an absence"
+            )
+
+    @classmethod
+    def served(cls, record: dict[str, Any]) -> "RecordFetch":
+        """The source answered with a record.
+
+        Args:
+            record: What it said about the article.
+
+        Returns:
+            The fetch.
+        """
+        return cls(record=record)
+
+    @classmethod
+    def absent(cls) -> "RecordFetch":
+        """The source was read, and holds no such article.
+
+        Returns:
+            The fetch. This is the one state that is about the article.
+        """
+        return cls()
+
+    @classmethod
+    def unreachable(cls, failure: RequestFailure) -> "RecordFetch":
+        """The source could not be read, or its answer could not be parsed.
+
+        Args:
+            failure: Why.
+
+        Returns:
+            The fetch.
+        """
+        return cls(failure=failure)
+
+    @property
+    def is_unreachable(self) -> bool:
+        """Whether the source could not be read.
+
+        Returns:
+            ``True`` when nothing about the article was established.
+        """
+        return self.failure is not None
+
+
+@dataclass(frozen=True)
 class SourceLookupFailure:
     """A full-text lookup that could not be made at all (#347).
 
@@ -309,6 +403,129 @@ class SourceLookupFailure:
         if not self.service or not self.service.strip():
             raise ValueError("A source lookup failure names the service it asked")
         object.__setattr__(self, "service", self.service.strip())
+
+
+class LookupSkipReason(Enum):
+    """Why a lookup was never attempted (#355).
+
+    #347 gave the reader the lookups that were *attempted and failed*. A
+    lookup we never made leaves the same empty list of sources and the same
+    full-confidence "the document may require institutional access" -- the
+    identical harm with a configuration cause rather than a throttle.
+
+    The two reasons are separate because they want different words and only
+    one of them is the reader's to act on: an Unpaywall with no email
+    configured is a setting away from working, while an id converter with no
+    identifier to convert is nobody's fault.
+    """
+
+    #: The service needs configuration this installation does not have,
+    #: such as the Unpaywall email address.
+    NOT_CONFIGURED = "not_configured"
+
+    #: Nothing was known about the article that this service could be asked
+    #: about, such as an id conversion with neither a PMC ID nor a PMID.
+    NO_IDENTIFIER = "no_identifier"
+
+
+#: What each skip reason tells the reader, as a parenthetical in the clause.
+#: The wording is here rather than in the sentence builder so that the enum
+#: and its words cannot drift apart across the Swift and Android ports.
+_SKIP_REASONS: dict[LookupSkipReason, str] = {
+    LookupSkipReason.NOT_CONFIGURED: "not configured",
+    LookupSkipReason.NO_IDENTIFIER: "no identifier to ask it about",
+}
+
+
+@dataclass(frozen=True)
+class SourceLookupSkipped:
+    """A full-text lookup that was never attempted (#355).
+
+    The sibling of :class:`SourceLookupFailure`, and deliberately a separate
+    type rather than a failure kind: a failure is something that went wrong
+    and may not recur, while a skip recurs on every search until something
+    changes. Collapsing them would put "Unpaywall was throttled" and
+    "Unpaywall is not configured" behind one sentence, and only the second
+    tells the reader to do something.
+
+    Attributes:
+        service: The source that was not asked, named as the reader knows
+            it, for example ``"Unpaywall"``. Stripped on construction,
+            because equality of this string is the grouping contract.
+        reason: Why it was not asked.
+
+    Raises:
+        ValueError: On construction, if the service is not named. A skip the
+            reader cannot attribute is not reportable.
+    """
+
+    service: str
+    reason: LookupSkipReason
+
+    def __post_init__(self) -> None:
+        """Refuse a skip that names no service, and normalise the name."""
+        if not self.service or not self.service.strip():
+            raise ValueError("A skipped source lookup names the service it skipped")
+        object.__setattr__(self, "service", self.service.strip())
+
+    def describe(self) -> str:
+        """Say why this source was not asked, in the reader's words.
+
+        Returns:
+            A short phrase for the parenthetical in the reader's sentence,
+            for example ``"not configured"``.
+        """
+        return _SKIP_REASONS[self.reason]
+
+
+@dataclass(frozen=True)
+class LookupRecord:
+    """Which full-text lookups went unanswered, and why (#354, #355).
+
+    One value rather than two parallel tuples, because it travels: PDF
+    discovery builds it, full-text discovery carries it, and the
+    transparency analyser reads it to decide whether an absence is the
+    article's answer or our own silence. A field that stops one layer short
+    reproduces the defect it was added to fix (#349).
+
+    An empty record is the ordinary case -- every lookup was made and
+    answered -- and says nothing to the reader.
+
+    Attributes:
+        failures: Lookups that were attempted and failed.
+        skipped: Lookups that were never attempted.
+    """
+
+    failures: tuple[SourceLookupFailure, ...] = ()
+    skipped: tuple[SourceLookupSkipped, ...] = ()
+
+    @property
+    def anything_unasked(self) -> bool:
+        """Whether any lookup went unanswered, for either reason.
+
+        Returns:
+            ``True`` when at least one source was not asked or did not
+            answer, so no claim about this article's access can be made.
+        """
+        return bool(self.failures) or bool(self.skipped)
+
+    def merged(self, other: "LookupRecord") -> "LookupRecord":
+        """Combine two records, keeping everything both hold.
+
+        Merging rather than replacing: a caller that overwrote the record it
+        was given would silently drop the layer below's findings, which is
+        how ``with_lookup_failures`` came to merge (#349).
+
+        Args:
+            other: The record to add to this one.
+
+        Returns:
+            A record holding both sides, this one's entries first.
+        """
+        return LookupRecord(
+            failures=self.failures + other.failures,
+            skipped=self.skipped + other.skipped,
+        )
 
 
 # The kinds whose failure is an HTTP answer, and so can name its status.

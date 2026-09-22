@@ -644,10 +644,20 @@ def _handle_fulltext(args: dict[str, Any], ctx: _AgentsContext) -> dict[str, Any
     )
 
     if not result.success or not result.markdown_content:
+        # "Not available" is a claim about the article, and a calling agent
+        # reads it as the literature's answer -- which is the harm #262 was
+        # opened for. It may only be made where every lookup that could be
+        # made was made and answered (#354).
         return {
             "success": False,
             "source": result.source_type.value,
-            "error": "Full text not available for this article.",
+            "absence_established": result.absence_established,
+            "error": (
+                "Full text not available for this article."
+                if result.absence_established
+                else result.error
+                or "Whether a full text is available was not established."
+            ),
         }
 
     # Build a document ID from available identifiers

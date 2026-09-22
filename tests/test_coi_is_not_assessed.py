@@ -46,6 +46,7 @@ from bmlibrarian_lite.analysis_failures import (
     coi_not_assessed_caveat,
     unassessed_caveat,
 )
+from bmlibrarian_lite.data_models import RecordFetch
 from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
     RISK_INDICATOR_MISSING_COI_STATEMENT,
     COIDisclosureLevel,
@@ -808,9 +809,9 @@ class TestTheWiringItself:
         Args:
             analyzer: The analyzer to stub.
         """
-        analyzer.pubmed.fetch_article = lambda pmid: None
+        analyzer.pubmed.fetch_article = lambda pmid: RecordFetch.absent()
         analyzer.pubmed.convert_ids = lambda *a, **k: {}
-        analyzer.crossref.get_work = lambda doi: None
+        analyzer.crossref.get_work = lambda doi: RecordFetch.absent()
         analyzer.clinicaltrials.get_study = lambda nct: None
         analyzer.europepmc.session = ExplodingSession()
 
@@ -826,17 +827,27 @@ class TestTheWiringItself:
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_STATED
 
     def test_not_reading_it_reaches_the_decision(self, analyzer) -> None:
-        """The control: the same call without a full text establishes nothing."""
+        """The control: the same call without a full text establishes nothing.
+
+        Asserted on the caveat as well as the level. Both the "full text was
+        read but nothing in it was recognised" branch and this one record
+        NOT_ASSESSED, so the level alone lets ``analyze``'s ``bool(fulltext)``
+        be mutated to a constant and stay green -- which would tell every
+        reader the article had been read.
+        """
         self._quiet(analyzer)
 
         report = analyzer.analyze(doi="10.1/x")
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_ASSESSED
+        assert coi_not_assessed_caveat(False) in report.warnings
 
     def test_a_pubmed_answer_is_recorded_as_read(self, analyzer) -> None:
         """``pubmed_record_read`` is what the caveat's two forms turn on."""
-        analyzer.crossref.get_work = lambda doi: None
-        analyzer.pubmed.fetch_article = lambda pmid: {"title": "A study"}
+        analyzer.crossref.get_work = lambda doi: RecordFetch.absent()
+        analyzer.pubmed.fetch_article = lambda pmid: RecordFetch.served(
+            {"title": "A study"}
+        )
 
         report = TransparencyReport(pmid="1")
         analyzer._fetch_basic_metadata(report)
@@ -845,8 +856,8 @@ class TestTheWiringItself:
 
     def test_no_pubmed_answer_is_not(self, analyzer) -> None:
         """The control: an efetch that yielded no article read nothing (#250)."""
-        analyzer.crossref.get_work = lambda doi: None
-        analyzer.pubmed.fetch_article = lambda pmid: None
+        analyzer.crossref.get_work = lambda doi: RecordFetch.absent()
+        analyzer.pubmed.fetch_article = lambda pmid: RecordFetch.absent()
         analyzer.pubmed.convert_ids = lambda *a, **k: {}
 
         report = TransparencyReport(pmid="1")

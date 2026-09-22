@@ -32,7 +32,6 @@ test reaches nothing and cannot check that; the other tests of the same client
 do.
 """
 
-import json
 import logging
 import socket
 import threading
@@ -184,6 +183,20 @@ def _no_fulltext(self: StudyTransparencyAnalyzer, report: TransparencyReport) ->
     return None
 
 
+def _raise_from_a_real_request(self: StudyTransparencyAnalyzer, *_args, **_kwargs):
+    """Fail the way an unhandled E-utilities error does, from a real request.
+
+    Args:
+        self: The analyzer, whose PubMed client carries the key.
+        *_args: The identifiers, unused.
+        **_kwargs: The identifiers, unused.
+
+    Raises:
+        requests.RequestException: Whatever the throttling server produces.
+    """
+    self.pubmed._make_request("efetch.fcgi", {"db": "pubmed", "id": TEST_PMID})
+
+
 @pytest.fixture
 def start_server() -> Iterator[StartServer]:
     """Start local E-utilities stand-ins; all of them stop after the test."""
@@ -232,7 +245,14 @@ def unreachable_url() -> str:
 
 
 class TestTransparencyPubMedClient:
-    """The transparency analyser's own E-utilities client."""
+    """The transparency analyser's own E-utilities client.
+
+    ``fetch_article`` classifies a request failure into a ``RecordFetch``
+    rather than letting it propagate (#356), so the exception these tests
+    were written against is now caught one frame in. They assert the same
+    guarantee at both surfaces: the exception ``_make_request`` raises, and
+    the value and log ``fetch_article`` leaves behind.
+    """
 
     def test_an_http_error_does_not_carry_the_key(
         self, rate_limiting_server: RecordingServer
@@ -242,12 +262,25 @@ class TestTransparencyPubMedClient:
         client.BASE_URL = rate_limiting_server.url
 
         with pytest.raises(requests.HTTPError) as raised:
-            client.fetch_article(TEST_PMID)
+            client._make_request("efetch.fcgi", {"db": "pubmed", "id": TEST_PMID})
 
         assert raised.value.response.status_code == HTTPStatus.TOO_MANY_REQUESTS
         assert FAKE_API_KEY not in str(raised.value)
         assert FAKE_API_KEY not in (raised.value.request.url or "")
         assert_key_arrived_outside_the_url(rate_limiting_server)
+
+    def test_the_classified_failure_does_not_carry_the_key(
+        self, rate_limiting_server: RecordingServer
+    ) -> None:
+        """What ``fetch_article`` hands its caller keeps the status only."""
+        client = PubMedClient(TEST_EMAIL, FAKE_API_KEY)
+        client.BASE_URL = rate_limiting_server.url
+
+        fetch = client.fetch_article(TEST_PMID)
+
+        assert fetch.is_unreachable
+        assert FAKE_API_KEY not in fetch.failure.describe()
+        assert FAKE_API_KEY not in repr(fetch)
 
     def test_a_connection_error_does_not_carry_the_key(
         self, unreachable_url: str
@@ -257,9 +290,21 @@ class TestTransparencyPubMedClient:
         client.BASE_URL = unreachable_url
 
         with pytest.raises(requests.ConnectionError) as raised:
-            client.fetch_article(TEST_PMID)
+            client._make_request("efetch.fcgi", {"db": "pubmed", "id": TEST_PMID})
 
         assert FAKE_API_KEY not in str(raised.value)
+
+    def test_the_connection_failure_reaches_the_caller_without_the_key(
+        self, unreachable_url: str
+    ) -> None:
+        """The control for the classified path: it is reached and is clean."""
+        client = PubMedClient(TEST_EMAIL, FAKE_API_KEY)
+        client.BASE_URL = unreachable_url
+
+        fetch = client.fetch_article(TEST_PMID)
+
+        assert fetch.is_unreachable
+        assert FAKE_API_KEY not in repr(fetch)
 
     def test_the_debug_log_does_not_carry_the_key(
         self,
@@ -271,8 +316,7 @@ class TestTransparencyPubMedClient:
         client = PubMedClient(TEST_EMAIL, FAKE_API_KEY)
         client.BASE_URL = rate_limiting_server.url
 
-        with pytest.raises(requests.HTTPError):
-            client.fetch_article(TEST_PMID)
+        client.fetch_article(TEST_PMID)
 
         assert "urllib3" in {record.name.split(".")[0] for record in caplog.records}
         assert FAKE_API_KEY not in caplog.text
@@ -293,26 +337,48 @@ class TestTransparencyPubMedClient:
         client.BASE_URL = redirecting.url
 
         with pytest.raises(requests.HTTPError) as raised:
-            client.fetch_article(TEST_PMID)
+            client._make_request("efetch.fcgi", {"db": "pubmed", "id": TEST_PMID})
 
         assert elsewhere.recorded == []
         assert raised.value.response.status_code == status
         assert FAKE_API_KEY not in str(raised.value)
         assert_key_arrived_outside_the_url(redirecting)
 
+    @pytest.mark.parametrize("status", REDIRECTS, ids=REDIRECT_IDS)
+    def test_a_refused_redirect_reaches_the_caller_as_unreachable(
+        self, status: HTTPStatus, start_server: StartServer
+    ) -> None:
+        """A redirect we refused told us nothing about the article (#346)."""
+        elsewhere = start_server(HTTPStatus.OK)
+        redirecting = start_server(status, f"{elsewhere.url}/efetch.fcgi")
+        client = PubMedClient(TEST_EMAIL, FAKE_API_KEY)
+        client.BASE_URL = redirecting.url
+
+        fetch = client.fetch_article(TEST_PMID)
+
+        assert fetch.is_unreachable
+        assert FAKE_API_KEY not in repr(fetch)
+
 
 class TestBatchAnalyzerExport:
-    """The path from a failed analysis to a file the user chose (#196)."""
+    """The path from a throttled analysis to a file the user chose (#196).
+
+    A throttled PubMed used to end the analysis, so the credential's only
+    route into the export was ``result.errors``. Since #356 the analysis
+    survives and records a caveat instead, which the export writes out with
+    every report -- a new route to the same file, and the one these tests
+    now guard.
+    """
 
     @pytest.mark.parametrize("parallel", [False, True], ids=["serial", "parallel"])
-    def test_recorded_errors_and_the_json_export_do_not_carry_the_key(
+    def test_the_caveat_and_the_json_export_do_not_carry_the_key(
         self,
         parallel: bool,
         rate_limiting_server: RecordingServer,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """The failure is still reported, just without the credential."""
+        """The throttling is still reported, just without the credential."""
         monkeypatch.setattr(PubMedClient, "BASE_URL", rate_limiting_server.url)
         monkeypatch.setattr(StudyTransparencyAnalyzer, "_discover_fulltext", _no_fulltext)
         batch = BatchAnalyzer(TEST_EMAIL, FAKE_API_KEY, max_workers=1)
@@ -323,17 +389,38 @@ class TestBatchAnalyzerExport:
         else:
             result = batch.analyze_batch(studies, delay_between=0.0)
 
-        assert result.failed == 1
-        recorded_error = result.errors[TEST_PMID]
-        assert RATE_LIMITED_REASON in recorded_error
-        assert FAKE_API_KEY not in recorded_error
+        warnings = " ".join(w for r in result.reports for w in r.warnings)
+        # Reported, not swallowed: a test that only checks for the absence
+        # of the key passes just as well when nothing is said at all.
+        assert RATE_LIMITED_REASON in warnings
+        assert FAKE_API_KEY not in warnings
 
         export_path = tmp_path / "transparency.json"
         export_to_json(result, str(export_path))
         exported = export_path.read_text(encoding="utf-8")
-        assert RATE_LIMITED_REASON in json.loads(exported)["errors"][TEST_PMID]
+        assert RATE_LIMITED_REASON in exported
         assert FAKE_API_KEY not in exported
         assert_key_arrived_outside_the_url(rate_limiting_server)
+
+    def test_an_unread_pubmed_does_not_end_the_analysis(
+        self,
+        rate_limiting_server: RecordingServer,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """One record we could not read is not a failed analysis (#356).
+
+        ``fetch_article`` used to let the request exception out of
+        ``analyze()``, so a single throttled record lost every other
+        dimension of the study's transparency as well.
+        """
+        monkeypatch.setattr(PubMedClient, "BASE_URL", rate_limiting_server.url)
+        monkeypatch.setattr(StudyTransparencyAnalyzer, "_discover_fulltext", _no_fulltext)
+        batch = BatchAnalyzer(TEST_EMAIL, FAKE_API_KEY, max_workers=1)
+
+        result = batch.analyze_batch([{"pmid": TEST_PMID}], delay_between=0.0)
+
+        assert result.failed == 0
+        assert result.reports
 
 
 class TestTransparencyManagerFailure:
@@ -355,6 +442,13 @@ class TestTransparencyManagerFailure:
 
         monkeypatch.setattr(PubMedClient, "BASE_URL", rate_limiting_server.url)
         monkeypatch.setattr(StudyTransparencyAnalyzer, "_discover_fulltext", _no_fulltext)
+        # Since #356 a throttled record no longer ends the analysis, so the
+        # failure is raised where one still can be -- from a real request to
+        # the same throttling server, so the exception under test is the one
+        # production would raise and not a stand-in built by hand.
+        monkeypatch.setattr(
+            StudyTransparencyAnalyzer, "analyze", _raise_from_a_real_request
+        )
         storage = MagicMock()
         storage.get_transparency_result.return_value = None
         config = MagicMock()

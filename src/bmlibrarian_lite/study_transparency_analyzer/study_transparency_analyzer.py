@@ -28,11 +28,24 @@ from ..polite_session import mount_politely
 from ..analysis_failures import (
     COI_DISCLOSURE_SOUGHT,
     coi_not_assessed_caveat,
+    configuration_nudge,
+    unasked_lookups_clause,
     unassessed_caveat,
     unreachable_source_caveat,
 )
-from ..constants import HTTP_NOT_FOUND, SERVICE_EUROPE_PMC
-from ..data_models import FullTextFetch, RequestFailure, RequestFailureKind
+from ..constants import (
+    HTTP_NOT_FOUND,
+    SERVICE_CROSSREF,
+    SERVICE_EUROPE_PMC,
+    SERVICE_PUBMED,
+)
+from ..data_models import (
+    FullTextFetch,
+    LookupRecord,
+    RecordFetch,
+    RequestFailure,
+    RequestFailureKind,
+)
 from ..search_failures import request_failure_from_exception
 
 # Each client below owns its own request loop and its own error handling,
@@ -252,6 +265,11 @@ class TransparencyReport:
     # knowing that it was consulted is what lets the caveat tell the reader
     # which sources were actually asked (#352).
     pubmed_record_read: bool = False
+
+    # Whether a CrossRef record for this study was read. The funder list and
+    # the sponsor tier are built from it, so its silence and an article that
+    # declares no funding are opposite answers (#356).
+    crossref_record_read: bool = False
 
     # Data availability
     data_availability: Optional[DataAvailabilityInfo] = None
@@ -1096,14 +1114,42 @@ class PubMedClient:
         data = response.json()
         return data.get('esearchresult', {}).get('idlist', [])
 
-    def fetch_article(self, pmid: str) -> Optional[Dict]:
-        """Fetch full article metadata for a PMID."""
+    def fetch_article(self, pmid: str) -> RecordFetch:
+        """Fetch full article metadata for a PMID.
+
+        Returns a typed fetch rather than ``Optional[Dict]``: a PubMed we
+        could not read and a PubMed that holds no such article left the same
+        ``None``, and the analysis read both as the second -- printing
+        "Trial Registration: None found" for a study whose registry nobody
+        asked about (#356). The request failure used to propagate out of
+        ``analyze()`` entirely, ending the whole analysis for one unread
+        record.
+
+        Args:
+            pmid: The article's PubMed ID.
+
+        Returns:
+            The record PubMed holds, its answer that it holds none, or why
+            it could not be read. The exception is never kept: its
+            ``request`` holds the parameters sent, the NCBI API key among
+            them (#196).
+        """
         params = {
             'db': 'pubmed',
             'id': pmid,
             'retmode': 'xml',
         }
-        response = self._make_request('efetch.fcgi', params)
+        try:
+            response = self._make_request('efetch.fcgi', params)
+        except requests.RequestException as e:
+            failure = request_failure_from_exception(e)
+            logger.warning(
+                "PubMed could not be read for PMID %s (%s), so what its "
+                "record holds is not assessed.",
+                pmid,
+                failure.describe(),
+            )
+            return RecordFetch.unreachable(failure)
         return self._parse_pubmed_xml(response.text)
 
     def convert_ids(self, ids: List[str], from_type: str, to_type: str) -> Dict[str, str]:
@@ -1126,15 +1172,29 @@ class PubMedClient:
                 result[source_id] = target_id
         return result
 
-    def _parse_pubmed_xml(self, xml_text: str) -> Optional[Dict]:
-        """Parse PubMed XML response into structured data."""
+    def _parse_pubmed_xml(self, xml_text: str) -> RecordFetch:
+        """Parse PubMed XML response into structured data.
+
+        Two failures used to share one ``None``. An efetch carrying no
+        ``PubmedArticle`` is PubMed's own answer that it holds no such
+        article, and is an absence. XML that will not parse has told us
+        nothing at all, and is not (#346, #250).
+
+        Args:
+            xml_text: The body PubMed answered with.
+
+        Returns:
+            The record, PubMed's answer that it holds none, or why its
+            answer could not be read.
+        """
         import xml.etree.ElementTree as ET
 
         try:
             root = ET.fromstring(xml_text)
             article = root.find('.//PubmedArticle')
             if article is None:
-                return None
+                logger.info("PubMed returned no article for this request.")
+                return RecordFetch.absent()
 
             medline = article.find('MedlineCitation')
             article_elem = medline.find('Article')
@@ -1161,11 +1221,13 @@ class PubMedClient:
                 elif id_type == 'doi':
                     result['doi'] = id_elem.text
 
-            return result
+            return RecordFetch.served(result)
 
         except ET.ParseError as e:
             logger.error(f"Failed to parse PubMed XML: {e}")
-            return None
+            return RecordFetch.unreachable(
+                RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+            )
 
     def _extract_pub_date(self, article_elem) -> Optional[str]:
         """Extract publication date from article element."""
@@ -1242,19 +1304,57 @@ class CrossRefClient:
             'User-Agent': f'StudyTransparencyAnalyzer/1.0 (mailto:{email})'
         })
 
-    def get_work(self, doi: str) -> Optional[Dict]:
-        """Get work metadata by DOI."""
+    def get_work(self, doi: str) -> RecordFetch:
+        """Get work metadata by DOI.
+
+        Returns a typed fetch rather than ``Optional[Dict]``: an unreachable
+        CrossRef left the funder list empty and the sponsor type UNKNOWN,
+        with nothing to tell the reader the funders had never been read
+        (#356).
+
+        A 404 is CrossRef's own answer that it holds no such DOI, so it is
+        an absence. Every other failure leaves the question open -- the same
+        division the full-text paths draw (#346).
+
+        Args:
+            doi: The article's DOI.
+
+        Returns:
+            The work CrossRef holds, its answer that it holds none, or why
+            it could not be read.
+        """
         # Clean DOI
         doi = doi.replace('https://doi.org/', '').replace('http://doi.org/', '')
 
         url = f"{self.BASE_URL}/works/{doi}"
         try:
             response = self.session.get(url, timeout=30)
+            if response.status_code == HTTP_NOT_FOUND:
+                logger.info("CrossRef holds no record of DOI %s.", doi)
+                return RecordFetch.absent()
             response.raise_for_status()
-            return response.json().get('message')
+            message = response.json().get('message')
         except requests.RequestException as e:
-            logger.error(f"CrossRef API error for DOI {doi}: {e}")
-            return None
+            failure = request_failure_from_exception(e)
+            logger.warning(
+                "CrossRef could not be read for DOI %s (%s), so this "
+                "article's funders are not assessed.",
+                doi,
+                failure.describe(),
+            )
+            return RecordFetch.unreachable(failure)
+        except ValueError:
+            # A body that is not JSON has told us nothing about the article.
+            # Unreadable is not absent (#346).
+            logger.warning(
+                "CrossRef's answer for DOI %s could not be read.", doi
+            )
+            return RecordFetch.unreachable(
+                RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+            )
+        if not message:
+            return RecordFetch.absent()
+        return RecordFetch.served(message)
 
     def extract_funders(self, work: Dict) -> List[FunderInfo]:
         """Extract funder information from a CrossRef work.
@@ -1651,6 +1751,83 @@ def analyze_coi_statement(coi_text: str) -> ConflictOfInterest:
 #: all, which is what separates "the article declares nothing" from "we could
 #: not find the part that would say" (#359).
 _END_MATTER_SECTIONS = ('funding', 'funding_role', 'acknowledgments', 'contributors')
+
+
+#: What an unread PubMed record leaves unestablished, as the reader is told
+#: it. One place, because two sentences end with it.
+PUBMED_RECORD_SOUGHT = (
+    "what PubMed records about this study, including its trial registrations"
+)
+
+#: What an unread CrossRef record leaves unestablished.
+CROSSREF_RECORD_SOUGHT = "the funders CrossRef records for this study"
+
+#: What a full text we could not retrieve leaves unestablished, as the
+#: reader is told it. One place, because four sentences end with it.
+FULL_TEXT_SOUGHT = "what this article's own text states"
+
+
+def _full_text_unassessed_caveat(lookups: LookupRecord) -> str:
+    """Say that the article's text was not retrieved, and what went unasked.
+
+    Built from the typed record rather than from the discoverer's ``error``
+    string: that string is assembled for a reader looking for a PDF, and on
+    the request paths it embeds the URL, which for Unpaywall carries the
+    user's email address (#196, #330).
+
+    Args:
+        lookups: What went unasked on the way; may be empty, which means the
+            retrieval failed for a reason no lookup recorded.
+
+    Returns:
+        Two or three sentences ending in a full stop, the third being the
+        configuration advice when there is any to give.
+    """
+    clause = unasked_lookups_clause(lookups)
+    because = (
+        f"The article's full text was not retrieved, and {clause} could not "
+        "be asked"
+        if clause
+        else "The article's full text was not retrieved"
+    )
+    sentences = unassessed_caveat(because, FULL_TEXT_SOUGHT)
+    nudge = configuration_nudge(lookups)
+    return f"{sentences} {nudge}" if nudge else sentences
+
+
+#: What the data availability caveats say was not established, as the
+#: reader is told it. One place, because four sentences end with it.
+DATA_AVAILABILITY_SOUGHT = "this study's data availability statement"
+
+#: Why the commonest unassessed case arose: nothing that could carry the
+#: statement was consulted. Not "the article is not in PMC", because a
+#: reader cannot act on our source list -- what they can act on is knowing
+#: the paper's own PDF has not been read.
+DATA_AVAILABILITY_NOWHERE_TO_LOOK = (
+    "Neither the article's full text nor an open-access copy in PMC was read"
+)
+
+
+def _any_section_was_parsed(fulltext_sections: Optional[Dict[str, str]]) -> bool:
+    """Say whether any part of the full text was segmented at all.
+
+    A data availability statement can sit anywhere in an article, so unlike
+    the conflict of interest path there is no particular section whose
+    absence is telling. What is telling is recognising *nothing*: a full
+    text we received and could not segment has not said the article states
+    no data availability, and recording ``NOT_STATED`` from it charges the
+    paper five points for our own parser (#353, the rule of #359).
+
+    Args:
+        fulltext_sections: The dict from :func:`extract_fulltext_sections`,
+            or ``None`` when no full text was read.
+
+    Returns:
+        True if at least one section was recognised.
+    """
+    if not fulltext_sections:
+        return False
+    return any(value for value in fulltext_sections.values())
 
 
 def _end_matter_was_parsed(fulltext_sections: Optional[Dict[str, str]]) -> bool:
@@ -2153,7 +2330,9 @@ class StudyTransparencyAnalyzer:
         self._analyze_conflicts(report, fulltext_sections, bool(fulltext))
 
         # Step 6: Analyze data availability (full text overrides API data)
-        self._analyze_data_availability(report, fulltext_sections)
+        self._analyze_data_availability(
+            report, fulltext_sections, bool(fulltext)
+        )
 
         # Step 7: Calculate transparency score
         report.transparency_score = calculate_transparency_score(report)
@@ -2180,9 +2359,19 @@ class StudyTransparencyAnalyzer:
         try:
             from ..fulltext_discovery import FulltextDiscoverer
         except ImportError:
-            logger.debug(
-                "fulltext_discovery module not available; "
-                "skipping automatic full-text retrieval"
+            # Logged at debug and reported nowhere, so an installation
+            # without the module analysed every article as though its full
+            # text held nothing (#353).
+            logger.warning(
+                "fulltext_discovery module not available; no full text can "
+                "be retrieved for this article."
+            )
+            report.warnings.append(
+                unassessed_caveat(
+                    "Full-text retrieval is not available in this "
+                    "installation",
+                    FULL_TEXT_SOUGHT,
+                )
             )
             return None
 
@@ -2231,24 +2420,69 @@ class StudyTransparencyAnalyzer:
                     f"Full text behind paywall"
                     + (f": {result.paywall_url}" if result.paywall_url else "")
                 )
+            elif not result.absence_established:
+                # The asymmetry #353 names: a paywall was reported to the
+                # reader and a failure was not, though both leave the
+                # analysis with no text and only the paywall is about the
+                # article. The caveat is built from the typed record, never
+                # from ``result.error``, which embeds the request URL -- and
+                # Unpaywall's carries the user's email (#196, #330).
+                report.warnings.append(
+                    _full_text_unassessed_caveat(result.lookups)
+                )
             else:
                 logger.info(
-                    "Full-text discovery failed: %s",
-                    result.error or "unknown reason",
+                    "No full text exists for this article in any source asked."
                 )
 
         except Exception as e:
+            # Reported, not only logged: this body builds the discoverer and
+            # reads its result, and neither failing is the article's fault.
             logger.warning("Full-text discovery error: %s", e)
+            report.warnings.append(
+                unassessed_caveat(
+                    "Full-text retrieval could not be completed",
+                    FULL_TEXT_SOUGHT,
+                )
+            )
 
         return None
 
     def _fetch_basic_metadata(self, report: TransparencyReport):
-        """Fetch and consolidate basic article metadata."""
+        """Fetch and consolidate basic article metadata.
+
+        Each source is recorded as read or not, because three later steps
+        decide what to claim from that: the conflict of interest wording
+        (#352), trial registration and funding (#356). A source that could
+        not be read raises its caveat here, once, rather than leaving each
+        step to infer it from an empty field.
+
+        Args:
+            report: The report to collect metadata onto.
+        """
 
         # Try PubMed first if we have PMID
         if report.pmid:
             logger.info(f"Fetching PubMed data for PMID {report.pmid}")
-            pubmed_data = self.pubmed.fetch_article(report.pmid)
+            fetch = self.pubmed.fetch_article(report.pmid)
+            pubmed_data = fetch.record
+
+            if fetch.failure is not None:
+                report.warnings.append(
+                    unreachable_source_caveat(
+                        SERVICE_PUBMED, fetch.failure, PUBMED_RECORD_SOUGHT
+                    )
+                )
+            elif pubmed_data is None:
+                # PubMed answered, and holds no such article. That is about
+                # the article, but it is still not a finding *against* it:
+                # nothing it would have carried was established (#250).
+                report.warnings.append(
+                    unassessed_caveat(
+                        "PubMed holds no record of this article",
+                        PUBMED_RECORD_SOUGHT,
+                    )
+                )
 
             if pubmed_data:
                 report.pubmed_record_read = True
@@ -2285,9 +2519,18 @@ class StudyTransparencyAnalyzer:
         # Try CrossRef if we have DOI
         if report.doi:
             logger.info(f"Fetching CrossRef data for DOI {report.doi}")
-            crossref_data = self.crossref.get_work(report.doi)
+            fetch = self.crossref.get_work(report.doi)
+            crossref_data = fetch.record
+
+            if fetch.failure is not None:
+                report.warnings.append(
+                    unreachable_source_caveat(
+                        SERVICE_CROSSREF, fetch.failure, CROSSREF_RECORD_SOUGHT
+                    )
+                )
 
             if crossref_data:
+                report.crossref_record_read = True
                 report.data_sources_used.append("CrossRef")
 
                 # Fill in missing data from CrossRef
@@ -2313,6 +2556,32 @@ class StudyTransparencyAnalyzer:
 
     def _fetch_funder_info(self, report: TransparencyReport):
         """Analyze funding sources."""
+
+        # A funder list is built from CrossRef's record and PubMed's grants.
+        # Where a source went unread the list is short for reasons that are
+        # not the study's, and the sponsor tier derived from it is drawn
+        # from less than was published -- which can turn an industry-funded
+        # study into an apparently unfunded one (#356).
+        # A source is named only where we held the identifier it is asked
+        # by: CrossRef cannot be read for an article with no DOI, and
+        # saying so would caveat every PMID-only record with something the
+        # reader can neither act on nor doubt.
+        unread = [
+            name
+            for name, was_read, could_ask in (
+                (SERVICE_CROSSREF, report.crossref_record_read, report.doi),
+                (SERVICE_PUBMED, report.pubmed_record_read, report.pmid),
+            )
+            if could_ask and not was_read
+        ]
+        if unread:
+            report.warnings.append(
+                unassessed_caveat(
+                    f"{' and '.join(unread)} "
+                    f"{'were' if len(unread) > 1 else 'was'} not read",
+                    "this study's funding in full",
+                )
+            )
 
         # Analyze CrossRef funders
         if hasattr(report, '_crossref_funders') and report._crossref_funders:
@@ -2401,6 +2670,20 @@ class StudyTransparencyAnalyzer:
 
     def _fetch_trial_info(self, report: TransparencyReport):
         """Fetch and analyze clinical trial registration information."""
+
+        # The trial IDs come from PubMed's databank links and from nowhere
+        # else, so a PubMed we did not read leaves trial_ids empty and the
+        # summary prints "Trial Registration: None found" -- an unregistered
+        # trial invented out of an unread record (#356).
+        if not report.pubmed_record_read:
+            report.warnings.append(
+                unassessed_caveat(
+                    "PubMed, which is the only source this analysis reads "
+                    "trial registrations from, was not read",
+                    "this study's trial registration",
+                )
+            )
+            return
 
         # Get trial IDs from PubMed databank links
         trial_ids = []
@@ -2564,24 +2847,59 @@ class StudyTransparencyAnalyzer:
         )
         report.warnings.append(
             unreachable_source_caveat(
-                SERVICE_EUROPE_PMC,
-                failure,
-                "this study's data availability statement",
+                SERVICE_EUROPE_PMC, failure, DATA_AVAILABILITY_SOUGHT
             )
+        )
+
+    @staticmethod
+    def _record_data_availability_unassessed_because(
+        report: TransparencyReport, because: str
+    ) -> None:
+        """Record an unassessed data availability for a reason of our own.
+
+        The sibling of :meth:`_record_data_availability_unassessed`, for the
+        cases where no request failed because no request was made: the
+        article is outside PMC and its full text was never retrieved, or a
+        full text arrived that we could not segment. Both leave exactly the
+        empty statement an article without one leaves, and until #353 both
+        were charged for it.
+
+        Args:
+            report: The report to record it on; its warnings gain the caveat.
+            because: Why it could not be checked, as a capitalised clause
+                that opens the sentence.
+        """
+        report.data_availability = DataAvailabilityInfo(
+            disclosure_level=DataDisclosureLevel.UNKNOWN
+        )
+        report.warnings.append(
+            unassessed_caveat(because, DATA_AVAILABILITY_SOUGHT)
         )
 
     def _analyze_data_availability(
         self,
         report: TransparencyReport,
         fulltext_sections: Optional[Dict[str, str]] = None,
+        fulltext_read: bool = False,
     ):
         """Analyze data availability and sharing.
+
+        Only a text we read can establish that a study states nothing about
+        its data. Until #353 the analysis fell through to
+        ``analyze_data_availability(None)`` -- ``NOT_STATED``, five points
+        and "Data Availability: Not Stated" -- for every article that is not
+        in PMC, which is the majority, and for every full text discovery
+        failed to retrieve. Neither is the article's answer.
 
         Args:
             report: TransparencyReport being built.
             fulltext_sections: Optional dict from extract_fulltext_sections().
                 The 'data_sharing' key, if present, takes priority over
                 Europe PMC XML extraction.
+            fulltext_read: Whether the article's own full text was obtained.
+                With ``fulltext_sections``, it is what separates "this
+                article states nothing about its data" from "nobody read the
+                article".
         """
         data_statement = None
 
@@ -2589,6 +2907,22 @@ class StudyTransparencyAnalyzer:
         if fulltext_sections and fulltext_sections.get('data_sharing'):
             data_statement = fulltext_sections['data_sharing']
             logger.info("Using data sharing statement from full-text (%d chars)", len(data_statement))
+            report.data_availability = analyze_data_availability(data_statement)
+            return
+        elif fulltext_read:
+            # The article itself was read. Whether its silence is the
+            # article's own depends on whether we segmented it at all: a
+            # full text in which not one section was recognised has told us
+            # nothing, and is the #359 defect one dimension over.
+            if _any_section_was_parsed(fulltext_sections):
+                report.data_availability = analyze_data_availability(None)
+            else:
+                self._record_data_availability_unassessed_because(
+                    report,
+                    "The article's full text was read but none of its "
+                    "sections could be identified",
+                )
+            return
         elif report.pmcid:
             # Fallback: Check Europe PMC for open access full text
             fetch = self.europepmc.get_full_text_xml(report.pmcid)
@@ -2604,7 +2938,9 @@ class StudyTransparencyAnalyzer:
                 import xml.etree.ElementTree as ET
                 try:
                     root = ET.fromstring(fetch.xml)
-                    for section in root.findall('.//sec'):
+                    sections = root.findall('.//sec')
+                    sections_seen = bool(sections)
+                    for section in sections:
                         title = section.findtext('title', '').lower()
                         if 'data' in title and ('avail' in title or 'shar' in title or 'access' in title):
                             data_statement = ' '.join(section.itertext())
@@ -2625,6 +2961,24 @@ class StudyTransparencyAnalyzer:
                         RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
                     )
                     return
+                if not sections_seen:
+                    # Europe PMC served XML we could parse and it holds no
+                    # sections at all, so there was nowhere for a statement
+                    # to be found. Unparsed is not absent (#359).
+                    self._record_data_availability_unassessed_because(
+                        report,
+                        "Europe PMC's full text for this article holds no "
+                        "sections we could read",
+                    )
+                    return
+        else:
+            # Not in PMC and no full text was read, so nothing that could
+            # carry a data availability statement was ever consulted. This
+            # is the majority of articles (#353).
+            self._record_data_availability_unassessed_because(
+                report, DATA_AVAILABILITY_NOWHERE_TO_LOOK
+            )
+            return
 
         report.data_availability = analyze_data_availability(data_statement)
 

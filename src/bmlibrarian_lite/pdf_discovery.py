@@ -42,7 +42,6 @@ import threading
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
-from collections.abc import Sequence
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote, urljoin, urlparse
 
@@ -63,7 +62,14 @@ from .analysis_failures import (
     paywall_message,
     with_unestablished_access,
 )
-from .data_models import RequestFailure, RequestFailureKind, SourceLookupFailure
+from .data_models import (
+    LookupRecord,
+    LookupSkipReason,
+    RequestFailure,
+    RequestFailureKind,
+    SourceLookupFailure,
+    SourceLookupSkipped,
+)
 from .polite_session import is_loopback_host, mount_politely
 from .rate_limit import limiter_for
 from .search_failures import request_failure_from_exception
@@ -357,18 +363,18 @@ class DiscoveryResult:
         is_paywall: Whether a source answered "pay or log in".
         paywall_url: Where, so the caller can offer authentication.
         verification_warning: What the content check doubted.
-        lookup_failures: The lookups that were attempted and failed (#347).
-            Empty means no attempted lookup failed -- **not** that every
-            lookup was attempted: Unpaywall is skipped entirely when no
-            email is configured, and the PMC id converter when the PMC ID
-            is already known. Independent of ``success``, which says only
-            whether a PDF arrived: a download can succeed while Unpaywall
-            was throttled, and that is worth knowing.
+        lookups: The lookups that went unanswered, whether they failed
+            (#347) or were never made (#355). Empty means every lookup this
+            discovery could make was made and answered. Independent of
+            ``success``, which says only whether a PDF arrived: a download
+            can succeed while Unpaywall was throttled, and that is worth
+            knowing.
 
-            ``error`` already carries these failures in words on every
-            unsuccessful path, so a caller that only shows text needs
-            nothing from this field; it is here so a caller can group or
-            count them without parsing a sentence.
+            ``error`` already carries these in words on every unsuccessful
+            path, so a caller that only shows text needs nothing from this
+            field; it is here so a caller can classify rather than parse a
+            sentence -- which is what the transparency analyser does to tell
+            an absence from a silence (#354).
     """
 
     success: bool
@@ -378,29 +384,25 @@ class DiscoveryResult:
     is_paywall: bool = False
     paywall_url: Optional[str] = None
     verification_warning: Optional[str] = None
-    lookup_failures: tuple[SourceLookupFailure, ...] = ()
+    lookups: LookupRecord = LookupRecord()
 
-    def with_lookup_failures(
-        self, failures: Sequence[SourceLookupFailure]
-    ) -> "DiscoveryResult":
-        """Add the lookups that could not be made to this result.
+    def with_lookups(self, record: LookupRecord) -> "DiscoveryResult":
+        """Add the lookups that went unanswered to this result.
 
-        Merges rather than replaces. A download path records no lookup
-        failure of its own today, so ``replace()`` was harmless -- but a
-        discarded lookup failure becomes, downstream, an article reported
-        as having no open-access copy, which is the defect this field
-        exists to prevent (#347).
+        Merges rather than replaces. A download path records no unanswered
+        lookup of its own today, so ``replace()`` was harmless -- but a
+        discarded one becomes, downstream, an article reported as having no
+        open-access copy, which is the defect this field exists to prevent
+        (#347).
 
         Args:
-            failures: The lookups that could not be made; may be empty.
+            record: What went unasked; may be empty.
 
         Returns:
-            A copy carrying this result's own failures and then ``failures``,
+            A copy carrying this result's own record and then ``record``,
             with nothing dropped.
         """
-        return replace(
-            self, lookup_failures=self.lookup_failures + tuple(failures)
-        )
+        return replace(self, lookups=self.lookups.merged(record))
 
 
 class PDFDiscoverer:
@@ -499,13 +501,13 @@ class PDFDiscoverer:
         self._emit_progress("discovery", "starting")
 
         # Find all available PDF sources, and what could not be asked at all
-        sources, lookup_failures = self._discover_sources(doi, pmid, pmcid)
+        sources, lookups = self._discover_sources(doi, pmid, pmcid)
 
         if self._cancelled:
             return DiscoveryResult(
                 success=False,
                 error="Cancelled",
-                lookup_failures=lookup_failures,
+                lookups=lookups,
             )
 
         if not sources:
@@ -514,8 +516,8 @@ class PDFDiscoverer:
                 success=False,
                 # A lookup we could not make says nothing about the licence,
                 # so the paywall claim is withheld when one failed (#347).
-                error=no_pdf_sources_message(lookup_failures),
-                lookup_failures=lookup_failures,
+                error=no_pdf_sources_message(lookups),
+                lookups=lookups,
             )
 
         # Sort by priority
@@ -534,14 +536,14 @@ class PDFDiscoverer:
                 return DiscoveryResult(
                     success=False,
                     error="Cancelled",
-                    lookup_failures=lookup_failures,
+                    lookups=lookups,
                 )
 
             self._emit_progress("discovery", "found_oa" if source.is_open_access else "found")
             result = self._try_download(source, output_path, expected_title or title)
 
             if result.success:
-                return result.with_lookup_failures(lookup_failures)
+                return result.with_lookups(lookups)
 
             if result.is_paywall:
                 # For open access sources, a 403 might be bot protection, not paywall
@@ -558,9 +560,9 @@ class PDFDiscoverer:
                     # that would have found a free copy could not be made,
                     # the claim is withheld rather than asserted (#347).
                     return replace(
-                        result.with_lookup_failures(lookup_failures),
+                        result.with_lookups(lookups),
                         error=paywall_message(
-                            result.error or "", lookup_failures
+                            result.error or "", lookups
                         ),
                     )
 
@@ -574,19 +576,19 @@ class PDFDiscoverer:
                     return DiscoveryResult(
                         success=False,
                         error="Cancelled",
-                        lookup_failures=lookup_failures,
+                        lookups=lookups,
                     )
 
                 result = self._try_browser_download(source, output_path, expected_title or title)
                 if result.success:
-                    return result.with_lookup_failures(lookup_failures)
+                    return result.with_lookups(lookups)
 
         # If we had a paywall result but no success, return it for OpenAthens option
         if last_paywall_result:
             return replace(
-                last_paywall_result.with_lookup_failures(lookup_failures),
+                last_paywall_result.with_lookups(lookups),
                 error=paywall_message(
-                    last_paywall_result.error or "", lookup_failures
+                    last_paywall_result.error or "", lookups
                 ),
             )
 
@@ -596,9 +598,9 @@ class PDFDiscoverer:
             # cannot falsify -- so it is qualified rather than withheld.
             error=with_unestablished_access(
                 "Failed to download PDF from any available source.",
-                lookup_failures,
+                lookups,
             ),
-            lookup_failures=lookup_failures,
+            lookups=lookups,
         )
 
     def _discover_sources(
@@ -606,14 +608,30 @@ class PDFDiscoverer:
         doi: Optional[str],
         pmid: Optional[str],
         pmcid: Optional[str],
-    ) -> tuple[list[PDFSource], tuple[SourceLookupFailure, ...]]:
-        """Discover all available PDF sources, and what could not be asked.
+    ) -> tuple[list[PDFSource], LookupRecord]:
+        """Discover all available PDF sources, and what went unasked.
 
         A lookup that failed and a lookup that answered "nothing" both used
         to leave an empty list, so a throttled Unpaywall was reported to the
-        reader as an article behind a paywall (#347). The failures are
+        reader as an article behind a paywall (#347). A lookup we never made
+        left the same empty list for the same reader (#355). Both are
         returned alongside the sources, not only logged: a log line cannot
         reach the reader, and only the caller can.
+
+        A skip is recorded only where it changes what can be claimed, which
+        is why the two cases here are asymmetric. **Unpaywall** is what
+        establishes open access on this path, so every reason it went
+        unasked -- unconfigured, or no DOI to ask it by -- withholds the
+        claim. **The PMC path** is not reported when no PMID or PMC ID is
+        held: where Unpaywall answered the claim stands, and where it did
+        not, its own entry already withholds it, so a second caveat on
+        every DOI-only record would tell the reader nothing the first does
+        not. That is how an honest majority gets drowned (the 404 rule, one
+        dimension over).
+
+        The no-DOI skip is further gated on having found nothing, because
+        an article whose PMC ID gave us direct links had its open access
+        established by PMC: Unpaywall would only have agreed.
 
         Args:
             doi: The article's DOI, if known.
@@ -621,11 +639,12 @@ class PDFDiscoverer:
             pmcid: Its PMC ID, if known.
 
         Returns:
-            The sources found, and the lookups that could not be made. Both
-            may be empty; one being empty says nothing about the other.
+            The sources found, and what went unasked. Both may be empty; one
+            being empty says nothing about the other.
         """
         sources: List[PDFSource] = []
         failures: list[SourceLookupFailure] = []
+        skipped: list[SourceLookupSkipped] = []
 
         # Try PMC first (most reliable for open access)
         if pmcid or pmid:
@@ -640,6 +659,15 @@ class PDFDiscoverer:
             sources.extend(unpaywall_sources)
             if unpaywall_failure is not None:
                 failures.append(unpaywall_failure)
+        elif doi:
+            # An unconfigured Unpaywall quietly costs every search its best
+            # open-access route, and the reader is the only one who can
+            # change that -- so it is a caveat with a nudge, not a log line.
+            skipped.append(
+                SourceLookupSkipped(
+                    SERVICE_UNPAYWALL, LookupSkipReason.NOT_CONFIGURED
+                )
+            )
 
         # Try publisher-specific patterns (even if Unpaywall didn't find it)
         if doi:
@@ -657,7 +685,18 @@ class PDFDiscoverer:
             if doi_failure is not None:
                 failures.append(doi_failure)
 
-        return sources, tuple(failures)
+        if not sources and not doi:
+            # Unpaywall indexes the open-access copies PMC does not hold,
+            # and we never resolved a DOI to ask it by -- so "no PDF
+            # sources found. The document may require institutional
+            # access." rests on one source having said no (#355).
+            skipped.append(
+                SourceLookupSkipped(
+                    SERVICE_UNPAYWALL, LookupSkipReason.NO_IDENTIFIER
+                )
+            )
+
+        return sources, LookupRecord(tuple(failures), tuple(skipped))
 
     def _discover_pmc(
         self,
@@ -866,7 +905,16 @@ class PDFDiscoverer:
         """
         sources: List[PDFSource] = []
 
+        # Defensive: _discover_sources records a NOT_CONFIGURED skip rather
+        # than calling here without an address (#355), so this is a guard
+        # against a future caller, not a live path. Returning "no sources,
+        # nothing failed" is what it must not become again -- that is
+        # exactly the silence #355 was opened for -- so it says so.
         if not self.unpaywall_email:
+            logger.warning(
+                "Unpaywall was asked for %s with no email configured; no "
+                "lookup was made and none is recorded here.", doi,
+            )
             return sources, None
 
         try:

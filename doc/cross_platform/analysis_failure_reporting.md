@@ -12,7 +12,7 @@ is the reference.
 
 | Platform | Status |
 |----------|--------|
-| Python | Conforms (#261, #262, #263, #264, #302, #303, #304, #306, #307, #310, #314, #315, #316, #320, #324, #326, #327), except two known gaps: the review's quality filter records a failed classification as an "unknown" design (#319), and its `WorkflowWorker` is not yet on the single-terminal-signal contract (#334) |
+| Python | Conforms (#261, #262, #263, #264, #302, #303, #304, #306, #307, #310, #314, #315, #316, #320, #324, #326, #327, #346, #347, #352, #353, #354, #355, #356), except two known gaps: the review's quality filter records a failed classification as an "unknown" design (#319), and its `WorkflowWorker` is not yet on the single-terminal-signal contract (#334) |
 | Swift (BioMedLit + app) | **Unchecked.** `ParallelScoringService` and `ParallelCitationService` have the same shape; see #300 |
 | Android | **Unchecked.** `domain/workflow/` has the same shape; see #300 |
 
@@ -169,6 +169,55 @@ logged **and reported**).
   — which carries no conflict of interest field at all. The fix was to
   remove the fetch and, with it, its ambiguous `Optional[Dict]` (#348,
   #351). A source is named as provenance only when it contributed.
+- **A source nobody asked is not a source that answered "nothing".** The
+  rule's other half, and the larger population by far. #346 and #347 taught
+  the pipeline to tell a source that answered from one it could not reach;
+  four paths were still reporting a source *never consulted* as the
+  article's own answer. Data availability recorded `NOT_STATED` -- five
+  points and "this study publishes no data availability statement" -- for
+  every article outside PMC whose full text was not retrieved, which is most
+  of them (#353). What follows from fixing it:
+  - **A skip is a third state, not a failure.** `SourceLookupSkipped`
+    carries `NOT_CONFIGURED` or `NO_IDENTIFIER` beside
+    `SourceLookupFailure`, and `LookupRecord` carries both together so one
+    value travels from PDF discovery through full-text discovery to the
+    analyser. They are separate types because a failure may not recur while
+    a skip recurs on every search until something changes, and only the
+    second is the reader's to act on: an unconfigured Unpaywall earns a
+    sentence of advice, a throttled one does not (#355). Advice the reader
+    cannot act on reads as confidently as advice they can (#335).
+  - **`NOT_FOUND` is a claim about the article, so only one path may reach
+    it.** `FulltextDiscoverer` mapped every failure, every cancel and every
+    skipped download to it, erasing #347's distinction one layer up (#354).
+    Whether an absence was established is now derived --
+    `FulltextResult.absence_established` is true only when the source type
+    is `NOT_FOUND` *and* nothing went unasked -- because either condition
+    alone lies.
+  - **Only report a skip where it changes what can be claimed.** With no
+    PMID the PMC path is not consulted, but Unpaywall is what establishes
+    open access there: where it answered the claim stands, and where it did
+    not, its own entry already withholds the claim. Recording both would
+    caveat every DOI-only record twice, which is how an honest majority
+    gets drowned -- the same danger as reporting a 404 as unreachable.
+  - **A metadata record has the same three states as a full text.**
+    `RecordFetch` (served / absent / unreachable) replaced the
+    `Optional[Dict]` that PubMed's efetch and CrossRef's works endpoint
+    both returned. An unreachable PubMed left `trial_ids` empty and printed
+    "Trial Registration: None found"; an unreachable CrossRef left the study
+    looking unfunded, with an honest tier and no caveat anywhere (#356). A
+    CrossRef 404 is its own answer and stays an absence; an efetch carrying
+    no `PubmedArticle` likewise, while XML that will not parse does not
+    (#250).
+  - **A failure classified is a failure that no longer ends the analysis.**
+    `fetch_article` let its request exception out of `analyze()`, so one
+    throttled record lost every other dimension of that study's
+    transparency. Typing the return fixed the reporting and the blast
+    radius together.
+  - **The reader is told at every surface, including the agent's.** MCP's
+    `get_document_fulltext` answered "Full text not available for this
+    article." for every unsuccessful result -- the harm of #262, one tool
+    over. It now makes that claim only when the absence was established,
+    and carries `absence_established` so a calling agent can tell.
 - **Keep a control test for the honest finding, and for the success path.**
   Returning "unknown" unconditionally passes every test that only checks the
   unreachable path. A reachable source that answers "no statement" must still
@@ -177,10 +226,13 @@ logged **and reported**).
   shown to have it read, or the whole fix can silently become "nothing is
   ever fetched".
 
-**Ports.** Python is canonical and has landed this for four paths: the
-Europe PMC full-text fetch behind data availability and the three full-text
-discovery lookups (#346, #347), and the conflict of interest disclosure
-(#352, #348, #351). Swift
+**Ports.** Python is canonical and has landed this for every path it has:
+the Europe PMC full-text fetch behind data availability and the three
+full-text discovery lookups (#346, #347), the conflict of interest
+disclosure (#352, #348, #351), and the sources nobody asked -- data
+availability outside PMC, full-text discovery's own failures, the skipped
+lookups, and the metadata records behind trial registration and funding
+(#353, #354, #355, #356, #250). Swift
 (`Packages/BioMedLit/Sources/BioMedLit/Transparency/`) and Android still read
 an unreachable source as an absence — tracked on #346. Swift does **not**
 share the always-true `coi_disclosed` Python has just removed: `COIAnalysisResult.hasStatement`
@@ -194,12 +246,14 @@ so the parity fixtures are not involved; the COI **score** does move, for
 studies nobody read.
 
 **Still outstanding in Python**, so do not read the rule as fully enforced
-before checking: data availability still fabricates `NOT_STATED` for
-articles outside PMC (#353); `FulltextDiscoverer` maps every failure to
-`NOT_FOUND` (#354); a lookup skipped for want of configuration records
-nothing (#355); trial registration and funding read an unreachable source as
-an absence (#356); and the download paths still put the provider's own error
-text in reader-facing fields (#350).
+before checking: the download paths still put the provider's own error text
+in reader-facing fields (#350); nothing re-analyses a stored row, so a
+corrected analyser reaches no existing document (#360); `analysis_failed`
+has no connected slot (#361); a DOI-only document never asks PubMed at all,
+so its record is honestly reported as unread rather than being read (#362);
+and `europepmc.get_article_info` still answers "not in Europe PMC" and "we
+could not ask" with one `None` (#363), which is why a Europe PMC that holds
+no record contributes nothing to the lookup record.
 
 ## What a stage records
 
