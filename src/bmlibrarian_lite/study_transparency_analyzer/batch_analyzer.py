@@ -21,6 +21,7 @@ from .study_transparency_analyzer import (
     TransparencyReport,
     SponsorType,
     DataDisclosureLevel,
+    COIDisclosureLevel,
     ResultsComplianceStatus
 )
 
@@ -301,8 +302,18 @@ def export_to_csv(result: BatchResult, filepath: str):
                 ),
                 'trial_registration_count': len(report.trial_registrations),
                 'results_compliance': report.results_compliance.value,
+                'coi_disclosure_level': (
+                    report.coi_info.disclosure_level.value
+                    if report.coi_info else 'not_assessed'
+                ),
+                # Blank, not False, unless a statement was actually read: an
+                # analyst filtering on False would otherwise count every
+                # never-examined study as one with no industry ties (#352).
                 'coi_has_industry_ties': (
-                    report.coi_info.has_industry_ties if report.coi_info else ''
+                    report.coi_info.has_industry_ties
+                    if report.coi_info
+                    and report.coi_info.disclosure_level is COIDisclosureLevel.DISCLOSED
+                    else ''
                 ),
                 'transparency_score': f"{report.transparency_score:.1f}",
                 'risk_indicators_count': len(report.risk_of_bias_indicators),

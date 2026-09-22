@@ -198,10 +198,31 @@ class TestWhatTheAnalyserRecords:
         report = TransparencyReport(pmid="1", pubmed_record_read=True)
 
         analyzer._analyze_conflicts(
-            report, fulltext_sections={"methods": "..."}, fulltext_read=True
+            report,
+            fulltext_sections={"methods": "...", "funding": "NIH grant R01."},
+            fulltext_read=True,
         )
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_STATED
+
+    def test_a_full_text_we_could_not_segment_is_not_the_article_speaking(
+        self, analyzer
+    ) -> None:
+        """Unparsed is not absent: a parse that found nothing found nothing.
+
+        Full text arrived, but not one end-matter section was recognised in
+        it, so the disclosure may be sitting in the part we could not
+        segment. Charging the study five points and raising an indicator
+        would state the extractor's failure as the article's answer (#359).
+        """
+        report = TransparencyReport(pmid="1", pubmed_record_read=True)
+
+        analyzer._analyze_conflicts(
+            report, fulltext_sections={"methods": "..."}, fulltext_read=True
+        )
+
+        assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_ASSESSED
+        assert any("end matter" in w for w in report.warnings)
 
     def test_a_statement_in_the_full_text_is_read(self, analyzer) -> None:
         """The success control: a disclosure that arrived is used."""
@@ -522,7 +543,18 @@ class TestTheStoredValues:
     """The constants, the round trip, and the rows an older build wrote."""
 
     def test_the_stored_strings_match_the_enum(self) -> None:
-        """``transparency_models`` copies them to avoid an import cycle."""
+        """``transparency_models`` keeps a copy to stay a leaf module.
+
+        Pinned name by name, not as a set: set equality holds just as well
+        when two of the three are swapped, and a build that stored
+        ``"not_stated"`` under ``COI_DISCLOSED`` would report every disclosed
+        study as carrying no statement and charge it for it -- #352 restored
+        through the guard against it. The set assertion stays as the "no
+        fourth member sneaked in" tripwire.
+        """
+        assert COI_DISCLOSED == COIDisclosureLevel.DISCLOSED.value
+        assert COI_NOT_STATED == COIDisclosureLevel.NOT_STATED.value
+        assert COI_NOT_ASSESSED == COIDisclosureLevel.NOT_ASSESSED.value
         assert {COI_DISCLOSED, COI_NOT_STATED, COI_NOT_ASSESSED} == {
             level.value for level in COIDisclosureLevel
         }
@@ -786,7 +818,10 @@ class TestTheWiringItself:
         """A full text without a COI section is the article's own answer."""
         self._quiet(analyzer)
 
-        report = analyzer.analyze(doi="10.1/x", fulltext="# Methods\n\nWe did things.")
+        report = analyzer.analyze(
+            doi="10.1/x",
+            fulltext="# Methods\n\nWe did things.\n\n# Funding\n\nNIH grant R01.",
+        )
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_STATED
 

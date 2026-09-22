@@ -12,6 +12,7 @@ from study_transparency_analyzer import (
     StudyTransparencyAnalyzer,
     SponsorType,
     DataDisclosureLevel,
+    COIDisclosureLevel,
 )
 
 
@@ -218,7 +219,10 @@ def example_custom_scoring():
                 score += 10
 
         # COI disclosure (20 points max)
-        if report.coi_info and report.coi_info.statement:
+        if (
+            report.coi_info
+            and report.coi_info.disclosure_level is COIDisclosureLevel.DISCLOSED
+        ):
             score += 20
 
         return score

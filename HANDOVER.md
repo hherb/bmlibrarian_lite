@@ -54,10 +54,39 @@ Compress into **Recently landed** once merged.
   `warnings` and **drops** `coi_disclosed`, whose stored 1 carries no
   information, so no later reader can pick it back up. Stored scores and
   risk levels are *not* recomputed (#145).
-- **Verified:** `pytest tests/` — 2014 passed, 3 xfailed; `lint_delta.py`
-  0 new ruff or mypy findings. `tests/test_coi_is_not_assessed.py` is 58
-  tests, and **29 mutations of the behaviour above each fail a test**, no
-  survivors.
+- **#359, found reviewing this PR and fixed in it: unparsed is not absent.**
+  The family one layer down, and the review's most important finding.
+  `extract_fulltext_sections` anchored its heading match, so **7 of 12**
+  real-world COI headings missed — including Elsevier's "Declaration of
+  Competing Interest" and the standard PMC/JATS "Conflict of Interest
+  Statement" — and the article was then recorded as declaring no conflicts.
+  **The timing is the lesson**: #352 made `missing_coi_triggers_downgrade`
+  live for the first time, turning a latent extractor miss into a forced
+  HIGH-risk badge on a paper that discloses. A fix that activates dead code
+  changes what every other defect on that path costs. Two answers, both
+  pinned: recognise the spellings journals actually print (16/16, prose
+  about conflicts still rejected — this fixes "Data Availability Statement"
+  too), and require **positive evidence that the end matter was parsed**
+  before recording `NOT_STATED`, else `NOT_ASSESSED` with a caveat.
+- **Also from the review.** `to_dict()` emitted a raw `COIDisclosureLevel`,
+  so `json.dumps` raised for *every* report (`--output json`, `examples.py`)
+  and `batch_analyzer` wrote `"COIDisclosureLevel.NOT_ASSESSED"`. The
+  migration now **retracts** `RISK_INDICATOR_MISSING_COI_STATEMENT` from
+  rows it converts — dropping the column but leaving the sentence showed a
+  clinician the retracted claim beside its own retraction. A failed `DROP
+  COLUMN` is logged and tolerated rather than fatal: Python commits DDL as
+  it goes, so a hard failure left the ADDs applied and failed identically on
+  every later start. `ConflictOfInterest` is **frozen** with a tuple of
+  relationships, `confidence` is range-checked on all levels, storage
+  validates `coi_disclosure` and reports an unreadable JSON column as a
+  caveat rather than a silently shorter list. The constants are pinned to
+  the enum **name by name** — set equality passed a swap. The import-cycle
+  comment was false (no cycle exists; the real reason is keeping
+  `transparency_models` a leaf, free of `requests`).
+- **Verified:** `pytest tests/` — **2058 passed**, 3 xfailed; `lint_delta.py`
+  **0 new** ruff or mypy findings. `tests/test_coi_is_not_assessed.py` is 59
+  tests and `tests/test_coi_unparsed_is_not_absent.py` 42; **29 + 10
+  mutations each fail a test**, no survivors.
 - **The sweep lied twice before it was worth anything.** First it named a
   test file that does not exist (`tests/test_storage.py`), so pytest exited
   non-zero having collected **0 tests** and every mutation read CAUGHT.
@@ -71,6 +100,15 @@ Compress into **Recently landed** once merged.
   COI from the full text alone, so every article whose full text was not
   retrieved is scored and badged as declaring no conflicts. Android
   analyses no COI at all (#116).
+- **Lodged from the review, not fixed here:** **#360** nothing ever
+  re-analyses a stored row (`analyzer_version` has no consumer), so the fix
+  reaches no existing document; **#361** `analysis_failed` has no connected
+  slot, so every worker exception disappears; **#362** a DOI-only document
+  never asks PubMed for the statement it reports as unavailable; **#363**
+  `europepmc.get_article_info` is the surviving half of #351, on the path
+  that now decides NOT_STATED vs NOT_ASSESSED; **#364** type cleanup
+  (stringly-typed `coi_disclosure`, `coi_info: Optional` as an implicit
+  fourth absence, substring-sniffed provenance).
 
 ## Recently landed (context)
 

@@ -49,6 +49,11 @@ here turn either record into what a reader sees.
   :func:`paywall_message` and :func:`with_unestablished_access` are the three
   sentences that carry it to the reader, and none of them claims a licence
   that the lookup we could not make was the one to establish (#347).
+- :func:`unassessed_caveat` is the one sentence shape all of these share --
+  why something could not be checked, and that the result is therefore not a
+  finding against the study. :func:`coi_not_assessed_caveat` builds the two
+  conflict of interest reasons on it: no source that carries a disclosure was
+  read, or the article's full text was not (#352).
 
 None of these put the provider's own words on the screen: those can print the
 request, credentials and all, and stay in the log (#330).
@@ -385,7 +390,8 @@ def unassessed_caveat(because: str, sought: str) -> str:
 
 
 #: What the COI caveats say was not established, as the reader is told it.
-#: One place, because both reasons below end in it and they must not drift.
+#: One place, because every COI reason is completed by it -- the two below
+#: and the unparsed-end-matter one in the analyzer -- and they must not drift.
 COI_DISCLOSURE_SOUGHT = "this study's conflict of interest disclosure"
 
 

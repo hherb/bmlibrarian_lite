@@ -150,6 +150,19 @@ logged **and reported**).
   and not the study's. `ConflictOfInterest` therefore has no default level
   and refuses a "disclosed" with no statement behind it, or a finding drawn
   from a statement that was never read (#352).
+- **Unparsed is not absent either.** The rule keeps going down a layer. A
+  full text we obtained but could not segment is not the article declaring
+  nothing: `extract_fulltext_sections` anchored its heading match, so
+  "Declaration of Competing Interest" (Elsevier's standard heading) and
+  "Conflict of Interest Statement" (the standard PMC/JATS one) both missed,
+  and the article was recorded as declaring no conflicts, charged five
+  points and downgraded. Two things follow. Recognise the spellings real
+  journals print, and require *positive evidence that the relevant part was
+  parsed* before recording an absence — the COI path now records
+  `NOT_ASSESSED` with a caveat when no end-matter section was recognised at
+  all (#359). Watch especially for a fix that **activates previously dead
+  code**: #352 made `missing_coi_triggers_downgrade` live for the first
+  time, which turned a latent extractor miss into a forced high-risk badge.
 - **Delete a lookup that reads nothing rather than reporting it honestly.**
   The COI path fetched a `resultType=core` Europe PMC record per document,
   named Europe PMC in `data_sources_used`, and read no part of the response
@@ -170,7 +183,7 @@ discovery lookups (#346, #347), and the conflict of interest disclosure
 (#352, #348, #351). Swift
 (`Packages/BioMedLit/Sources/BioMedLit/Transparency/`) and Android still read
 an unreachable source as an absence — tracked on #346. Swift does **not**
-share Python's always-true `coi_disclosed`: `COIAnalysisResult.hasStatement`
+share the always-true `coi_disclosed` Python has just removed: `COIAnalysisResult.hasStatement`
 is an honest two-state boolean. It has the other half of #352 instead — only
 two states where three are needed. `TransparencyAnalysisService` takes a COI
 statement from the full text alone, so every article whose full text it

@@ -25,7 +25,12 @@ import requests
 from urllib3.util.retry import Retry
 
 from ..polite_session import mount_politely
-from ..analysis_failures import coi_not_assessed_caveat, unreachable_source_caveat
+from ..analysis_failures import (
+    COI_DISCLOSURE_SOUGHT,
+    coi_not_assessed_caveat,
+    unassessed_caveat,
+    unreachable_source_caveat,
+)
 from ..constants import HTTP_NOT_FOUND, SERVICE_EUROPE_PMC
 from ..data_models import FullTextFetch, RequestFailure, RequestFailureKind
 from ..search_failures import request_failure_from_exception
@@ -114,7 +119,7 @@ class TrialRegistration:
     secondary_outcomes_registered: List[str] = field(default_factory=list)
 
 
-@dataclass
+@dataclass(frozen=True)
 class ConflictOfInterest:
     """Conflict of interest information.
 
@@ -123,33 +128,50 @@ class ConflictOfInterest:
     "this article declares no conflicts" and "we never read a source that
     would have said". Only the first is a fact about the study.
 
+    Frozen, and ``disclosed_relationships`` is a tuple, because the checks in
+    ``__post_init__`` are worth only as much as the object's lifetime: on a
+    mutable version, ``coi.disclosure_level = NOT_ASSESSED`` on a real
+    disclosure, or appending to a caller's aliased list, rebuilds the very
+    states the constructor refuses. Nothing in the tree mutates one; the
+    analyser assigns it wholesale.
+
     Attributes:
         statement: The disclosure as published, empty unless the level is
             ``DISCLOSED``.
         disclosure_level: Which of the three states this is.
         has_industry_ties: Whether the statement discloses industry ties.
             False unless the level is ``DISCLOSED``.
-        disclosed_relationships: Named relationships found in the statement.
-        confidence: How far ``has_industry_ties`` can be trusted, 0.0 unless
-            the level is ``DISCLOSED``.
-
-    Raises:
-        ValueError: If the fields contradict the level -- a ``DISCLOSED``
-            with nothing to show for it, or a finding drawn from a statement
-            that was never read.
+        disclosed_relationships: Named relationships found in the statement,
+            empty unless the level is ``DISCLOSED``.
+        confidence: How far ``has_industry_ties`` can be trusted, between 0.0
+            and 1.0, and 0.0 unless the level is ``DISCLOSED``.
     """
     statement: str
     disclosure_level: COIDisclosureLevel
     has_industry_ties: bool = False
-    disclosed_relationships: List[str] = field(default_factory=list)
+    disclosed_relationships: tuple[str, ...] = ()
     confidence: float = 0.0
 
     def __post_init__(self) -> None:
         """Refuse the combinations that would state an unestablished finding.
 
         Raises:
-            ValueError: If the level and the evidence disagree.
+            ValueError: If the level and the evidence disagree, or if
+                ``confidence`` is outside 0.0-1.0.
         """
+        # Accept any sequence the callers build and store it frozen, so the
+        # list a caller keeps a reference to cannot grow a relationship after
+        # the fact.
+        object.__setattr__(
+            self, "disclosed_relationships", tuple(self.disclosed_relationships)
+        )
+        # Checked on every level, not just the unread ones: the benchmark
+        # averages this number, and the early return below used to let a
+        # disclosed 42.0 through while refusing an unread 1e-300.
+        if not 0.0 <= self.confidence <= 1.0:
+            raise ValueError(
+                f"Confidence must be between 0.0 and 1.0, not {self.confidence}."
+            )
         if self.disclosure_level is COIDisclosureLevel.DISCLOSED:
             if not self.statement.strip():
                 raise ValueError(
@@ -256,6 +278,11 @@ class TransparencyReport:
         d['results_compliance'] = self.results_compliance.value
         if self.data_availability:
             d['data_availability']['disclosure_level'] = self.data_availability.disclosure_level.value
+        # The COI level is an enum like the two above, and ``coi_info`` is now
+        # always set, so every report carried an unserialisable object until
+        # this line existed. ``asdict`` does not unwrap enums.
+        if self.coi_info:
+            d['coi_info']['disclosure_level'] = self.coi_info.disclosure_level.value
         # Convert datetimes to ISO strings
         d['analysis_timestamp'] = self.analysis_timestamp.isoformat()
         if self.publication_date:
@@ -1614,9 +1641,36 @@ def analyze_coi_statement(coi_text: str) -> ConflictOfInterest:
         statement=coi_text,
         disclosure_level=COIDisclosureLevel.DISCLOSED,
         has_industry_ties=has_industry,
-        disclosed_relationships=clean_relationships,
+        disclosed_relationships=tuple(clean_relationships),
         confidence=confidence
     )
+
+
+#: Sections that sit in an article's end matter beside its COI statement.
+#: Recognising any of them is the evidence that the end matter was parsed at
+#: all, which is what separates "the article declares nothing" from "we could
+#: not find the part that would say" (#359).
+_END_MATTER_SECTIONS = ('funding', 'funding_role', 'acknowledgments', 'contributors')
+
+
+def _end_matter_was_parsed(fulltext_sections: Optional[Dict[str, str]]) -> bool:
+    """Say whether the article's end matter was recognised at all.
+
+    A COI statement lives among the funding, acknowledgment and contributor
+    sections. If the extractor found none of them in a full text it did
+    receive, the disclosure may be sitting in the part it could not segment,
+    so its silence is the parser's rather than the article's.
+
+    Args:
+        fulltext_sections: The dict from :func:`extract_fulltext_sections`,
+            or ``None`` when no full text was read.
+
+    Returns:
+        True if at least one end-matter section was recognised.
+    """
+    if not fulltext_sections:
+        return False
+    return any(fulltext_sections.get(key) for key in _END_MATTER_SECTIONS)
 
 
 def coi_disclosure_summary(coi_info: ConflictOfInterest) -> str:
@@ -1781,11 +1835,19 @@ def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
     # Map of canonical key -> list of header patterns (case-insensitive)
     section_headers: Dict[str, List[str]] = {
         'coi': [
-            'declaration of interests',
-            'declarations? of interest',
-            'conflict of interest',
-            'conflicts? of interest',
-            'competing interests?',
+            # "Declaration of Competing Interest" is Elsevier's standard
+            # heading and "Conflict of Interest Statement" the standard
+            # PMC/JATS one; both missed the anchored match until the
+            # ``competing`` infix and the trailing qualifier below existed.
+            # A heading we fail to recognise used to be recorded as the
+            # article declaring no conflicts (#359).
+            'coi',
+            'conflicts? of interests?',
+            'conflict[-‐-―\\s]of[-‐-―\\s]interests?',
+            'potential conflicts? of interests?',
+            'declarations? of (?:competing |conflicting )?interests?',
+            'competing (?:financial )?interests?',
+            'author disclosures?',
             'disclosures?',
         ],
         'data_sharing': [
@@ -1835,8 +1897,15 @@ def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
                 continue  # Already found this section
 
             for pattern in patterns:
+                # The optional trailing qualifier matters as much as the
+                # patterns themselves: "Conflict of Interest Statement" and
+                # "Data Availability Statement" are the commonest spellings
+                # of both sections, and a fully anchored match rejected
+                # every one of them (#359).
                 if re.search(
-                    rf'^(?:#*\s*)?{pattern}\s*:?\s*$',
+                    rf'^(?:#*\s*)?{pattern}'
+                    rf'(?:\s+(?:statements?|disclosures?|declarations?|section))?'
+                    rf'\s*:?\s*$',
                     stripped_lower,
                 ):
                     # Found a header — collect content until next section
@@ -2440,10 +2509,23 @@ class StudyTransparencyAnalyzer:
 
         if coi_text and coi_text.strip():
             report.coi_info = analyze_coi_statement(coi_text)
-        elif fulltext_read:
-            # The article itself was read and carries no disclosure. That is
-            # the study's own answer, and the only one that costs it points.
+        elif fulltext_read and _end_matter_was_parsed(fulltext_sections):
+            # The article itself was read, its end matter was recognised, and
+            # no disclosure is among it. That is the study's own answer, and
+            # the only one that costs it points.
             report.coi_info = ConflictOfInterest.not_stated()
+        elif fulltext_read:
+            # Full text arrived but not one end-matter section was
+            # recognised in it, so the parse -- not the article -- is what
+            # came up empty. Unparsed is not absent (#359).
+            report.coi_info = ConflictOfInterest.not_assessed()
+            report.warnings.append(
+                unassessed_caveat(
+                    "The article's full text was read but none of its "
+                    "end matter could be identified",
+                    COI_DISCLOSURE_SOUGHT,
+                )
+            )
         else:
             report.coi_info = ConflictOfInterest.not_assessed()
             report.warnings.append(

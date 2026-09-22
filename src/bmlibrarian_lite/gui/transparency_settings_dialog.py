@@ -143,7 +143,8 @@ class TransparencySettingsDialog(QDialog):
             "Missing COI disclosure triggers downgrade"
         )
         self._missing_coi_cb.setToolTip(
-            "Downgrade tier if conflict of interest is not disclosed"
+            "Downgrade tier if the article was read and states no "
+            "conflict of interest"
         )
         indicators_layout.addWidget(self._missing_coi_cb)
 

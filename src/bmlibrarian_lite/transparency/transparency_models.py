@@ -30,10 +30,14 @@ MEDIUM_RISK_SCORE_THRESHOLD = 70
 
 # The three states a conflict of interest finding can be in, as they are
 # stored and serialised. They are the values of
-# ``study_transparency_analyzer.COIDisclosureLevel``, repeated here rather
-# than imported because importing the analyzer from this module would close
-# a cycle through ``transparency/__init__``. A test pins them to the enum so
-# the copy cannot drift.
+# ``study_transparency_analyzer.study_transparency_analyzer.COIDisclosureLevel``,
+# repeated here rather than imported to keep this module a leaf: it holds the
+# dataclass the GUI and storage pass around, and importing the analyzer would
+# pull ``requests`` and ``urllib3`` into every consumer of
+# ``TransparencyResult``. (There is no import cycle -- the analyzer package
+# imports nothing from ``transparency`` -- so do not re-derive that as the
+# reason.) ``test_the_stored_strings_match_the_enum`` pins each name to its
+# member, so neither a re-spelling nor a swap can drift.
 COI_DISCLOSED = "disclosed"
 COI_NOT_STATED = "not_stated"
 COI_NOT_ASSESSED = "not_assessed"
@@ -157,7 +161,10 @@ class TransparencyResult:
             industry_funding_detected=data.get("industry_funding_detected", False),
             industry_funding_confidence=data.get("industry_funding_confidence", 0.0),
             data_availability_level=data.get("data_availability_level", "unknown"),
-            coi_disclosure=data.get("coi_disclosure", COI_NOT_ASSESSED),
+            # ``or``, not a ``get`` default: a dict carrying an explicit
+            # ``null`` would otherwise put ``None`` into a field every reader
+            # treats as a string, and title-case it into the badge.
+            coi_disclosure=data.get("coi_disclosure") or COI_NOT_ASSESSED,
             trial_registered=data.get("trial_registered", False),
             trial_results_compliant=data.get("trial_results_compliant", False),
             outcome_switching_detected=data.get("outcome_switching_detected", False),
@@ -183,8 +190,9 @@ def calculate_risk_level(
     Risk levels:
     - High Risk: score < threshold OR (industry + restricted data) OR a COI
       statement the article was read to be missing
-    - Medium Risk: score 40-70 OR industry with disclosure
-    - Low Risk: score > 70, transparent
+    - Medium Risk: between ``settings.score_threshold`` and
+      ``MEDIUM_RISK_SCORE_THRESHOLD`` OR industry with disclosure
+    - Low Risk: above ``MEDIUM_RISK_SCORE_THRESHOLD``, transparent
 
     Only ``COI_NOT_STATED`` raises the risk. ``COI_NOT_ASSESSED`` is not a
     finding about the study, so it cannot downgrade it -- the whole point of

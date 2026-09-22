@@ -134,7 +134,11 @@ class TransparencyManager(QObject):
             document_id: Internal document ID
             pmid: PubMed ID (optional if DOI provided)
             doi: DOI (optional if PMID provided)
-            full_text: Full text content (future enhancement, currently unused)
+            full_text: Full text content. Passed straight to the analyzer,
+                which uses it instead of discovering the article itself --
+                and whether it arrives is what separates a study that
+                declares no conflicts from one nobody read, so it is not
+                an argument to drop as unused.
         """
         if not self.settings.enabled:
             return
@@ -233,8 +237,10 @@ class TransparencyManager(QObject):
 
         # What is known about the study's COI disclosure. A report with no
         # coi_info at all has had nothing established either way, so it is
-        # not assessed rather than disclosed -- the default this replaced
-        # made every badge read "Disclosed" (#352).
+        # not assessed. The expression this replaced answered False on
+        # exactly this branch and True on every other one, and neither was
+        # ever established, so the badge read "Disclosed" for every study an
+        # analysis actually ran on (#352).
         coi_disclosure = (
             report.coi_info.disclosure_level.value
             if report.coi_info
@@ -267,8 +273,11 @@ class TransparencyManager(QObject):
             trial_registered=len(report.trial_registrations) > 0,
             trial_results_compliant=results_compliant,
             outcome_switching_detected=report.outcome_switching_detected,
-            risk_indicators=report.risk_of_bias_indicators,
-            warnings=report.warnings,
+            # Both copied, not aliased: the report stays alive in the
+            # worker and a later append would silently edit a stored
+            # result.
+            risk_indicators=list(report.risk_of_bias_indicators),
+            warnings=list(report.warnings),
             tier_downgrade_applied=(
                 self.settings.tier_downgrade_amount
                 if risk_level == TransparencyRisk.HIGH
@@ -276,7 +285,6 @@ class TransparencyManager(QObject):
             ),
             full_text_analyzed=(
                 full_text is not None
-                or "Full-text" in report.data_sources_used
                 or any("Full-text" in s for s in report.data_sources_used)
             ),
         )

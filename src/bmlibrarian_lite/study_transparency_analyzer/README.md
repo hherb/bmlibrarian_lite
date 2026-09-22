@@ -127,7 +127,8 @@ Set `use_browser_fallback=False` (or `--no-browser`) to skip step 6 — all othe
 
 Base score of 50, modified by:
 - Data availability: +20 (open) to -15 (unavailable)
-- COI disclosure: +5 (statement present) to -5 (missing/industry ties)
+- COI disclosure: +5 (statement read) to -5 (article read, none stated); a
+  disclosure that was never assessed scores neither way
 - Trial registration: +10 (registered) to -10 (results missing)
 - Compound penalty: -10 for industry ties + restricted/unavailable data
 - Outcome switching: -15
