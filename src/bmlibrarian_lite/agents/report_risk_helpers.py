@@ -72,6 +72,12 @@ def should_warn_for_citation(
 ) -> bool:
     """Determine if a citation should receive a warning based on threshold.
 
+    A result an earlier version of the analyser produced raises no warning:
+    the corrections since #352 retract findings it made, and a warning in a
+    clinician's report is the last place a retracted claim should survive.
+    It is re-analysed on the paced path (#360); until then there is no
+    finding to warn from.
+
     Args:
         result: Transparency analysis result
         settings: Transparency settings with threshold
@@ -79,6 +85,9 @@ def should_warn_for_citation(
     Returns:
         True if citation should be warned
     """
+    if not result.is_current:
+        return False
+
     threshold = settings.report_risk_threshold
 
     if threshold == ReportRiskThreshold.HIGH:

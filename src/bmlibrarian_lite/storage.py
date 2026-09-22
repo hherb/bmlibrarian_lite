@@ -3560,10 +3560,12 @@ class LiteStorage:
         session_id: str,
     ) -> list[str]:
         """
-        Get document IDs that haven't been analyzed for transparency.
+        Get document IDs whose transparency this build has not established.
 
-        Returns documents from a search session that don't have
-        transparency results yet.
+        Returns documents from a search session that have no transparency
+        result, and those whose result an earlier version of the analyser
+        wrote: a corrected analyser reaches an existing document only by
+        being asked to look at it again (#360).
 
         Args:
             session_id: Search session ID
@@ -3571,6 +3573,11 @@ class LiteStorage:
         Returns:
             List of document IDs pending transparency analysis
         """
+        from .transparency import TRANSPARENCY_ANALYZER_VERSION
+
+        # A row an earlier analyser wrote is pending too: it holds findings
+        # this build's analyser has since retracted, and nothing else would
+        # ever ask for it to be redone (#360).
         query = """
             SELECT DISTINCT sd.document_id
             FROM scored_documents sd
@@ -3578,11 +3585,14 @@ class LiteStorage:
             WHERE rc.search_session_id = ?
               AND sd.document_id NOT IN (
                   SELECT document_id FROM transparency_results
+                  WHERE analyzer_version = ?
               )
         """
 
         with self._sqlite_connection() as conn:
-            cursor = conn.execute(query, (session_id,))
+            cursor = conn.execute(
+                query, (session_id, TRANSPARENCY_ANALYZER_VERSION)
+            )
             return [row["document_id"] for row in cursor]
 
     def delete_transparency_result(self, document_id: str) -> bool:

@@ -52,7 +52,10 @@ from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Callable, Generator, TypeVar
+
+import requests
 
 from tenacity import (
     retry,
@@ -519,6 +522,16 @@ def classify_llm_exception(exc: Exception) -> "EvaluationErrorCode":
     return EvaluationErrorCode.UNKNOWN_ERROR
 
 
+#: The statuses a source answers when it refuses the credentials it was
+#: given. PubMed answers 400 for a key it does not accept, not 401 (#196),
+#: so a bad request from a keyed service is read as a refused key here too.
+_REFUSED_CREDENTIAL_STATUSES = (
+    HTTPStatus.BAD_REQUEST,
+    HTTPStatus.UNAUTHORIZED,
+    HTTPStatus.FORBIDDEN,
+)
+
+
 def classify_analysis_exception(exc: Exception) -> "EvaluationErrorCode":
     """Classify anything a stage of the analysis raised, wrapper or not.
 
@@ -536,6 +549,45 @@ def classify_analysis_exception(exc: Exception) -> "EvaluationErrorCode":
     """
     if isinstance(exc, RetryExhaustedError):
         return classify_exhausted_retries(exc)
+    if isinstance(exc, requests.RequestException):
+        return classify_request_exception(exc)
+    return classify_llm_exception(exc)
+
+
+def classify_request_exception(
+    exc: "requests.RequestException",
+) -> "EvaluationErrorCode":
+    """Classify a failed HTTP request by what the source did, not by its type.
+
+    Every ``requests`` exception inherits from ``OSError``, so
+    :func:`classify_llm_exception` answered ``API_CONNECTION_ERROR`` for all
+    of them -- a throttled PubMed, a refused NCBI key and an unplugged cable
+    alike -- and the reader was advised to check their internet connection
+    for a rate limit they need only wait out.
+
+    Args:
+        exc: What the request raised, after its retries.
+
+    Returns:
+        The code for the HTTP status the source answered with, where it
+        answered at all; otherwise the code for the transport failure.
+    """
+    from .data_models import EvaluationErrorCode
+
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int):
+        if status == HTTPStatus.TOO_MANY_REQUESTS:
+            return EvaluationErrorCode.API_RATE_LIMIT
+        if status in _REFUSED_CREDENTIAL_STATUSES:
+            return EvaluationErrorCode.API_AUTH_ERROR
+        if status >= HTTPStatus.INTERNAL_SERVER_ERROR:
+            return EvaluationErrorCode.API_SERVER_ERROR
+        return EvaluationErrorCode.INVALID_RESPONSE_FORMAT
+    if isinstance(exc, requests.Timeout):
+        return EvaluationErrorCode.API_TIMEOUT
+    if isinstance(exc, requests.ConnectionError):
+        return EvaluationErrorCode.API_CONNECTION_ERROR
     return classify_llm_exception(exc)
 
 

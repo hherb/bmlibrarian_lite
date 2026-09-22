@@ -684,6 +684,16 @@ Key passages:
                 f"| Medium     | {metadata.transparency_medium_risk_count}     |"
             )
             lines.append(f"| High       | {metadata.transparency_high_risk_count}     |")
+            if metadata.transparency_superseded_count:
+                lines.append("")
+                lines.append(
+                    f"- **Awaiting re-analysis:** "
+                    f"{metadata.transparency_superseded_count:,}. Their stored "
+                    "assessments were made by an earlier version of the "
+                    "analyser, which has since been corrected, so they are "
+                    "left out of the distribution above rather than counted "
+                    "under a risk level nobody would find today."
+                )
         else:
             lines.append("Transparency analysis was not applied.")
         lines.append("")

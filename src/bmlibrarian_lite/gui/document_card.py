@@ -68,7 +68,7 @@ from .card_utils import (
     score_badge_tooltip,
 )
 from .quality_badge import QualityBadge
-from .transparency_badge import TransparencyBadge
+from .transparency_badge import TransparencyBadge, TransparencyOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -283,7 +283,7 @@ class DocumentCard(QFrame):
         score: Optional[int] = None,
         score_rationale: Optional[str] = None,
         quality_assessment: Optional[QualityAssessment] = None,
-        transparency_result: Optional[TransparencyResult] = None,
+        transparency_outcome: TransparencyOutcome | None = None,
         citation_rationale: Optional[str] = None,
         show_abstract: bool = False,
         parent: Optional[QWidget] = None,
@@ -296,7 +296,9 @@ class DocumentCard(QFrame):
             score: Optional relevance score (1-5)
             score_rationale: LLM explanation for the score
             quality_assessment: Optional quality assessment
-            transparency_result: Optional transparency analysis result
+            transparency_outcome: The document's transparency finding, or
+                why it has none (a failed analysis, or an assessment made by
+                an analyser this build has since corrected)
             citation_rationale: Why this passage was selected as citation
             show_abstract: Whether to initially show abstract (expanded state)
             parent: Parent widget
@@ -306,7 +308,7 @@ class DocumentCard(QFrame):
         self._score = score
         self._score_rationale = score_rationale
         self._quality_assessment = quality_assessment
-        self._transparency_result = transparency_result
+        self._transparency_outcome = transparency_outcome
         self._citation_rationale = citation_rationale
         self._expanded = show_abstract
 
@@ -366,9 +368,9 @@ class DocumentCard(QFrame):
             title_row.addWidget(self._quality_badge)
 
         # Transparency badge (if available) - after quality, before score
-        if self._transparency_result:
+        if self._transparency_outcome is not None:
             self._transparency_badge = TransparencyBadge(
-                self._transparency_result,
+                self._transparency_outcome,
                 compact=True,  # Use compact mode in card header
             )
             title_row.addWidget(self._transparency_badge)
@@ -742,24 +744,27 @@ class DocumentCard(QFrame):
         """Get document ID."""
         return self.document.id
 
-    def set_transparency_result(self, result: TransparencyResult) -> None:
+    def set_transparency_outcome(self, outcome: TransparencyOutcome) -> None:
         """
-        Update the transparency result and badge.
+        Update the transparency outcome and badge.
 
-        Called when background analysis completes. Creates the badge
-        if not present, otherwise updates existing badge.
+        Called when background analysis finishes, whether it produced a
+        finding or could not be made at all. Creates the badge if not
+        present, otherwise updates the existing one. A document whose
+        analysis failed gets a badge saying so: showing nothing left the
+        reader unable to tell it from one still being analysed (#361).
 
         Args:
-            result: Transparency analysis result
+            outcome: The document's transparency finding, or why it has none
         """
-        self._transparency_result = result
+        self._transparency_outcome = outcome
 
         if self._transparency_badge:
             # Update existing badge
-            self._transparency_badge.update_result(result)
+            self._transparency_badge.update_outcome(outcome)
         else:
             # Create new badge and insert into title row
-            self._transparency_badge = TransparencyBadge(result, compact=True)
+            self._transparency_badge = TransparencyBadge(outcome, compact=True)
 
             # Find title row in header and insert after quality badge
             if self._header_widget:
@@ -772,18 +777,21 @@ class DocumentCard(QFrame):
                         insert_index = 1 if self._quality_badge else 0
                         title_row.insertWidget(insert_index, self._transparency_badge)
                         logger.debug(
-                            f"Transparency badge added for {self.document.id}: "
-                            f"{result.risk_level.value}"
+                            f"Transparency badge added for {self.document.id}"
                         )
 
     def get_transparency_result(self) -> Optional[TransparencyResult]:
         """
-        Return current transparency result.
+        Return the current transparency finding.
 
         Returns:
-            TransparencyResult if available, None otherwise
+            The result, or ``None`` when the document has none -- including
+            when an analysis was attempted and could not be completed, which
+            is not a finding about the study.
         """
-        return self._transparency_result
+        if isinstance(self._transparency_outcome, TransparencyResult):
+            return self._transparency_outcome
+        return None
 
     @property
     def transparency_risk(self) -> Optional[str]:
@@ -793,6 +801,7 @@ class DocumentCard(QFrame):
         Returns:
             Risk level value string (low, medium, high) or None
         """
-        if self._transparency_result:
-            return self._transparency_result.risk_level.value
+        result = self.get_transparency_result()
+        if result:
+            return result.risk_level.value
         return None

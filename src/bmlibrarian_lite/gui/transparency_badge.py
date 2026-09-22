@@ -35,7 +35,19 @@ from ..transparency import (
     COI_NOT_STATED,
     TransparencyResult,
     TransparencyRisk,
+    TransparencyUnassessed,
 )
+
+#: What a badge can be asked to show. A document either has a finding or has
+#: none for a reason the reader is owed: an analysis that failed (#361), or a
+#: stored assessment an analyser this build has since corrected made (#360).
+#: Showing nothing for those made them indistinguishable from an analysis
+#: still running.
+TransparencyOutcome = TransparencyResult | TransparencyUnassessed
+
+#: The label of a badge with no finding behind it, long and compact form.
+UNASSESSED_LABEL = "Not assessed"
+UNASSESSED_LABEL_SHORT = "n/a"
 
 
 # Color scheme for risk levels: (background_color, text_color)
@@ -116,7 +128,7 @@ class TransparencyBadge(QFrame):
 
     def __init__(
         self,
-        result: TransparencyResult,
+        outcome: TransparencyOutcome,
         compact: bool = False,
         parent: Optional[QWidget] = None,
     ) -> None:
@@ -124,14 +136,24 @@ class TransparencyBadge(QFrame):
         Initialize the transparency badge.
 
         Args:
-            result: Transparency result for the document
+            outcome: The document's transparency finding, or why it has none
             compact: If True, use shorter labels and smaller padding
             parent: Parent widget
         """
         super().__init__(parent)
-        self.result = result
+        self.outcome = outcome
         self.compact = compact
         self._setup_ui()
+
+    @property
+    def result(self) -> TransparencyResult | None:
+        """The finding this badge shows.
+
+        Returns:
+            The result, or ``None`` when there is no finding behind the
+            badge -- which is not the same as a result saying "unknown".
+        """
+        return self.outcome if isinstance(self.outcome, TransparencyResult) else None
 
     def _setup_ui(self) -> None:
         """Set up the badge UI with appropriate colors and label."""
@@ -147,18 +169,23 @@ class TransparencyBadge(QFrame):
         )
         layout.setSpacing(0)
 
-        # Get colors for risk level
-        risk_level = self.result.risk_level
-        bg_color, text_color = RISK_COLORS.get(
-            risk_level,
-            RISK_COLORS[TransparencyRisk.UNKNOWN]
-        )
-
-        # Get label text
-        label_text = (
-            RISK_LABELS_SHORT[risk_level] if self.compact
-            else RISK_LABELS[risk_level]
-        )
+        # Colors and label: a finding reads as its risk level, and a document
+        # with no finding says so rather than showing nothing at all.
+        if isinstance(self.outcome, TransparencyUnassessed):
+            bg_color, text_color = RISK_COLORS[TransparencyRisk.UNKNOWN]
+            label_text = (
+                UNASSESSED_LABEL_SHORT if self.compact else UNASSESSED_LABEL
+            )
+        else:
+            risk_level = self.outcome.risk_level
+            bg_color, text_color = RISK_COLORS.get(
+                risk_level,
+                RISK_COLORS[TransparencyRisk.UNKNOWN]
+            )
+            label_text = (
+                RISK_LABELS_SHORT[risk_level] if self.compact
+                else RISK_LABELS[risk_level]
+            )
 
         # Create label
         self.label = QLabel(label_text)
@@ -191,7 +218,11 @@ class TransparencyBadge(QFrame):
 
     def _set_tooltip(self) -> None:
         """Set informative tooltip with transparency assessment details."""
-        r = self.result
+        if isinstance(self.outcome, TransparencyUnassessed):
+            self.setToolTip(self.outcome.reason)
+            return
+
+        r = self.outcome
         lines = []
 
         # Header
@@ -261,14 +292,14 @@ class TransparencyBadge(QFrame):
 
         self.setToolTip("<br>".join(lines))
 
-    def update_result(self, result: TransparencyResult) -> None:
+    def update_outcome(self, outcome: TransparencyOutcome) -> None:
         """
-        Update the badge with a new transparency result.
+        Update the badge with a new transparency outcome.
 
         Args:
-            result: New transparency result
+            outcome: The document's finding, or why it has none
         """
-        self.result = result
+        self.outcome = outcome
         # Clear layout and recreate
         while self.layout().count():
             item = self.layout().takeAt(0)

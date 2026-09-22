@@ -210,6 +210,21 @@ Each study is automatically analyzed for transparency indicators:
 
 Transparency results feed into risk warnings that appear in generated reports, flagging studies with potential concerns.
 
+A study can also show a grey **Not assessed** badge. That is not a finding
+against the study — it means BMLibrarian has nothing to report about it, and
+hovering over the badge says why:
+
+- **The analysis could not be completed**: a source was unreachable, refused
+  the request, or limited how often it can be called. The badge says which,
+  and what you can do about it.
+- **The record carries neither a PubMed ID nor a DOI**, so there was nothing
+  to look the study up by.
+- **The stored assessment was made by an earlier version of the analyser.**
+  When a correction changes what the analyser would find, studies assessed
+  before it are re-analysed the next time they come up in a review, and until
+  that happens their old score and risk level are withheld rather than shown.
+  A report counts those studies separately and says how many are waiting.
+
 ### Full-Text Discovery
 
 BMLibrarian Lite can automatically find and retrieve full-text content through a fallback chain:

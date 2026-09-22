@@ -28,7 +28,7 @@ its sub-tabs in real-time during workflow execution.
 """
 
 import logging
-from typing import Optional, List
+from typing import List, Optional
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
@@ -39,9 +39,19 @@ from PySide6.QtWidgets import (
 
 from ..config import LiteConfig
 from ..storage import LiteStorage
-from ..data_models import LiteDocument, ScoredDocument, Citation
+from ..analysis_failures import transparency_failure_text
+from ..data_models import (
+    Citation,
+    LiteDocument,
+    ScoredDocument,
+    TransparencyAnalysisFailure,
+)
 from ..quality.data_models import QualityAssessment
-from ..transparency import TransparencyResult
+from ..transparency import (
+    TransparencyResult,
+    TransparencyUnassessed,
+    transparency_outcome,
+)
 
 from .audit_queries_tab import AuditQueriesTab
 from .audit_literature_tab import AuditLiteratureTab
@@ -290,25 +300,45 @@ class AuditTrailTab(QWidget):
         logger.debug(f"Audit trail: quality assessed - {doc_id}")
         self.literature_tab.update_quality(doc_id, assessment)
 
-    def on_transparency_assessed(
+    def on_transparency_outcome(
         self,
         doc_id: str,
-        result: TransparencyResult,
+        outcome: TransparencyResult | TransparencyAnalysisFailure,
     ) -> None:
         """
-        Handle transparency assessment result.
+        Handle what became of a document's transparency analysis.
 
-        Updates transparency badge in the Literature sub-tab.
+        Updates the transparency badge in the Literature sub-tab. An analysis
+        that failed is turned into its sentence here, at the surface that
+        shows it: the failure travels as a classified value so that no call
+        site can put the provider's own error text -- which can carry a
+        credential -- on the screen instead (#330, #361).
 
         Args:
             doc_id: Document ID
-            result: Transparency analysis result
+            outcome: The transparency result, or why the document has none
         """
+        if isinstance(outcome, TransparencyAnalysisFailure):
+            logger.debug(
+                f"Audit trail: transparency not assessed - {doc_id} "
+                f"({outcome.kind.value})"
+            )
+            self.literature_tab.update_transparency(
+                doc_id,
+                TransparencyUnassessed(reason=transparency_failure_text(outcome)),
+            )
+            return
+
         logger.debug(
             f"Audit trail: transparency assessed - {doc_id} "
-            f"(risk: {result.risk_level.value})"
+            f"(risk: {outcome.risk_level.value})"
         )
-        self.literature_tab.update_transparency(doc_id, result)
+        # A result an earlier version of the analyser produced is shown as
+        # not assessed, with the reason, rather than as the finding it was:
+        # the corrections since #352 have retracted it (#360).
+        self.literature_tab.update_transparency(
+            doc_id, transparency_outcome(outcome)
+        )
 
     # =========================================================================
     # Data Access

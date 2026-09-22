@@ -1120,6 +1120,106 @@ class PassFailure:
             raise ValueError("A pass failure cannot be caused by success")
 
 
+class TransparencyFailureKind(Enum):
+    """Why a document carries no transparency assessment (#361, #249).
+
+    A missing badge used to mean three things at once -- transparency
+    switched off, the analysis still running, and the analysis failed -- and
+    the reader could tell none of them apart. These are the two the pipeline
+    can report; "still running" is what the absence of a failure means.
+    """
+
+    #: The record carries neither a PubMed ID nor a DOI, so nothing was asked.
+    NO_IDENTIFIER = "no_identifier"
+    #: A source was asked and the analysis did not finish.
+    ANALYSIS_FAILED = "analysis_failed"
+
+
+@dataclass(frozen=True)
+class TransparencyAnalysisFailure:
+    """A document left without a transparency finding, and why (#361, #249).
+
+    The manager emitted ``str(e)`` for this, into a signal nothing connected.
+    Both halves were defects: a ``requests`` exception embeds the request URL,
+    and the Unpaywall URL carries the user's email address while the NCBI one
+    carries the API key (#196, #330), so the text could not be shown; and a
+    failure nobody shows is a study that quietly has no assessment.
+
+    The cause is classified, never the provider's own words. The sentence the
+    reader sees is built from this value by
+    :func:`~bmlibrarian_lite.analysis_failures.transparency_failure_text`, so
+    no call site can interpolate the raw text instead.
+
+    Attributes:
+        document_id: The document left unassessed.
+        kind: Whether a source was asked at all.
+        cause: What went wrong, classified; ``None`` when nothing was asked.
+
+    Raises:
+        ValueError: On construction, for a failure that names no document, a
+            failed analysis with no cause or a cause of ``SUCCESS``, or a
+            missing identifier carrying a provider failure -- nothing was
+            asked, so no provider can have failed.
+    """
+
+    document_id: str
+    kind: TransparencyFailureKind
+    cause: EvaluationErrorCode | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a failure whose kind and cause disagree.
+
+        Raises:
+            ValueError: As documented on the class.
+        """
+        if not isinstance(self.document_id, str) or not self.document_id:
+            raise ValueError("A failed analysis names the document it happened to")
+        if not isinstance(self.kind, TransparencyFailureKind):
+            raise ValueError("A failed analysis names why it has no finding")
+        if self.kind is TransparencyFailureKind.NO_IDENTIFIER:
+            if self.cause is not None:
+                raise ValueError(
+                    "Nothing was asked for a record with no identifier, so no "
+                    "provider can have failed"
+                )
+            return
+        if not isinstance(self.cause, EvaluationErrorCode):
+            raise ValueError("A failed analysis names a classified cause")
+        if self.cause is EvaluationErrorCode.SUCCESS:
+            raise ValueError("A failed analysis cannot be caused by success")
+
+    @classmethod
+    def no_identifier(cls, document_id: str) -> "TransparencyAnalysisFailure":
+        """Record that a document could not be looked up at all.
+
+        Args:
+            document_id: The document carrying neither a PubMed ID nor a DOI.
+
+        Returns:
+            The failure.
+        """
+        return cls(document_id=document_id, kind=TransparencyFailureKind.NO_IDENTIFIER)
+
+    @classmethod
+    def failed(
+        cls, document_id: str, cause: EvaluationErrorCode
+    ) -> "TransparencyAnalysisFailure":
+        """Record an analysis that was attempted and did not finish.
+
+        Args:
+            document_id: The document being analysed.
+            cause: What went wrong, classified.
+
+        Returns:
+            The failure.
+        """
+        return cls(
+            document_id=document_id,
+            kind=TransparencyFailureKind.ANALYSIS_FAILED,
+            cause=cause,
+        )
+
+
 @dataclass(frozen=True)
 class PassOutcome:
     """What a re-classification or re-scoring did with the documents it was given.
@@ -2199,6 +2299,11 @@ class ReportMetadata:
         transparency_low_risk_count: Documents with low transparency risk
         transparency_medium_risk_count: Documents with medium transparency risk
         transparency_high_risk_count: Documents with high transparency risk
+        transparency_superseded_count: Documents whose stored assessment an
+            earlier version of the analyser made. They are counted apart
+            from the three risk levels and named in the report: their
+            stored level is not this build's finding, and leaving them out
+            silently would report an analysis that did not happen (#360)
 
         model_configs: LLM configuration for each workflow task
         citations_extracted: Total citation passages extracted
@@ -2236,6 +2341,7 @@ class ReportMetadata:
     transparency_low_risk_count: int = 0
     transparency_medium_risk_count: int = 0
     transparency_high_risk_count: int = 0
+    transparency_superseded_count: int = 0
 
     # LLM configuration by task
     model_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -2273,6 +2379,7 @@ class ReportMetadata:
             "transparency_low_risk_count": self.transparency_low_risk_count,
             "transparency_medium_risk_count": self.transparency_medium_risk_count,
             "transparency_high_risk_count": self.transparency_high_risk_count,
+            "transparency_superseded_count": self.transparency_superseded_count,
             "model_configs": self.model_configs,
             "citations_extracted": self.citations_extracted,
             "unique_sources_cited": self.unique_sources_cited,
@@ -2329,6 +2436,9 @@ class ReportMetadata:
                 "transparency_medium_risk_count", 0
             ),
             transparency_high_risk_count=data.get("transparency_high_risk_count", 0),
+            transparency_superseded_count=data.get(
+                "transparency_superseded_count", 0
+            ),
             model_configs=data.get("model_configs", {}),
             citations_extracted=data.get("citations_extracted", 0),
             unique_sources_cited=data.get("unique_sources_cited", 0),

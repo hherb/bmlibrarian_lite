@@ -24,9 +24,12 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 from PySide6.QtCore import QObject, Signal
 
+from ..data_models import TransparencyAnalysisFailure
 from ..study_transparency_analyzer.study_transparency_analyzer import StudyTransparencyAnalyzer
+from ..utils import classify_analysis_exception
 from .transparency_models import (
     COI_NOT_ASSESSED,
+    TRANSPARENCY_ANALYZER_VERSION,
     TransparencyResult,
     TransparencyRisk,
     calculate_risk_level,
@@ -52,14 +55,20 @@ class TransparencyManager(QObject):
 
     Signals:
         analysis_complete: Emitted when a document analysis finishes (document_id, result)
-        analysis_failed: Emitted when analysis fails (document_id, error_message)
+        analysis_failed: Emitted when a document is left without an assessment
+            (document_id, :class:`TransparencyAnalysisFailure`)
         batch_complete: Emitted when a batch finishes (completed_count, total_count)
         progress_updated: Emitted during batch processing (current, total)
     """
 
     # Signals
     analysis_complete = Signal(str, object)  # document_id, TransparencyResult
-    analysis_failed = Signal(str, str)  # document_id, error_message
+    # document_id, TransparencyAnalysisFailure. The failure is a value and
+    # not a message: ``str(e)`` used to travel here, and a ``requests``
+    # exception embeds the request URL, which carries the user's email
+    # address for Unpaywall and the API key for NCBI (#196, #330). What the
+    # reader sees is built from the value by ``transparency_failure_text``.
+    analysis_failed = Signal(str, object)
     batch_complete = Signal(int, int)  # completed_count, total_count
     progress_updated = Signal(int, int)  # current, total
 
@@ -145,16 +154,29 @@ class TransparencyManager(QObject):
 
         if not pmid and not doi:
             logger.warning(f"Cannot analyze {document_id}: no PMID or DOI")
-            self.analysis_failed.emit(document_id, "No PMID or DOI available")
+            self.analysis_failed.emit(
+                document_id, TransparencyAnalysisFailure.no_identifier(document_id)
+            )
             return
 
-        # Check cache first
+        # Check cache first. A row an earlier analyser wrote is a miss, not a
+        # hit: it was served unconditionally, so every semantic correction --
+        # #352, #359, #353--#356 -- reached only documents analysed after it,
+        # and a stored row kept a finding the fix had already retracted
+        # (#360). Re-analysis happens here, on the path that already queues
+        # and paces this work, rather than as a bulk invalidation on open.
         if self.settings.cache_results:
             cached = self.storage.get_transparency_result(document_id)
-            if cached:
+            if cached and cached.is_current:
                 logger.debug(f"Using cached transparency result for {document_id}")
                 self.analysis_complete.emit(document_id, cached)
                 return
+            if cached:
+                logger.debug(
+                    f"Re-analysing {document_id}: stored result was written by "
+                    f"analyser {cached.analyzer_version}, this build is "
+                    f"{TRANSPARENCY_ANALYZER_VERSION}"
+                )
 
         # Queue for background analysis
         self.start()  # Ensure executor is running
@@ -309,8 +331,16 @@ class TransparencyManager(QObject):
             result = future.result()
             self.analysis_complete.emit(document_id, result)
         except Exception as e:
+            # The provider's own text is logged and goes no further: it can
+            # carry the request, and with it a credential (#330). What the
+            # reader is shown is built from the classified cause.
             logger.error(f"Transparency analysis failed for {document_id}: {e}")
-            self.analysis_failed.emit(document_id, str(e))
+            self.analysis_failed.emit(
+                document_id,
+                TransparencyAnalysisFailure.failed(
+                    document_id, classify_analysis_exception(e)
+                ),
+            )
 
     def get_pending_count(self) -> int:
         """
