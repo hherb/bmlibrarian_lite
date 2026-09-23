@@ -33,7 +33,7 @@ from bmlibrarian_lite.transparency import (
     TransparencyResult,
     TransparencyRisk,
     TransparencySettings,
-    count_transparency_results,
+    count_transparency_over,
 )
 
 DOC = "pmid-12345678"
@@ -138,7 +138,7 @@ class TestTheManagerRedoesAStaleRow:
         config = MagicMock()
         config.transparency = TransparencySettings()
         with patch(
-            "bmlibrarian_lite.transparency.transparency_manager."
+            "bmlibrarian_lite.transparency.assessment."
             "StudyTransparencyAnalyzer"
         ):
             return TransparencyManager(
@@ -220,7 +220,11 @@ class TestTheManagerRedoesAStaleRow:
 
 
 class TestTheStoreKnowsWhatStillNeedsAnalysing:
-    """``get_documents_pending_transparency`` only looked for missing rows."""
+    """``get_documents_pending_transparency`` only looked for missing rows.
+
+    It also had no caller (#373); the Research Questions tab's re-analysis
+    now asks it, over the documents a reloaded question shows.
+    """
 
     @staticmethod
     def _storage(tmp_path: Any) -> Any:
@@ -239,81 +243,81 @@ class TestTheStoreKnowsWhatStillNeedsAnalysing:
         config.storage.data_dir = tmp_path
         return LiteStorage(config)
 
-    def test_a_stale_row_is_pending_and_a_current_one_is_not(
-        self, tmp_path: Any
-    ) -> None:
-        """Both halves in one place: the fix, and the control beside it."""
-        from bmlibrarian_lite.data_models import (
-            DocumentSource,
-            LiteDocument,
-            ScoredDocument,
-        )
+    @staticmethod
+    def _add_document(storage: Any, doc_id: str, **ids: Any) -> None:
+        """Store a document and record it as found for question "Q".
 
-        storage = self._storage(tmp_path)
-        session = storage.create_search_session(
-            query="q", natural_language_query="Q"
-        )
-        checkpoint = storage.create_checkpoint(research_question="Q")
-        storage.update_checkpoint(
-            checkpoint_id=checkpoint.id, search_session_id=session.id
-        )
-        for doc_id, version in (("old", LEGACY_ANALYZER_VERSION), ("new", None)):
-            document = LiteDocument(
+        Args:
+            storage: The storage.
+            doc_id: The document's id.
+            **ids: Its ``pmid`` and ``doi``, if any.
+        """
+        from bmlibrarian_lite.data_models import DocumentSource, LiteDocument
+
+        storage.add_document(
+            LiteDocument(
                 id=doc_id,
                 title="A study",
                 abstract="An abstract.",
                 authors=["A"],
                 year=2024,
                 source=DocumentSource.PUBMED,
+                **ids,
             )
-            storage.add_document(document)
-            storage.save_scored_document(
-                ScoredDocument(document=document, score=4, explanation="r"),
-                checkpoint.id,
-            )
+        )
+        storage.add_question_documents("Q", [doc_id])
+
+    def test_a_stale_row_is_pending_and_a_current_one_is_not(
+        self, tmp_path: Any
+    ) -> None:
+        """Both halves in one place: the fix, and the control beside it."""
+        storage = self._storage(tmp_path)
+        for doc_id, version in (
+            ("old", LEGACY_ANALYZER_VERSION),
+            ("new", TRANSPARENCY_ANALYZER_VERSION),
+        ):
+            self._add_document(storage, doc_id)
             storage.save_transparency_result(
-                a_result(
-                    version=version or TRANSPARENCY_ANALYZER_VERSION,
-                    document_id=doc_id,
-                )
+                a_result(version=version, document_id=doc_id)
             )
 
-        pending = storage.get_documents_pending_transparency(session.id)
+        pending = storage.get_documents_pending_transparency("Q")
 
-        assert "old" in pending
-        assert "new" not in pending
+        assert pending == ["old"]
+
+    def test_a_document_with_no_row_is_pending(self, tmp_path: Any) -> None:
+        """The case the query was written for, still answered."""
+        storage = self._storage(tmp_path)
+        self._add_document(storage, "never")
+
+        assert storage.get_documents_pending_transparency("Q") == ["never"]
+
+    def test_a_newer_analysers_row_is_not_pending(self, tmp_path: Any) -> None:
+        """Ordered, not matched: re-analysing it would overwrite a better row."""
+        storage = self._storage(tmp_path)
+        self._add_document(storage, "later")
+        storage.save_transparency_result(
+            a_result(version="10.0", document_id="later")
+        )
+
+        assert storage.get_documents_pending_transparency("Q") == []
+
+    def test_another_questions_documents_are_not_pending_here(
+        self, tmp_path: Any
+    ) -> None:
+        """Scoped by question: a pass may not reach documents it cannot show."""
+        storage = self._storage(tmp_path)
+        self._add_document(storage, "mine")
+        storage.add_question_documents("Another question", ["elsewhere"])
+
+        assert storage.get_documents_pending_transparency("Q") == ["mine"]
 
     def test_a_provisional_row_is_pending_and_round_trips(
         self, tmp_path: Any
     ) -> None:
         """A current row whose sources were unreadable is still work to do."""
-        from bmlibrarian_lite.data_models import (
-            DocumentSource,
-            LiteDocument,
-            ScoredDocument,
-        )
-
         storage = self._storage(tmp_path)
-        session = storage.create_search_session(
-            query="q", natural_language_query="Q"
-        )
-        checkpoint = storage.create_checkpoint(research_question="Q")
-        storage.update_checkpoint(
-            checkpoint_id=checkpoint.id, search_session_id=session.id
-        )
-        document = LiteDocument(
-            id="throttled",
-            title="A study",
-            abstract="An abstract.",
-            authors=["A"],
-            year=2024,
-            source=DocumentSource.PUBMED,
-        )
-        storage.add_document(document)
-        storage.save_scored_document(
-            ScoredDocument(document=document, score=4, explanation="r"),
-            checkpoint.id,
-        )
+        self._add_document(storage, "throttled")
         provisional = a_result(document_id="throttled")
         provisional.sources_unreachable = True
         storage.save_transparency_result(provisional)
@@ -322,9 +326,7 @@ class TestTheStoreKnowsWhatStillNeedsAnalysing:
 
         assert reloaded.sources_unreachable, "the flag did not survive storage"
         assert not reloaded.is_final
-        assert "throttled" in storage.get_documents_pending_transparency(
-            session.id
-        )
+        assert storage.get_documents_pending_transparency("Q") == ["throttled"]
 
     def test_a_stored_row_keeps_the_version_that_wrote_it(
         self, tmp_path: Any
@@ -415,16 +417,17 @@ class TestNoSurfacePresentsASupersededFinding:
 
     def test_the_report_counts_superseded_rows_apart(self) -> None:
         """A count that includes them reports an analysis that did not run."""
-        counts = count_transparency_results(
-            [
-                a_result(risk=TransparencyRisk.LOW, document_id="a"),
-                a_result(risk=TransparencyRisk.HIGH, document_id="b"),
-                a_result(
-                    risk=TransparencyRisk.HIGH,
-                    version=LEGACY_ANALYZER_VERSION,
-                    document_id="c",
-                ),
-            ]
+        rows = [
+            a_result(risk=TransparencyRisk.LOW, document_id="a"),
+            a_result(risk=TransparencyRisk.HIGH, document_id="b"),
+            a_result(
+                risk=TransparencyRisk.HIGH,
+                version=LEGACY_ANALYZER_VERSION,
+                document_id="c",
+            ),
+        ]
+        counts = count_transparency_over(
+            {row.document_id: row for row in rows}, ["a", "b", "c"]
         )
 
         assert counts.low == 1
@@ -778,7 +781,9 @@ class TestAnUnknownLevelIsCountedSomewhere:
 
     def test_a_current_unknown_row_is_counted(self) -> None:
         """It fell through every bucket, so nothing could report it at all."""
-        counts = count_transparency_results([a_result(risk=TransparencyRisk.UNKNOWN)])
+        counts = count_transparency_over(
+            {DOC: a_result(risk=TransparencyRisk.UNKNOWN)}, [DOC]
+        )
 
         assert counts.unknown == 1
         # Not among the named levels: there is no level to name. It is
@@ -803,7 +808,9 @@ class TestAnUnknownLevelIsCountedSomewhere:
 
     def test_a_named_level_is_still_counted_as_itself(self) -> None:
         """The control."""
-        counts = count_transparency_results([a_result(risk=TransparencyRisk.HIGH)])
+        counts = count_transparency_over(
+            {DOC: a_result(risk=TransparencyRisk.HIGH)}, [DOC]
+        )
 
         assert counts.high == 1
         assert counts.unknown == 0
@@ -852,7 +859,9 @@ class TestAWithheldFindingIsNamedInTheReferences:
             relevance_score=4,
         )
         withheld = {
-            doc_id for doc_id, r in stored.items() if not r.is_current
+            doc_id: superseded_assessment_caveat()
+            for doc_id, r in stored.items()
+            if not r.is_current
         }
         risky = {
             doc_id: r for doc_id, r in stored.items() if r.is_current

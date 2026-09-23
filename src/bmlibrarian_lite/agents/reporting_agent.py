@@ -21,7 +21,7 @@ professional research summary with proper attribution.
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from ..analysis_failures import (
     describe_analysis_shortfalls,
@@ -36,9 +36,86 @@ from .report_risk_helpers import (
     format_reference_risk_annotation,
     format_reference_withheld_annotation,
     should_warn_for_citation,
+    withheld_reference_caveats,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def cited_share_text(count: int, cited: int) -> str:
+    """Say how many of some withheld studies the report cites.
+
+    Args:
+        count: How many studies are withheld.
+        cited: How many of them the report cites.
+
+    Returns:
+        A clause, without leading or closing punctuation, e.g. "3 of them
+        are cited in this report".
+    """
+    if count == 1:
+        return "it is cited in this report" if cited else (
+            "it is not cited in this report"
+        )
+    if cited == 0:
+        return "none of them is cited in this report"
+    if cited == count:
+        return "all of them are cited in this report"
+    if cited == 1:
+        return "1 of them is cited in this report"
+    return f"{cited:,} of them are cited in this report"
+
+
+def withheld_population_text(
+    count: int,
+    considered: int | None,
+    cited: int | None,
+) -> str:
+    """Say what a count of withheld studies is a share of (#372).
+
+    The methodology counts over every study the review assessed, while the
+    reference list annotates only the ones it cites. Given as one bare
+    number, "Awaiting re-analysis: 12" could exceed every annotation the
+    reader can find, with nothing saying why. Both populations are named
+    rather than the count narrowed to the cited set: a withheld study that
+    was *not* cited is still worth knowing about, since the withholding may
+    be why it was not.
+
+    Args:
+        count: How many studies are withheld.
+        considered: How many the review assessed, or None for a report made
+            before it was recorded.
+        cited: How many of the withheld studies are cited, or None when that
+            was not recorded.
+
+    Returns:
+        e.g. "12 of the 40 studies reviewed; 3 of them are cited in this
+        report". A report without the populations gets the bare count it
+        always had, not a guess -- and so does one whose recorded populations
+        cannot hold the count, which only a hand-edited or corrupted report
+        can carry: "5 of them are cited" against a count of 3 is a claim no
+        reader can check against anything.
+    """
+    if considered is not None and considered < count:
+        logger.warning(
+            f"{count} withheld studies recorded against {considered} "
+            "reviewed; the report names the bare count"
+        )
+        considered = None
+    if cited is not None and not 0 <= cited <= count:
+        logger.warning(
+            f"{cited} cited recorded against {count} withheld studies; the "
+            "report does not name a cited share"
+        )
+        cited = None
+    text = f"{count:,}"
+    if considered:
+        noun = "study" if considered == 1 else "studies"
+        text += f" of the {considered:,} {noun} reviewed"
+    if cited is not None:
+        text += f"; {cited_share_text(count, cited)}"
+    return text
+
 
 # System prompt for report generation
 REPORTING_SYSTEM_PROMPT = """You are a medical research report writer. Your task is to synthesize evidence from multiple sources into a coherent, professional research summary.
@@ -206,20 +283,32 @@ class LiteReportingAgent(LiteBaseAgent):
                 doc_to_ref[doc_id] = citation.formatted_reference
 
         # Identify risky citations based on threshold, and separately the
-        # ones whose stored finding is being withheld: those are not "no
-        # concerns found", and printing them unannotated made them
-        # indistinguishable from a study assessed as low risk (#360).
+        # ones with no finding to state: those are not "no concerns found",
+        # and printing them unannotated made them indistinguishable from a
+        # study assessed as low risk (#360). Every kind the methodology
+        # counts as withheld is annotated, so each cited one it names can be
+        # found in the list (#372).
+        results = transparency_results or {}
+        # Without metadata nothing says the analysis was asked for, so only
+        # rows it stored show that it ran; a study with no row is then not
+        # annotated as "not stored", since the analysis may never have run.
+        analysis_applied = (
+            metadata.transparency_analysis_applied
+            if metadata is not None
+            else bool(results)
+        )
+        withheld = withheld_reference_caveats(doc_order, results, analysis_applied)
         risky_doc_results: dict[str, TransparencyResult] = {}
-        withheld_doc_ids: set[str] = set()
-        if transparency_results and hasattr(self.config, "transparency"):
+        if results and hasattr(self.config, "transparency"):
             settings = self.config.transparency
             for doc_id in doc_order:
-                if doc_id in transparency_results:
-                    result = transparency_results[doc_id]
-                    if not result.is_current:
-                        withheld_doc_ids.add(doc_id)
-                    elif should_warn_for_citation(result, settings):
-                        risky_doc_results[doc_id] = result
+                result = results.get(doc_id)
+                if (
+                    result is not None
+                    and doc_id not in withheld
+                    and should_warn_for_citation(result, settings)
+                ):
+                    risky_doc_results[doc_id] = result
 
         # Build risk context for LLM prompt
         risk_context = ""
@@ -262,7 +351,7 @@ IMPORTANT: Use ONLY the exact Source and Document ID values provided above. Do n
 
             # Add references section with risk annotations
             references = self._format_references_with_risk(
-                citations, risky_doc_results, withheld_doc_ids
+                citations, risky_doc_results, withheld
             )
             full_report = f"{report}\n\n## References\n\n{references}"
 
@@ -498,22 +587,23 @@ Key passages:
         self,
         citations: list[Citation],
         risky_doc_results: dict[str, TransparencyResult],
-        withheld_doc_ids: set[str] | None = None,
+        withheld: Mapping[str, str] | None = None,
     ) -> str:
         """Format reference list with risk annotations for risky citations.
 
         Args:
             citations: List of citations
             risky_doc_results: Dict mapping document_id to TransparencyResult for risky docs
-            withheld_doc_ids: Documents whose stored finding is not this
-                build's, and so is withheld pending re-analysis. They are
-                annotated as unassessed rather than left bare, which would
-                read as a study with no transparency concerns (#360).
+            withheld: By document id, why a document carries no finding --
+                superseded, never stored, or at no nameable risk level. They
+                are annotated as unassessed rather than left bare, which
+                would read as a study with no transparency concerns (#360,
+                #372).
 
         Returns:
             Formatted reference list with risk annotations
         """
-        withheld = withheld_doc_ids or set()
+        withheld = withheld or {}
         # Deduplicate by document ID
         seen: set[str] = set()
         unique_citations = []
@@ -543,7 +633,9 @@ Key passages:
                 if annotation:
                     references.append(annotation)
             elif doc.id in withheld:
-                references.append(format_reference_withheld_annotation())
+                references.append(
+                    format_reference_withheld_annotation(withheld[doc.id])
+                )
 
         return "\n".join(references)
 
@@ -690,7 +782,14 @@ Key passages:
                 + metadata.transparency_medium_risk_count
                 + metadata.transparency_high_risk_count
             )
-            lines.append(f"- **Documents Analyzed:** {total_analyzed:,}")
+            lines.append(
+                "- **Documents Analyzed:** "
+                + withheld_population_text(
+                    total_analyzed,
+                    metadata.transparency_documents_considered,
+                    None,
+                )
+            )
             lines.append("")
             lines.append("**Risk Distribution:**")
             lines.append("")
@@ -704,8 +803,13 @@ Key passages:
             if metadata.transparency_superseded_count:
                 lines.append("")
                 lines.append(
-                    f"- **Awaiting re-analysis:** "
-                    f"{metadata.transparency_superseded_count:,}. Their stored "
+                    "- **Awaiting re-analysis:** "
+                    + withheld_population_text(
+                        metadata.transparency_superseded_count,
+                        metadata.transparency_documents_considered,
+                        metadata.transparency_superseded_cited_count,
+                    )
+                    + ". Their stored "
                     "assessments were made by an earlier version of the "
                     "analyser, which has since been corrected, so they are "
                     "left out of the distribution above rather than counted "
@@ -714,8 +818,13 @@ Key passages:
             if metadata.transparency_unassessed_count:
                 lines.append("")
                 lines.append(
-                    f"- **Not assessed:** "
-                    f"{metadata.transparency_unassessed_count:,}. The "
+                    "- **Not assessed:** "
+                    + withheld_population_text(
+                        metadata.transparency_unassessed_count,
+                        metadata.transparency_documents_considered,
+                        metadata.transparency_unassessed_cited_count,
+                    )
+                    + ". The "
                     "analysis was asked about these studies and did not come "
                     "back with a finding: it failed, the study carried no "
                     "identifier to look one up by, or it had not finished. "

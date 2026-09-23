@@ -172,7 +172,7 @@ class TestEveryWorkerEndsItsRun:
 
     def test_the_module_defines_the_workers_this_suite_expects(self) -> None:
         """A guard on the sweep below: an empty sweep passes vacuously."""
-        assert len(worker_classes()) == 8
+        assert len(worker_classes()) == 9
 
     @pytest.mark.parametrize("worker", worker_classes(), ids=lambda c: c.__name__)
     def test_a_worker_ends_a_run_exactly_once(self, worker: type) -> None:

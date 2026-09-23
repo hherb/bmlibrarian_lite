@@ -473,10 +473,139 @@ def superseded_assessment_caveat() -> str:
         Two sentences, ending in a full stop: why there is no finding, and
         that it is not one against the study.
     """
+    # "Has not been re-analysed yet", not "is being re-analysed": the second
+    # was true only inside a running review, and a question reloaded from the
+    # store shows the same caveat with nothing running at all (#373).
     return unassessed_caveat(
         "This study's stored assessment was made by an earlier version of "
-        "the analyser and is being re-analysed",
+        "the analyser and has not been re-analysed yet",
         TRANSPARENCY_SOUGHT,
+    )
+
+
+def not_stored_assessment_caveat() -> str:
+    """Say that a reloaded study has no stored transparency assessment (#373).
+
+    A question loaded from the store showed no badge for these, which read
+    the same as a study still being analysed, or one whose analysis was
+    never asked for. What the store cannot say is *which* happened -- the
+    analysis failed, did not finish, or was switched off at the time -- so
+    the sentence names all three rather than guessing.
+
+    Returns:
+        Two sentences, ending in a full stop: why there is no finding, and
+        that it is not one against the study.
+    """
+    return unassessed_caveat(
+        "No assessment of this study is stored: its analysis failed, did not "
+        "finish, or was not run",
+        TRANSPARENCY_SOUGHT,
+    )
+
+
+def no_risk_level_caveat() -> str:
+    """Say that a study's analysis came back at no risk level it could name.
+
+    Such a row is counted under "Not assessed" in the report, so its
+    reference is annotated the same way: printed bare, it read as a study
+    assessed as low risk (#372).
+
+    Returns:
+        Two sentences, ending in a full stop.
+    """
+    return unassessed_caveat(
+        "This study's analysis finished without reaching a risk level it "
+        "could name",
+        TRANSPARENCY_SOUGHT,
+    )
+
+
+def unreadable_assessment_caveat() -> str:
+    """Say that a reloaded study's stored assessment could not be read.
+
+    One row a build cannot decode fails the whole batch read, so every
+    document of the question is left without its badge (#374). A badge that
+    is simply missing read the same as an analysis still running, so each
+    one says what happened instead. Re-analysis is not advised: it reads the
+    same rows, and would fail the same way.
+
+    Returns:
+        Two sentences, ending in a full stop: why no assessment is shown,
+        and that this is not a finding against the study.
+    """
+    return (
+        "The stored transparency assessments of this question could not be "
+        "read, so none is shown; see the log. This is not a finding against "
+        "the study."
+    )
+
+
+def unreadable_assessments_clause(error_name: str) -> str:
+    """Name a failed read of the stored assessments in a status message.
+
+    Posted on its own, the message was replaced a moment later by the load's
+    own summary, so it is a clause the summary carries instead.
+
+    Args:
+        error_name: The exception's class name, never its message: a
+            message can carry a stored value or a path.
+
+    Returns:
+        A clause without capital or full stop, for example
+        ``"transparency badges could not be loaded (ValueError); see the log"``.
+    """
+    return f"transparency badges could not be loaded ({error_name}); see the log"
+
+
+#: The Research Questions tab's action that re-analyses a question's
+#: documents. Named once, because the advice below tells the reader to use it
+#: by this name, and a label renamed on the menu alone would send them looking
+#: for an action that is not there.
+REANALYSE_TRANSPARENCY_ACTION = "Re-analyse Transparency"
+
+
+def reanalysis_advice() -> str:
+    """Tell the reader how to have a reloaded study's transparency assessed.
+
+    Returns:
+        One sentence with a leading space, to follow a caveat. Only for a
+        study that *can* be analysed: one with no identifier to look a record
+        up by would be sent to an action that cannot help it.
+    """
+    return (
+        f" To assess it, use {REANALYSE_TRANSPARENCY_ACTION} on this "
+        "question in the Research Questions tab."
+    )
+
+
+def provisional_text(provisional: int) -> str:
+    """What a transparency re-analysis adds for studies it could not settle.
+
+    These analyses finished, and their results are stored and shown with
+    their caveats -- but a source they score against could not be read, so
+    the score fell for want of an answer rather than because of one. Counted
+    as re-analysed, a throttled PubMed read as a pass in which everything
+    worked; counted as failed, a stored and presented result read as lost.
+
+    Args:
+        provisional: How many studies' re-analysis could not read a source.
+
+    Returns:
+        A sentence with a leading space, or ``""`` when every re-analysis
+        read what it needed.
+    """
+    if provisional <= 0:
+        return ""
+    if provisional == 1:
+        return (
+            " For 1 study a source could not be read; its result is shown "
+            "with that caveat, and it stays pending until a re-analysis "
+            "reaches every source."
+        )
+    return (
+        f" For {provisional:,} studies a source could not be read; their "
+        "results are shown with that caveat, and they stay pending until a "
+        "re-analysis reaches every source."
     )
 
 

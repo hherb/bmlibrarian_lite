@@ -1089,7 +1089,10 @@ def distinct_causes(
 
 @dataclass(frozen=True)
 class PassFailure:
-    """One document a re-classification or re-scoring pass could not finish (#327).
+    """One document a pass over a question's documents could not finish (#327).
+
+    Re-classification, re-scoring and transparency re-analysis all report
+    their failures this way.
 
     The pass counted its failures and logged the rest, so seventeen documents
     behind one unreachable provider and seventeen unprocessable abstracts
@@ -1230,11 +1233,12 @@ class TransparencyAnalysisFailure:
 
 @dataclass(frozen=True)
 class PassOutcome:
-    """What a re-classification or re-scoring did with the documents it was given.
+    """What a pass over a question's documents did with the documents it was given.
 
-    Both passes reported a pair of counts, which a cancel then had to be told
+    The passes reported a pair of counts, which a cancel then had to be told
     separately (#320) and which said nothing about why anything failed (#327).
-    This is the one value both their terminal signals carry.
+    This is the one value every pass's terminal signals carry:
+    re-classification, re-scoring and transparency re-analysis.
 
     A document the model answered for without naming a study design is neither
     a success nor a failure: nothing broke, and the model was honest. Counted
@@ -1248,6 +1252,10 @@ class PassOutcome:
         total: Documents it was given.
         unclassified: Documents the model answered for without naming a study
             design. Re-classification only; re-scoring has no such answer.
+        provisional: Documents whose transparency re-analysis finished but
+            could not read a source it scores against. Neither a success --
+            the result stays pending -- nor a failure, since it is stored
+            and shown with its caveat. Transparency re-analysis only (#373).
 
     Raises:
         ValueError: On construction, for counts that cannot be true --
@@ -1260,6 +1268,7 @@ class PassOutcome:
     failures: tuple[PassFailure, ...] = ()
     total: int = 0
     unclassified: int = 0
+    provisional: int = 0
 
     def __post_init__(self) -> None:
         """Refuse counts that cannot be true, and keep the failures a tuple.
@@ -1273,7 +1282,9 @@ class PassOutcome:
                 more documents were attempted than the pass was given.
         """
         object.__setattr__(self, "failures", tuple(self.failures))
-        for count in (self.succeeded, self.total, self.unclassified):
+        for count in (
+            self.succeeded, self.total, self.unclassified, self.provisional
+        ):
             if isinstance(count, bool) or not isinstance(count, int) or count < 0:
                 raise ValueError("A pass outcome counts documents in whole numbers")
         if not all(isinstance(failure, PassFailure) for failure in self.failures):
@@ -1297,10 +1308,13 @@ class PassOutcome:
         """How many documents the pass reached.
 
         Returns:
-            The successes, the failures and the documents left unclassified:
-            every document it got an answer about, one way or another.
+            The successes, the failures, the documents left unclassified and
+            the provisional ones: every document it got an answer about, one
+            way or another.
         """
-        return self.succeeded + self.failed + self.unclassified
+        return (
+            self.succeeded + self.failed + self.unclassified + self.provisional
+        )
 
     @property
     def not_attempted(self) -> int:
@@ -2320,6 +2334,16 @@ class ReportMetadata:
             nothing saying so, and a total outage printed "Transparency
             analysis was not applied" over an analysis that ran against
             every study and failed on every one (#361, #249)
+        transparency_documents_considered: How many documents the counts
+            above are a share of -- those the review assessed. None for a
+            report made before the report named it (#372)
+        transparency_superseded_cited_count: Of the superseded documents,
+            how many the report cites. The reference list annotates only
+            the cited ones, so the report says how the two figures relate
+            rather than leaving the reader to map one onto the other; None
+            when it is not known (#372)
+        transparency_unassessed_cited_count: Likewise for the unassessed
+            documents (#372)
 
         model_configs: LLM configuration for each workflow task
         citations_extracted: Total citation passages extracted
@@ -2359,6 +2383,9 @@ class ReportMetadata:
     transparency_high_risk_count: int = 0
     transparency_superseded_count: int = 0
     transparency_unassessed_count: int = 0
+    transparency_documents_considered: int | None = None
+    transparency_superseded_cited_count: int | None = None
+    transparency_unassessed_cited_count: int | None = None
 
     # LLM configuration by task
     model_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -2398,6 +2425,15 @@ class ReportMetadata:
             "transparency_high_risk_count": self.transparency_high_risk_count,
             "transparency_superseded_count": self.transparency_superseded_count,
             "transparency_unassessed_count": self.transparency_unassessed_count,
+            "transparency_documents_considered": (
+                self.transparency_documents_considered
+            ),
+            "transparency_superseded_cited_count": (
+                self.transparency_superseded_cited_count
+            ),
+            "transparency_unassessed_cited_count": (
+                self.transparency_unassessed_cited_count
+            ),
             "model_configs": self.model_configs,
             "citations_extracted": self.citations_extracted,
             "unique_sources_cited": self.unique_sources_cited,
@@ -2459,6 +2495,15 @@ class ReportMetadata:
             ),
             transparency_unassessed_count=data.get(
                 "transparency_unassessed_count", 0
+            ),
+            transparency_documents_considered=data.get(
+                "transparency_documents_considered"
+            ),
+            transparency_superseded_cited_count=data.get(
+                "transparency_superseded_cited_count"
+            ),
+            transparency_unassessed_cited_count=data.get(
+                "transparency_unassessed_cited_count"
             ),
             model_configs=data.get("model_configs", {}),
             citations_extracted=data.get("citations_extracted", 0),

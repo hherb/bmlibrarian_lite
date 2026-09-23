@@ -28,6 +28,7 @@ its sub-tabs in real-time during workflow execution.
 """
 
 import logging
+from collections.abc import Mapping
 from typing import List, Optional
 
 from PySide6.QtCore import Signal
@@ -48,6 +49,7 @@ from ..data_models import (
 )
 from ..quality.data_models import QualityAssessment
 from ..transparency import (
+    TransparencyOutcome,
     TransparencyResult,
     TransparencyUnassessed,
     transparency_outcome,
@@ -339,6 +341,23 @@ class AuditTrailTab(QWidget):
         self.literature_tab.update_transparency(
             doc_id, transparency_outcome(outcome)
         )
+
+    def show_transparency_outcomes(
+        self,
+        outcomes: Mapping[str, TransparencyOutcome],
+    ) -> None:
+        """Show outcomes already decided, such as a reloaded question's.
+
+        Unlike :meth:`on_transparency_outcome` these are presentable as they
+        stand -- :func:`~bmlibrarian_lite.transparency.stored_transparency_outcomes`
+        has already withheld what this build does not stand behind -- so
+        nothing is converted here.
+
+        Args:
+            outcomes: Each document's finding, or why it has none, by id.
+        """
+        for doc_id, outcome in outcomes.items():
+            self.literature_tab.update_transparency(doc_id, outcome)
 
     # =========================================================================
     # Data Access

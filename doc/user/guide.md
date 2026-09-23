@@ -150,7 +150,20 @@ The Research Questions tab lets you manage and revisit past searches:
   scoring failed is not counted as scored: a re-run hands it back to be scored
   again, and says how many it is retrying (for example **Found 5 new
   documents, and 3 whose scoring failed before**)
-- Context menu: re-classify, re-score, delete, or run benchmarks
+- Context menu: re-classify, re-score, re-analyse transparency, delete, or run benchmarks
+- **Load** shows the question's saved report and audit trail, including each
+  study's stored transparency badge. Nothing is fetched: a study whose stored
+  assessment is out of date, or that has none, reads **Not assessed** with the
+  reason on hover. If the stored assessments cannot be read at all, every
+  badge says so, and so does the status bar's "Loaded question" message; the
+  log has the details
+- **Re-analyse Transparency** (context menu, when transparency analysis is on)
+  re-analyses only the question's studies whose assessment is missing, out of
+  date, or provisional. It says how many that is, and how many carry no
+  PubMed ID or DOI to look one up by, before it starts; it can be cancelled,
+  and the badges of a loaded question update as each study comes back. A
+  study whose sources could not all be read is reported as **provisional**:
+  its result is shown with that caveat, and it stays pending
 
 ### Audit Trail
 
@@ -221,8 +234,10 @@ hovering over the badge says why:
   to look the study up by.
 - **The stored assessment was made by an earlier version of the analyser.**
   When a correction changes what the analyser would find, studies assessed
-  before it are re-analysed the next time they come up in a review, and until
-  that happens their old score and risk level are withheld rather than shown.
+  before it are re-analysed the next time they come up in a review, or when
+  you choose **Re-analyse Transparency** for their question on the Research
+  Questions tab. Until that happens their old score and risk level are
+  withheld rather than shown.
   A report counts those studies separately and says how many are waiting, and
   annotates each affected reference rather than leaving it bare.
 
@@ -230,15 +245,19 @@ hovering over the badge says why:
 > everything.** That release corrected what the analyser accepts as evidence,
 > so *every* assessment stored before it is superseded. Transparency badges
 > will read **Not assessed** across the board until each study has been
-> looked at again, which happens the next time it appears in a review. This
-> is the correction working, not the feature breaking. Re-analysis is paced
+> looked at again, which happens the next time it appears in a review, or
+> when you re-analyse its question from the Research Questions tab. This is
+> the correction working, not the feature breaking. Re-analysis is paced
 > against rate-limited sources, so it is deliberately not done all at once
 > when you open the application.
 
 A report's **Transparency Analysis** section accounts for every study it was
 asked about. Alongside the risk distribution it names how many are awaiting
 re-analysis, and how many came back with no finding at all — because an
-analysis that could not be made is not a study with nothing to declare. If
+analysis that could not be made is not a study with nothing to declare. Each
+of those counts says what it is a share of, for example **12 of the 40
+studies reviewed; 3 of them are cited in this report**, since only the cited
+studies are annotated in the reference list. If
 transparency analysis was switched on, the report says so even when every
 analysis failed.
 

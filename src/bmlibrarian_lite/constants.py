@@ -79,6 +79,10 @@ PUBMED_CACHE_TTL_SECONDS = 86400
 # Default maximum results for PubMed searches
 PUBMED_DEFAULT_MAX_RESULTS = 200
 
+# The contact address a literature source is sent when the user has set none.
+# NCBI and Unpaywall ask for one with every request.
+FALLBACK_CONTACT_EMAIL = "bmlibrarian@example.com"
+
 # Batch size for fetching PubMed article details
 PUBMED_BATCH_SIZE = 200
 
@@ -347,6 +351,9 @@ LLM_TIMEOUT_MS = 120000
 
 # Timeout for PubMed API requests
 PUBMED_TIMEOUT_MS = 30000
+
+# How long a status bar message the reader must be able to read stays up
+STATUS_MESSAGE_TIMEOUT_MS = 5000
 
 # =============================================================================
 # Scoring Settings

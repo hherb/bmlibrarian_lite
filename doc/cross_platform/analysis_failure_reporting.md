@@ -294,6 +294,32 @@ analysed after it, and the reader cannot tell which they are looking at.
   pending. There is no bulk invalidation on open: these are rate-limited
   network sources, and a user opening the application is not asking for
   every article they have ever searched to be fetched again.
+- **But something the reader can reach must ask.** A cache miss is only
+  re-analysed when a review asks for its document again, so every study the
+  user does not happen to review again kept a withheld badge for good, and
+  the pending query had no caller (#373). The remedy is an **explicit
+  request, not a sweep**: the Research Questions tab's *Re-analyse
+  Transparency* runs the pending documents of one question -- no row, a
+  provisional row, or a superseded one -- through the same analysis body the
+  review runs (`transparency/assessment.py`), paced by the same per-host
+  limiter. "Pending" is the cache's own predicate (`is_final`), asked of the
+  same rows, so the pass and the review cannot disagree about what is done.
+  A re-analysis that could not read a source is counted as **provisional**,
+  neither a success nor a failure: its result is stored and shown, and it
+  stays pending. A pending document with neither a PMID nor a DOI is left
+  out of the pass, since nothing could look it up, and the confirmation
+  says how many were left out rather than shrinking its count in silence.
+- **A reloaded question shows what the store holds, and fetches nothing.**
+  It used to show no badge at all, so a missing badge meant a fourth thing
+  beside disabled, still running and failed. Every document now gets an
+  outcome (`stored_transparency_outcomes`): a row this build stands behind,
+  or a reason -- superseded, never stored, or no identifier to look one up
+  by -- with advice to use the re-analysis only where it can help. A caveat
+  may not claim work in progress that is not happening: "is being
+  re-analysed" was true only inside a running review. If the stored rows
+  cannot be read at all, every badge says so, and so does the load's own
+  status message; a failure posted as a message of its own was replaced by
+  the load's summary before anyone could read it.
 - **Until it is redone, no surface presents it as a finding.** Five read a
   stored row and made a claim from it: the badge, the report's citation
   warnings (`should_warn_for_citation`, which also gates the reference
@@ -310,9 +336,20 @@ analysed after it, and the reader cannot tell which they are looking at.
   is the same claim the gate just retracted. An aggregate line elsewhere in
   the document does not discharge this: it is counted over a different
   population than the references, so the reader cannot map it onto any one
-  study. The report also names how many rows are waiting, and how many
+  study. **Every kind of study the withheld counts include is annotated**,
+  each with its own caveat: a superseded row; no stored row at all, when the
+  analysis was switched on; and a current row that reached no risk level it
+  could name. Annotating only the superseded kind left a cited study counted
+  "Not assessed" printed bare (#372). The counts and the annotations are
+  taken from **one read** of the stored rows: analyses still running during
+  a review store rows between two reads, and a study the count put in one
+  bucket could then be annotated as another. The report also names how many rows are waiting, and how many
   studies came back with no finding at all, so no denominator shrinks in
-  silence.
+  silence -- and **says what each count is a share of**: "12 of the 40
+  studies reviewed; 3 of them are cited in this report" (#372). Both
+  populations, not the cited set alone, because a withheld study that was
+  not cited is still worth knowing about. A report made before the
+  populations were recorded keeps its bare count rather than a guessed one.
 - **"Applied" means asked, not answered.** A report whose transparency
   analysis was switched on says so even when every analysis failed. Saying
   "transparency analysis was not applied" over an analysis that ran against

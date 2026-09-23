@@ -16,8 +16,11 @@
 
 """Helper functions for report risk warnings."""
 
+from collections.abc import Mapping, Sequence
+
 from ..transparency.transparency_models import (
     COI_NOT_STATED,
+    NAMEABLE_RISK_LEVELS,
     TransparencyResult,
     TransparencyRisk,
 )
@@ -182,7 +185,50 @@ def inject_risk_warnings(
     return result
 
 
-def format_reference_withheld_annotation() -> str:
+def withheld_reference_caveats(
+    doc_ids: Sequence[str],
+    transparency_results: Mapping[str, TransparencyResult],
+    analysis_applied: bool,
+) -> dict[str, str]:
+    """Say which cited studies carry no finding, and why, for their references.
+
+    The report's "Awaiting re-analysis" and "Not assessed" lines name how
+    many of each are cited; every one of those has to be findable in the
+    reference list, or the count points at entries that look exactly like a
+    study assessed as low risk (#372). So all three kinds are annotated, not
+    only the superseded one.
+
+    Args:
+        doc_ids: The cited documents, in reference order.
+        transparency_results: Their stored assessments, by document id.
+        analysis_applied: Whether transparency analysis was asked for. When
+            it was not, a missing row is expected and says nothing.
+
+    Returns:
+        By document id, the caveat its reference is annotated with: a row an
+        earlier analyser wrote, a row at no nameable risk level, or -- when
+        the analysis was asked for -- no row at all.
+    """
+    from ..analysis_failures import (
+        no_risk_level_caveat,
+        not_stored_assessment_caveat,
+        superseded_assessment_caveat,
+    )
+
+    caveats: dict[str, str] = {}
+    for doc_id in doc_ids:
+        result = transparency_results.get(doc_id)
+        if result is None:
+            if analysis_applied:
+                caveats[doc_id] = not_stored_assessment_caveat()
+        elif not result.is_current:
+            caveats[doc_id] = superseded_assessment_caveat()
+        elif result.risk_level not in NAMEABLE_RISK_LEVELS:
+            caveats[doc_id] = no_risk_level_caveat()
+    return caveats
+
+
+def format_reference_withheld_annotation(reason: str | None = None) -> str:
     """Annotate a reference whose transparency finding is being withheld.
 
     ``should_warn_for_citation`` answers False for a superseded row, which
@@ -194,6 +240,9 @@ def format_reference_withheld_annotation() -> str:
     any reference. A caveat elsewhere in the document does not withhold a
     claim here (#360).
 
+    Args:
+        reason: Why there is no finding; the superseded caveat when omitted.
+
     Returns:
         The annotation's lines, indented to match the risk annotation.
     """
@@ -202,7 +251,7 @@ def format_reference_withheld_annotation() -> str:
     return "\n".join(
         [
             "    ⚠️ TRANSPARENCY NOT ASSESSED",
-            f"    - {superseded_assessment_caveat()}",
+            f"    - {reason or superseded_assessment_caveat()}",
         ]
     )
 

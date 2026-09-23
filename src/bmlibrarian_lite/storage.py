@@ -3624,60 +3624,38 @@ class LiteStorage:
 
     def get_documents_pending_transparency(
         self,
-        session_id: str,
+        question: str,
     ) -> list[str]:
         """
         Get document IDs whose transparency this build has not established.
 
-        Returns documents from a search session that have no transparency
-        result, and those whose result an earlier version of the analyser
-        wrote: a corrected analyser reaches an existing document only by
-        being asked to look at it again (#360).
+        Returns the documents found for a research question that have no
+        transparency result, whose result an earlier version of the analyser
+        wrote, or whose analysis could not read a source it scores against:
+        a corrected analyser reaches an existing document only by being asked
+        to look at it again (#360), and this is what the Research Questions
+        tab's re-analysis asks (#373).
+
+        Scoped by question, not by search session: the question's documents
+        are what a reloaded question shows, so a pass over any narrower set
+        would leave badges on screen that it never reached.
 
         Args:
-            session_id: Search session ID
+            question: The research question text
 
         Returns:
-            List of document IDs pending transparency analysis
+            The pending document IDs, sorted
         """
-        from .transparency import (
-            TRANSPARENCY_ANALYZER_VERSION,
-            analyzer_version_ordinal,
+        from .transparency import pending_transparency_ids
+
+        document_ids = sorted(self.get_document_ids_for_question(question))
+        # The verdict is the one the manager's cache reaches, asked of the
+        # same rows, rather than a second rendering of it in SQL -- which
+        # could drift, and would compare versions as text: SQLite orders
+        # '10.0' before '2.0'.
+        return pending_transparency_ids(
+            self.get_transparency_results_batch(document_ids), document_ids
         )
-
-        # A LEFT JOIN, decided in Python, rather than a NOT IN subquery
-        # comparing the version in SQL. Two reasons: SQLite orders
-        # ``'10.0' < '2.0'``, so a textual comparison would call a later
-        # analyser's rows stale forever; and ``NOT IN`` over a subquery that
-        # yields one NULL is NULL for every row, which would silently empty
-        # the whole pending list.
-        query = """
-            SELECT DISTINCT sd.document_id,
-                   tr.analyzer_version AS analyzer_version,
-                   tr.sources_unreachable AS sources_unreachable
-            FROM scored_documents sd
-            JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
-            LEFT JOIN transparency_results tr
-                   ON tr.document_id = sd.document_id
-            WHERE rc.search_session_id = ?
-              AND sd.document_id IS NOT NULL
-        """
-
-        current = analyzer_version_ordinal(TRANSPARENCY_ANALYZER_VERSION)
-        pending: list[str] = []
-        with self._sqlite_connection() as conn:
-            for row in conn.execute(query, (session_id,)):
-                # No row at all, a row an older analyser wrote, or one whose
-                # analysis could not reach a source it scores against: each
-                # is work this build has yet to do, and nothing else would
-                # ever ask for it to be done again (#360, #346).
-                if row["analyzer_version"] is None:
-                    pending.append(row["document_id"])
-                elif analyzer_version_ordinal(row["analyzer_version"]) < current:
-                    pending.append(row["document_id"])
-                elif row["sources_unreachable"]:
-                    pending.append(row["document_id"])
-        return pending
 
     def delete_transparency_result(self, document_id: str) -> bool:
         """

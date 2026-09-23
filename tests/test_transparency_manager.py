@@ -88,7 +88,7 @@ def mock_report():
 def manager(mock_storage, mock_config):
     """Create a TransparencyManager with mocked dependencies."""
     with patch(
-        "bmlibrarian_lite.transparency.transparency_manager.StudyTransparencyAnalyzer"
+        "bmlibrarian_lite.transparency.assessment.StudyTransparencyAnalyzer"
     ) as mock_analyzer_class:
         manager = TransparencyManager(
             storage=mock_storage,
@@ -105,7 +105,7 @@ class TestTransparencyManagerInit:
     def test_init_creates_analyzer(self, mock_storage, mock_config):
         """Test that init creates the analyzer."""
         with patch(
-            "bmlibrarian_lite.transparency.transparency_manager.StudyTransparencyAnalyzer"
+            "bmlibrarian_lite.transparency.assessment.StudyTransparencyAnalyzer"
         ) as mock_cls:
             manager = TransparencyManager(
                 storage=mock_storage,
@@ -126,7 +126,7 @@ class TestTransparencyManagerInit:
         """Test that settings are loaded from config."""
         mock_config.transparency.score_threshold = 50
         with patch(
-            "bmlibrarian_lite.transparency.transparency_manager.StudyTransparencyAnalyzer"
+            "bmlibrarian_lite.transparency.assessment.StudyTransparencyAnalyzer"
         ):
             manager = TransparencyManager(
                 storage=mock_storage,
