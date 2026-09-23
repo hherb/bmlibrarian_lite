@@ -216,7 +216,7 @@ class TestTheManagerEmitsAClassifiedFailure:
         config = MagicMock()
         config.transparency = TransparencySettings()
         with patch(
-            "bmlibrarian_lite.transparency.transparency_manager."
+            "bmlibrarian_lite.transparency.assessment."
             "StudyTransparencyAnalyzer"
         ) as analyzer_class:
             analyzer_class.return_value = analyzer
@@ -628,7 +628,7 @@ class TestNothingLeavesTheDocumentWithoutAnOutcome:
         config = MagicMock()
         config.transparency = TransparencySettings()
         with patch(
-            "bmlibrarian_lite.transparency.transparency_manager."
+            "bmlibrarian_lite.transparency.assessment."
             "StudyTransparencyAnalyzer"
         ):
             return TransparencyManager(

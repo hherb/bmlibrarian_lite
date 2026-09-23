@@ -16,13 +16,14 @@
 
 """Data models for transparency analysis results."""
 
-from collections.abc import Iterable
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Union
 
 if TYPE_CHECKING:
+    from ..data_models import LiteDocument
     from .transparency_settings import TransparencySettings
 
 
@@ -139,6 +140,11 @@ class TransparencyCounts:
             an analysis that ran and reached a conclusion vanished from the
             distribution with nothing saying so -- the same defect the
             ``superseded`` bucket exists to prevent, one level down.
+        not_stored: Documents asked about that have no stored row at all:
+            the analysis failed, found no identifier to look one up by, or
+            had not finished. Only :func:`count_transparency_over` can know
+            these, since it is the one given the documents as well as the
+            rows.
     """
 
     low: int = 0
@@ -146,6 +152,28 @@ class TransparencyCounts:
     high: int = 0
     superseded: int = 0
     unknown: int = 0
+    not_stored: int = 0
+
+    @property
+    def not_assessed(self) -> int:
+        """How many documents came back without a finding this build can name.
+
+        Returns:
+            Those with no row, and those whose row names no risk level. Both
+            asked a question that produced nothing to state, and neither is
+            a study with nothing to declare (#361).
+        """
+        return self.not_stored + self.unknown
+
+    @property
+    def considered(self) -> int:
+        """How many documents these counts account for.
+
+        Returns:
+            Every bucket, so the report can say what the others are a share
+            of (#372).
+        """
+        return self.assessed + self.superseded + self.not_assessed
 
     @property
     def assessed(self) -> int:
@@ -199,6 +227,110 @@ def count_transparency_results(
     )
 
 
+def count_transparency_over(
+    stored: Mapping[str, "TransparencyResult"],
+    document_ids: Iterable[str],
+) -> TransparencyCounts:
+    """Count what is known about a set of documents' transparency.
+
+    Args:
+        stored: The stored assessments, by document id. Rows for documents
+            outside ``document_ids`` are ignored, so one batch can be counted
+            over the documents a review assessed and over the ones it cited.
+        document_ids: The documents to account for. A repeated id counts
+            once.
+
+    Returns:
+        The counts, with every document in exactly one bucket: the report
+        names a population and says what became of each member of it, so
+        two figures taken over different sets cannot be read as one (#372).
+    """
+    ids = list(dict.fromkeys(document_ids))
+    counts = count_transparency_results(
+        stored[doc_id] for doc_id in ids if doc_id in stored
+    )
+    return replace(
+        counts, not_stored=sum(1 for doc_id in ids if doc_id not in stored)
+    )
+
+
+def pending_transparency_ids(
+    stored: Mapping[str, "TransparencyResult"],
+    document_ids: Iterable[str],
+) -> list[str]:
+    """Say which documents' transparency this build has yet to establish.
+
+    Args:
+        stored: The stored assessments, by document id.
+        document_ids: The documents to consider.
+
+    Returns:
+        Each document with no row, or whose row is not final -- an earlier
+        analyser wrote it (#360), or a source it scores against could not be
+        read (#346) -- once each, in the order given. The same question
+        ``TransparencyManager.analyze_document`` asks of its cache, so the
+        pass that re-analyses a question's documents and the review that
+        re-analyses them as it goes cannot disagree about which are done.
+    """
+    return [
+        doc_id
+        for doc_id in dict.fromkeys(document_ids)
+        if doc_id not in stored or not stored[doc_id].is_final
+    ]
+
+
+def stored_transparency_outcomes(
+    documents: Iterable["LiteDocument"],
+    stored: Mapping[str, "TransparencyResult"],
+) -> dict[str, "TransparencyOutcome"]:
+    """Say what each document of a reloaded question may be presented as.
+
+    A question loaded from the store used to show no transparency badge at
+    all, current or not, so a missing badge meant a fourth thing beside
+    disabled, still running and failed. Every document gets an outcome here,
+    and nothing is fetched: opening a question is not a request to re-fetch
+    it, which is what the Research Questions tab's re-analysis is for (#373).
+
+    Args:
+        documents: The question's documents.
+        stored: Their stored assessments, by document id.
+
+    Returns:
+        By document id: the row itself when this build stands behind it;
+        otherwise the caveat for why there is none -- a superseded row, no
+        identifier to look one up by, or nothing stored -- ending with how
+        to have it assessed where that is possible.
+    """
+    from ..analysis_failures import (
+        not_stored_assessment_caveat,
+        reanalysis_advice,
+        superseded_assessment_caveat,
+        transparency_failure_text,
+    )
+    from ..data_models import TransparencyAnalysisFailure
+
+    outcomes: dict[str, TransparencyOutcome] = {}
+    for document in documents:
+        row = stored.get(document.id)
+        if row is not None and row.is_current:
+            outcomes[document.id] = row
+        elif not document.pmid and not document.doi:
+            outcomes[document.id] = TransparencyUnassessed(
+                reason=transparency_failure_text(
+                    TransparencyAnalysisFailure.no_identifier(document.id)
+                )
+            )
+        elif row is not None:
+            outcomes[document.id] = TransparencyUnassessed(
+                reason=superseded_assessment_caveat() + reanalysis_advice()
+            )
+        else:
+            outcomes[document.id] = TransparencyUnassessed(
+                reason=not_stored_assessment_caveat() + reanalysis_advice()
+            )
+    return outcomes
+
+
 #: What a surface can be asked to present. A document either has a finding
 #: or has none for a reason the reader is owed: an analysis that failed
 #: (#361), or a stored assessment an analyser this build has since corrected
@@ -224,7 +356,7 @@ def transparency_outcome(
 
     Returns:
         The result itself when this build's analyser wrote it; otherwise the
-        caveat saying it is being re-analysed.
+        caveat saying it has not been re-analysed yet.
     """
     from ..analysis_failures import superseded_assessment_caveat
 

@@ -29,7 +29,10 @@ from .transparency_models import (
     TransparencyUnassessed,
     analyzer_version_ordinal,
     calculate_risk_level,
+    count_transparency_over,
     count_transparency_results,
+    pending_transparency_ids,
+    stored_transparency_outcomes,
     transparency_outcome,
 )
 from .transparency_settings import (
@@ -51,7 +54,10 @@ __all__ = [
     "TransparencyUnassessed",
     "analyzer_version_ordinal",
     "calculate_risk_level",
+    "count_transparency_over",
     "count_transparency_results",
+    "pending_transparency_ids",
+    "stored_transparency_outcomes",
     "transparency_outcome",
     "TransparencySettings",
     "get_default_settings",

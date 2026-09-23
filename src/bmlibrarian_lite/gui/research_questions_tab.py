@@ -51,8 +51,10 @@ from PySide6.QtWidgets import (
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
 from ..analysis_failures import (
+    REANALYSE_TRANSPARENCY_ACTION,
     also_failed_text,
     pass_failure_detail,
+    provisional_text,
     unclassified_text,
 )
 from ..benchmarking.display import benchmark_cancelled_text, failed_scorings_sentence
@@ -68,7 +70,12 @@ from ..data_models import (
 from ..exceptions import SQLiteError
 from ..search_failures import describe_search_shortfalls
 from ..storage import LiteStorage
-from .workers import IncrementalSearchWorker, ReclassifyWorker, RescoreWorker
+from .workers import (
+    IncrementalSearchWorker,
+    ReclassifyWorker,
+    RescoreWorker,
+    TransparencyReanalysisWorker,
+)
 from .benchmark_dialog import BenchmarkWorker
 
 logger = logging.getLogger(__name__)
@@ -194,6 +201,8 @@ def pass_cancelled_text(
         text += f", {outcome.failed} failed"
     if outcome.unclassified:
         text += f", {outcome.unclassified} with no study design named"
+    if outcome.provisional:
+        text += f", {outcome.provisional} provisional"
     text += "."
     remaining = outcome.not_attempted
     if remaining == 1:
@@ -223,7 +232,50 @@ def pass_finished_text(pass_name: str, verb: str, outcome: PassOutcome) -> str:
         text += f", {outcome.failed} failed"
     if outcome.unclassified:
         text += f", {outcome.unclassified} with no study design named"
+    if outcome.provisional:
+        text += f", {outcome.provisional} provisional"
     return text + "."
+
+
+def reanalysis_scope_text(analysable: int, unidentified: int) -> str:
+    """What a transparency re-analysis of a question would cover.
+
+    Args:
+        analysable: Pending documents that carry a PMID or a DOI.
+        unidentified: Pending documents that carry neither, which no
+            re-analysis can look up.
+
+    Returns:
+        e.g. "12 documents have no settled transparency assessment
+        (missing, provisional or out of date) and can be re-analysed. 2 more
+        carry no PubMed ID or DOI to look one up by." Not "no current
+        assessment": a provisional row is current, and its badge is on
+        screen while the dialog is open.
+        Said even when nothing can be done, so a question whose badges still
+        read "Not assessed" is not left looking as if the pass found no work
+        it could not do.
+    """
+    if analysable == 0:
+        text = "Every document that can be analysed has a settled assessment."
+    elif analysable == 1:
+        text = (
+            "1 document has no settled transparency assessment (missing, "
+            "provisional or out of date) and can be re-analysed."
+        )
+    else:
+        text = (
+            f"{analysable:,} documents have no settled transparency "
+            "assessment (missing, provisional or out of date) and can be "
+            "re-analysed."
+        )
+    if unidentified == 1:
+        text += " 1 more carries no PubMed ID or DOI to look one up by."
+    elif unidentified > 1:
+        text += (
+            f" {unidentified:,} more carry no PubMed ID or DOI to look one "
+            "up by."
+        )
+    return text
 
 
 def pass_failure_explanation(outcome: PassOutcome) -> str:
@@ -241,8 +293,10 @@ def pass_failure_explanation(outcome: PassOutcome) -> str:
         The failure detail, the unclassified note, or both -- each only when
         it has something to say; "" when the pass had neither.
     """
-    return pass_failure_detail(outcome.failures) + unclassified_text(
-        outcome.unclassified
+    return (
+        pass_failure_detail(outcome.failures)
+        + unclassified_text(outcome.unclassified)
+        + provisional_text(outcome.provisional)
     )
 
 
@@ -264,12 +318,19 @@ class ResearchQuestionsTab(QWidget):
             Args: (question, pubmed_query, documents, search_shortfalls)
         benchmark_completed: Emitted when benchmark run completes
             Args: (BenchmarkResult)
+        transparency_outcome_ready: Emitted for each document a
+            transparency re-analysis reaches, so a badge on screen is
+            updated by the slot that updates it during a review
+            Args: (document_id, TransparencyResult or
+            TransparencyAnalysisFailure)
     """
 
     question_selected = Signal(str, str)  # (question, pubmed_query)
     # (question, pubmed_query, List[LiteDocument], List[RetrievalShortfall])
     new_documents_found = Signal(str, str, list, list)
     benchmark_completed = Signal(object)  # BenchmarkResult
+    # document_id, TransparencyResult | TransparencyAnalysisFailure
+    transparency_outcome_ready = Signal(str, object)
 
     def __init__(
         self,
@@ -295,6 +356,7 @@ class ResearchQuestionsTab(QWidget):
         self._benchmark_worker: Optional[BenchmarkWorker] = None
         self._reclassify_worker: Optional[ReclassifyWorker] = None
         self._rescore_worker: Optional[RescoreWorker] = None
+        self._transparency_worker: TransparencyReanalysisWorker | None = None
 
         self._setup_ui()
         self._setup_context_menu()
@@ -471,6 +533,22 @@ class ResearchQuestionsTab(QWidget):
         )
         menu.addAction(rescore_action)
 
+        # Re-analyse transparency action -- the explicit request #373 asks
+        # for, since nothing re-analyses a question nobody reviews again
+        if self.config.transparency.enabled:
+            transparency_action = QAction(REANALYSE_TRANSPARENCY_ACTION, self)
+            transparency_action.setToolTip(
+                "Re-analyse the transparency of documents whose stored "
+                "assessment is missing, provisional or out of date"
+            )
+            transparency_action.triggered.connect(
+                self._on_reanalyse_transparency_clicked
+            )
+            transparency_action.setEnabled(
+                not is_busy and question.total_documents > 0
+            )
+            menu.addAction(transparency_action)
+
         menu.addSeparator()
 
         # Re-run search action (same as button)
@@ -567,6 +645,7 @@ class ResearchQuestionsTab(QWidget):
             or self._benchmark_worker is not None
             or self._reclassify_worker is not None
             or self._rescore_worker is not None
+            or self._transparency_worker is not None
         )
 
     def _on_selection_changed(self) -> None:
@@ -691,9 +770,9 @@ class ResearchQuestionsTab(QWidget):
         self._worker.start()
 
     def _on_cancel_clicked(self) -> None:
-        """Ask the running worker -- whichever of the four it is -- to stop.
+        """Ask the running worker -- whichever of the five it is -- to stop.
 
-        Each of the four workers ends by emitting ``cancelled``, which
+        Each of the five workers ends by emitting ``cancelled``, which
         returns the tab to ready (#320). A benchmark is among them since
         #324: its runner is asked before each evaluation, so cancelling one
         stops it spending rather than only dropping what it has paid for.
@@ -702,6 +781,7 @@ class ResearchQuestionsTab(QWidget):
             self._worker
             or self._reclassify_worker
             or self._rescore_worker
+            or self._transparency_worker
             or self._benchmark_worker
         )
         if worker is None:
@@ -1351,6 +1431,161 @@ class ResearchQuestionsTab(QWidget):
                 "Delete Error",
                 f"Failed to delete research question:\n\n{e}",
             )
+
+    # -------------------------------------------------------------------------
+    # Transparency re-analysis handlers
+    # -------------------------------------------------------------------------
+
+    def _on_reanalyse_transparency_clicked(self) -> None:
+        """Re-analyse the transparency the store does not hold for a question.
+
+        Only the pending documents are offered -- no row, a provisional one,
+        or one an earlier analyser wrote -- so a question whose assessments
+        are all current costs no request at all.
+        """
+        question = self._get_selected_question()
+        if not question:
+            return
+
+        try:
+            pending_ids = self.storage.get_documents_pending_transparency(
+                question.question
+            )
+            documents = self.storage.get_documents(pending_ids)
+        except (SQLiteError, sqlite3.Error, ValueError) as e:
+            # ValueError: a stored row this build cannot decode, such as a
+            # risk level a newer build wrote into a shared data directory
+            logger.exception("Could not read the pending transparency work")
+            self.progress_label.setText(
+                f"Could not read the stored assessments: {type(e).__name__}"
+            )
+            return
+        if len(documents) < len(pending_ids):
+            # Not offered, because nothing could be analysed or shown for
+            # them: a reloaded question drops the same documents too
+            logger.warning(
+                f"{len(pending_ids) - len(documents)} pending document(s) of "
+                "this question are missing from the store"
+            )
+        analysable = [doc for doc in documents if doc.pmid or doc.doi]
+        message = reanalysis_scope_text(
+            len(analysable), len(documents) - len(analysable)
+        )
+        if not analysable:
+            self.progress_label.setText(message)
+            return
+
+        reply = QMessageBox.question(
+            self,
+            REANALYSE_TRANSPARENCY_ACTION,
+            f"{message}\n\nEach study's records are fetched again from PubMed, "
+            "Europe PMC, CrossRef and ClinicalTrials.gov, paced to what "
+            "those services allow, so this can take a while.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._transparency_worker = TransparencyReanalysisWorker(
+            config=self.config,
+            storage=self.storage,
+            documents=analysable,
+            parent=self,
+        )
+        worker = self._transparency_worker
+        # Forwarded, so a badge the Audit Trail shows for this question is
+        # updated as each document comes back rather than left as it was
+        worker.outcome_ready.connect(self.transparency_outcome_ready)
+        # The progress lines have the same shape as re-classification's
+        worker.progress.connect(self._on_reclassify_progress)
+        worker.finished.connect(self._on_transparency_finished)
+        worker.error.connect(self._on_transparency_error)
+        worker.cancelled.connect(self._on_transparency_cancelled)
+
+        self._set_busy_state()
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("Re-analysing transparency...")
+
+        worker.start()
+
+    def _on_transparency_finished(self, outcome: PassOutcome) -> None:
+        """A transparency re-analysis that reached the end of its documents.
+
+        Args:
+            outcome: What it did with the documents it was given.
+        """
+        self._reset_ui()
+        message = pass_finished_text(
+            "Transparency re-analysis", "re-analysed", outcome
+        )
+        self.progress_label.setText(message)
+        explanation = pass_failure_explanation(outcome)
+        if outcome.failed or outcome.provisional:
+            QMessageBox.warning(
+                self,
+                "Transparency Re-analysis Complete",
+                f"{message}\n\n{explanation.lstrip()}",
+            )
+        else:
+            QMessageBox.information(
+                self, "Transparency Re-analysis Complete", message
+            )
+        QTimer.singleShot(100, self._cleanup_transparency_worker)
+
+    def _on_transparency_error(self, error_message: str) -> None:
+        """A transparency re-analysis that ended on an error.
+
+        Every result it reached before the error is already stored and
+        already sent to the badges, so only the error is reported here.
+
+        Args:
+            error_message: The cause, classified. The provider's own words
+                are not shown: they can carry a credential (#330).
+        """
+        self._reset_ui()
+        self.progress_label.setText(
+            f"Transparency re-analysis error: {error_message}"
+        )
+        QMessageBox.warning(
+            self,
+            "Transparency Re-analysis Error",
+            "An error occurred during transparency re-analysis:"
+            f"\n\n{error_message}",
+        )
+        QTimer.singleShot(100, self._cleanup_transparency_worker)
+
+    def _on_transparency_cancelled(
+        self, outcome: PassOutcome, error: str = ""
+    ) -> None:
+        """A cancelled transparency re-analysis: what it did stays done.
+
+        Args:
+            outcome: What it did before the cancel.
+            error: The error that also ended the run, or an empty string.
+        """
+        self._reset_ui()
+        message = pass_cancelled_text(
+            "Transparency re-analysis", "re-analysed", outcome, error
+        )
+        self.progress_label.setText(message)
+        explanation = pass_failure_explanation(outcome)
+        if outcome.failed or error or explanation:
+            QMessageBox.warning(
+                self,
+                "Transparency Re-analysis Cancelled",
+                f"{message}\n\n{explanation.lstrip()}" if explanation else message,
+            )
+        QTimer.singleShot(100, self._cleanup_transparency_worker)
+
+    def _cleanup_transparency_worker(self) -> None:
+        """Clean up the transparency re-analysis worker after completion."""
+        if self._transparency_worker is not None:
+            if self._transparency_worker.isRunning():
+                self._transparency_worker.wait(2000)
+            self._transparency_worker = None
+            self._update_action_buttons()
 
     # -------------------------------------------------------------------------
     # Helper methods

@@ -26,6 +26,7 @@ Provides QThread-based workers for long-running operations:
 - IncrementalSearchWorker: Search for new documents incrementally
 - ReclassifyWorker: Re-run study design classification
 - RescoreWorker: Re-run relevance scoring
+- TransparencyReanalysisWorker: Re-analyse a question's pending transparency
 
 These workers allow the main GUI thread to remain responsive while
 background operations execute.
@@ -45,7 +46,12 @@ from PySide6.QtCore import QThread, Signal, SignalInstance
 from PySide6.QtWidgets import QWidget
 
 from ..analysis_failures import failure_cause_text
-from ..data_models import EvaluationErrorCode, PassFailure, PassOutcome
+from ..data_models import (
+    EvaluationErrorCode,
+    PassFailure,
+    PassOutcome,
+    TransparencyAnalysisFailure,
+)
 from ..pdf_discovery import PDFDiscoverer, DiscoveryResult
 from ..pdf_utils import generate_pdf_path
 from ..fulltext_discovery import FulltextDiscoverer, FulltextResult, FulltextSourceType
@@ -1328,6 +1334,174 @@ class RescoreWorker(SingleOutcome, QThread):
             # credentials included (#330)
             cause = classify_analysis_exception(e)
             logger.exception(f"Re-scoring failed ({cause.name})")
+            # Cancelling is not failing -- but the failure is still reported
+            if self._cancelled:
+                self._end(self.cancelled, outcome(), failure_cause_text(cause))
+            else:
+                self._end(self.error, failure_cause_text(cause))
+
+    def cancel(self) -> None:
+        """Request cancellation of the operation."""
+        self._cancelled = True
+
+
+class TransparencyReanalysisWorker(SingleOutcome, QThread):
+    """Background worker that re-analyses a question's pending transparency.
+
+    A stored assessment is re-analysed only when a running review asks for
+    its document again, so after an analyser correction every study the user
+    does not happen to review again kept a withheld badge forever (#373).
+    This is the explicit request to do that work -- never started on its
+    own, because these are rate-limited sources and opening the application
+    is not a request to re-fetch a year of articles.
+
+    Each analysis goes through the same body the review's manager runs, and
+    every request it makes is paced by the per-host limiter the rest of the
+    process shares (#341), so a pass run beside a review cannot double the
+    rate either one is allowed.
+
+    Signals:
+        progress: Emitted with (current, total, message) before each document
+        outcome_ready: Emitted with (document_id, outcome) after each one:
+            the stored :class:`TransparencyResult`, or a
+            :class:`TransparencyAnalysisFailure` -- the same pair the
+            review's manager emits, so a badge on screen can be updated by
+            the slot that already updates it
+        finished: Emitted with the :class:`PassOutcome` when complete
+        error: Emitted with the classified cause when the pass could not run
+        cancelled: Emitted with (outcome, error) when cancelled before every
+            document was re-analysed (#320)
+
+    Exactly one of ``finished``, ``error`` and ``cancelled`` ends a run. A
+    re-analysis that could not read a source is counted as provisional, not
+    as a success or a failure: its result is stored and shown with a caveat,
+    and it stays pending.
+    """
+
+    progress = Signal(int, int, str)  # current, total, message
+    outcome_ready = Signal(str, object)  # document_id, result or failure
+    finished = Signal(object)  # PassOutcome
+    error = Signal(str)
+    cancelled = Signal(object, str)  # PassOutcome, error
+
+    def __init__(
+        self,
+        config: "LiteConfig",
+        storage: "LiteStorage",
+        documents: list["LiteDocument"],
+        parent: QWidget | None = None,
+    ) -> None:
+        """Initialize the transparency re-analysis worker.
+
+        Args:
+            config: Lite configuration, for the contact email, the NCBI key
+                and the transparency settings the risk level is judged by
+            storage: Storage layer the results are saved to
+            documents: The documents to re-analyse. Each must carry a PMID
+                or a DOI; the tab leaves out those that carry neither, since
+                no re-analysis can help them.
+            parent: Optional parent widget
+        """
+        super().__init__(parent)
+        self.config = config
+        self.storage = storage
+        self.documents = documents
+        self._cancelled = False
+
+    def run(self) -> None:
+        """Execute the re-analysis in a background thread.
+
+        Ends with exactly one of ``finished``, ``error`` and ``cancelled``,
+        including when it fails in a way it does not anticipate.
+        """
+        self._run_once(
+            self._reanalyse, lambda error: self._end(self.error, error)
+        )
+
+    def _reanalyse(self) -> None:
+        """Analyse each document, and end the run."""
+        success_count = 0
+        provisional = 0
+        failures: list[PassFailure] = []
+        total = len(self.documents)
+        stopped = False
+
+        def outcome() -> PassOutcome:
+            """What the pass has done so far."""
+            return PassOutcome(
+                succeeded=success_count,
+                failures=tuple(failures),
+                total=total,
+                provisional=provisional,
+            )
+
+        try:
+            from ..transparency.assessment import (
+                assess_document,
+                contact_email,
+                create_background_analyzer,
+            )
+
+            analyzer = create_background_analyzer(
+                contact_email(self.config), self.config.pubmed.api_key
+            )
+
+            for i, doc in enumerate(self.documents):
+                if self._cancelled:
+                    stopped = True
+                    break
+
+                self.progress.emit(
+                    i + 1,
+                    total,
+                    f"Re-analysing {i + 1}/{total}: {doc.title[:50]}...",
+                )
+
+                try:
+                    result = assess_document(
+                        analyzer,
+                        self.storage,
+                        self.config.transparency,
+                        doc.id,
+                        doc.pmid,
+                        doc.doi,
+                    )
+                except Exception as e:
+                    # The provider's text stays in the log: it can print the
+                    # request, credentials and all (#330)
+                    cause = classify_analysis_exception(e)
+                    failures.append(
+                        PassFailure(
+                            document_id=doc.id or f"document {i + 1}",
+                            cause=cause,
+                        )
+                    )
+                    logger.warning(
+                        f"Failed to re-analyse transparency for {doc.id} "
+                        f"({cause.name}): {e}"
+                    )
+                    if doc.id:
+                        self.outcome_ready.emit(
+                            doc.id, TransparencyAnalysisFailure.failed(doc.id, cause)
+                        )
+                    continue
+
+                if result.sources_unreachable:
+                    provisional += 1
+                else:
+                    success_count += 1
+                self.outcome_ready.emit(doc.id, result)
+
+            # A cancel that came after the last document stopped nothing
+            if stopped:
+                self._end(self.cancelled, outcome(), "")
+            else:
+                self._end(self.finished, outcome())
+
+        except Exception as e:
+            # The provider's text stays in the log here too (#330)
+            cause = classify_analysis_exception(e)
+            logger.exception(f"Transparency re-analysis failed ({cause.name})")
             # Cancelling is not failing -- but the failure is still reported
             if self._cancelled:
                 self._end(self.cancelled, outcome(), failure_cause_text(cause))

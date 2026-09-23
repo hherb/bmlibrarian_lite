@@ -2424,9 +2424,9 @@ class StudyTransparencyAnalyzer:
 
     def analyze(
         self,
-        doi: str = None,
-        pmid: str = None,
-        fulltext: str = None,
+        doi: str | None = None,
+        pmid: str | None = None,
+        fulltext: str | None = None,
     ) -> TransparencyReport:
         """
         Analyze a study for transparency indicators.

@@ -25,6 +25,7 @@ A lightweight version of BMLibrarian with three tabs:
 
 import logging
 import os
+import sqlite3
 import sys
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Optional
@@ -55,7 +56,10 @@ from ..audit_records import (
     recorded_min_score,
 )
 from ..config import LiteConfig
+from ..constants import STATUS_MESSAGE_TIMEOUT_MS
+from ..exceptions import SQLiteError
 from ..storage import LiteStorage
+from ..transparency import stored_transparency_outcomes
 from .research_questions_tab import ResearchQuestionsTab, documents_text
 from .systematic_review_tab import SystematicReviewTab
 from .audit_trail_tab import AuditTrailTab
@@ -68,7 +72,11 @@ from ..benchmarking import BenchmarkRunner
 from ..benchmarking.display import benchmark_status_text
 
 if TYPE_CHECKING:
-    from bmlibrarian_lite.data_models import ExtractionFailure, RetrievalShortfall
+    from bmlibrarian_lite.data_models import (
+        ExtractionFailure,
+        LiteDocument,
+        RetrievalShortfall,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -271,6 +279,11 @@ class LiteMainWindow(QMainWindow):
         )
         self.research_questions_tab.question_selected.connect(
             self._on_question_selected
+        )
+        # A re-analysis updates the badges the Audit Trail already shows
+        # through the same slot a running review does (#373)
+        self.research_questions_tab.transparency_outcome_ready.connect(
+            self.audit_trail_tab.on_transparency_outcome
         )
 
     def _apply_styles(self) -> None:
@@ -587,6 +600,44 @@ class LiteMainWindow(QMainWindow):
             logger.warning(f"Failed to load benchmark results: {e!r}")
             self.benchmark_tab.show_unreadable()
 
+    def _show_stored_transparency(
+        self,
+        documents: Sequence["LiteDocument"],
+    ) -> None:
+        """Give each document of a reloaded question its transparency badge.
+
+        A question loaded from the store showed no transparency badge at all,
+        current or not: a missing badge meant a fourth thing beside disabled,
+        still running and failed. Nothing is fetched here -- a stored row
+        this build stands behind is shown, and every other document says why
+        it has none and how to have it assessed (#373).
+
+        Args:
+            documents: The question's documents, as the Audit Trail shows them.
+        """
+        if not self.config.transparency.enabled:
+            # A review run with the analysis off shows no badge either
+            return
+        try:
+            stored = self.storage.get_transparency_results_batch(
+                [document.id for document in documents]
+            )
+        except (SQLiteError, sqlite3.Error, ValueError) as e:
+            # Its own narrow catch: the load's broad one would take the
+            # report and audit trail down with the badges. ValueError is a
+            # row this build cannot decode, such as a risk level a newer
+            # build wrote into a shared data directory.
+            logger.exception("Could not read the stored transparency results")
+            self.status_bar.showMessage(
+                "Transparency badges could not be loaded "
+                f"({type(e).__name__}); see the log.",
+                STATUS_MESSAGE_TIMEOUT_MS,
+            )
+            return
+        self.audit_trail_tab.show_transparency_outcomes(
+            stored_transparency_outcomes(documents, stored)
+        )
+
     def _on_question_selected(
         self,
         question: str,
@@ -618,10 +669,12 @@ class LiteMainWindow(QMainWindow):
             # 2. Load all documents found for this question
             doc_ids = self.storage.get_document_ids_for_question(question)
             documents_found = [
-                self.storage.get_document(doc_id)
-                for doc_id in doc_ids
+                document
+                for document in (
+                    self.storage.get_document(doc_id) for doc_id in doc_ids
+                )
+                if document is not None
             ]
-            documents_found = [d for d in documents_found if d is not None]
 
             # 3. Load the scores of the run this report came from. Every run
             # of the question merged, highest score first, would describe
@@ -662,6 +715,8 @@ class LiteMainWindow(QMainWindow):
 
             for citation in citations:
                 self.audit_trail_tab.on_citation_extracted(citation)
+
+            self._show_stored_transparency(documents_found)
 
             self.audit_trail_tab.on_workflow_finished()
 

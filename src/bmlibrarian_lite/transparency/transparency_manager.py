@@ -25,15 +25,9 @@ from typing import TYPE_CHECKING, Callable, Optional
 from PySide6.QtCore import QObject, Signal
 
 from ..data_models import TransparencyAnalysisFailure
-from ..study_transparency_analyzer.study_transparency_analyzer import StudyTransparencyAnalyzer
 from ..utils import classify_analysis_exception
-from .transparency_models import (
-    COI_NOT_ASSESSED,
-    TRANSPARENCY_ANALYZER_VERSION,
-    TransparencyResult,
-    TransparencyRisk,
-    calculate_risk_level,
-)
+from .assessment import assess_document, create_background_analyzer
+from .transparency_models import TRANSPARENCY_ANALYZER_VERSION, TransparencyResult
 from .transparency_settings import TransparencySettings
 
 # Rate limiting: minimum seconds between API requests
@@ -93,16 +87,7 @@ class TransparencyManager(QObject):
         self.config = config
         self.settings = config.transparency
 
-        # Initialize the analyzer with full-text discovery enabled.
-        # Browser fallback is disabled for background analysis to avoid
-        # blocking threads with Playwright; API-based sources are sufficient.
-        self._analyzer = StudyTransparencyAnalyzer(
-            email=email,
-            pubmed_api_key=pubmed_api_key,
-            unpaywall_email=email,
-            use_browser_fallback=False,
-            auto_discover_fulltext=True,
-        )
+        self._analyzer = create_background_analyzer(email, pubmed_api_key)
 
         # Thread pool for background analysis
         self._executor: Optional[ThreadPoolExecutor] = None
@@ -242,7 +227,7 @@ class TransparencyManager(QObject):
             document_id: Internal document ID
             pmid: PubMed ID
             doi: DOI
-            full_text: Full text content (future enhancement)
+            full_text: Full text content, or None to let the analyser find it
 
         Returns:
             TransparencyResult with analysis data
@@ -254,82 +239,15 @@ class TransparencyManager(QObject):
                 time.sleep(self._min_request_interval - elapsed)
             self._last_request_time = time.time()
 
-        # Run the analyzer (full_text overrides auto-discovery when provided)
-        report = self._analyzer.analyze(pmid=pmid, doi=doi, fulltext=full_text)
-
-        # Extract data availability level
-        data_availability_level = "unknown"
-        if report.data_availability:
-            data_availability_level = report.data_availability.disclosure_level.value
-
-        # What is known about the study's COI disclosure. A report with no
-        # coi_info at all has had nothing established either way, so it is
-        # not assessed. The expression this replaced answered False on
-        # exactly this branch and True on every other one, and neither was
-        # ever established, so the badge read "Disclosed" for every study an
-        # analysis actually ran on (#352).
-        coi_disclosure = (
-            report.coi_info.disclosure_level.value
-            if report.coi_info
-            else COI_NOT_ASSESSED
+        return assess_document(
+            self._analyzer,
+            self.storage,
+            self.settings,
+            document_id,
+            pmid,
+            doi,
+            full_text,
         )
-
-        # Calculate risk level
-        risk_level = calculate_risk_level(
-            score=int(report.transparency_score),
-            industry_funding=report.industry_funding_detected,
-            data_availability=data_availability_level,
-            coi_disclosure=coi_disclosure,
-            settings=self.settings,
-        )
-
-        # Determine results compliance status
-        results_compliant = False
-        if report.results_compliance:
-            results_compliant = report.results_compliance.value == "compliant"
-
-        # Build the result
-        result = TransparencyResult(
-            document_id=document_id,
-            transparency_score=int(report.transparency_score),
-            risk_level=risk_level,
-            industry_funding_detected=report.industry_funding_detected,
-            industry_funding_confidence=report.industry_funding_confidence,
-            data_availability_level=data_availability_level,
-            coi_disclosure=coi_disclosure,
-            trial_registered=len(report.trial_registrations) > 0,
-            trial_results_compliant=results_compliant,
-            outcome_switching_detected=report.outcome_switching_detected,
-            # Both copied, not aliased: the report stays alive in the
-            # worker and a later append would silently edit a stored
-            # result.
-            risk_indicators=list(report.risk_of_bias_indicators),
-            warnings=list(report.warnings),
-            tier_downgrade_applied=(
-                self.settings.tier_downgrade_amount
-                if risk_level == TransparencyRisk.HIGH
-                else 0
-            ),
-            full_text_analyzed=(
-                full_text is not None
-                or any("Full-text" in s for s in report.data_sources_used)
-            ),
-            # A source that could not be read is our silence, not the
-            # study's. Neither fetch raises -- each returns "unreachable" and
-            # the analysis finishes with a caveat and a score that fell
-            # because nothing could be established -- so without this the row
-            # was stored as a settled finding and served from cache forever
-            # (#346, #360).
-            sources_unreachable=(
-                report.pubmed_record_unreachable
-                or report.crossref_record_unreachable
-            ),
-        )
-
-        # Store result
-        self.storage.save_transparency_result(result)
-
-        return result
 
     def _on_analysis_complete(self, document_id: str, future: Future) -> None:
         """

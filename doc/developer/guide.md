@@ -453,8 +453,14 @@ the benchmark launchers want.
 The transparency system has two components:
 
 **Infrastructure** (`transparency/`):
-- `transparency_manager.py` - Core transparency management and coordination
-- `transparency_models.py` - Data models for transparency results
+- `transparency_manager.py` - Queues and paces the analyses a running review asks for
+- `assessment.py` - The one analysis body (analyse, build the result, store it),
+  shared by the manager and the Research Questions tab's re-analysis pass
+  (`TransparencyReanalysisWorker`), so the two cannot store different results
+- `transparency_models.py` - Data models for transparency results, and the pure
+  functions every surface asks: `pending_transparency_ids` (what still needs
+  analysing), `stored_transparency_outcomes` (what a reloaded question may
+  show), `count_transparency_over` (the report's counts over a named population)
 - `transparency_settings.py` - User-configurable thresholds and settings
 
 **LLM-Based Analyzer** (`study_transparency_analyzer/`):
