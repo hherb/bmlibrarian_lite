@@ -16,6 +16,43 @@ overwritten (not pending, not re-queued); any other undecodable row is
 damaged, stays pending, and re-analysis replaces it. Either way it is shown
 as "not assessed" for that document alone, never dropped.
 
+- **The value.** `LiteStorage._stored_transparency_from_row` catches
+  `ValueError`/`TypeError` per row and returns `UndecodableTransparencyRow`
+  (document id + raw version); both readers now return `StoredTransparency`
+  (`TransparencyResult | UndecodableTransparencyRow`), so mypy finds every
+  consumer. `undecodable_row_caveat` is the one sentence the badge and the
+  reference annotation share; `damaged_assessment_caveat` for damage, the new
+  `TransparencyFailureKind.WRITTEN_BY_NEWER_BUILD` (no cause, like
+  `NO_IDENTIFIER`) for the newer build's row.
+- **Where it reaches:** `TransparencyCounts.undecodable` (inside
+  `not_assessed`), `pending_transparency_ids` (`_needs_analysis`),
+  `stored_transparency_outcomes` (re-analysis advice only for damage),
+  `withheld_reference_caveats`, the manager's cache check, the review tab's
+  getter. `_show_stored_transparency`'s catch narrowed to database errors;
+  the Research Questions tab keeps `ValueError` because `get_documents`'
+  `json.loads` still raises it.
+- **Verified:** `pytest tests/` 2358 passed, 3 xfailed; `lint_delta.py` 0 new.
+  Mutation sweep (both guards, `cp` backups, `cmp` after): 19 of 20 caught;
+  the survivor (`isinstance(result, TransparencyResult)` in the reporting
+  agent's risky loop → `is not None`) is equivalent, since every undecodable
+  row is already in `withheld`, and mypy rejects it.
+- **Review round (two agents), addressed:**
+  - Invalid UTF-8 in any column still raised from the cursor and failed the
+    batch, so both readers now set `conn.text_factory = _text_or_bytes`, and
+    a row holding bytes is withheld.
+  - With *Cache results* off, the manager skipped the newer-build check, so
+    it now runs before the cache guard. The old
+    `test_caching_disabled_skips_cache` pinned "the store is not read" and
+    now asserts "no stored finding is served".
+  - The methodology's "Not assessed" sentence now lists an unreadable row
+    and a row at no nameable level.
+  - A newer build's row logs a warning, not an ERROR traceback.
+  - A second sweep caught 7 of 7.
+  - `pytest tests/` 2365 passed, 3 xfailed; `lint_delta.py` 0 new.
+- Lodged: **#378**. Its undecodable half is fixed here. Still open: a
+  *decodable* row from a newer build is overwritten with the cache off, and
+  the Re-analyse pass never re-reads a row before saving over it.
+
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
@@ -255,7 +292,8 @@ Open issues by family; each issue carries the detail. None blocks another.
   **#371** the model path's 5xx advice still blames the reader's connection;
   **#367** the quality filter has no caller; **#368** `TransparencyResult` is
   mutable and unvalidated; **#370** Android has no version comparison;
-  **#374** (in flight above); **#376** one skeleton for the Research Questions
+  **#374** (in flight above); **#378** cache-off overwrites a newer build's
+  row; **#376** one skeleton for the Research Questions
   passes; **#377** say how many pending documents are missing from the library.
 - Python, the rest of what PR #358 and PR #365 lodged: **#362** a DOI-only
   document never asks PubMed for the statement it reports as unavailable —

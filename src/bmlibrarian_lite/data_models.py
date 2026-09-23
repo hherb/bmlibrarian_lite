@@ -2358,8 +2358,10 @@ class ReportMetadata:
             stored level is not this build's finding, and leaving them out
             silently would report an analysis that did not happen (#360)
         transparency_unassessed_count: Documents the analysis was asked
-            about that carry no finding at all -- it failed, or had no
-            identifier to look one up by, or had not finished. Counted and
+            about that carry no finding at all -- it failed, had no
+            identifier to look one up by, had not finished, reached no
+            nameable risk level, or its stored row could not be decoded
+            (#374). Counted and
             named because the alternative is a shorter denominator: a
             throttled PubMed used to shrink "Documents Analyzed" with
             nothing saying so, and a total outage printed "Transparency

@@ -215,10 +215,25 @@ class TestAnalyzeDocument:
         assert signals[0][1] == cached_result
 
     def test_caching_disabled_skips_cache(self, manager, mock_storage):
-        """Test that disabled caching doesn't check cache."""
+        """Disabled caching serves no stored finding, current or not.
+
+        The row is still read: whose it is decides whether it may be
+        overwritten, whatever the setting (#374).
+        """
+        mock_storage.get_transparency_result.return_value = TransparencyResult(
+            document_id="doc1",
+            transparency_score=80,
+            risk_level=TransparencyRisk.LOW,
+        )
         manager.settings.cache_results = False
-        manager.analyze_document("doc1", pmid="12345678")
-        mock_storage.get_transparency_result.assert_not_called()
+        served = []
+        manager.analysis_complete.connect(lambda _id, r: served.append(r))
+        with patch.object(manager, "start"), patch.object(
+            manager, "_executor"
+        ) as executor:
+            manager.analyze_document("doc1", pmid="12345678")
+        assert served == []
+        assert executor.submit.called
 
     def test_already_queued_not_duplicated(self, manager):
         """Test that same document isn't queued twice."""

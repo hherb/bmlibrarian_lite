@@ -154,20 +154,22 @@ class TransparencyManager(QObject):
         # and a stored row kept a finding the fix had already retracted
         # (#360). Re-analysis happens here, on the path that already queues
         # and paces this work, rather than as a bulk invalidation on open.
+        cached = self.storage.get_transparency_result(document_id)
+        # Asked whatever the cache setting: switching off reuse of this
+        # build's results is not permission to overwrite a newer build's
+        # (#374). Any other row that will not decode is damaged, and is
+        # redone below.
+        if (
+            isinstance(cached, UndecodableTransparencyRow)
+            and cached.written_by_newer_build
+        ):
+            self.analysis_failed.emit(
+                document_id,
+                TransparencyAnalysisFailure.written_by_newer_build(document_id),
+            )
+            return
         if self.settings.cache_results:
-            cached = self.storage.get_transparency_result(document_id)
             if isinstance(cached, UndecodableTransparencyRow):
-                # A newer build's row is left alone: re-analysing it would
-                # overwrite that build's finding with this one's. Any other
-                # row that will not decode is damaged, and is redone (#374).
-                if cached.written_by_newer_build:
-                    self.analysis_failed.emit(
-                        document_id,
-                        TransparencyAnalysisFailure.written_by_newer_build(
-                            document_id
-                        ),
-                    )
-                    return
                 logger.debug(
                     f"Re-analysing {document_id}: its stored result could "
                     "not be decoded"

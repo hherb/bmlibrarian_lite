@@ -184,6 +184,60 @@ class TestTheStoreWithholdsOneRowAlone:
 
         assert isinstance(stored["b"], UndecodableTransparencyRow)
 
+    @pytest.mark.parametrize("column", ["risk_level", "data_availability_level"])
+    def test_text_that_is_not_utf8_fails_only_its_own_row(
+        self, tmp_path: Any, column: str
+    ) -> None:
+        """sqlite3 raised this from the cursor, before any row could be held.
+
+        ``data_availability_level`` is the quieter half: nothing decodes it,
+        so it would have reached a badge as a ``bytes`` value.
+        """
+        storage = self._storage(tmp_path)
+        with storage._sqlite_connection() as conn:
+            conn.execute(
+                f"UPDATE transparency_results SET {column} = CAST(X'FF' AS TEXT) "
+                "WHERE document_id = 'b'"
+            )
+            conn.commit()
+
+        stored = storage.get_transparency_results_batch(["a", "b"])
+
+        assert isinstance(stored["a"], TransparencyResult)
+        assert stored["b"] == UndecodableTransparencyRow(
+            "b", TRANSPARENCY_ANALYZER_VERSION
+        )
+        assert isinstance(
+            storage.get_transparency_result("b"), UndecodableTransparencyRow
+        )
+
+    def test_a_newer_builds_row_is_logged_without_a_traceback(
+        self, tmp_path: Any, caplog: Any
+    ) -> None:
+        """Expected and permanent, so not an error on every read."""
+        storage = self._storage(tmp_path)
+        self._corrupt(storage, "b", "risk_level", "extreme")
+        self._corrupt(storage, "b", "analyzer_version", NEWER_VERSION)
+
+        storage.get_transparency_results_batch(["b"])
+
+        [record] = [r for r in caplog.records if "document b" in r.getMessage()]
+        assert record.levelname == "WARNING"
+        assert record.exc_info is None
+
+    def test_a_damaged_row_is_logged_as_an_error(
+        self, tmp_path: Any, caplog: Any
+    ) -> None:
+        """The control: damage is worth a traceback."""
+        storage = self._storage(tmp_path)
+        self._corrupt(storage, "b", "risk_level", "extreme")
+
+        storage.get_transparency_results_batch(["b"])
+
+        [record] = [r for r in caplog.records if "document b" in r.getMessage()]
+        assert record.levelname == "ERROR"
+        assert record.exc_info is not None
+
     def test_the_single_reader_withholds_it_as_well(self, tmp_path: Any) -> None:
         """The manager's cache check reads one row at a time."""
         storage = self._storage(tmp_path)
@@ -390,16 +444,31 @@ class TestTheReportCountsAndAnnotatesIt:
         assert "TRANSPARENCY NOT ASSESSED" in report
         assert "newer version of BMLibrarian Lite" in report
 
+    def test_the_methodology_names_it_among_the_reasons(self) -> None:
+        """The count may not list reasons that exclude the row it counts."""
+        from bmlibrarian_lite.agents.reporting_agent import LiteReportingAgent
+
+        metadata = ReportMetadata(research_question="Q")
+        metadata.transparency_analysis_applied = True
+        metadata.transparency_unassessed_count = 1
+
+        section = LiteReportingAgent.format_methodology_section(
+            MagicMock(), metadata
+        )
+
+        assert "its stored assessment could not be read" in section
+
 
 class TestTheManagerLeavesANewerBuildsRowAlone:
     """The cache check, which read one row and raised out of the review."""
 
     @staticmethod
-    def _manager(stored: Any) -> Any:
+    def _manager(stored: Any, cache_results: bool = True) -> Any:
         """Build a manager whose store holds one row, and a stand-in pool.
 
         Args:
             stored: What the store returns for the document.
+            cache_results: The user's "Cache results" setting.
 
         Returns:
             The manager, whose ``_executor.submit`` records what was queued.
@@ -410,7 +479,7 @@ class TestTheManagerLeavesANewerBuildsRowAlone:
         storage = MagicMock()
         storage.get_transparency_result.return_value = stored
         config = MagicMock()
-        config.transparency = TransparencySettings()
+        config.transparency = TransparencySettings(cache_results=cache_results)
         with patch(
             "bmlibrarian_lite.transparency.assessment.StudyTransparencyAnalyzer"
         ):
@@ -431,6 +500,27 @@ class TestTheManagerLeavesANewerBuildsRowAlone:
 
         assert failures == [TransparencyAnalysisFailure.written_by_newer_build("x")]
         manager._executor.submit.assert_not_called()
+
+    def test_switching_the_cache_off_does_not_overwrite_it(self) -> None:
+        """Not reusing this build's results is not leave to replace another's."""
+        manager = self._manager(
+            UndecodableTransparencyRow("x", NEWER_VERSION), cache_results=False
+        )
+        failures: list[Any] = []
+        manager.analysis_failed.connect(lambda _id, failure: failures.append(failure))
+
+        manager.analyze_document("x", pmid="12345678")
+
+        assert failures == [TransparencyAnalysisFailure.written_by_newer_build("x")]
+        manager._executor.submit.assert_not_called()
+
+    def test_with_the_cache_off_a_current_row_is_still_redone(self) -> None:
+        """The control: the setting still means what it says."""
+        manager = self._manager(a_row("x"), cache_results=False)
+
+        manager.analyze_document("x", pmid="12345678")
+
+        assert manager._executor.submit.called
 
     def test_a_damaged_row_is_redone(self) -> None:
         """Nothing is lost by replacing it, and nothing else will."""

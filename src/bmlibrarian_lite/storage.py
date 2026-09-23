@@ -87,6 +87,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _text_or_bytes(raw: bytes) -> str | bytes:
+    """Decode a stored text value, keeping it as bytes if it is not UTF-8.
+
+    sqlite3's default decoding raises from inside the cursor, so one row
+    holding such text fails every row read with it. Kept as bytes, the row
+    can be recognised and withheld on its own (#374). Nothing is replaced
+    or dropped: a lossy decode would show the reader altered text.
+
+    Args:
+        raw: The column's stored bytes.
+
+    Returns:
+        The decoded text, or the bytes unchanged when they are not UTF-8.
+    """
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw
+
+
 def compute_question_hash(question: str) -> str:
     """
     Compute deterministic hash for research question lookup.
@@ -3543,21 +3563,41 @@ class LiteStorage:
         from .transparency import UndecodableTransparencyRow
 
         try:
+            if any(isinstance(value, bytes) for value in row):
+                # Text that is not UTF-8 (see _text_or_bytes), or a BLOB in
+                # a text column: either would otherwise pass through as a
+                # ``bytes`` value and be shown as one
+                raise TypeError("a column holds bytes where text is stored")
             return self._transparency_result_from_row(row)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as error:
             # ValueError: an enum value or timestamp this build does not
-            # know. TypeError: a NULL where a value is required. The row
-            # names what failed; its values stay out of the reader's view.
-            logger.exception(
-                "The stored transparency row of document %s could not be "
-                "decoded; withholding it",
-                row["document_id"],
-            )
+            # know. TypeError: a value of the wrong type, such as the bytes
+            # above. The log names the document and the error's class; the
+            # traceback, which may quote a stored value, stays in the log.
             raw_version = row["analyzer_version"]
-            return UndecodableTransparencyRow(
+            undecodable = UndecodableTransparencyRow(
                 document_id=row["document_id"],
-                analyzer_version=None if raw_version is None else str(raw_version),
+                analyzer_version=(
+                    raw_version if isinstance(raw_version, str) else None
+                ),
             )
+            if undecodable.written_by_newer_build:
+                # Expected, and permanent: no traceback on every read
+                logger.warning(
+                    "The stored transparency row of document %s was written "
+                    "by analyser %s, newer than this build's; withholding it",
+                    row["document_id"],
+                    raw_version,
+                )
+            else:
+                logger.error(
+                    "The stored transparency row of document %s could not "
+                    "be decoded (%s); withholding it",
+                    row["document_id"],
+                    type(error).__name__,
+                    exc_info=True,
+                )
+            return undecodable
 
     def save_transparency_result(self, result: "TransparencyResult") -> None:
         """
@@ -3622,6 +3662,7 @@ class LiteStorage:
         query = "SELECT * FROM transparency_results WHERE document_id = ?"
 
         with self._sqlite_connection() as conn:
+            conn.text_factory = _text_or_bytes
             cursor = conn.execute(query, (document_id,))
             row = cursor.fetchone()
 
@@ -3655,6 +3696,9 @@ class LiteStorage:
         results: dict[str, StoredTransparency] = {}
 
         with self._sqlite_connection() as conn:
+            # Without it, one row holding text that is not UTF-8 raises out
+            # of the cursor itself, before any row can be withheld (#374)
+            conn.text_factory = _text_or_bytes
             cursor = conn.execute(query, document_ids)
 
             for row in cursor:

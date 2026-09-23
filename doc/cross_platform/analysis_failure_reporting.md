@@ -302,6 +302,14 @@ analysed after it, and the reader cannot tell which they are looking at.
   its caveat says a newer version wrote it. **Anything else is damage**,
   which stays pending, and re-analysis replaces it. Neither caveat may say
   an *earlier* analyser wrote the row, because nothing established that.
+  The newer-build check holds **whatever the cache setting**: turning off
+  reuse of this build's results does not permit overwriting another
+  build's. Text that is not valid UTF-8 counts as undecodable too. Python's
+  sqlite3 raises it from the cursor itself, before any row can be withheld,
+  so the readers keep such text as bytes and withhold the row. It is never
+  decoded lossily, which would show the reader altered text. A newer
+  build's row is logged as a warning, since it is expected and permanent,
+  and damage is logged as an error.
 - **A stale row is a cache miss, not a cache hit.** Re-analysis happens on
   the path that already queues and paces that work (`analyze_document`),
   and `get_documents_pending_transparency` counts a superseded row as

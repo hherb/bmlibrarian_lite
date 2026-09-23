@@ -266,7 +266,8 @@ class WorkflowWorker(QThread):
         metadata.transparency_superseded_count = counts.superseded
         # Whatever is left asked a question that never came back: the
         # analysis failed, the document carried no identifier to look one up
-        # by, or it had not finished. None of those is a study with nothing
+        # by, it had not finished, or its stored row could not be decoded
+        # (#374). None of those is a study with nothing
         # to declare, so none may leave the count without being named.
         metadata.transparency_unassessed_count = counts.not_assessed
         metadata.transparency_documents_considered = counts.considered
