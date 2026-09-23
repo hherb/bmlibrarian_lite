@@ -9,7 +9,8 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#374 — one undecodable transparency row fails a whole batch read**, branch
-`fix/one-undecodable-transparency-row-374`. Python only.
+`fix/one-undecodable-transparency-row-374`, **PR #379**. Python only. Compress into
+**Recently landed** once merged.
 **User's call (2026-09-23): split by version.** A row whose `analyzer_version`
 is strictly newer than this build's was written by a newer build and is never
 overwritten (not pending, not re-queued); any other undecodable row is
