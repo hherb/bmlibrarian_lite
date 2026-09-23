@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#373 + #372 — a correction reaches a question nobody reviews again**,
-branch `fix/reanalyse-a-question-nobody-reviews-373-372`. Python only.
+branch `fix/reanalyse-a-question-nobody-reviews-373-372`, **PR #375**. Python only.
 Compress into **Recently landed** once merged. Contract: the two new bullets
 under *A correction only reaches the reader if something re-analyses* in
 `doc/cross_platform/analysis_failure_reporting.md`.
