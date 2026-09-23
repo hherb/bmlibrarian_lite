@@ -182,6 +182,31 @@ def inject_risk_warnings(
     return result
 
 
+def format_reference_withheld_annotation() -> str:
+    """Annotate a reference whose transparency finding is being withheld.
+
+    ``should_warn_for_citation`` answers False for a superseded row, which
+    silences the inline marker, this annotation and the prompt's risk block
+    at once -- so the study appeared in the reference list byte-identical to
+    one this build had assessed as low risk. The aggregate "Awaiting
+    re-analysis" line is counted over every document the review found, while
+    the annotations follow the cited ones, so it could not be mapped onto
+    any reference. A caveat elsewhere in the document does not withhold a
+    claim here (#360).
+
+    Returns:
+        The annotation's lines, indented to match the risk annotation.
+    """
+    from ..analysis_failures import superseded_assessment_caveat
+
+    return "\n".join(
+        [
+            "    ⚠️ TRANSPARENCY NOT ASSESSED",
+            f"    - {superseded_assessment_caveat()}",
+        ]
+    )
+
+
 def format_reference_risk_annotation(
     result: TransparencyResult,
 ) -> str:
@@ -218,5 +243,15 @@ def format_reference_risk_annotation(
 
     if result.outcome_switching_detected:
         lines.append("    - Outcome switching: Detected")
+
+    if result.sources_unreachable:
+        # The badge's tooltip shows the analysis caveats; this annotation
+        # never did, so a risk level established while a source was
+        # unreadable read here as firmly as one established against every
+        # source (#346).
+        lines.append(
+            "    - Assessment is provisional: a source it needed could not "
+            "be read, so this level rests on less than the full record."
+        )
 
     return "\n".join(lines)

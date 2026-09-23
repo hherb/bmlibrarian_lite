@@ -42,7 +42,7 @@ import struct
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Generator, Optional
+from typing import TYPE_CHECKING, Any, Generator, Optional
 
 import sqlite_vec
 
@@ -75,6 +75,14 @@ from .data_models import (
     ScoredDocument,
 )
 from .exceptions import SQLiteError, LiteStorageError
+
+if TYPE_CHECKING:
+    # Names used only in annotations. The modules themselves are imported
+    # inside the methods that need them, to keep this module importable
+    # without pulling in the agents and the analyser.
+    from .data_models import Citation
+    from .quality.data_models import QualityAssessment, StudyClassification
+    from .transparency import TransparencyResult
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +168,7 @@ class LiteStorage:
             # Run migrations for existing data
             self._migrate_benchmark_question_hashes()
             self._migrate_scored_documents_constraint()
-            self._migrate_transparency_coi_and_warnings()
+            self._migrate_transparency_results()
             logger.debug(f"SQLite initialized at {self._storage_config.sqlite_path}")
         except sqlite3.Error as e:
             raise SQLiteError(
@@ -214,6 +222,17 @@ class LiteStorage:
                     )
         except sqlite3.Error as e:
             logger.warning(f"Failed to migrate benchmark question hashes: {e}")
+
+    def _migrate_transparency_results(self) -> None:
+        """Bring ``transparency_results`` up to what this build's readers need.
+
+        One door, in order, because the readers are shared: a caller that
+        applies some of these and then reads a row gets an exception on the
+        column it skipped. Every migration below is idempotent, so running
+        this on an up-to-date database does nothing.
+        """
+        self._migrate_transparency_coi_and_warnings()
+        self._migrate_transparency_source_reachability()
 
     def _migrate_transparency_coi_and_warnings(self) -> None:
         """Replace the always-true coi_disclosed column, and keep the caveats.
@@ -436,6 +455,47 @@ class LiteStorage:
         if not caveats_ok:
             caveats.append(cls._unreadable_column_caveat("analysis caveats"))
         return indicators, caveats
+
+    def _migrate_transparency_source_reachability(self) -> None:
+        """Record whether an analysis reached its sources, for older rows.
+
+        ``sources_unreachable`` distinguishes an analysis that asked every
+        source it needed from one that could not read a source at all. The
+        second is provisional: a throttled PubMed does not raise -- the fetch
+        returns "unreachable" and the analysis finishes with a caveat and a
+        score that fell because nothing could be established. Without the
+        column such a row was stamped with the current version and served
+        from cache forever, so a transient outage became a permanent risk
+        claim against a study (#346, #360).
+
+        Rows written before the column default to 0. That is not a claim
+        that their sources answered: those rows carry an analyser version
+        older than this build's, so ``is_current`` already makes every one of
+        them pending, and they are re-analysed before anyone reads them.
+
+        Raises:
+            SQLiteError: If the column cannot be added. This runs from
+                ``_init_sqlite``, so it aborts construction: without it every
+                read of a stored assessment raises on a missing key.
+        """
+        try:
+            with self._sqlite_connection() as conn:
+                cursor = conn.execute("PRAGMA table_info(transparency_results)")
+                columns = [row["name"] for row in cursor.fetchall()]
+                if "sources_unreachable" not in columns:
+                    conn.execute(
+                        "ALTER TABLE transparency_results "
+                        "ADD COLUMN sources_unreachable INTEGER DEFAULT 0"
+                    )
+                    logger.info(
+                        "Added sources_unreachable to transparency_results; "
+                        "rows written before it are superseded anyway."
+                    )
+                conn.commit()
+        except sqlite3.Error as e:
+            raise SQLiteError(
+                f"Could not add transparency_results.sources_unreachable: {e}"
+            ) from e
 
     @staticmethod
     def _retract_migrated_coi_indicators(conn: sqlite3.Connection) -> None:
@@ -840,6 +900,7 @@ class LiteStorage:
             tier_downgrade_applied INTEGER DEFAULT 0,
             analyzed_at TEXT NOT NULL,
             analyzer_version TEXT DEFAULT '1.0',
+            sources_unreachable INTEGER DEFAULT 0,
             full_text_analyzed INTEGER DEFAULT 0,
             FOREIGN KEY (document_id) REFERENCES documents(id)
         );
@@ -3412,6 +3473,54 @@ class LiteStorage:
     # Transparency Results Operations
     # =========================================================================
 
+    def _transparency_result_from_row(
+        self, row: sqlite3.Row
+    ) -> "TransparencyResult":
+        """Build a stored assessment from one ``transparency_results`` row.
+
+        One mapper, because the single and batch readers each had their own
+        copy: a column added to one and forgotten in the other reads as its
+        default rather than as what was stored, and the two copies were
+        identical enough that a test exercising either would pass.
+
+        Args:
+            row: A ``transparency_results`` row.
+
+        Returns:
+            The stored assessment.
+        """
+        from .transparency import (
+            LEGACY_ANALYZER_VERSION,
+            TransparencyResult,
+            TransparencyRisk,
+        )
+
+        indicators, caveats = self._stored_transparency_lists(row)
+        return TransparencyResult(
+            document_id=row["document_id"],
+            transparency_score=row["transparency_score"],
+            risk_level=TransparencyRisk(row["risk_level"]),
+            industry_funding_detected=bool(row["industry_funding_detected"]),
+            industry_funding_confidence=row["industry_funding_confidence"],
+            data_availability_level=row["data_availability_level"],
+            coi_disclosure=self._stored_coi_disclosure(
+                row["coi_disclosure"], row["document_id"]
+            ),
+            trial_registered=bool(row["trial_registered"]),
+            trial_results_compliant=bool(row["trial_results_compliant"]),
+            outcome_switching_detected=bool(row["outcome_switching_detected"]),
+            risk_indicators=indicators,
+            warnings=caveats,
+            tier_downgrade_applied=row["tier_downgrade_applied"],
+            analyzed_at=datetime.fromisoformat(row["analyzed_at"]),
+            # ``or``, not the raw column: it is nullable, and a NULL would
+            # put ``None`` into a field typed ``str``. Such a row reads as
+            # legacy either way -- but as a string, as every reader expects.
+            analyzer_version=row["analyzer_version"] or LEGACY_ANALYZER_VERSION,
+            sources_unreachable=bool(row["sources_unreachable"]),
+            full_text_analyzed=bool(row["full_text_analyzed"]),
+        )
+
     def save_transparency_result(self, result: "TransparencyResult") -> None:
         """
         Save or update transparency analysis result.
@@ -3428,8 +3537,8 @@ class LiteStorage:
                 data_availability_level, coi_disclosure, trial_registered,
                 trial_results_compliant, outcome_switching_detected,
                 risk_indicators, warnings, tier_downgrade_applied, analyzed_at,
-                analyzer_version, full_text_analyzed
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                analyzer_version, sources_unreachable, full_text_analyzed
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         with self._sqlite_connection() as conn:
@@ -3451,6 +3560,7 @@ class LiteStorage:
                     result.tier_downgrade_applied,
                     result.analyzed_at.isoformat(),
                     result.analyzer_version,
+                    1 if result.sources_unreachable else 0,
                     1 if result.full_text_analyzed else 0,
                 ),
             )
@@ -3469,8 +3579,6 @@ class LiteStorage:
         Returns:
             TransparencyResult if found, None otherwise
         """
-        from .transparency import TransparencyResult, TransparencyRisk
-
         query = "SELECT * FROM transparency_results WHERE document_id = ?"
 
         with self._sqlite_connection() as conn:
@@ -3480,28 +3588,7 @@ class LiteStorage:
             if not row:
                 return None
 
-            indicators, caveats = self._stored_transparency_lists(row)
-
-            return TransparencyResult(
-                document_id=row["document_id"],
-                transparency_score=row["transparency_score"],
-                risk_level=TransparencyRisk(row["risk_level"]),
-                industry_funding_detected=bool(row["industry_funding_detected"]),
-                industry_funding_confidence=row["industry_funding_confidence"],
-                data_availability_level=row["data_availability_level"],
-                coi_disclosure=self._stored_coi_disclosure(
-                    row["coi_disclosure"], row["document_id"]
-                ),
-                trial_registered=bool(row["trial_registered"]),
-                trial_results_compliant=bool(row["trial_results_compliant"]),
-                outcome_switching_detected=bool(row["outcome_switching_detected"]),
-                risk_indicators=indicators,
-                warnings=caveats,
-                tier_downgrade_applied=row["tier_downgrade_applied"],
-                analyzed_at=datetime.fromisoformat(row["analyzed_at"]),
-                analyzer_version=row["analyzer_version"],
-                full_text_analyzed=bool(row["full_text_analyzed"]),
-            )
+            return self._transparency_result_from_row(row)
 
     def get_transparency_results_batch(
         self,
@@ -3519,7 +3606,7 @@ class LiteStorage:
         if not document_ids:
             return {}
 
-        from .transparency import TransparencyResult, TransparencyRisk
+        from .transparency import TransparencyResult
 
         placeholders = ",".join("?" * len(document_ids))
         query = f"SELECT * FROM transparency_results WHERE document_id IN ({placeholders})"
@@ -3530,27 +3617,7 @@ class LiteStorage:
             cursor = conn.execute(query, document_ids)
 
             for row in cursor:
-                indicators, caveats = self._stored_transparency_lists(row)
-                result = TransparencyResult(
-                    document_id=row["document_id"],
-                    transparency_score=row["transparency_score"],
-                    risk_level=TransparencyRisk(row["risk_level"]),
-                    industry_funding_detected=bool(row["industry_funding_detected"]),
-                    industry_funding_confidence=row["industry_funding_confidence"],
-                    data_availability_level=row["data_availability_level"],
-                    coi_disclosure=self._stored_coi_disclosure(
-                        row["coi_disclosure"], row["document_id"]
-                    ),
-                    trial_registered=bool(row["trial_registered"]),
-                    trial_results_compliant=bool(row["trial_results_compliant"]),
-                    outcome_switching_detected=bool(row["outcome_switching_detected"]),
-                    risk_indicators=indicators,
-                    warnings=caveats,
-                    tier_downgrade_applied=row["tier_downgrade_applied"],
-                    analyzed_at=datetime.fromisoformat(row["analyzed_at"]),
-                    analyzer_version=row["analyzer_version"],
-                    full_text_analyzed=bool(row["full_text_analyzed"]),
-                )
+                result = self._transparency_result_from_row(row)
                 results[result.document_id] = result
 
         return results
@@ -3573,27 +3640,44 @@ class LiteStorage:
         Returns:
             List of document IDs pending transparency analysis
         """
-        from .transparency import TRANSPARENCY_ANALYZER_VERSION
+        from .transparency import (
+            TRANSPARENCY_ANALYZER_VERSION,
+            analyzer_version_ordinal,
+        )
 
-        # A row an earlier analyser wrote is pending too: it holds findings
-        # this build's analyser has since retracted, and nothing else would
-        # ever ask for it to be redone (#360).
+        # A LEFT JOIN, decided in Python, rather than a NOT IN subquery
+        # comparing the version in SQL. Two reasons: SQLite orders
+        # ``'10.0' < '2.0'``, so a textual comparison would call a later
+        # analyser's rows stale forever; and ``NOT IN`` over a subquery that
+        # yields one NULL is NULL for every row, which would silently empty
+        # the whole pending list.
         query = """
-            SELECT DISTINCT sd.document_id
+            SELECT DISTINCT sd.document_id,
+                   tr.analyzer_version AS analyzer_version,
+                   tr.sources_unreachable AS sources_unreachable
             FROM scored_documents sd
             JOIN review_checkpoints rc ON sd.checkpoint_id = rc.id
+            LEFT JOIN transparency_results tr
+                   ON tr.document_id = sd.document_id
             WHERE rc.search_session_id = ?
-              AND sd.document_id NOT IN (
-                  SELECT document_id FROM transparency_results
-                  WHERE analyzer_version = ?
-              )
+              AND sd.document_id IS NOT NULL
         """
 
+        current = analyzer_version_ordinal(TRANSPARENCY_ANALYZER_VERSION)
+        pending: list[str] = []
         with self._sqlite_connection() as conn:
-            cursor = conn.execute(
-                query, (session_id, TRANSPARENCY_ANALYZER_VERSION)
-            )
-            return [row["document_id"] for row in cursor]
+            for row in conn.execute(query, (session_id,)):
+                # No row at all, a row an older analyser wrote, or one whose
+                # analysis could not reach a source it scores against: each
+                # is work this build has yet to do, and nothing else would
+                # ever ask for it to be done again (#360, #346).
+                if row["analyzer_version"] is None:
+                    pending.append(row["document_id"])
+                elif analyzer_version_ordinal(row["analyzer_version"]) < current:
+                    pending.append(row["document_id"])
+                elif row["sources_unreachable"]:
+                    pending.append(row["document_id"])
+        return pending
 
     def delete_transparency_result(self, document_id: str) -> bool:
         """

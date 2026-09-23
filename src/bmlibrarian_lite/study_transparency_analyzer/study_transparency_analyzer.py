@@ -9,6 +9,19 @@ A comprehensive tool for analyzing medical study transparency, including:
 - Trial registration compliance checking
 - Outcome reporting analysis
 
+**Changing what this module concludes means bumping
+``TRANSPARENCY_ANALYZER_VERSION``** (in
+``bmlibrarian_lite.transparency.transparency_models``). Stored assessments
+carry the version that produced them, and every presenting surface withholds
+a row an older analyser wrote until it has been re-analysed. A correction
+made here without the bump reaches only documents analysed after it, which
+is the whole of #360: rows kept findings the fix had already retracted.
+
+Bump it when the same inputs could produce a different score, risk level,
+indicator or caveat. Not for a refactor that cannot move a result, and not
+for a change in user settings -- thresholds are applied at analysis time and
+are not part of the analyser's version.
+
 Author: Medical Research Transparency Tools
 License: MIT
 """

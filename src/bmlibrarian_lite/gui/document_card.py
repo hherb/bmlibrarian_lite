@@ -68,7 +68,8 @@ from .card_utils import (
     score_badge_tooltip,
 )
 from .quality_badge import QualityBadge
-from .transparency_badge import TransparencyBadge, TransparencyOutcome
+from ..transparency import TransparencyOutcome
+from .transparency_badge import TransparencyBadge
 
 logger = logging.getLogger(__name__)
 

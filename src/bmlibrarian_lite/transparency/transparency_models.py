@@ -83,10 +83,14 @@ class TransparencyUnassessed:
 #: other version was written by an analyser whose semantics have since been
 #: corrected, so it is not a finding this build stands behind (#360).
 #:
-#: **Bump this whenever the analyser's semantics change** -- a level it can
-#: reach, what it charges for one, what it takes as evidence -- and not for a
-#: refactor that cannot move a result. Every stored row then becomes pending
-#: again and is re-analysed on the paced path that already does that work.
+#: **Bump this whenever the analyser's semantics change**: whenever the same
+#: inputs could produce a different score, risk level, indicator or caveat.
+#: Not for a refactor that cannot move a result, and not for a change in the
+#: user's settings -- ``calculate_risk_level`` applies those at analysis
+#: time, so they are not part of what this version identifies. Every stored
+#: row then becomes pending again and is re-analysed on the paced path that
+#: already does that work. The same instruction sits on
+#: ``study_transparency_analyzer``, where the semantics actually live.
 #:
 #: 2.0: #352 and #359 (a conflict of interest statement nobody read is not a
 #: disclosure, and the headings journals actually print), #353--#356 and #250
@@ -97,6 +101,24 @@ TRANSPARENCY_ANALYZER_VERSION = "2.0"
 #: What every row written before #360 says, whatever analysed it: the field
 #: was never compared to anything, so it never moved off its default.
 LEGACY_ANALYZER_VERSION = "1.0"
+
+
+def analyzer_version_ordinal(version: str | None) -> tuple[int, ...]:
+    """Order two analyser versions.
+
+    Args:
+        version: A stored ``analyzer_version``, or ``None`` for a row whose
+            column predates the field.
+
+    Returns:
+        The dotted components as integers, for comparison. An absent or
+        unparseable version sorts oldest, so an unknown provenance is
+        re-analysed rather than trusted.
+    """
+    try:
+        return tuple(int(part) for part in (version or "").split("."))
+    except ValueError:
+        return (0,)
 
 
 @dataclass(frozen=True)
@@ -112,20 +134,30 @@ class TransparencyCounts:
             row's level is not this build's finding, and dropping it from
             the counts without saying so would report an analysis that did
             not happen as one that found nothing (#360).
+        unknown: Documents this build's analyser rates at no risk level it
+            can name. A row like this used to fall through every bucket, so
+            an analysis that ran and reached a conclusion vanished from the
+            distribution with nothing saying so -- the same defect the
+            ``superseded`` bucket exists to prevent, one level down.
     """
 
     low: int = 0
     medium: int = 0
     high: int = 0
     superseded: int = 0
+    unknown: int = 0
 
     @property
     def assessed(self) -> int:
-        """How many documents carry a finding this build stands behind.
+        """How many documents carry a finding this build can name.
 
         Returns:
-            The sum of the three risk levels, which is what "Documents
-            Analyzed" means in a report.
+            The sum of the three named risk levels, which is what
+            "Documents Analyzed" means in a report. ``unknown`` is
+            deliberately excluded: a row at no nameable level has nothing
+            for the report to state, so it is accounted for under the
+            studies that came back without a finding rather than inflating
+            a distribution it appears in none of.
         """
         return self.low + self.medium + self.high
 
@@ -140,27 +172,46 @@ def count_transparency_results(
 
     Returns:
         The counts. A result an earlier analyser wrote is counted only as
-        superseded, whatever risk level it stored.
+        superseded, whatever risk level it stored; every other result is
+        counted under some bucket, so none can leave the distribution
+        without the report being able to say so.
     """
-    counts = {TransparencyRisk.LOW: 0, TransparencyRisk.MEDIUM: 0, TransparencyRisk.HIGH: 0}
+    counts = {
+        TransparencyRisk.LOW: 0,
+        TransparencyRisk.MEDIUM: 0,
+        TransparencyRisk.HIGH: 0,
+    }
     superseded = 0
+    unknown = 0
     for result in results:
         if not result.is_current:
             superseded += 1
-            continue
-        if result.risk_level in counts:
+        elif result.risk_level in counts:
             counts[result.risk_level] += 1
+        else:
+            unknown += 1
     return TransparencyCounts(
         low=counts[TransparencyRisk.LOW],
         medium=counts[TransparencyRisk.MEDIUM],
         high=counts[TransparencyRisk.HIGH],
         superseded=superseded,
+        unknown=unknown,
     )
+
+
+#: What a surface can be asked to present. A document either has a finding
+#: or has none for a reason the reader is owed: an analysis that failed
+#: (#361), or a stored assessment an analyser this build has since corrected
+#: made (#360). Showing nothing for those made them indistinguishable from
+#: an analysis still running. Defined here rather than in the badge that
+#: first needed it, so that naming the domain's own outcome type does not
+#: require importing Qt.
+TransparencyOutcome = Union["TransparencyResult", TransparencyUnassessed]
 
 
 def transparency_outcome(
     result: "TransparencyResult",
-) -> Union["TransparencyResult", TransparencyUnassessed]:
+) -> TransparencyOutcome:
     """Say what a stored assessment may be presented as.
 
     One place, because five surfaces read a stored row and made a claim from
@@ -228,6 +279,11 @@ class TransparencyResult:
             ``is_current``: a row an earlier analyser wrote is re-analysed
             rather than shown, because every correction since #352 would
             otherwise reach only documents analysed after it (#360).
+        sources_unreachable: Whether a source this analysis needed could not
+            be read. The finding is then provisional: ``is_final`` is False,
+            so it is re-analysed rather than cached as a settled answer, and
+            the reference annotation says so rather than printing its risk
+            level unqualified (#346, #360).
         full_text_analyzed: Whether full text was used (future enhancement)
     """
 
@@ -257,20 +313,56 @@ class TransparencyResult:
     analyzed_at: datetime = field(default_factory=datetime.now)
     analyzer_version: str = TRANSPARENCY_ANALYZER_VERSION
 
+    # Whether a source the analysis needed could not be read at all, as
+    # opposed to answering that it holds nothing. Only the first is our
+    # silence, and only the first makes the finding provisional (#346).
+    sources_unreachable: bool = False
+
     # For future full-text enhancement
     full_text_analyzed: bool = False
 
     @property
     def is_current(self) -> bool:
-        """Whether this build's analyser is the one that produced this result.
+        """Whether no correction has landed since this result was produced.
+
+        *Strictly older*, not merely different. Equality also called a row
+        stamped with a **newer** version superseded, which re-analysed it and
+        -- ``save_transparency_result`` being ``INSERT OR REPLACE`` --
+        overwrote a better finding with this build's worse one. Two builds
+        sharing one ``~/.bmlibrarian_lite`` would each supersede the other's
+        rows and re-analyse the whole library, forever. It also made the
+        caveat's own words false: it says an *earlier* analyser made the row,
+        which only an ordering establishes. Swift settled this first, for the
+        same reason under CloudKit sync -- see ``TransparencyResult.isStale``
+        in ``Packages/BioMedLit``.
 
         Returns:
-            True when the stored ``analyzer_version`` is this build's. A row
-            written by any other analyser is not a finding this build stands
+            True unless an analyser older than this build's produced the
+            result. A superseded row is not a finding this build stands
             behind: it is re-analysed, and until it has been, no surface
             presents it (#360).
         """
-        return self.analyzer_version == TRANSPARENCY_ANALYZER_VERSION
+        return analyzer_version_ordinal(
+            self.analyzer_version
+        ) >= analyzer_version_ordinal(TRANSPARENCY_ANALYZER_VERSION)
+
+    @property
+    def is_final(self) -> bool:
+        """Whether this row is a finished finding, safe to serve from cache.
+
+        ``is_current`` asks only who produced the row, never whether the
+        analysis reached the sources it scores a study against. A throttled
+        PubMed does not raise -- the fetch returns "unreachable" and the
+        analysis completes with a caveat and a score that fell because
+        nothing could be established. Stamped with the current version, that
+        row answered ``is_current`` forever: a transient outage became a
+        permanent risk claim no re-analysis would ever revisit.
+
+        Returns:
+            True when this build's analyser produced the result *and* every
+            source it consulted answered. A provisional row is a cache miss.
+        """
+        return self.is_current and not self.sources_unreachable
 
     def to_dict(self) -> dict[str, Any]:
         """
@@ -295,6 +387,7 @@ class TransparencyResult:
             "tier_downgrade_applied": self.tier_downgrade_applied,
             "analyzed_at": self.analyzed_at.isoformat(),
             "analyzer_version": self.analyzer_version,
+            "sources_unreachable": self.sources_unreachable,
             "full_text_analyzed": self.full_text_analyzed,
         }
 
@@ -329,7 +422,13 @@ class TransparencyResult:
             analyzed_at=datetime.fromisoformat(data["analyzed_at"]),
             # A stored dict with no version was written before the field
             # was compared to anything, so it is legacy -- never current.
-            analyzer_version=data.get("analyzer_version", LEGACY_ANALYZER_VERSION),
+            # ``or``, not a ``get`` default, for the reason above: an
+            # explicit ``null`` would otherwise put ``None`` into a field
+            # typed ``str``. It reads as legacy either way, but honestly.
+            analyzer_version=(
+                data.get("analyzer_version") or LEGACY_ANALYZER_VERSION
+            ),
+            sources_unreachable=data.get("sources_unreachable", False),
             full_text_analyzed=data.get("full_text_analyzed", False),
         )
 

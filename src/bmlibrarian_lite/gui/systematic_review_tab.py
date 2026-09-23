@@ -221,19 +221,37 @@ class WorkflowWorker(QThread):
         this build's finding, and the report names how many are waiting to
         be re-analysed rather than dropping them silently (#360).
 
+        Every document the analysis was *asked* about is accounted for. This
+        used to return early when no row had been stored, leaving
+        ``transparency_analysis_applied`` False so the report said
+        "Transparency analysis was not applied" -- over an analysis that had
+        run against every study and failed on every one, which is a positive
+        false statement about the one artefact the reader keeps. A partial
+        outage was quieter and no better: the denominator simply shrank
+        (#361, #249).
+
         Args:
-            metadata: The report metadata to fill in.
+            metadata: The report metadata to fill in. The caller has already
+                established that transparency analysis was asked for.
             document_ids: Every document the review found.
         """
-        results = self.storage.get_transparency_results_batch(document_ids)
-        if not results:
-            return
+        # Applied means asked, not answered. The caller only reaches here
+        # when the user turned transparency on.
         metadata.transparency_analysis_applied = True
+        results = self.storage.get_transparency_results_batch(document_ids)
         counts = count_transparency_results(results.values())
         metadata.transparency_low_risk_count = counts.low
         metadata.transparency_medium_risk_count = counts.medium
         metadata.transparency_high_risk_count = counts.high
         metadata.transparency_superseded_count = counts.superseded
+        # Whatever is left asked a question that never came back: the
+        # analysis failed, the document carried no identifier to look one up
+        # by, or it had not finished. None of those is a study with nothing
+        # to declare, so none may leave the count without being named.
+        metadata.transparency_unassessed_count = max(
+            0,
+            len(set(document_ids)) - counts.assessed - counts.superseded,
+        )
 
     def run(self) -> None:
         """Execute the systematic review workflow."""
@@ -1781,12 +1799,21 @@ class SystematicReviewTab(QWidget):
         doc_id: str,
     ) -> Optional[TransparencyResult]:
         """
-        Get cached transparency result for a document.
+        Get the stored transparency finding for a document, if it is one.
 
         Args:
             doc_id: Document ID
 
         Returns:
-            TransparencyResult if available, None otherwise
+            The stored assessment when this build's analyser produced it;
+            ``None`` when there is none, or when the stored row is one an
+            earlier analyser wrote. The caller cannot tell a retracted
+            finding from a current one, so the gate is here rather than
+            left to each of them (#360).
         """
-        return self.storage.get_transparency_result(doc_id)
+        stored: TransparencyResult | None = self.storage.get_transparency_result(
+            doc_id
+        )
+        if stored is None or not stored.is_current:
+            return None
+        return stored

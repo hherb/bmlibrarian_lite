@@ -25,7 +25,10 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 
-from bmlibrarian_lite.analysis_failures import transparency_failure_text
+from bmlibrarian_lite.analysis_failures import (
+    source_failure_advice,
+    transparency_failure_text,
+)
 from bmlibrarian_lite.data_models import (
     EvaluationErrorCode,
     TransparencyAnalysisFailure,
@@ -422,3 +425,292 @@ class TestTheWiringExists:
         window.systematic_review_tab.transparency_outcome_ready.connect.assert_called_once_with(
             window.audit_trail_tab.on_transparency_outcome
         )
+
+    def test_building_the_window_reaches_the_wiring(self) -> None:
+        """...and something actually calls it.
+
+        The test above asserts what ``_connect_signals`` does. Extracting it
+        created a second place for the same defect: deleting the call from
+        ``_setup_ui`` left every one of the window's connections dead with
+        the whole suite green, which is #249 one level up. Asserting the
+        source rather than building the window keeps this free of Qt and of
+        a display -- the point is only that the call is still there.
+        """
+        pytest.importorskip("PySide6")
+        import inspect
+
+        from bmlibrarian_lite.gui.app import LiteMainWindow
+
+        setup = inspect.getsource(LiteMainWindow._setup_ui)
+        assert "self._connect_signals()" in setup
+
+
+class TestAdviceNamesSomethingTheReaderCanDo:
+    """#335, at the three edges the classification fix did not reach.
+
+    Advice the reader cannot act on reads exactly as confidently as advice
+    they can, so a wrong remedy is not a smaller harm than none.
+    """
+
+    @staticmethod
+    def _http(status: int, url: str) -> Any:
+        """Build a failed request carrying a status and a URL.
+
+        Args:
+            status: What the source answered.
+            url: Where the request went.
+
+        Returns:
+            The exception a source failure arrives as.
+        """
+        import requests
+
+        response = requests.Response()
+        response.status_code = status
+        response.url = url
+        return requests.HTTPError(response=response)
+
+    def test_a_bad_request_to_an_unkeyed_source_is_not_a_refused_key(
+        self,
+    ) -> None:
+        """A malformed DOI to CrossRef must not name an NCBI API key."""
+        from bmlibrarian_lite.data_models import EvaluationErrorCode
+        from bmlibrarian_lite.utils import classify_request_exception
+
+        cause = classify_request_exception(
+            self._http(400, "https://api.crossref.org/works/nonsense")
+        )
+
+        assert cause is not EvaluationErrorCode.API_AUTH_ERROR
+        assert "API key" not in source_failure_advice(cause)
+
+    def test_a_bad_request_to_ncbi_still_is(self) -> None:
+        """The control: PubMed answers 400 for a key it will not take (#196)."""
+        from bmlibrarian_lite.data_models import EvaluationErrorCode
+        from bmlibrarian_lite.utils import classify_request_exception
+
+        cause = classify_request_exception(
+            self._http(400, "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/x")
+        )
+
+        assert cause is EvaluationErrorCode.API_AUTH_ERROR
+
+    def test_a_source_having_trouble_is_not_the_readers_network(self) -> None:
+        """A 503 is a throttle or an outage; neither is a cable to check."""
+        from bmlibrarian_lite.data_models import EvaluationErrorCode
+        from bmlibrarian_lite.utils import classify_request_exception
+
+        cause = classify_request_exception(
+            self._http(503, "https://www.ebi.ac.uk/europepmc/webservices/rest/x")
+        )
+
+        assert cause is EvaluationErrorCode.API_SERVER_ERROR
+        assert "internet connection" not in source_failure_advice(cause)
+
+    def test_a_refused_connection_still_names_the_connection(self) -> None:
+        """The control: the one case where the advice is right."""
+        import requests
+
+        from bmlibrarian_lite.utils import classify_request_exception
+
+        advice = source_failure_advice(
+            classify_request_exception(requests.ConnectionError())
+        )
+
+        assert "internet connection" in advice
+
+    def test_an_unreadable_answer_is_not_an_unreachable_source(self) -> None:
+        """Falling back to the OSError blanket sent this reader to their cable."""
+        import requests
+
+        from bmlibrarian_lite.data_models import EvaluationErrorCode
+        from bmlibrarian_lite.utils import classify_request_exception
+
+        cause = classify_request_exception(
+            requests.exceptions.JSONDecodeError("bad", "{", 0)
+        )
+
+        assert cause is EvaluationErrorCode.JSON_PARSE_ERROR
+        assert "internet connection" not in source_failure_advice(cause)
+
+    def test_our_own_defect_is_not_reported_as_the_sources_fault(self) -> None:
+        """A shape error used to arrive as "the source's answer could not be read"."""
+        from bmlibrarian_lite.data_models import EvaluationErrorCode
+        from bmlibrarian_lite.utils import classify_analysis_exception
+
+        cause = classify_analysis_exception(
+            AttributeError("'NoneType' object has no attribute 'json'")
+        )
+
+        assert cause is EvaluationErrorCode.INTERNAL_ERROR
+        advice = source_failure_advice(cause)
+        assert "defect in BMLibrarian" in advice
+        assert "try again later" not in advice.lower()
+
+    def test_a_wrapped_throttle_is_still_a_throttle(self) -> None:
+        """Spent retries must not re-enter the blanket the fix escaped."""
+        from bmlibrarian_lite.data_models import EvaluationErrorCode
+        from bmlibrarian_lite.exceptions import RetryExhaustedError
+        from bmlibrarian_lite.utils import classify_analysis_exception
+
+        wrapped = RetryExhaustedError("gave up")
+        wrapped.last_error = self._http(
+            429, "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/x"
+        )
+
+        assert (
+            classify_analysis_exception(wrapped)
+            is EvaluationErrorCode.API_RATE_LIMIT
+        )
+
+
+class TestTheValuesRefuseToSayNothing:
+    """The guards that keep a caveat from being empty or nameless."""
+
+    def test_an_unassessed_outcome_must_say_why(self) -> None:
+        """A badge that says "Not assessed" and cannot say why is the defect on."""
+        from bmlibrarian_lite.transparency import TransparencyUnassessed
+
+        with pytest.raises(ValueError):
+            TransparencyUnassessed(reason="   ")
+
+    def test_a_failure_must_name_its_document(self) -> None:
+        """A failure nobody can attach to a study reaches no badge."""
+        from bmlibrarian_lite.data_models import (
+            EvaluationErrorCode,
+            TransparencyAnalysisFailure,
+        )
+
+        with pytest.raises(ValueError):
+            TransparencyAnalysisFailure.failed(
+                "", EvaluationErrorCode.API_TIMEOUT
+            )
+
+    def test_a_failures_kind_must_be_one_of_the_two(self) -> None:
+        """The union is only as good as what may be put in it."""
+        from bmlibrarian_lite.data_models import (
+            EvaluationErrorCode,
+            TransparencyAnalysisFailure,
+        )
+
+        with pytest.raises(ValueError):
+            TransparencyAnalysisFailure(
+                document_id=DOC,
+                kind="analysis_failed",
+                cause=EvaluationErrorCode.API_TIMEOUT,
+            )
+
+
+class TestNothingLeavesTheDocumentWithoutAnOutcome:
+    """Every way out of the worker must reach one of the two signals.
+
+    The pending entry is popped before the result is read, so anything that
+    escapes the done-callback is swallowed by ``concurrent.futures`` and
+    *neither* signal fires. The card then keeps no badge -- which this change
+    has just taught the reader to read as "still running" (#333, #361).
+    """
+
+    @staticmethod
+    def _manager() -> Any:
+        """Build a manager with a stand-in analyzer.
+
+        Returns:
+            The manager.
+        """
+        pytest.importorskip("PySide6")
+        from unittest.mock import patch
+
+        from bmlibrarian_lite.transparency import (
+            TransparencyManager,
+            TransparencySettings,
+        )
+
+        config = MagicMock()
+        config.transparency = TransparencySettings()
+        with patch(
+            "bmlibrarian_lite.transparency.transparency_manager."
+            "StudyTransparencyAnalyzer"
+        ):
+            return TransparencyManager(
+                storage=MagicMock(), config=config, email="test@example.com"
+            )
+
+    def test_a_base_exception_still_reaches_the_reader(self) -> None:
+        """``except Exception`` let this one out in silence."""
+        from concurrent.futures import Future
+
+        manager = self._manager()
+        failures: list[Any] = []
+        manager.analysis_failed.connect(
+            lambda doc_id, failure: failures.append(failure)
+        )
+        future: Future = Future()
+        future.set_running_or_notify_cancel()
+        future.set_exception(BaseException("out of a thread, in silence"))
+
+        manager._on_analysis_complete(DOC, future)
+
+        assert failures, "the document was left with no outcome at all"
+        assert failures[0].document_id == DOC
+
+    def test_an_ordinary_failure_still_reaches_it(self) -> None:
+        """The control."""
+        from concurrent.futures import Future
+
+        manager = self._manager()
+        failures: list[Any] = []
+        manager.analysis_failed.connect(
+            lambda doc_id, failure: failures.append(failure)
+        )
+        future: Future = Future()
+        future.set_running_or_notify_cancel()
+        future.set_exception(TimeoutError("slow"))
+
+        manager._on_analysis_complete(DOC, future)
+
+        assert failures and failures[0].cause is EvaluationErrorCode.API_TIMEOUT
+
+    def test_a_success_still_reaches_it(self) -> None:
+        """The other control: the happy path was not pinned either."""
+        from concurrent.futures import Future
+
+        manager = self._manager()
+        results: list[Any] = []
+        manager.analysis_complete.connect(
+            lambda doc_id, result: results.append(result)
+        )
+        future: Future = Future()
+        future.set_running_or_notify_cancel()
+        future.set_result("a result")
+
+        manager._on_analysis_complete(DOC, future)
+
+        assert results == ["a result"]
+
+
+class TestTheTabRelaysBothOutcomes:
+    """The signal the window connects carries findings as well as failures."""
+
+    def test_a_finding_is_relayed(self) -> None:
+        """Silencing this emit would blank every successful badge."""
+        pytest.importorskip("PySide6")
+        from bmlibrarian_lite.gui.systematic_review_tab import SystematicReviewTab
+        from bmlibrarian_lite.transparency import (
+            TransparencyResult,
+            TransparencyRisk,
+        )
+
+        outcomes: list[Any] = []
+        tab = SystematicReviewTab(config=MagicMock(), storage=MagicMock())
+        tab.transparency_outcome_ready.connect(
+            lambda doc_id, outcome: outcomes.append((doc_id, outcome))
+        )
+        result = TransparencyResult(
+            document_id=DOC,
+            transparency_score=80,
+            risk_level=TransparencyRisk.LOW,
+        )
+
+        tab._transparency_manager.analysis_complete.emit(DOC, result)
+
+        assert outcomes and outcomes[0] == (DOC, result)

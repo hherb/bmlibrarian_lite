@@ -830,6 +830,13 @@ class EvaluationErrorCode(Enum):
     # General errors (-31 to -40)
     UNKNOWN_ERROR = -31
     INVALID_INPUT = -32
+    #: Our own defect, not the source's or the model's. A ``KeyError`` out
+    #: of a parser used to reach the reader through the message heuristics
+    #: below as "Failed to parse JSON response. The source's answer could
+    #: not be read. Try again later." -- a permanent bug in this code
+    #: reported to a clinician as the source's fault, with advice that will
+    #: never work.
+    INTERNAL_ERROR = -33
 
     @property
     def is_retryable(self) -> bool:
@@ -859,6 +866,7 @@ class EvaluationErrorCode(Enum):
             self.RETRY_EXHAUSTED: "All retry attempts exhausted",
             self.UNKNOWN_ERROR: "Unknown error occurred",
             self.INVALID_INPUT: "Invalid input provided",
+            self.INTERNAL_ERROR: "BMLibrarian could not complete the analysis",
         }
         return descriptions.get(self, "Unknown error")
 
@@ -2304,6 +2312,14 @@ class ReportMetadata:
             from the three risk levels and named in the report: their
             stored level is not this build's finding, and leaving them out
             silently would report an analysis that did not happen (#360)
+        transparency_unassessed_count: Documents the analysis was asked
+            about that carry no finding at all -- it failed, or had no
+            identifier to look one up by, or had not finished. Counted and
+            named because the alternative is a shorter denominator: a
+            throttled PubMed used to shrink "Documents Analyzed" with
+            nothing saying so, and a total outage printed "Transparency
+            analysis was not applied" over an analysis that ran against
+            every study and failed on every one (#361, #249)
 
         model_configs: LLM configuration for each workflow task
         citations_extracted: Total citation passages extracted
@@ -2342,6 +2358,7 @@ class ReportMetadata:
     transparency_medium_risk_count: int = 0
     transparency_high_risk_count: int = 0
     transparency_superseded_count: int = 0
+    transparency_unassessed_count: int = 0
 
     # LLM configuration by task
     model_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -2380,6 +2397,7 @@ class ReportMetadata:
             "transparency_medium_risk_count": self.transparency_medium_risk_count,
             "transparency_high_risk_count": self.transparency_high_risk_count,
             "transparency_superseded_count": self.transparency_superseded_count,
+            "transparency_unassessed_count": self.transparency_unassessed_count,
             "model_configs": self.model_configs,
             "citations_extracted": self.citations_extracted,
             "unique_sources_cited": self.unique_sources_cited,
@@ -2438,6 +2456,9 @@ class ReportMetadata:
             transparency_high_risk_count=data.get("transparency_high_risk_count", 0),
             transparency_superseded_count=data.get(
                 "transparency_superseded_count", 0
+            ),
+            transparency_unassessed_count=data.get(
+                "transparency_unassessed_count", 0
             ),
             model_configs=data.get("model_configs", {}),
             citations_extracted=data.get("citations_extracted", 0),

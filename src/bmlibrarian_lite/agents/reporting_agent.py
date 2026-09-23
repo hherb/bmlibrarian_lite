@@ -34,6 +34,7 @@ from .base import LiteBaseAgent
 from .report_risk_helpers import (
     build_risk_context_for_prompt,
     format_reference_risk_annotation,
+    format_reference_withheld_annotation,
     should_warn_for_citation,
 )
 
@@ -204,14 +205,20 @@ class LiteReportingAgent(LiteBaseAgent):
                 doc_order.append(doc_id)
                 doc_to_ref[doc_id] = citation.formatted_reference
 
-        # Identify risky citations based on threshold
+        # Identify risky citations based on threshold, and separately the
+        # ones whose stored finding is being withheld: those are not "no
+        # concerns found", and printing them unannotated made them
+        # indistinguishable from a study assessed as low risk (#360).
         risky_doc_results: dict[str, TransparencyResult] = {}
+        withheld_doc_ids: set[str] = set()
         if transparency_results and hasattr(self.config, "transparency"):
             settings = self.config.transparency
             for doc_id in doc_order:
                 if doc_id in transparency_results:
                     result = transparency_results[doc_id]
-                    if should_warn_for_citation(result, settings):
+                    if not result.is_current:
+                        withheld_doc_ids.add(doc_id)
+                    elif should_warn_for_citation(result, settings):
                         risky_doc_results[doc_id] = result
 
         # Build risk context for LLM prompt
@@ -254,7 +261,9 @@ IMPORTANT: Use ONLY the exact Source and Document ID values provided above. Do n
             report = self._chat(messages, temperature=0.3, max_tokens=4096)
 
             # Add references section with risk annotations
-            references = self._format_references_with_risk(citations, risky_doc_results)
+            references = self._format_references_with_risk(
+                citations, risky_doc_results, withheld_doc_ids
+            )
             full_report = f"{report}\n\n## References\n\n{references}"
 
             # Add methodology section if metadata provided
@@ -489,16 +498,22 @@ Key passages:
         self,
         citations: list[Citation],
         risky_doc_results: dict[str, TransparencyResult],
+        withheld_doc_ids: set[str] | None = None,
     ) -> str:
         """Format reference list with risk annotations for risky citations.
 
         Args:
             citations: List of citations
             risky_doc_results: Dict mapping document_id to TransparencyResult for risky docs
+            withheld_doc_ids: Documents whose stored finding is not this
+                build's, and so is withheld pending re-analysis. They are
+                annotated as unassessed rather than left bare, which would
+                read as a study with no transparency concerns (#360).
 
         Returns:
             Formatted reference list with risk annotations
         """
+        withheld = withheld_doc_ids or set()
         # Deduplicate by document ID
         seen: set[str] = set()
         unique_citations = []
@@ -527,6 +542,8 @@ Key passages:
                 annotation = format_reference_risk_annotation(risky_doc_results[doc.id])
                 if annotation:
                     references.append(annotation)
+            elif doc.id in withheld:
+                references.append(format_reference_withheld_annotation())
 
         return "\n".join(references)
 
@@ -693,6 +710,18 @@ Key passages:
                     "analyser, which has since been corrected, so they are "
                     "left out of the distribution above rather than counted "
                     "under a risk level nobody would find today."
+                )
+            if metadata.transparency_unassessed_count:
+                lines.append("")
+                lines.append(
+                    f"- **Not assessed:** "
+                    f"{metadata.transparency_unassessed_count:,}. The "
+                    "analysis was asked about these studies and did not come "
+                    "back with a finding: it failed, the study carried no "
+                    "identifier to look one up by, or it had not finished. "
+                    "They are named here rather than left out of the count, "
+                    "because an analysis that could not be made is not a "
+                    "study with nothing to declare."
                 )
         else:
             lines.append("Transparency analysis was not applied.")

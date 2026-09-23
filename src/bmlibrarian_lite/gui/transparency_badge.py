@@ -29,25 +29,23 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QWidget
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
+from ..analysis_failures import superseded_assessment_caveat
 from ..transparency import (
     COI_DISCLOSED,
     COI_NOT_ASSESSED,
     COI_NOT_STATED,
+    TransparencyOutcome,
     TransparencyResult,
     TransparencyRisk,
     TransparencyUnassessed,
 )
 
-#: What a badge can be asked to show. A document either has a finding or has
-#: none for a reason the reader is owed: an analysis that failed (#361), or a
-#: stored assessment an analyser this build has since corrected made (#360).
-#: Showing nothing for those made them indistinguishable from an analysis
-#: still running.
-TransparencyOutcome = TransparencyResult | TransparencyUnassessed
-
-#: The label of a badge with no finding behind it, long and compact form.
+#: The label of a badge with no finding behind it. One form, compact or not:
+#: both production badges are compact, so an abbreviation would be the only
+#: label a reader ever saw -- and "n/a" is one character from the "?" an
+#: UNKNOWN risk level shows, in the same grey. A document nobody could
+#: assess must not be one glyph away from one assessed as unknown.
 UNASSESSED_LABEL = "Not assessed"
-UNASSESSED_LABEL_SHORT = "n/a"
 
 
 # Color scheme for risk levels: (background_color, text_color)
@@ -143,7 +141,18 @@ class TransparencyBadge(QFrame):
         super().__init__(parent)
         self.outcome = outcome
         self.compact = compact
-        self._setup_ui()
+        # The layout and the label are built once, here, and every later
+        # outcome re-renders them in place. Rebuilding them meant calling
+        # ``QHBoxLayout(self)`` on a widget that already had one, which Qt
+        # refuses: the real layout was left empty and the new label orphaned,
+        # so a second outcome drew an empty pill and the reader -- who this
+        # change exists to tell "not assessed" -- was shown nothing at all.
+        self._layout = QHBoxLayout(self)
+        self._layout.setSpacing(0)
+        self.label = QLabel()
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._layout.addWidget(self.label)
+        self._render()
 
     @property
     def result(self) -> TransparencyResult | None:
@@ -155,27 +164,23 @@ class TransparencyBadge(QFrame):
         """
         return self.outcome if isinstance(self.outcome, TransparencyResult) else None
 
-    def _setup_ui(self) -> None:
-        """Set up the badge UI with appropriate colors and label."""
+    def _render(self) -> None:
+        """Draw the current outcome into the label built in ``__init__``."""
         padding_h = COMPACT_BADGE_PADDING_H if self.compact else BADGE_PADDING_H
         font_size = COMPACT_BADGE_FONT_SIZE if self.compact else BADGE_FONT_SIZE
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(
+        self._layout.setContentsMargins(
             scaled(padding_h),
             scaled(BADGE_PADDING_V),
             scaled(padding_h),
             scaled(BADGE_PADDING_V),
         )
-        layout.setSpacing(0)
 
         # Colors and label: a finding reads as its risk level, and a document
         # with no finding says so rather than showing nothing at all.
         if isinstance(self.outcome, TransparencyUnassessed):
             bg_color, text_color = RISK_COLORS[TransparencyRisk.UNKNOWN]
-            label_text = (
-                UNASSESSED_LABEL_SHORT if self.compact else UNASSESSED_LABEL
-            )
+            label_text = UNASSESSED_LABEL
         else:
             risk_level = self.outcome.risk_level
             bg_color, text_color = RISK_COLORS.get(
@@ -187,9 +192,7 @@ class TransparencyBadge(QFrame):
                 else RISK_LABELS[risk_level]
             )
 
-        # Create label
-        self.label = QLabel(label_text)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label.setText(label_text)
 
         # Style the badge
         font = QFont()
@@ -210,8 +213,6 @@ class TransparencyBadge(QFrame):
                 padding: 0px;
             }}
         """)
-
-        layout.addWidget(self.label)
 
         # Set tooltip with details
         self._set_tooltip()
@@ -300,12 +301,7 @@ class TransparencyBadge(QFrame):
             outcome: The document's finding, or why it has none
         """
         self.outcome = outcome
-        # Clear layout and recreate
-        while self.layout().count():
-            item = self.layout().takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self._setup_ui()
+        self._render()
 
 
 class TransparencyBadgeSmall(QLabel):
@@ -344,7 +340,14 @@ class TransparencyBadgeSmall(QLabel):
 
     def _setup_ui(self) -> None:
         """Set up the small badge UI."""
-        risk_level = self.result.risk_level
+        # The same gate as the full badge, not because this class has a
+        # caller today but because it is the one place next to it that
+        # could still render a retracted finding as a green "L" (#360).
+        risk_level = (
+            self.result.risk_level
+            if self.result.is_current
+            else TransparencyRisk.UNKNOWN
+        )
         bg_color, _ = RISK_COLORS.get(
             risk_level,
             RISK_COLORS[TransparencyRisk.UNKNOWN]
@@ -371,7 +374,10 @@ class TransparencyBadgeSmall(QLabel):
             }}
         """)
 
-        self.setToolTip(f"Transparency: {RISK_LABELS[risk_level]}")
+        if self.result.is_current:
+            self.setToolTip(f"Transparency: {RISK_LABELS[risk_level]}")
+        else:
+            self.setToolTip(superseded_assessment_caveat())
 
     def update_result(self, result: TransparencyResult) -> None:
         """

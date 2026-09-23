@@ -27,8 +27,27 @@ Compress into **Recently landed** once merged.
 - **One constant, and one predicate every reader asks.**
   `TRANSPARENCY_ANALYZER_VERSION` (now `"2.0"`) says what this build would
   find today; `TransparencyResult.is_current` compares. **Bump the constant
-  when the analyser's semantics change** — a level it can reach, what it
-  charges, what it takes as evidence — and not for a refactor.
+  when the analyser's semantics change** — whenever the same inputs could
+  produce a different score, level, indicator or caveat — and not for a
+  refactor, nor for a settings change. The instruction now also sits on
+  `study_transparency_analyzer`, where the semantics live and where the
+  person making the next correction will actually see it.
+- **The comparison is an ordering, not equality** (`analyzer_version_ordinal`,
+  dotted components as ints). Only a *strictly older* row is superseded: a
+  newer one is left alone, because `save_transparency_result` is
+  `INSERT OR REPLACE` and re-analysing it overwrites a better finding with
+  a worse one — and because the caveat tells the reader an *earlier*
+  analyser made the row, which only an ordering establishes. Swift settled
+  this first under CloudKit sync; Python follows it. A string compare would
+  also have sorted `"10.0"` before `"2.0"`.
+- **`is_final` is the cache's question; `is_current` is only half of it.**
+  A throttled source does not raise — the fetch returns "unreachable" and
+  the analysis completes with a caveat and a score that fell because
+  nothing could be established. Stamped with the current version, that row
+  was current forever, so a transient outage became a permanent risk claim
+  nothing revisited. `TransparencyResult.sources_unreachable` (new column,
+  migrated) makes it a cache miss. It is still *presented*, with its caveat
+  in the reference annotation: a weakened finding, not an absent one.
 - **A stale row is a cache miss.** Re-analysis happens in `analyze_document`,
   on the path that already queues and paces that work, and
   `get_documents_pending_transparency` counts a superseded row as pending.
@@ -37,53 +56,108 @@ Compress into **Recently landed** once merged.
 - **Five surfaces read a stored row and made a claim from it**, each now
   gated: the badge, `should_warn_for_citation` (which also gates the
   reference annotations and the prompt's risk context), the report's risk
-  distribution, the quality **tier downgrade** and the quality **filter** —
-  the last excludes the study from the review, so it is the costliest.
+  distribution, the quality **tier downgrade** and the quality **filter**.
   The tier gate sits in `apply_transparency_adjustment`, not its caller, so
-  reaching the lower method directly cannot walk around it.
-- **Withheld, not dropped.** A superseded row is shown as "Not assessed"
-  with `superseded_assessment_caveat()`, and the report names how many are
-  waiting (`transparency_superseded_count`). A badge that simply disappears
-  is the reporting defect one layer on.
+  reaching the lower method directly cannot walk around it. The filter has
+  **no production caller** — the gate is right, but it guards the least of
+  the five today; see #367. Two more surfaces are gated here that the first
+  pass missed: `TransparencyBadgeSmall` and
+  `SystematicReviewTab.get_transparency_result`.
+- **Withheld, not dropped — at every surface, not just the badge.** The
+  badge reads "Not assessed" with `superseded_assessment_caveat()`, and the
+  reference list now **annotates** a withheld entry instead of printing it
+  bare. Bare is not neutral: an unannotated reference read exactly like a
+  study assessed as low risk, and the aggregate count is taken over a
+  different population than the references (#372), so it could not be
+  mapped onto one. "Not assessed" is now the label in both compact and long
+  form — the compact one said `n/a`, one glyph from the `?` an UNKNOWN risk
+  level shows, in the same grey.
+- **"Applied" means asked, not answered.** `_record_transparency_counts`
+  returned early when nothing was stored, so a total outage printed
+  "Transparency analysis was not applied" over an analysis that ran against
+  every study and failed on every one, and a partial outage merely shrank
+  the denominator. Every document asked about is now accounted for:
+  `transparency_unassessed_count` names those that came back with no
+  finding, and `TransparencyCounts.unknown` catches a current row at no
+  nameable level, which used to fall through every bucket.
 - **#361/#249: a signal nothing connects is not reporting.**
   `analysis_failed` reached nothing, so a PubMed outage produced a review in
   which studies quietly had no assessment — and a missing badge meant three
   things at once (disabled, still running, failed). The wiring is asserted
   where it is made: `LiteMainWindow._connect_signals` was **extracted from
   `_setup_ui`** for exactly that reason, and a test calls it with a
-  stand-in window.
+  stand-in window. A second test asserts `_setup_ui` still *calls* it —
+  the extraction created a new place for the same defect, and deleting the
+  call left the whole window's wiring dead with the suite green.
+- **Nothing may leave a document without an outcome.** The done-callback
+  pops the pending entry before reading the future, so anything escaping it
+  is swallowed by `concurrent.futures` and *neither* signal fires — leaving
+  no badge, which this change teaches the reader to read as "still running".
+  It catches `BaseException` now, reports, and re-raises only an interrupt
+  (#333). A cancel is still reported as a failure: #369.
 - **The payload is a value, not a message.** It emitted `str(e)`, and a
   `requests` exception embeds the request URL — Unpaywall's carries the
   user's email, NCBI's the API key (#196, #330). `TransparencyAnalysisFailure`
   (frozen, refuses a failure with no cause and a skip with one) carries the
   document and an `EvaluationErrorCode`, and `transparency_failure_text`
   builds the sentence. The raw text stays in the log.
-- **Two defects found on the way, both fixed here.** Every `requests`
-  exception inherits from `OSError`, so a throttled PubMed, a refused NCBI
-  key and an unplugged cable all classified as `API_CONNECTION_ERROR`
-  (`classify_request_exception` now reads the status); and the advice
-  sentences are written for the *model* provider, so a throttled PubMed
-  advised checking that Ollama is running — `source_failure_advice` is the
-  literature-source set, beside `advice_for_causes`, never instead of it
-  (#335's rule).
+- **Classification: the status, and then four edges it did not reach.**
+  Every `requests` exception inherits from `OSError`, so a throttled
+  PubMed, a refused NCBI key and an unplugged cable all classified as
+  `API_CONNECTION_ERROR`; `classify_request_exception` reads the status.
+  The advice sentences are written for the *model* provider, so a throttled
+  PubMed advised checking that Ollama is running — `source_failure_advice`
+  is the literature-source set, beside `advice_for_causes`, never instead
+  of it (#335's rule). The four edges, all closed here: **400 is a refused
+  key only for a host we send a key to** (`_KEYED_HOSTS`), since every other
+  source answers 400 for a request it could not parse; **a 5xx is the
+  source's trouble, not the reader's network**, so it no longer says
+  "check the internet connection" (the model path still does — #371); **the
+  fallback no longer re-enters `classify_llm_exception`**, whose `OSError`
+  blanket is the thing being escaped, so an unreadable answer stops
+  reading as an unreachable source; and **our own shape errors are not the
+  source's fault** — `KeyError`, `AttributeError`, `TypeError`, `IndexError`
+  are enumerated by type before any message is inspected and classified
+  `INTERNAL_ERROR`, with wording that says it is a defect and no retry
+  advice. A `KeyError` from our parser used to reach a clinician as "failed
+  to parse JSON response… try again later". `classify_exhausted_retries`
+  also routes back through the full classifier, so one layer of retry
+  wrapping no longer undoes all of this.
 - **`TransparencyOutcome` is the union** every presenting surface takes:
   `TransparencyResult | TransparencyUnassessed`. The badge, the card and
   the literature tab branch on it; `DocumentCard.get_transparency_result()`
   returns `None` for the second, so nothing downstream reads a non-finding
   as a finding.
-- **Verified:** `pytest tests/` — **2211 passed**, 3 xfailed; `lint_delta.py`
-  **0 new** ruff or mypy findings (net −2 ruff). The two new test files are
-  **21 + 22 tests**; the sweep is **29 sites, 29 caught**, under both guards
-  (a `__file__` probe that the copy is what imports, and a green baseline of
-  120). `LiteMainWindow` is built offscreen as a smoke check, since no test
-  constructs it.
+- **Verified:** `pytest tests/` — **2257 passed**, 3 xfailed;
+  `lint_delta.py` **0 new** ruff or mypy findings (net −10 ruff, −11 mypy;
+  `storage.py` gained the `TYPE_CHECKING` block its string annotations
+  always needed). Mutation sweeps under both guards — a `__file__` probe
+  that the copy is what imports, and a green baseline — **29 sites** for
+  the first pass and **12 more** for the review fixes, all caught, no
+  survivors. `LiteMainWindow` is built offscreen as a smoke check, since no
+  test constructs it.
 - **Expect badges to go blank before they come back.** Every existing row
   is superseded by this change and is re-analysed the next time its document
   passes through a review. Stored scores are still not recomputed in place
   (#145).
+- **Reviewed, and what the review left open.** Five review agents went over
+  this branch; everything reader-facing was addressed here. Lodged rather
+  than done, see #367 (the quality filter has no caller), #368
+  (`TransparencyResult` is mutable and unvalidated), #369 (a cancel reported
+  as a failure), #370 (Android has no version comparison at all), #371 (the
+  model path's 5xx advice), #372 (the report's counts and its annotations
+  are taken over different populations), #373 (nothing sweeps the store for
+  pending work, so re-analysis only reaches documents a review revisits).
+- **The parity ledger was wrong and is now right.** The Ports section said
+  neither mobile platform compares an analyser version. **Swift already
+  did**, and better: `TransparencyConstants.analyzerVersion` (`Int`, at 3,
+  with a per-version changelog), `TransparencyResult.isStale` using
+  strictly-older, consumers in `Document` and the two detail views, and
+  `TransparencyStalenessTests`. Only **Android** carries #360 (#370). The
+  two version spaces are not comparable — `Int` 3 against the string
+  `"2.0"` — and each orders only against itself.
 - **Still deferred:** #350, #362, #364, and #357 / #300 for Swift and
-  Android — neither platform compares an analyser version either, so both
-  carry #360 as well as their own halves.
+  Android.
 
 ## Recently landed (context)
 

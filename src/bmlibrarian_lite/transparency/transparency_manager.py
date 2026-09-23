@@ -167,15 +167,20 @@ class TransparencyManager(QObject):
         # and paces this work, rather than as a bulk invalidation on open.
         if self.settings.cache_results:
             cached = self.storage.get_transparency_result(document_id)
-            if cached and cached.is_current:
+            if cached and cached.is_final:
                 logger.debug(f"Using cached transparency result for {document_id}")
                 self.analysis_complete.emit(document_id, cached)
                 return
-            if cached:
+            if cached and not cached.is_current:
                 logger.debug(
                     f"Re-analysing {document_id}: stored result was written by "
                     f"analyser {cached.analyzer_version}, this build is "
                     f"{TRANSPARENCY_ANALYZER_VERSION}"
+                )
+            elif cached:
+                logger.debug(
+                    f"Re-analysing {document_id}: a source its stored result "
+                    "needed could not be read, so that result is provisional"
                 )
 
         # Queue for background analysis
@@ -309,6 +314,16 @@ class TransparencyManager(QObject):
                 full_text is not None
                 or any("Full-text" in s for s in report.data_sources_used)
             ),
+            # A source that could not be read is our silence, not the
+            # study's. Neither fetch raises -- each returns "unreachable" and
+            # the analysis finishes with a caveat and a score that fell
+            # because nothing could be established -- so without this the row
+            # was stored as a settled finding and served from cache forever
+            # (#346, #360).
+            sources_unreachable=(
+                report.pubmed_record_unreachable
+                or report.crossref_record_unreachable
+            ),
         )
 
         # Store result
@@ -330,7 +345,14 @@ class TransparencyManager(QObject):
         try:
             result = future.result()
             self.analysis_complete.emit(document_id, result)
-        except Exception as e:
+        except BaseException as e:
+            # ``BaseException``, not ``Exception``: the pending entry is
+            # already popped, so anything that escapes here is swallowed by
+            # ``concurrent.futures``' own callback handler and *neither*
+            # signal fires. The document then keeps no badge, which this
+            # change has just taught the reader to read as "still running" --
+            # the very ambiguity it exists to remove (#333, #361).
+            #
             # The provider's own text is logged and goes no further: it can
             # carry the request, and with it a credential (#330). What the
             # reader is shown is built from the classified cause.
@@ -341,6 +363,11 @@ class TransparencyManager(QObject):
                     document_id, classify_analysis_exception(e)
                 ),
             )
+            # An interrupt is reported, then allowed to keep unwinding: the
+            # reader is owed the badge either way, but the process must
+            # still be able to stop.
+            if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                raise
 
     def get_pending_count(self) -> int:
         """

@@ -54,6 +54,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Callable, Generator, TypeVar
+from urllib.parse import urlparse
 
 import requests
 
@@ -443,7 +444,7 @@ def is_retryable_exception(exc: Exception) -> bool:
     return any(pattern in error_msg for pattern in retryable_patterns)
 
 
-def classify_llm_exception(exc: Exception) -> "EvaluationErrorCode":
+def classify_llm_exception(exc: BaseException) -> "EvaluationErrorCode":
     """
     Classify an exception into an EvaluationErrorCode.
 
@@ -522,9 +523,24 @@ def classify_llm_exception(exc: Exception) -> "EvaluationErrorCode":
     return EvaluationErrorCode.UNKNOWN_ERROR
 
 
+#: The exceptions that mean this code is wrong, not that a source failed.
+#: They arrive at the same ``except`` as a provider failure, so they have to
+#: be told apart by type before anything reads their message.
+_SHAPE_ERRORS = (KeyError, AttributeError, TypeError, IndexError)
+
+#: The hosts that are given an NCBI API key, and so are the only ones whose
+#: 400 can mean the key was refused (#196). Every other source answers 400
+#: for a request it could not parse -- a malformed DOI to CrossRef, say --
+#: and telling that reader to check an API key the source never saw is
+#: advice they cannot act on (#335).
+_KEYED_HOSTS = ("ncbi.nlm.nih.gov", "eutils.ncbi.nlm.nih.gov")
+
 #: The statuses a source answers when it refuses the credentials it was
 #: given. PubMed answers 400 for a key it does not accept, not 401 (#196),
-#: so a bad request from a keyed service is read as a refused key here too.
+#: so a 400 is read as a refused key -- but only from a host in
+#: ``_KEYED_HOSTS``, because every other source answers 400 for a request it
+#: could not parse, and a reader sent to check an API key that source never
+#: saw has been given advice they cannot act on (#335).
 _REFUSED_CREDENTIAL_STATUSES = (
     HTTPStatus.BAD_REQUEST,
     HTTPStatus.UNAUTHORIZED,
@@ -532,7 +548,7 @@ _REFUSED_CREDENTIAL_STATUSES = (
 )
 
 
-def classify_analysis_exception(exc: Exception) -> "EvaluationErrorCode":
+def classify_analysis_exception(exc: BaseException) -> "EvaluationErrorCode":
     """Classify anything a stage of the analysis raised, wrapper or not.
 
     :func:`classify_llm_exception` answers ``RETRY_EXHAUSTED`` for the wrapper
@@ -541,16 +557,27 @@ def classify_analysis_exception(exc: Exception) -> "EvaluationErrorCode":
     the wrapper wrote the same two-branch expression; this is it, once.
 
     Args:
-        exc: Whatever the stage raised.
+        exc: Whatever the stage raised. ``BaseException``, because a done
+            callback that only caught ``Exception`` let the document out
+            with no outcome at all (#333).
 
     Returns:
         The code classifying the failure retrying was spent on, for spent
         retries; otherwise the code classifying the exception itself.
     """
+    from .data_models import EvaluationErrorCode
+
     if isinstance(exc, RetryExhaustedError):
         return classify_exhausted_retries(exc)
     if isinstance(exc, requests.RequestException):
         return classify_request_exception(exc)
+    if isinstance(exc, _SHAPE_ERRORS):
+        # Enumerated before the message heuristics below can reach them.
+        # A ``KeyError`` from our own parser fell through to "json" in
+        # ``str(exc)`` and was reported as the source's unreadable answer,
+        # with "try again later" advice that will never work. Narrowing a
+        # catch-all moves this work into the body; this is that work.
+        return EvaluationErrorCode.INTERNAL_ERROR
     return classify_llm_exception(exc)
 
 
@@ -579,7 +606,9 @@ def classify_request_exception(
     if isinstance(status, int):
         if status == HTTPStatus.TOO_MANY_REQUESTS:
             return EvaluationErrorCode.API_RATE_LIMIT
-        if status in _REFUSED_CREDENTIAL_STATUSES:
+        if status in _REFUSED_CREDENTIAL_STATUSES and (
+            status != HTTPStatus.BAD_REQUEST or _is_keyed_host(exc)
+        ):
             return EvaluationErrorCode.API_AUTH_ERROR
         if status >= HTTPStatus.INTERNAL_SERVER_ERROR:
             return EvaluationErrorCode.API_SERVER_ERROR
@@ -588,7 +617,48 @@ def classify_request_exception(
         return EvaluationErrorCode.API_TIMEOUT
     if isinstance(exc, requests.ConnectionError):
         return EvaluationErrorCode.API_CONNECTION_ERROR
-    return classify_llm_exception(exc)
+    if isinstance(exc, requests.JSONDecodeError):
+        return EvaluationErrorCode.JSON_PARSE_ERROR
+    if isinstance(
+        exc, (requests.exceptions.ContentDecodingError, requests.exceptions.ChunkedEncodingError)
+    ):
+        return EvaluationErrorCode.INVALID_RESPONSE_FORMAT
+    if isinstance(
+        exc,
+        (
+            requests.exceptions.MissingSchema,
+            requests.exceptions.InvalidSchema,
+            requests.exceptions.InvalidURL,
+            requests.exceptions.URLRequired,
+        ),
+    ):
+        # A URL this code built and got wrong. Not the source's doing.
+        return EvaluationErrorCode.INTERNAL_ERROR
+    # Deliberately *not* ``classify_llm_exception``: that is the ``OSError``
+    # blanket this function exists to escape, and falling back into it put
+    # "Failed to connect to API. Check the internet connection" on an answer
+    # we simply could not read.
+    return EvaluationErrorCode.UNKNOWN_ERROR
+
+
+def _is_keyed_host(exc: "requests.RequestException") -> bool:
+    """Whether the failed request went to a host this build sends a key to.
+
+    Args:
+        exc: The failed request.
+
+    Returns:
+        True when the URL names an NCBI host. A URL we cannot read answers
+        False: an unidentified source is not assumed to hold a credential,
+        because the advice that follows names one the reader may not have.
+    """
+    for carrier in (getattr(exc, "response", None), getattr(exc, "request", None)):
+        url = getattr(carrier, "url", None)
+        if isinstance(url, str):
+            host = urlparse(url).hostname or ""
+            if any(host == keyed or host.endswith(f".{keyed}") for keyed in _KEYED_HOSTS):
+                return True
+    return False
 
 
 def classify_exhausted_retries(exc: RetryExhaustedError) -> "EvaluationErrorCode":
@@ -619,7 +689,11 @@ def classify_exhausted_retries(exc: RetryExhaustedError) -> "EvaluationErrorCode
 
     if exc.last_error is None:
         return EvaluationErrorCode.RETRY_EXHAUSTED
-    return classify_llm_exception(exc.last_error)
+    # Back through the full classifier, not straight to the model one: a
+    # wrapped ``requests`` failure would otherwise hit the ``OSError``
+    # blanket and a throttled source would read as a broken connection
+    # again, one layer of retry-wrapping later.
+    return classify_analysis_exception(exc.last_error)
 
 
 # =============================================================================

@@ -29,6 +29,7 @@ from bmlibrarian_lite.transparency import (
     COI_NOT_STATED,
     TransparencyResult,
     TransparencyRisk,
+    TransparencyUnassessed,
 )
 from bmlibrarian_lite.gui.transparency_badge import (
     TransparencyBadge,
@@ -37,6 +38,7 @@ from bmlibrarian_lite.gui.transparency_badge import (
     RISK_LABELS,
     RISK_LABELS_SHORT,
     DATA_AVAILABILITY_LABELS,
+    UNASSESSED_LABEL,
 )
 
 
@@ -47,6 +49,12 @@ def qapp():
     if app is None:
         app = QApplication([])
     yield app
+
+
+@pytest.fixture
+def an_unassessed_outcome() -> TransparencyUnassessed:
+    """A document with no finding, and the reason the reader is owed."""
+    return TransparencyUnassessed(reason="The transparency analysis failed.")
 
 
 @pytest.fixture
@@ -239,6 +247,39 @@ class TestTransparencyBadge:
         badge.update_outcome(high_risk_result)
         assert badge.result == high_risk_result
         assert badge.label.text() == "High Risk"
+
+    def test_a_second_outcome_is_still_on_screen(
+        self, qapp, low_risk_result, high_risk_result
+    ) -> None:
+        """The re-rendered label is in the layout, not orphaned beside it.
+
+        ``update_outcome`` used to re-enter the builder, which called
+        ``QHBoxLayout(self)`` on a widget that already had a layout. Qt
+        refuses that, so the badge kept an empty layout and an unparented
+        label: ``label.text()`` was right and the reader saw an empty pill.
+        Asserting the text alone cannot tell the two apart.
+        """
+        badge = TransparencyBadge(outcome=low_risk_result)
+        badge.update_outcome(high_risk_result)
+
+        layout = badge.layout()
+        assert layout is not None
+        assert layout.count() == 1
+        assert layout.itemAt(0).widget() is badge.label
+        assert badge.label.parent() is badge
+
+    def test_an_unassessed_outcome_names_itself_in_a_card(
+        self, qapp, an_unassessed_outcome
+    ) -> None:
+        """A compact badge says "Not assessed", not "n/a".
+
+        Both production badges are compact, so the short label is the only
+        one a reader ever sees. "n/a" is one character from the "?" an
+        UNKNOWN risk level shows, in the same grey -- and the user guide
+        promises "Not assessed" (#361).
+        """
+        badge = TransparencyBadge(outcome=an_unassessed_outcome, compact=True)
+        assert badge.label.text() == UNASSESSED_LABEL
 
     def test_trial_registration_shown_when_registered(self, qapp) -> None:
         """Tooltip should show trial registration when registered."""

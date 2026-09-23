@@ -371,7 +371,7 @@ class TestTheUpgradeAUserActuallyExperiences:
         self._old_database(path)
         storage = self._storage_over(path)
 
-        storage._migrate_transparency_coi_and_warnings()
+        storage._migrate_transparency_results()
         result = storage.get_transparency_result("old-doc")
 
         assert result.coi_disclosure == COI_NOT_ASSESSED
@@ -383,7 +383,7 @@ class TestTheUpgradeAUserActuallyExperiences:
         self._old_database(path)
         storage = self._storage_over(path)
 
-        storage._migrate_transparency_coi_and_warnings()
+        storage._migrate_transparency_results()
 
         assert "Industry funding detected" in storage.get_transparency_result(
             "old-doc"
@@ -395,9 +395,9 @@ class TestTheUpgradeAUserActuallyExperiences:
         self._old_database(path)
         storage = self._storage_over(path)
 
-        storage._migrate_transparency_coi_and_warnings()
+        storage._migrate_transparency_results()
         first = storage.get_transparency_result("old-doc")
-        storage._migrate_transparency_coi_and_warnings()
+        storage._migrate_transparency_results()
 
         assert storage.get_transparency_result("old-doc") == first
 

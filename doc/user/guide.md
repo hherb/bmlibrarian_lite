@@ -223,7 +223,24 @@ hovering over the badge says why:
   When a correction changes what the analyser would find, studies assessed
   before it are re-analysed the next time they come up in a review, and until
   that happens their old score and risk level are withheld rather than shown.
-  A report counts those studies separately and says how many are waiting.
+  A report counts those studies separately and says how many are waiting, and
+  annotates each affected reference rather than leaving it bare.
+
+> **After upgrading to analyser version 2.0, expect this once, for
+> everything.** That release corrected what the analyser accepts as evidence,
+> so *every* assessment stored before it is superseded. Transparency badges
+> will read **Not assessed** across the board until each study has been
+> looked at again, which happens the next time it appears in a review. This
+> is the correction working, not the feature breaking. Re-analysis is paced
+> against rate-limited sources, so it is deliberately not done all at once
+> when you open the application.
+
+A report's **Transparency Analysis** section accounts for every study it was
+asked about. Alongside the risk distribution it names how many are awaiting
+re-analysis, and how many came back with no finding at all — because an
+analysis that could not be made is not a study with nothing to declare. If
+transparency analysis was switched on, the report says so even when every
+analysis failed.
 
 ### Full-Text Discovery
 

@@ -41,8 +41,7 @@ from ..audit_records import outcome_sort_key
 from ..constants import AUDIT_CARD_SPACING, AUDIT_UI_UPDATE_DELAY_MS
 from ..data_models import LiteDocument, ScoredDocument
 from ..quality.data_models import QualityAssessment
-from ..transparency import TransparencyResult
-from .transparency_badge import TransparencyOutcome
+from ..transparency import TransparencyOutcome, TransparencyResult
 from .document_card import DocumentCard
 
 logger = logging.getLogger(__name__)
@@ -293,13 +292,16 @@ class AuditLiteratureTab(QWidget):
         doc_id: str,
     ) -> Optional[TransparencyResult]:
         """
-        Get transparency result for a document.
+        Get the transparency finding for a document, if it is one.
 
         Args:
             doc_id: Document ID
 
         Returns:
-            TransparencyResult if found, None otherwise
+            The finding, or ``None`` when there is none -- which includes a
+            document whose analysis failed or whose stored assessment is
+            withheld. ``None`` is "no finding to report", never "analysed
+            and found nothing" (#361).
         """
         with self._lock:
             outcome = self._transparency_outcomes.get(doc_id)
