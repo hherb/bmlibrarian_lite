@@ -27,7 +27,11 @@ from PySide6.QtCore import QObject, Signal
 from ..data_models import TransparencyAnalysisFailure
 from ..utils import classify_analysis_exception
 from .assessment import assess_document, create_background_analyzer
-from .transparency_models import TRANSPARENCY_ANALYZER_VERSION, TransparencyResult
+from .transparency_models import (
+    TRANSPARENCY_ANALYZER_VERSION,
+    TransparencyResult,
+    UndecodableTransparencyRow,
+)
 from .transparency_settings import TransparencySettings
 
 # Rate limiting: minimum seconds between API requests
@@ -152,11 +156,27 @@ class TransparencyManager(QObject):
         # and paces this work, rather than as a bulk invalidation on open.
         if self.settings.cache_results:
             cached = self.storage.get_transparency_result(document_id)
-            if cached and cached.is_final:
+            if isinstance(cached, UndecodableTransparencyRow):
+                # A newer build's row is left alone: re-analysing it would
+                # overwrite that build's finding with this one's. Any other
+                # row that will not decode is damaged, and is redone (#374).
+                if cached.written_by_newer_build:
+                    self.analysis_failed.emit(
+                        document_id,
+                        TransparencyAnalysisFailure.written_by_newer_build(
+                            document_id
+                        ),
+                    )
+                    return
+                logger.debug(
+                    f"Re-analysing {document_id}: its stored result could "
+                    "not be decoded"
+                )
+            elif cached and cached.is_final:
                 logger.debug(f"Using cached transparency result for {document_id}")
                 self.analysis_complete.emit(document_id, cached)
                 return
-            if cached and not cached.is_current:
+            elif cached and not cached.is_current:
                 logger.debug(
                     f"Re-analysing {document_id}: stored result was written by "
                     f"analyser {cached.analyzer_version}, this build is "

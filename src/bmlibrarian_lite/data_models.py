@@ -1144,6 +1144,19 @@ class TransparencyFailureKind(Enum):
     NO_IDENTIFIER = "no_identifier"
     #: A source was asked and the analysis did not finish.
     ANALYSIS_FAILED = "analysis_failed"
+    #: The stored row was written by a newer build and this one cannot
+    #: decode it; nothing was asked, since re-analysing would overwrite that
+    #: build's finding with an older analyser's (#374).
+    WRITTEN_BY_NEWER_BUILD = "written_by_newer_build"
+
+
+#: The kinds under which no source was asked, so no cause can be named.
+_NOTHING_ASKED_KINDS = frozenset(
+    {
+        TransparencyFailureKind.NO_IDENTIFIER,
+        TransparencyFailureKind.WRITTEN_BY_NEWER_BUILD,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -1169,8 +1182,8 @@ class TransparencyAnalysisFailure:
     Raises:
         ValueError: On construction, for a failure that names no document, a
             failed analysis with no cause or a cause of ``SUCCESS``, or a
-            missing identifier carrying a provider failure -- nothing was
-            asked, so no provider can have failed.
+            missing identifier or a newer build's row carrying a provider
+            failure -- nothing was asked, so no provider can have failed.
     """
 
     document_id: str
@@ -1187,10 +1200,10 @@ class TransparencyAnalysisFailure:
             raise ValueError("A failed analysis names the document it happened to")
         if not isinstance(self.kind, TransparencyFailureKind):
             raise ValueError("A failed analysis names why it has no finding")
-        if self.kind is TransparencyFailureKind.NO_IDENTIFIER:
+        if self.kind in _NOTHING_ASKED_KINDS:
             if self.cause is not None:
                 raise ValueError(
-                    "Nothing was asked for a record with no identifier, so no "
+                    f"Nothing was asked for a {self.kind.value} record, so no "
                     "provider can have failed"
                 )
             return
@@ -1210,6 +1223,24 @@ class TransparencyAnalysisFailure:
             The failure.
         """
         return cls(document_id=document_id, kind=TransparencyFailureKind.NO_IDENTIFIER)
+
+    @classmethod
+    def written_by_newer_build(
+        cls, document_id: str
+    ) -> "TransparencyAnalysisFailure":
+        """Record that a document's stored row is a newer build's (#374).
+
+        Args:
+            document_id: The document whose row this build cannot decode and
+                may not replace.
+
+        Returns:
+            The failure.
+        """
+        return cls(
+            document_id=document_id,
+            kind=TransparencyFailureKind.WRITTEN_BY_NEWER_BUILD,
+        )
 
     @classmethod
     def failed(

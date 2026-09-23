@@ -123,6 +123,88 @@ def analyzer_version_ordinal(version: str | None) -> tuple[int, ...]:
 
 
 @dataclass(frozen=True)
+class UndecodableTransparencyRow:
+    """A stored transparency row this build could not decode (#374).
+
+    One such row -- a risk level a newer build wrote into a shared
+    ``~/.bmlibrarian_lite``, a timestamp that will not parse -- used to fail
+    the batch read for every document asked about, so a review's report
+    failed over it and a reloaded question lost every badge. It is carried
+    as this value instead, beside the rows that did decode: dropped, it
+    would read as a document never analysed.
+
+    Only ``analyzer_version`` is kept, because it is the one column that
+    decides what may be done with the row, and it is plain text that
+    survives whatever else failed to decode.
+
+    Attributes:
+        document_id: Whose row it is.
+        analyzer_version: The row's stored version, or ``None`` when the
+            column is empty.
+
+    Raises:
+        ValueError: On construction, for a row that names no document.
+    """
+
+    document_id: str
+    analyzer_version: str | None
+
+    def __post_init__(self) -> None:
+        """Refuse a row that names no document.
+
+        Raises:
+            ValueError: If ``document_id`` is not a non-empty string.
+        """
+        if not isinstance(self.document_id, str) or not self.document_id:
+            raise ValueError("An undecodable row names the document it belongs to")
+
+    @property
+    def written_by_newer_build(self) -> bool:
+        """Whether a build newer than this one wrote the row.
+
+        *Strictly newer*, the ordering ``TransparencyResult.is_current``
+        uses: such a row is presumably that build's finding, and
+        re-analysing it here would overwrite it (``INSERT OR REPLACE``) with
+        an older analyser's. Any other row that will not decode is damaged,
+        not newer, and nothing is lost by replacing it. User's call,
+        2026-09-23.
+
+        Returns:
+            True when the row's version orders after this build's.
+        """
+        return analyzer_version_ordinal(
+            self.analyzer_version
+        ) > analyzer_version_ordinal(TRANSPARENCY_ANALYZER_VERSION)
+
+
+def undecodable_row_caveat(row: UndecodableTransparencyRow) -> str:
+    """Say why a document whose stored row would not decode has no finding.
+
+    One function, because the reloaded question's badge and the report's
+    reference annotation both say it, and must say the same thing.
+
+    Args:
+        row: The row this build could not decode.
+
+    Returns:
+        The caveat's two sentences: a newer build's row, left unchanged, or
+        a damaged one not yet re-analysed. Neither claims an *earlier*
+        analyser wrote it.
+    """
+    from ..analysis_failures import (
+        damaged_assessment_caveat,
+        transparency_failure_text,
+    )
+    from ..data_models import TransparencyAnalysisFailure
+
+    if row.written_by_newer_build:
+        return transparency_failure_text(
+            TransparencyAnalysisFailure.written_by_newer_build(row.document_id)
+        )
+    return damaged_assessment_caveat()
+
+
+@dataclass(frozen=True)
 class TransparencyCounts:
     """How a set of stored assessments is distributed, for a report.
 
@@ -145,6 +227,9 @@ class TransparencyCounts:
             had not finished. Only :func:`count_transparency_over` can know
             these, since it is the one given the documents as well as the
             rows.
+        undecodable: Documents whose stored row this build could not decode
+            (#374). Not a risk level, and not superseded either: a newer
+            build may have written it.
     """
 
     low: int = 0
@@ -153,17 +238,19 @@ class TransparencyCounts:
     superseded: int = 0
     unknown: int = 0
     not_stored: int = 0
+    undecodable: int = 0
 
     @property
     def not_assessed(self) -> int:
         """How many documents came back without a finding this build can name.
 
         Returns:
-            Those with no row, and those whose row names no risk level. Both
-            asked a question that produced nothing to state, and neither is
-            a study with nothing to declare (#361).
+            Those with no row, those whose row names no risk level, and those
+            whose row could not be read. Each asked a question that produced
+            nothing this build can state, and none is a study with nothing
+            to declare (#361, #374).
         """
-        return self.not_stored + self.unknown
+        return self.not_stored + self.unknown + self.undecodable
 
     @property
     def considered(self) -> int:
@@ -191,7 +278,7 @@ class TransparencyCounts:
 
 
 def _count_rows(
-    results: Iterable["TransparencyResult"],
+    results: Iterable["StoredTransparency"],
 ) -> TransparencyCounts:
     """Count stored assessments by risk level, keeping superseded ones apart.
 
@@ -211,8 +298,11 @@ def _count_rows(
     counts = dict.fromkeys(NAMEABLE_RISK_LEVELS, 0)
     superseded = 0
     unknown = 0
+    undecodable = 0
     for result in results:
-        if not result.is_current:
+        if isinstance(result, UndecodableTransparencyRow):
+            undecodable += 1
+        elif not result.is_current:
             superseded += 1
         elif result.risk_level in counts:
             counts[result.risk_level] += 1
@@ -224,11 +314,12 @@ def _count_rows(
         high=counts[TransparencyRisk.HIGH],
         superseded=superseded,
         unknown=unknown,
+        undecodable=undecodable,
     )
 
 
 def count_transparency_over(
-    stored: Mapping[str, "TransparencyResult"],
+    stored: Mapping[str, "StoredTransparency"],
     document_ids: Iterable[str],
 ) -> TransparencyCounts:
     """Count what is known about a set of documents' transparency.
@@ -252,8 +343,24 @@ def count_transparency_over(
     )
 
 
+def _needs_analysis(row: "StoredTransparency") -> bool:
+    """Whether a stored row leaves its document's transparency to be done.
+
+    Args:
+        row: The document's stored row.
+
+    Returns:
+        For a decoded row, whether it is not final. For one that would not
+        decode, whether this build may replace it: not when a newer build
+        wrote it (#374).
+    """
+    if isinstance(row, UndecodableTransparencyRow):
+        return not row.written_by_newer_build
+    return not row.is_final
+
+
 def pending_transparency_ids(
-    stored: Mapping[str, "TransparencyResult"],
+    stored: Mapping[str, "StoredTransparency"],
     document_ids: Iterable[str],
 ) -> list[str]:
     """Say which documents' transparency this build has yet to establish.
@@ -265,7 +372,9 @@ def pending_transparency_ids(
     Returns:
         Each document with no row, or whose row is not final -- an earlier
         analyser wrote it (#360), or a source it scores against could not be
-        read (#346) -- once each, in the order given. The same question
+        read (#346) -- or whose row is damaged beyond decoding, once each, in
+        the order given. A row a newer build wrote is never pending, whether
+        or not it decodes (#374). The same question
         ``TransparencyManager.analyze_document`` asks of its cache when
         caching is on (with it off, a review re-analyses every document), so
         the pass that re-analyses a question's documents and the review that
@@ -274,13 +383,13 @@ def pending_transparency_ids(
     return [
         doc_id
         for doc_id in dict.fromkeys(document_ids)
-        if doc_id not in stored or not stored[doc_id].is_final
+        if doc_id not in stored or _needs_analysis(stored[doc_id])
     ]
 
 
 def stored_transparency_outcomes(
     documents: Iterable["LiteDocument"],
-    stored: Mapping[str, "TransparencyResult"],
+    stored: Mapping[str, "StoredTransparency"],
 ) -> dict[str, "TransparencyOutcome"]:
     """Say what each document of a reloaded question may be presented as.
 
@@ -296,9 +405,9 @@ def stored_transparency_outcomes(
 
     Returns:
         By document id: the row itself when this build stands behind it;
-        otherwise the caveat for why there is none -- a superseded row, no
-        identifier to look one up by, or nothing stored -- ending with how
-        to have it assessed where that is possible.
+        otherwise the caveat for why there is none -- a superseded or
+        undecodable row, no identifier to look one up by, or nothing stored
+        -- ending with how to have it assessed where that is possible.
     """
     from ..analysis_failures import (
         not_stored_assessment_caveat,
@@ -311,13 +420,19 @@ def stored_transparency_outcomes(
     outcomes: dict[str, TransparencyOutcome] = {}
     for document in documents:
         row = stored.get(document.id)
-        if row is not None and row.is_current:
+        if isinstance(row, TransparencyResult) and row.is_current:
             outcomes[document.id] = row
         elif not document.pmid and not document.doi:
             outcomes[document.id] = TransparencyUnassessed(
                 reason=transparency_failure_text(
                     TransparencyAnalysisFailure.no_identifier(document.id)
                 )
+            )
+        elif isinstance(row, UndecodableTransparencyRow):
+            # No advice for a newer build's row: the pass leaves it alone
+            advice = "" if row.written_by_newer_build else reanalysis_advice()
+            outcomes[document.id] = TransparencyUnassessed(
+                reason=undecodable_row_caveat(row) + advice
             )
         elif row is not None:
             outcomes[document.id] = TransparencyUnassessed(
@@ -338,6 +453,11 @@ def stored_transparency_outcomes(
 #: first needed it, so that naming the domain's own outcome type does not
 #: require importing Qt.
 TransparencyOutcome = Union["TransparencyResult", TransparencyUnassessed]
+
+#: What the store holds for a document: a row it decoded, or one it could
+#: not (#374). Every reader of the store is handed this, so none can treat a
+#: row that failed to decode as a finding or as a row that is not there.
+StoredTransparency = Union["TransparencyResult", UndecodableTransparencyRow]
 
 
 def transparency_outcome(

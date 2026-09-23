@@ -520,14 +520,45 @@ def no_risk_level_caveat() -> str:
     )
 
 
-def unreadable_assessment_caveat() -> str:
-    """Say that a reloaded study's stored assessment could not be read.
+#: Why a study whose stored row a newer build wrote has no finding here.
+#: Not "an earlier version": only the ordering established that it is newer,
+#: and that is the reason it is left alone rather than re-analysed (#374).
+_NEWER_BUILD_BECAUSE = (
+    "This study's stored assessment was made by a newer version of "
+    "BMLibrarian Lite, which this one cannot read and leaves unchanged"
+)
 
-    One row a build cannot decode fails the whole batch read, so every
-    document of the question is left without its badge (#374). A badge that
-    is simply missing read the same as an analysis still running, so each
-    one says what happened instead. Re-analysis is not advised: it reads the
-    same rows, and would fail the same way.
+
+def damaged_assessment_caveat() -> str:
+    """Say that a study's stored assessment could not be decoded (#374).
+
+    One such row used to fail the read for every document asked about with
+    it. It is now withheld on its own. It is not called superseded: nothing
+    says an *earlier* analyser wrote it. Its version is not newer than this
+    build's, so it is damaged rather than another build's finding, and
+    re-analysis may replace it.
+
+    Returns:
+        Two sentences, ending in a full stop: why there is no finding, and
+        that it is not one against the study.
+    """
+    return unassessed_caveat(
+        "This study's stored assessment could not be read and has not been "
+        "re-analysed yet",
+        TRANSPARENCY_SOUGHT,
+    )
+
+
+def unreadable_assessment_caveat() -> str:
+    """Say that a reloaded study's stored assessments could not be read.
+
+    For a read of the table that failed outright (a database error), which
+    leaves every document of the question without its badge. A single row
+    that will not decode does not reach here: it is withheld on its own
+    (:func:`damaged_assessment_caveat`, #374). A badge that is simply
+    missing read the same as an analysis still running, so each one says
+    what happened instead. Re-analysis is not advised: it reads the same
+    table, and would fail the same way.
 
     Returns:
         Two sentences, ending in a full stop: why no assessment is shown,
@@ -640,6 +671,8 @@ def transparency_failure_text(failure: TransparencyAnalysisFailure) -> str:
     """
     if failure.kind is TransparencyFailureKind.NO_IDENTIFIER:
         return unassessed_caveat(_NO_IDENTIFIER_BECAUSE, TRANSPARENCY_SOUGHT)
+    if failure.kind is TransparencyFailureKind.WRITTEN_BY_NEWER_BUILD:
+        return unassessed_caveat(_NEWER_BUILD_BECAUSE, TRANSPARENCY_SOUGHT)
     # __post_init__ refuses an attempted analysis with no cause, so this is
     # unreachable. It is a raise rather than an assert because ``python -O``
     # strips asserts, and what follows the strip is an AttributeError on the

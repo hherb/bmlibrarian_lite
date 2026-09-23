@@ -21,8 +21,11 @@ from collections.abc import Mapping, Sequence
 from ..transparency.transparency_models import (
     COI_NOT_STATED,
     NAMEABLE_RISK_LEVELS,
+    StoredTransparency,
     TransparencyResult,
     TransparencyRisk,
+    UndecodableTransparencyRow,
+    undecodable_row_caveat,
 )
 from ..transparency.transparency_settings import (
     ReportRiskThreshold,
@@ -187,7 +190,7 @@ def inject_risk_warnings(
 
 def withheld_reference_caveats(
     doc_ids: Sequence[str],
-    transparency_results: Mapping[str, TransparencyResult],
+    transparency_results: Mapping[str, StoredTransparency],
     analysis_applied: bool,
 ) -> dict[str, str]:
     """Say which cited studies carry no finding, and why, for their references.
@@ -195,8 +198,8 @@ def withheld_reference_caveats(
     The report's "Awaiting re-analysis" and "Not assessed" lines name how
     many of each are cited; every one of those has to be findable in the
     reference list, or the count points at entries that look exactly like a
-    study assessed as low risk (#372). So all three kinds are annotated, not
-    only the superseded one.
+    study assessed as low risk (#372). So every kind is annotated, not only
+    the superseded one.
 
     Args:
         doc_ids: The cited documents, in reference order.
@@ -206,8 +209,9 @@ def withheld_reference_caveats(
 
     Returns:
         By document id, the caveat its reference is annotated with: a row an
-        earlier analyser wrote, a row at no nameable risk level, or -- when
-        the analysis was asked for -- no row at all.
+        earlier analyser wrote, a row this build could not decode (#374), a
+        row at no nameable risk level, or -- when the analysis was asked for
+        -- no row at all.
     """
     from ..analysis_failures import (
         no_risk_level_caveat,
@@ -221,6 +225,8 @@ def withheld_reference_caveats(
         if result is None:
             if analysis_applied:
                 caveats[doc_id] = not_stored_assessment_caveat()
+        elif isinstance(result, UndecodableTransparencyRow):
+            caveats[doc_id] = undecodable_row_caveat(result)
         elif not result.is_current:
             caveats[doc_id] = superseded_assessment_caveat()
         elif result.risk_level not in NAMEABLE_RISK_LEVELS:

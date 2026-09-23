@@ -288,6 +288,20 @@ analysed after it, and the reader cannot tell which they are looking at.
   record that a source was unreadable, and a row carrying that flag is a
   cache miss too (`is_final`). It is still *presented*, with its caveat: it
   is a weakened finding, not an absent one.
+- **A row this build cannot decode is one row, withheld on its own.** A
+  risk level a newer build wrote, or a timestamp that will not parse, used
+  to raise out of the batch reader and fail the read for every document
+  asked about with it: a review's report failed, and a reloaded question
+  lost every badge (#374). The reader returns such a row as a value
+  (`UndecodableTransparencyRow`) beside the rows that decoded. It is
+  counted as not assessed, annotated in the references, and badged with
+  its own reason. Dropping it would read as a document never analysed. The
+  one column that decides what may be done with it is its version, which
+  is plain text and survives: **strictly newer than this build's** means
+  another build's finding, which is never re-analysed or overwritten, and
+  its caveat says a newer version wrote it. **Anything else is damage**,
+  which stays pending, and re-analysis replaces it. Neither caveat may say
+  an *earlier* analyser wrote the row, because nothing established that.
 - **A stale row is a cache miss, not a cache hit.** Re-analysis happens on
   the path that already queues and paces that work (`analyze_document`),
   and `get_documents_pending_transparency` counts a superseded row as

@@ -82,7 +82,7 @@ if TYPE_CHECKING:
     # without pulling in the agents and the analyser.
     from .data_models import Citation
     from .quality.data_models import QualityAssessment, StudyClassification
-    from .transparency import TransparencyResult
+    from .transparency import StoredTransparency, TransparencyResult
 
 logger = logging.getLogger(__name__)
 
@@ -3521,6 +3521,44 @@ class LiteStorage:
             full_text_analyzed=bool(row["full_text_analyzed"]),
         )
 
+    def _stored_transparency_from_row(
+        self, row: sqlite3.Row
+    ) -> "StoredTransparency":
+        """Decode one ``transparency_results`` row, or say it would not decode.
+
+        One row this build cannot read -- a risk level a newer build wrote
+        into a shared data directory, a timestamp that will not parse --
+        used to raise out of the reader and fail the read for every document
+        asked about with it: a review's report, a reloaded question's badges
+        (#374). It is withheld on its own instead, and logged.
+
+        Args:
+            row: A ``transparency_results`` row.
+
+        Returns:
+            The stored assessment, or an :class:`UndecodableTransparencyRow`
+            carrying the row's version, which decides whether it may be
+            re-analysed.
+        """
+        from .transparency import UndecodableTransparencyRow
+
+        try:
+            return self._transparency_result_from_row(row)
+        except (ValueError, TypeError):
+            # ValueError: an enum value or timestamp this build does not
+            # know. TypeError: a NULL where a value is required. The row
+            # names what failed; its values stay out of the reader's view.
+            logger.exception(
+                "The stored transparency row of document %s could not be "
+                "decoded; withholding it",
+                row["document_id"],
+            )
+            raw_version = row["analyzer_version"]
+            return UndecodableTransparencyRow(
+                document_id=row["document_id"],
+                analyzer_version=None if raw_version is None else str(raw_version),
+            )
+
     def save_transparency_result(self, result: "TransparencyResult") -> None:
         """
         Save or update transparency analysis result.
@@ -3569,7 +3607,7 @@ class LiteStorage:
     def get_transparency_result(
         self,
         document_id: str,
-    ) -> Optional["TransparencyResult"]:
+    ) -> Optional["StoredTransparency"]:
         """
         Retrieve transparency result for a document.
 
@@ -3577,7 +3615,9 @@ class LiteStorage:
             document_id: Document ID to look up
 
         Returns:
-            TransparencyResult if found, None otherwise
+            The stored assessment; an :class:`UndecodableTransparencyRow`
+            when the row is there but this build cannot decode it (#374);
+            None when there is no row.
         """
         query = "SELECT * FROM transparency_results WHERE document_id = ?"
 
@@ -3588,12 +3628,12 @@ class LiteStorage:
             if not row:
                 return None
 
-            return self._transparency_result_from_row(row)
+            return self._stored_transparency_from_row(row)
 
     def get_transparency_results_batch(
         self,
         document_ids: list[str],
-    ) -> dict[str, "TransparencyResult"]:
+    ) -> dict[str, "StoredTransparency"]:
         """
         Retrieve transparency results for multiple documents.
 
@@ -3601,23 +3641,24 @@ class LiteStorage:
             document_ids: List of document IDs to look up
 
         Returns:
-            Dictionary mapping document ID to TransparencyResult
+            By document ID, what is stored: the assessment, or an
+            :class:`UndecodableTransparencyRow` for a row this build cannot
+            decode. One such row no longer fails the read for the rest
+            (#374). A document with no row is absent from the mapping.
         """
         if not document_ids:
             return {}
 
-        from .transparency import TransparencyResult
-
         placeholders = ",".join("?" * len(document_ids))
         query = f"SELECT * FROM transparency_results WHERE document_id IN ({placeholders})"
 
-        results: dict[str, TransparencyResult] = {}
+        results: dict[str, StoredTransparency] = {}
 
         with self._sqlite_connection() as conn:
             cursor = conn.execute(query, document_ids)
 
             for row in cursor:
-                result = self._transparency_result_from_row(row)
+                result = self._stored_transparency_from_row(row)
                 results[result.document_id] = result
 
         return results

@@ -8,94 +8,38 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#373 + #372 — a correction reaches a question nobody reviews again**,
-branch `fix/reanalyse-a-question-nobody-reviews-373-372`, **PR #375**. Python only.
-Compress into **Recently landed** once merged. Contract: the two new bullets
-under *A correction only reaches the reader if something re-analyses* in
-`doc/cross_platform/analysis_failure_reporting.md`.
-
-- **What #373 actually was.** Only two paths read a stored row — the
-  manager's cache check and the report step of a *live* review — and both
-  run inside a review that has already queued re-analysis. Loading a past
-  question (`LiteMainWindow._on_question_selected`) showed **no transparency
-  badge at all**, current or not. So the harm was not an unswept store but
-  an unreachable one: a stale row had no reader and no way to be redone.
-- **User's call (2026-09-23): an explicit pass, not a sweep or auto-on-load.**
-  *Re-analyse Transparency* on the Research Questions context menu
-  (`TransparencyReanalysisWorker`, on the `SingleOutcome`/`PassOutcome`
-  pattern) runs the question's pending documents. It is the caller
-  `get_documents_pending_transparency` lacked — now **question-scoped** (the
-  population a reloaded question shows) and decided by
-  `pending_transparency_ids`, i.e. the cache's own `is_final`, not a second
-  rendering in SQL. Documents with no PMID or DOI are left out and named.
-- **One analysis body.** `transparency/assessment.py` (Qt-free:
-  `create_background_analyzer`, `build_transparency_result`,
-  `assess_document`, `contact_email`) is what the manager and the pass both
-  run, so they cannot store different results. Tests patch
-  `transparency.assessment.StudyTransparencyAnalyzer` now.
-- **Provisional is a third count.** `PassOutcome.provisional`: a re-analysis
-  that could not read a source is stored and shown, and stays pending —
-  neither a success nor a failure (`provisional_text`).
-- **Load shows, and fetches nothing.** `stored_transparency_outcomes` gives
-  every document an outcome; superseded and never-stored rows carry
-  `reanalysis_advice()`, which names `REANALYSE_TRANSPARENCY_ACTION` — the
-  same constant the menu label uses. The superseded caveat now says "has not
-  been re-analysed yet"; "is being re-analysed" was false outside a review.
-  The pass forwards each outcome to `AuditTrailTab.on_transparency_outcome`.
-- **#372: both populations** (user's call). `count_transparency_over` counts
-  a named set (`not_stored`, `not_assessed`, `considered`);
-  `_record_transparency_counts` takes `cited_ids`; three `ReportMetadata`
-  fields default to `None`, so an older report keeps its bare count rather
-  than a guessed share. Wording: "12 of the 40 studies reviewed; 3 of them
-  are cited in this report".
-- **Every counted study must be findable in the references.** The review
-  found that "Not assessed … 2 of them are cited" pointed at references with
-  no mark: only superseded rows were annotated. `withheld_reference_caveats`
-  (report_risk_helpers) now annotates all three kinds the count includes —
-  superseded, no row (only when the analysis was asked for), and a current
-  row at no nameable level (`no_risk_level_caveat`).
-- **Review round, addressed:** the confirm dialog said "no current
-  assessment" over provisional rows whose badges are on screen (now "no
-  settled assessment (missing, provisional or out of date)"); one row that
-  fails to decode no longer blanks a reloaded question (narrow catch in
-  `_show_stored_transparency` and the pass's click handler). The underlying
-  batch-read fragility is **#374** — it also hits a live review's report.
-- **Verified:** `pytest tests/` 2311 passed, 3 xfailed; `lint_delta.py`
-  0 new (mypy net −14 — `analyze()` now types its optionals). Mutation
-  sweeps (both guards, `cp` backups, `cmp` after): 32 + 7 sites, one
-  survivor — the singular "1 more carries…" branch — now tested. Offscreen
-  smoke of `LiteMainWindow` + a stored question: current, superseded and
-  no-identifier badges all render.
-- **Second review round (six agents), addressed:**
-  - The badge-load failure message was overwritten at once by the load's
-    own "Loaded question…" summary. `_show_stored_transparency` now returns
-    a clause (`unreadable_assessments_clause`) that the summary carries, and
-    gives every badge `unreadable_assessment_caveat()`.
-  - The report's cited counts and its reference notes came from two reads,
-    with background analyses storing rows in between.
-    `_record_transparency_counts` now returns the rows it counted, and the
-    report step annotates from those.
-  - `count_transparency_results` is now the private `_count_rows`, since its
-    `not_stored=0` meant "not known".
-  - `NAMEABLE_RISK_LEVELS` now lives only in `transparency_models`.
-  - `withheld_population_text` names the bare count when a recorded
-    population cannot hold it.
-  - The worker refuses documents with no PMID or DOI, and logs a traceback
-    for `INTERNAL_ERROR`.
-  - The source-string tests became behavioural ones: the menu, the load
-    path and the workflow's `cited_ids`.
-  - The contract gains every-kind-annotated, one-read, and no-identifier
-    exclusion.
-  - Lodged rather than done: the pass-skeleton refactor is #376, and the
-    count of pending documents missing from the library is #377.
-  - After this round: `pytest tests/` 2333 passed, 3 xfailed;
-    `lint_delta.py` 0 new.
+**#374 — one undecodable transparency row fails a whole batch read**, branch
+`fix/one-undecodable-transparency-row-374`. Python only.
+**User's call (2026-09-23): split by version.** A row whose `analyzer_version`
+is strictly newer than this build's was written by a newer build and is never
+overwritten (not pending, not re-queued); any other undecodable row is
+damaged, stays pending, and re-analysis replaces it. Either way it is shown
+as "not assessed" for that document alone, never dropped.
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
+
+- **A correction reaches a question nobody reviews again** (Python; #373,
+  #372, PR #375, merged 2026-09-23). Contract: *A correction only reaches the
+  reader if something re-analyses* in
+  `doc/cross_platform/analysis_failure_reporting.md`. What binds: **a stored
+  row nothing reads is unreachable, not merely stale** — a reloaded question
+  showed no badge at all. **Load shows and fetches nothing**
+  (`stored_transparency_outcomes`); re-analysis is an explicit pass
+  (*Re-analyse Transparency*, `TransparencyReanalysisWorker`), question-scoped
+  and decided by the cache's own `is_final` (`pending_transparency_ids`).
+  **One analysis body** (`transparency/assessment.py`) for the manager and the
+  pass. **Provisional is a third count** (`PassOutcome.provisional`). **Every
+  counted study must be findable in the references**
+  (`withheld_reference_caveats` annotates superseded, not-stored and
+  no-nameable-level rows), and **the counts and annotations come from one
+  read** (`_record_transparency_counts` returns its rows). Reports name both
+  populations ("12 of the 40 studies reviewed; 3 of them are cited").
+  **A status message is overwritten by the load's summary** — carry a clause
+  instead. Lodged: #374, #376, #377.
 
 - **A correction only reaches the reader if something re-analyses** (Python;
   #360, #361, #249, PR #366, merged 2026-09-23). Rules in
@@ -306,12 +250,13 @@ Open issues by family; each issue carries the detail. None blocks another.
   `doc/cross_platform/analysis_failure_reporting.md`**, now several rules
   longer (#302–#304, #306, #307, #310, #315). Both run the same pipeline with the
   same shape. The largest remaining slice of this family.
-- Python, lodged by PR #366 (**#373** and **#372** are in flight above):
+- Python, lodged by PR #366 and PR #375:
   **#369** a cancel is reported as a failure;
   **#371** the model path's 5xx advice still blames the reader's connection;
   **#367** the quality filter has no caller; **#368** `TransparencyResult` is
   mutable and unvalidated; **#370** Android has no version comparison;
-  **#374** one undecodable transparency row fails a whole batch read.
+  **#374** (in flight above); **#376** one skeleton for the Research Questions
+  passes; **#377** say how many pending documents are missing from the library.
 - Python, the rest of what PR #358 and PR #365 lodged: **#362** a DOI-only
   document never asks PubMed for the statement it reports as unavailable —
   PR #365 reports that honestly rather than fixing it; **#350** the download

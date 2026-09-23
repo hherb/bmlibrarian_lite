@@ -260,8 +260,9 @@ def reanalysis_scope_text(analysable: int, unidentified: int) -> str:
 
     Returns:
         e.g. "12 documents have no settled transparency assessment
-        (missing, provisional or out of date) and can be re-analysed. 2 more
-        carry no PubMed ID or DOI to look one up by." Not "no current
+        (missing, provisional, out of date or unreadable) and can be
+        re-analysed. 2 more carry no PubMed ID or DOI to look one up by."
+        Not "no current
         assessment": a provisional row is current, and its badge is on
         screen while the dialog is open.
         Said even when nothing can be done, so a question whose badges still
@@ -273,13 +274,13 @@ def reanalysis_scope_text(analysable: int, unidentified: int) -> str:
     elif analysable == 1:
         text = (
             "1 document has no settled transparency assessment (missing, "
-            "provisional or out of date) and can be re-analysed."
+            "provisional, out of date or unreadable) and can be re-analysed."
         )
     else:
         text = (
             f"{analysable:,} documents have no settled transparency "
-            "assessment (missing, provisional or out of date) and can be "
-            "re-analysed."
+            "assessment (missing, provisional, out of date or unreadable) "
+            "and can be re-analysed."
         )
     if unidentified == 1:
         text += " 1 more carries no PubMed ID or DOI to look one up by."
@@ -1466,8 +1467,9 @@ class ResearchQuestionsTab(QWidget):
             )
             documents = self.storage.get_documents(pending_ids)
         except (SQLiteError, sqlite3.Error, ValueError) as e:
-            # ValueError: a stored row this build cannot decode, such as a
-            # risk level a newer build wrote into a shared data directory
+            # ValueError: a stored document whose JSON columns will not
+            # parse. A transparency row that will not decode does not land
+            # here: the reader withholds it alone (#374).
             logger.exception("Could not read the pending transparency work")
             self.progress_label.setText(
                 f"Could not read the stored assessments: {type(e).__name__}"

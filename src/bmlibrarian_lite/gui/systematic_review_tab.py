@@ -96,6 +96,7 @@ from ..search_failures import (
 )
 from ..quality import QualityManager, QualityFilter, QualityAssessment
 from ..transparency import (
+    StoredTransparency,
     TransparencyManager,
     TransparencyResult,
     count_transparency_over,
@@ -215,7 +216,7 @@ class WorkflowWorker(QThread):
         metadata: ReportMetadata,
         document_ids: list[str],
         cited_ids: list[str] | None = None,
-    ) -> dict[str, TransparencyResult]:
+    ) -> dict[str, StoredTransparency]:
         """Record how the documents' transparency assessments are distributed.
 
         A row an earlier version of the analyser wrote is counted apart from
@@ -616,7 +617,7 @@ class WorkflowWorker(QThread):
             metadata.unique_sources_cited = len(unique_docs)
 
             # Collect transparency stats from available results
-            counted_rows: dict[str, TransparencyResult] | None = None
+            counted_rows: dict[str, StoredTransparency] | None = None
             if self.config.transparency.enabled:
                 counted_rows = self._record_transparency_counts(
                     metadata,
@@ -1842,14 +1843,13 @@ class SystematicReviewTab(QWidget):
 
         Returns:
             The stored assessment when this build's analyser produced it;
-            ``None`` when there is none, or when the stored row is one an
-            earlier analyser wrote. The caller cannot tell a retracted
+            ``None`` when there is none, when the stored row is one an
+            earlier analyser wrote, or when it could not be decoded. The caller cannot tell a retracted
             finding from a current one, so the gate is here rather than
             left to each of them (#360).
         """
-        stored: TransparencyResult | None = self.storage.get_transparency_result(
-            doc_id
-        )
-        if stored is None or not stored.is_current:
+        stored = self.storage.get_transparency_result(doc_id)
+        # A row this build could not decode is no finding either (#374)
+        if not isinstance(stored, TransparencyResult) or not stored.is_current:
             return None
         return stored
