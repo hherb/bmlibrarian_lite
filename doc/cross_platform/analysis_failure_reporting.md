@@ -297,19 +297,38 @@ analysed after it, and the reader cannot tell which they are looking at.
   counted as not assessed, annotated in the references, and badged with
   its own reason. Dropping it would read as a document never analysed. The
   one column that decides what may be done with it is its version, which
-  is plain text and survives: **strictly newer than this build's** means
-  another build's finding, which is never re-analysed or overwritten, and
-  its caveat says a newer version wrote it. **Anything else is damage**,
-  which stays pending, and re-analysis replaces it. Neither caveat may say
-  an *earlier* analyser wrote the row, because nothing established that.
-  The newer-build check holds **whatever the cache setting**: turning off
-  reuse of this build's results does not permit overwriting another
-  build's. Text that is not valid UTF-8 counts as undecodable too. Python's
-  sqlite3 raises it from the cursor itself, before any row can be withheld,
-  so the readers keep such text as bytes and withhold the row. It is never
-  decoded lossily, which would show the reader altered text. A newer
-  build's row is logged as a warning, since it is expected and permanent,
-  and damage is logged as an error.
+  usually survives (when it does not, the row sorts oldest and is damage):
+  **strictly newer than this build's** means another build's finding, which
+  is never re-analysed or overwritten, and its caveat says a newer version
+  wrote it. **Anything else is damage**, which stays pending, and
+  re-analysis replaces it. Neither caveat may say an *earlier* analyser
+  wrote the row, because nothing established that.
+- **A newer build's row is never this build's to replace, decodable or
+  not.** One test decides it (`may_replace_stored`), and the pending list
+  and the manager both ask it. It holds **whatever the cache setting** --
+  turning off reuse of this build's results does not permit overwriting
+  another build's -- and **even for a provisional row**: `is_final` is
+  false for it, but re-analysing it here would replace that build's finding
+  with an older analyser's. A newer build's row that decodes is served as
+  it is stored, with its own caveats.
+- **Only the stored data is caught, never the mapper.** The catch that
+  withholds a row surrounds the decoding of the values alone (risk level,
+  timestamp, text that is not UTF-8). Around the whole mapping, it also
+  caught the `TypeError` of a field the mapper forgot, and every row in the
+  library read as damaged and was re-analysed on every pass. Text that is
+  not valid UTF-8 counts as undecodable. Python's sqlite3 raises it from the
+  cursor itself, before any row can be withheld, so the readers keep such
+  text as bytes. In a column the row cannot be shown without, that
+  withholds the row; in one already read on its own (the indicator and
+  caveat lists, the COI disclosure) it costs that column, with its caveat,
+  not the finding. It is never decoded lossily, which would show the reader
+  altered text. A newer build's row is logged as a warning, since it is
+  expected and permanent, and damage is logged as an error; both name the
+  column and the error's class, never the stored value.
+
+  **Still outstanding in Python** (#378): the Re-analyse pass does not
+  re-read a row before saving over it, so a newer build that writes a row
+  while the pass is running can still lose it.
 - **A stale row is a cache miss, not a cache hit.** Re-analysis happens on
   the path that already queues and paces that work (`analyze_document`),
   and `get_documents_pending_transparency` counts a superseded row as

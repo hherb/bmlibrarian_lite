@@ -82,7 +82,11 @@ if TYPE_CHECKING:
     # without pulling in the agents and the analyser.
     from .data_models import Citation
     from .quality.data_models import QualityAssessment, StudyClassification
-    from .transparency import StoredTransparency, TransparencyResult
+    from .transparency import (
+        StoredTransparency,
+        TransparencyResult,
+        TransparencyRisk,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +109,47 @@ def _text_or_bytes(raw: bytes) -> str | bytes:
         return raw.decode("utf-8")
     except UnicodeDecodeError:
         return raw
+
+
+#: The ``transparency_results`` columns read one at a time, each degrading on
+#: its own when it will not read: a list to empty with a caveat saying it was
+#: lost, the COI disclosure to "not assessed". Text in them that is not UTF-8
+#: costs that column, not the row: it once withheld a finding whose risk
+#: level and score read perfectly well.
+_TRANSPARENCY_COLUMNS_READ_ALONE = frozenset(
+    {"risk_indicators", "warnings", "coi_disclosure"}
+)
+
+
+class _UndecodableColumnError(Exception):
+    """A stored transparency value this build cannot decode (#374).
+
+    Raised only around the stored *data*, so that the catch that withholds
+    the row cannot also swallow a programming error: a mapper that forgot a
+    field raised ``TypeError`` from inside that catch, and every row in the
+    library read as damaged and was offered for re-analysis on every pass.
+    Its message names the column and the error's class, never the value,
+    which may be anything.
+    """
+
+
+def _stored_version_text(raw: object) -> str | None:
+    """Read a stored ``analyzer_version`` as text, if it can be.
+
+    Args:
+        raw: The column's value: text, a number SQLite kept as one, bytes
+            that were not UTF-8, or NULL.
+
+    Returns:
+        The version as text, or ``None`` when there is none to read. A
+        number is kept, not dropped: dropped, it would sort oldest, and a
+        newer build's row would be called damaged and overwritten.
+    """
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return str(raw)
+    return None
 
 
 def compute_question_hash(question: str) -> str:
@@ -352,7 +397,7 @@ class LiteStorage:
 
     @staticmethod
     def _stored_json_list(
-        raw: str | None, document_id: str, column: str
+        raw: str | bytes | None, document_id: str, column: str
     ) -> tuple[list[str], bool]:
         """Read a JSON array column without trusting what is in it.
 
@@ -367,7 +412,8 @@ class LiteStorage:
         risk indicators found".
 
         Args:
-            raw: The column's stored text, possibly ``None``.
+            raw: The column's stored text, possibly ``None``, or bytes when
+                it was not UTF-8 (see ``_text_or_bytes``).
             document_id: Whose row this is, for the log line.
             column: The column's name, for the log line.
 
@@ -377,6 +423,15 @@ class LiteStorage:
         """
         if not raw:
             return [], True
+        if isinstance(raw, bytes):
+            # json.loads would decode it and raise UnicodeDecodeError, which
+            # is neither of the errors caught below
+            logger.warning(
+                "%s for document %s is not UTF-8 text; treating it as empty.",
+                column,
+                document_id,
+            )
+            return [], False
         try:
             value = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
@@ -417,7 +472,7 @@ class LiteStorage:
         )
 
     @staticmethod
-    def _stored_coi_disclosure(raw: str | None, document_id: str) -> str:
+    def _stored_coi_disclosure(raw: str | bytes | None, document_id: str) -> str:
         """Map a stored COI disclosure to one of the three known states.
 
         A NULL is what the migration leaves on every pre-#352 row and means
@@ -426,7 +481,8 @@ class LiteStorage:
         to a badge that would title-case it into a finding.
 
         Args:
-            raw: The column's stored text, possibly ``None``.
+            raw: The column's stored text, possibly ``None``, or bytes when
+                it was not UTF-8 -- unrecognised like any other value.
             document_id: Whose row this is, for the log line.
 
         Returns:
@@ -3493,6 +3549,50 @@ class LiteStorage:
     # Transparency Results Operations
     # =========================================================================
 
+    @staticmethod
+    def _decoded_transparency_keys(
+        row: sqlite3.Row,
+    ) -> tuple["TransparencyRisk", datetime]:
+        """Decode the stored values a row cannot be presented without.
+
+        Args:
+            row: A ``transparency_results`` row.
+
+        Returns:
+            The row's risk level and when it was analysed.
+
+        Raises:
+            _UndecodableColumnError: If a column outside the ones read alone
+                holds bytes (text that is not UTF-8, or a BLOB), or if the
+                risk level or timestamp is one this build does not know.
+        """
+        from .transparency import TransparencyRisk
+
+        held_as_bytes = [
+            column
+            for column in row.keys()
+            if column not in _TRANSPARENCY_COLUMNS_READ_ALONE
+            and isinstance(row[column], bytes)
+        ]
+        if held_as_bytes:
+            # Passed through, it would reach a badge as a ``bytes`` value
+            raise _UndecodableColumnError(
+                f"{', '.join(held_as_bytes)}: bytes where text is stored"
+            )
+        try:
+            risk_level = TransparencyRisk(row["risk_level"])
+        except ValueError as error:
+            raise _UndecodableColumnError(
+                f"risk_level: {type(error).__name__}"
+            ) from error
+        try:
+            analyzed_at = datetime.fromisoformat(row["analyzed_at"])
+        except (ValueError, TypeError) as error:
+            raise _UndecodableColumnError(
+                f"analyzed_at: {type(error).__name__}"
+            ) from error
+        return risk_level, analyzed_at
+
     def _transparency_result_from_row(
         self, row: sqlite3.Row
     ) -> "TransparencyResult":
@@ -3508,18 +3608,18 @@ class LiteStorage:
 
         Returns:
             The stored assessment.
-        """
-        from .transparency import (
-            LEGACY_ANALYZER_VERSION,
-            TransparencyResult,
-            TransparencyRisk,
-        )
 
+        Raises:
+            _UndecodableColumnError: If a value it needs will not decode.
+        """
+        from .transparency import LEGACY_ANALYZER_VERSION, TransparencyResult
+
+        risk_level, analyzed_at = self._decoded_transparency_keys(row)
         indicators, caveats = self._stored_transparency_lists(row)
         return TransparencyResult(
             document_id=row["document_id"],
             transparency_score=row["transparency_score"],
-            risk_level=TransparencyRisk(row["risk_level"]),
+            risk_level=risk_level,
             industry_funding_detected=bool(row["industry_funding_detected"]),
             industry_funding_confidence=row["industry_funding_confidence"],
             data_availability_level=row["data_availability_level"],
@@ -3532,17 +3632,22 @@ class LiteStorage:
             risk_indicators=indicators,
             warnings=caveats,
             tier_downgrade_applied=row["tier_downgrade_applied"],
-            analyzed_at=datetime.fromisoformat(row["analyzed_at"]),
-            # ``or``, not the raw column: it is nullable, and a NULL would
-            # put ``None`` into a field typed ``str``. Such a row reads as
-            # legacy either way -- but as a string, as every reader expects.
-            analyzer_version=row["analyzer_version"] or LEGACY_ANALYZER_VERSION,
+            analyzed_at=analyzed_at,
+            # Not the raw column: it is nullable, and a NULL would put
+            # ``None`` into a field typed ``str``, and a number SQLite kept
+            # as one would fail the version ordering. Such a row reads as
+            # legacy, or as its number -- but as a string, as every reader
+            # expects.
+            analyzer_version=(
+                _stored_version_text(row["analyzer_version"])
+                or LEGACY_ANALYZER_VERSION
+            ),
             sources_unreachable=bool(row["sources_unreachable"]),
             full_text_analyzed=bool(row["full_text_analyzed"]),
         )
 
     def _stored_transparency_from_row(
-        self, row: sqlite3.Row
+        self, row: sqlite3.Row, document_id: str
     ) -> "StoredTransparency":
         """Decode one ``transparency_results`` row, or say it would not decode.
 
@@ -3552,8 +3657,15 @@ class LiteStorage:
         asked about with it: a review's report, a reloaded question's badges
         (#374). It is withheld on its own instead, and logged.
 
+        Only a value that will not decode is caught. Anything else the
+        mapper raises is a defect in this build, and propagates: caught, it
+        called every row in the library damaged.
+
         Args:
             row: A ``transparency_results`` row.
+            document_id: The id the row was looked up by. The withheld row
+                is named by it rather than by the row's own column, so that
+                building it cannot fail over the value that failed to decode.
 
         Returns:
             The stored assessment, or an :class:`UndecodableTransparencyRow`
@@ -3563,38 +3675,32 @@ class LiteStorage:
         from .transparency import UndecodableTransparencyRow
 
         try:
-            if any(isinstance(value, bytes) for value in row):
-                # Text that is not UTF-8 (see _text_or_bytes), or a BLOB in
-                # a text column: either would otherwise pass through as a
-                # ``bytes`` value and be shown as one
-                raise TypeError("a column holds bytes where text is stored")
             return self._transparency_result_from_row(row)
-        except (ValueError, TypeError) as error:
-            # ValueError: an enum value or timestamp this build does not
-            # know. TypeError: a value of the wrong type, such as the bytes
-            # above. The log names the document and the error's class; the
-            # traceback, which may quote a stored value, stays in the log.
+        except _UndecodableColumnError as error:
             raw_version = row["analyzer_version"]
             undecodable = UndecodableTransparencyRow(
-                document_id=row["document_id"],
-                analyzer_version=(
-                    raw_version if isinstance(raw_version, str) else None
-                ),
+                document_id=document_id,
+                analyzer_version=_stored_version_text(raw_version),
             )
+            # The message names the column and the error's class; only the
+            # log carries the traceback, which may quote a stored value, and
+            # nothing here reaches the reader.
             if undecodable.written_by_newer_build:
                 # Expected, and permanent: no traceback on every read
                 logger.warning(
                     "The stored transparency row of document %s was written "
-                    "by analyser %s, newer than this build's; withholding it",
-                    row["document_id"],
-                    raw_version,
+                    "by analyser %s, newer than this build's, and could not "
+                    "be decoded (%s); withholding it",
+                    document_id,
+                    undecodable.analyzer_version,
+                    error,
                 )
             else:
                 logger.error(
                     "The stored transparency row of document %s could not "
                     "be decoded (%s); withholding it",
-                    row["document_id"],
-                    type(error).__name__,
+                    document_id,
+                    error,
                     exc_info=True,
                 )
             return undecodable
@@ -3669,7 +3775,7 @@ class LiteStorage:
             if not row:
                 return None
 
-            return self._stored_transparency_from_row(row)
+            return self._stored_transparency_from_row(row, document_id)
 
     def get_transparency_results_batch(
         self,
@@ -3702,8 +3808,12 @@ class LiteStorage:
             cursor = conn.execute(query, document_ids)
 
             for row in cursor:
-                result = self._stored_transparency_from_row(row)
-                results[result.document_id] = result
+                # One of ``document_ids``: ``IN`` matched it against them,
+                # and none of them is bytes, so it read as the same text
+                document_id = row["document_id"]
+                results[document_id] = self._stored_transparency_from_row(
+                    row, document_id
+                )
 
         return results
 

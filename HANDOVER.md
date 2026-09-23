@@ -43,16 +43,40 @@ as "not assessed" for that document alone, never dropped.
     a row holding bytes is withheld.
   - With *Cache results* off, the manager skipped the newer-build check, so
     it now runs before the cache guard. The old
-    `test_caching_disabled_skips_cache` pinned "the store is not read" and
-    now asserts "no stored finding is served".
+    `test_caching_disabled_skips_cache` pinned "the store is not read"; it
+    is now `test_caching_disabled_serves_no_stored_finding`.
   - The methodology's "Not assessed" sentence now lists an unreadable row
     and a row at no nameable level.
   - A newer build's row logs a warning, not an ERROR traceback.
   - A second sweep caught 7 of 7.
   - `pytest tests/` 2365 passed, 3 xfailed; `lint_delta.py` 0 new.
-- Lodged: **#378**. Its undecodable half is fixed here. Still open: a
-  *decodable* row from a newer build is overwritten with the cache off, and
-  the Re-analyse pass never re-reads a row before saving over it.
+- **Second review round (five agents), addressed:**
+  - A newer build's row that *decoded* but was provisional was still pending
+    and re-analysed, even with the cache on (`is_final` is false for it), and
+    with the cache off any decodable newer row was. One test now decides
+    it, `may_replace_stored` (on `is_newer_than_this_build`), asked by
+    `_needs_analysis` and by the manager before the cache guard; a decodable
+    newer row is served as stored.
+  - The catch wrapped the whole mapper, so a field the mapper forgot
+    (`TypeError`) would have called every row damaged. Only the decoding
+    (`_decoded_transparency_keys`) now raises the private
+    `_UndecodableColumnError`; anything else propagates.
+  - Bytes now withhold the row only outside the list and COI columns
+    (`_TRANSPARENCY_COLUMNS_READ_ALONE`), which degrade per column.
+  - The handler names the withheld row by the queried id, so it cannot
+    raise over the row's own id. A numeric version is kept as text.
+  - `TransparencyCounts` validates its buckets. The logs name the column
+    and the error's class, never the value.
+  - Every new fix test fails on the pre-round code (11 of them); a 4-mutation
+    sweep over the storage changes caught all 4.
+  - `pytest tests/` 2384 passed, 3 xfailed; `lint_delta.py` 0 new.
+- Lodged: **#378** — its undecodable and decodable halves are fixed here;
+  still open is that nothing re-reads a row just before saving over it, so a
+  newer build writing mid-analysis can lose its row. **#380** — the report
+  count and the Re-analyse dialog do not tell a newer build's row from a
+  damaged one. **#381** — a store error in the manager's cache check stops
+  the review's queueing loop. **#382** — the startup COI migration fails on
+  non-UTF-8 text.
 
 ## Recently landed (context)
 
@@ -293,9 +317,11 @@ Open issues by family; each issue carries the detail. None blocks another.
   **#371** the model path's 5xx advice still blames the reader's connection;
   **#367** the quality filter has no caller; **#368** `TransparencyResult` is
   mutable and unvalidated; **#370** Android has no version comparison;
-  **#374** (in flight above); **#378** cache-off overwrites a newer build's
-  row; **#376** one skeleton for the Research Questions
-  passes; **#377** say how many pending documents are missing from the library.
+  **#374** (in flight above); **#378** nothing re-reads a newer build's row
+  before saving over it; **#380** newer-build vs damaged rows in the report
+  count and the dialog; **#381** a store error stops the review's queueing
+  loop; **#382** the startup COI migration and non-UTF-8 text; **#376** one
+  skeleton for the Research Questions passes; **#377** say how many pending documents are missing from the library.
 - Python, the rest of what PR #358 and PR #365 lodged: **#362** a DOI-only
   document never asks PubMed for the statement it reports as unavailable —
   PR #365 reports that honestly rather than fixing it; **#350** the download

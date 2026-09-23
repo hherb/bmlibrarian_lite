@@ -214,11 +214,11 @@ class TestAnalyzeDocument:
         assert signals[0][0] == "doc1"
         assert signals[0][1] == cached_result
 
-    def test_caching_disabled_skips_cache(self, manager, mock_storage):
-        """Disabled caching serves no stored finding, current or not.
+    def test_caching_disabled_serves_no_stored_finding(self, manager, mock_storage):
+        """Disabled caching serves no stored finding of this build's.
 
-        The row is still read: whose it is decides whether it may be
-        overwritten, whatever the setting (#374).
+        The row is still read: a newer build's, decodable or not, may not be
+        overwritten whatever the setting (#374), and that is asked first.
         """
         mock_storage.get_transparency_result.return_value = TransparencyResult(
             document_id="doc1",

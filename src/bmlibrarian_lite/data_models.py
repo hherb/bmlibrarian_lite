@@ -1136,7 +1136,7 @@ class TransparencyFailureKind(Enum):
 
     A missing badge used to mean three things at once -- transparency
     switched off, the analysis still running, and the analysis failed -- and
-    the reader could tell none of them apart. These are the two the pipeline
+    the reader could tell none of them apart. These are what the pipeline
     can report; "still running" is what the absence of a failure means.
     """
 
@@ -1203,8 +1203,8 @@ class TransparencyAnalysisFailure:
         if self.kind in _NOTHING_ASKED_KINDS:
             if self.cause is not None:
                 raise ValueError(
-                    f"Nothing was asked for a {self.kind.value} record, so no "
-                    "provider can have failed"
+                    f"Nothing was asked for this document ({self.kind.name}), "
+                    "so no provider can have failed"
                 )
             return
         if not isinstance(self.cause, EvaluationErrorCode):
@@ -2361,12 +2361,11 @@ class ReportMetadata:
             about that carry no finding at all -- it failed, had no
             identifier to look one up by, had not finished, reached no
             nameable risk level, or its stored row could not be decoded
-            (#374). Counted and
-            named because the alternative is a shorter denominator: a
-            throttled PubMed used to shrink "Documents Analyzed" with
-            nothing saying so, and a total outage printed "Transparency
-            analysis was not applied" over an analysis that ran against
-            every study and failed on every one (#361, #249)
+            (#374). Counted and named because the alternative is a shorter
+            denominator: a throttled PubMed used to shrink "Documents
+            Analyzed" with nothing saying so, and a total outage printed
+            "Transparency analysis was not applied" over an analysis that
+            ran against every study and failed on every one (#361, #249)
         transparency_documents_considered: How many documents the counts
             above are a share of -- those the review assessed. None for a
             report made before the report named it (#372)

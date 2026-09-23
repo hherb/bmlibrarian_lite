@@ -906,7 +906,8 @@ class TestTheTabOffersOnlyWhatIsPending:
         worker_cls.assert_not_called()
         [call] = tab.progress_label.setText.call_args_list
         assert call.args[0] == (
-            "Could not read the stored assessments: JSONDecodeError"
+            "Could not read this question's stored documents or "
+            "assessments: JSONDecodeError"
         )
 
     def test_declining_starts_nothing(self) -> None:

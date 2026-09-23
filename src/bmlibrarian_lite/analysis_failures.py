@@ -583,7 +583,7 @@ def unreadable_assessments_clause(error_name: str) -> str:
 
     Returns:
         A clause without capital or full stop, for example
-        ``"transparency badges could not be loaded (ValueError); see the log"``.
+        ``"transparency badges could not be loaded (OperationalError); see the log"``.
     """
     return f"transparency badges could not be loaded ({error_name}); see the log"
 
@@ -641,10 +641,10 @@ def provisional_text(provisional: int) -> str:
 
 
 #: What a failed or skipped whole-study analysis says was not established.
-#: One place, because all three reasons are completed by it -- the
-#: superseded caveat above, the no-identifier one below, and the
-#: failed-analysis clause in ``transparency_failure_text`` -- and they must
-#: not drift apart.
+#: One place, because every transparency caveat is completed by it -- the
+#: superseded, not-stored and damaged caveats above, the no-identifier and
+#: newer-build ones below, and the failed-analysis clause in
+#: ``transparency_failure_text`` -- and they must not drift apart.
 TRANSPARENCY_SOUGHT = "this study's transparency"
 
 #: Why nothing was asked for a record carrying neither identifier. The

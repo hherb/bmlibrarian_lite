@@ -31,6 +31,7 @@ from .transparency_models import (
     TRANSPARENCY_ANALYZER_VERSION,
     TransparencyResult,
     UndecodableTransparencyRow,
+    may_replace_stored,
 )
 from .transparency_settings import TransparencySettings
 
@@ -155,18 +156,28 @@ class TransparencyManager(QObject):
         # (#360). Re-analysis happens here, on the path that already queues
         # and paces this work, rather than as a bulk invalidation on open.
         cached = self.storage.get_transparency_result(document_id)
-        # Asked whatever the cache setting: switching off reuse of this
-        # build's results is not permission to overwrite a newer build's
-        # (#374). Any other row that will not decode is damaged, and is
-        # redone below.
-        if (
-            isinstance(cached, UndecodableTransparencyRow)
-            and cached.written_by_newer_build
-        ):
-            self.analysis_failed.emit(
-                document_id,
-                TransparencyAnalysisFailure.written_by_newer_build(document_id),
-            )
+        # Asked whatever the cache setting, and of every row, provisional or
+        # not: switching off reuse of this build's results is not permission
+        # to overwrite a newer build's (#374). The same test the pass's
+        # pending list asks (``may_replace_stored``). Any other row that
+        # will not decode is damaged, and is redone below.
+        if cached is not None and not may_replace_stored(cached):
+            if isinstance(cached, UndecodableTransparencyRow):
+                self.analysis_failed.emit(
+                    document_id,
+                    TransparencyAnalysisFailure.written_by_newer_build(
+                        document_id
+                    ),
+                )
+            else:
+                # Current by definition, and presented as stored, with its
+                # own caveats if it is provisional
+                logger.debug(
+                    f"Using {document_id}'s stored result as it is: analyser "
+                    f"{cached.analyzer_version}, newer than this build's, "
+                    "wrote it"
+                )
+                self.analysis_complete.emit(document_id, cached)
             return
         if self.settings.cache_results:
             if isinstance(cached, UndecodableTransparencyRow):

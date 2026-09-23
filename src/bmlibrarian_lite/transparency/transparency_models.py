@@ -17,7 +17,7 @@
 """Data models for transparency analysis results."""
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Union
@@ -122,6 +122,31 @@ def analyzer_version_ordinal(version: str | None) -> tuple[int, ...]:
         return (0,)
 
 
+def is_newer_than_this_build(version: str | None) -> bool:
+    """Whether a stored row's version says a newer build wrote it.
+
+    The one test of whose a row is, for every place that decides whether
+    this build may replace it: the pass's pending list, the manager's cache
+    check, and what the reader is told. Written out at each, the copies
+    drifted, and a newer build's row that decoded but was provisional was
+    re-analysed and overwritten (#374).
+
+    *Strictly newer*: such a row is presumably that build's finding, and
+    re-analysing it here would overwrite it (``INSERT OR REPLACE``) with an
+    older analyser's. This build's own version, and any version that will
+    not parse, is not newer.
+
+    Args:
+        version: A stored ``analyzer_version``, or ``None``.
+
+    Returns:
+        True when it orders after this build's.
+    """
+    return analyzer_version_ordinal(version) > analyzer_version_ordinal(
+        TRANSPARENCY_ANALYZER_VERSION
+    )
+
+
 @dataclass(frozen=True)
 class UndecodableTransparencyRow:
     """A stored transparency row this build could not decode (#374).
@@ -134,13 +159,14 @@ class UndecodableTransparencyRow:
     would read as a document never analysed.
 
     Only ``analyzer_version`` is kept, because it is the one column that
-    decides what may be done with the row, and it is plain text that
-    survives whatever else failed to decode.
+    decides what may be done with the row, and it usually survives whatever
+    else failed to decode. When it does not, the row sorts oldest and is
+    treated as damage.
 
     Attributes:
         document_id: Whose row it is.
         analyzer_version: The row's stored version, or ``None`` when the
-            column is empty.
+            column is NULL or not readable as text.
 
     Raises:
         ValueError: On construction, for a row that names no document.
@@ -162,19 +188,13 @@ class UndecodableTransparencyRow:
     def written_by_newer_build(self) -> bool:
         """Whether a build newer than this one wrote the row.
 
-        *Strictly newer*, the ordering ``TransparencyResult.is_current``
-        uses: such a row is presumably that build's finding, and
-        re-analysing it here would overwrite it (``INSERT OR REPLACE``) with
-        an older analyser's. Any other row that will not decode is damaged,
-        not newer, and nothing is lost by replacing it. User's call,
-        2026-09-23.
+        See :func:`is_newer_than_this_build`. Any other row that will not
+        decode is damaged, not newer, and nothing is lost by replacing it.
 
         Returns:
             True when the row's version orders after this build's.
         """
-        return analyzer_version_ordinal(
-            self.analyzer_version
-        ) > analyzer_version_ordinal(TRANSPARENCY_ANALYZER_VERSION)
+        return is_newer_than_this_build(self.analyzer_version)
 
 
 def undecodable_row_caveat(row: UndecodableTransparencyRow) -> str:
@@ -239,6 +259,25 @@ class TransparencyCounts:
     unknown: int = 0
     not_stored: int = 0
     undecodable: int = 0
+
+    def __post_init__(self) -> None:
+        """Refuse a count that is not a whole number of documents.
+
+        Every bucket is built from a count of rows today, so none can go
+        negative -- but that holds only while nothing else builds one. A
+        negative bucket would shrink ``considered`` and hide the studies it
+        stands for.
+
+        Raises:
+            ValueError: If any bucket is not a non-negative ``int``.
+        """
+        for bucket in fields(self):
+            value = getattr(self, bucket.name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(
+                    f"TransparencyCounts.{bucket.name} must be a non-negative "
+                    f"int, got {value!r}"
+                )
 
     @property
     def not_assessed(self) -> int:
@@ -343,6 +382,23 @@ def count_transparency_over(
     )
 
 
+def may_replace_stored(row: "StoredTransparency") -> bool:
+    """Whether this build may overwrite a stored row with its own analysis.
+
+    Asked before anything is re-analysed, whatever the cache setting:
+    switching off reuse of this build's results is not permission to
+    overwrite a newer build's (#374).
+
+    Args:
+        row: The document's stored row, decoded or not.
+
+    Returns:
+        False when a newer build wrote it, decodable or not: re-analysing it
+        would replace that build's finding with an older analyser's.
+    """
+    return not row.written_by_newer_build
+
+
 def _needs_analysis(row: "StoredTransparency") -> bool:
     """Whether a stored row leaves its document's transparency to be done.
 
@@ -350,12 +406,14 @@ def _needs_analysis(row: "StoredTransparency") -> bool:
         row: The document's stored row.
 
     Returns:
-        For a decoded row, whether it is not final. For one that would not
-        decode, whether this build may replace it: not when a newer build
-        wrote it (#374).
+        Never for a row this build may not replace (a newer build's, even a
+        provisional one). Otherwise: for one that would not decode, always;
+        for a decoded one, whether it is not final.
     """
+    if not may_replace_stored(row):
+        return False
     if isinstance(row, UndecodableTransparencyRow):
-        return not row.written_by_newer_build
+        return True
     return not row.is_final
 
 
@@ -374,11 +432,12 @@ def pending_transparency_ids(
         analyser wrote it (#360), or a source it scores against could not be
         read (#346) -- or whose row is damaged beyond decoding, once each, in
         the order given. A row a newer build wrote is never pending, whether
-        or not it decodes (#374). The same question
-        ``TransparencyManager.analyze_document`` asks of its cache when
-        caching is on (with it off, a review re-analyses every document), so
-        the pass that re-analyses a question's documents and the review that
-        re-analyses them as it goes cannot disagree about which are done.
+        or not it decodes and even if it is provisional (#374). The same
+        question ``TransparencyManager.analyze_document`` asks of its cache
+        when caching is on (with it off, a review re-analyses every document
+        but a newer build's), so the pass that re-analyses a question's
+        documents and the review that re-analyses them as it goes cannot
+        disagree about which are done.
     """
     return [
         doc_id
@@ -607,6 +666,19 @@ class TransparencyResult:
         return analyzer_version_ordinal(
             self.analyzer_version
         ) >= analyzer_version_ordinal(TRANSPARENCY_ANALYZER_VERSION)
+
+    @property
+    def written_by_newer_build(self) -> bool:
+        """Whether a build newer than this one produced this result.
+
+        See :func:`is_newer_than_this_build`. Such a row is current -- it is
+        served -- but it is never this build's to replace, even when it is
+        provisional (#374).
+
+        Returns:
+            True when the result's version orders after this build's.
+        """
+        return is_newer_than_this_build(self.analyzer_version)
 
     @property
     def is_final(self) -> bool:

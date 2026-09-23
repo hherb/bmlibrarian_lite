@@ -153,11 +153,13 @@ class TestTheStoreWithholdsOneRowAlone:
         self._corrupt(storage, "b", "risk_level", "extreme")
         self._corrupt(storage, "b", "analyzer_version", NEWER_VERSION)
 
-        stored = storage.get_transparency_results_batch(["a", "b"])
+        stored = storage.get_transparency_results_batch(["a", "b", "c"])
 
         assert isinstance(stored["a"], TransparencyResult)
         assert stored["b"] == UndecodableTransparencyRow("b", NEWER_VERSION)
         assert stored["b"].written_by_newer_build
+        # The control: a document with no row is still absent, not unreadable
+        assert "c" not in stored
 
     def test_a_timestamp_that_will_not_parse_is_damage(
         self, tmp_path: Any
@@ -247,6 +249,144 @@ class TestTheStoreWithholdsOneRowAlone:
             storage.get_transparency_result("b"), UndecodableTransparencyRow
         )
         assert isinstance(storage.get_transparency_result("a"), TransparencyResult)
+        assert storage.get_transparency_result("c") is None
+
+    def test_a_version_that_is_not_utf8_is_damage(self, tmp_path: Any) -> None:
+        """The one column kept must not raise from inside the handler.
+
+        Read as bytes, it failed the version ordering there, and the whole
+        batch with it -- #374 again. It is unreadable, so it sorts oldest.
+        """
+        storage = self._storage(tmp_path)
+        with storage._sqlite_connection() as conn:
+            conn.execute(
+                "UPDATE transparency_results SET analyzer_version = "
+                "CAST(X'FF' AS TEXT) WHERE document_id = 'b'"
+            )
+            conn.commit()
+
+        stored = storage.get_transparency_results_batch(["a", "b"])
+
+        assert isinstance(stored["a"], TransparencyResult)
+        assert stored["b"] == UndecodableTransparencyRow("b", None)
+        assert storage.get_documents_pending_transparency("Q") == ["b"]
+
+    def test_the_handler_cannot_fail_over_the_rows_own_id(
+        self, tmp_path: Any
+    ) -> None:
+        """It is named by the id it was looked up by, not by its column.
+
+        Today's readers match on the id, so a row's own id always reads as
+        text; a reader that scans the table would not. Named by its column,
+        the withheld row raised from inside the handler, and the read failed
+        for every document again.
+        """
+        from bmlibrarian_lite.storage import _text_or_bytes
+
+        storage = self._storage(tmp_path)
+        self._corrupt(storage, "b", "risk_level", "extreme")
+        with storage._sqlite_connection() as conn:
+            conn.execute(
+                "UPDATE transparency_results SET document_id = "
+                "CAST(X'FF' AS TEXT) WHERE document_id = 'b'"
+            )
+            conn.commit()
+            conn.text_factory = _text_or_bytes
+            row = conn.execute(
+                "SELECT * FROM transparency_results "
+                "WHERE document_id = CAST(X'FF' AS TEXT)"
+            ).fetchone()
+
+        withheld = storage._stored_transparency_from_row(row, "b")
+
+        assert withheld == UndecodableTransparencyRow(
+            "b", TRANSPARENCY_ANALYZER_VERSION
+        )
+
+    @pytest.mark.parametrize("column", ["risk_indicators", "warnings"])
+    def test_a_list_that_is_not_utf8_costs_that_list_not_the_finding(
+        self, tmp_path: Any, column: str
+    ) -> None:
+        """Read on its own already, so the risk level and score still show."""
+        storage = self._storage(tmp_path)
+        storage.save_transparency_result(a_row("b", TransparencyRisk.HIGH))
+        with storage._sqlite_connection() as conn:
+            conn.execute(
+                f"UPDATE transparency_results SET {column} = CAST(X'FF' AS TEXT) "
+                "WHERE document_id = 'b'"
+            )
+            conn.commit()
+
+        row = storage.get_transparency_results_batch(["b"])["b"]
+
+        assert isinstance(row, TransparencyResult)
+        assert row.risk_level is TransparencyRisk.HIGH
+        # Not a silently shorter list: the reader is told it was lost
+        assert any("could not be read" in caveat for caveat in row.warnings)
+
+    def test_a_coi_disclosure_that_is_not_utf8_is_not_assessed(
+        self, tmp_path: Any
+    ) -> None:
+        """Unrecognised, like any value this build does not know."""
+        from bmlibrarian_lite.transparency import COI_NOT_ASSESSED
+
+        storage = self._storage(tmp_path)
+        with storage._sqlite_connection() as conn:
+            conn.execute(
+                "UPDATE transparency_results SET coi_disclosure = "
+                "CAST(X'FF' AS TEXT) WHERE document_id = 'b'"
+            )
+            conn.commit()
+
+        row = storage.get_transparency_results_batch(["b"])["b"]
+
+        assert isinstance(row, TransparencyResult)
+        assert row.coi_disclosure == COI_NOT_ASSESSED
+
+    def test_a_defect_in_the_mapper_is_not_called_damage(
+        self, tmp_path: Any
+    ) -> None:
+        """Only the stored data is caught, never this build's own code.
+
+        Caught, a field the mapper forgot made every row in the library
+        read as damaged, and every pass offered all of it for re-analysis.
+        """
+        storage = self._storage(tmp_path)
+
+        with patch(
+            "bmlibrarian_lite.transparency.TransparencyResult",
+            side_effect=TypeError("unexpected keyword argument"),
+        ):
+            with pytest.raises(TypeError):
+                storage.get_transparency_results_batch(["a"])
+            with pytest.raises(TypeError):
+                storage.get_transparency_result("a")
+
+    def test_the_log_names_the_column_and_never_the_value(
+        self, tmp_path: Any, caplog: Any
+    ) -> None:
+        """What failed, for whoever reads the log; not what was stored."""
+        storage = self._storage(tmp_path)
+        self._corrupt(storage, "b", "risk_level", "a-stored-value")
+
+        storage.get_transparency_results_batch(["b"])
+
+        [record] = [r for r in caplog.records if "document b" in r.getMessage()]
+        assert "risk_level: ValueError" in record.getMessage()
+        assert "a-stored-value" not in record.getMessage()
+
+    def test_a_newer_builds_row_logs_why_it_would_not_decode(
+        self, tmp_path: Any, caplog: Any
+    ) -> None:
+        """It is left alone for good, so the log is all anyone will have."""
+        storage = self._storage(tmp_path)
+        self._corrupt(storage, "b", "analyzed_at", "last Tuesday")
+        self._corrupt(storage, "b", "analyzer_version", NEWER_VERSION)
+
+        storage.get_transparency_results_batch(["b"])
+
+        [record] = [r for r in caplog.records if "document b" in r.getMessage()]
+        assert "analyzed_at: ValueError" in record.getMessage()
 
     def test_a_damaged_row_is_pending_and_a_newer_one_is_not(
         self, tmp_path: Any
@@ -286,6 +426,62 @@ class TestTheRowAndItsVerdict:
     def test_this_builds_version_is_damage(self) -> None:
         """Equal is not newer: this build wrote it, and it will not read."""
         assert not DAMAGED.written_by_newer_build
+
+    def test_a_stored_version_is_read_as_text_when_it_can_be(self) -> None:
+        """A number is kept: dropped, a newer build's row read as damage."""
+        from bmlibrarian_lite.storage import _stored_version_text
+
+        assert _stored_version_text("2.0") == "2.0"
+        assert _stored_version_text(99.0) == "99.0"
+        assert _stored_version_text(3) == "3"
+        assert _stored_version_text(b"\xff") is None
+        assert _stored_version_text(None) is None
+        assert _stored_version_text(True) is None
+
+    def test_a_newer_builds_decodable_row_is_not_ours_to_replace(self) -> None:
+        """Provisional or not, it is another build's finding (#374)."""
+        from bmlibrarian_lite.transparency import may_replace_stored
+
+        provisional = TransparencyResult(
+            document_id="n",
+            transparency_score=40,
+            risk_level=TransparencyRisk.MEDIUM,
+            analyzer_version=NEWER_VERSION,
+            sources_unreachable=True,
+        )
+
+        assert provisional.written_by_newer_build
+        assert provisional.is_current and not provisional.is_final
+        assert not may_replace_stored(provisional)
+        assert not may_replace_stored(NEWER)
+        # The controls: this build's rows, and damage, are its to replace
+        assert may_replace_stored(a_row("c"))
+        assert may_replace_stored(DAMAGED)
+
+    def test_a_newer_builds_provisional_row_is_not_pending(self) -> None:
+        """is_final is false for it, and it is still not ours to redo.
+
+        Pending, the pass re-analysed it and INSERT OR REPLACE wrote an
+        older analyser's finding over it. This build's own provisional row
+        stays pending: the control.
+        """
+        newer = TransparencyResult(
+            document_id="newer",
+            transparency_score=40,
+            risk_level=TransparencyRisk.MEDIUM,
+            analyzer_version=NEWER_VERSION,
+            sources_unreachable=True,
+        )
+        ours = TransparencyResult(
+            document_id="ours",
+            transparency_score=40,
+            risk_level=TransparencyRisk.MEDIUM,
+            sources_unreachable=True,
+        )
+
+        assert pending_transparency_ids(
+            {"newer": newer, "ours": ours}, ["newer", "ours"]
+        ) == ["ours"]
 
     def test_an_empty_or_unreadable_version_is_damage(self) -> None:
         """An unknown provenance sorts oldest, as it does for is_current."""
@@ -383,6 +579,15 @@ class TestTheReportCountsAndAnnotatesIt:
         assert counts.superseded == 0
         assert counts.considered == 3
 
+    @pytest.mark.parametrize("value", [-1, 1.5, True, "2"])
+    def test_a_count_is_a_whole_number_of_documents(self, value: Any) -> None:
+        """A negative bucket would hide the studies it stands for."""
+        from bmlibrarian_lite.transparency import TransparencyCounts
+
+        with pytest.raises(ValueError):
+            TransparencyCounts(undecodable=value)
+        assert TransparencyCounts(undecodable=0).considered == 0
+
     def test_the_workflow_records_it(self) -> None:
         """The worker that fills the report's numbers."""
         pytest.importorskip("PySide6")
@@ -443,6 +648,41 @@ class TestTheReportCountsAndAnnotatesIt:
 
         assert "TRANSPARENCY NOT ASSESSED" in report
         assert "newer version of BMLibrarian Lite" in report
+
+    def test_a_risky_study_beside_it_is_still_warned_about(self) -> None:
+        """Withholding one row must not quiet the rest of the report."""
+        from bmlibrarian_lite.agents.reporting_agent import LiteReportingAgent
+        from bmlibrarian_lite.data_models import Citation
+
+        config = MagicMock()
+        config.transparency = TransparencySettings(enabled=True)
+        citations = [
+            Citation(document=a_document(doc_id), passage="P.", relevance_score=4)
+            for doc_id in ("newer", "risky")
+        ]
+        metadata = ReportMetadata(research_question="Q")
+        metadata.transparency_analysis_applied = True
+
+        with patch.object(
+            LiteReportingAgent,
+            "_chat",
+            return_value="Body [A](docid:newer) [B](docid:risky).",
+        ):
+            report = LiteReportingAgent(config=config).generate_report(
+                "Q",
+                citations,
+                metadata,
+                transparency_results={
+                    "newer": NEWER,
+                    "risky": a_row("risky", TransparencyRisk.HIGH),
+                },
+            )
+
+        assert "TRANSPARENCY NOT ASSESSED" in report
+        assert "newer version of BMLibrarian Lite" in report
+        # The risky study's own reference annotation, at the default
+        # threshold (high)
+        assert "⚠️ HIGH RISK" in report
 
     def test_the_methodology_names_it_among_the_reasons(self) -> None:
         """The count may not list reasons that exclude the row it counts."""
@@ -514,6 +754,31 @@ class TestTheManagerLeavesANewerBuildsRowAlone:
         assert failures == [TransparencyAnalysisFailure.written_by_newer_build("x")]
         manager._executor.submit.assert_not_called()
 
+    @pytest.mark.parametrize("cache_results", [True, False])
+    def test_a_newer_builds_decodable_row_is_served_not_redone(
+        self, cache_results: bool
+    ) -> None:
+        """Provisional too: it is that build's finding to settle, not ours.
+
+        With the cache on it was a provisional cache miss, and with it off
+        every row was; either way it was re-analysed and overwritten.
+        """
+        newer = TransparencyResult(
+            document_id="x",
+            transparency_score=40,
+            risk_level=TransparencyRisk.MEDIUM,
+            analyzer_version=NEWER_VERSION,
+            sources_unreachable=True,
+        )
+        manager = self._manager(newer, cache_results=cache_results)
+        served: list[Any] = []
+        manager.analysis_complete.connect(lambda _id, row: served.append(row))
+
+        manager.analyze_document("x", pmid="12345678")
+
+        assert served == [newer]
+        manager._executor.submit.assert_not_called()
+
     def test_with_the_cache_off_a_current_row_is_still_redone(self) -> None:
         """The control: the setting still means what it says."""
         manager = self._manager(a_row("x"), cache_results=False)
@@ -544,3 +809,51 @@ class TestTheManagerLeavesANewerBuildsRowAlone:
         tab.storage.get_transparency_result.return_value = NEWER
 
         assert SystematicReviewTab.get_transparency_result(tab, "newer") is None
+
+
+class TestAReloadedQuestionOverARealStore:
+    """The surface the reader sees, over a store with every kind of row."""
+
+    def test_each_document_is_badged_for_what_its_row_is(
+        self, tmp_path: Any
+    ) -> None:
+        """Bad, good and absent, read together and kept apart.
+
+        The load's catch no longer takes ``ValueError``, so a row that
+        still raised would take the report and audit trail down with it.
+        """
+        pytest.importorskip("PySide6")
+        from bmlibrarian_lite.analysis_failures import not_stored_assessment_caveat
+        from bmlibrarian_lite.gui.app import LiteMainWindow
+
+        storage = TestTheStoreWithholdsOneRowAlone._storage(tmp_path)
+        corrupt = TestTheStoreWithholdsOneRowAlone._corrupt
+        for doc_id in ("newer", "damaged", "missing"):
+            storage.add_document(a_document(doc_id))
+        for doc_id in ("newer", "damaged"):
+            storage.save_transparency_result(a_row(doc_id))
+            corrupt(storage, doc_id, "risk_level", "extreme")
+        corrupt(storage, "newer", "analyzer_version", NEWER_VERSION)
+        window = MagicMock()
+        window.config.transparency.enabled = True
+        window.storage = storage
+        documents = [
+            a_document(doc_id) for doc_id in ("a", "newer", "damaged", "missing")
+        ]
+
+        clause = LiteMainWindow._show_stored_transparency(window, documents)
+
+        assert clause is None
+        [call] = window.audit_trail_tab.show_transparency_outcomes.call_args_list
+        outcomes = call.args[0]
+        assert isinstance(outcomes["a"], TransparencyResult)
+        assert outcomes["newer"] == TransparencyUnassessed(
+            undecodable_row_caveat(UndecodableTransparencyRow("newer", NEWER_VERSION))
+        )
+        assert outcomes["damaged"] == TransparencyUnassessed(
+            damaged_assessment_caveat() + reanalysis_advice()
+        )
+        # The control: absent is still absent, not unreadable
+        assert outcomes["missing"] == TransparencyUnassessed(
+            not_stored_assessment_caveat() + reanalysis_advice()
+        )
