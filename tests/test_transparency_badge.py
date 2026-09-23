@@ -29,6 +29,7 @@ from bmlibrarian_lite.transparency import (
     COI_NOT_STATED,
     TransparencyResult,
     TransparencyRisk,
+    TransparencyUnassessed,
 )
 from bmlibrarian_lite.gui.transparency_badge import (
     TransparencyBadge,
@@ -37,6 +38,7 @@ from bmlibrarian_lite.gui.transparency_badge import (
     RISK_LABELS,
     RISK_LABELS_SHORT,
     DATA_AVAILABILITY_LABELS,
+    UNASSESSED_LABEL,
 )
 
 
@@ -47,6 +49,12 @@ def qapp():
     if app is None:
         app = QApplication([])
     yield app
+
+
+@pytest.fixture
+def an_unassessed_outcome() -> TransparencyUnassessed:
+    """A document with no finding, and the reason the reader is owed."""
+    return TransparencyUnassessed(reason="The transparency analysis failed.")
 
 
 @pytest.fixture
@@ -108,23 +116,23 @@ class TestTransparencyBadge:
 
     def test_initialization_low_risk(self, qapp, low_risk_result) -> None:
         """Badge should initialize with low risk result."""
-        badge = TransparencyBadge(result=low_risk_result)
+        badge = TransparencyBadge(outcome=low_risk_result)
         assert badge.result == low_risk_result
         assert badge.compact is False
 
     def test_initialization_high_risk(self, qapp, high_risk_result) -> None:
         """Badge should initialize with high risk result."""
-        badge = TransparencyBadge(result=high_risk_result)
+        badge = TransparencyBadge(outcome=high_risk_result)
         assert badge.result == high_risk_result
 
     def test_label_shows_full_text(self, qapp, low_risk_result) -> None:
         """Non-compact badge should show full risk label."""
-        badge = TransparencyBadge(result=low_risk_result, compact=False)
+        badge = TransparencyBadge(outcome=low_risk_result, compact=False)
         assert badge.label.text() == "Low Risk"
 
     def test_label_shows_short_text_compact(self, qapp, low_risk_result) -> None:
         """Compact badge should show short risk label."""
-        badge = TransparencyBadge(result=low_risk_result, compact=True)
+        badge = TransparencyBadge(outcome=low_risk_result, compact=True)
         assert badge.label.text() == "Low"
 
     def test_all_risk_levels_full_labels(self, qapp) -> None:
@@ -135,7 +143,7 @@ class TestTransparencyBadge:
                 transparency_score=50,
                 risk_level=risk_level,
             )
-            badge = TransparencyBadge(result=result, compact=False)
+            badge = TransparencyBadge(outcome=result, compact=False)
             assert badge.label.text() == expected_label
 
     def test_all_risk_levels_short_labels(self, qapp) -> None:
@@ -146,49 +154,49 @@ class TestTransparencyBadge:
                 transparency_score=50,
                 risk_level=risk_level,
             )
-            badge = TransparencyBadge(result=result, compact=True)
+            badge = TransparencyBadge(outcome=result, compact=True)
             assert badge.label.text() == expected_label
 
     def test_tooltip_contains_score(self, qapp, low_risk_result) -> None:
         """Tooltip should contain transparency score."""
-        badge = TransparencyBadge(result=low_risk_result)
+        badge = TransparencyBadge(outcome=low_risk_result)
         tooltip = badge.toolTip()
         assert "85/100" in tooltip
 
     def test_tooltip_contains_risk_level(self, qapp, medium_risk_result) -> None:
         """Tooltip should contain risk level."""
-        badge = TransparencyBadge(result=medium_risk_result)
+        badge = TransparencyBadge(outcome=medium_risk_result)
         tooltip = badge.toolTip()
         assert "Med Risk" in tooltip
 
     def test_tooltip_shows_industry_funding_detected(self, qapp, high_risk_result) -> None:
         """Tooltip should show industry funding when detected."""
-        badge = TransparencyBadge(result=high_risk_result)
+        badge = TransparencyBadge(outcome=high_risk_result)
         tooltip = badge.toolTip()
         assert "Detected" in tooltip
         assert "90%" in tooltip  # confidence
 
     def test_tooltip_shows_industry_funding_not_detected(self, qapp, low_risk_result) -> None:
         """Tooltip should show no industry funding when not detected."""
-        badge = TransparencyBadge(result=low_risk_result)
+        badge = TransparencyBadge(outcome=low_risk_result)
         tooltip = badge.toolTip()
         assert "Not detected" in tooltip
 
     def test_tooltip_shows_data_availability(self, qapp, low_risk_result) -> None:
         """Tooltip should show data availability level."""
-        badge = TransparencyBadge(result=low_risk_result)
+        badge = TransparencyBadge(outcome=low_risk_result)
         tooltip = badge.toolTip()
         assert "Fully Open" in tooltip
 
     def test_tooltip_shows_coi_status_disclosed(self, qapp, low_risk_result) -> None:
         """Tooltip should show COI disclosed status."""
-        badge = TransparencyBadge(result=low_risk_result)
+        badge = TransparencyBadge(outcome=low_risk_result)
         tooltip = badge.toolTip()
         assert "Conflicts of Interest:</b> Disclosed" in tooltip
 
     def test_tooltip_shows_coi_status_not_stated(self, qapp, high_risk_result) -> None:
         """A study whose article declares no conflicts says so."""
-        badge = TransparencyBadge(result=high_risk_result)
+        badge = TransparencyBadge(outcome=high_risk_result)
         tooltip = badge.toolTip()
         assert "Conflicts of Interest:</b> Not stated in the article" in tooltip
 
@@ -202,43 +210,76 @@ class TestTransparencyBadge:
         every study in the library said "Disclosed".
         """
         low_risk_result.coi_disclosure = COI_NOT_ASSESSED
-        badge = TransparencyBadge(result=low_risk_result)
+        badge = TransparencyBadge(outcome=low_risk_result)
         tooltip = badge.toolTip()
         assert "Conflicts of Interest:</b> Not assessed" in tooltip
 
     def test_tooltip_shows_outcome_switching(self, qapp, high_risk_result) -> None:
         """Tooltip should show outcome switching warning."""
-        badge = TransparencyBadge(result=high_risk_result)
+        badge = TransparencyBadge(outcome=high_risk_result)
         tooltip = badge.toolTip()
         assert "Outcome Switching Detected" in tooltip
 
     def test_tooltip_shows_risk_indicators(self, qapp, high_risk_result) -> None:
         """Tooltip should show risk indicators."""
-        badge = TransparencyBadge(result=high_risk_result)
+        badge = TransparencyBadge(outcome=high_risk_result)
         tooltip = badge.toolTip()
         assert "Undisclosed COI" in tooltip
         assert "Outcome switching" in tooltip
 
     def test_tooltip_shows_tier_downgrade(self, qapp, high_risk_result) -> None:
         """Tooltip should show tier downgrade when applied."""
-        badge = TransparencyBadge(result=high_risk_result)
+        badge = TransparencyBadge(outcome=high_risk_result)
         tooltip = badge.toolTip()
         assert "-1 tier(s)" in tooltip
 
     def test_tooltip_no_tier_downgrade_when_zero(self, qapp, low_risk_result) -> None:
         """Tooltip should not show tier downgrade when zero."""
-        badge = TransparencyBadge(result=low_risk_result)
+        badge = TransparencyBadge(outcome=low_risk_result)
         tooltip = badge.toolTip()
         assert "tier(s)" not in tooltip
 
     def test_update_result(self, qapp, low_risk_result, high_risk_result) -> None:
         """update_result should change displayed risk."""
-        badge = TransparencyBadge(result=low_risk_result)
+        badge = TransparencyBadge(outcome=low_risk_result)
         assert badge.label.text() == "Low Risk"
 
-        badge.update_result(high_risk_result)
+        badge.update_outcome(high_risk_result)
         assert badge.result == high_risk_result
         assert badge.label.text() == "High Risk"
+
+    def test_a_second_outcome_is_still_on_screen(
+        self, qapp, low_risk_result, high_risk_result
+    ) -> None:
+        """The re-rendered label is in the layout, not orphaned beside it.
+
+        ``update_outcome`` used to re-enter the builder, which called
+        ``QHBoxLayout(self)`` on a widget that already had a layout. Qt
+        refuses that, so the badge kept an empty layout and an unparented
+        label: ``label.text()`` was right and the reader saw an empty pill.
+        Asserting the text alone cannot tell the two apart.
+        """
+        badge = TransparencyBadge(outcome=low_risk_result)
+        badge.update_outcome(high_risk_result)
+
+        layout = badge.layout()
+        assert layout is not None
+        assert layout.count() == 1
+        assert layout.itemAt(0).widget() is badge.label
+        assert badge.label.parent() is badge
+
+    def test_an_unassessed_outcome_names_itself_in_a_card(
+        self, qapp, an_unassessed_outcome
+    ) -> None:
+        """A compact badge says "Not assessed", not "n/a".
+
+        Both production badges are compact, so the short label is the only
+        one a reader ever sees. "n/a" is one character from the "?" an
+        UNKNOWN risk level shows, in the same grey -- and the user guide
+        promises "Not assessed" (#361).
+        """
+        badge = TransparencyBadge(outcome=an_unassessed_outcome, compact=True)
+        assert badge.label.text() == UNASSESSED_LABEL
 
     def test_trial_registration_shown_when_registered(self, qapp) -> None:
         """Tooltip should show trial registration when registered."""
@@ -249,14 +290,14 @@ class TestTransparencyBadge:
             trial_registered=True,
             trial_results_compliant=True,
         )
-        badge = TransparencyBadge(result=result)
+        badge = TransparencyBadge(outcome=result)
         tooltip = badge.toolTip()
         assert "Registered" in tooltip
         assert "Results Compliant" in tooltip
 
     def test_trial_registration_not_shown_when_not_registered(self, qapp, low_risk_result) -> None:
         """Tooltip should not show trial info when not registered."""
-        badge = TransparencyBadge(result=low_risk_result)
+        badge = TransparencyBadge(outcome=low_risk_result)
         tooltip = badge.toolTip()
         assert "Trial Registration" not in tooltip
 

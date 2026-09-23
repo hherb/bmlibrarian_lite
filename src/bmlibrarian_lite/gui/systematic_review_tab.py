@@ -59,6 +59,7 @@ from ..audit_records import (
 from ..config import LiteConfig
 from ..storage import LiteStorage
 from ..data_models import (
+    TransparencyAnalysisFailure,
     AnalysisShortfall,
     AnalysisStage,
     ExtractionFailure,
@@ -94,7 +95,11 @@ from ..search_failures import (
     with_search_shortfall_notice,
 )
 from ..quality import QualityManager, QualityFilter, QualityAssessment
-from ..transparency import TransparencyManager, TransparencyResult
+from ..transparency import (
+    TransparencyManager,
+    TransparencyResult,
+    count_transparency_results,
+)
 from datetime import datetime
 
 from .quality_filter_panel import QualityFilterPanel
@@ -203,6 +208,50 @@ class WorkflowWorker(QThread):
         self._cancelled = False
         self._cancel_event = threading.Event()
         self._checkpoint_id: Optional[str] = None
+
+    def _record_transparency_counts(
+        self,
+        metadata: ReportMetadata,
+        document_ids: list[str],
+    ) -> None:
+        """Record how the documents' transparency assessments are distributed.
+
+        A row an earlier version of the analyser wrote is counted apart from
+        the three risk levels, not under its stored one: that level is not
+        this build's finding, and the report names how many are waiting to
+        be re-analysed rather than dropping them silently (#360).
+
+        Every document the analysis was *asked* about is accounted for. This
+        used to return early when no row had been stored, leaving
+        ``transparency_analysis_applied`` False so the report said
+        "Transparency analysis was not applied" -- over an analysis that had
+        run against every study and failed on every one, which is a positive
+        false statement about the one artefact the reader keeps. A partial
+        outage was quieter and no better: the denominator simply shrank
+        (#361, #249).
+
+        Args:
+            metadata: The report metadata to fill in. The caller has already
+                established that transparency analysis was asked for.
+            document_ids: Every document the review found.
+        """
+        # Applied means asked, not answered. The caller only reaches here
+        # when the user turned transparency on.
+        metadata.transparency_analysis_applied = True
+        results = self.storage.get_transparency_results_batch(document_ids)
+        counts = count_transparency_results(results.values())
+        metadata.transparency_low_risk_count = counts.low
+        metadata.transparency_medium_risk_count = counts.medium
+        metadata.transparency_high_risk_count = counts.high
+        metadata.transparency_superseded_count = counts.superseded
+        # Whatever is left asked a question that never came back: the
+        # analysis failed, the document carried no identifier to look one up
+        # by, or it had not finished. None of those is a study with nothing
+        # to declare, so none may leave the count without being named.
+        metadata.transparency_unassessed_count = max(
+            0,
+            len(set(document_ids)) - counts.assessed - counts.superseded,
+        )
 
     def run(self) -> None:
         """Execute the systematic review workflow."""
@@ -544,20 +593,9 @@ class WorkflowWorker(QThread):
 
             # Collect transparency stats from available results
             if self.config.transparency.enabled:
-                all_doc_ids = [doc.id for doc in documents]
-                transparency_results = self.storage.get_transparency_results_batch(
-                    all_doc_ids
+                self._record_transparency_counts(
+                    metadata, [doc.id for doc in documents]
                 )
-                if transparency_results:
-                    metadata.transparency_analysis_applied = True
-                    from ..transparency import TransparencyRisk
-                    for result in transparency_results.values():
-                        if result.risk_level == TransparencyRisk.LOW:
-                            metadata.transparency_low_risk_count += 1
-                        elif result.risk_level == TransparencyRisk.MEDIUM:
-                            metadata.transparency_medium_risk_count += 1
-                        elif result.risk_level == TransparencyRisk.HIGH:
-                            metadata.transparency_high_risk_count += 1
 
             if self._cancelled:
                 self.finished.emit("Workflow cancelled.", metadata)
@@ -727,7 +765,11 @@ class SystematicReviewTab(QWidget):
     quality_benchmark_completed = Signal(object)  # QualityBenchmarkResult
 
     # Transparency signal - emitted when analysis completes for a document
-    transparency_result_ready = Signal(str, object)  # (doc_id, TransparencyResult)
+    # (doc_id, TransparencyResult | TransparencyAnalysisFailure). One signal
+    # for both, because a failed analysis has to travel the same path to the
+    # same badge: the separate analysis_failed signal reached nothing at all
+    # (#249, #361).
+    transparency_outcome_ready = Signal(str, object)
 
     def __init__(
         self,
@@ -768,6 +810,9 @@ class SystematicReviewTab(QWidget):
         )
         self._transparency_manager.analysis_complete.connect(
             self._on_transparency_result
+        )
+        self._transparency_manager.analysis_failed.connect(
+            self._on_transparency_failed
         )
 
         # Audit trail data - stored during workflow execution
@@ -1689,7 +1734,7 @@ class SystematicReviewTab(QWidget):
             result: Transparency analysis result
         """
         # Forward to audit trail via signal
-        self.transparency_result_ready.emit(doc_id, result)
+        self.transparency_outcome_ready.emit(doc_id, result)
 
         # If we have quality assessment for this doc, apply tier adjustment
         if doc_id in self._quality_assessments:
@@ -1703,6 +1748,27 @@ class SystematicReviewTab(QWidget):
             f"Transparency result for {doc_id}: {result.risk_level.value}"
         )
 
+    def _on_transparency_failed(
+        self,
+        doc_id: str,
+        failure: TransparencyAnalysisFailure,
+    ) -> None:
+        """Handle a document left without a transparency assessment.
+
+        The failure travels to the audit trail as a value, which turns it
+        into the sentence the reader sees. Nothing listened to this signal
+        before, so a throttled PubMed produced a review in which studies
+        quietly had no assessment (#249, #361).
+
+        Args:
+            doc_id: Document ID whose analysis did not produce a finding
+            failure: Why it has none, classified
+        """
+        logger.debug(
+            f"Transparency not assessed for {doc_id}: {failure.kind.value}"
+        )
+        self.transparency_outcome_ready.emit(doc_id, failure)
+
     def start_transparency_analysis(
         self,
         documents: List[LiteDocument],
@@ -1711,7 +1777,8 @@ class SystematicReviewTab(QWidget):
         Start background transparency analysis for documents.
 
         Call this after documents are retrieved to begin analysis
-        in background. Results are emitted via transparency_result_ready.
+        in background. What becomes of each analysis is emitted via
+        transparency_outcome_ready, whether it produced a finding or not.
 
         Args:
             documents: Documents to analyze
@@ -1732,12 +1799,21 @@ class SystematicReviewTab(QWidget):
         doc_id: str,
     ) -> Optional[TransparencyResult]:
         """
-        Get cached transparency result for a document.
+        Get the stored transparency finding for a document, if it is one.
 
         Args:
             doc_id: Document ID
 
         Returns:
-            TransparencyResult if available, None otherwise
+            The stored assessment when this build's analyser produced it;
+            ``None`` when there is none, or when the stored row is one an
+            earlier analyser wrote. The caller cannot tell a retracted
+            finding from a current one, so the gate is here rather than
+            left to each of them (#360).
         """
-        return self.storage.get_transparency_result(doc_id)
+        stored: TransparencyResult | None = self.storage.get_transparency_result(
+            doc_id
+        )
+        if stored is None or not stored.is_current:
+            return None
+        return stored

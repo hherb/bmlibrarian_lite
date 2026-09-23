@@ -328,8 +328,9 @@ class QualityManager:
         """
         Apply tier downgrade based on transparency analysis.
 
-        If transparency settings are disabled or the risk level is not HIGH,
-        returns the original assessment unchanged. Otherwise, creates a new
+        If transparency settings are disabled, the stored assessment was
+        made by an earlier version of the analyser, or the risk level is not
+        HIGH, returns the original assessment unchanged. Otherwise, creates a new
         assessment with the tier downgraded.
 
         Args:
@@ -340,6 +341,14 @@ class QualityManager:
             Modified assessment with tier adjustment (if applicable)
         """
         if not self._transparency_settings.enabled:
+            return assessment
+
+        # A finding an earlier version of the analyser made does not cost a
+        # study a quality tier: it is re-analysed rather than acted on, and
+        # the corrections since #352 may have retracted it (#360). The gate
+        # is here rather than in the caller so that reaching this method
+        # directly cannot walk around it.
+        if not transparency_result.is_current:
             return assessment
 
         if transparency_result.risk_level != TransparencyRisk.HIGH:
@@ -432,6 +441,12 @@ class QualityManager:
 
         if transparency_result is None:
             return False  # Don't filter if not yet analyzed
+
+        # Nor if the stored assessment predates this build's analyser:
+        # excluding a study from the review on a retracted finding is the
+        # costliest thing a superseded row can do (#360).
+        if not transparency_result.is_current:
+            return False
 
         return transparency_result.risk_level == TransparencyRisk.HIGH
 

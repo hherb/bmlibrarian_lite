@@ -177,15 +177,24 @@ class TestAnalyzeDocument:
         mock_storage.get_transparency_result.assert_not_called()
 
     def test_no_pmid_or_doi_fails(self, manager):
-        """Test that missing identifiers emits failure signal."""
+        """A record nothing could be looked up by is reported as a skip.
+
+        The payload is a classified value rather than a message since #361:
+        what the reader sees is built from it by ``transparency_failure_text``,
+        so no call site can show a provider's raw error text instead (#330).
+        """
+        from bmlibrarian_lite.data_models import TransparencyFailureKind
+
         signals = []
-        manager.analysis_failed.connect(lambda doc_id, msg: signals.append((doc_id, msg)))
+        manager.analysis_failed.connect(
+            lambda doc_id, failure: signals.append((doc_id, failure))
+        )
 
         manager.analyze_document("doc1")
 
         assert len(signals) == 1
         assert signals[0][0] == "doc1"
-        assert "No PMID or DOI" in signals[0][1]
+        assert signals[0][1].kind is TransparencyFailureKind.NO_IDENTIFIER
 
     def test_cached_result_returned(self, manager, mock_storage):
         """Test that cached results are returned without re-analysis."""

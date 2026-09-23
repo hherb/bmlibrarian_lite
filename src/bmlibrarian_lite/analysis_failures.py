@@ -80,6 +80,8 @@ from .data_models import (
     PassFailure,
     RequestFailure,
     SourceLookupFailure,
+    TransparencyAnalysisFailure,
+    TransparencyFailureKind,
 )
 
 
@@ -395,6 +397,134 @@ def unassessed_caveat(because: str, sought: str) -> str:
         f"{because}, so {sought} could not be checked. It is recorded as "
         f"not assessed, which is not a finding against the study."
     )
+
+
+#: Advice for the literature sources a transparency analysis reads -- PubMed,
+#: Europe PMC, Unpaywall, CrossRef and ClinicalTrials.gov. The advice above is
+#: written for the model provider, and handing a reader "check that Ollama is
+#: running" when PubMed is throttling is advice they cannot act on, which
+#: reads as confidently as advice they can (#335). The wording mirrors
+#: ``search_failures``, which says the same things about the same services.
+_SOURCE_AUTH_ADVICE = (
+    "The source refused the credentials: if an NCBI API key is set in "
+    "Settings, check that it is correct."
+)
+_SOURCE_RATE_LIMIT_ADVICE = (
+    "The source is limiting how often it can be called: wait a minute and "
+    "try again."
+)
+_SOURCE_UNREACHABLE_ADVICE = "Check the internet connection and try again."
+_SOURCE_UNREADABLE_ADVICE = (
+    "The source's answer could not be read. Try again later."
+)
+_SOURCE_SERVER_ERROR_ADVICE = (
+    "The source is having trouble at its end: wait and try again. Nothing "
+    "here needs changing."
+)
+_SOURCE_INTERNAL_ERROR_ADVICE = (
+    "This is a defect in BMLibrarian, not a finding about the study. "
+    "Retrying will not help; please report it."
+)
+
+
+def source_failure_advice(cause: EvaluationErrorCode) -> str:
+    """Say what the reader can do about a literature source that failed.
+
+    The counterpart of :func:`advice_for_causes` for the sources a study's
+    transparency is read from, rather than the model. One place, so that a
+    throttled PubMed is never advised as a stopped Ollama.
+
+    Args:
+        cause: What went wrong, classified.
+
+    Returns:
+        One sentence the reader can act on, or "Try again later." when there
+        is nothing specific to say.
+    """
+    if cause is EvaluationErrorCode.API_AUTH_ERROR:
+        return _SOURCE_AUTH_ADVICE
+    if cause is EvaluationErrorCode.API_RATE_LIMIT:
+        return _SOURCE_RATE_LIMIT_ADVICE
+    if cause is EvaluationErrorCode.INTERNAL_ERROR:
+        return _SOURCE_INTERNAL_ERROR_ADVICE
+    # Before the unreachable group, which it belongs to for the model but
+    # not here: a 503 is a throttle from Europe PMC and an outage at NCBI,
+    # and neither is the reader's network to check (#335).
+    if cause is EvaluationErrorCode.API_SERVER_ERROR:
+        return _SOURCE_SERVER_ERROR_ADVICE
+    if cause in _UNREACHABLE_CAUSES:
+        return _SOURCE_UNREACHABLE_ADVICE
+    if cause in _UNREADABLE_CAUSES:
+        return _SOURCE_UNREADABLE_ADVICE
+    return _FALLBACK_ADVICE
+
+
+def superseded_assessment_caveat() -> str:
+    """Say that a stored assessment predates this build's analyser (#360).
+
+    Nothing re-analysed a stored row: ``analyzer_version`` was written, read
+    back and compared by nobody, so a user with a year of results kept every
+    finding the corrections since #352 retracted. A superseded row is
+    withheld from every surface that would present it as a finding, and this
+    is what is shown in its place -- withheld, not silently dropped, because
+    a badge that simply disappears is the reporting defect one layer on.
+
+    Returns:
+        Two sentences, ending in a full stop: why there is no finding, and
+        that it is not one against the study.
+    """
+    return unassessed_caveat(
+        "This study's stored assessment was made by an earlier version of "
+        "the analyser and is being re-analysed",
+        TRANSPARENCY_SOUGHT,
+    )
+
+
+#: What a failed or skipped whole-study analysis says was not established.
+#: One place, because all three reasons are completed by it -- the
+#: superseded caveat above, the no-identifier one below, and the
+#: failed-analysis clause in ``transparency_failure_text`` -- and they must
+#: not drift apart.
+TRANSPARENCY_SOUGHT = "this study's transparency"
+
+#: Why nothing was asked for a record carrying neither identifier. The
+#: sentence opens the caveat, so it is a capitalised clause.
+_NO_IDENTIFIER_BECAUSE = "This record carries neither a PubMed ID nor a DOI"
+
+
+def transparency_failure_text(failure: TransparencyAnalysisFailure) -> str:
+    """Say why a document has no transparency assessment, and what to do.
+
+    The manager used to emit ``str(e)`` here, which can carry the request URL
+    and with it the user's email address or the NCBI API key (#196, #330).
+    The classified cause is what the reader can act on; the raw text stays in
+    the log. Building the sentence here, from the value alone, is what keeps
+    the raw text off every screen that shows one of these.
+
+    Args:
+        failure: What became of the analysis.
+
+    Returns:
+        The caveat's two sentences, and for an attempted analysis the advice
+        for its cause: a failure is not a finding against the study, and the
+        reader is told which of the two they are looking at.
+    """
+    if failure.kind is TransparencyFailureKind.NO_IDENTIFIER:
+        return unassessed_caveat(_NO_IDENTIFIER_BECAUSE, TRANSPARENCY_SOUGHT)
+    # __post_init__ refuses an attempted analysis with no cause, so this is
+    # unreachable. It is a raise rather than an assert because ``python -O``
+    # strips asserts, and what follows the strip is an AttributeError on the
+    # one screen whose job is to tell the reader why something failed.
+    cause = failure.cause
+    if cause is None:
+        raise ValueError(
+            f"A {failure.kind} failure reached the reader with no cause"
+        )
+    caveat = unassessed_caveat(
+        f"The transparency analysis failed ({cause.description})",
+        TRANSPARENCY_SOUGHT,
+    )
+    return f"{caveat} {source_failure_advice(cause)}"
 
 
 #: What the COI caveats say was not established, as the reader is told it.

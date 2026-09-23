@@ -40,14 +40,15 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from operator import methodcaller
 from pathlib import Path
-from typing import NamedTuple, cast
+from typing import Any, NamedTuple, cast
 from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import requests
 
-from bmlibrarian_lite.data_models import RequestFailureKind
+from bmlibrarian_lite.analysis_failures import transparency_failure_text
+from bmlibrarian_lite.data_models import EvaluationErrorCode, RequestFailureKind
 from bmlibrarian_lite.exceptions import SourceRequestError
 from bmlibrarian_lite.pubmed import search_client
 from bmlibrarian_lite.pubmed.constants import ENV_NCBI_API_KEY
@@ -494,12 +495,12 @@ class TestTransparencyManagerFailure:
             email=TEST_EMAIL,
             pubmed_api_key=FAKE_API_KEY,
         )
-        failures: list[str] = []
+        failures: list[Any] = []
         signalled = threading.Event()
 
-        def record_failure(document_id: str, message: str) -> None:
-            """Keep the signalled message and wake the waiting test."""
-            failures.append(message)
+        def record_failure(document_id: str, failure: Any) -> None:
+            """Keep the signalled failure and wake the waiting test."""
+            failures.append(failure)
             signalled.set()
 
         # The failure is emitted from the executor's thread, and with no Qt
@@ -514,8 +515,14 @@ class TestTransparencyManagerFailure:
         finally:
             manager.stop()
 
-        assert failures and RATE_LIMITED_REASON in failures[0]
-        assert FAKE_API_KEY not in failures[0]
+        # Since #361 the signal carries a classified value, not the
+        # exception's text, and the sentence the reader sees is built from
+        # it. Both are checked: the value cannot hold the key, and neither
+        # can the words built from it.
+        assert failures
+        assert failures[0].cause is EvaluationErrorCode.API_RATE_LIMIT
+        shown = transparency_failure_text(failures[0])
+        assert FAKE_API_KEY not in shown
         assert RATE_LIMITED_REASON in caplog.text
         assert FAKE_API_KEY not in caplog.text
         assert_key_arrived_outside_the_url(rate_limiting_server)

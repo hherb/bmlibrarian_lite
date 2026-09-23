@@ -41,7 +41,7 @@ from ..audit_records import outcome_sort_key
 from ..constants import AUDIT_CARD_SPACING, AUDIT_UI_UPDATE_DELAY_MS
 from ..data_models import LiteDocument, ScoredDocument
 from ..quality.data_models import QualityAssessment
-from ..transparency import TransparencyResult
+from ..transparency import TransparencyOutcome, TransparencyResult
 from .document_card import DocumentCard
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,9 @@ class AuditLiteratureTab(QWidget):
         self._scores: Dict[str, int] = {}
         self._score_rationales: Dict[str, str] = {}
         self._quality_assessments: Dict[str, QualityAssessment] = {}
-        self._transparency_results: Dict[str, TransparencyResult] = {}
+        # A finding, or why the document has none: a failed analysis and an
+        # analysis still running used to look identical here (#361).
+        self._transparency_outcomes: Dict[str, TransparencyOutcome] = {}
 
         # Thread safety
         self._lock = threading.RLock()
@@ -198,7 +200,7 @@ class AuditLiteratureTab(QWidget):
             score = self._scores.get(document.id)
             score_rationale = self._score_rationales.get(document.id)
             quality = self._quality_assessments.get(document.id)
-            transparency = self._transparency_results.get(document.id)
+            transparency = self._transparency_outcomes.get(document.id)
 
             # Create card
             card = DocumentCard(
@@ -206,7 +208,7 @@ class AuditLiteratureTab(QWidget):
                 score=score,
                 score_rationale=score_rationale,
                 quality_assessment=quality,
-                transparency_result=transparency,
+                transparency_outcome=transparency,
             )
             card.clicked.connect(self._on_card_clicked)
             card.send_to_interrogator.connect(self._on_send_to_interrogator)
@@ -262,24 +264,25 @@ class AuditLiteratureTab(QWidget):
     def update_transparency(
         self,
         doc_id: str,
-        result: TransparencyResult,
+        outcome: TransparencyOutcome,
     ) -> None:
         """
-        Update transparency result for a document.
+        Update the transparency outcome for a document.
 
-        Called when background transparency analysis completes.
-        Updates the document card with the new transparency badge.
+        Called when background transparency analysis finishes, whether it
+        produced a finding or could not be made at all. Updates the document
+        card with the new badge.
 
         Args:
             doc_id: Document ID
-            result: Transparency analysis result
+            outcome: The document's transparency finding, or why it has none
         """
         with self._lock:
-            self._transparency_results[doc_id] = result
+            self._transparency_outcomes[doc_id] = outcome
 
             card = self._cards_by_doc_id.get(doc_id)
             if card:
-                card.set_transparency_result(result)
+                card.set_transparency_outcome(outcome)
             else:
                 # Document not yet added - store for later
                 logger.debug(f"Transparency received before document: {doc_id}")
@@ -289,16 +292,20 @@ class AuditLiteratureTab(QWidget):
         doc_id: str,
     ) -> Optional[TransparencyResult]:
         """
-        Get transparency result for a document.
+        Get the transparency finding for a document, if it is one.
 
         Args:
             doc_id: Document ID
 
         Returns:
-            TransparencyResult if found, None otherwise
+            The finding, or ``None`` when there is none -- which includes a
+            document whose analysis failed or whose stored assessment is
+            withheld. ``None`` is "no finding to report", never "analysed
+            and found nothing" (#361).
         """
         with self._lock:
-            return self._transparency_results.get(doc_id)
+            outcome = self._transparency_outcomes.get(doc_id)
+            return outcome if isinstance(outcome, TransparencyResult) else None
 
     def _on_card_clicked(self, doc_id: str) -> None:
         """Handle document card click."""
@@ -387,7 +394,7 @@ class AuditLiteratureTab(QWidget):
             self._scores.clear()
             self._score_rationales.clear()
             self._quality_assessments.clear()
-            self._transparency_results.clear()
+            self._transparency_outcomes.clear()
 
             # Show placeholder
             self.placeholder.show()

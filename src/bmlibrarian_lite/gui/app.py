@@ -187,6 +187,30 @@ class LiteMainWindow(QMainWindow):
         self.quality_benchmark_tab = QualityBenchmarkResultsTab(result=None, parent=self)
         self.tab_widget.addTab(self.quality_benchmark_tab, "Quality Benchmark")
 
+        # Every signal the window wires up. Extracted so the wiring can be
+        # tested: a signal nothing connects is invisible until a user
+        # notices the thing it was meant to report is missing (#249, #361).
+        self._connect_signals()
+
+        # Status bar
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("Ready")
+
+        # Token usage label in status bar (permanent, left of settings)
+        self.token_usage_label = QLabel("Tokens: 0 | Cost: $0.0000")
+        self.token_usage_label.setToolTip(
+            "Cumulative token usage and estimated cost for this session"
+        )
+        self.status_bar.addPermanentWidget(self.token_usage_label)
+
+        # Settings button in status bar
+        settings_btn = QPushButton("Settings")
+        settings_btn.clicked.connect(self._show_settings)
+        self.status_bar.addPermanentWidget(settings_btn)
+
+    def _connect_signals(self) -> None:
+        """Connect the tabs' signals to the window and to each other."""
         # Connect report generation signal to display in Report tab
         self.systematic_review_tab.report_generated.connect(
             self._on_report_generated
@@ -219,8 +243,8 @@ class LiteMainWindow(QMainWindow):
         self.systematic_review_tab.quality_assessed.connect(
             self.audit_trail_tab.on_quality_assessed
         )
-        self.systematic_review_tab.transparency_result_ready.connect(
-            self.audit_trail_tab.on_transparency_assessed
+        self.systematic_review_tab.transparency_outcome_ready.connect(
+            self.audit_trail_tab.on_transparency_outcome
         )
 
         # Connect Audit Trail document request to load document
@@ -248,23 +272,6 @@ class LiteMainWindow(QMainWindow):
         self.research_questions_tab.question_selected.connect(
             self._on_question_selected
         )
-
-        # Status bar
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready")
-
-        # Token usage label in status bar (permanent, left of settings)
-        self.token_usage_label = QLabel("Tokens: 0 | Cost: $0.0000")
-        self.token_usage_label.setToolTip(
-            "Cumulative token usage and estimated cost for this session"
-        )
-        self.status_bar.addPermanentWidget(self.token_usage_label)
-
-        # Settings button in status bar
-        settings_btn = QPushButton("Settings")
-        settings_btn.clicked.connect(self._show_settings)
-        self.status_bar.addPermanentWidget(settings_btn)
 
     def _apply_styles(self) -> None:
         """Apply stylesheet to the application."""

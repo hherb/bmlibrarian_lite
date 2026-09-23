@@ -8,151 +8,207 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#353 + #354 + #355 + #356 (+ #250) — a source nobody asked is not a source
-that answered "nothing"**, branch `fix/absence-needs-a-lookup-353-356`.
-Python only. Compress into **Recently landed** once merged.
+**#360 + #361 (+ #249) — a correction nothing re-analyses reaches no reader**,
+branch `fix/a-corrected-analyser-reaches-stored-rows-360-361`, **PR #366**.
+Python only.
+Compress into **Recently landed** once merged.
 
 - **The contract is `doc/cross_platform/analysis_failure_reporting.md`**,
-  which gained a six-bullet rule and a rewritten **Ports** paragraph — read
-  it before touching any of this. It is the other half of #346/#347: those
-  taught the pipeline to tell a source that *answered* from one we *could
-  not reach*; these four were still reporting a source **never consulted**
-  as the article's own answer.
-- **#353 is the one that moves scores.** `_analyze_data_availability` fell
-  through to `analyze_data_availability(None)` — `NOT_STATED`, −5, "Data
-  Availability: Not Stated" — for every article outside PMC whose full text
-  was not retrieved, which is the majority. It now takes `fulltext_read`
-  and decides six ways; only a text we *read and segmented* can produce
-  `NOT_STATED`. `_any_section_was_parsed` is #359's rule one dimension over
-  (a data statement can sit anywhere, so the test is "any section", not
-  "end matter"). The Europe PMC branch gained the same guard: XML that
-  parses to zero `<sec>` elements establishes nothing.
-- **#355: a skip is a third state, not a failure.** `SourceLookupSkipped`
-  (`NOT_CONFIGURED` / `NO_IDENTIFIER`) sits beside `SourceLookupFailure`,
-  and **`LookupRecord` carries both** so one value travels PDF discovery →
-  full-text discovery → analyser. Separate types because a failure may not
-  recur while a skip recurs every search, and only the second is the
-  reader's to act on: `configuration_nudge()` fires for `NOT_CONFIGURED`
-  and for nothing else (#335 — advice the reader cannot act on is worse
-  than none). The four sentence builders now take a `LookupRecord`.
-- **Only report a skip where it changes what can be claimed.** A control
-  test caught the first attempt: a `NO_IDENTIFIER` skip for PMC on every
-  DOI-only article withheld the paywall claim from the honest majority.
-  Unpaywall establishes open access there, so where *it* answered the claim
-  stands. Pinned by `test_a_doi_only_article_gets_no_second_pmc_caveat`.
-- **#354: `NOT_FOUND` is a claim about the article**, and `FulltextResult`
-  gave it to every failure, cancel and skipped download. New
-  `FulltextSourceType.NOT_ASSESSED` for all of those; the two `logger.debug`
-  paths that are genuine absences keep `NOT_FOUND`.
-  **`absence_established` is derived** — `NOT_FOUND` **and** nothing
-  unasked — because either condition alone lies.
-- **#356: `RecordFetch` (served / absent / unreachable)** replaces the
-  `Optional[Dict]` from PubMed's efetch and CrossRef's works endpoint. An
-  unreachable PubMed left `trial_ids` empty and printed "Trial
-  Registration: None found"; an unreachable CrossRef left the study looking
-  unfunded with an honest tier and no caveat anywhere. A CrossRef 404 and
-  an efetch with no `PubmedArticle` stay absences; XML that will not parse
-  does not (**this closes #250**). A funding caveat names a source only
-  where we held the identifier to ask it by, or every PMID-only record
-  carries "CrossRef was not read".
-- **It also shrank a blast radius.** `fetch_article` let its request
-  exception out of `analyze()`, so one throttled record lost every other
-  dimension of that study's transparency. Three
-  `test_ncbi_api_key_confinement` tests asserted that propagation; they now
-  assert the key's absence at both surfaces — the exception `_make_request`
-  still raises, and the `RecordFetch`, caveat and **JSON export** the
-  analysis now leaves behind, which is a new route to the user's file.
-- **The agent-facing surface too.** MCP's `get_document_fulltext` answered
-  "Full text not available for this article." for *every* unsuccessful
-  result — the harm of #262, one tool over. It now makes that claim only
-  when the absence was established, and carries `absence_established`.
-- **The mutation sweep found a design defect, not just test gaps.**
-  `LookupSkipReason.NO_IDENTIFIER` had **no producer** — dead the moment
-  the PMC skip came out — and giving it one exposed a real fabrication: an
-  article we hold no DOI for never asks Unpaywall, so "may require
-  institutional access" rested on PMC alone. It is now recorded, gated on
-  having found no sources. **The controls are doing the work in this
-  slice**; write them first.
-- **Two call sites that read identically hid a third survivor.**
-  `analyze()` passes `report, fulltext_sections, bool(fulltext)` to *both*
-  `_analyze_conflicts` and `_analyze_data_availability`, so a mutation
-  aimed at the second silently hit the first — and survived, because
-  #352's own wiring control asserted only the *level*, which is
-  NOT_ASSESSED either way. Both controls now assert the **caveat**, which
-  is what distinguishes "nobody read the article" from "we read it and
-  recognised nothing in it".
-- **A review pass found four feed sites and two report surfaces** that
-  still made the claim. The types were right and were being handed
-  non-answers — worth reading before adding a fifth producer, because
-  every one of these passed the suite:
-  - **Europe PMC holding no open-access copy is not the article saying
-    nothing.** `FullTextFetch.absent()` sets neither `failure` nor `xml`,
-    so it fell past the unreachable guard **and** the sections guard onto
-    `analyze_data_availability(None)` — `NOT_STATED`, −5, **no warning at
-    all**, for every embargoed deposit and author manuscript in PMC but
-    outside the OA subset. #353's own harm in the one branch #353 left.
-    *A three-state value needs three arms; two and a fall-through makes
-    the third state the default.*
-  - **A PDF we hold and cannot read is not an article without one.** An
-    empty text extraction fell through to `NOT_FOUND` with a record saying
-    every lookup answered — true, and irrelevant: our extractor came up
-    empty. `absence_established` was **true**, so MCP stated the absence
-    with the PDF in the cache. Now `_pdf_unreadable`, and the cached-PDF
-    branch records it too instead of logging and stepping over it.
-  - **#363 is fixed, because it was load-bearing.** `get_article_info`
-    answered "not in Europe PMC" and "we could not ask" with one `None`, so
-    a *throttled* Europe PMC left an empty record and the chain's
-    `NOT_FOUND` became an established absence. New
-    `EuropePMCClient.fetch_article_info` → `ArticleInfoFetch`;
-    `get_article_info` keeps its `Optional` for callers that only want the
-    record.
-  - **A source that answered must never be called unread.**
-    `pubmed_record_read` / `crossref_record_read` are set only when a record
-    is *served*, so a CrossRef 404 — the absence this design works hardest
-    to preserve — produced "CrossRef was not read". They now carry
-    `*_record_unreachable` beside them and `unread_records_clause` picks the
-    words from the state.
-  - **A withheld claim must stay withheld at every surface.** The risk
-    indicator read an empty `trial_registrations` as "unregistered" while
-    the warnings said "not assessed"; `format_report_summary` printed
-    "Trial Registration: None found" and "Industry Funding: NO"; the CSV
-    exported `0` and `False`. New `trial_registration_assessed` and
-    `funding_was_assessed()` gate all five. **A caveat elsewhere in the
-    document does not withhold a claim under KEY FINDINGS.**
-  - `ClinicalTrialsClient.get_study` had the same `Optional[Dict]` two
-    screens below `RecordFetch`, so a mistyped accession read as an outage.
-    Now a `RecordFetch` too.
-- **Two survivors were the assertion, not the code.** The analyser-side
-  nudge test matched `"onfigur"`, which the skip reason's own phrase
-  ("not configured") already contains, so `configuration_nudge` could be
-  deleted; and both funding-caveat tests matched "CrossRef could not be
-  read", which `_fetch_basic_metadata` **also** emits. Assert the built
-  sentence, not a substring that another caveat shares.
-- **Verified:** `pytest tests/` — **2168 passed**, 3 xfailed;
-  `lint_delta.py` **0 new** ruff or mypy findings (net −7 ruff, −6 mypy).
-  `tests/test_absence_needs_a_lookup.py` is **97 tests**; the second sweep
-  is **16 sites, 16 caught**, under both guards (a `__file__` probe that
-  the mutated copy is the imported one, and a green baseline).
-- **The sweep's restore must not use `git`, and must not use `for f in
-  $FILES` in zsh.** zsh does not word-split unquoted parameters, so the
-  restore silently copied nothing and six mutations accumulated in the
-  tree; every later result was meaningless. Drive the sweep from Python and
-  assert the file matches its backup after each restore.
-- **Expect scores to move.** Data availability goes from −5 to neutral for
-  the majority of articles, and `RISK_INDICATOR_DATA_EFFECTIVELY_UNAVAILABLE`
-  / `..._RESTRICTED_DATA` stop firing for papers nobody read. Stored rows
-  keep their old scores (#145) and old and new documents will disagree
-  until **#360**. Data availability moves again after the review pass: PMC
-  articles Europe PMC serves no OA copy for go from −5 to neutral too.
-- **Still deferred:** #350, #360, #361, #362, and #357 / #300 for Swift and
-  Android. **#363 is now closed** as part of this slice — it was not
-  cosmetic: it was what let a throttled Europe PMC establish an absence.
+  which gained two sections — *A correction only reaches the reader if
+  something re-analyses* and *A failed analysis is not a document without
+  one*. Read it before touching any of this. It is the last mile of the
+  #346/#347/#352/#353 family: those fixed what the analyser concludes, this
+  is whether a conclusion ever reaches a document already in the store.
+- **#360 was load-bearing, and larger than it looks.** Document ids are
+  still `pmid-<id>` (#229), so the transparency cache hits across sessions:
+  the stale rows are every article the user has ever searched, not a corner
+  case. `analyzer_version` was written, read back and **compared by
+  nobody**, and had been `"1.0"` since it was introduced.
+- **One constant, and one predicate every reader asks.**
+  `TRANSPARENCY_ANALYZER_VERSION` (now `"2.0"`) says what this build would
+  find today; `TransparencyResult.is_current` compares. **Bump the constant
+  when the analyser's semantics change** — whenever the same inputs could
+  produce a different score, level, indicator or caveat — and not for a
+  refactor, nor for a settings change. The instruction now also sits on
+  `study_transparency_analyzer`, where the semantics live and where the
+  person making the next correction will actually see it.
+- **The comparison is an ordering, not equality** (`analyzer_version_ordinal`,
+  dotted components as ints). Only a *strictly older* row is superseded: a
+  newer one is left alone, because `save_transparency_result` is
+  `INSERT OR REPLACE` and re-analysing it overwrites a better finding with
+  a worse one — and because the caveat tells the reader an *earlier*
+  analyser made the row, which only an ordering establishes. Swift settled
+  this first under CloudKit sync; Python follows it. A string compare would
+  also have sorted `"10.0"` before `"2.0"`.
+- **`is_final` is the cache's question; `is_current` is only half of it.**
+  A throttled source does not raise — the fetch returns "unreachable" and
+  the analysis completes with a caveat and a score that fell because
+  nothing could be established. Stamped with the current version, that row
+  was current forever, so a transient outage became a permanent risk claim
+  nothing revisited. `TransparencyResult.sources_unreachable` (new column,
+  migrated) makes it a cache miss. It is still *presented*, with its caveat
+  in the reference annotation: a weakened finding, not an absent one.
+- **A stale row is a cache miss.** Re-analysis happens in `analyze_document`,
+  on the path that already queues and paces that work, and
+  `get_documents_pending_transparency` counts a superseded row as pending.
+  No bulk invalidation on open: these are rate-limited sources, and opening
+  the app is not a request to re-fetch a year of articles.
+- **Five surfaces read a stored row and made a claim from it**, each now
+  gated: the badge, `should_warn_for_citation` (which also gates the
+  reference annotations and the prompt's risk context), the report's risk
+  distribution, the quality **tier downgrade** and the quality **filter**.
+  The tier gate sits in `apply_transparency_adjustment`, not its caller, so
+  reaching the lower method directly cannot walk around it. The filter has
+  **no production caller** — the gate is right, but it guards the least of
+  the five today; see #367. Two more surfaces are gated here that the first
+  pass missed: `TransparencyBadgeSmall` and
+  `SystematicReviewTab.get_transparency_result`.
+- **Withheld, not dropped — at every surface, not just the badge.** The
+  badge reads "Not assessed" with `superseded_assessment_caveat()`, and the
+  reference list now **annotates** a withheld entry instead of printing it
+  bare. Bare is not neutral: an unannotated reference read exactly like a
+  study assessed as low risk, and the aggregate count is taken over a
+  different population than the references (#372), so it could not be
+  mapped onto one. "Not assessed" is now the label in both compact and long
+  form — the compact one said `n/a`, one glyph from the `?` an UNKNOWN risk
+  level shows, in the same grey.
+- **"Applied" means asked, not answered.** `_record_transparency_counts`
+  returned early when nothing was stored, so a total outage printed
+  "Transparency analysis was not applied" over an analysis that ran against
+  every study and failed on every one, and a partial outage merely shrank
+  the denominator. Every document asked about is now accounted for:
+  `transparency_unassessed_count` names those that came back with no
+  finding, and `TransparencyCounts.unknown` catches a current row at no
+  nameable level, which used to fall through every bucket.
+- **#361/#249: a signal nothing connects is not reporting.**
+  `analysis_failed` reached nothing, so a PubMed outage produced a review in
+  which studies quietly had no assessment — and a missing badge meant three
+  things at once (disabled, still running, failed). The wiring is asserted
+  where it is made: `LiteMainWindow._connect_signals` was **extracted from
+  `_setup_ui`** for exactly that reason, and a test calls it with a
+  stand-in window. A second test asserts `_setup_ui` still *calls* it —
+  the extraction created a new place for the same defect, and deleting the
+  call left the whole window's wiring dead with the suite green.
+- **Nothing may leave a document without an outcome.** The done-callback
+  pops the pending entry before reading the future, so anything escaping it
+  is swallowed by `concurrent.futures` and *neither* signal fires — leaving
+  no badge, which this change teaches the reader to read as "still running".
+  It catches `BaseException` now, reports, and re-raises only an interrupt
+  (#333). A cancel is still reported as a failure: #369.
+- **The payload is a value, not a message.** It emitted `str(e)`, and a
+  `requests` exception embeds the request URL — Unpaywall's carries the
+  user's email, NCBI's the API key (#196, #330). `TransparencyAnalysisFailure`
+  (frozen, refuses a failure with no cause and a skip with one) carries the
+  document and an `EvaluationErrorCode`, and `transparency_failure_text`
+  builds the sentence. The raw text stays in the log.
+- **Classification: the status, and then four edges it did not reach.**
+  Every `requests` exception inherits from `OSError`, so a throttled
+  PubMed, a refused NCBI key and an unplugged cable all classified as
+  `API_CONNECTION_ERROR`; `classify_request_exception` reads the status.
+  The advice sentences are written for the *model* provider, so a throttled
+  PubMed advised checking that Ollama is running — `source_failure_advice`
+  is the literature-source set, beside `advice_for_causes`, never instead
+  of it (#335's rule). The four edges, all closed here: **400 is a refused
+  key only for a host we send a key to** (`_KEYED_HOSTS`), since every other
+  source answers 400 for a request it could not parse; **a 5xx is the
+  source's trouble, not the reader's network**, so it no longer says
+  "check the internet connection" (the model path still does — #371); **the
+  fallback no longer re-enters `classify_llm_exception`**, whose `OSError`
+  blanket is the thing being escaped, so an unreadable answer stops
+  reading as an unreachable source; and **our own shape errors are not the
+  source's fault** — `KeyError`, `AttributeError`, `TypeError`, `IndexError`
+  are enumerated by type before any message is inspected and classified
+  `INTERNAL_ERROR`, with wording that says it is a defect and no retry
+  advice. A `KeyError` from our parser used to reach a clinician as "failed
+  to parse JSON response… try again later". `classify_exhausted_retries`
+  also routes back through the full classifier, so one layer of retry
+  wrapping no longer undoes all of this.
+- **`TransparencyOutcome` is the union** every presenting surface takes:
+  `TransparencyResult | TransparencyUnassessed`. The badge, the card and
+  the literature tab branch on it; `DocumentCard.get_transparency_result()`
+  returns `None` for the second, so nothing downstream reads a non-finding
+  as a finding.
+- **Verified:** `pytest tests/` — **2257 passed**, 3 xfailed;
+  `lint_delta.py` **0 new** ruff or mypy findings (net −10 ruff, −11 mypy;
+  `storage.py` gained the `TYPE_CHECKING` block its string annotations
+  always needed). Mutation sweeps under both guards — a `__file__` probe
+  that the copy is what imports, and a green baseline — **29 sites** for
+  the first pass and **12 more** for the review fixes, all caught, no
+  survivors. `LiteMainWindow` is built offscreen as a smoke check, since no
+  test constructs it.
+- **Expect badges to go blank before they come back.** Every existing row
+  is superseded by this change and is re-analysed the next time its document
+  passes through a review. Stored scores are still not recomputed in place
+  (#145).
+- **Reviewed, and what the review left open.** Five review agents went over
+  this branch; everything reader-facing was addressed here. Lodged rather
+  than done, see #367 (the quality filter has no caller), #368
+  (`TransparencyResult` is mutable and unvalidated), #369 (a cancel reported
+  as a failure), #370 (Android has no version comparison at all), #371 (the
+  model path's 5xx advice), #372 (the report's counts and its annotations
+  are taken over different populations), #373 (nothing sweeps the store for
+  pending work, so re-analysis only reaches documents a review revisits).
+- **The parity ledger was wrong and is now right.** The Ports section said
+  neither mobile platform compares an analyser version. **Swift already
+  did**, and better: `TransparencyConstants.analyzerVersion` (`Int`, at 3,
+  with a per-version changelog), `TransparencyResult.isStale` using
+  strictly-older, consumers in `Document` and the two detail views, and
+  `TransparencyStalenessTests`. Only **Android** carries #360 (#370). The
+  two version spaces are not comparable — `Int` 3 against the string
+  `"2.0"` — and each orders only against itself.
+- **Still deferred:** #350, #362, #364, and #357 / #300 for Swift and
+  Android.
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
+
+- **A source nobody asked is not a source that answered "nothing"** (Python;
+  #353, #354, #355, #356, #250, #363, PR #365, merged 2026-09-22). The other
+  half of #346/#347, and the rules are in
+  `doc/cross_platform/analysis_failure_reporting.md`. What binds:
+  **only a text we read and segmented can produce `NOT_STATED`** —
+  `_analyze_data_availability` used to fall through to
+  `analyze_data_availability(None)` for every article outside PMC whose full
+  text was not retrieved, which is the majority; `_any_section_was_parsed` is
+  #359's rule one dimension over (a data statement sits anywhere, so the test
+  is "any section", not "end matter"). **A skip is a third state, not a
+  failure**: `SourceLookupSkipped` (`NOT_CONFIGURED` / `NO_IDENTIFIER`) sits
+  beside `SourceLookupFailure` and `LookupRecord` carries both, because a
+  failure may not recur while a skip recurs every search — and only the
+  second is the reader's to act on, so `configuration_nudge()` fires for
+  `NOT_CONFIGURED` and nothing else (#335). **Record a skip only where it
+  changes what can be claimed**: a `NO_IDENTIFIER` skip for PMC on every
+  DOI-only article withheld the paywall claim from the honest majority.
+  **`absence_established` is derived** — `NOT_FOUND` *and* nothing unasked,
+  because either condition alone lies — and MCP's `get_document_fulltext`
+  states the absence only then. **`RecordFetch` / `ArticleInfoFetch`
+  (served / absent / unreachable)** replace the `Optional[Dict]` from efetch,
+  CrossRef, ClinicalTrials.gov and `get_article_info`; a CrossRef 404 and an
+  efetch with no `PubmedArticle` stay absences, XML that will not parse does
+  not (#250). **A withheld claim must stay withheld at every surface** —
+  `trial_registration_assessed` and `funding_was_assessed()` gate the risk
+  indicator, `format_report_summary`'s two KEY FINDINGS lines and two CSV
+  columns; a caveat elsewhere in the document withholds nothing.
+  **A three-state value needs three arms**: `FullTextFetch.absent()` sets
+  neither `failure` nor `xml`, so it fell past both guards onto the −5 for
+  every PMC deposit outside the OA subset. **A PDF we hold and cannot read is
+  not an article without one** (`_pdf_unreadable`). **A source that answered
+  must never be called unread** — `*_record_read` is set only when a record is
+  *served*, so a CrossRef 404 read as "CrossRef was not read"; the words now
+  come from `unread_records_clause`.
+  **Two survivors were the assertion, not the code**: a nudge test matched
+  `"onfigur"`, which the skip reason's own phrase contains, and two funding
+  tests matched a sentence a *second* caveat also emits — assert the built
+  sentence, never a substring another caveat shares.
+  **Scores moved**: data availability −5 → neutral for the majority, and
+  `RISK_INDICATOR_DATA_EFFECTIVELY_UNAVAILABLE` / `..._RESTRICTED_DATA` stop
+  firing for papers nobody read. Stored rows keep their old scores (#145), so
+  old and new documents disagree until **#360**.
+  Still open from this family: **#350**, **#360**, **#361**, **#362**,
+  **#364**, and **#357** / **#300** for Swift and Android.
 
 - **A COI statement nobody read is not a disclosure** (Python; #352, #348,
   #351, #359, PR #358, merged 2026-09-22). The rules are in
@@ -200,39 +256,34 @@ the rest.
 
 - **Every outbound request is paced, per host** (Python; #341, PR #345,
   merged 2026-09-21). The contract is
-  `doc/cross_platform/polite_request_pacing.md`. **One limiter per host,
-  process-wide** (`rate_limit.py`), mounted by an adapter
-  (`mount_politely`) so no call site has to remember it; six ad-hoc limiters
-  keyed to `self` are gone, each of which gave every `ThreadPoolExecutor`
-  worker a full budget. **A `Retry-After` is a pause, not a rate** — timed
-  from when the response *arrived*, held in `_not_before`, separate from
-  `_interval`; **a penalty never shortens the interval**. **One retry
-  budget, not two nested**: every forcelisted status comes off the
-  transport's `Retry` and is retried in the pacing loop, because urllib3's
-  first backoff is zero seconds. Only a throttle penalises. **503 is a
-  throttle for Europe PMC, an outage for NCBI.** **Loopback is never
-  paced.** Europe PMC is 1/s as a conservative choice, not a measurement.
-  Tests assert the wait, not the `interval` property; `conftest.py` resets
-  the registry autouse. Ports lodged: #342 (Swift), #343 (Android).
+  `doc/cross_platform/polite_request_pacing.md`; read it before touching
+  this. **One limiter per host, process-wide** (`rate_limit.py`), mounted by
+  an adapter (`mount_politely`) so no call site has to remember it — six
+  ad-hoc limiters keyed to `self` gave every pool worker a full budget.
+  **A `Retry-After` is a pause, not a rate**, timed from when the response
+  arrived, and **a penalty never shortens the interval**. **One retry
+  budget, not two nested**: urllib3's first backoff is zero seconds. Only a
+  throttle penalises. **503 is a throttle for Europe PMC, an outage for
+  NCBI.** **Loopback is never paced.** Europe PMC's 1/s is a conservative
+  choice, not a measurement. Tests assert the wait, not the `interval`
+  property; `conftest.py` resets the registry autouse. Lodged: the ports
+  **#342** (Swift) / **#343** (Android).
 
 - **A cancelled worker ends, and a failed pass names its cause** (Python;
-  #326, #327, PR #333, merged 2026-09-21). **Every `QThread` in
+  #326, #327, PR #333, merged 2026-09-21). Rules in
+  `doc/cross_platform/analysis_failure_reporting.md`. **Every `QThread` in
   `gui/workers.py` mixes in `SingleOutcome`**, asserted over
-  `vars(workers_module)` so a worker added later is covered — with a count
-  guard, because an empty sweep passes vacuously. **A cancel the runner
-  cannot see is not a cancel**: `QualityManager.filter_documents` takes
-  `should_cancel`, asked *before* each document. **PySide6 prints a slot's
-  traceback and `emit()` returns normally**, so there was no double report
-  to fix; what `_run_once` adds is the arm the bodies lack — `except
-  Exception` does not catch a `BaseException`. **A failure names a document
-  and a classified cause**: `PassFailure` / `PassOutcome` refuse impossible
-  counts, and `advice_for_causes()` is shared so a shortfall and a
-  per-document failure cannot advise differently. **The raw provider text
-  never reaches the screen on these paths** (user's call, 2026-09-20) — it
-  can carry a credential; `also_failed_text` still takes raw text at six
-  call sites (#330). **An UNKNOWN design is not a failure.**
-  **`addopts` carries `-m "not integration"`**; `pytest -m integration`
-  still selects the live tests. Lodged: #332, #334–#340.
+  `vars(workers_module)` with a count guard, because an empty sweep passes
+  vacuously. **A cancel the runner cannot see is not a cancel**:
+  `should_cancel` is asked *before* each document. **`except Exception` does
+  not catch a `BaseException`**, which is what walked out of a thread in
+  silence. **A failure names a document and a classified cause**:
+  `PassFailure` / `PassOutcome` refuse impossible counts, and
+  `advice_for_causes()` is shared so a shortfall and a per-document failure
+  cannot advise differently. **The raw provider text never reaches the
+  screen on these paths** (user's call, 2026-09-20); `also_failed_text`
+  still takes raw text at six call sites (#330). **`addopts` carries
+  `-m "not integration"`.** Lodged: #332, #334–#340.
   **Trap:** the mutation harness `git checkout`-ed a file it had not backed
   up, so every later mutation reported CAUGHT for the wrong reason. **No git
   in a mutation restore, for any path.**
@@ -329,27 +380,17 @@ Open issues by family; each issue carries the detail. None blocks another.
   `doc/cross_platform/analysis_failure_reporting.md`**, now several rules
   longer (#302–#304, #306, #307, #310, #315). Both run the same pipeline with the
   same shape. The largest remaining slice of this family.
-- Lodged by PR #349, Python, all "a source we could not read is not a finding"
-  one layer further out: **#353** data availability fabricates `NOT_STATED` for
-  every article outside PMC (the larger population); **#354**
-  `FulltextDiscoverer` maps every failure to `NOT_FOUND`; **#355** a lookup
-  skipped for want of configuration records nothing; **#356** an unreachable
-  PubMed/CrossRef reads as unregistered and unfunded; **#350** the download
-  paths still put `str(e)` in reader-facing fields (no secret leaks today).
-  **#352**, **#348** and **#351** landed in PR #358.
-- Lodged by PR #358, Python: **#360** nothing ever re-analyses a stored row
-  (`analyzer_version` has no consumer), so a corrected analyser reaches no
-  existing document; **#361** `TransparencyManager.analysis_failed` has no
-  connected slot, so every worker exception disappears; **#362** a DOI-only
-  document never asks PubMed for the statement it reports as unavailable;
-  **#363** `europepmc.get_article_info` is the surviving half of #351, on the
-  path that now decides NOT_STATED vs NOT_ASSESSED; **#364** type cleanup
-  (stringly-typed `coi_disclosure`, `coi_info: Optional` as an implicit
-  fourth absence, substring-sniffed provenance). Also **#357**: Swift has the
-  other half of #352 — its `hasStatement` boolean is honest, but COI is read
-  from the full text alone, so every article whose full text was not
-  retrieved is scored and badged as declaring no conflicts. Android analyses
-  no COI at all (#116).
+- Python, the rest of what PR #358 and PR #365 lodged (**#360** and
+  **#361**/**#249** are the slice in flight above): **#362** a DOI-only
+  document never asks PubMed for the statement it reports as unavailable —
+  PR #365 reports that honestly rather than fixing it; **#350** the download
+  paths still put `str(e)` in reader-facing fields (no secret leaks today);
+  **#364** type cleanup (stringly-typed `coi_disclosure`, `coi_info:
+  Optional` as an implicit fourth absence, substring-sniffed provenance).
+- **#357** — Swift has the other half of #352: its `hasStatement` boolean is
+  honest, but COI is read from the full text alone, so every article whose
+  full text was not retrieved is scored and badged as declaring no conflicts.
+  Android analyses no COI at all (#116).
 - Lodged by PR #325, Python: **#328** a re-scored failure supersedes a
   document's good score under latest-wins, and the Scored column does not show
   it (a cancelled re-score also leaves an empty checkpoint).
@@ -493,8 +534,13 @@ enables DEBUG; **#245** the transparency CLIs take the NCBI key only as
   negation as far as GitHub is concerned** — that exact wording took #360 with
   #359 in commit `9caf78b`, five rounds after the rule was written down. No
   closing keyword *at all* before a deferred number: write "Deferred: #N" or
-  "Lodged, unaddressed: #N". After every merge, re-read the list of issues the
-  commit said it deferred and confirm each is still open.
+  "Lodged, unaddressed: #N". **Quoting the phrase closes the issue too**:
+  commit `743f508` reopened #360 and, in explaining what had gone wrong,
+  repeated the offending words — which closed it a second time. Name the
+  keyword, never write it beside a number. After every merge, re-read the
+  list of issues the commit said it deferred and confirm each is still open,
+  and re-read the ones it said it *fixed* beyond the `Closes` lines: PR #365
+  fixed #363 and listed it as deferred, leaving it open.
 - Touching any data-availability pattern? Run all three parity suites; a change
   that does not update `doc/cross_platform/transparency_parity/` **and** all
   three platforms is meant to fail.

@@ -249,11 +249,123 @@ studies nobody read.
 
 **Still outstanding in Python**, so do not read the rule as fully enforced
 before checking: the download paths still put the provider's own error text
-in reader-facing fields (#350); nothing re-analyses a stored row, so a
-corrected analyser reaches no existing document (#360); `analysis_failed`
-has no connected slot (#361); and a DOI-only document never asks PubMed at
+in reader-facing fields (#350); and a DOI-only document never asks PubMed at
 all, so its record is honestly reported as unread rather than being read
 (#362).
+
+### A correction only reaches the reader if something re-analyses
+
+The rule's last mile, and the one that made every fix above conditional. A
+stored assessment is an answer given under the analyser's *old* semantics.
+Where nothing compares the two, every correction applies only to documents
+analysed after it, and the reader cannot tell which they are looking at.
+
+- **The version a result was produced under is compared, not just stored.**
+  `TransparencyResult.analyzer_version` was written, read back and compared
+  by nobody, and had been `"1.0"` since it was introduced. One constant --
+  `TRANSPARENCY_ANALYZER_VERSION` -- says what this build would find today,
+  and `is_current` is the predicate every reader asks (#360). **Bump it
+  whenever the analyser's semantics change**: whenever the same inputs could
+  produce a different score, risk level, indicator or caveat. Not for a
+  refactor that cannot move a result, and not for a change in user settings
+  -- thresholds are applied at analysis time and are not part of what the
+  version identifies.
+- **The comparison is an ordering, and only an *older* version is stale.**
+  A result stamped with a version *newer* than this build's must be left
+  alone. Treating it as stale re-analyses it and overwrites a better finding
+  with a worse one -- across a synced store, or simply two builds over one
+  data directory -- and it makes the caveat's own words false, since that
+  caveat tells the reader an *earlier* analyser produced the row. Compare
+  version components numerically, not as text: `"10.0"` sorts *before*
+  `"2.0"` as a string. An absent or unreadable version sorts oldest, so an
+  unknown provenance is re-analysed rather than trusted.
+- **A version says who produced the row, never whether the analysis
+  reached its sources.** A throttled source does not raise: the fetch
+  returns "unreachable" and the analysis completes, with a caveat and a
+  score that fell because nothing could be established. Stamped with the
+  current version, such a row is current forever -- a transient outage
+  becomes a permanent risk claim nothing revisits. A result must therefore
+  record that a source was unreadable, and a row carrying that flag is a
+  cache miss too (`is_final`). It is still *presented*, with its caveat: it
+  is a weakened finding, not an absent one.
+- **A stale row is a cache miss, not a cache hit.** Re-analysis happens on
+  the path that already queues and paces that work (`analyze_document`),
+  and `get_documents_pending_transparency` counts a superseded row as
+  pending. There is no bulk invalidation on open: these are rate-limited
+  network sources, and a user opening the application is not asking for
+  every article they have ever searched to be fetched again.
+- **Until it is redone, no surface presents it as a finding.** Five read a
+  stored row and made a claim from it: the badge, the report's citation
+  warnings (`should_warn_for_citation`, which also gates the reference
+  annotations and the prompt's risk context), the report's risk
+  distribution, the quality tier downgrade, and the quality filter, which
+  would exclude the study from the review altogether. Each asks
+  `is_current`. (In the Python build the filter has no caller yet, so of
+  the five it is the gate that guards the least today.)
+- **Withheld, not dropped -- and that has to hold at every surface, not
+  just the badge.** A withheld row is labelled, not omitted: the badge reads
+  "Not assessed" and carries the reason on hover, and the reference list
+  annotates the entry rather than printing it bare. Bare is not neutral --
+  an unannotated reference reads as a study nothing was found against, which
+  is the same claim the gate just retracted. An aggregate line elsewhere in
+  the document does not discharge this: it is counted over a different
+  population than the references, so the reader cannot map it onto any one
+  study. The report also names how many rows are waiting, and how many
+  studies came back with no finding at all, so no denominator shrinks in
+  silence.
+- **"Applied" means asked, not answered.** A report whose transparency
+  analysis was switched on says so even when every analysis failed. Saying
+  "transparency analysis was not applied" over an analysis that ran against
+  every study and failed on every one is a positive false statement, in the
+  one artefact the reader keeps; a partial outage that merely shrinks the
+  count is quieter and no better.
+- **Stored scores and risk levels are still not recomputed in place**
+  (#145). They are superseded, then replaced by a re-analysis; nothing
+  edits an old row to look like a new one.
+
+### A failed analysis is not a document without one
+
+- **A signal nothing connects is not reporting.** `TransparencyManager`
+  emitted `analysis_failed` and the application connected `analysis_complete`
+  only, so a PubMed outage produced a review in which studies quietly had
+  no assessment (#361, #249). A missing badge meant three things at once:
+  transparency switched off, the analysis still running, and the analysis
+  failed. A reporting path is asserted end to end: not only that the
+  emitter fires, but that something connects it. Extracting the wiring so a
+  test can reach it creates a second place for the same defect, so the test
+  that the wiring *is reached* belongs beside the test of what it does.
+- **The payload is a classified value, not a message.** What it emitted was
+  `str(e)`, and a `requests` exception embeds the request URL -- the
+  Unpaywall one carries the user's email address, the NCBI one the API key
+  (#196, #330). `TransparencyAnalysisFailure` carries the document and an
+  `EvaluationErrorCode`, or says no identifier was held to ask by;
+  `transparency_failure_text` builds the sentence. The raw text stays in
+  the log.
+- **A request is classified by what the source answered, not by the type
+  of the error object.** Classify on the HTTP status where there was a
+  response; fall back to the transport failure only where there was none.
+  (In Python every `requests` exception inherits from `OSError`, so a
+  throttled PubMed, a refused NCBI key and an unplugged cable all read as
+  `API_CONNECTION_ERROR`, and the reader was advised to check their
+  internet connection for a rate limit they need only wait out.) Three
+  corollaries the first pass missed: a status that means "the source
+  refused your credentials" may only be read that way for a source this
+  build actually sends credentials to -- every other source answers 400 for
+  a request it could not parse; a 5xx is the source's own trouble, not the
+  reader's network, so it must not be advised as one; and an answer we
+  could not *read* is not a source we could not *reach*.
+- **Our own defect is not the source's.** A shape error out of our parser
+  -- a missing key, an attribute on nothing -- arrives at the same handler
+  as a provider failure. Classified by message, it reached the reader as
+  "the source's answer could not be read. Try again later": a permanent bug
+  in this code reported as someone else's fault, with advice that will
+  never work. Enumerate those by type before any message is inspected, and
+  give them their own wording and no retry advice.
+- **The advice is written for the source that failed.** These are
+  literature APIs, not the model provider: "check that Ollama is running"
+  for a throttled PubMed is advice the reader cannot act on, which reads as
+  confidently as advice they can (#335). `source_failure_advice` is that
+  set of sentences, beside `advice_for_causes` and never instead of it.
 
 **Four feed sites found in review of the above.** The types were right and
 the claim was still made, because a correct `absence_established` can only
@@ -604,7 +716,23 @@ wrapper carries nothing to classify.
 
 ## Ports
 
-Nothing here has been checked against Swift or Android (#300). Both run the
+Nothing here has been checked against Swift or Android (#300).
+
+On the analyser version (#360) the ledger is not symmetric. **Swift already
+carries it**, and carries it better: `TransparencyConstants.analyzerVersion`
+(an `Int`, with a per-version changelog in its doc comment),
+`TransparencyResult.isStale` comparing *strictly older* — with the reason
+written down, since a CloudKit-synced `Document` can arrive from a device on
+a newer build — and consumers in `Document`, `TransparencyDetailView` and
+`MacTransparencyDetailView`, under `TransparencyStalenessTests`. Python
+followed it here, to an ordering over dotted components. **Android has
+nothing**, and carries #360 in full.
+
+Note the two version spaces are not comparable: Swift counts `Int` (at 3),
+Python counts a dotted string (at `"2.0"`). Each platform's constant orders
+only against itself; a stored row never crosses between them. Swift's
+`TransparencyAnalysisService` additionally reads COI from the full text
+alone (#357). Both run the
 same pipeline with the same shape — a parallel scoring service that drops
 what it could not score, and a report built from whatever citations arrived —
 so the same defects are likely present. A port conforms when a review whose
