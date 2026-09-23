@@ -3650,9 +3650,9 @@ class LiteStorage:
 
         document_ids = sorted(self.get_document_ids_for_question(question))
         # The verdict is the one the manager's cache reaches, asked of the
-        # same rows, rather than a second rendering of it in SQL. The query
-        # this replaced compared versions in Python for the same reason:
-        # SQLite orders '10.0' before '2.0'.
+        # same rows, rather than a second rendering of it in SQL -- which
+        # could drift, and would compare versions as text: SQLite orders
+        # '10.0' before '2.0'.
         return pending_transparency_ids(
             self.get_transparency_results_batch(document_ids), document_ids
         )

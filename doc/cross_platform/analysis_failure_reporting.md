@@ -306,7 +306,9 @@ analysed after it, and the reader cannot tell which they are looking at.
   same rows, so the pass and the review cannot disagree about what is done.
   A re-analysis that could not read a source is counted as **provisional**,
   neither a success nor a failure: its result is stored and shown, and it
-  stays pending.
+  stays pending. A pending document with neither a PMID nor a DOI is left
+  out of the pass, since nothing could look it up, and the confirmation
+  says how many were left out rather than shrinking its count in silence.
 - **A reloaded question shows what the store holds, and fetches nothing.**
   It used to show no badge at all, so a missing badge meant a fourth thing
   beside disabled, still running and failed. Every document now gets an
@@ -314,7 +316,10 @@ analysed after it, and the reader cannot tell which they are looking at.
   or a reason -- superseded, never stored, or no identifier to look one up
   by -- with advice to use the re-analysis only where it can help. A caveat
   may not claim work in progress that is not happening: "is being
-  re-analysed" was true only inside a running review.
+  re-analysed" was true only inside a running review. If the stored rows
+  cannot be read at all, every badge says so, and so does the load's own
+  status message; a failure posted as a message of its own was replaced by
+  the load's summary before anyone could read it.
 - **Until it is redone, no surface presents it as a finding.** Five read a
   stored row and made a claim from it: the badge, the report's citation
   warnings (`should_warn_for_citation`, which also gates the reference
@@ -331,7 +336,14 @@ analysed after it, and the reader cannot tell which they are looking at.
   is the same claim the gate just retracted. An aggregate line elsewhere in
   the document does not discharge this: it is counted over a different
   population than the references, so the reader cannot map it onto any one
-  study. The report also names how many rows are waiting, and how many
+  study. **Every kind of study the withheld counts include is annotated**,
+  each with its own caveat: a superseded row; no stored row at all, when the
+  analysis was switched on; and a current row that reached no risk level it
+  could name. Annotating only the superseded kind left a cited study counted
+  "Not assessed" printed bare (#372). The counts and the annotations are
+  taken from **one read** of the stored rows: analyses still running during
+  a review store rows between two reads, and a study the count put in one
+  bucket could then be annotated as another. The report also names how many rows are waiting, and how many
   studies came back with no finding at all, so no denominator shrinks in
   silence -- and **says what each count is a share of**: "12 of the 40
   studies reviewed; 3 of them are cited in this report" (#372). Both

@@ -37,7 +37,7 @@ gui/                  # PySide6: SystematicReview, ResearchQuestions, AuditTrail
 llm/                  # LLMClient (Anthropic/Ollama providers), token_tracker
 pubmed/               # PubMedSearchClient
 quality/              # QualityManager, study classification, evidence_summary, metadata_filter
-transparency/         # TransparencyManager, transparency_models, transparency_settings
+transparency/         # TransparencyManager, transparency_models, transparency_settings, assessment (shared analysis body)
 study_transparency_analyzer/  # Full LLM-based transparency analysis (funding, COI, data availability, trial registration)
 config.py             # LiteConfig (~/.bmlibrarian_lite/)
 storage.py            # LiteStorage (SQLite + sqlite-vec)

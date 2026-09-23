@@ -215,7 +215,7 @@ class WorkflowWorker(QThread):
         metadata: ReportMetadata,
         document_ids: list[str],
         cited_ids: list[str] | None = None,
-    ) -> None:
+    ) -> dict[str, TransparencyResult]:
         """Record how the documents' transparency assessments are distributed.
 
         A row an earlier version of the analyser wrote is counted apart from
@@ -243,6 +243,13 @@ class WorkflowWorker(QThread):
             document_ids: Every document the review assessed.
             cited_ids: The documents the report cites, or None when it is
                 not known which; the report then names one population only.
+
+        Returns:
+            The stored rows the counts were taken from, over the reviewed and
+            the cited documents. The report annotates its references from
+            these same rows: background analyses are still storing results
+            while the review runs, and a second read could annotate a study
+            the count had put in another bucket (#372).
         """
         # Applied means asked, not answered. The caller only reaches here
         # when the user turned transparency on.
@@ -268,6 +275,7 @@ class WorkflowWorker(QThread):
             metadata.transparency_unassessed_cited_count = (
                 cited_counts.not_assessed
             )
+        return results
 
     def run(self) -> None:
         """Execute the systematic review workflow."""
@@ -608,8 +616,9 @@ class WorkflowWorker(QThread):
             metadata.unique_sources_cited = len(unique_docs)
 
             # Collect transparency stats from available results
+            counted_rows: dict[str, TransparencyResult] | None = None
             if self.config.transparency.enabled:
-                self._record_transparency_counts(
+                counted_rows = self._record_transparency_counts(
                     metadata,
                     [doc.id for doc in documents],
                     cited_ids=list(unique_docs),
@@ -624,9 +633,18 @@ class WorkflowWorker(QThread):
 
             # Gather transparency results for cited documents
             cited_doc_ids = list({c.document.id for c in citations})
-            transparency_results = self.storage.get_transparency_results_batch(
-                cited_doc_ids
-            )
+            if counted_rows is not None:
+                # The rows the counts came from, so the report's figures and
+                # its reference annotations describe one read (#372)
+                transparency_results = {
+                    doc_id: counted_rows[doc_id]
+                    for doc_id in cited_doc_ids
+                    if doc_id in counted_rows
+                }
+            else:
+                transparency_results = self.storage.get_transparency_results_batch(
+                    cited_doc_ids
+                )
 
             reporting_agent = LiteReportingAgent(config=self.config)
             try:

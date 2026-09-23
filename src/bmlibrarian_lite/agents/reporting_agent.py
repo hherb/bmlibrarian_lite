@@ -91,8 +91,23 @@ def withheld_population_text(
     Returns:
         e.g. "12 of the 40 studies reviewed; 3 of them are cited in this
         report". A report without the populations gets the bare count it
-        always had, not a guess.
+        always had, not a guess -- and so does one whose recorded populations
+        cannot hold the count, which only a hand-edited or corrupted report
+        can carry: "5 of them are cited" against a count of 3 is a claim no
+        reader can check against anything.
     """
+    if considered is not None and considered < count:
+        logger.warning(
+            f"{count} withheld studies recorded against {considered} "
+            "reviewed; the report names the bare count"
+        )
+        considered = None
+    if cited is not None and not 0 <= cited <= count:
+        logger.warning(
+            f"{cited} cited recorded against {count} withheld studies; the "
+            "report does not name a cited share"
+        )
+        cited = None
     text = f"{count:,}"
     if considered:
         noun = "study" if considered == 1 else "studies"
@@ -274,6 +289,9 @@ class LiteReportingAgent(LiteBaseAgent):
         # counts as withheld is annotated, so each cited one it names can be
         # found in the list (#372).
         results = transparency_results or {}
+        # Without metadata nothing says the analysis was asked for, so only
+        # rows it stored show that it ran; a study with no row is then not
+        # annotated as "not stored", since the analysis may never have run.
         analysis_applied = (
             metadata.transparency_analysis_applied
             if metadata is not None

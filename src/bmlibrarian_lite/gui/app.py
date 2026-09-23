@@ -59,7 +59,11 @@ from ..config import LiteConfig
 from ..constants import STATUS_MESSAGE_TIMEOUT_MS
 from ..exceptions import SQLiteError
 from ..storage import LiteStorage
-from ..transparency import stored_transparency_outcomes
+from ..analysis_failures import (
+    unreadable_assessment_caveat,
+    unreadable_assessments_clause,
+)
+from ..transparency import TransparencyUnassessed, stored_transparency_outcomes
 from .research_questions_tab import ResearchQuestionsTab, documents_text
 from .systematic_review_tab import SystematicReviewTab
 from .audit_trail_tab import AuditTrailTab
@@ -603,7 +607,7 @@ class LiteMainWindow(QMainWindow):
     def _show_stored_transparency(
         self,
         documents: Sequence["LiteDocument"],
-    ) -> None:
+    ) -> str | None:
         """Give each document of a reloaded question its transparency badge.
 
         A question loaded from the store showed no transparency badge at all,
@@ -614,10 +618,16 @@ class LiteMainWindow(QMainWindow):
 
         Args:
             documents: The question's documents, as the Audit Trail shows them.
+
+        Returns:
+            None when the stored rows were read, or a clause for the load's
+            status message naming why they could not be. A message posted
+            here was replaced by the load's own summary before anyone could
+            read it.
         """
         if not self.config.transparency.enabled:
             # A review run with the analysis off shows no badge either
-            return
+            return None
         try:
             stored = self.storage.get_transparency_results_batch(
                 [document.id for document in documents]
@@ -628,15 +638,17 @@ class LiteMainWindow(QMainWindow):
             # row this build cannot decode, such as a risk level a newer
             # build wrote into a shared data directory.
             logger.exception("Could not read the stored transparency results")
-            self.status_bar.showMessage(
-                "Transparency badges could not be loaded "
-                f"({type(e).__name__}); see the log.",
-                STATUS_MESSAGE_TIMEOUT_MS,
+            # A missing badge reads as an analysis still running: each one
+            # says what happened instead
+            unreadable = TransparencyUnassessed(unreadable_assessment_caveat())
+            self.audit_trail_tab.show_transparency_outcomes(
+                {document.id: unreadable for document in documents}
             )
-            return
+            return unreadable_assessments_clause(type(e).__name__)
         self.audit_trail_tab.show_transparency_outcomes(
             stored_transparency_outcomes(documents, stored)
         )
+        return None
 
     def _on_question_selected(
         self,
@@ -670,9 +682,7 @@ class LiteMainWindow(QMainWindow):
             doc_ids = self.storage.get_document_ids_for_question(question)
             documents_found = [
                 document
-                for document in (
-                    self.storage.get_document(doc_id) for doc_id in doc_ids
-                )
+                for document in map(self.storage.get_document, doc_ids)
                 if document is not None
             ]
 
@@ -716,7 +726,7 @@ class LiteMainWindow(QMainWindow):
             for citation in citations:
                 self.audit_trail_tab.on_citation_extracted(citation)
 
-            self._show_stored_transparency(documents_found)
+            badge_failure = self._show_stored_transparency(documents_found)
 
             self.audit_trail_tab.on_workflow_finished()
 
@@ -752,10 +762,12 @@ class LiteMainWindow(QMainWindow):
             # A failure is not a scored document (#307)
             failed_count = sum(1 for scored in scored_documents if scored.score < 0)
             failed_text = f" ({failed_count} could not be scored)" if failed_count else ""
+            badge_text = f"; {badge_failure}" if badge_failure else ""
             self.status_bar.showMessage(
                 f"Loaded question with {len(scored_documents) - failed_count} "
-                f"scored docs{failed_text}, {len(citations)} citations",
-                5000
+                f"scored docs{failed_text}, {len(citations)} citations"
+                f"{badge_text}",
+                STATUS_MESSAGE_TIMEOUT_MS,
             )
 
         except Exception as e:

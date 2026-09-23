@@ -1089,7 +1089,10 @@ def distinct_causes(
 
 @dataclass(frozen=True)
 class PassFailure:
-    """One document a re-classification or re-scoring pass could not finish (#327).
+    """One document a pass over a question's documents could not finish (#327).
+
+    Re-classification, re-scoring and transparency re-analysis all report
+    their failures this way.
 
     The pass counted its failures and logged the rest, so seventeen documents
     behind one unreachable provider and seventeen unprocessable abstracts
@@ -1232,9 +1235,10 @@ class TransparencyAnalysisFailure:
 class PassOutcome:
     """What a pass over a question's documents did with the documents it was given.
 
-    Both passes reported a pair of counts, which a cancel then had to be told
+    The passes reported a pair of counts, which a cancel then had to be told
     separately (#320) and which said nothing about why anything failed (#327).
-    This is the one value both their terminal signals carry.
+    This is the one value every pass's terminal signals carry:
+    re-classification, re-scoring and transparency re-analysis.
 
     A document the model answered for without naming a study design is neither
     a success nor a failure: nothing broke, and the model was honest. Counted

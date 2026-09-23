@@ -20,6 +20,7 @@ from collections.abc import Mapping, Sequence
 
 from ..transparency.transparency_models import (
     COI_NOT_STATED,
+    NAMEABLE_RISK_LEVELS,
     TransparencyResult,
     TransparencyRisk,
 )
@@ -30,14 +31,6 @@ from ..transparency.transparency_settings import (
 
 # Data availability levels that indicate risk
 RISKY_DATA_AVAILABILITY_LEVELS = ("not_available", "restricted", "not_stated")
-
-# The risk levels a current finding can be reported under. The same three
-# the report's distribution counts; any other is counted as not assessed.
-NAMEABLE_RISK_LEVELS = (
-    TransparencyRisk.LOW,
-    TransparencyRisk.MEDIUM,
-    TransparencyRisk.HIGH,
-)
 
 
 def select_inline_warning(

@@ -154,7 +154,9 @@ The Research Questions tab lets you manage and revisit past searches:
 - **Load** shows the question's saved report and audit trail, including each
   study's stored transparency badge. Nothing is fetched: a study whose stored
   assessment is out of date, or that has none, reads **Not assessed** with the
-  reason on hover
+  reason on hover. If the stored assessments cannot be read at all, every
+  badge says so, and so does the status bar's "Loaded question" message; the
+  log has the details
 - **Re-analyse Transparency** (context menu, when transparency analysis is on)
   re-analyses only the question's studies whose assessment is missing, out of
   date, or provisional. It says how many that is, and how many carry no

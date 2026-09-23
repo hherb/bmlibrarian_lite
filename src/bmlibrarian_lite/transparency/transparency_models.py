@@ -190,25 +190,25 @@ class TransparencyCounts:
         return self.low + self.medium + self.high
 
 
-def count_transparency_results(
+def _count_rows(
     results: Iterable["TransparencyResult"],
 ) -> TransparencyCounts:
     """Count stored assessments by risk level, keeping superseded ones apart.
+
+    Private: given rows alone it cannot know which documents have none, so
+    its ``not_stored`` is always 0, which reads as "none missing" rather
+    than "not known". :func:`count_transparency_over` is the public count.
 
     Args:
         results: The stored assessments, in any order.
 
     Returns:
-        The counts. A result an earlier analyser wrote is counted only as
-        superseded, whatever risk level it stored; every other result is
-        counted under some bucket, so none can leave the distribution
-        without the report being able to say so.
+        The counts, ``not_stored`` apart. A result an earlier analyser wrote
+        is counted only as superseded, whatever risk level it stored; every
+        other result is counted under some bucket, so none can leave the
+        distribution without the report being able to say so.
     """
-    counts = {
-        TransparencyRisk.LOW: 0,
-        TransparencyRisk.MEDIUM: 0,
-        TransparencyRisk.HIGH: 0,
-    }
+    counts = dict.fromkeys(NAMEABLE_RISK_LEVELS, 0)
     superseded = 0
     unknown = 0
     for result in results:
@@ -246,9 +246,7 @@ def count_transparency_over(
         two figures taken over different sets cannot be read as one (#372).
     """
     ids = list(dict.fromkeys(document_ids))
-    counts = count_transparency_results(
-        stored[doc_id] for doc_id in ids if doc_id in stored
-    )
+    counts = _count_rows(stored[doc_id] for doc_id in ids if doc_id in stored)
     return replace(
         counts, not_stored=sum(1 for doc_id in ids if doc_id not in stored)
     )
@@ -268,8 +266,9 @@ def pending_transparency_ids(
         Each document with no row, or whose row is not final -- an earlier
         analyser wrote it (#360), or a source it scores against could not be
         read (#346) -- once each, in the order given. The same question
-        ``TransparencyManager.analyze_document`` asks of its cache, so the
-        pass that re-analyses a question's documents and the review that
+        ``TransparencyManager.analyze_document`` asks of its cache when
+        caching is on (with it off, a review re-analyses every document), so
+        the pass that re-analyses a question's documents and the review that
         re-analyses them as it goes cannot disagree about which are done.
     """
     return [
@@ -372,6 +371,17 @@ class TransparencyRisk(Enum):
     MEDIUM = "medium"
     HIGH = "high"
     UNKNOWN = "unknown"
+
+
+#: The risk levels a current finding can be reported under. The report's
+#: distribution counts these three, and annotates a cited study at any other
+#: level as not assessed; one definition, so the count and the annotations
+#: cannot disagree about which studies are "Not assessed" (#372).
+NAMEABLE_RISK_LEVELS = (
+    TransparencyRisk.LOW,
+    TransparencyRisk.MEDIUM,
+    TransparencyRisk.HIGH,
+)
 
 
 @dataclass

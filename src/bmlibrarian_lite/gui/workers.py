@@ -1401,7 +1401,18 @@ class TransparencyReanalysisWorker(SingleOutcome, QThread):
                 or a DOI; the tab leaves out those that carry neither, since
                 no re-analysis can help them.
             parent: Optional parent widget
+
+        Raises:
+            ValueError: If a document carries neither a PMID nor a DOI. Let
+                through, it would be counted as a provider failure rather
+                than a document with nothing to look it up by.
         """
+        unidentified = [doc.id for doc in documents if not (doc.pmid or doc.doi)]
+        if unidentified:
+            raise ValueError(
+                f"{len(unidentified)} document(s) carry neither a PMID nor a "
+                "DOI, so no re-analysis can look them up"
+            )
         super().__init__(parent)
         self.config = config
         self.storage = storage
@@ -1478,7 +1489,10 @@ class TransparencyReanalysisWorker(SingleOutcome, QThread):
                     )
                     logger.warning(
                         f"Failed to re-analyse transparency for {doc.id} "
-                        f"({cause.name}): {e}"
+                        f"({cause.name}): {e}",
+                        # A defect here fails every document alike; without
+                        # the traceback nothing says where
+                        exc_info=cause is EvaluationErrorCode.INTERNAL_ERROR,
                     )
                     if doc.id:
                         self.outcome_ready.emit(

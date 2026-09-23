@@ -31,6 +31,8 @@ from bmlibrarian_lite.analysis_failures import (
     reanalysis_advice,
     superseded_assessment_caveat,
     transparency_failure_text,
+    unreadable_assessment_caveat,
+    unreadable_assessments_clause,
 )
 from bmlibrarian_lite.data_models import (
     DocumentSource,
@@ -200,6 +202,32 @@ class TestAReloadedQuestionShowsItsBadges:
         )
         assert REANALYSE_TRANSPARENCY_ACTION not in outcome.reason
 
+    def test_a_current_row_stands_without_an_identifier(self) -> None:
+        """A finding already made needs no identifier to be shown.
+
+        Checked for an identifier first, a valid finding would be withheld.
+        """
+        document = a_document("a", pmid=None, doi=None)
+        row = a_row("a", risk=TransparencyRisk.HIGH)
+
+        outcomes = stored_transparency_outcomes([document], {"a": row})
+
+        assert outcomes["a"] is row
+
+    def test_a_superseded_row_without_an_identifier_is_not_sent_to_the_pass(
+        self,
+    ) -> None:
+        """Its row is out of date, but no re-analysis can look it up."""
+        document = a_document("a", pmid=None, doi=None)
+        stored = {"a": a_row("a", version=LEGACY_ANALYZER_VERSION)}
+
+        outcome = stored_transparency_outcomes([document], stored)["a"]
+
+        assert isinstance(outcome, TransparencyUnassessed)
+        assert outcome.reason == transparency_failure_text(
+            TransparencyAnalysisFailure.no_identifier("a")
+        )
+
     def test_a_doi_alone_is_enough_to_be_analysable(self) -> None:
         """Preprints carry a DOI and no PMID; they are first-class."""
         document = a_document("a", pmid=None, doi="10.1101/2024.01.01.000001")
@@ -239,15 +267,78 @@ class TestTheCaveatSaysOnlyWhatIsTrue:
 
     def test_the_advice_names_the_action_the_menu_shows(self) -> None:
         """A label renamed on the menu alone would send the reader nowhere."""
-        pytest.importorskip("PySide6")
-        import inspect
-
-        from bmlibrarian_lite.gui.research_questions_tab import ResearchQuestionsTab
-
-        menu = inspect.getsource(ResearchQuestionsTab._show_context_menu)
+        actions = menu_actions(enabled=True, busy=False, total_documents=3)
 
         assert REANALYSE_TRANSPARENCY_ACTION in reanalysis_advice()
-        assert "QAction(REANALYSE_TRANSPARENCY_ACTION" in menu
+        assert REANALYSE_TRANSPARENCY_ACTION in actions
+
+
+def menu_actions(enabled: bool, busy: bool, total_documents: int) -> dict[str, Any]:
+    """Build the Research Questions context menu with stand-in actions.
+
+    Args:
+        enabled: Whether transparency analysis is switched on.
+        busy: Whether a run is already under way.
+        total_documents: How many documents the selected question has.
+
+    Returns:
+        Each action the menu was given, by its label.
+    """
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import QPoint
+
+    from bmlibrarian_lite.gui import research_questions_tab as module
+
+    actions: dict[str, Any] = {}
+
+    def make_action(label: str, _parent: Any) -> Any:
+        action = MagicMock()
+        actions[label] = action
+        return action
+
+    tab = MagicMock()
+    tab.config.transparency.enabled = enabled
+    tab._is_busy.return_value = busy
+    tab._get_selected_question.return_value.total_documents = total_documents
+    with patch.object(module, "QAction", side_effect=make_action), \
+            patch.object(module, "QMenu"):
+        module.ResearchQuestionsTab._show_context_menu(tab, QPoint())
+    return actions
+
+
+class TestTheMenuOffersTheAction:
+    """Where the reader can reach it, and only when it can run."""
+
+    def test_it_is_offered_when_it_can_run(self) -> None:
+        """The control."""
+        action = menu_actions(enabled=True, busy=False, total_documents=3)[
+            REANALYSE_TRANSPARENCY_ACTION
+        ]
+
+        action.setEnabled.assert_called_once_with(True)
+
+    def test_it_is_not_offered_with_the_analysis_switched_off(self) -> None:
+        """Advice to run it is only ever given with the analysis on."""
+        actions = menu_actions(enabled=False, busy=False, total_documents=3)
+
+        assert REANALYSE_TRANSPARENCY_ACTION not in actions
+        assert "Re-score Documents" in actions
+
+    def test_it_waits_for_a_running_pass(self) -> None:
+        """Otherwise a second run could start on top of it (#320)."""
+        action = menu_actions(enabled=True, busy=True, total_documents=3)[
+            REANALYSE_TRANSPARENCY_ACTION
+        ]
+
+        action.setEnabled.assert_called_once_with(False)
+
+    def test_a_question_with_no_documents_has_nothing_to_analyse(self) -> None:
+        """No document, no request."""
+        action = menu_actions(enabled=True, busy=False, total_documents=0)[
+            REANALYSE_TRANSPARENCY_ACTION
+        ]
+
+        action.setEnabled.assert_called_once_with(False)
 
 
 class TestTheWindowShowsThemOnLoad:
@@ -310,21 +401,89 @@ class TestTheWindowShowsThemOnLoad:
             "'extreme' is not a valid TransparencyRisk"
         )
 
-        LiteMainWindow._show_stored_transparency(window, [a_document("a")])
+        clause = LiteMainWindow._show_stored_transparency(
+            window, [a_document("a"), a_document("b")]
+        )
 
-        window.audit_trail_tab.show_transparency_outcomes.assert_not_called()
-        [call] = window.status_bar.showMessage.call_args_list
-        assert "could not be loaded" in call.args[0]
+        assert clause == unreadable_assessments_clause("ValueError")
+        # The error's own text can carry a stored value; only its class shows
+        assert "extreme" not in clause
+        [call] = window.audit_trail_tab.show_transparency_outcomes.call_args_list
+        outcomes = call.args[0]
+        assert set(outcomes) == {"a", "b"}
+        assert all(
+            outcome == TransparencyUnassessed(unreadable_assessment_caveat())
+            for outcome in outcomes.values()
+        )
 
-    def test_the_load_path_calls_it(self) -> None:
-        """Extracted, so a second place for the same defect: assert the call."""
-        pytest.importorskip("PySide6")
-        import inspect
+    @staticmethod
+    def _loaded(stored: dict | Exception) -> Any:
+        """Load a question through the window's own load path.
 
+        Args:
+            stored: What reading the stored assessments returns, or raises.
+
+        Returns:
+            The stand-in window, after the load.
+        """
+        from datetime import datetime
+
+        from bmlibrarian_lite.data_models import ReviewCheckpoint
         from bmlibrarian_lite.gui.app import LiteMainWindow
 
-        source = inspect.getsource(LiteMainWindow._on_question_selected)
-        assert "self._show_stored_transparency(documents_found)" in source
+        documents = {"a": a_document("a"), "b": a_document("b")}
+        window = TestTheWindowShowsThemOnLoad._window(True, {})
+        if isinstance(stored, Exception):
+            window.storage.get_transparency_results_batch.side_effect = stored
+        else:
+            window.storage.get_transparency_results_batch.return_value = stored
+        window._show_stored_transparency.side_effect = (
+            lambda docs: LiteMainWindow._show_stored_transparency(window, docs)
+        )
+        window.storage.get_checkpoint_for_question.return_value = ReviewCheckpoint(
+            id="checkpoint-1",
+            research_question="Q",
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+            step="complete",
+            report="## Findings",
+            metadata={},
+        )
+        window.storage.get_document_ids_for_question.return_value = list(documents)
+        window.storage.get_document.side_effect = documents.get
+        window.storage.get_scored_documents_for_question.return_value = []
+        window.storage.get_citations_for_question.return_value = []
+        window.storage.get_quality_assessments_for_question.return_value = {}
+
+        LiteMainWindow._on_question_selected(window, "Q", "query")
+        return window
+
+    def test_the_load_path_shows_the_badges(self) -> None:
+        """Extracted, so a second place for the same defect: drive the load."""
+        pytest.importorskip("PySide6")
+
+        window = self._loaded({"a": a_row("a")})
+
+        [call] = window.audit_trail_tab.show_transparency_outcomes.call_args_list
+        assert set(call.args[0]) == {"a", "b"}
+        last_message = window.status_bar.showMessage.call_args.args[0]
+        assert "could not be loaded" not in last_message
+
+    def test_a_failed_read_survives_the_load_summary(self) -> None:
+        """Posted on its own, it was replaced within the same call.
+
+        The load's summary is the status bar's last word, so the failure is
+        a clause of it -- and every badge says why it shows no finding.
+        """
+        pytest.importorskip("PySide6")
+
+        window = self._loaded(ValueError("'extreme' is not a valid TransparencyRisk"))
+
+        last_message = window.status_bar.showMessage.call_args.args[0]
+        assert last_message.startswith("Loaded question")
+        assert unreadable_assessments_clause("ValueError") in last_message
+        [call] = window.audit_trail_tab.show_transparency_outcomes.call_args_list
+        assert set(call.args[0]) == {"a", "b"}
 
     def test_a_reanalysis_updates_the_badges_on_screen(self) -> None:
         """The pass's outcomes reach the slot a review's outcomes reach."""
@@ -375,13 +534,25 @@ def qapp() -> Any:
 
 
 def run_pass(
-    answers: dict[str, Any], cancel_before: bool = False
+    answers: dict[str, Any],
+    cancel_before: bool = False,
+    documents: list[LiteDocument] | None = None,
+    config: Any = None,
+    cancel_during: str | None = None,
+    analyzer_error: Exception | None = None,
+    calls: list[tuple[Any, ...]] | None = None,
 ) -> tuple[str, tuple[Any, ...], list[tuple[str, Any]]]:
     """Run a re-analysis whose analyses give fixed answers.
 
     Args:
         answers: By document id, the stored result or the exception raised.
         cancel_before: Whether to cancel before the run starts.
+        documents: The documents to re-analyse; one per answer when None.
+        config: The configuration to run under; the defaults when None.
+        cancel_during: A document whose analysis the user cancels during.
+        analyzer_error: What creating the analyser raises, if anything.
+        calls: Filled with the arguments each analysis was given, after the
+            analyser, when a list is passed.
 
     Returns:
         The terminal signal's name, its arguments, and every per-document
@@ -391,19 +562,26 @@ def run_pass(
     from bmlibrarian_lite.config import LiteConfig
     from bmlibrarian_lite.gui.workers import TransparencyReanalysisWorker
 
-    def assess(
-        _analyzer: Any, _storage: Any, _settings: Any, doc_id: str, *_: Any
-    ) -> TransparencyResult:
+    def assess(_analyzer: Any, *args: Any) -> TransparencyResult:
         """Answer for one document."""
+        if calls is not None:
+            calls.append(args)
+        doc_id = args[2]
+        if doc_id == cancel_during:
+            worker.cancel()
         answer = answers[doc_id]
         if isinstance(answer, BaseException):
             raise answer
         return answer
 
     worker = TransparencyReanalysisWorker(
-        config=LiteConfig(),
+        config=config if config is not None else LiteConfig(),
         storage=MagicMock(),
-        documents=[a_document(doc_id) for doc_id in answers],
+        documents=(
+            documents
+            if documents is not None
+            else [a_document(doc_id) for doc_id in answers]
+        ),
     )
     terminal: list[tuple[str, tuple[Any, ...]]] = []
     for name in ("finished", "error", "cancelled"):
@@ -417,7 +595,8 @@ def run_pass(
     with patch(
         "bmlibrarian_lite.transparency.assessment.assess_document", assess
     ), patch(
-        "bmlibrarian_lite.transparency.assessment.create_background_analyzer"
+        "bmlibrarian_lite.transparency.assessment.create_background_analyzer",
+        side_effect=analyzer_error,
     ):
         worker.run()
     [(name, args)] = terminal
@@ -469,6 +648,89 @@ class TestThePassAccountsForEveryDocument:
         assert name == "cancelled"
         assert (outcome.attempted, outcome.not_attempted, error) == (0, 1, "")
         assert outcomes == []
+
+
+    def test_each_analysis_gets_its_own_documents_identifiers(self) -> None:
+        """Swapped or dropped, a DOI-only preprint is looked up by nothing."""
+        from bmlibrarian_lite.config import LiteConfig
+
+        config = LiteConfig()
+        calls: list[tuple[Any, ...]] = []
+        run_pass(
+            {"pmid-only": a_row("pmid-only"), "doi-only": a_row("doi-only")},
+            documents=[
+                a_document("pmid-only", pmid="111"),
+                a_document("doi-only", pmid=None, doi="10.1101/2024.01.01"),
+            ],
+            config=config,
+            calls=calls,
+        )
+
+        # After the analyser: storage, settings, id, PMID, DOI
+        assert all(call[1] is config.transparency for call in calls)
+        assert [call[2:] for call in calls] == [
+            ("pmid-only", "111", None),
+            ("doi-only", None, "10.1101/2024.01.01"),
+        ]
+
+    def test_a_cancel_between_documents_says_what_was_left(self) -> None:
+        """The analysis under way finishes; the next one is not started."""
+        calls: list[tuple[Any, ...]] = []
+        name, (outcome, error), outcomes = run_pass(
+            {"a": a_row("a"), "b": a_row("b")}, cancel_during="a", calls=calls
+        )
+
+        assert name == "cancelled"
+        assert error == ""
+        assert (outcome.succeeded, outcome.not_attempted) == (1, 1)
+        assert [call[2] for call in calls] == ["a"]
+        assert [doc_id for doc_id, _ in outcomes] == ["a"]
+
+    def test_a_cancel_after_the_last_document_stopped_nothing(self) -> None:
+        """The control: every document was re-analysed, so it finished."""
+        name, (outcome,), _ = run_pass(
+            {"a": a_row("a"), "b": a_row("b")}, cancel_during="b"
+        )
+
+        assert name == "finished"
+        assert outcome.succeeded == 2
+
+    def test_a_pass_that_cannot_start_says_why_in_its_own_words(self) -> None:
+        """The provider's text can print the request, credentials and all."""
+        name, (error,), outcomes = run_pass(
+            {"a": a_row("a")},
+            analyzer_error=RuntimeError("GET https://x?api_key=SECRET failed"),
+        )
+
+        assert name == "error"
+        assert error
+        assert "SECRET" not in error
+        assert outcomes == []
+
+    def test_a_pass_that_cannot_start_while_cancelling_is_a_cancel(self) -> None:
+        """Cancelling is not failing, but the failure is still reported."""
+        name, (outcome, error), _ = run_pass(
+            {"a": a_row("a")},
+            cancel_before=True,
+            analyzer_error=RuntimeError("GET https://x?api_key=SECRET failed"),
+        )
+
+        assert name == "cancelled"
+        assert error and "SECRET" not in error
+        assert outcome.attempted == 0
+
+    def test_a_document_nothing_can_look_up_is_refused(self) -> None:
+        """Let through, it would read as a provider failure."""
+        pytest.importorskip("PySide6")
+        from bmlibrarian_lite.config import LiteConfig
+        from bmlibrarian_lite.gui.workers import TransparencyReanalysisWorker
+
+        with pytest.raises(ValueError, match="neither a PMID nor a DOI"):
+            TransparencyReanalysisWorker(
+                config=LiteConfig(),
+                storage=MagicMock(),
+                documents=[a_document("a"), a_document("b", pmid=None)],
+            )
 
 
 class TestThePassSaysWhatItDid:
@@ -602,6 +864,43 @@ class TestTheTabOffersOnlyWhatIsPending:
         )
         worker.start.assert_called_once()
 
+    def test_the_dialog_opens_with_what_the_pass_would_cover(self) -> None:
+        """The scope sentence is the choice the user is asked to make."""
+        pytest.importorskip("PySide6")
+        from PySide6.QtWidgets import QMessageBox
+
+        from bmlibrarian_lite.gui import research_questions_tab as module
+
+        tab = self._tab(["stale", "anon"], [a_document("stale"), a_document("anon", pmid=None)])
+
+        with patch.object(module, "TransparencyReanalysisWorker"), \
+                patch.object(
+                    module.QMessageBox,
+                    "question",
+                    return_value=QMessageBox.StandardButton.No,
+                ) as question:
+            module.ResearchQuestionsTab._on_reanalyse_transparency_clicked(tab)
+
+        body = question.call_args.args[2]
+        assert body.startswith(module.reanalysis_scope_text(1, 1))
+
+    def test_a_store_it_cannot_read_starts_nothing_and_says_so(self) -> None:
+        """A newer build's risk level must not crash the tab."""
+        pytest.importorskip("PySide6")
+        from bmlibrarian_lite.gui import research_questions_tab as module
+
+        tab = self._tab([], [])
+        tab.storage.get_documents_pending_transparency.side_effect = ValueError(
+            "'extreme' is not a valid TransparencyRisk"
+        )
+
+        with patch.object(module, "TransparencyReanalysisWorker") as worker_cls:
+            module.ResearchQuestionsTab._on_reanalyse_transparency_clicked(tab)
+
+        worker_cls.assert_not_called()
+        [call] = tab.progress_label.setText.call_args_list
+        assert call.args[0] == "Could not read the stored assessments: ValueError"
+
     def test_declining_starts_nothing(self) -> None:
         """The control: the dialog is a real choice."""
         pytest.importorskip("PySide6")
@@ -620,6 +919,61 @@ class TestTheTabOffersOnlyWhatIsPending:
             module.ResearchQuestionsTab._on_reanalyse_transparency_clicked(tab)
 
         worker_cls.assert_not_called()
+
+    @staticmethod
+    def _ended(handler: str, *args: Any) -> Any:
+        """Run one of the tab's end-of-pass handlers with its dialogs replaced.
+
+        Args:
+            handler: The handler's name.
+            *args: What the worker's signal carried.
+
+        Returns:
+            The stand-in QMessageBox the handler reported through.
+        """
+        pytest.importorskip("PySide6")
+        from bmlibrarian_lite.gui import research_questions_tab as module
+
+        tab = MagicMock()
+        with patch.object(module, "QMessageBox") as box, \
+                patch.object(module, "QTimer"):
+            getattr(module.ResearchQuestionsTab, handler)(tab, *args)
+        return box
+
+    def test_a_clean_pass_ends_on_information(self) -> None:
+        """The control."""
+        box = self._ended(
+            "_on_transparency_finished", PassOutcome(succeeded=2, total=2)
+        )
+
+        box.information.assert_called_once()
+        box.warning.assert_not_called()
+
+    def test_a_provisional_pass_ends_on_a_warning(self) -> None:
+        """Provisional is the point: a throttled source is not all-clear."""
+        box = self._ended(
+            "_on_transparency_finished",
+            PassOutcome(succeeded=1, total=2, provisional=1),
+        )
+
+        box.warning.assert_called_once()
+        box.information.assert_not_called()
+        assert provisional_text(1).strip() in box.warning.call_args.args[2]
+
+    def test_a_cancel_names_its_provisional_results(self) -> None:
+        """Left out, the counts in the sentence did not add up (#327)."""
+        from bmlibrarian_lite.gui.research_questions_tab import pass_cancelled_text
+
+        text = pass_cancelled_text(
+            "Transparency re-analysis",
+            "re-analysed",
+            PassOutcome(succeeded=1, total=3, provisional=1),
+        )
+
+        assert text == (
+            "Transparency re-analysis cancelled after 2 of 3 documents: "
+            "1 re-analysed, 1 provisional. The other one was not re-analysed."
+        )
 
     def test_a_running_pass_keeps_the_tab_busy(self) -> None:
         """Otherwise a second run could start on top of it (#320)."""
@@ -696,14 +1050,89 @@ class TestTheCountsNameTheirPopulations:
         assert metadata.transparency_superseded_cited_count is None
         assert metadata.transparency_unassessed_cited_count is None
 
-    def test_the_workflow_passes_the_cited_documents(self) -> None:
+    def test_the_workflow_passes_the_cited_documents(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A parameter nobody passes is the #361 defect one level on."""
         pytest.importorskip("PySide6")
-        import inspect
+        from tests.test_gui_extraction_failures import CITED, run_worker
 
-        from bmlibrarian_lite.gui.systematic_review_tab import WorkflowWorker
+        reporting_agent = MagicMock()
+        run_worker(
+            monkeypatch,
+            reporting_agent=reporting_agent,
+            transparency_reads=[{}],
+        )
 
-        assert "cited_ids=list(unique_docs)" in inspect.getsource(WorkflowWorker.run)
+        metadata = reporting_agent.generate_report.call_args.args[2]
+        # CITED is the one cited study, with no stored row: its share is named
+        assert metadata.transparency_unassessed_cited_count == 1
+        assert metadata.transparency_documents_considered == 3
+        assert CITED.id not in (
+            reporting_agent.generate_report.call_args.kwargs["transparency_results"]
+        )
+
+    def test_the_counts_and_the_annotations_come_from_one_read(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A row stored between two reads split the count from its notes.
+
+        Background analyses store rows while the review runs. Counted from
+        one read and annotated from a second, a cited study counted "Not
+        assessed" could carry a risk annotation instead.
+        """
+        pytest.importorskip("PySide6")
+        from tests.test_gui_extraction_failures import CITED, run_worker
+
+        reporting_agent = MagicMock()
+        landed_late = {CITED.id: a_row(CITED.id)}
+        run_worker(
+            monkeypatch,
+            reporting_agent=reporting_agent,
+            transparency_reads=[{}, landed_late],
+        )
+
+        call = reporting_agent.generate_report.call_args
+        assert call.args[2].transparency_unassessed_cited_count == 1
+        assert call.kwargs["transparency_results"] == {}
+
+    def test_rows_the_count_read_are_the_ones_annotated(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The control: a row already stored reaches the report's references."""
+        pytest.importorskip("PySide6")
+        from tests.test_gui_extraction_failures import CITED, run_worker
+
+        reporting_agent = MagicMock()
+        stored = {CITED.id: a_row(CITED.id)}
+        run_worker(
+            monkeypatch,
+            reporting_agent=reporting_agent,
+            # However often it is read, the store holds the same row
+            transparency_reads=[stored, stored],
+        )
+
+        call = reporting_agent.generate_report.call_args
+        assert call.args[2].transparency_unassessed_cited_count == 0
+        assert call.kwargs["transparency_results"] == stored
+
+    def test_one_study_reviewed_is_one_study(self) -> None:
+        """The singular, which the plural's test cannot reach."""
+        from bmlibrarian_lite.agents.reporting_agent import withheld_population_text
+
+        assert withheld_population_text(1, 1, 1) == (
+            "1 of the 1 study reviewed; it is cited in this report"
+        )
+
+    def test_populations_that_cannot_hold_the_count_are_not_named(self) -> None:
+        """A share larger than its whole is no claim a reader can check."""
+        from bmlibrarian_lite.agents.reporting_agent import withheld_population_text
+
+        assert withheld_population_text(3, 40, 5) == "3 of the 40 studies reviewed"
+        assert withheld_population_text(3, 2, 1) == (
+            "3; 1 of them is cited in this report"
+        )
+        assert withheld_population_text(3, 40, -1) == "3 of the 40 studies reviewed"
 
     def test_the_report_names_both_populations(self) -> None:
         """The sentence the reader actually gets."""

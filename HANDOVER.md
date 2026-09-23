@@ -66,6 +66,30 @@ under *A correction only reaches the reader if something re-analyses* in
   survivor — the singular "1 more carries…" branch — now tested. Offscreen
   smoke of `LiteMainWindow` + a stored question: current, superseded and
   no-identifier badges all render.
+- **Second review round (six agents), addressed:**
+  - The badge-load failure message was overwritten at once by the load's
+    own "Loaded question…" summary. `_show_stored_transparency` now returns
+    a clause (`unreadable_assessments_clause`) that the summary carries, and
+    gives every badge `unreadable_assessment_caveat()`.
+  - The report's cited counts and its reference notes came from two reads,
+    with background analyses storing rows in between.
+    `_record_transparency_counts` now returns the rows it counted, and the
+    report step annotates from those.
+  - `count_transparency_results` is now the private `_count_rows`, since its
+    `not_stored=0` meant "not known".
+  - `NAMEABLE_RISK_LEVELS` now lives only in `transparency_models`.
+  - `withheld_population_text` names the bare count when a recorded
+    population cannot hold it.
+  - The worker refuses documents with no PMID or DOI, and logs a traceback
+    for `INTERNAL_ERROR`.
+  - The source-string tests became behavioural ones: the menu, the load
+    path and the workflow's `cited_ids`.
+  - The contract gains every-kind-annotated, one-read, and no-identifier
+    exclusion.
+  - Lodged rather than done: the pass-skeleton refactor is #376, and the
+    count of pending documents missing from the library is #377.
+  - After this round: `pytest tests/` 2333 passed, 3 xfailed;
+    `lint_delta.py` 0 new.
 
 ## Recently landed (context)
 

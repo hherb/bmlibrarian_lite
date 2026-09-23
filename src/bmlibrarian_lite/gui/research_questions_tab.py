@@ -168,6 +168,29 @@ def rerun_cancelled_text(retried: int, error: str = "") -> str:
     return text + also_failed_text(error)
 
 
+def _outcome_breakdown(outcome: PassOutcome) -> str:
+    """The documents a pass attempted and did not simply finish, as clauses.
+
+    Shared by the finished and the cancelled sentence, so a count added to
+    one cannot be left out of the other.
+
+    Args:
+        outcome: What the pass did with the documents it was given.
+
+    Returns:
+        e.g. ", 3 failed, 1 provisional", or an empty string when every
+        attempted document succeeded.
+    """
+    clauses = []
+    if outcome.failed:
+        clauses.append(f"{outcome.failed} failed")
+    if outcome.unclassified:
+        clauses.append(f"{outcome.unclassified} with no study design named")
+    if outcome.provisional:
+        clauses.append(f"{outcome.provisional} provisional")
+    return "".join(f", {clause}" for clause in clauses)
+
+
 def pass_cancelled_text(
     pass_name: str, verb: str, outcome: PassOutcome, error: str = ""
 ) -> str:
@@ -196,14 +219,8 @@ def pass_cancelled_text(
     text = (
         f"{pass_name} cancelled after {outcome.attempted} of "
         f"{documents_text(outcome.total)}: {outcome.succeeded} {verb}"
+        f"{_outcome_breakdown(outcome)}."
     )
-    if outcome.failed:
-        text += f", {outcome.failed} failed"
-    if outcome.unclassified:
-        text += f", {outcome.unclassified} with no study design named"
-    if outcome.provisional:
-        text += f", {outcome.provisional} provisional"
-    text += "."
     remaining = outcome.not_attempted
     if remaining == 1:
         text += f" The other one was not {verb}."
@@ -227,14 +244,10 @@ def pass_finished_text(pass_name: str, verb: str, outcome: PassOutcome) -> str:
         looking at once the dialog is dismissed, so it has to add up on its
         own (#327).
     """
-    text = f"{pass_name} complete: {outcome.succeeded} {verb}"
-    if outcome.failed:
-        text += f", {outcome.failed} failed"
-    if outcome.unclassified:
-        text += f", {outcome.unclassified} with no study design named"
-    if outcome.provisional:
-        text += f", {outcome.provisional} provisional"
-    return text + "."
+    return (
+        f"{pass_name} complete: {outcome.succeeded} {verb}"
+        f"{_outcome_breakdown(outcome)}."
+    )
 
 
 def reanalysis_scope_text(analysable: int, unidentified: int) -> str:

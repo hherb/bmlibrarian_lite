@@ -116,6 +116,8 @@ def run_worker(
     monkeypatch: pytest.MonkeyPatch,
     cancel_during_extraction: bool = False,
     metadata_write_error: Exception | None = None,
+    reporting_agent: MagicMock | None = None,
+    transparency_reads: list[dict[str, Any]] | None = None,
 ) -> tuple[Recorder, MagicMock]:
     """Run a review whose extraction could not read one relevant document.
 
@@ -125,6 +127,11 @@ def run_worker(
             runs.
         metadata_write_error: What writing the checkpoint's metadata raises,
             if anything.
+        reporting_agent: The reporting agent to hand the report step, so a
+            caller can see what it was given; a fresh stand-in when None.
+        transparency_reads: What successive reads of the stored
+            transparency rows return. Transparency analysis is on only when
+            this is given.
 
     Returns:
         A recorder of the worker's signals, and the storage it wrote to.
@@ -151,7 +158,8 @@ def run_worker(
     monkeypatch.setattr(
         systematic_review_tab, "LiteCitationAgent", lambda **_: citation_agent
     )
-    reporting_agent = MagicMock()
+    if reporting_agent is None:
+        reporting_agent = MagicMock()
     reporting_agent.generate_report.return_value = "## Findings"
     monkeypatch.setattr(
         systematic_review_tab, "LiteReportingAgent", lambda **_: reporting_agent
@@ -159,9 +167,13 @@ def run_worker(
     config = LiteConfig()
     monkeypatch.setattr(config.parallel, "get_scoring_workers", lambda provider: 1)
     monkeypatch.setattr(config.parallel, "get_citation_workers", lambda provider: 1)
-    monkeypatch.setattr(config.transparency, "enabled", False)
+    monkeypatch.setattr(
+        config.transparency, "enabled", transparency_reads is not None
+    )
     storage = MagicMock()
     storage.create_checkpoint.return_value.id = "checkpoint-1"
+    if transparency_reads is not None:
+        storage.get_transparency_results_batch.side_effect = transparency_reads
 
     def update_checkpoint(**kwargs: Any) -> None:
         if "metadata" in kwargs and metadata_write_error is not None:

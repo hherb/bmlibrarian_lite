@@ -520,6 +520,43 @@ def no_risk_level_caveat() -> str:
     )
 
 
+def unreadable_assessment_caveat() -> str:
+    """Say that a reloaded study's stored assessment could not be read.
+
+    One row a build cannot decode fails the whole batch read, so every
+    document of the question is left without its badge (#374). A badge that
+    is simply missing read the same as an analysis still running, so each
+    one says what happened instead. Re-analysis is not advised: it reads the
+    same rows, and would fail the same way.
+
+    Returns:
+        Two sentences, ending in a full stop: why no assessment is shown,
+        and that this is not a finding against the study.
+    """
+    return (
+        "The stored transparency assessments of this question could not be "
+        "read, so none is shown; see the log. This is not a finding against "
+        "the study."
+    )
+
+
+def unreadable_assessments_clause(error_name: str) -> str:
+    """Name a failed read of the stored assessments in a status message.
+
+    Posted on its own, the message was replaced a moment later by the load's
+    own summary, so it is a clause the summary carries instead.
+
+    Args:
+        error_name: The exception's class name, never its message: a
+            message can carry a stored value or a path.
+
+    Returns:
+        A clause without capital or full stop, for example
+        ``"transparency badges could not be loaded (ValueError); see the log"``.
+    """
+    return f"transparency badges could not be loaded ({error_name}); see the log"
+
+
 #: The Research Questions tab's action that re-analyses a question's
 #: documents. Named once, because the advice below tells the reader to use it
 #: by this name, and a label renamed on the menu alone would send them looking

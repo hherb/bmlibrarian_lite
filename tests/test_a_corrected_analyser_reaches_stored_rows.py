@@ -33,7 +33,7 @@ from bmlibrarian_lite.transparency import (
     TransparencyResult,
     TransparencyRisk,
     TransparencySettings,
-    count_transparency_results,
+    count_transparency_over,
 )
 
 DOC = "pmid-12345678"
@@ -417,16 +417,17 @@ class TestNoSurfacePresentsASupersededFinding:
 
     def test_the_report_counts_superseded_rows_apart(self) -> None:
         """A count that includes them reports an analysis that did not run."""
-        counts = count_transparency_results(
-            [
-                a_result(risk=TransparencyRisk.LOW, document_id="a"),
-                a_result(risk=TransparencyRisk.HIGH, document_id="b"),
-                a_result(
-                    risk=TransparencyRisk.HIGH,
-                    version=LEGACY_ANALYZER_VERSION,
-                    document_id="c",
-                ),
-            ]
+        rows = [
+            a_result(risk=TransparencyRisk.LOW, document_id="a"),
+            a_result(risk=TransparencyRisk.HIGH, document_id="b"),
+            a_result(
+                risk=TransparencyRisk.HIGH,
+                version=LEGACY_ANALYZER_VERSION,
+                document_id="c",
+            ),
+        ]
+        counts = count_transparency_over(
+            {row.document_id: row for row in rows}, ["a", "b", "c"]
         )
 
         assert counts.low == 1
@@ -780,7 +781,9 @@ class TestAnUnknownLevelIsCountedSomewhere:
 
     def test_a_current_unknown_row_is_counted(self) -> None:
         """It fell through every bucket, so nothing could report it at all."""
-        counts = count_transparency_results([a_result(risk=TransparencyRisk.UNKNOWN)])
+        counts = count_transparency_over(
+            {DOC: a_result(risk=TransparencyRisk.UNKNOWN)}, [DOC]
+        )
 
         assert counts.unknown == 1
         # Not among the named levels: there is no level to name. It is
@@ -805,7 +808,9 @@ class TestAnUnknownLevelIsCountedSomewhere:
 
     def test_a_named_level_is_still_counted_as_itself(self) -> None:
         """The control."""
-        counts = count_transparency_results([a_result(risk=TransparencyRisk.HIGH)])
+        counts = count_transparency_over(
+            {DOC: a_result(risk=TransparencyRisk.HIGH)}, [DOC]
+        )
 
         assert counts.high == 1
         assert counts.unknown == 0
