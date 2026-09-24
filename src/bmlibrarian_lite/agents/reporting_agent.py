@@ -29,7 +29,7 @@ from ..analysis_failures import (
 )
 from ..data_models import AnalysisShortfall, AnalysisStage, Citation, ReportMetadata
 from ..search_failures import describe_search_shortfalls, with_search_shortfall_notice
-from ..transparency.transparency_models import TransparencyResult
+from ..transparency.transparency_models import StoredTransparency, TransparencyResult
 from .base import LiteBaseAgent
 from .report_risk_helpers import (
     build_risk_context_for_prompt,
@@ -162,7 +162,7 @@ class LiteReportingAgent(LiteBaseAgent):
         question: str,
         citations: list[Citation],
         metadata: ReportMetadata | None = None,
-        transparency_results: dict[str, TransparencyResult] | None = None,
+        transparency_results: Mapping[str, StoredTransparency] | None = None,
         analysis_shortfalls: Sequence[AnalysisShortfall] | None = None,
         documents_accepted: int | None = None,
     ) -> str:
@@ -172,7 +172,8 @@ class LiteReportingAgent(LiteBaseAgent):
             question: Research question
             citations: List of citations to synthesize
             metadata: Optional report metadata for methodology section
-            transparency_results: Optional dict mapping document_id to TransparencyResult
+            transparency_results: Optional mapping of document_id to what is
+                stored for it, including rows that could not be decoded
             analysis_shortfalls: What scoring and citation extraction could
                 not read (#261, #262); taken from *metadata* when not given.
             documents_accepted: How many documents met the relevance
@@ -233,7 +234,7 @@ class LiteReportingAgent(LiteBaseAgent):
         question: str,
         citations: list[Citation],
         metadata: ReportMetadata | None,
-        transparency_results: dict[str, TransparencyResult] | None,
+        transparency_results: Mapping[str, StoredTransparency] | None,
         analysis_shortfalls: Sequence[AnalysisShortfall] = (),
         documents_accepted: int = 0,
     ) -> str:
@@ -243,7 +244,8 @@ class LiteReportingAgent(LiteBaseAgent):
             question: Research question
             citations: List of citations to synthesize
             metadata: Optional report metadata for methodology section
-            transparency_results: Optional dict mapping document_id to TransparencyResult
+            transparency_results: Optional mapping of document_id to what is
+                stored for it, including rows that could not be decoded
             analysis_shortfalls: What scoring and citation extraction could
                 not read
             documents_accepted: How many relevant documents were read for
@@ -304,7 +306,7 @@ class LiteReportingAgent(LiteBaseAgent):
             for doc_id in doc_order:
                 result = results.get(doc_id)
                 if (
-                    result is not None
+                    isinstance(result, TransparencyResult)
                     and doc_id not in withheld
                     and should_warn_for_citation(result, settings)
                 ):
@@ -827,7 +829,9 @@ Key passages:
                     + ". The "
                     "analysis was asked about these studies and did not come "
                     "back with a finding: it failed, the study carried no "
-                    "identifier to look one up by, or it had not finished. "
+                    "identifier to look one up by, it had not finished, it "
+                    "reached no risk level it could name, or its stored "
+                    "assessment could not be read. "
                     "They are named here rather than left out of the count, "
                     "because an analysis that could not be made is not a "
                     "study with nothing to declare."

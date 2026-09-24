@@ -260,10 +260,10 @@ def reanalysis_scope_text(analysable: int, unidentified: int) -> str:
 
     Returns:
         e.g. "12 documents have no settled transparency assessment
-        (missing, provisional or out of date) and can be re-analysed. 2 more
-        carry no PubMed ID or DOI to look one up by." Not "no current
-        assessment": a provisional row is current, and its badge is on
-        screen while the dialog is open.
+        (missing, provisional, out of date or unreadable) and can be
+        re-analysed. 2 more carry no PubMed ID or DOI to look one up by."
+        Not "no current assessment": a provisional row is current, and its
+        badge is on screen while the dialog is open.
         Said even when nothing can be done, so a question whose badges still
         read "Not assessed" is not left looking as if the pass found no work
         it could not do.
@@ -273,13 +273,13 @@ def reanalysis_scope_text(analysable: int, unidentified: int) -> str:
     elif analysable == 1:
         text = (
             "1 document has no settled transparency assessment (missing, "
-            "provisional or out of date) and can be re-analysed."
+            "provisional, out of date or unreadable) and can be re-analysed."
         )
     else:
         text = (
             f"{analysable:,} documents have no settled transparency "
-            "assessment (missing, provisional or out of date) and can be "
-            "re-analysed."
+            "assessment (missing, provisional, out of date or unreadable) "
+            "and can be re-analysed."
         )
     if unidentified == 1:
         text += " 1 more carries no PubMed ID or DOI to look one up by."
@@ -1453,8 +1453,10 @@ class ResearchQuestionsTab(QWidget):
         """Re-analyse the transparency the store does not hold for a question.
 
         Only the pending documents are offered -- no row, a provisional one,
-        or one an earlier analyser wrote -- so a question whose assessments
-        are all current costs no request at all.
+        one an earlier analyser wrote, or one too damaged to decode -- so a
+        question whose assessments are all current costs no request at all.
+        A newer build's row is never offered: it is not this build's to
+        replace (#374).
         """
         question = self._get_selected_question()
         if not question:
@@ -1466,11 +1468,14 @@ class ResearchQuestionsTab(QWidget):
             )
             documents = self.storage.get_documents(pending_ids)
         except (SQLiteError, sqlite3.Error, ValueError) as e:
-            # ValueError: a stored row this build cannot decode, such as a
-            # risk level a newer build wrote into a shared data directory
+            # ValueError: a stored document that will not decode -- JSON
+            # columns that will not parse, a source this build does not know.
+            # A transparency row that will not decode does not land here:
+            # the reader withholds it alone (#374).
             logger.exception("Could not read the pending transparency work")
             self.progress_label.setText(
-                f"Could not read the stored assessments: {type(e).__name__}"
+                "Could not read this question's stored documents or "
+                f"assessments: {type(e).__name__}"
             )
             return
         if len(documents) < len(pending_ids):

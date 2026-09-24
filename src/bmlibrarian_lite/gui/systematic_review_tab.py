@@ -96,6 +96,7 @@ from ..search_failures import (
 )
 from ..quality import QualityManager, QualityFilter, QualityAssessment
 from ..transparency import (
+    StoredTransparency,
     TransparencyManager,
     TransparencyResult,
     count_transparency_over,
@@ -215,7 +216,7 @@ class WorkflowWorker(QThread):
         metadata: ReportMetadata,
         document_ids: list[str],
         cited_ids: list[str] | None = None,
-    ) -> dict[str, TransparencyResult]:
+    ) -> dict[str, StoredTransparency]:
         """Record how the documents' transparency assessments are distributed.
 
         A row an earlier version of the analyser wrote is counted apart from
@@ -265,8 +266,10 @@ class WorkflowWorker(QThread):
         metadata.transparency_superseded_count = counts.superseded
         # Whatever is left asked a question that never came back: the
         # analysis failed, the document carried no identifier to look one up
-        # by, or it had not finished. None of those is a study with nothing
-        # to declare, so none may leave the count without being named.
+        # by, it had not finished, it reached no nameable risk level, or its
+        # stored row could not be decoded (#374). None of those is a study
+        # with nothing to declare, so none may leave the count without being
+        # named.
         metadata.transparency_unassessed_count = counts.not_assessed
         metadata.transparency_documents_considered = counts.considered
         if cited_ids is not None:
@@ -616,7 +619,7 @@ class WorkflowWorker(QThread):
             metadata.unique_sources_cited = len(unique_docs)
 
             # Collect transparency stats from available results
-            counted_rows: dict[str, TransparencyResult] | None = None
+            counted_rows: dict[str, StoredTransparency] | None = None
             if self.config.transparency.enabled:
                 counted_rows = self._record_transparency_counts(
                     metadata,
@@ -1841,15 +1844,15 @@ class SystematicReviewTab(QWidget):
             doc_id: Document ID
 
         Returns:
-            The stored assessment when this build's analyser produced it;
-            ``None`` when there is none, or when the stored row is one an
-            earlier analyser wrote. The caller cannot tell a retracted
-            finding from a current one, so the gate is here rather than
-            left to each of them (#360).
+            The stored assessment when it is current -- this build's
+            analyser, or a newer one, produced it; ``None`` when there is
+            none, when the stored row is one an earlier analyser wrote, or
+            when it could not be decoded. The caller cannot tell a retracted
+            finding from a current one, so the gate is here rather than left
+            to each of them (#360).
         """
-        stored: TransparencyResult | None = self.storage.get_transparency_result(
-            doc_id
-        )
-        if stored is None or not stored.is_current:
+        stored = self.storage.get_transparency_result(doc_id)
+        # A row this build could not decode is no finding either (#374)
+        if not isinstance(stored, TransparencyResult) or not stored.is_current:
             return None
         return stored

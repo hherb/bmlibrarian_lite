@@ -632,11 +632,11 @@ class LiteMainWindow(QMainWindow):
             stored = self.storage.get_transparency_results_batch(
                 [document.id for document in documents]
             )
-        except (SQLiteError, sqlite3.Error, ValueError) as e:
+        except (SQLiteError, sqlite3.Error) as e:
             # Its own narrow catch: the load's broad one would take the
-            # report and audit trail down with the badges. ValueError is a
-            # row this build cannot decode, such as a risk level a newer
-            # build wrote into a shared data directory.
+            # report and audit trail down with the badges. A single row this
+            # build cannot decode does not land here: the reader withholds
+            # it alone, and its badge says why (#374).
             logger.exception("Could not read the stored transparency results")
             # A missing badge reads as an analysis still running: each one
             # says what happened instead

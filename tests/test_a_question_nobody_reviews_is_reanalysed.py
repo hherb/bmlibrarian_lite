@@ -19,6 +19,8 @@ report says what its withheld counts are a share of, since the reference
 list annotates only the cited studies (#372).
 """
 
+import json
+import sqlite3
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -389,25 +391,29 @@ class TestTheWindowShowsThemOnLoad:
         window.audit_trail_tab.show_transparency_outcomes.assert_not_called()
         window.storage.get_transparency_results_batch.assert_not_called()
 
-    def test_an_undecodable_row_leaves_the_rest_of_the_load_standing(
+    def test_a_failed_read_leaves_the_rest_of_the_load_standing(
         self,
     ) -> None:
-        """A newer build's risk level must not take the report down with it."""
+        """A table that cannot be read must not take the report down with it.
+
+        A single row that will not decode no longer reaches this catch: the
+        reader withholds it alone (#374), which the storage tests assert.
+        """
         pytest.importorskip("PySide6")
         from bmlibrarian_lite.gui.app import LiteMainWindow
 
         window = self._window(True, {})
-        window.storage.get_transparency_results_batch.side_effect = ValueError(
-            "'extreme' is not a valid TransparencyRisk"
+        window.storage.get_transparency_results_batch.side_effect = (
+            sqlite3.OperationalError("unable to open /Users/someone/lite.db")
         )
 
         clause = LiteMainWindow._show_stored_transparency(
             window, [a_document("a"), a_document("b")]
         )
 
-        assert clause == unreadable_assessments_clause("ValueError")
-        # The error's own text can carry a stored value; only its class shows
-        assert "extreme" not in clause
+        assert clause == unreadable_assessments_clause("OperationalError")
+        # The error's own text can carry a path; only its class shows
+        assert "someone" not in clause
         [call] = window.audit_trail_tab.show_transparency_outcomes.call_args_list
         outcomes = call.args[0]
         assert set(outcomes) == {"a", "b"}
@@ -477,11 +483,11 @@ class TestTheWindowShowsThemOnLoad:
         """
         pytest.importorskip("PySide6")
 
-        window = self._loaded(ValueError("'extreme' is not a valid TransparencyRisk"))
+        window = self._loaded(sqlite3.OperationalError("database is locked"))
 
         last_message = window.status_bar.showMessage.call_args.args[0]
         assert last_message.startswith("Loaded question")
-        assert unreadable_assessments_clause("ValueError") in last_message
+        assert unreadable_assessments_clause("OperationalError") in last_message
         [call] = window.audit_trail_tab.show_transparency_outcomes.call_args_list
         assert set(call.args[0]) == {"a", "b"}
 
@@ -772,13 +778,13 @@ class TestThePassSaysWhatItDid:
 
         assert reanalysis_scope_text(12, 2) == (
             "12 documents have no settled transparency assessment (missing, "
-            "provisional or out of date) and can be re-analysed. 2 more carry "
-            "no PubMed ID or DOI to look one up by."
+            "provisional, out of date or unreadable) and can be re-analysed. "
+            "2 more carry no PubMed ID or DOI to look one up by."
         )
         assert reanalysis_scope_text(1, 1) == (
             "1 document has no settled transparency assessment (missing, "
-            "provisional or out of date) and can be re-analysed. 1 more "
-            "carries no PubMed ID or DOI to look one up by."
+            "provisional, out of date or unreadable) and can be re-analysed. "
+            "1 more carries no PubMed ID or DOI to look one up by."
         )
         assert reanalysis_scope_text(0, 0) == (
             "Every document that can be analysed has a settled assessment."
@@ -885,13 +891,13 @@ class TestTheTabOffersOnlyWhatIsPending:
         assert body.startswith(module.reanalysis_scope_text(1, 1))
 
     def test_a_store_it_cannot_read_starts_nothing_and_says_so(self) -> None:
-        """A newer build's risk level must not crash the tab."""
+        """A stored document that will not decode must not crash the tab."""
         pytest.importorskip("PySide6")
         from bmlibrarian_lite.gui import research_questions_tab as module
 
         tab = self._tab([], [])
-        tab.storage.get_documents_pending_transparency.side_effect = ValueError(
-            "'extreme' is not a valid TransparencyRisk"
+        tab.storage.get_documents.side_effect = json.JSONDecodeError(
+            "Expecting value", "", 0
         )
 
         with patch.object(module, "TransparencyReanalysisWorker") as worker_cls:
@@ -899,7 +905,10 @@ class TestTheTabOffersOnlyWhatIsPending:
 
         worker_cls.assert_not_called()
         [call] = tab.progress_label.setText.call_args_list
-        assert call.args[0] == "Could not read the stored assessments: ValueError"
+        assert call.args[0] == (
+            "Could not read this question's stored documents or "
+            "assessments: JSONDecodeError"
+        )
 
     def test_declining_starts_nothing(self) -> None:
         """The control: the dialog is a real choice."""
