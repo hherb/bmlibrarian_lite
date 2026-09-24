@@ -25,8 +25,14 @@ object RegexHelper {
     /** Inline flag enabling Unicode-aware `\w`/`\s`/`\b`/`\d` (see class KDoc). */
     private const val UNICODE_FLAG = "(?U)"
 
-    /** Compile [pattern] with Unicode character classes, optionally case-insensitive. */
-    private fun compile(pattern: String, ignoreCase: Boolean = false): Regex =
+    /**
+     * Compile [pattern] with Unicode character classes, optionally case-insensitive.
+     *
+     * Internal rather than private so [TransparencyRegex] (the funder, COI and
+     * trial analyzers' Swift-semantics helpers) compiles through the same flag
+     * instead of carrying a second copy of it that could drift.
+     */
+    internal fun compile(pattern: String, ignoreCase: Boolean = false): Regex =
         if (ignoreCase) {
             Regex(UNICODE_FLAG + pattern, RegexOption.IGNORE_CASE)
         } else {

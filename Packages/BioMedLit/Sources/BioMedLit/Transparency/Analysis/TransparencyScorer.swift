@@ -63,40 +63,129 @@ public enum TransparencyScorer {
         industryFundingDetected: Bool,
         outcomeSwitchingDetected: Bool
     ) -> Int {
-        var score = TransparencyConstants.baseTransparencyScore
+        let score = scoreComponents(
+            dataAvailability: dataAvailability,
+            coiAnalysis: coiAnalysis,
+            trialRegistrations: trialRegistrations,
+            resultsCompliance: resultsCompliance,
+            industryFundingDetected: industryFundingDetected,
+            outcomeSwitchingDetected: outcomeSwitchingDetected
+        ).reduce(0) { $0 + $1.points }
 
-        // Data availability points
-        score += dataAvailabilityPoints(for: dataAvailability.disclosureLevel)
-
-        // COI disclosure points
-        score += coiDisclosurePoints(
-            hasStatement: coiAnalysis.hasStatement,
-            hasIndustryTies: coiAnalysis.hasIndustryTies
+        // Clamp to valid range
+        return max(
+            TransparencyConstants.minTransparencyScore,
+            min(TransparencyConstants.maxTransparencyScore, score)
         )
+    }
 
-        // Trial registration points
-        score += trialRegistrationPoints(
-            registrations: trialRegistrations,
-            compliance: resultsCompliance
+    /// The additions and penalties a transparency score is the sum of.
+    ///
+    /// ``calculateScore(dataAvailability:coiAnalysis:trialRegistrations:resultsCompliance:industryFundingDetected:outcomeSwitchingDetected:)``
+    /// is the clamped sum of these, so a report explaining a low score lists
+    /// the very terms that produced it. Terms worth zero points are omitted;
+    /// the base score is always first.
+    ///
+    /// - Parameters: As for `calculateScore`.
+    /// - Returns: Each term that moved the score, in the order it is applied.
+    public static func scoreComponents(
+        dataAvailability: DataAvailabilityResult,
+        coiAnalysis: COIAnalysisResult,
+        trialRegistrations: [TrialRegistration],
+        resultsCompliance: ResultsComplianceStatus,
+        industryFundingDetected: Bool,
+        outcomeSwitchingDetected: Bool
+    ) -> [ScoreComponent] {
+        let base = ScoreComponent(
+            label: "Starting score",
+            points: TransparencyConstants.baseTransparencyScore
         )
+        var components: [ScoreComponent] = []
 
-        // Outcome switching penalty
+        let level = dataAvailability.disclosureLevel
+        components.append(ScoreComponent(
+            label: "Data availability: \(level.displayName.lowercased())",
+            points: dataAvailabilityPoints(for: level),
+            recordsMissingStatement: level == .notStated
+        ))
+
+        // Stated as the separate terms `coiDisclosurePoints` adds up, so a
+        // statement disclosing industry ties reads as credit and penalty
+        // rather than as a net zero that looks like nothing was found.
+        if coiAnalysis.hasStatement {
+            components.append(ScoreComponent(
+                label: "Conflict of interest statement present",
+                points: TransparencyConstants.coiStatementPoints
+            ))
+            if coiAnalysis.hasIndustryTies {
+                components.append(ScoreComponent(
+                    label: "Conflict of interest statement discloses industry ties",
+                    points: TransparencyConstants.coiIndustryTiesPenalty
+                ))
+            }
+        } else {
+            components.append(ScoreComponent(
+                label: "No conflict of interest statement found",
+                points: coiDisclosurePoints(hasStatement: false),
+                recordsMissingStatement: true
+            ))
+        }
+
+        if !trialRegistrations.isEmpty {
+            components.append(ScoreComponent(
+                label: "Trial registered",
+                points: TransparencyConstants.trialRegistrationPoints
+            ))
+            switch resultsCompliance {
+            case .compliant:
+                components.append(ScoreComponent(
+                    label: "Trial results posted on time",
+                    points: TransparencyConstants.compliantResultsPoints
+                ))
+            case .missing:
+                components.append(ScoreComponent(
+                    label: "Trial results not posted",
+                    points: TransparencyConstants.missingResultsPenalty
+                ))
+            case .late, .notRequired, .unknown:
+                break
+            }
+        }
+
         if outcomeSwitchingDetected {
-            score += TransparencyConstants.outcomeSwitchingPenalty
+            components.append(ScoreComponent(
+                label: "Outcome switching detected",
+                points: TransparencyConstants.outcomeSwitchingPenalty
+            ))
         }
 
         // Industry ties (funding or disclosed COI) combined with
         // restricted/unavailable data is especially concerning.
         let hasIndustryTies = industryFundingDetected || coiAnalysis.hasIndustryTies
         let restrictedOrUnavailable: [DataDisclosureLevel] = [.notAvailable, .restricted]
-        if hasIndustryTies && restrictedOrUnavailable.contains(dataAvailability.disclosureLevel) {
-            score += TransparencyConstants.industryNoDataPenalty
+        if hasIndustryTies && restrictedOrUnavailable.contains(level) {
+            components.append(ScoreComponent(
+                label: "Industry ties with restricted or unavailable data",
+                points: TransparencyConstants.industryNoDataPenalty
+            ))
         }
 
-        // Clamp to valid range
-        return max(
-            TransparencyConstants.minTransparencyScore,
-            min(TransparencyConstants.maxTransparencyScore, score)
+        return [base] + components.filter { $0.points != 0 }
+    }
+
+    /// The score terms of a stored result, as ``scoreComponents(dataAvailability:coiAnalysis:trialRegistrations:resultsCompliance:industryFundingDetected:outcomeSwitchingDetected:)``
+    /// computes them from its recorded findings.
+    ///
+    /// - Parameter result: A stored transparency result.
+    /// - Returns: Each term that moved the score.
+    public static func scoreComponents(for result: TransparencyResult) -> [ScoreComponent] {
+        scoreComponents(
+            dataAvailability: result.dataAvailability,
+            coiAnalysis: result.coiAnalysis,
+            trialRegistrations: result.trialRegistrations,
+            resultsCompliance: result.resultsCompliance,
+            industryFundingDetected: result.industryFundingDetected,
+            outcomeSwitchingDetected: result.outcomeSwitchingDetected
         )
     }
 
@@ -207,21 +296,16 @@ public enum TransparencyScorer {
         industryDataTriggersHighRisk: Bool = true,
         missingCoiTriggersHighRisk: Bool = true
     ) -> TransparencyRiskLevel {
-        // High risk: low score
-        if score < scoreThreshold {
-            return .high
-        }
-
-        // High risk: industry funding with restricted/unavailable data
-        if industryDataTriggersHighRisk && industryFunding {
-            let restrictedLevels: [DataDisclosureLevel] = [.restricted, .notAvailable, .notStated]
-            if restrictedLevels.contains(dataAvailability) {
-                return .high
-            }
-        }
-
-        // High risk: missing COI disclosure
-        if missingCoiTriggersHighRisk && !coiDisclosed {
+        let triggers = highRiskTriggers(
+            score: score,
+            industryFunding: industryFunding,
+            dataAvailability: dataAvailability,
+            coiDisclosed: coiDisclosed,
+            scoreThreshold: scoreThreshold,
+            industryDataTriggersHighRisk: industryDataTriggersHighRisk,
+            missingCoiTriggersHighRisk: missingCoiTriggersHighRisk
+        )
+        if !triggers.isEmpty {
             return .high
         }
 
@@ -236,6 +320,65 @@ public enum TransparencyScorer {
         }
 
         return .low
+    }
+
+    /// Every rule that, on its own, rates a study high risk.
+    ///
+    /// ``calculateRiskLevel(score:industryFunding:dataAvailability:coiDisclosed:scoreThreshold:industryDataTriggersHighRisk:missingCoiTriggersHighRisk:)``
+    /// rates a study high exactly when this is non-empty, so a report that
+    /// explains a high rating names the rules that produced it rather than a
+    /// second reading of them that could drift. All matching rules are
+    /// returned, not only the first, because a reader weighing the rating
+    /// needs to know whether removing one concern would change it.
+    ///
+    /// - Parameters: As for `calculateRiskLevel`.
+    /// - Returns: The high-risk rules that apply, in the order they are checked.
+    public static func highRiskTriggers(
+        score: Int,
+        industryFunding: Bool,
+        dataAvailability: DataDisclosureLevel,
+        coiDisclosed: Bool,
+        scoreThreshold: Int = TransparencyConstants.highRiskScoreThreshold,
+        industryDataTriggersHighRisk: Bool = true,
+        missingCoiTriggersHighRisk: Bool = true
+    ) -> [HighRiskTrigger] {
+        var triggers: [HighRiskTrigger] = []
+
+        if score < scoreThreshold {
+            triggers.append(.scoreBelowThreshold(score: score, threshold: scoreThreshold))
+        }
+
+        if industryDataTriggersHighRisk && industryFunding {
+            let restrictedLevels: [DataDisclosureLevel] = [.restricted, .notAvailable, .notStated]
+            if restrictedLevels.contains(dataAvailability) {
+                triggers.append(.industryFundingWithWithheldData(dataAvailability))
+            }
+        }
+
+        if missingCoiTriggersHighRisk && !coiDisclosed {
+            triggers.append(.missingCOIStatement)
+        }
+
+        return triggers
+    }
+
+    /// The high-risk rules that apply to a stored result.
+    ///
+    /// Evaluated with the same defaults ``TransparencyResultBuilder/build()``
+    /// rates with, so for a result this build produced it agrees with
+    /// ``TransparencyResult/riskLevel``. A result from another analyzer can
+    /// carry a high rating none of these rules explains; callers must say so
+    /// rather than present an empty list as the reason.
+    ///
+    /// - Parameter result: A stored transparency result.
+    /// - Returns: The high-risk rules its recorded findings meet.
+    public static func highRiskTriggers(for result: TransparencyResult) -> [HighRiskTrigger] {
+        highRiskTriggers(
+            score: result.transparencyScore,
+            industryFunding: result.industryFundingDetected,
+            dataAvailability: result.dataAvailability.disclosureLevel,
+            coiDisclosed: result.coiAnalysis.hasStatement
+        )
     }
 
     // MARK: - Risk Indicators
@@ -257,6 +400,9 @@ public enum TransparencyScorer {
     ///   - trialRegistrations: List of trial registrations found.
     ///   - outcomeSwitchingDetected: Whether outcome switching was detected.
     ///   - title: Study title (for missing registration check).
+    ///   - trialRegistrationAssessed: Whether ClinicalTrials.gov answered for
+    ///     every trial the article cites; without that answer a missing
+    ///     registration is not reported.
     /// - Returns: List of human-readable risk indicator strings.
     public static func identifyRiskIndicators(
         industryFundingDetected: Bool,
@@ -265,7 +411,8 @@ public enum TransparencyScorer {
         coiAnalysis: COIAnalysisResult,
         trialRegistrations: [TrialRegistration],
         outcomeSwitchingDetected: Bool,
-        title: String?
+        title: String?,
+        trialRegistrationAssessed: Bool = false
     ) -> [String] {
         var indicators: [String] = []
         let restrictedOrUnavailable: [DataDisclosureLevel] = [.notAvailable, .restricted]
@@ -325,7 +472,8 @@ public enum TransparencyScorer {
         // Missing trial registration
         if let warning = TrialComplianceAnalyzer.checkMissingRegistration(
             title: title,
-            registrations: trialRegistrations
+            registrations: trialRegistrations,
+            registrationAssessed: trialRegistrationAssessed
         ) {
             indicators.append(warning)
         }
@@ -349,6 +497,9 @@ public enum TransparencyScorer {
 
         lines.append("Transparency Score: \(result.transparencyScore)/100")
         lines.append("Risk Level: \(result.riskLevel.fullLabel)")
+        if let note = TransparencyCertainty(fullTextSearched: result.fullTextSearched).note {
+            lines.append(note)
+        }
         lines.append("")
 
         // Funding section

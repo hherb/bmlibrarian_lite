@@ -42,12 +42,20 @@ object ReportText {
      * @param analysis The report the LLM wrote
      * @param references The reference list, one entry per relevant document
      * @param shortfalls What the session's searches failed to retrieve
-     * @return The notice (if any), the analysis, the Methodology section (if
-     *   any) and the references
+     * @param transparency The transparency sections, built by code from the
+     *   stored analyses (`TransparencyReportMarkdown`); empty when none ran
+     * @return The notice (if any), the analysis, the transparency sections (if
+     *   any), the Methodology section (if any) and the references
      */
-    fun fullReport(analysis: String, references: String, shortfalls: List<RetrievalShortfall>): String {
+    fun fullReport(
+        analysis: String,
+        references: String,
+        shortfalls: List<RetrievalShortfall>,
+        transparency: String = ""
+    ): String {
         val blocks = listOf(
             analysis,
+            transparency,
             SearchFailureReporting.searchCompletenessMethodology(shortfalls),
             "$REFERENCES_HEADING$BLOCK_SEPARATOR$references"
         ).filter { it.isNotEmpty() }

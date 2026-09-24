@@ -19,6 +19,7 @@
 package com.bmlibrarian.factchecker.ui.theme
 
 import androidx.compose.ui.graphics.Color
+import com.bmlibrarian.factchecker.domain.transparency.TransparencyRiskLevel
 
 /**
  * Color definitions for MedicalFactChecker theme.
@@ -147,6 +148,19 @@ fun scoreColor(score: Int): Color {
         5 -> Score5
         else -> Disabled
     }
+}
+
+/**
+ * Returns the color for a transparency risk level.
+ *
+ * @param level The risk level
+ * @return The corresponding color
+ */
+fun riskColor(level: TransparencyRiskLevel): Color = when (level) {
+    TransparencyRiskLevel.LOW -> Success
+    TransparencyRiskLevel.MEDIUM -> Warning
+    TransparencyRiskLevel.HIGH -> Error
+    TransparencyRiskLevel.UNKNOWN -> Disabled
 }
 
 /**

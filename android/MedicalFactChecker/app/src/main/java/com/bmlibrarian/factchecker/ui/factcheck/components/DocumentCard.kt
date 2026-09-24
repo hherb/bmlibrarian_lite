@@ -18,6 +18,10 @@
 
 package com.bmlibrarian.factchecker.ui.factcheck.components
 
+import com.bmlibrarian.factchecker.ui.common.TransparencyRiskBadge
+import com.bmlibrarian.factchecker.domain.transparency.TransparencyRiskExplanation
+import com.bmlibrarian.factchecker.domain.transparency.transparencyCertaintyOf
+import com.bmlibrarian.factchecker.domain.transparency.transparencyResult
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -273,6 +277,17 @@ fun DocumentCard(
                     SourceBadge(source = document.source)
                     if (document.isPreprint) {
                         PreprintBadge()
+                    }
+                    // Decoded once per stored result, not on every recomposition
+                    // of every card in the list.
+                    val transparency = remember(document.transparencyResultJson) { document.transparencyResult }
+                    transparency?.let { result ->
+                        val certainty = document.transparencyCertaintyOf(result)
+                        TransparencyRiskBadge(
+                            level = result.riskLevel,
+                            certainty = certainty,
+                            unassessed = TransparencyRiskExplanation.isUnassessed(result, certainty)
+                        )
                     }
                     document.pmid?.let {
                         Text(

@@ -494,6 +494,16 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
     /// See ``TransparencyConstants/analyzerVersion``.
     public let analyzerVersion: Int?
 
+    /// Whether the article's full text was given to the analysis.
+    ///
+    /// Conflict-of-interest and data-availability statements are looked for
+    /// only in the full text. Without it the analysis finds neither, and a
+    /// missing COI statement alone rates a study high risk, so a reader must be
+    /// able to tell "the article has no statement" from "there was no text to
+    /// look in". `nil` for results stored before this was recorded: whether the
+    /// text was searched is then unknown, and must be reported as unknown.
+    public let fullTextSearched: Bool?
+
     /// Whether this result was produced by an older analyzer than the current one.
     ///
     /// A stale result is not wrong so much as incomparable: the evidence reaching
@@ -540,6 +550,8 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
     ///   - errors: Errors encountered during analysis.
     ///   - analyzerVersion: Analyzer version that produced this result (defaults
     ///     to the current one; pass `nil` only to represent a pre-versioning result).
+    ///   - fullTextSearched: Whether the article's full text was given to the
+    ///     analysis (`nil` when not recorded).
     public init(
         id: UUID = UUID(),
         doi: String? = nil,
@@ -566,7 +578,8 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
         dataSourcesUsed: [String] = [],
         warnings: [String] = [],
         errors: [String] = [],
-        analyzerVersion: Int? = TransparencyConstants.analyzerVersion
+        analyzerVersion: Int? = TransparencyConstants.analyzerVersion,
+        fullTextSearched: Bool? = nil
     ) {
         self.id = id
         self.doi = doi
@@ -594,6 +607,7 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
         self.warnings = warnings
         self.errors = errors
         self.analyzerVersion = analyzerVersion
+        self.fullTextSearched = fullTextSearched
     }
 }
 
@@ -673,6 +687,14 @@ public struct TransparencyResultBuilder: Sendable {
     /// Errors encountered during analysis.
     public var errors: [String] = []
 
+    /// Whether the article's full text was given to the analysis.
+    public var fullTextSearched: Bool?
+
+    /// Whether ClinicalTrials.gov answered for every trial the article cites,
+    /// so an empty ``trialRegistrations`` is the registry's answer. False when
+    /// no trial ID was found to look up or a lookup failed.
+    public var trialRegistrationAssessed: Bool = false
+
     /// Creates a new TransparencyResultBuilder.
     ///
     /// - Parameters:
@@ -716,7 +738,8 @@ public struct TransparencyResultBuilder: Sendable {
             coiAnalysis: coiAnalysis,
             trialRegistrations: trialRegistrations,
             outcomeSwitchingDetected: outcomeSwitchingDetected,
-            title: title
+            title: title,
+            trialRegistrationAssessed: trialRegistrationAssessed
         )
 
         return TransparencyResult(
@@ -742,7 +765,8 @@ public struct TransparencyResultBuilder: Sendable {
             riskIndicators: riskIndicators,
             dataSourcesUsed: dataSourcesUsed,
             warnings: warnings,
-            errors: errors
+            errors: errors,
+            fullTextSearched: fullTextSearched
         )
     }
 
@@ -784,7 +808,8 @@ public struct TransparencyResultBuilder: Sendable {
             riskIndicators: riskIndicators,
             dataSourcesUsed: dataSourcesUsed,
             warnings: warnings,
-            errors: errors
+            errors: errors,
+            fullTextSearched: fullTextSearched
         )
     }
 

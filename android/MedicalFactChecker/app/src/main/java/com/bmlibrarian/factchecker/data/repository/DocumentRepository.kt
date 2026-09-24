@@ -196,6 +196,16 @@ class DocumentRepository @Inject constructor(
         documentDao.updateEmbeddingScore(documentId, embeddingScore, embeddingScoreNormalized)
     }
 
+    /**
+     * Store a document's transparency result.
+     *
+     * @param documentId Document ID
+     * @param resultJson The `TransparencyResult` as JSON
+     */
+    suspend fun updateTransparency(documentId: String, resultJson: String) {
+        documentDao.updateTransparency(documentId, resultJson)
+    }
+
     // ==================== Document Existence Checks ====================
 
     /**

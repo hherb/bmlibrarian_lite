@@ -460,6 +460,73 @@ final class Document {
         transparencyResult?.riskLevel
     }
 
+    /// How far this document's transparency rating can be relied on.
+    ///
+    /// The result's own record of whether the full text was analysed, when it
+    /// has one. A result stored before that was recorded falls back on the
+    /// document: one with no analysable full text now had none when it was
+    /// analysed either, so its rating is limited. The fallback can only err
+    /// towards calling a rating limited — if cached text was later removed —
+    /// never towards presenting a text-less rating as full strength.
+    ///
+    /// `nil` when there is no readable analysis.
+    var transparencyCertainty: TransparencyCertainty? {
+        guard let result = transparencyResult else { return nil }
+        if let searched = result.fullTextSearched {
+            return TransparencyCertainty(fullTextSearched: searched)
+        }
+        return analyzableFullText == nil ? .limitedNoFullText : .unrecorded
+    }
+
+    /// Whether this document's high rating is shown as unassessed: every reason
+    /// for it rests on statements in full text known not to have been searched. See
+    /// `TransparencyRiskExplanation.isUnassessed(result:certainty:)`.
+    var transparencyIsUnassessed: Bool {
+        guard let result = transparencyResult else { return false }
+        return TransparencyRiskExplanation.isUnassessed(result: result, certainty: transparencyCertainty)
+    }
+
+    /// The documents rated high transparency risk, as a report discusses them.
+    ///
+    /// The same documents the report's "flagged as high transparency risk"
+    /// count covers, so the count and the discussion never disagree. Ordered
+    /// by reference, then title: a session's documents are an unordered
+    /// relationship, and a report should list them the same way every time.
+    ///
+    /// - Parameter documents: A session's documents.
+    /// - Returns: One entry per document rated high and not shown as
+    ///   unassessed, with why it was rated high.
+    static func highRiskTransparencyEntries(in documents: [Document]) -> [HighRiskTransparencyEntry] {
+        documents
+            .compactMap { document -> (Document, TransparencyResult)? in
+                // A rating shown as unassessed is not discussed as high risk.
+                guard let result = document.transparencyResult, result.riskLevel == .high,
+                      !document.transparencyIsUnassessed else {
+                    return nil
+                }
+                return (document, result)
+            }
+            .sorted { ($0.0.shortReference, $0.0.displayTitle) < ($1.0.shortReference, $1.0.displayTitle) }
+            .map { document, result in
+                HighRiskTransparencyEntry(
+                    reference: document.shortReference,
+                    citation: [document.displayTitle, document.journal, document.citationIdentifier?.labelled]
+                        .compactMap { $0 }
+                        .joined(separator: ". "),
+                    result: result,
+                    certainty: document.transparencyCertainty
+                )
+            }
+    }
+
+    /// Whether this document holds a stored analysis this build cannot read.
+    ///
+    /// Such a result is neither absent nor rated: a report must say it could
+    /// not be read rather than leave the study out of every count.
+    var transparencyResultIsUnreadable: Bool {
+        hasTransparencyAnalysis && transparencyResult == nil
+    }
+
     // MARK: - Relationships
 
     var session: FactCheckSession?
@@ -1466,4 +1533,67 @@ enum DisplayedFullText: Equatable {
 
     /// Nothing cached to show.
     case none
+}
+
+// MARK: - Transparency Report Counts
+
+/// How a report's documents fall across the transparency ratings it shows.
+///
+/// One computation for the screen, both printable views and the exported
+/// text, so no two surfaces can count differently. ``high`` covers exactly the
+/// documents ``Document/highRiskTransparencyEntries(in:)`` discusses.
+struct TransparencyReportCounts: Equatable {
+    /// Documents with a readable analysis.
+    var analysed = 0
+    /// Readable ratings shown as low risk.
+    var low = 0
+    /// Readable ratings shown as medium risk.
+    var medium = 0
+    /// Readable ratings shown as high risk; a high rating shown as unassessed
+    /// is counted in ``unassessed`` instead.
+    var high = 0
+    /// High ratings shown as unassessed: every reason rests on full text known
+    /// not to have been searched.
+    var unassessed = 0
+    /// Readable ratings made without the full text.
+    var limited = 0
+    /// Stored analyses this build cannot read.
+    var unreadable = 0
+
+    /// Counts a report's documents.
+    ///
+    /// - Parameter documents: The documents the report rests on.
+    init(documents: [Document]) {
+        for document in documents {
+            guard let result = document.transparencyResult else {
+                if document.transparencyResultIsUnreadable { unreadable += 1 }
+                continue
+            }
+            analysed += 1
+            if document.transparencyCertainty == .limitedNoFullText { limited += 1 }
+            if document.transparencyIsUnassessed {
+                unassessed += 1
+                continue
+            }
+            switch result.riskLevel {
+            case .low: low += 1
+            case .medium: medium += 1
+            case .high: high += 1
+            case .unknown: break
+            }
+        }
+    }
+
+    /// The sentence naming stored analyses that could not be read, or `nil`
+    /// when there are none. Such a study carries no rating, and saying so
+    /// keeps it from reading as one examined that raised no concern.
+    var unreadableSummary: String? {
+        guard unreadable > 0 else { return nil }
+        if unreadable == 1 {
+            return "1 study's stored transparency analysis could not be read, so it carries "
+                + "no rating here. Re-analyse to rate it."
+        }
+        return "\(unreadable) studies' stored transparency analyses could not be read, so they "
+            + "carry no rating here. Re-analyse to rate them."
+    }
 }

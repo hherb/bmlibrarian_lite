@@ -104,6 +104,7 @@ struct MacReportView: View {
                         let docs = session.documents ?? []
                         if docs.contains(where: { $0.hasTransparencyAnalysis }) {
                             MacTransparencySummarySection(documents: docs)
+                            MacHighRiskTransparencyDetails(documents: docs)
                         }
                     }
 
@@ -614,7 +615,11 @@ struct MacReviewedDocumentRow: View {
                 MacScoreBadge(score: document.relevanceScore)
                     .frame(width: MacIconSize.scoreBadgeSmall, height: MacIconSize.scoreBadgeSmall)
                 if let riskLevel = document.transparencyRiskLevel {
-                    MacTransparencyRiskBadge(riskLevel: riskLevel)
+                    MacTransparencyRiskBadge(
+                        riskLevel: riskLevel,
+                        certainty: document.transparencyCertainty,
+                        unassessed: document.transparencyIsUnassessed
+                    )
                 }
             }
 
@@ -977,7 +982,7 @@ struct MacDocumentDetailSheet: View {
                 .font(.headline)
 
             if let result = document.transparencyResult {
-                MacTransparencyDetailView(result: result)
+                MacTransparencyDetailView(result: result, certainty: document.transparencyCertainty)
 
                 // A stale result keeps its score on screen but has to be
                 // re-runnable, or the notice above names a fix the user cannot apply.

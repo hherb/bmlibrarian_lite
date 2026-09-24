@@ -51,7 +51,12 @@ public enum TransparencyConstants {
     ///   tier, and when it is returned anyway because nothing better existed,
     ///   the app passes `nil` rather than its abstract to ``analyze``. Both
     ///   change which evidence reaches the scorer, in opposite directions.
-    public static let analyzerVersion = 3
+    /// - Version 4 (2026-09-24): results record whether the full text was
+    ///   searched (``TransparencyResult/fullTextSearched``), and a missing trial
+    ///   registration is reported only when ClinicalTrials.gov answered for
+    ///   every cited trial. A result without the record has unknown certainty,
+    ///   and its note asks for re-analysis, which only staleness offers.
+    public static let analyzerVersion = 4
 
 
     // MARK: - API URLs
@@ -178,6 +183,44 @@ public enum TransparencyConstants {
 
     /// ClinicalTrials.gov registry display name.
     public static let clinicalTrialsRegistryName = "ClinicalTrials.gov"
+
+    // MARK: - Certainty Notes
+
+    /// Shown with every rating made without the article's full text.
+    public static let limitedCertaintyNote =
+        "Limited certainty because of lack of full text access"
+
+    /// Shown with a rating that did not record whether the full text was read.
+    public static let unrecordedCertaintyNote =
+        "Certainty unknown: this analysis did not record whether the full text was "
+        + "accessed. Re-analyse for a rating of known certainty."
+
+    /// Shown in place of "High" for a rating whose every reason rests on
+    /// statements in full text that was not searched.
+    public static let unassessedLabel = "Unassessed"
+
+    /// Shown with a single rating displayed as unassessed.
+    public static let unassessedNote =
+        "Shown as unassessed rather than high risk: every reason for a high rating depends "
+        + "on statements that appear only in the full text, which was not available to search."
+
+    /// Suffix a compact risk badge carries when its rating's certainty is limited.
+    public static let limitedCertaintyBadgeSuffix = "· limited"
+
+    // MARK: - Metadata Sources
+
+    /// Name recorded in `dataSourcesUsed` when PubMed returned the article.
+    public static let pubMedSourceName = "PubMed"
+
+    /// Name recorded in `dataSourcesUsed` when CrossRef returned the work.
+    public static let crossRefSourceName = "CrossRef"
+
+    /// Warning recorded when CrossRef, the only source of funders, could not be
+    /// reached or its answer could not be read: "industry funding: not detected"
+    /// then means not looked for.
+    public static let crossRefUnreachableWarning =
+        "CrossRef could not be reached, so this study's funders were not checked; "
+        + "industry funding may be present though none is reported."
 
     // MARK: - Date Parsing Defaults
 
@@ -718,6 +761,10 @@ public enum RiskIndicatorStrings {
     /// Industry funding was routed through an institutional intermediary.
     public static let institutionalIntermediary =
         "Industry funding routed through institutional intermediaries"
+
+    /// Warning: industry funding was detected and no COI statement was found.
+    public static let fundingWithoutCoiStatement =
+        "Industry funding detected but no COI statement found"
 
     /// No conflict of interest statement was found.
     public static let missingCoiStatement =

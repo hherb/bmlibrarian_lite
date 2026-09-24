@@ -110,6 +110,9 @@ public actor TransparencyAnalysisService {
         }
 
         var builder = TransparencyResultBuilder(doi: doi, pmid: pmid)
+        // Recorded so a report can tell a statement the article lacks from one
+        // there was no text to look for: both analyzers below read full text only.
+        builder.fullTextSearched = !(fullText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
 
         BioMedLitLib.logger?.info(
             "Starting transparency analysis for DOI: \(doi ?? "nil"), PMID: \(pmid ?? "nil")",
@@ -170,7 +173,7 @@ public actor TransparencyAnalysisService {
                         builder.doi = article.doi
                     }
 
-                    builder.dataSourcesUsed.append("PubMed")
+                    builder.dataSourcesUsed.append(TransparencyConstants.pubMedSourceName)
 
                     BioMedLitLib.logger?.debug(
                         "PubMed metadata retrieved for PMID: \(pmid)",
@@ -192,7 +195,7 @@ public actor TransparencyAnalysisService {
                 let work = try await crossRef.getWork(doi: doi)
 
                 if let work = work {
-                    builder.dataSourcesUsed.append("CrossRef")
+                    builder.dataSourcesUsed.append(TransparencyConstants.crossRefSourceName)
 
                     // Fill in missing data from CrossRef
                     if builder.title == nil {
@@ -218,6 +221,9 @@ public actor TransparencyAnalysisService {
                     )
                 }
             } catch {
+                // A 404 returns nil above; anything thrown is a failed lookup,
+                // which must not read as a study with no funders.
+                builder.warnings.append(TransparencyConstants.crossRefUnreachableWarning)
                 BioMedLitLib.logger?.warning(
                     "CrossRef fetch failed for DOI \(doi): \(error.localizedDescription)",
                     category: .network
@@ -254,7 +260,9 @@ public actor TransparencyAnalysisService {
     ///
     /// Searches for NCT IDs in the article title and fetches trial details
     /// from ClinicalTrials.gov API. Updates sponsor type based on trial
-    /// sponsor information and checks results compliance.
+    /// sponsor information and checks results compliance. A failed or
+    /// unreadable lookup is recorded as a warning and leaves the registration
+    /// unassessed; a 404 is the registry's answer and is recorded as such.
     ///
     /// - Parameter builder: The result builder to populate with trial info.
     private func fetchTrialInfo(builder: inout TransparencyResultBuilder) async {
@@ -279,40 +287,51 @@ public actor TransparencyAnalysisService {
             category: .transparency
         )
 
-        // Fetch each trial from ClinicalTrials.gov
+        // Fetch each trial from ClinicalTrials.gov. The registration counts as
+        // assessed only if the registry answered for every one: a failed or
+        // unreadable lookup leaves the list empty for a reason not the study's.
         let clinicalTrials = getClinicalTrialsService()
+        var everyTrialAnswered = true
 
         for nctId in nctIds {
             do {
-                if let study = try await clinicalTrials.getStudy(nctId: nctId),
-                   let registration = clinicalTrials.extractTrialInfo(from: study) {
+                guard let study = try await clinicalTrials.getStudy(nctId: nctId) else {
+                    builder.warnings.append(TrialComplianceAnalyzer.registryHasNoRecordWarning(nctId: nctId))
+                    continue
+                }
+                guard let registration = clinicalTrials.extractTrialInfo(from: study) else {
+                    everyTrialAnswered = false
+                    builder.warnings.append(TrialComplianceAnalyzer.unreadableRegistryRecordWarning(nctId: nctId))
+                    continue
+                }
+                builder.trialRegistrations.append(registration)
+                if !builder.dataSourcesUsed.contains(TransparencyConstants.clinicalTrialsRegistryName) {
+                    builder.dataSourcesUsed.append(TransparencyConstants.clinicalTrialsRegistryName)
+                }
 
-                    builder.trialRegistrations.append(registration)
-                    if !builder.dataSourcesUsed.contains("ClinicalTrials.gov") {
-                        builder.dataSourcesUsed.append("ClinicalTrials.gov")
-                    }
-
-                    // Update sponsor type based on trial sponsor
-                    if TrialComplianceAnalyzer.isIndustrySponsor(registration.sponsorClass) {
-                        builder.industryFundingDetected = true
-                        builder.sponsorType = FundingAnalyzer.updateSponsorType(
-                            builder.sponsorType,
-                            withTrialSponsorClass: registration.sponsorClass
-                        )
-                    }
-
-                    BioMedLitLib.logger?.debug(
-                        "Trial info retrieved for \(nctId): sponsor=\(registration.leadSponsor ?? "unknown")",
-                        category: .transparency
+                // Update sponsor type based on trial sponsor
+                if TrialComplianceAnalyzer.isIndustrySponsor(registration.sponsorClass) {
+                    builder.industryFundingDetected = true
+                    builder.sponsorType = FundingAnalyzer.updateSponsorType(
+                        builder.sponsorType,
+                        withTrialSponsorClass: registration.sponsorClass
                     )
                 }
+
+                BioMedLitLib.logger?.debug(
+                    "Trial info retrieved for \(nctId): sponsor=\(registration.leadSponsor ?? "unknown")",
+                    category: .transparency
+                )
             } catch {
+                everyTrialAnswered = false
+                builder.warnings.append(TrialComplianceAnalyzer.registryUnreachableWarning(nctId: nctId))
                 BioMedLitLib.logger?.warning(
                     "ClinicalTrials.gov fetch failed for \(nctId): \(error.localizedDescription)",
                     category: .network
                 )
             }
         }
+        builder.trialRegistrationAssessed = everyTrialAnswered
 
         // Check results compliance for first trial
         if let firstTrial = builder.trialRegistrations.first {
@@ -395,7 +414,8 @@ public actor TransparencyAnalysisService {
         // Check for missing trial registration
         if let warning = TrialComplianceAnalyzer.checkMissingRegistration(
             title: builder.title,
-            registrations: builder.trialRegistrations
+            registrations: builder.trialRegistrations,
+            registrationAssessed: builder.trialRegistrationAssessed
         ) {
             builder.warnings.append(warning)
             BioMedLitLib.logger?.debug(

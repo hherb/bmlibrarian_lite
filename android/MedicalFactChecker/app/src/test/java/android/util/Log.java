@@ -23,6 +23,8 @@ public class Log {
     public static int i(String tag, String msg) { return record(tag, msg); }
     public static int w(String tag, String msg) { return record(tag, msg); }
     public static int e(String tag, String msg) { return record(tag, msg); }
+    public static int e(String tag, String msg, Throwable tr) { return record(tag, msg + ": " + tr); }
+    public static int w(String tag, String msg, Throwable tr) { return record(tag, msg + ": " + tr); }
     public static int v(String tag, String msg) { return record(tag, msg); }
 
     private static int record(String tag, String msg) {

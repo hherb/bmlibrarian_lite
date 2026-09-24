@@ -19,6 +19,10 @@
 package com.bmlibrarian.factchecker.domain.workflow
 
 import android.util.Log
+import com.bmlibrarian.factchecker.domain.transparency.TransparencyJson
+import com.bmlibrarian.factchecker.domain.transparency.TransparencyReportMarkdown
+import com.bmlibrarian.factchecker.domain.transparency.canAnalyzeTransparency
+import com.bmlibrarian.factchecker.domain.transparency.needsTransparencyAnalysis
 import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.local.entity.ProcessingCheckpointEntity
@@ -45,7 +49,10 @@ import com.bmlibrarian.factchecker.domain.model.Verdict
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import com.bmlibrarian.factchecker.ml.HydeGenerator
 import com.bmlibrarian.factchecker.util.Constants
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -98,7 +105,8 @@ class FactCheckWorkflow @Inject constructor(
     private val checkpointManager: CheckpointManager,
     private val errorPersistenceManager: ErrorPersistenceManager,
     private val embeddingService: EmbeddingService,
-    private val hydeGenerator: HydeGenerator
+    private val hydeGenerator: HydeGenerator,
+    private val transparencyRunner: TransparencyAnalysisRunner
 ) {
 
     companion object {
@@ -424,6 +432,10 @@ class FactCheckWorkflow @Inject constructor(
                 }
             }
 
+            // Analyse the transparency of documents this batch made relevant
+            sessionRepository.updateWorkflowStep(session.id, WorkflowStep.ANALYZING_TRANSPARENCY)
+            analyzeTransparency(session.id, config)
+
             // Regenerate report with all evidence
             sessionRepository.updateWorkflowStep(session.id, WorkflowStep.GENERATING_REPORT)
             _state.value = WorkflowState.GeneratingReport
@@ -442,6 +454,10 @@ class FactCheckWorkflow @Inject constructor(
             keepReportAfterFailedSearchForMore(session, SearchFailureReporting.formatSearchFailureMessage(e))
         } catch (e: NcbiCredentialsUnavailableException) {
             keepReportAfterFailedSearchForMore(session, checkNotNull(e.message))
+        } catch (e: CancellationException) {
+            // A cancelled run is not a failed one: cancel() has already set the
+            // state the user chose, which failing the session would overwrite.
+            throw e
         } catch (e: Exception) {
             handleWorkflowError(e, session)
         }
@@ -469,6 +485,10 @@ class FactCheckWorkflow @Inject constructor(
             handleSearchNotRun(SearchFailureReporting.formatSearchFailureMessage(e), e, session, config)
         } catch (e: NcbiCredentialsUnavailableException) {
             handleSearchNotRun(checkNotNull(e.message), e, session, config)
+        } catch (e: CancellationException) {
+            // A cancelled run is not a failed one: cancel() has already set the
+            // state the user chose, which failing the session would overwrite.
+            throw e
         } catch (e: Exception) {
             handleWorkflowError(e, session)
         }
@@ -864,6 +884,14 @@ class FactCheckWorkflow @Inject constructor(
                 updateProgress("Extracting citations...", WorkflowProgress.PROGRESS_EXTRACTION_START)
                 extractCitations(relevantDocs, session.claimText, session.id, config)
             }
+
+            currentStep = WorkflowStep.ANALYZING_TRANSPARENCY
+            sessionRepository.updateWorkflowStep(session.id, currentStep)
+        }
+
+        // Step 4b: Analyse transparency of relevant documents
+        if (currentStep == WorkflowStep.ANALYZING_TRANSPARENCY) {
+            analyzeTransparency(session.id, config)
 
             currentStep = WorkflowStep.GENERATING_REPORT
             sessionRepository.updateWorkflowStep(session.id, currentStep)
@@ -1349,7 +1377,12 @@ class FactCheckWorkflow @Inject constructor(
         // Build references section
         val relevantDocs = documents.filter { (it.relevanceScore ?: 0) >= config.relevanceThreshold }
         val references = buildReferencesSection(relevantDocs)
-        val fullReport = ReportText.fullReport(generation.report, references, shortfalls)
+        val fullReport = ReportText.fullReport(
+            generation.report,
+            references,
+            shortfalls,
+            TransparencyReportMarkdown.sections(relevantDocs)
+        )
 
         // Create and save report
         val report = reportRepository.createReport(
@@ -1365,6 +1398,46 @@ class FactCheckWorkflow @Inject constructor(
         )
 
         return report
+    }
+
+    // ==================== Transparency Analysis ====================
+
+    /**
+     * Analyse the transparency of every relevant document not yet analysed by
+     * the current analyzer.
+     *
+     * A document's failure is not the run's: it is logged and the report goes
+     * ahead. The report names every relevant document left without a readable
+     * analysis (`TransparencyReportMarkdown`), which, unlike a transient notice,
+     * stays with the report and cannot displace a search notice or be read
+     * under the "Search failed" heading that notice card carries.
+     *
+     * @param sessionId The session
+     * @param config Workflow configuration (for the relevance threshold)
+     */
+    private suspend fun analyzeTransparency(sessionId: String, config: WorkflowConfig) {
+        val documents = documentRepository.getDocumentsBySessionSync(sessionId)
+            .filter { (it.relevanceScore ?: 0) >= config.relevanceThreshold }
+            .filter { it.needsTransparencyAnalysis && it.canAnalyzeTransparency }
+        if (documents.isEmpty()) return
+
+        documents.forEachIndexed { index, document ->
+            currentCoroutineContext().ensureActive()
+            _state.value = WorkflowState.AnalyzingTransparency(index, documents.size)
+            updateProgress(
+                "Analyzing transparency (${index + 1}/${documents.size})...",
+                WorkflowProgress.PROGRESS_TRANSPARENCY_START +
+                    WorkflowProgress.PROGRESS_TRANSPARENCY_RANGE * index / documents.size
+            )
+            try {
+                val result = transparencyRunner.analyze(document)
+                documentRepository.updateTransparency(document.id, TransparencyJson.encode(result))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Transparency analysis failed for document ${document.id}", e)
+            }
+        }
     }
 
     // ==================== Smart Search ====================

@@ -26,8 +26,30 @@ import BioMedLit
 struct TransparencyDetailView: View {
     let result: TransparencyResult
 
+    /// How far the rating can be relied on; a limited one is announced above
+    /// the score. `nil` falls back on the result's own record.
+    var certainty: TransparencyCertainty? = nil
+
+    /// The certainty shown: the caller's, else what the result recorded.
+    private var resolvedCertainty: TransparencyCertainty {
+        certainty ?? TransparencyCertainty(fullTextSearched: result.fullTextSearched)
+    }
+
+    /// Whether the rating is shown as unassessed rather than high.
+    private var isUnassessed: Bool {
+        TransparencyRiskExplanation.isUnassessed(result: result, certainty: resolvedCertainty)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // Certainty notice: a rating made without the full text says so
+            if let note = resolvedCertainty.note {
+                certaintyNotice(note)
+            }
+            if isUnassessed {
+                certaintyNotice(TransparencyConstants.unassessedNote)
+            }
+
             // Stale-analysis notice
             if result.isStale {
                 staleNotice
@@ -63,6 +85,25 @@ struct TransparencyDetailView: View {
             // Metadata
             metadataSection
         }
+    }
+
+    // MARK: - Certainty Notice
+
+    /// Banner saying the rating falls short of full-text analysis.
+    private func certaintyNotice(_ note: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.caption)
+                .foregroundColor(.orange)
+            Text(note)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.12))
+        .cornerRadius(6)
     }
 
     // MARK: - Stale Notice
@@ -110,7 +151,7 @@ struct TransparencyDetailView: View {
                 Text("Transparency Score")
                     .font(.subheadline)
                     .fontWeight(.medium)
-                TransparencyRiskBadge(riskLevel: result.riskLevel)
+                TransparencyRiskBadge(riskLevel: result.riskLevel, certainty: resolvedCertainty, unassessed: isUnassessed)
             }
 
             Spacer()
@@ -121,6 +162,7 @@ struct TransparencyDetailView: View {
     }
 
     private var scoreColor: Color {
+        if isUnassessed { return .gray }
         switch result.riskLevel {
         case .low: return .green
         case .medium: return .orange

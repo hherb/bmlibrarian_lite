@@ -26,8 +26,29 @@ import BioMedLit
 struct MacTransparencyDetailView: View {
     let result: TransparencyResult
 
+    /// How far the rating can be relied on; a limited one is announced above
+    /// the score. `nil` falls back on the result's own record.
+    var certainty: TransparencyCertainty? = nil
+
+    /// The certainty shown: the caller's, else what the result recorded.
+    private var resolvedCertainty: TransparencyCertainty {
+        certainty ?? TransparencyCertainty(fullTextSearched: result.fullTextSearched)
+    }
+
+    /// Whether the rating is shown as unassessed rather than high.
+    private var isUnassessed: Bool {
+        TransparencyRiskExplanation.isUnassessed(result: result, certainty: resolvedCertainty)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: MacSpacing.standard) {
+            if let note = resolvedCertainty.note {
+                certaintyNotice(note)
+            }
+            if isUnassessed {
+                certaintyNotice(TransparencyConstants.unassessedNote)
+            }
+
             if result.isStale {
                 staleNotice
             }
@@ -75,7 +96,7 @@ struct MacTransparencyDetailView: View {
                 Text("Transparency Score")
                     .font(.subheadline)
                     .fontWeight(.medium)
-                MacTransparencyRiskBadge(riskLevel: result.riskLevel)
+                MacTransparencyRiskBadge(riskLevel: result.riskLevel, certainty: resolvedCertainty, unassessed: isUnassessed)
             }
 
             Spacer()
@@ -86,6 +107,7 @@ struct MacTransparencyDetailView: View {
     }
 
     private var scoreColor: Color {
+        if isUnassessed { return .gray }
         switch result.riskLevel {
         case .low: return .green
         case .medium: return .orange
@@ -344,6 +366,23 @@ struct MacTransparencyDetailView: View {
     /// The score is left visible rather than hidden — it is the last thing that
     /// was actually measured — but it is marked so it is not read beside a
     /// freshly computed one as if the two were comparable.
+    /// Banner saying the rating falls short of full-text analysis.
+    private func certaintyNotice(_ note: String) -> some View {
+        HStack(alignment: .top, spacing: MacSpacing.xSmall) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.caption)
+                .foregroundColor(.orange)
+            Text(note)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(MacSpacing.small)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(MacOpacity.subtle))
+        .cornerRadius(MacCornerRadius.medium)
+    }
+
     private var staleNotice: some View {
         HStack(alignment: .top, spacing: MacSpacing.xSmall) {
             Image(systemName: "clock.arrow.circlepath")

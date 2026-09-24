@@ -44,17 +44,11 @@ struct TransparencySummarySection: View {
         return (industryFundedCount * 100) / analyzedResults.count
     }
 
-    private var riskCounts: (low: Int, medium: Int, high: Int) {
-        var low = 0, medium = 0, high = 0
-        for result in analyzedResults {
-            switch result.riskLevel {
-            case .low: low += 1
-            case .medium: medium += 1
-            case .high: high += 1
-            case .unknown: break
-            }
-        }
-        return (low, medium, high)
+    /// Documents at each displayed level, as every report surface counts
+    /// them: a high rating resting only on unsearched full text is counted as
+    /// unassessed, not high.
+    private var riskCounts: TransparencyReportCounts {
+        TransparencyReportCounts(documents: documents)
     }
 
     private var hasHighRiskDocuments: Bool {
@@ -62,7 +56,9 @@ struct TransparencySummarySection: View {
     }
 
     var body: some View {
-        guard !analyzedResults.isEmpty else { return AnyView(EmptyView()) }
+        // Shown when any analysis is stored, readable or not: an unreadable
+        // one must be named, not dropped.
+        guard !analyzedResults.isEmpty || riskCounts.unreadable > 0 else { return AnyView(EmptyView()) }
 
         return AnyView(
             VStack(alignment: .leading, spacing: 12) {
@@ -82,6 +78,33 @@ struct TransparencySummarySection: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.red.opacity(0.1))
                     .cornerRadius(8)
+                }
+
+                // Ratings made without the full text
+                if riskCounts.limited > 0 {
+                    Text(
+                        "\(riskCounts.limited) of \(analyzedResults.count) ratings made without "
+                        + "the full text. \(TransparencyConstants.limitedCertaintyNote)."
+                    )
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // Stored analyses this build cannot read
+                if let unreadable = riskCounts.unreadableSummary {
+                    Text(unreadable)
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // Ratings shown as unassessed rather than high
+                if let unassessed = HighRiskTransparencySection.unassessedSummary(count: riskCounts.unassessed) {
+                    Text(unassessed)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 // Stats
@@ -116,6 +139,13 @@ struct TransparencySummarySection: View {
                     }
                     if riskCounts.high > 0 {
                         riskCountBadge(count: riskCounts.high, label: "High", color: .red)
+                    }
+                    if riskCounts.unassessed > 0 {
+                        riskCountBadge(
+                            count: riskCounts.unassessed,
+                            label: TransparencyConstants.unassessedLabel,
+                            color: .gray
+                        )
                     }
                 }
             }
@@ -159,6 +189,97 @@ private struct TransparencyStatItem: View {
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// Why each document in a report was rated high transparency risk.
+///
+/// The summary above counts the high-risk documents; this names them and the
+/// rules that produced each rating, so a reader can judge whether a flag is a
+/// finding about the study or a gap in what the analysis could read. Laid out
+/// with no disclosure controls, so the printable report shows it unchanged.
+struct HighRiskTransparencyDetails: View {
+    let documents: [Document]
+
+    var body: some View {
+        let entries = Document.highRiskTransparencyEntries(in: documents)
+        if let introduction = HighRiskTransparencySection.introduction(count: entries.count) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(HighRiskTransparencySection.heading)
+                    .font(.headline)
+                Text(introduction)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+                    Divider()
+                    HighRiskTransparencyEntryView(entry: entry)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.red.opacity(0.06))
+            .cornerRadius(10)
+        }
+    }
+}
+
+/// One high-risk document: its reference, score, reasons, and caveats.
+private struct HighRiskTransparencyEntryView: View {
+    let entry: HighRiskTransparencyEntry
+
+    var body: some View {
+        let explanation = entry.explanation
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(entry.reference)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Spacer()
+                Text("Score \(explanation.score)/100")
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+            if let note = explanation.certainty.note {
+                Text(note)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(entry.citation)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            bulletList(HighRiskTransparencySection.reasonsLabel, explanation.reasons)
+            bulletList(
+                HighRiskTransparencySection.scoreBreakdownLabel,
+                explanation.scoreBreakdown.map { "\($0.label): \($0.signedPoints)" }
+            )
+            bulletList(HighRiskTransparencySection.otherConcernsLabel, explanation.otherConcerns)
+            bulletList(HighRiskTransparencySection.caveatsLabel, explanation.caveats)
+        }
+    }
+
+    @ViewBuilder
+    private func bulletList(_ title: String, _ items: [String]) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text("\u{2022}")
+                        Text(item)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .font(.caption)
+                }
+            }
+        }
     }
 }
 

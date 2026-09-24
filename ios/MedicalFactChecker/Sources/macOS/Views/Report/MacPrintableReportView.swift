@@ -125,6 +125,7 @@ struct PrintableReportView: View {
                 let docs = session.documents ?? []
                 if docs.contains(where: { $0.hasTransparencyAnalysis }) {
                     printableTransparencySection(docs)
+                    MacHighRiskTransparencyDetails(documents: docs)
                 }
             }
 
@@ -346,9 +347,20 @@ struct PrintableReportView: View {
                     }
 
                     if let riskLevel = document.transparencyRiskLevel {
-                        Text(riskLevel.shortLabel)
+                        // A reader of the printout never saw the app: a rating
+                        // made without the full text says so here too.
+                        let level = document.transparencyIsUnassessed
+                            ? TransparencyConstants.unassessedLabel
+                            : riskLevel.shortLabel
+                        Text(
+                            document.transparencyCertainty?.isLimited == true
+                                ? "\(level) \(TransparencyConstants.limitedCertaintyBadgeSuffix)"
+                                : level
+                        )
                             .font(.system(size: 8, weight: .medium))
-                            .foregroundColor(transparencyColor(riskLevel))
+                            .foregroundColor(
+                                document.transparencyIsUnassessed ? .gray : transparencyColor(riskLevel)
+                            )
                     }
                 }
             }
@@ -381,7 +393,10 @@ struct PrintableReportView: View {
         let avgScore = results.isEmpty ? 0 : results.reduce(0) { $0 + $1.transparencyScore } / results.count
         let industryCount = results.filter { $0.industryFundingDetected }.count
         let industryPercent = results.isEmpty ? 0 : (industryCount * 100) / results.count
-        let highRisk = results.filter { $0.riskLevel == .high }.count
+        let counts = TransparencyReportCounts(documents: documents)
+        let highRisk = counts.high
+        let unassessed = counts.unassessed
+        let limited = counts.limited
 
         return VStack(alignment: .leading, spacing: 8) {
             Text("Transparency Analysis")
@@ -396,6 +411,27 @@ struct PrintableReportView: View {
                         .font(.caption)
                         .foregroundColor(.red)
                 }
+            }
+
+            if let unreadable = counts.unreadableSummary {
+                Text(unreadable)
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            }
+
+            if let summary = HighRiskTransparencySection.unassessedSummary(count: unassessed) {
+                Text(summary)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            if limited > 0 {
+                Text(
+                    "\(limited) of \(results.count) ratings made without the full text. "
+                    + "\(TransparencyConstants.limitedCertaintyNote)."
+                )
+                .font(.caption)
+                .foregroundColor(.orange)
             }
 
             HStack(spacing: 40) {

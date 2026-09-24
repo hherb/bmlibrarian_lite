@@ -55,6 +55,7 @@ class WorkflowProgressTest {
             WorkflowStep.SEARCHING_PUBMED,
             WorkflowStep.SCORING_DOCUMENTS,
             WorkflowStep.EXTRACTING_CITATIONS,
+            WorkflowStep.ANALYZING_TRANSPARENCY,
             WorkflowStep.GENERATING_REPORT,
             WorkflowStep.FETCHING_MORE_EVIDENCE
         )
@@ -106,6 +107,7 @@ class WorkflowProgressTest {
             WorkflowStep.SCORING_DOCUMENTS,
             WorkflowStep.AWAITING_USER_DECISION,
             WorkflowStep.EXTRACTING_CITATIONS,
+            WorkflowStep.ANALYZING_TRANSPARENCY,
             WorkflowStep.GENERATING_REPORT,
             WorkflowStep.FETCHING_MORE_EVIDENCE
         )
@@ -187,13 +189,15 @@ class WorkflowProgressTest {
         val searching = WorkflowProgress.basePercentageFor(WorkflowStep.SEARCHING_PUBMED)
         val scoring = WorkflowProgress.basePercentageFor(WorkflowStep.SCORING_DOCUMENTS)
         val extracting = WorkflowProgress.basePercentageFor(WorkflowStep.EXTRACTING_CITATIONS)
+        val transparency = WorkflowProgress.basePercentageFor(WorkflowStep.ANALYZING_TRANSPARENCY)
         val generating = WorkflowProgress.basePercentageFor(WorkflowStep.GENERATING_REPORT)
         val completed = WorkflowProgress.basePercentageFor(WorkflowStep.COMPLETED)
 
         assertTrue(convertingQuery < searching)
         assertTrue(searching < scoring)
         assertTrue(scoring < extracting)
-        assertTrue(extracting < generating)
+        assertTrue(extracting < transparency)
+        assertTrue(transparency < generating)
         assertTrue(generating < completed)
         assertEquals(1.0f, completed, 0.001f)
     }

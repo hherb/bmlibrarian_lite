@@ -243,20 +243,57 @@ public enum TrialComplianceAnalyzer {
     ///
     /// Checks if the study title suggests it's a clinical trial but no
     /// registration was found, which may indicate a transparency concern.
+    /// Only a registry's answer can say a registration is missing: with no
+    /// trial ID to look up, or no answer, the list is empty for a reason that
+    /// is not the study's, so nothing is said (mirrors Python's
+    /// `trial_registration_assessed` gate).
     ///
     /// - Parameters:
     ///   - title: Study title.
     ///   - registrations: Found trial registrations (empty if none found).
+    ///   - registrationAssessed: Whether ClinicalTrials.gov answered for every
+    ///     trial the article cites.
     /// - Returns: Warning message if applicable, nil otherwise.
     public static func checkMissingRegistration(
         title: String?,
-        registrations: [TrialRegistration]
+        registrations: [TrialRegistration],
+        registrationAssessed: Bool
     ) -> String? {
-        guard registrations.isEmpty,
+        guard registrationAssessed,
+              registrations.isEmpty,
               appearsToBeClinicalTrial(title: title) else {
             return nil
         }
 
         return RiskIndicatorStrings.missingTrialRegistration
+    }
+
+    // MARK: - Registry Lookup Warnings
+
+    /// Warning for a trial whose registry lookup failed (network, server or
+    /// HTTP error): its registration was not checked, not found missing.
+    ///
+    /// - Parameter nctId: The trial's NCT ID.
+    /// - Returns: The warning, worded as the Python reference words it.
+    public static func registryUnreachableWarning(nctId: String) -> String {
+        "Could not reach ClinicalTrials.gov for trial \(nctId), so its registration could "
+            + "not be checked. Absence of a registration is not evidence the study is unregistered."
+    }
+
+    /// Warning for a trial ClinicalTrials.gov answered it holds no record of.
+    ///
+    /// - Parameter nctId: The trial's NCT ID.
+    /// - Returns: The warning — a finding about the study, not about the lookup.
+    public static func registryHasNoRecordWarning(nctId: String) -> String {
+        "ClinicalTrials.gov holds no record of trial \(nctId), which the article cites as its registration."
+    }
+
+    /// Warning for a registry record that arrived but could not be read.
+    ///
+    /// - Parameter nctId: The trial's NCT ID.
+    /// - Returns: The warning; an unread record is not an absent one.
+    public static func unreadableRegistryRecordWarning(nctId: String) -> String {
+        "ClinicalTrials.gov returned a record for trial \(nctId) that could not be read, so its "
+            + "registration could not be checked."
     }
 }

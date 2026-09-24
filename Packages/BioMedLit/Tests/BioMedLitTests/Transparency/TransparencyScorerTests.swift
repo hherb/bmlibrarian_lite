@@ -405,10 +405,27 @@ final class TransparencyScorerTests: XCTestCase {
             coiAnalysis: COIAnalysisResult(statement: "None"),
             trialRegistrations: [],
             outcomeSwitchingDetected: false,
-            title: "Randomized Controlled Trial"
+            title: "Randomized Controlled Trial",
+            trialRegistrationAssessed: true
         )
 
         XCTAssertTrue(indicators.contains { $0.contains("without detected registration") })
+    }
+
+    /// Without a registry's answer the empty registration list is not the
+    /// study's, so it is not reported as missing.
+    func testIdentifyRiskIndicatorsUnassessedRegistrationIsNotMissing() {
+        let indicators = TransparencyScorer.identifyRiskIndicators(
+            industryFundingDetected: false,
+            dataAvailability: DataAvailabilityResult(disclosureLevel: .fullOpen),
+            resultsCompliance: .unknown,
+            coiAnalysis: COIAnalysisResult(statement: "None"),
+            trialRegistrations: [],
+            outcomeSwitchingDetected: false,
+            title: "Randomized Controlled Trial"
+        )
+
+        XCTAssertFalse(indicators.contains(RiskIndicatorStrings.missingTrialRegistration))
     }
 
     /// Test outcome switching risk indicator.

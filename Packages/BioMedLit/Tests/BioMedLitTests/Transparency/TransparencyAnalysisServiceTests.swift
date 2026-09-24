@@ -311,14 +311,25 @@ final class TransparencyAnalysisServiceTests: XCTestCase {
         XCTAssertTrue(result.riskIndicators.contains { $0.contains("conflict of interest") })
     }
 
-    /// Test risk indicators for trial without registration.
+    /// Test risk indicators for a trial the registry answered it has no record of.
     func testRiskIndicatorsMissingTrialRegistration() {
         var builder = TransparencyResultBuilder(pmid: "12345678")
         builder.title = "A Randomized Controlled Trial of Drug X"
+        builder.trialRegistrationAssessed = true
         // No trial registrations
 
         let result = builder.build()
 
         XCTAssertTrue(result.riskIndicators.contains { $0.contains("without") && $0.contains("registration") })
+    }
+
+    /// An unanswered registration question is not reported as a missing registration.
+    func testRiskIndicatorsUnassessedTrialRegistrationIsNotMissing() {
+        var builder = TransparencyResultBuilder(pmid: "12345678")
+        builder.title = "A Randomized Controlled Trial of Drug X"
+
+        let result = builder.build()
+
+        XCTAssertFalse(result.riskIndicators.contains(RiskIndicatorStrings.missingTrialRegistration))
     }
 }

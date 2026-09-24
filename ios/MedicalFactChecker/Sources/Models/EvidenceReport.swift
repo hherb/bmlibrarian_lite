@@ -189,6 +189,19 @@ final class EvidenceReport {
     /// which carries a namespace-labelled identifier.
     var plainTextReport: String {
         let notice = incompleteSearchNotice.map { "\($0)\n\n" } ?? ""
+        // The screen and the printed report discuss every high-risk study;
+        // text a reader copies or exports must not drop that discussion.
+        let documents = session?.documents ?? []
+        let counts = TransparencyReportCounts(documents: documents)
+        let highRiskSection = HighRiskTransparencySection.plainText(
+            for: Document.highRiskTransparencyEntries(in: documents),
+            unassessedCount: counts.unassessed
+        )
+        // An unreadable stored analysis is named, not dropped from the text.
+        let transparencyText = [counts.unreadableSummary, highRiskSection].compactMap { $0 }
+        let highRisk = transparencyText.isEmpty
+            ? ""
+            : "---\n\n\(transparencyText.joined(separator: "\n\n"))\n\n"
         return """
         MEDICAL FACT CHECK REPORT
         Generated: \(generatedAt.formatted(date: .abbreviated, time: .shortened))
@@ -202,7 +215,7 @@ final class EvidenceReport {
 
         \(ReportFormatter.plainText(fromReportMarkdown: reportBodyAfterNotice))
 
-        ---
+        \(highRisk)---
         Based on \(uniqueSourceCount) sources, \(citationCount) citations.
         \(documentsReviewed) documents reviewed.
 
