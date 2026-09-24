@@ -217,12 +217,52 @@
       "title" : "11. Conclusions"
     },
     {
-      "paragraphCount" : 6,
-      "scalarCount" : 872,
+      "paragraphCount" : 1,
+      "scalarCount" : 369,
       "subsections" : [
 
       ],
       "title" : ""
+    },
+    {
+      "paragraphCount" : 1,
+      "scalarCount" : 329,
+      "subsections" : [
+
+      ],
+      "title" : "Author Contributions"
+    },
+    {
+      "paragraphCount" : 1,
+      "scalarCount" : 15,
+      "subsections" : [
+
+      ],
+      "title" : "Institutional Review Board Statement"
+    },
+    {
+      "paragraphCount" : 1,
+      "scalarCount" : 15,
+      "subsections" : [
+
+      ],
+      "title" : "Informed Consent Statement"
+    },
+    {
+      "paragraphCount" : 1,
+      "scalarCount" : 99,
+      "subsections" : [
+
+      ],
+      "title" : "Data Availability Statement"
+    },
+    {
+      "paragraphCount" : 1,
+      "scalarCount" : 45,
+      "subsections" : [
+
+      ],
+      "title" : "Conflicts of Interest"
     }
   ],
   "doi" : "10.3390/healthcare14010097",
@@ -244,10 +284,10 @@
       "label" : "Figure 2"
     }
   ],
-  "htmlScalarCount" : 63347,
+  "htmlScalarCount" : 63527,
   "issue" : "1",
   "journal" : "Healthcare",
-  "markdownScalarCount" : 56757,
+  "markdownScalarCount" : 56912,
   "pages" : "",
   "pmcId" : "PMC12785261",
   "pmid" : "41517028",

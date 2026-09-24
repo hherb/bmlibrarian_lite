@@ -355,7 +355,7 @@ public actor TransparencyAnalysisService {
         var coiStatement: String?
 
         if let fullText = fullText {
-            coiStatement = extractCOISection(from: fullText)
+            coiStatement = Self.extractCOISection(from: fullText)
         }
 
         builder.coiAnalysis = COIAnalyzer.analyze(statement: coiStatement)
@@ -381,7 +381,7 @@ public actor TransparencyAnalysisService {
 
         // Try to extract from full text if provided
         if let fullText = fullText {
-            dataStatement = extractDataAvailabilitySection(from: fullText)
+            dataStatement = Self.extractDataAvailabilitySection(from: fullText)
         }
 
         builder.dataAvailability = DataAvailabilityAnalyzer.analyze(statement: dataStatement)
@@ -434,12 +434,19 @@ public actor TransparencyAnalysisService {
     ///
     /// - Parameter fullText: The full text of the article.
     /// - Returns: The extracted data availability statement, or nil if not found.
-    private func extractDataAvailabilitySection(from fullText: String) -> String? {
+    /// An optional trailing word of a statement's heading, as the canonical
+    /// Python extractor allows (#359 there): "Data Availability Statement" and
+    /// "Conflict of Interest Statement" are the commonest spellings, and without
+    /// it the heading's last word was captured as the statement itself — on 110
+    /// of 220 surveyed PMC articles' data statements.
+    static let headingQualifier = #"(?:\s+(?:statements?|disclosures?|declarations?|section))?"#
+
+    static func extractDataAvailabilitySection(from fullText: String) -> String? {
         let patterns = [
-            #"(?i)data\s+availability[:\s]+([^§]+?)(?=\n\n|\z)"#,
-            #"(?i)availability\s+of\s+data[:\s]+([^§]+?)(?=\n\n|\z)"#,
-            #"(?i)data\s+sharing[:\s]+([^§]+?)(?=\n\n|\z)"#,
-            #"(?i)data\s+access[:\s]+([^§]+?)(?=\n\n|\z)"#,
+            #"(?i)data\s+availability"# + headingQualifier + #"[:\s]+([^§]+?)(?=\n\n|\z)"#,
+            #"(?i)availability\s+of\s+data"# + headingQualifier + #"[:\s]+([^§]+?)(?=\n\n|\z)"#,
+            #"(?i)data\s+sharing"# + headingQualifier + #"[:\s]+([^§]+?)(?=\n\n|\z)"#,
+            #"(?i)data\s+access"# + headingQualifier + #"[:\s]+([^§]+?)(?=\n\n|\z)"#,
         ]
 
         for pattern in patterns {
@@ -460,12 +467,12 @@ public actor TransparencyAnalysisService {
     ///
     /// - Parameter fullText: The full text of the article.
     /// - Returns: The extracted COI statement, or nil if not found.
-    private func extractCOISection(from fullText: String) -> String? {
+    static func extractCOISection(from fullText: String) -> String? {
         let patterns = [
-            #"(?i)conflict(?:s)?\s+of\s+interest[:\s]+([^§]+?)(?=\n\n|\z)"#,
-            #"(?i)competing\s+interest(?:s)?[:\s]+([^§]+?)(?=\n\n|\z)"#,
-            #"(?i)disclosure(?:s)?[:\s]+([^§]+?)(?=\n\n|\z)"#,
-            #"(?i)financial\s+disclosure(?:s)?[:\s]+([^§]+?)(?=\n\n|\z)"#,
+            #"(?i)conflict(?:s)?\s+of\s+interest"# + headingQualifier + #"[:\s]+([^§]+?)(?=\n\n|\z)"#,
+            #"(?i)competing\s+interest(?:s)?"# + headingQualifier + #"[:\s]+([^§]+?)(?=\n\n|\z)"#,
+            #"(?i)disclosure(?:s)?"# + headingQualifier + #"[:\s]+([^§]+?)(?=\n\n|\z)"#,
+            #"(?i)financial\s+disclosure(?:s)?"# + headingQualifier + #"[:\s]+([^§]+?)(?=\n\n|\z)"#,
         ]
 
         for pattern in patterns {

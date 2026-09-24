@@ -56,7 +56,13 @@ public enum TransparencyConstants {
     ///   registration is reported only when ClinicalTrials.gov answered for
     ///   every cited trial. A result without the record has unknown certainty,
     ///   and its note asks for re-analysis, which only staleness offers.
-    public static let analyzerVersion = 4
+    /// - Version 5 (2026-09-24): an unsectioned `<ack>`/`<notes>` keeps its
+    ///   heading in the parsed full text (bmlib #231), the COI and
+    ///   data-availability extractors accept "… Statement" headings, and a
+    ///   PubMed record's own DOI and PMC ID are read — so CrossRef funders are
+    ///   checked for PubMed-sourced documents. All three change which evidence
+    ///   reaches the scorer.
+    public static let analyzerVersion = 5
 
 
     // MARK: - API URLs
