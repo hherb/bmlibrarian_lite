@@ -148,7 +148,7 @@ class SettingsViewModel @Inject constructor(
 
     /** Estimated cost per run based on current model. */
     val estimatedCostPerRun: StateFlow<String> = settings.map { s ->
-        val modelInfo = s.modelInfo
+        val modelInfo = s.llmProvider?.pricedModel(s.modelId)
         if (modelInfo != null) {
             val cost = CostCalculator.estimateWorkflowCost(
                 modelInfo = modelInfo,

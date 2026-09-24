@@ -173,7 +173,7 @@ class ParallelScoringService @Inject constructor(
         val semaphore = Semaphore(maxConcurrent.coerceAtLeast(1))
         val total = documents.size
         val completed = AtomicInteger(0)
-        val modelInfo = provider.getModel(model)
+        val modelInfo = provider.pricedModel(model)
 
         // Launch all scoring tasks with semaphore-limited concurrency
         val deferredResults = documents.map { input ->
@@ -248,7 +248,7 @@ class ParallelScoringService @Inject constructor(
         val totalWithCheckpointed = documents.size
         val checkpointedCount = checkpointedIds.size
         val completed = AtomicInteger(0)
-        val modelInfo = provider.getModel(model)
+        val modelInfo = provider.pricedModel(model)
 
         val deferredResults = docsToScore.map { input ->
             async {

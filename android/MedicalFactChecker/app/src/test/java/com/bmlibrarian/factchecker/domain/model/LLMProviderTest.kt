@@ -231,4 +231,34 @@ class LLMProviderTest {
         assertEquals("", LLMProvider.CUSTOM.defaultModel)
         assertTrue(LLMProvider.CUSTOM.models.isEmpty())
     }
+
+    // ==================== Cost Pricing Tests ====================
+
+    @Test
+    fun `pricedModel prices a fetched model missing from the fallback list`() {
+        // claude-sonnet-5 is offered by the live model list but not the fallback
+        // list; costing it via getModel alone recorded every call at $0.
+        assertNull(LLMProvider.ANTHROPIC.getModel("claude-sonnet-5"))
+        val model = LLMProvider.ANTHROPIC.pricedModel("claude-sonnet-5")
+        assertNotNull(model)
+        assertEquals(2.00, model!!.inputPricePer1M, 0.0001)
+        assertEquals(10.00, model.outputPricePer1M, 0.0001)
+    }
+
+    @Test
+    fun `pricedModel prefers the listed entry`() {
+        assertEquals(LLMProvider.OPENAI.getModel("gpt-4o"), LLMProvider.OPENAI.pricedModel("gpt-4o"))
+    }
+
+    @Test
+    fun `pricedModel treats an unlisted local model as free`() {
+        val model = LLMProvider.OLLAMA.pricedModel("qwen3:32b")
+        assertNotNull(model)
+        assertTrue(model!!.isFree)
+    }
+
+    @Test
+    fun `pricedModel is null for a custom endpoint whose rates cannot be known`() {
+        assertNull(LLMProvider.CUSTOM.pricedModel("my-model"))
+    }
 }

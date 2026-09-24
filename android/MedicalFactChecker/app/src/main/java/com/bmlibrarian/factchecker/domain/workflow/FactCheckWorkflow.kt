@@ -1645,7 +1645,7 @@ class FactCheckWorkflow @Inject constructor(
         val model = settingsRepository.getLlmModel()
         val providerId = settingsRepository.getLlmProvider()
         val provider = LLMProvider.fromId(providerId)
-        val modelInfo = provider?.getModel(model)
+        val modelInfo = provider?.pricedModel(model)
         val cost = modelInfo?.calculateCost(inputTokens, outputTokens) ?: 0.0
 
         // Record in usage table

@@ -89,10 +89,25 @@ class CostCalculatorTest {
     }
 
     @Test
-    fun `calculateCost returns zero for unknown model`() {
+    fun `calculateCost charges an unlisted hosted model at the provider default`() {
+        // A hosted model is never free: an ID the tables don't know gets OpenAI's
+        // default $2/$8 rate rather than $0, which no budget would ever catch.
         val cost = CostCalculator.calculateCost(
             providerId = "openai",
             modelId = "unknown-model",
+            inputTokens = 1000,
+            outputTokens = 500
+        )
+
+        assertEquals(0.006, cost, 0.0001)
+    }
+
+    @Test
+    fun `calculateCost returns zero for a custom endpoint`() {
+        // A custom endpoint's rates cannot be known; this stays $0.
+        val cost = CostCalculator.calculateCost(
+            providerId = "custom",
+            modelId = "my-model",
             inputTokens = 1000,
             outputTokens = 500
         )
@@ -274,5 +289,17 @@ class CostCalculatorTest {
         val paidModel = ModelInfo("test", "Test", 1.0, 2.0)
 
         assertFalse(paidModel.isFree)
+    }
+
+    @Test
+    fun `calculateCost by ID charges a fetched model missing from the fallback list`() {
+        // This used to return 0.0, so such a model never counted against a budget.
+        val cost = CostCalculator.calculateCost(
+            providerId = "anthropic",
+            modelId = "claude-opus-5-5",
+            inputTokens = 1_000_000,
+            outputTokens = 1_000_000
+        )
+        assertEquals(24.00, cost, 0.0001)
     }
 }
