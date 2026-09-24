@@ -35,10 +35,18 @@ struct MacTransparencyDetailView: View {
         certainty ?? TransparencyCertainty(fullTextSearched: result.fullTextSearched)
     }
 
+    /// Whether the rating is shown as unassessed rather than high.
+    private var isUnassessed: Bool {
+        TransparencyRiskExplanation.isUnassessed(result: result, certainty: resolvedCertainty)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: MacSpacing.standard) {
             if let note = resolvedCertainty.note {
                 certaintyNotice(note)
+            }
+            if isUnassessed {
+                certaintyNotice(TransparencyConstants.unassessedNote)
             }
 
             if result.isStale {
@@ -88,7 +96,7 @@ struct MacTransparencyDetailView: View {
                 Text("Transparency Score")
                     .font(.subheadline)
                     .fontWeight(.medium)
-                MacTransparencyRiskBadge(riskLevel: result.riskLevel, certainty: resolvedCertainty)
+                MacTransparencyRiskBadge(riskLevel: result.riskLevel, certainty: resolvedCertainty, unassessed: isUnassessed)
             }
 
             Spacer()
@@ -99,6 +107,7 @@ struct MacTransparencyDetailView: View {
     }
 
     private var scoreColor: Color {
+        if isUnassessed { return .gray }
         switch result.riskLevel {
         case .low: return .green
         case .medium: return .orange

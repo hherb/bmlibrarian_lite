@@ -20,7 +20,6 @@ package com.bmlibrarian.factchecker.domain.transparency
 
 import android.util.Log
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
-import com.bmlibrarian.factchecker.util.Constants
 
 /** Log tag for reading stored transparency results. */
 private const val TAG = "DocumentTransparency"
@@ -127,17 +126,18 @@ val DocumentEntity.shortReference: String
  * Metadata for the analysis, answered from what the search already stored.
  *
  * The analysis asks PubMed for a PMID's title, journal, authors, DOI and PMC ID.
- * A document retrieved from PubMed already holds exactly that record, so it is
- * answered here without a second request. Any other document answers null —
- * "not a PubMed record" — so the result never names PubMed as a source it did
- * not come from.
+ * A document holding that PMID already holds that record — fetched from PubMed,
+ * or from Europe PMC's mirror of the same MEDLINE citation — so it is answered
+ * here without a second request. Null would mean "PubMed has no such article",
+ * which nothing established, so it is answered only for a PMID the document
+ * does not hold.
  *
  * @param document The document being analysed.
- * @return A lookup answering for that document's PMID only.
+ * @return A lookup answering for that document's PMID.
  */
 fun storedMetadataLookup(document: DocumentEntity): ArticleMetadataLookup =
     ArticleMetadataLookup { pmid ->
-        if (document.source != Constants.SOURCE_PUBMED || pmid != document.usablePmid) {
+        if (pmid != document.usablePmid) {
             null
         } else {
             ArticleMetadata(
@@ -151,7 +151,19 @@ fun storedMetadataLookup(document: DocumentEntity): ArticleMetadataLookup =
     }
 
 /**
+ * Whether this document's high rating is shown as unassessed: every reason for it rests on
+ * statements in full text that was not searched. See [TransparencyRiskExplanation.isUnassessed].
+ */
+val DocumentEntity.transparencyIsUnassessed: Boolean
+    get() {
+        val result = transparencyResult ?: return false
+        return TransparencyRiskExplanation.isUnassessed(result, transparencyCertainty)
+    }
+
+/**
  * The documents rated high transparency risk, as a report discusses them.
+ *
+ * A rating shown as unassessed is not discussed as high risk.
  *
  * Ordered by reference, then title, so a report lists them the same way every time.
  *
@@ -162,7 +174,11 @@ fun highRiskTransparencyEntries(documents: List<DocumentEntity>): List<HighRiskT
     documents
         .mapNotNull { document ->
             val result = document.transparencyResult
-            if (result?.riskLevel == TransparencyRiskLevel.HIGH) document to result else null
+            if (result?.riskLevel == TransparencyRiskLevel.HIGH && !document.transparencyIsUnassessed) {
+                document to result
+            } else {
+                null
+            }
         }
         .sortedWith(compareBy({ it.first.shortReference }, { it.first.title }))
         .map { (document, result) ->

@@ -34,7 +34,7 @@ final class TransparencyRiskExplanationTests: XCTestCase {
         registrations: [TrialRegistration] = [],
         compliance: ResultsComplianceStatus = .unknown,
         fullTextSearched: Bool? = true,
-        sources: [String] = [TransparencyConstants.pubMedSourceName]
+        sources: [String] = [TransparencyConstants.pubMedSourceName, TransparencyConstants.crossRefSourceName]
     ) -> TransparencyResult {
         var builder = TransparencyResultBuilder(doi: "10.1000/test", pmid: "123")
         builder.coiAnalysis = coi
@@ -173,7 +173,7 @@ final class TransparencyRiskExplanationTests: XCTestCase {
         let explanation = TransparencyRiskExplanation(result: result)
         XCTAssertEqual(explanation.certainty, .limitedNoFullText)
         XCTAssertTrue(explanation.reasons[0].contains("was not searched"))
-        XCTAssertTrue(explanation.caveats.contains { $0.contains("Treat the rating as unassessed") })
+        XCTAssertTrue(explanation.caveats.contains { $0.contains("shown as unassessed") })
     }
 
     /// A result stored before the field existed says its text coverage is unknown.
@@ -269,8 +269,88 @@ final class TransparencyRiskExplanationTests: XCTestCase {
         )
         let caveats = TransparencyRiskExplanation(result: result).caveats
         XCTAssertTrue(caveats.contains { $0.contains("older version of the analyser") })
-        XCTAssertTrue(caveats.contains { $0.contains("Neither PubMed nor CrossRef") })
+        XCTAssertTrue(caveats.contains { $0.contains("No CrossRef record was retrieved") })
         XCTAssertTrue(caveats.contains { $0.contains("timeout") })
+    }
+
+    /// Funders come only from CrossRef; a PubMed record does not stand in for it.
+    func testMissingCrossRefIsCaveatedEvenWithPubMed() {
+        let explanation = TransparencyRiskExplanation(result: build(sources: [TransparencyConstants.pubMedSourceName]))
+        XCTAssertTrue(explanation.caveats.contains { $0.contains("funders were not checked") })
+        let withCrossRef = TransparencyRiskExplanation(result: build(sources: [TransparencyConstants.crossRefSourceName]))
+        XCTAssertFalse(withCrossRef.caveats.contains { $0.contains("funders were not checked") })
+    }
+
+    /// Without full text, the COI warning is not repeated unqualified, and a
+    /// score term recording a missing statement says it was not searched.
+    func testUnsearchedStatementsAreNotRepeatedAsFindings() {
+        var builder = TransparencyResultBuilder(doi: "10.1000/x")
+        builder.industryFundingDetected = true
+        builder.industryFundingConfidence = 0.9
+        builder.dataAvailability = DataAvailabilityResult(disclosureLevel: .notAvailable)
+        builder.outcomeSwitchingDetected = true
+        builder.fullTextSearched = false
+        builder.warnings = [RiskIndicatorStrings.fundingWithoutCoiStatement]
+        let result = builder.build()
+        XCTAssertLessThan(result.transparencyScore, TransparencyConstants.highRiskScoreThreshold)
+
+        let explanation = TransparencyRiskExplanation(result: result)
+        XCTAssertFalse(explanation.otherConcerns.contains(RiskIndicatorStrings.fundingWithoutCoiStatement))
+        XCTAssertTrue(explanation.scoreBreakdown.contains {
+            $0.label == "No conflict of interest statement found (full text not searched)"
+        })
+    }
+
+    // MARK: - Unassessed
+
+    /// A high rating resting only on unsearched text is shown as unassessed.
+    func testTextOnlyHighRatingIsUnassessed() {
+        let result = build(fullTextSearched: false)
+        XCTAssertEqual(result.riskLevel, .high)
+        XCTAssertTrue(TransparencyRiskExplanation.isUnassessed(result: result))
+        XCTAssertTrue(TransparencyRiskExplanation(result: result).isUnassessed)
+        XCTAssertTrue(TransparencyRiskExplanation.isUnassessed(result: build(fullTextSearched: nil)))
+    }
+
+    /// The same finding from searched text is a real high rating.
+    func testSearchedTextHighRatingIsNotUnassessed() {
+        let result = build(fullTextSearched: true)
+        XCTAssertEqual(result.riskLevel, .high)
+        XCTAssertFalse(TransparencyRiskExplanation.isUnassessed(result: result))
+    }
+
+    /// A reason standing without the text keeps the rating high, limited or not.
+    func testRegistryFindingKeepsTheRatingHigh() {
+        let result = build(
+            coi: cleanCOI,
+            data: DataAvailabilityResult(disclosureLevel: .notAvailable),
+            industry: true,
+            registrations: [registration(resultsPosted: false)],
+            compliance: .missing,
+            fullTextSearched: false
+        )
+        XCTAssertEqual(result.riskLevel, .high)
+        XCTAssertFalse(TransparencyRiskExplanation.isUnassessed(result: result))
+    }
+
+    /// Only a high rating can be shown as unassessed.
+    func testLowerRatingsAreNeverUnassessed() {
+        let result = build(coi: cleanCOI, data: DataAvailabilityResult(disclosureLevel: .fullOpen), fullTextSearched: false)
+        XCTAssertNotEqual(result.riskLevel, .high)
+        XCTAssertFalse(TransparencyRiskExplanation.isUnassessed(result: result))
+    }
+
+    func testUnassessedSummary() {
+        XCTAssertNil(HighRiskTransparencySection.unassessedSummary(count: 0))
+        XCTAssertTrue(HighRiskTransparencySection.unassessedSummary(count: 1)!.hasPrefix("1 study is shown as unassessed"))
+        XCTAssertTrue(HighRiskTransparencySection.unassessedSummary(count: 3)!.hasPrefix("3 studies are shown as unassessed"))
+    }
+
+    /// With no high-risk study but some unassessed, the section says so rather than vanishing.
+    func testSectionWithOnlyUnassessedStudies() throws {
+        let text = try XCTUnwrap(HighRiskTransparencySection.plainText(for: [], unassessedCount: 2))
+        XCTAssertTrue(text.contains("2 studies are shown as unassessed"))
+        XCTAssertNil(HighRiskTransparencySection.plainText(for: [], unassessedCount: 0))
     }
 
     // MARK: - Section
@@ -290,7 +370,7 @@ final class TransparencyRiskExplanationTests: XCTestCase {
         XCTAssertTrue(text.contains("2 studies were rated high transparency risk"))
         XCTAssertTrue(text.contains("Smith et al., 2020: Smith J et al. (2020). A trial."))
         XCTAssertTrue(text.contains("Rated high risk because:"))
-        XCTAssertTrue(text.contains("Treat the rating as unassessed"))
+        XCTAssertTrue(text.contains("shown as unassessed"))
         XCTAssertTrue(text.contains(TransparencyConstants.limitedCertaintyNote))
     }
 

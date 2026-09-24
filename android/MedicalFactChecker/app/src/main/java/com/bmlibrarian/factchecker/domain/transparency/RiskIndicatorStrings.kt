@@ -27,6 +27,9 @@ object RiskIndicatorStrings {
     /** No conflict of interest statement was found. */
     const val MISSING_COI_STATEMENT: String = "No conflict of interest statement found"
 
+    /** Warning: industry funding was detected and no COI statement was found. */
+    const val FUNDING_WITHOUT_COI_STATEMENT: String = "Industry funding detected but no COI statement found"
+
     /** A sharing statement exists but the data is effectively unavailable. */
     const val DATA_EFFECTIVELY_UNAVAILABLE: String =
         "Data effectively unavailable despite sharing statement"

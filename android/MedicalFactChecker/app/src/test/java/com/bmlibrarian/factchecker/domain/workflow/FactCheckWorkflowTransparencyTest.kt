@@ -29,6 +29,8 @@ import com.bmlibrarian.factchecker.data.repository.SessionRepository
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import com.bmlibrarian.factchecker.domain.transparency.COIAnalysisResult
+import com.bmlibrarian.factchecker.domain.transparency.DataAvailabilityResult
+import com.bmlibrarian.factchecker.domain.transparency.DataDisclosureLevel
 import com.bmlibrarian.factchecker.domain.transparency.HighRiskTransparencySection
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyResultBuilder
 import io.mockk.coEvery
@@ -105,10 +107,12 @@ class FactCheckWorkflowTransparencyTest {
         coEvery { llmService.generateReport(any(), any(), any(), any(), any()) } returns
             Result.success(LLMService.ReportGeneration(verdict = "supported", summary = "S", report = "The analysis."))
 
-        // No COI statement and no full text: rated high, with limited certainty.
+        // Industry funding with unavailable data, no full text: high, with limited certainty.
         coEvery { runner.analyze(match { it.id == "relevant" }) } returns
             TransparencyResultBuilder(pmid = "1").apply {
-                coiAnalysis = COIAnalysisResult.NOT_AVAILABLE
+                coiAnalysis = COIAnalysisResult(statement = "None declared.")
+                dataAvailability = DataAvailabilityResult(disclosureLevel = DataDisclosureLevel.NOT_AVAILABLE)
+                industryFundingDetected = true
                 fullTextSearched = false
             }.build()
         coEvery { runner.analyze(match { it.id == "failing" }) } throws IOException("CrossRef unreachable")
@@ -143,13 +147,23 @@ class FactCheckWorkflowTransparencyTest {
         )
     }
 
-    /** One document's failure is named, not fatal: the report is still written. */
+    /** One document's failure is not fatal, and the report names it as unanalysed. */
     @Test
-    fun `a failed analysis is reported and the run completes`() = runTest {
+    fun `a failed analysis is named in the report and the run completes`() = runTest {
+        val report = slot<String>()
+        coEvery {
+            reportRepository.createReport(any(), any(), any(), capture(report), any(), any(), any(), any(), any())
+        } returns mockk(relaxed = true)
+
         workflow.resumeSession(SESSION_ID, WorkflowConfig(searchProvider = SearchProvider.PUBMED))
 
         assertTrue("got ${workflow.state.value}", workflow.state.value is WorkflowState.Completed)
-        assertEquals("Transparency analysis failed for: Study failing", workflow.searchFailureMessage.value)
+        assertTrue(
+            report.captured,
+            report.captured.contains("could not be analysed for transparency, and carry no rating:** " +
+                "AuthorFailing et al., 2020 (Study failing)")
+        )
+        assertEquals(null, workflow.searchFailureMessage.value)
         coVerify(exactly = 0) { sessionRepository.setError(any(), any()) }
         coVerify(exactly = 0) { documentRepository.updateTransparency("failing", any()) }
     }

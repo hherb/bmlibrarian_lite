@@ -21,6 +21,7 @@ package com.bmlibrarian.factchecker.ui.factcheck.components
 import com.bmlibrarian.factchecker.ui.common.TransparencyRiskBadge
 import com.bmlibrarian.factchecker.domain.transparency.transparencyResult
 import com.bmlibrarian.factchecker.domain.transparency.transparencyCertainty
+import com.bmlibrarian.factchecker.domain.transparency.transparencyIsUnassessed
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -280,7 +281,8 @@ fun DocumentCard(
                     document.transparencyResult?.let { result ->
                         TransparencyRiskBadge(
                             level = result.riskLevel,
-                            certainty = document.transparencyCertainty
+                            certainty = document.transparencyCertainty,
+                            unassessed = document.transparencyIsUnassessed
                         )
                     }
                     document.pmid?.let {

@@ -23,7 +23,7 @@ class TransparencyRiskExplanationTest {
         registrations: List<TrialRegistration> = emptyList(),
         compliance: ResultsComplianceStatus = ResultsComplianceStatus.UNKNOWN,
         fullTextSearched: Boolean? = true,
-        sources: List<String> = listOf(TransparencyConstants.PUBMED_SOURCE_NAME),
+        sources: List<String> = listOf(TransparencyConstants.PUBMED_SOURCE_NAME, TransparencyConstants.CROSSREF_SOURCE_NAME),
     ): TransparencyResult {
         val builder = TransparencyResultBuilder(doi = "10.1000/test", pmid = "123")
         builder.coiAnalysis = coi
@@ -184,7 +184,7 @@ class TransparencyRiskExplanationTest {
         val explanation = TransparencyRiskExplanation.of(result)
         assertEquals(TransparencyCertainty.LIMITED_NO_FULL_TEXT, explanation.certainty)
         assertTrue(explanation.reasons[0].contains("was not searched"))
-        assertTrue(explanation.caveats.any { it.contains("Treat the rating as unassessed") })
+        assertTrue(explanation.caveats.any { it.contains("shown as unassessed") })
     }
 
     @Test
@@ -302,7 +302,7 @@ class TransparencyRiskExplanationTest {
         )
         val caveats = TransparencyRiskExplanation.of(result).caveats
         assertTrue(caveats.any { it.contains("older version of the analyser") })
-        assertTrue(caveats.contains("Neither PubMed nor CrossRef returned a record for this study, so its funders could not be checked."))
+        assertTrue(caveats.any { it.startsWith("No CrossRef record was retrieved") })
         assertTrue(caveats.contains("The analysis reported errors: timeout."))
     }
 
@@ -333,7 +333,7 @@ class TransparencyRiskExplanationTest {
         assertTrue(text.contains("2 studies were rated high transparency risk"))
         assertTrue(text.contains("Smith et al., 2020: Smith J et al. (2020). A trial."))
         assertTrue(text.contains("Rated high risk because:"))
-        assertTrue(text.contains("Treat the rating as unassessed"))
+        assertTrue(text.contains("shown as unassessed"))
         assertTrue(text.contains(TransparencyConstants.LIMITED_CERTAINTY_NOTE))
     }
 
@@ -355,8 +355,9 @@ class TransparencyRiskExplanationTest {
                 "  - No conflict of interest statement was found; the full text, where one would appear, " +
                     "was not searched. A missing statement is enough on its own for a high rating.",
                 "  Caveats:",
-                "  - Every reason for this rating depends on statements that appear only in the full text. " +
-                    "Treat the rating as unassessed rather than as evidence of poor transparency.",
+                "  - Every reason for a high rating depends on statements that appear only in the full text, " +
+                    "which was not searched, so the study is shown as unassessed rather than as evidence of " +
+                    "poor transparency.",
             ).joinToString("\n"),
             HighRiskTransparencySection.plainText(listOf(entry)),
         )
@@ -416,5 +417,93 @@ class TransparencyRiskExplanationTest {
         val stored = Json.parseToJsonElement(TransparencyJson.encode(build(fullTextSearched = true))).jsonObject
         val decoded = TransparencyJson.decode(JsonObject(stored - "fullTextSearched").toString())
         assertNull(decoded.fullTextSearched)
+    }
+
+    /** Funders come only from CrossRef; a PubMed record does not stand in for it. */
+    @Test
+    fun `missing CrossRef is caveated even with PubMed`() {
+        val pubmedOnly = TransparencyRiskExplanation.of(build(sources = listOf(TransparencyConstants.PUBMED_SOURCE_NAME)))
+        assertTrue(pubmedOnly.caveats.any { it.contains("funders were not checked") })
+        val withCrossRef = TransparencyRiskExplanation.of(build(sources = listOf(TransparencyConstants.CROSSREF_SOURCE_NAME)))
+        assertFalse(withCrossRef.caveats.any { it.contains("funders were not checked") })
+    }
+
+    /**
+     * Without full text, the COI warning is not repeated unqualified, and a score term
+     * recording a missing statement says it was not searched.
+     */
+    @Test
+    fun `unsearched statements are not repeated as findings`() {
+        val builder = TransparencyResultBuilder(doi = "10.1000/x")
+        builder.industryFundingDetected = true
+        builder.industryFundingConfidence = 0.9
+        builder.dataAvailability = DataAvailabilityResult(disclosureLevel = DataDisclosureLevel.NOT_AVAILABLE)
+        builder.outcomeSwitchingDetected = true
+        builder.fullTextSearched = false
+        builder.warnings = listOf(RiskIndicatorStrings.FUNDING_WITHOUT_COI_STATEMENT)
+        val result = builder.build()
+        assertTrue(result.transparencyScore < TransparencyConstants.HIGH_RISK_SCORE_THRESHOLD)
+
+        val explanation = TransparencyRiskExplanation.of(result)
+        assertFalse(RiskIndicatorStrings.FUNDING_WITHOUT_COI_STATEMENT in explanation.otherConcerns)
+        assertTrue(
+            explanation.scoreBreakdown.any {
+                it.label == "No conflict of interest statement found (full text not searched)"
+            },
+        )
+    }
+
+    // ==================== Unassessed ====================
+
+    @Test
+    fun `a text-only high rating is unassessed`() {
+        val result = build(fullTextSearched = false)
+        assertEquals(TransparencyRiskLevel.HIGH, result.riskLevel)
+        assertTrue(TransparencyRiskExplanation.isUnassessed(result))
+        assertTrue(TransparencyRiskExplanation.of(result).isUnassessed)
+        assertTrue(TransparencyRiskExplanation.isUnassessed(build(fullTextSearched = null)))
+    }
+
+    @Test
+    fun `the same finding from searched text is a real high rating`() {
+        val result = build(fullTextSearched = true)
+        assertEquals(TransparencyRiskLevel.HIGH, result.riskLevel)
+        assertFalse(TransparencyRiskExplanation.isUnassessed(result))
+    }
+
+    @Test
+    fun `a registry finding keeps the rating high`() {
+        val result = build(
+            coi = COIAnalysisResult(statement = "The authors declare no competing interests."),
+            data = DataAvailabilityResult(disclosureLevel = DataDisclosureLevel.NOT_AVAILABLE),
+            industry = true,
+            fullTextSearched = false,
+        )
+        assertEquals(TransparencyRiskLevel.HIGH, result.riskLevel)
+        assertFalse(TransparencyRiskExplanation.isUnassessed(result))
+    }
+
+    @Test
+    fun `lower ratings are never unassessed`() {
+        val result = build(
+            coi = COIAnalysisResult(statement = "None."),
+            data = DataAvailabilityResult(disclosureLevel = DataDisclosureLevel.FULL_OPEN),
+            fullTextSearched = false,
+        )
+        assertFalse(result.riskLevel == TransparencyRiskLevel.HIGH)
+        assertFalse(TransparencyRiskExplanation.isUnassessed(result))
+    }
+
+    @Test
+    fun `unassessed summary`() {
+        assertNull(HighRiskTransparencySection.unassessedSummary(0))
+        assertTrue(HighRiskTransparencySection.unassessedSummary(1)!!.startsWith("1 study is shown as unassessed"))
+        assertTrue(HighRiskTransparencySection.unassessedSummary(3)!!.startsWith("3 studies are shown as unassessed"))
+    }
+
+    @Test
+    fun `a section with only unassessed studies says so rather than vanishing`() {
+        assertTrue(HighRiskTransparencySection.plainText(emptyList(), 2)!!.contains("2 studies are shown as unassessed"))
+        assertNull(HighRiskTransparencySection.plainText(emptyList(), 0))
     }
 }

@@ -175,7 +175,7 @@ public enum COIAnalyzer {
 
         // If no COI statement at all
         if coiResult.statement == nil {
-            return "Industry funding detected but no COI statement found"
+            return RiskIndicatorStrings.fundingWithoutCoiStatement
         }
 
         return nil

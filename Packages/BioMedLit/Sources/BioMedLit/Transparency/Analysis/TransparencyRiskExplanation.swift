@@ -133,6 +133,10 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
     /// Reasons the rating may rest on less than it appears to.
     public let caveats: [String]
 
+    /// Whether the rating is shown as unassessed rather than high: see
+    /// ``isUnassessed(result:certainty:)``.
+    public let isUnassessed: Bool
+
     /// How far the rating can be relied on; limited without the full text.
     /// Its ``TransparencyCertainty/note`` belongs beside the score, not among
     /// the caveats: it qualifies the whole rating.
@@ -150,6 +154,7 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
         let triggers = TransparencyScorer.highRiskTriggers(for: result)
 
         self.certainty = certainty
+        isUnassessed = Self.isUnassessed(result: result, certainty: certainty)
         score = result.transparencyScore
         reasons = triggers.map { Self.sentence(for: $0, result: result, certainty: certainty) }
 
@@ -157,7 +162,9 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
             if case .scoreBelowThreshold = $0 { return true }
             return false
         }
-        scoreBreakdown = scoredLow ? TransparencyScorer.scoreComponents(for: result) : []
+        scoreBreakdown = scoredLow
+            ? Self.qualified(TransparencyScorer.scoreComponents(for: result), certainty: certainty)
+            : []
 
         otherConcerns = Self.concerns(in: result, besides: triggers)
 
@@ -171,9 +178,9 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
         } else if certainty.isLimited && !triggers.isEmpty
                     && triggers.allSatisfy({ Self.dependsOnFullText($0, result: result) }) {
             caveats.append(
-                "Every reason for this rating depends on statements that appear only in the "
-                + "full text. Treat the rating as unassessed rather than as evidence of poor "
-                + "transparency."
+                "Every reason for a high rating depends on statements that appear only in the "
+                + "full text, which was not searched, so the study is shown as unassessed "
+                + "rather than as evidence of poor transparency."
             )
         }
         if result.isStale {
@@ -182,20 +189,39 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
                 + "re-analysing may change the rating."
             )
         }
-        let metadataSources = [
-            TransparencyConstants.pubMedSourceName,
-            TransparencyConstants.crossRefSourceName,
-        ]
-        if !result.dataSourcesUsed.contains(where: metadataSources.contains) {
+        // Funders come from CrossRef alone, so its absence is what leaves them
+        // unchecked; a PubMed record does not stand in for it. Worded so as not
+        // to claim which it was — no record, or no answer.
+        if !result.dataSourcesUsed.contains(TransparencyConstants.crossRefSourceName) {
             caveats.append(
-                "Neither PubMed nor CrossRef returned a record for this study, "
-                + "so its funders could not be checked."
+                "No CrossRef record was retrieved for this study (none exists, it has no DOI, "
+                + "or CrossRef could not be reached), so its funders were not checked."
             )
         }
         if !result.errors.isEmpty {
             caveats.append("The analysis reported errors: \(result.errors.joined(separator: "; ")).")
         }
         self.caveats = caveats
+    }
+
+    /// Whether a high rating rests only on statements in unread full text.
+    ///
+    /// Such a rating records what could not be looked for, not what the study
+    /// lacks, so every surface shows it as unassessed rather than high. Display
+    /// only: the stored rating and the scoring rules are unchanged, so the
+    /// platforms stay in step. A high rating any of whose reasons stands without
+    /// the text — unposted trial results, say — is still high.
+    ///
+    /// - Parameters:
+    ///   - result: A stored transparency result.
+    ///   - certainty: What is known of its full-text access; defaults to the
+    ///     result's own record.
+    /// - Returns: `true` when the rating is to be shown as unassessed.
+    public static func isUnassessed(result: TransparencyResult, certainty: TransparencyCertainty? = nil) -> Bool {
+        let certainty = certainty ?? TransparencyCertainty(fullTextSearched: result.fullTextSearched)
+        guard result.riskLevel == .high, certainty.isLimited else { return false }
+        let triggers = TransparencyScorer.highRiskTriggers(for: result)
+        return !triggers.isEmpty && triggers.allSatisfy { dependsOnFullText($0, result: result) }
     }
 
     /// The explanation as indented plain-text lines, for exported reports.
@@ -292,6 +318,24 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
         }
     }
 
+    /// Score terms, with those that record a statement as missing qualified
+    /// when the full text, the only place it is looked for, was not searched.
+    private static func qualified(
+        _ components: [ScoreComponent],
+        certainty: TransparencyCertainty
+    ) -> [ScoreComponent] {
+        guard certainty != .fullText else { return components }
+        let unsearched = [
+            "No conflict of interest statement found",
+            "Data availability: \(DataDisclosureLevel.notStated.displayName.lowercased())",
+        ]
+        return components.map {
+            unsearched.contains($0.label)
+                ? ScoreComponent(label: $0.label + " (full text not searched)", points: $0.points)
+                : $0
+        }
+    }
+
     /// The result's recorded concerns, less those a stated reason already says.
     private static func concerns(in result: TransparencyResult, besides triggers: [HighRiskTrigger]) -> [String] {
         var restated: Set<String> = []
@@ -299,6 +343,9 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
             switch trigger {
             case .missingCOIStatement:
                 restated.insert(RiskIndicatorStrings.missingCoiStatement)
+                // The service's discrepancy warning says the same thing, and
+                // without the reason's qualification about unsearched text.
+                restated.insert(RiskIndicatorStrings.fundingWithoutCoiStatement)
             case .industryFundingWithWithheldData:
                 restated.insert(RiskIndicatorStrings.industryFunding)
                 restated.insert(RiskIndicatorStrings.industryRestrictedData)
@@ -376,13 +423,34 @@ public enum HighRiskTransparencySection {
             + "it appears to."
     }
 
+    /// Heads the rules a high rating would rest on, for a rating shown as unassessed.
+    public static let unassessedReasonsLabel = "A high rating would rest only on"
+
+    /// The sentence accounting for ratings shown as unassessed.
+    ///
+    /// - Parameter count: The number of studies shown as unassessed.
+    /// - Returns: The sentence, or `nil` when there are none.
+    public static func unassessedSummary(count: Int) -> String? {
+        guard count > 0 else { return nil }
+        let studies = count == 1 ? "1 study is" : "\(count) studies are"
+        return "\(studies) shown as unassessed rather than high risk: every reason for a high "
+            + "rating depends on statements that appear only in the full text, which was not "
+            + "available to search."
+    }
+
     /// The section as plain text, for copied, shared and exported reports.
     ///
-    /// - Parameter entries: The studies rated high, in the order to list them.
-    /// - Returns: The section, or `nil` when no study was rated high.
-    public static func plainText(for entries: [HighRiskTransparencyEntry]) -> String? {
-        guard let introduction = introduction(count: entries.count) else { return nil }
+    /// - Parameters:
+    ///   - entries: The studies rated high, in the order to list them.
+    ///   - unassessedCount: How many studies are shown as unassessed instead.
+    /// - Returns: The section, or `nil` when there is nothing to say.
+    public static func plainText(for entries: [HighRiskTransparencyEntry], unassessedCount: Int = 0) -> String? {
+        let unassessed = unassessedSummary(count: unassessedCount)
+        guard let introduction = introduction(count: entries.count) else {
+            return unassessed.map { "\(heading.uppercased())\n\n\($0)" }
+        }
         var lines = [heading.uppercased(), "", introduction]
+        if let unassessed { lines += ["", unassessed] }
         for entry in entries {
             lines.append("")
             lines.append("\(entry.reference): \(entry.citation)")

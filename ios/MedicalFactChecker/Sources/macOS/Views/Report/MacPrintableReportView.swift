@@ -347,9 +347,20 @@ struct PrintableReportView: View {
                     }
 
                     if let riskLevel = document.transparencyRiskLevel {
-                        Text(riskLevel.shortLabel)
+                        // A reader of the printout never saw the app: a rating
+                        // made without the full text says so here too.
+                        let level = document.transparencyIsUnassessed
+                            ? TransparencyConstants.unassessedLabel
+                            : riskLevel.shortLabel
+                        Text(
+                            document.transparencyCertainty?.isLimited == true
+                                ? "\(level) \(TransparencyConstants.limitedCertaintyBadgeSuffix)"
+                                : level
+                        )
                             .font(.system(size: 8, weight: .medium))
-                            .foregroundColor(transparencyColor(riskLevel))
+                            .foregroundColor(
+                                document.transparencyIsUnassessed ? .gray : transparencyColor(riskLevel)
+                            )
                     }
                 }
             }
@@ -382,7 +393,11 @@ struct PrintableReportView: View {
         let avgScore = results.isEmpty ? 0 : results.reduce(0) { $0 + $1.transparencyScore } / results.count
         let industryCount = results.filter { $0.industryFundingDetected }.count
         let industryPercent = results.isEmpty ? 0 : (industryCount * 100) / results.count
-        let highRisk = results.filter { $0.riskLevel == .high }.count
+        // A high rating resting only on unsearched full text is shown as unassessed.
+        let highRisk = documents.filter {
+            $0.transparencyResult?.riskLevel == .high && !$0.transparencyIsUnassessed
+        }.count
+        let unassessed = documents.filter(\.transparencyIsUnassessed).count
         let limited = documents.filter { $0.transparencyCertainty == .limitedNoFullText }.count
 
         return VStack(alignment: .leading, spacing: 8) {
@@ -398,6 +413,12 @@ struct PrintableReportView: View {
                         .font(.caption)
                         .foregroundColor(.red)
                 }
+            }
+
+            if let summary = HighRiskTransparencySection.unassessedSummary(count: unassessed) {
+                Text(summary)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             if limited > 0 {

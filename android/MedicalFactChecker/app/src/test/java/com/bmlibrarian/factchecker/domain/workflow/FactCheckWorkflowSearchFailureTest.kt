@@ -453,8 +453,14 @@ class FactCheckWorkflowSearchFailureTest {
             "got ${report.captured}",
             report.captured.startsWith(
                 "> **Incomplete search:** $clause. Everything below rests only on the records that were retrieved.\n\n" +
-                    "## Analysis\n\nAspirin helps.\n\n" +
-                    "## Methodology\n\n- **Search Completeness:** Incomplete: $clause\n\n" +
+                    "## Analysis\n\nAspirin helps.\n\n"
+            )
+        )
+        // The transparency sections sit between the analysis and the Methodology
+        assertTrue(
+            "got ${report.captured}",
+            report.captured.contains(
+                "## Methodology\n\n- **Search Completeness:** Incomplete: $clause\n\n" +
                     "## References\n\n"
             )
         )

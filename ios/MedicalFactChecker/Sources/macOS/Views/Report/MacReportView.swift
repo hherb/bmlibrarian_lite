@@ -615,7 +615,11 @@ struct MacReviewedDocumentRow: View {
                 MacScoreBadge(score: document.relevanceScore)
                     .frame(width: MacIconSize.scoreBadgeSmall, height: MacIconSize.scoreBadgeSmall)
                 if let riskLevel = document.transparencyRiskLevel {
-                    MacTransparencyRiskBadge(riskLevel: riskLevel, certainty: document.transparencyCertainty)
+                    MacTransparencyRiskBadge(
+                        riskLevel: riskLevel,
+                        certainty: document.transparencyCertainty,
+                        unassessed: document.transparencyIsUnassessed
+                    )
                 }
             }
 

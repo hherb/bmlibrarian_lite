@@ -794,7 +794,11 @@ struct DocumentCard: View {
                         ScoreBadge(score: score)
                     }
                     if let riskLevel = document.transparencyRiskLevel {
-                        TransparencyRiskBadge(riskLevel: riskLevel, certainty: document.transparencyCertainty)
+                        TransparencyRiskBadge(
+                            riskLevel: riskLevel,
+                            certainty: document.transparencyCertainty,
+                            unassessed: document.transparencyIsUnassessed
+                        )
                     }
                 }
             }

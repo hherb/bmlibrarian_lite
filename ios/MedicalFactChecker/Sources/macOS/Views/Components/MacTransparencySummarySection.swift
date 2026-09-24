@@ -44,9 +44,16 @@ struct MacTransparencySummarySection: View {
         return (industryFundedCount * 100) / analyzedResults.count
     }
 
-    private var riskCounts: (low: Int, medium: Int, high: Int) {
-        var low = 0, medium = 0, high = 0
-        for result in analyzedResults {
+    /// Documents at each displayed level. A high rating resting only on
+    /// unsearched full text is counted as unassessed, not high.
+    private var riskCounts: (low: Int, medium: Int, high: Int, unassessed: Int) {
+        var low = 0, medium = 0, high = 0, unassessed = 0
+        for document in documents {
+            guard let result = document.transparencyResult else { continue }
+            if document.transparencyIsUnassessed {
+                unassessed += 1
+                continue
+            }
             switch result.riskLevel {
             case .low: low += 1
             case .medium: medium += 1
@@ -54,7 +61,7 @@ struct MacTransparencySummarySection: View {
             case .unknown: break
             }
         }
-        return (low, medium, high)
+        return (low, medium, high, unassessed)
     }
 
     /// Analysed documents rated without their full text.
@@ -101,6 +108,14 @@ struct MacTransparencySummarySection: View {
                     .fixedSize(horizontal: false, vertical: true)
                 }
 
+                // Ratings shown as unassessed rather than high
+                if let unassessed = HighRiskTransparencySection.unassessedSummary(count: riskCounts.unassessed) {
+                    Text(unassessed)
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 // Stats
                 HStack(spacing: MacSpacing.statItemSpacing) {
                     MacStatItem(
@@ -133,6 +148,13 @@ struct MacTransparencySummarySection: View {
                     }
                     if riskCounts.high > 0 {
                         riskCountBadge(count: riskCounts.high, label: "High", color: .red)
+                    }
+                    if riskCounts.unassessed > 0 {
+                        riskCountBadge(
+                            count: riskCounts.unassessed,
+                            label: TransparencyConstants.unassessedLabel,
+                            color: .gray
+                        )
                     }
                 }
             }

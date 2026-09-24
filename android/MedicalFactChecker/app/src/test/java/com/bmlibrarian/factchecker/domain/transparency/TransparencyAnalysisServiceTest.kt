@@ -203,7 +203,7 @@ class TransparencyAnalysisServiceTest {
         assertEquals(0, server.requestCount)
         assertTrue(Log.lines.any { it.contains("PubMed fetch failed for PMID 12345678: IOException") })
         assertTrue(
-            TransparencyRiskExplanation.of(result).caveats.any { it.startsWith("Neither PubMed nor CrossRef returned a record") },
+            TransparencyRiskExplanation.of(result).caveats.any { it.startsWith("No CrossRef record was retrieved") },
         )
     }
 

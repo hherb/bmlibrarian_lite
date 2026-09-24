@@ -28,7 +28,11 @@ import org.junit.Test
 /** The transparency sections a report carries. */
 class TransparencyReportMarkdownTest {
 
-    private fun analysed(surname: String, coiStatement: String?) = DocumentEntity(
+    /**
+     * A document analysed without full text. With a COI statement, industry funding and
+     * unavailable data it is rated high on findings that stand without the text.
+     */
+    private fun analysed(surname: String, coiStatement: String?, industryWithoutData: Boolean = false) = DocumentEntity(
         sessionId = "s",
         pmid = surname.length.toString(),
         title = "Study by $surname",
@@ -37,7 +41,10 @@ class TransparencyReportMarkdownTest {
         transparencyResultJson = TransparencyJson.encode(
             TransparencyResultBuilder(pmid = "1").apply {
                 coiAnalysis = COIAnalysisResult(statement = coiStatement)
-                dataAvailability = DataAvailabilityResult(disclosureLevel = DataDisclosureLevel.FULL_OPEN)
+                dataAvailability = DataAvailabilityResult(
+                    disclosureLevel = if (industryWithoutData) DataDisclosureLevel.NOT_AVAILABLE else DataDisclosureLevel.FULL_OPEN,
+                )
+                industryFundingDetected = industryWithoutData
                 dataSourcesUsed = listOf(TransparencyConstants.PUBMED_SOURCE_NAME)
                 fullTextSearched = false
             }.build(),
@@ -45,8 +52,24 @@ class TransparencyReportMarkdownTest {
     )
 
     @Test
-    fun `nothing is written when no document was analysed`() {
-        assertEquals("", TransparencyReportMarkdown.sections(listOf(DocumentEntity(sessionId = "s", title = "t"))))
+    fun `nothing is written for a report resting on no documents`() {
+        assertEquals("", TransparencyReportMarkdown.sections(emptyList()))
+    }
+
+    /** A document left unanalysed must not read as one examined and found clean. */
+    @Test
+    fun `a document with no readable analysis is named as unanalysed`() {
+        val damaged = analysed("Cole", "None declared.").copy(transparencyResultJson = "{broken")
+        val never = DocumentEntity(sessionId = "s", title = "Never analysed", authors = listOf("Dunn A"))
+        val text = TransparencyReportMarkdown.sections(listOf(analysed("Adams", "None declared."), damaged, never))
+        assertTrue(
+            text,
+            text.contains(
+                "**2 of 3 documents could not be analysed for transparency, and carry no rating:** " +
+                    "Cole et al., 2020 (Study by Cole); Dunn, n.d. (Never analysed)",
+            ),
+        )
+        assertTrue(text, text.contains("1 document analysed for transparency risk: 1 low."))
     }
 
     @Test
@@ -55,7 +78,8 @@ class TransparencyReportMarkdownTest {
             listOf(analysed("Adams", "None declared."), analysed("Baker", null)),
         )
         assertTrue(text, text.startsWith("## Transparency Analysis"))
-        assertTrue(text, text.contains("2 documents analysed for transparency risk: 1 low, 1 high."))
+        assertTrue(text, text.contains("2 documents analysed for transparency risk: 1 low, 1 unassessed."))
+        assertTrue(text, text.contains("1 study is shown as unassessed rather than high risk"))
         assertTrue(
             text,
             text.contains(
@@ -67,19 +91,29 @@ class TransparencyReportMarkdownTest {
 
     @Test
     fun `each high-risk study is discussed with its reasons and its certainty`() {
-        val text = TransparencyReportMarkdown.sections(listOf(analysed("Baker", null)))
+        val text = TransparencyReportMarkdown.sections(listOf(analysed("Baker", "None.", industryWithoutData = true)))
         assertTrue(text, text.contains("## ${HighRiskTransparencySection.HEADING}"))
         assertTrue(text, text.contains("### Baker et al., 2020"))
         assertTrue(text, text.contains("**Limited certainty because of lack of full text access**"))
         assertTrue(text, text.contains("**${HighRiskTransparencySection.REASONS_LABEL}:**"))
-        assertTrue(text, text.contains("- No conflict of interest statement was found"))
-        assertTrue(text, text.contains("Treat the rating as unassessed"))
+        assertTrue(text, text.contains("- Industry funding was detected"))
+    }
+
+    /** A high rating resting only on unsearched text is summarised, not discussed as high risk. */
+    @Test
+    fun `a text-only high rating is counted as unassessed, not discussed`() {
+        val text = TransparencyReportMarkdown.sections(listOf(analysed("Baker", null)))
+        assertFalse(text, text.contains(HighRiskTransparencySection.HEADING))
+        assertTrue(text, text.contains("1 document analysed for transparency risk: 1 unassessed."))
+        assertTrue(text, text.contains("1 study is shown as unassessed rather than high risk"))
     }
 
     /** The PDF exporter lays out one paragraph per blank-line block, so no block may hold two lines. */
     @Test
     fun `every item is its own block, as the PDF exporter needs`() {
-        val text = TransparencyReportMarkdown.sections(listOf(analysed("Baker", null)))
+        val text = TransparencyReportMarkdown.sections(
+            listOf(analysed("Baker", "None.", industryWithoutData = true), analysed("Cole", null)),
+        )
         text.split("\n\n").forEach { block -> assertFalse("block spans lines: $block", block.contains('\n')) }
     }
 

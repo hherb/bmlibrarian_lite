@@ -42,15 +42,25 @@ struct TransparencyRiskBadge: View {
     /// must not look like one that met it. `nil` shows the rating alone.
     var certainty: TransparencyCertainty? = nil
 
+    /// Whether the rating is shown as unassessed rather than high: every reason
+    /// for it rests on statements in full text that was not searched.
+    var unassessed: Bool = false
+
+    /// The level as the badge names it.
+    private var levelLabel: String {
+        unassessed ? TransparencyConstants.unassessedLabel : riskLevel.shortLabel
+    }
+
     /// The badge's label, qualified when its certainty is limited.
     private var label: String {
-        guard certainty?.isLimited == true else { return riskLevel.shortLabel }
-        return "\(riskLevel.shortLabel) \(TransparencyConstants.limitedCertaintyBadgeSuffix)"
+        guard certainty?.isLimited == true else { return levelLabel }
+        return "\(levelLabel) \(TransparencyConstants.limitedCertaintyBadgeSuffix)"
     }
 
     /// What assistive technology reads, including any certainty note.
     private var spokenLabel: String {
-        let rating = "Transparency risk: \(riskLevel.fullLabel)"
+        let level = unassessed ? TransparencyConstants.unassessedLabel : riskLevel.fullLabel
+        let rating = "Transparency risk: \(level)"
         guard let note = certainty?.note else { return rating }
         return "\(rating). \(note)"
     }
@@ -72,6 +82,7 @@ struct TransparencyRiskBadge: View {
     }
 
     private var badgeColor: Color {
+        if unassessed { return .gray }
         switch riskLevel {
         case .low: return .green
         case .medium: return .orange
@@ -81,6 +92,7 @@ struct TransparencyRiskBadge: View {
     }
 
     private var iconName: String {
+        if unassessed { return "questionmark.circle" }
         switch riskLevel {
         case .low: return "checkmark.shield"
         case .medium: return "exclamationmark.triangle"

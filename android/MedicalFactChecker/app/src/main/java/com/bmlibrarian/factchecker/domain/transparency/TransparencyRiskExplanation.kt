@@ -103,6 +103,8 @@ data class ScoreComponent(val label: String, val points: Int) {
  * @property caveats Reasons the rating may rest on less than it appears to.
  * @property certainty How far the rating can be relied on. Its [TransparencyCertainty.note]
  *   belongs beside the score, not among the caveats: it qualifies the whole rating.
+ * @property isUnassessed Whether the rating is shown as unassessed rather than high; see
+ *   [TransparencyRiskExplanation.Companion.isUnassessed].
  */
 data class TransparencyRiskExplanation(
     val score: Int,
@@ -111,6 +113,7 @@ data class TransparencyRiskExplanation(
     val otherConcerns: List<String>,
     val caveats: List<String>,
     val certainty: TransparencyCertainty,
+    val isUnassessed: Boolean = false,
 ) {
     /** The explanation as indented plain-text lines, for exported reports. */
     val plainTextLines: List<String>
@@ -145,19 +148,44 @@ data class TransparencyRiskExplanation(
 
         /** Caveat when every reason could have been met only for want of the full text. */
         internal const val UNASSESSED_CAVEAT: String =
-            "Every reason for this rating depends on statements that appear only in the " +
-                "full text. Treat the rating as unassessed rather than as evidence of poor " +
-                "transparency."
+            "Every reason for a high rating depends on statements that appear only in the " +
+                "full text, which was not searched, so the study is shown as unassessed " +
+                "rather than as evidence of poor transparency."
+
+        /**
+         * Whether a high rating rests only on statements in unread full text.
+         *
+         * Such a rating records what could not be looked for, not what the study lacks, so
+         * every surface shows it as unassessed rather than high. Display only: the stored
+         * rating and the scoring rules are unchanged, so the platforms stay in step. A high
+         * rating any of whose reasons stands without the text is still high.
+         *
+         * @param result A stored transparency result.
+         * @param certainty What is known of its full-text access; defaults to the result's record.
+         * @return true when the rating is to be shown as unassessed.
+         */
+        fun isUnassessed(result: TransparencyResult, certainty: TransparencyCertainty? = null): Boolean {
+            val resolved = certainty ?: TransparencyCertainty.from(result.fullTextSearched)
+            if (result.riskLevel != TransparencyRiskLevel.HIGH || !resolved.isLimited) return false
+            val triggers = TransparencyScorer.highRiskTriggers(result)
+            return triggers.isNotEmpty() && triggers.all { dependsOnFullText(it, result) }
+        }
 
         /** Caveat for a result produced by an older analyzer. */
         internal const val STALE_CAVEAT: String =
             "This analysis was produced by an older version of the analyser; " +
                 "re-analysing may change the rating."
 
-        /** Caveat when neither metadata source returned a record. */
-        internal const val NO_METADATA_CAVEAT: String =
-            "Neither PubMed nor CrossRef returned a record for this study, " +
-                "so its funders could not be checked."
+        /**
+         * Caveat when no CrossRef record was retrieved. Funders come from CrossRef alone, so a
+         * PubMed record does not stand in for it; worded so as not to claim which it was.
+         */
+        internal const val NO_CROSSREF_CAVEAT: String =
+            "No CrossRef record was retrieved for this study (none exists, it has no DOI, " +
+                "or CrossRef could not be reached), so its funders were not checked."
+
+        /** Suffix for a score term recording a statement missing from text that was not searched. */
+        private const val UNSEARCHED_SUFFIX: String = " (full text not searched)"
 
         /**
          * Explain a stored result's high rating.
@@ -182,11 +210,9 @@ data class TransparencyRiskExplanation(
                 caveats.add(UNASSESSED_CAVEAT)
             }
             if (result.isStale) caveats.add(STALE_CAVEAT)
-            val metadataSources = setOf(
-                TransparencyConstants.PUBMED_SOURCE_NAME,
-                TransparencyConstants.CROSSREF_SOURCE_NAME,
-            )
-            if (result.dataSourcesUsed.none { it in metadataSources }) caveats.add(NO_METADATA_CAVEAT)
+            if (TransparencyConstants.CROSSREF_SOURCE_NAME !in result.dataSourcesUsed) {
+                caveats.add(NO_CROSSREF_CAVEAT)
+            }
             if (result.errors.isNotEmpty()) {
                 caveats.add("The analysis reported errors: ${result.errors.joinToString("; ")}.")
             }
@@ -194,10 +220,15 @@ data class TransparencyRiskExplanation(
             return TransparencyRiskExplanation(
                 score = result.transparencyScore,
                 reasons = triggers.map { sentence(it, result, resolvedCertainty) },
-                scoreBreakdown = if (scoredLow) TransparencyScorer.scoreComponents(result) else emptyList(),
+                scoreBreakdown = if (scoredLow) {
+                    qualified(TransparencyScorer.scoreComponents(result), resolvedCertainty)
+                } else {
+                    emptyList()
+                },
                 otherConcerns = concerns(result, triggers),
                 caveats = caveats,
                 certainty = resolvedCertainty,
+                isUnassessed = isUnassessed(result, resolvedCertainty),
             )
         }
 
@@ -275,12 +306,32 @@ data class TransparencyRiskExplanation(
                 }
             }
 
+        /**
+         * Score terms, with those recording a statement as missing qualified when the full
+         * text, the only place it is looked for, was not searched.
+         */
+        private fun qualified(components: List<ScoreComponent>, certainty: TransparencyCertainty): List<ScoreComponent> {
+            if (certainty == TransparencyCertainty.FULL_TEXT) return components
+            val unsearched = setOf(
+                "No conflict of interest statement found",
+                "Data availability: ${DataDisclosureLevel.NOT_STATED.displayName.lowercase()}",
+            )
+            return components.map {
+                if (it.label in unsearched) ScoreComponent(it.label + UNSEARCHED_SUFFIX, it.points) else it
+            }
+        }
+
         /** The result's recorded concerns, less those a stated reason already says. */
         private fun concerns(result: TransparencyResult, triggers: List<HighRiskTrigger>): List<String> {
             val seen = mutableSetOf<String>()
             for (trigger in triggers) {
                 when (trigger) {
-                    HighRiskTrigger.MissingCOIStatement -> seen.add(RiskIndicatorStrings.MISSING_COI_STATEMENT)
+                    HighRiskTrigger.MissingCOIStatement -> {
+                        seen.add(RiskIndicatorStrings.MISSING_COI_STATEMENT)
+                        // The service's discrepancy warning says the same, without the
+                        // reason's qualification about unsearched text.
+                        seen.add(RiskIndicatorStrings.FUNDING_WITHOUT_COI_STATEMENT)
+                    }
                     is HighRiskTrigger.IndustryFundingWithWithheldData -> {
                         seen.add(RiskIndicatorStrings.INDUSTRY_FUNDING)
                         seen.add(RiskIndicatorStrings.INDUSTRY_RESTRICTED_DATA)
@@ -358,15 +409,36 @@ object HighRiskTransparencySection {
             "it appears to."
     }
 
+    /** Heads the rules a high rating would rest on, for a rating shown as unassessed. */
+    const val UNASSESSED_REASONS_LABEL: String = "A high rating would rest only on"
+
+    /**
+     * The sentence accounting for ratings shown as unassessed.
+     *
+     * @param count The number of studies shown as unassessed.
+     * @return The sentence, or null when there are none.
+     */
+    fun unassessedSummary(count: Int): String? {
+        if (count <= 0) return null
+        val studies = if (count == 1) "1 study is" else "$count studies are"
+        return "$studies shown as unassessed rather than high risk: every reason for a high " +
+            "rating depends on statements that appear only in the full text, which was not " +
+            "available to search."
+    }
+
     /**
      * The section as plain text, for copied, shared and exported reports.
      *
      * @param entries The studies rated high, in the order to list them.
-     * @return The section, or null when no study was rated high.
+     * @param unassessedCount How many studies are shown as unassessed instead.
+     * @return The section, or null when there is nothing to say.
      */
-    fun plainText(entries: List<HighRiskTransparencyEntry>): String? {
-        val introduction = introduction(entries.size) ?: return null
+    fun plainText(entries: List<HighRiskTransparencyEntry>, unassessedCount: Int = 0): String? {
+        val unassessed = unassessedSummary(unassessedCount)
+        val introduction = introduction(entries.size)
+            ?: return unassessed?.let { "${HEADING.uppercase()}\n\n$it" }
         val lines = mutableListOf(HEADING.uppercase(), "", introduction)
+        if (unassessed != null) lines.addAll(listOf("", unassessed))
         for (entry in entries) {
             lines.add("")
             lines.add("${entry.reference}: ${entry.citation}")

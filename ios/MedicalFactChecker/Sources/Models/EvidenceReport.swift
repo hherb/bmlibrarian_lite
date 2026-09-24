@@ -191,8 +191,10 @@ final class EvidenceReport {
         let notice = incompleteSearchNotice.map { "\($0)\n\n" } ?? ""
         // The screen and the printed report discuss every high-risk study;
         // text a reader copies or exports must not drop that discussion.
+        let documents = session?.documents ?? []
         let highRisk = HighRiskTransparencySection.plainText(
-            for: Document.highRiskTransparencyEntries(in: session?.documents ?? [])
+            for: Document.highRiskTransparencyEntries(in: documents),
+            unassessedCount: documents.filter(\.transparencyIsUnassessed).count
         ).map { "---\n\n\($0)\n\n" } ?? ""
         return """
         MEDICAL FACT CHECK REPORT

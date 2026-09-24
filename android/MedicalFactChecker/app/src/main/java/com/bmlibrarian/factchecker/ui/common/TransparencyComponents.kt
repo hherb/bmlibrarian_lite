@@ -42,6 +42,7 @@ import com.bmlibrarian.factchecker.domain.transparency.TransparencyRiskExplanati
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyRiskLevel
 import com.bmlibrarian.factchecker.domain.transparency.transparencyCertainty
 import com.bmlibrarian.factchecker.domain.transparency.transparencyResult
+import com.bmlibrarian.factchecker.ui.theme.Disabled
 import com.bmlibrarian.factchecker.ui.theme.Warning
 import com.bmlibrarian.factchecker.ui.theme.riskColor
 import com.bmlibrarian.factchecker.util.Constants
@@ -57,20 +58,25 @@ private const val RISK_BADGE_BACKGROUND_ALPHA = 0.15f
  *
  * @param level The risk level
  * @param certainty How far the rating can be relied on; null shows the level alone
+ * @param unassessed Whether the rating is shown as unassessed rather than high: every reason
+ *   for it rests on statements in full text that was not searched
  */
 @Composable
 fun TransparencyRiskBadge(
     level: TransparencyRiskLevel,
     certainty: TransparencyCertainty?,
+    unassessed: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val color = riskColor(level)
+    val color = if (unassessed) Disabled else riskColor(level)
+    val levelLabel = if (unassessed) TransparencyConstants.UNASSESSED_LABEL else level.shortLabel
     val label = if (certainty?.isLimited == true) {
-        "${level.shortLabel} ${TransparencyConstants.LIMITED_CERTAINTY_BADGE_SUFFIX}"
+        "$levelLabel ${TransparencyConstants.LIMITED_CERTAINTY_BADGE_SUFFIX}"
     } else {
-        level.shortLabel
+        levelLabel
     }
-    val spoken = listOfNotNull("Transparency risk: ${level.fullLabel}", certainty?.note).joinToString(". ")
+    val spokenLevel = if (unassessed) TransparencyConstants.UNASSESSED_LABEL else level.fullLabel
+    val spoken = listOfNotNull("Transparency risk: $spokenLevel", certainty?.note).joinToString(". ")
     Surface(
         color = color.copy(alpha = RISK_BADGE_BACKGROUND_ALPHA),
         shape = MaterialTheme.shapes.small,
@@ -91,13 +97,24 @@ fun TransparencyRiskBadge(
 /**
  * A document's transparency analysis: its rating, what limits it, and why.
  *
- * Shows nothing for a document never analysed.
+ * Shows nothing for a document never analysed, and says so for one whose
+ * stored analysis can no longer be read.
  *
  * @param document The document
  */
 @Composable
 fun TransparencyDetails(document: DocumentEntity, modifier: Modifier = Modifier) {
-    val result = document.transparencyResult ?: return
+    if (document.transparencyResultJson == null) return
+    val result = document.transparencyResult
+    if (result == null) {
+        Text(
+            text = "This document's transparency analysis could not be read. It carries no rating.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = modifier
+        )
+        return
+    }
     val certainty = document.transparencyCertainty
     val explanation = TransparencyRiskExplanation.of(result, certainty)
 
@@ -114,11 +131,15 @@ fun TransparencyDetails(document: DocumentEntity, modifier: Modifier = Modifier)
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
         ) {
-            TransparencyRiskBadge(level = result.riskLevel, certainty = certainty)
+            TransparencyRiskBadge(
+                level = result.riskLevel,
+                certainty = certainty,
+                unassessed = explanation.isUnassessed
+            )
             Text(
                 text = "Score ${explanation.score}/${TransparencyConstants.MAX_TRANSPARENCY_SCORE}",
                 style = MaterialTheme.typography.labelLarge,
-                color = riskColor(result.riskLevel)
+                color = if (explanation.isUnassessed) Disabled else riskColor(result.riskLevel)
             )
         }
         explanation.certainty.note?.let {
@@ -129,6 +150,13 @@ fun TransparencyDetails(document: DocumentEntity, modifier: Modifier = Modifier)
                 color = Warning
             )
         }
+        if (explanation.isUnassessed) {
+            Text(
+                text = TransparencyConstants.UNASSESSED_NOTE,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         if (result.isStale) {
             Text(
                 text = "Analysed by an earlier version of the analyser; its score may not be comparable with a current one.",
@@ -136,7 +164,14 @@ fun TransparencyDetails(document: DocumentEntity, modifier: Modifier = Modifier)
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        BulletList(HighRiskTransparencySection.REASONS_LABEL, explanation.reasons)
+        BulletList(
+            if (explanation.isUnassessed) {
+                HighRiskTransparencySection.UNASSESSED_REASONS_LABEL
+            } else {
+                HighRiskTransparencySection.REASONS_LABEL
+            },
+            explanation.reasons
+        )
         BulletList(
             HighRiskTransparencySection.SCORE_BREAKDOWN_LABEL,
             explanation.scoreBreakdown.map { "${it.label}: ${it.signedPoints}" }

@@ -170,6 +170,14 @@ object TransparencyConstants {
     /** Suffix a compact risk badge carries when its rating's certainty is limited. */
     const val LIMITED_CERTAINTY_BADGE_SUFFIX: String = "· limited"
 
+    /** Shown in place of "High" for a rating whose every reason rests on unsearched full text. */
+    const val UNASSESSED_LABEL: String = "Unassessed"
+
+    /** Shown with a single rating displayed as unassessed. */
+    const val UNASSESSED_NOTE: String =
+        "Shown as unassessed rather than high risk: every reason for a high rating depends " +
+            "on statements that appear only in the full text, which was not available to search."
+
     // ==================== Metadata sources ====================
 
     /** Name recorded in `dataSourcesUsed` when PubMed returned the article. */

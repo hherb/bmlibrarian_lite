@@ -190,6 +190,15 @@ public enum TransparencyConstants {
         "Certainty unknown: this analysis did not record whether the full text was "
         + "accessed. Re-analyse for a rating of known certainty."
 
+    /// Shown in place of "High" for a rating whose every reason rests on
+    /// statements in full text that was not searched.
+    public static let unassessedLabel = "Unassessed"
+
+    /// Shown with a single rating displayed as unassessed.
+    public static let unassessedNote =
+        "Shown as unassessed rather than high risk: every reason for a high rating depends "
+        + "on statements that appear only in the full text, which was not available to search."
+
     /// Suffix a compact risk badge carries when its rating's certainty is limited.
     public static let limitedCertaintyBadgeSuffix = "· limited"
 
@@ -740,6 +749,10 @@ public enum RiskIndicatorStrings {
     /// Industry funding was routed through an institutional intermediary.
     public static let institutionalIntermediary =
         "Industry funding routed through institutional intermediaries"
+
+    /// Warning: industry funding was detected and no COI statement was found.
+    public static let fundingWithoutCoiStatement =
+        "Industry funding detected but no COI statement found"
 
     /// No conflict of interest statement was found.
     public static let missingCoiStatement =

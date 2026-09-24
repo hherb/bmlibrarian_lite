@@ -478,6 +478,14 @@ final class Document {
         return analyzableFullText == nil ? .limitedNoFullText : .unrecorded
     }
 
+    /// Whether this document's high rating is shown as unassessed: every reason
+    /// for it rests on statements in full text that was not searched. See
+    /// `TransparencyRiskExplanation.isUnassessed(result:certainty:)`.
+    var transparencyIsUnassessed: Bool {
+        guard let result = transparencyResult else { return false }
+        return TransparencyRiskExplanation.isUnassessed(result: result, certainty: transparencyCertainty)
+    }
+
     /// The documents rated high transparency risk, as a report discusses them.
     ///
     /// The same documents the report's "flagged as high transparency risk"
@@ -490,7 +498,9 @@ final class Document {
     static func highRiskTransparencyEntries(in documents: [Document]) -> [HighRiskTransparencyEntry] {
         documents
             .compactMap { document -> (Document, TransparencyResult)? in
-                guard let result = document.transparencyResult, result.riskLevel == .high else {
+                // A rating shown as unassessed is not discussed as high risk.
+                guard let result = document.transparencyResult, result.riskLevel == .high,
+                      !document.transparencyIsUnassessed else {
                     return nil
                 }
                 return (document, result)

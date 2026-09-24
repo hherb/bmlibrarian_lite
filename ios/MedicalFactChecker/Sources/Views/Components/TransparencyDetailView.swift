@@ -35,11 +35,19 @@ struct TransparencyDetailView: View {
         certainty ?? TransparencyCertainty(fullTextSearched: result.fullTextSearched)
     }
 
+    /// Whether the rating is shown as unassessed rather than high.
+    private var isUnassessed: Bool {
+        TransparencyRiskExplanation.isUnassessed(result: result, certainty: resolvedCertainty)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Certainty notice: a rating made without the full text says so
             if let note = resolvedCertainty.note {
                 certaintyNotice(note)
+            }
+            if isUnassessed {
+                certaintyNotice(TransparencyConstants.unassessedNote)
             }
 
             // Stale-analysis notice
@@ -143,7 +151,7 @@ struct TransparencyDetailView: View {
                 Text("Transparency Score")
                     .font(.subheadline)
                     .fontWeight(.medium)
-                TransparencyRiskBadge(riskLevel: result.riskLevel, certainty: resolvedCertainty)
+                TransparencyRiskBadge(riskLevel: result.riskLevel, certainty: resolvedCertainty, unassessed: isUnassessed)
             }
 
             Spacer()
@@ -154,6 +162,7 @@ struct TransparencyDetailView: View {
     }
 
     private var scoreColor: Color {
+        if isUnassessed { return .gray }
         switch result.riskLevel {
         case .low: return .green
         case .medium: return .orange

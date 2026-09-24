@@ -121,7 +121,7 @@ object COIAnalyzer {
             return "Industry funding detected but COI statement does not mention industry ties"
         }
         if (coiResult.statement == null) {
-            return "Industry funding detected but no COI statement found"
+            return RiskIndicatorStrings.FUNDING_WITHOUT_COI_STATEMENT
         }
         return null
     }

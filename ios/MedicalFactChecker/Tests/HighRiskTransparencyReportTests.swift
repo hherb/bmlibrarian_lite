@@ -36,7 +36,8 @@ final class HighRiskTransparencyReportTests: XCTestCase {
         surname: String,
         year: Int,
         coiStatement: String?,
-        fullTextSearched: Bool
+        fullTextSearched: Bool,
+        configure: (inout TransparencyResultBuilder) -> Void = { _ in }
     ) -> Document {
         let document = Document(
             pmid: pmid,
@@ -50,6 +51,7 @@ final class HighRiskTransparencyReportTests: XCTestCase {
         builder.dataAvailability = DataAvailabilityResult(disclosureLevel: .fullOpen)
         builder.dataSourcesUsed = [TransparencyConstants.pubMedSourceName]
         builder.fullTextSearched = fullTextSearched
+        configure(&builder)
         document.storeTransparencyResult(builder.build())
         return document
     }
@@ -69,20 +71,29 @@ final class HighRiskTransparencyReportTests: XCTestCase {
             coiStatement: nil, fullTextSearched: false
         )
         let unanalysed = Document(pmid: "4", title: "Not analysed", abstract: "")
+        let registryFinding = makeDocument(
+            pmid: "5", surname: "Cole", year: 2018,
+            coiStatement: "None declared.", fullTextSearched: false
+        ) { builder in
+            builder.dataAvailability = DataAvailabilityResult(disclosureLevel: .notAvailable)
+            builder.industryFundingDetected = true
+            builder.industryFundingConfidence = 0.9
+        }
         XCTAssertNotEqual(low.transparencyRiskLevel, .high)
         XCTAssertEqual(highLater.transparencyRiskLevel, .high)
+        XCTAssertEqual(highEarlier.transparencyRiskLevel, .high)
+        XCTAssertEqual(registryFinding.transparencyRiskLevel, .high)
+        XCTAssertTrue(highEarlier.transparencyIsUnassessed, "its only reason is a statement nobody could look for")
+        XCTAssertFalse(registryFinding.transparencyIsUnassessed)
 
         let entries = Document.highRiskTransparencyEntries(
-            in: [highLater, low, unanalysed, highEarlier]
+            in: [highLater, low, unanalysed, highEarlier, registryFinding]
         )
 
-        XCTAssertEqual(entries.map(\.reference), ["Baker et al., 2019", "Young et al., 2021"])
-        XCTAssertTrue(entries[0].citation.hasPrefix("Study by Baker"))
-        XCTAssertTrue(
-            entries[0].explanation.caveats.contains { $0.contains("unassessed") },
-            "the document analysed without its full text says its rating is unassessed"
-        )
-        XCTAssertFalse(entries[1].explanation.caveats.contains { $0.contains("unassessed") })
+        XCTAssertEqual(entries.map(\.reference), ["Cole et al., 2018", "Young et al., 2021"])
+        XCTAssertTrue(entries[1].citation.hasPrefix("Study by Young"))
+        XCTAssertEqual(entries[0].explanation.certainty, .limitedNoFullText)
+        XCTAssertEqual(entries[1].explanation.certainty, .fullText)
     }
 
     /// Copied, shared and exported text carries the discussion too.
@@ -164,7 +175,10 @@ final class HighRiskTransparencyReportTests: XCTestCase {
     /// Exported text carries the note with the rating it qualifies.
     func testSharedSectionStatesLimitedCertainty() throws {
         let entries = Document.highRiskTransparencyEntries(in: [
-            makeDocument(pmid: "2", surname: "Baker", year: 2019, coiStatement: nil, fullTextSearched: false)
+            makeDocument(pmid: "2", surname: "Baker", year: 2019, coiStatement: "None.", fullTextSearched: false) {
+                $0.dataAvailability = DataAvailabilityResult(disclosureLevel: .notAvailable)
+                $0.industryFundingDetected = true
+            }
         ])
         let text = try XCTUnwrap(HighRiskTransparencySection.plainText(for: entries))
         XCTAssertTrue(text.contains("Limited certainty because of lack of full text access"), text)

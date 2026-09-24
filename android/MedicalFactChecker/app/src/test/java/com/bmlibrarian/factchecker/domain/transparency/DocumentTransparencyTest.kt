@@ -31,10 +31,17 @@ import org.junit.Test
 class DocumentTransparencyTest {
 
     /** A result built the way the analysis service builds one. */
-    private fun result(coiStatement: String? = null, fullTextSearched: Boolean? = false): TransparencyResult =
+    private fun result(
+        coiStatement: String? = null,
+        fullTextSearched: Boolean? = false,
+        industryWithoutData: Boolean = false,
+    ): TransparencyResult =
         TransparencyResultBuilder(pmid = "1").apply {
             coiAnalysis = COIAnalysisResult(statement = coiStatement)
-            dataAvailability = DataAvailabilityResult(disclosureLevel = DataDisclosureLevel.FULL_OPEN)
+            dataAvailability = DataAvailabilityResult(
+                disclosureLevel = if (industryWithoutData) DataDisclosureLevel.NOT_AVAILABLE else DataDisclosureLevel.FULL_OPEN,
+            )
+            industryFundingDetected = industryWithoutData
             dataSourcesUsed = listOf(TransparencyConstants.PUBMED_SOURCE_NAME)
             this.fullTextSearched = fullTextSearched
         }.build()
@@ -105,20 +112,35 @@ class DocumentTransparencyTest {
         assertEquals("Unknown, 2021", document(authors = emptyList()).shortReference)
     }
 
-    /** The result names PubMed as a source only when the metadata came from PubMed. */
+    /**
+     * Null means "PubMed has no such article", so it is never answered for a
+     * PMID the document holds, whichever service the record came through.
+     */
     @Test
-    fun `stored metadata answers only for a PubMed record's own PMID`() = runTest {
-        val pubmed = document()
-        assertEquals("A study", storedMetadataLookup(pubmed).lookup("1")?.title)
-        assertNull(storedMetadataLookup(pubmed).lookup("2"))
-        assertNull(storedMetadataLookup(document(source = Constants.SOURCE_EUROPE_PMC)).lookup("1"))
+    fun `stored metadata answers for the document's own PMID only`() = runTest {
+        assertEquals("A study", storedMetadataLookup(document()).lookup("1")?.title)
+        assertNull(storedMetadataLookup(document()).lookup("2"))
+        assertEquals(
+            "A study",
+            storedMetadataLookup(document(source = Constants.SOURCE_EUROPE_PMC)).lookup("1")?.title,
+        )
+    }
+
+    /** On Android every rating lacks full text, so a text-only high is unassessed. */
+    @Test
+    fun `a high rating resting only on unsearched text is unassessed`() {
+        assertTrue(document(stored = result()).transparencyIsUnassessed)
+        assertFalse(document(stored = result(coiStatement = "None.", industryWithoutData = true)).transparencyIsUnassessed)
+        assertFalse(document().transparencyIsUnassessed)
     }
 
     @Test
     fun `high-risk entries are the documents rated high, in reference order`() {
-        val high = result()
+        val high = result(coiStatement = "None declared.", industryWithoutData = true)
+        val textOnly = result()
         val low = result(coiStatement = "None declared.")
         assertEquals(TransparencyRiskLevel.HIGH, high.riskLevel)
+        assertEquals(TransparencyRiskLevel.HIGH, textOnly.riskLevel)
         assertFalse(low.riskLevel == TransparencyRiskLevel.HIGH)
 
         val entries = highRiskTransparencyEntries(
@@ -127,6 +149,7 @@ class DocumentTransparencyTest {
                 document(authors = listOf("Adams A", "B C"), stored = low),
                 document(authors = listOf("Baker A", "B C"), stored = high),
                 document(authors = listOf("Cole A", "B C")),
+                document(authors = listOf("Abel A", "B C"), stored = textOnly),
             ),
         )
 

@@ -454,6 +454,10 @@ class FactCheckWorkflow @Inject constructor(
             keepReportAfterFailedSearchForMore(session, SearchFailureReporting.formatSearchFailureMessage(e))
         } catch (e: NcbiCredentialsUnavailableException) {
             keepReportAfterFailedSearchForMore(session, checkNotNull(e.message))
+        } catch (e: CancellationException) {
+            // A cancelled run is not a failed one: cancel() has already set the
+            // state the user chose, which failing the session would overwrite.
+            throw e
         } catch (e: Exception) {
             handleWorkflowError(e, session)
         }
@@ -481,6 +485,10 @@ class FactCheckWorkflow @Inject constructor(
             handleSearchNotRun(SearchFailureReporting.formatSearchFailureMessage(e), e, session, config)
         } catch (e: NcbiCredentialsUnavailableException) {
             handleSearchNotRun(checkNotNull(e.message), e, session, config)
+        } catch (e: CancellationException) {
+            // A cancelled run is not a failed one: cancel() has already set the
+            // state the user chose, which failing the session would overwrite.
+            throw e
         } catch (e: Exception) {
             handleWorkflowError(e, session)
         }
@@ -1398,10 +1406,11 @@ class FactCheckWorkflow @Inject constructor(
      * Analyse the transparency of every relevant document not yet analysed by
      * the current analyzer.
      *
-     * A document's failure is not the run's: it is logged, named in a notice,
-     * and the report goes ahead, marking that document as unanalysed by
-     * leaving it out of the transparency sections. Mirrors iOS
-     * `FactCheckWorkflow.analyzeTransparency()`.
+     * A document's failure is not the run's: it is logged and the report goes
+     * ahead. The report names every relevant document left without a readable
+     * analysis (`TransparencyReportMarkdown`), which, unlike a transient notice,
+     * stays with the report and cannot displace a search notice or be read
+     * under the "Search failed" heading that notice card carries.
      *
      * @param sessionId The session
      * @param config Workflow configuration (for the relevance threshold)
@@ -1412,7 +1421,6 @@ class FactCheckWorkflow @Inject constructor(
             .filter { it.needsTransparencyAnalysis && it.canAnalyzeTransparency }
         if (documents.isEmpty()) return
 
-        val failures = mutableListOf<String>()
         documents.forEachIndexed { index, document ->
             currentCoroutineContext().ensureActive()
             _state.value = WorkflowState.AnalyzingTransparency(index, documents.size)
@@ -1428,21 +1436,9 @@ class FactCheckWorkflow @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Transparency analysis failed for document ${document.id}", e)
-                failures += document.title
             }
         }
-        if (failures.isNotEmpty()) {
-            _searchFailureMessage.value = transparencyFailureNotice(failures)
-        }
     }
-
-    /** A one-line summary of the documents whose transparency analysis failed. */
-    private fun transparencyFailureNotice(titles: List<String>): String =
-        if (titles.size <= Constants.MAX_TRANSPARENCY_FAILURES_NAMED) {
-            "Transparency analysis failed for: ${titles.joinToString("; ")}"
-        } else {
-            "Transparency analysis could not be completed for ${titles.size} documents"
-        }
 
     // ==================== Smart Search ====================
 

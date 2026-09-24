@@ -39,14 +39,28 @@ object TransparencyReportMarkdown {
      * The transparency summary and, when any study was rated high, the
      * discussion of each.
      *
-     * @param documents The session's documents.
-     * @return The sections, or an empty string when no document was analysed.
+     * Every document passed is accounted for: one with no readable analysis —
+     * because it failed, had no identifier to look it up by, or no longer
+     * decodes — is named as unanalysed, so it cannot read as a study that was
+     * examined and raised no concern.
+     *
+     * @param documents The documents the report rests on (the relevant ones).
+     * @return The sections, or an empty string when there are no documents.
      */
     fun sections(documents: List<DocumentEntity>): String {
+        if (documents.isEmpty()) return ""
         val analysed = documents.filter { it.transparencyResult != null }
-        if (analysed.isEmpty()) return ""
+        val unanalysed = documents - analysed.toSet()
 
-        val blocks = mutableListOf("## $SUMMARY_HEADING", distribution(analysed))
+        val blocks = mutableListOf("## $SUMMARY_HEADING")
+        if (analysed.isNotEmpty()) blocks += distribution(analysed)
+        if (unanalysed.isNotEmpty()) {
+            blocks += "**${unanalysed.size} of ${documents.size} documents could not be analysed for " +
+                "transparency, and carry no rating:** " +
+                unanalysed.sortedBy { it.shortReference }.joinToString("; ") { "${it.shortReference} (${it.title})" }
+        }
+        HighRiskTransparencySection.unassessedSummary(analysed.count { it.transparencyIsUnassessed })
+            ?.let { blocks += it }
         val limited = analysed.count { it.transparencyCertainty == TransparencyCertainty.LIMITED_NO_FULL_TEXT }
         if (limited > 0) {
             blocks += "**$limited of ${analysed.size} ratings were made without the full text. " +
@@ -62,9 +76,13 @@ object TransparencyReportMarkdown {
         return blocks.joinToString(BLOCK_SEPARATOR)
     }
 
-    /** How many analysed documents fell at each risk level. */
+    /**
+     * How many analysed documents fell at each displayed level; a high rating resting only
+     * on unsearched full text is counted as unassessed.
+     */
     private fun distribution(analysed: List<DocumentEntity>): String {
-        val levels = analysed.mapNotNull { it.transparencyResult?.riskLevel }
+        val assessed = analysed.filterNot { it.transparencyIsUnassessed }
+        val levels = assessed.mapNotNull { it.transparencyResult?.riskLevel }
         val counts = listOf(
             TransparencyRiskLevel.LOW to "low",
             TransparencyRiskLevel.MEDIUM to "medium",
@@ -72,7 +90,10 @@ object TransparencyReportMarkdown {
             TransparencyRiskLevel.UNKNOWN to "undetermined",
         ).mapNotNull { (level, label) ->
             levels.count { it == level }.takeIf { it > 0 }?.let { "$it $label" }
-        }
+        } + listOfNotNull(
+            (analysed.size - assessed.size).takeIf { it > 0 }
+                ?.let { "$it ${TransparencyConstants.UNASSESSED_LABEL.lowercase()}" },
+        )
         val documents = if (analysed.size == 1) "1 document" else "${analysed.size} documents"
         return "$documents analysed for transparency risk: ${counts.joinToString(", ")}."
     }
