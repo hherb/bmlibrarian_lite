@@ -184,12 +184,52 @@ object TrialComplianceAnalyzer {
     /**
      * A warning when a study looks like a clinical trial but no registration was found.
      *
+     * Only a registry's answer can say a registration is missing: with no trial ID to look
+     * up, or no answer, the list is empty for a reason that is not the study's, so nothing is
+     * said (mirrors Python's `trial_registration_assessed` gate).
+     *
      * @param title The study title.
      * @param registrations Registrations found (empty if none).
+     * @param registrationAssessed Whether ClinicalTrials.gov answered for every trial the
+     *   article cites.
      * @return [RiskIndicatorStrings.MISSING_TRIAL_REGISTRATION], or null.
      */
-    fun checkMissingRegistration(title: String?, registrations: List<TrialRegistration>): String? {
-        if (registrations.isNotEmpty() || !appearsToBeClinicalTrial(title)) return null
+    fun checkMissingRegistration(
+        title: String?,
+        registrations: List<TrialRegistration>,
+        registrationAssessed: Boolean,
+    ): String? {
+        if (!registrationAssessed || registrations.isNotEmpty() || !appearsToBeClinicalTrial(title)) return null
         return RiskIndicatorStrings.MISSING_TRIAL_REGISTRATION
     }
+
+    /**
+     * Warning for a trial whose registry lookup failed (network, server or HTTP error): its
+     * registration was not checked, not found missing.
+     *
+     * @param nctId The trial's NCT ID.
+     * @return The warning, worded as the Python reference words it.
+     */
+    fun registryUnreachableWarning(nctId: String): String =
+        "Could not reach ClinicalTrials.gov for trial $nctId, so its registration could " +
+            "not be checked. Absence of a registration is not evidence the study is unregistered."
+
+    /**
+     * Warning for a trial ClinicalTrials.gov answered it holds no record of.
+     *
+     * @param nctId The trial's NCT ID.
+     * @return The warning — a finding about the study, not about the lookup.
+     */
+    fun registryHasNoRecordWarning(nctId: String): String =
+        "ClinicalTrials.gov holds no record of trial $nctId, which the article cites as its registration."
+
+    /**
+     * Warning for a registry record that arrived but could not be read.
+     *
+     * @param nctId The trial's NCT ID.
+     * @return The warning; an unread record is not an absent one.
+     */
+    fun unreadableRegistryRecordWarning(nctId: String): String =
+        "ClinicalTrials.gov returned a record for trial $nctId that could not be read, so its " +
+            "registration could not be checked."
 }

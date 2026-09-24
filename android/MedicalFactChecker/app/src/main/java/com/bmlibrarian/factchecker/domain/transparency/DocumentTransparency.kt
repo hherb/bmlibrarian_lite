@@ -75,15 +75,23 @@ val DocumentEntity.analyzableFullText: String?
  * document's: with no analysable text now, there was none to analyse then.
  */
 val DocumentEntity.transparencyCertainty: TransparencyCertainty?
-    get() {
-        val result = transparencyResult ?: return null
-        result.fullTextSearched?.let { return TransparencyCertainty.from(it) }
-        return if (analyzableFullText == null) {
-            TransparencyCertainty.LIMITED_NO_FULL_TEXT
-        } else {
-            TransparencyCertainty.UNRECORDED
-        }
+    get() = transparencyResult?.let { transparencyCertaintyOf(it) }
+
+/**
+ * [transparencyCertainty] for a result of this document the caller has already decoded,
+ * sparing a second decode of the stored JSON.
+ *
+ * @param result This document's decoded transparency result.
+ * @return How far the rating can be relied on.
+ */
+fun DocumentEntity.transparencyCertaintyOf(result: TransparencyResult): TransparencyCertainty {
+    result.fullTextSearched?.let { return TransparencyCertainty.from(it) }
+    return if (analyzableFullText == null) {
+        TransparencyCertainty.LIMITED_NO_FULL_TEXT
+    } else {
+        TransparencyCertainty.UNRECORDED
     }
+}
 
 /** The document's PubMed ID, when it has a non-blank one. */
 val DocumentEntity.usablePmid: String?
@@ -128,9 +136,10 @@ val DocumentEntity.shortReference: String
  * The analysis asks PubMed for a PMID's title, journal, authors, DOI and PMC ID.
  * A document holding that PMID already holds that record — fetched from PubMed,
  * or from Europe PMC's mirror of the same MEDLINE citation — so it is answered
- * here without a second request. Null would mean "PubMed has no such article",
- * which nothing established, so it is answered only for a PMID the document
- * does not hold.
+ * here without a second request. The service only ever asks for this
+ * document's own PMID ([com.bmlibrarian.factchecker.domain.workflow.TransparencyAnalysisRunner]),
+ * so the null returned for any other PMID is a guard, not a claim that PubMed
+ * has no such article.
  *
  * @param document The document being analysed.
  * @return A lookup answering for that document's PMID.
@@ -152,7 +161,7 @@ fun storedMetadataLookup(document: DocumentEntity): ArticleMetadataLookup =
 
 /**
  * Whether this document's high rating is shown as unassessed: every reason for it rests on
- * statements in full text that was not searched. See [TransparencyRiskExplanation.isUnassessed].
+ * statements in full text known not to have been searched. See [TransparencyRiskExplanation.isUnassessed].
  */
 val DocumentEntity.transparencyIsUnassessed: Boolean
     get() {
@@ -168,7 +177,7 @@ val DocumentEntity.transparencyIsUnassessed: Boolean
  * Ordered by reference, then title, so a report lists them the same way every time.
  *
  * @param documents A session's documents.
- * @return One entry per document rated high.
+ * @return One entry per document rated high and not shown as unassessed.
  */
 fun highRiskTransparencyEntries(documents: List<DocumentEntity>): List<HighRiskTransparencyEntry> =
     documents

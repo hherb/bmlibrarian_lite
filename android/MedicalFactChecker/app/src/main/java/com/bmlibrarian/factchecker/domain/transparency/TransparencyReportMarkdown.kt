@@ -36,7 +36,9 @@ object TransparencyReportMarkdown {
     private const val BLOCK_SEPARATOR = "\n\n"
 
     /**
-     * The transparency summary and, when any study was rated high, the
+     * The transparency summary — the distribution of ratings, the documents
+     * left without a readable analysis, the count shown as unassessed and the
+     * count rated without full text — and, when any study was rated high, the
      * discussion of each.
      *
      * Every document passed is accounted for: one with no readable analysis —

@@ -44,29 +44,11 @@ struct TransparencySummarySection: View {
         return (industryFundedCount * 100) / analyzedResults.count
     }
 
-    /// Documents at each displayed level. A high rating resting only on
-    /// unsearched full text is counted as unassessed, not high.
-    private var riskCounts: (low: Int, medium: Int, high: Int, unassessed: Int) {
-        var low = 0, medium = 0, high = 0, unassessed = 0
-        for document in documents {
-            guard let result = document.transparencyResult else { continue }
-            if document.transparencyIsUnassessed {
-                unassessed += 1
-                continue
-            }
-            switch result.riskLevel {
-            case .low: low += 1
-            case .medium: medium += 1
-            case .high: high += 1
-            case .unknown: break
-            }
-        }
-        return (low, medium, high, unassessed)
-    }
-
-    /// Analysed documents rated without their full text.
-    private var limitedCertaintyCount: Int {
-        documents.filter { $0.transparencyCertainty == .limitedNoFullText }.count
+    /// Documents at each displayed level, as every report surface counts
+    /// them: a high rating resting only on unsearched full text is counted as
+    /// unassessed, not high.
+    private var riskCounts: TransparencyReportCounts {
+        TransparencyReportCounts(documents: documents)
     }
 
     private var hasHighRiskDocuments: Bool {
@@ -74,7 +56,9 @@ struct TransparencySummarySection: View {
     }
 
     var body: some View {
-        guard !analyzedResults.isEmpty else { return AnyView(EmptyView()) }
+        // Shown when any analysis is stored, readable or not: an unreadable
+        // one must be named, not dropped.
+        guard !analyzedResults.isEmpty || riskCounts.unreadable > 0 else { return AnyView(EmptyView()) }
 
         return AnyView(
             VStack(alignment: .leading, spacing: 12) {
@@ -97,14 +81,22 @@ struct TransparencySummarySection: View {
                 }
 
                 // Ratings made without the full text
-                if limitedCertaintyCount > 0 {
+                if riskCounts.limited > 0 {
                     Text(
-                        "\(limitedCertaintyCount) of \(analyzedResults.count) ratings made without "
+                        "\(riskCounts.limited) of \(analyzedResults.count) ratings made without "
                         + "the full text. \(TransparencyConstants.limitedCertaintyNote)."
                     )
                     .font(.caption)
                     .foregroundColor(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // Stored analyses this build cannot read
+                if let unreadable = riskCounts.unreadableSummary {
+                    Text(unreadable)
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 // Ratings shown as unassessed rather than high

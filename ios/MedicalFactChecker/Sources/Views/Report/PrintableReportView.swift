@@ -340,12 +340,10 @@ struct PrintableReportView: View {
         let avgScore = results.isEmpty ? 0 : results.reduce(0) { $0 + $1.transparencyScore } / results.count
         let industryCount = results.filter { $0.industryFundingDetected }.count
         let industryPercent = results.isEmpty ? 0 : (industryCount * 100) / results.count
-        // A high rating resting only on unsearched full text is shown as unassessed.
-        let highRisk = documents.filter {
-            $0.transparencyResult?.riskLevel == .high && !$0.transparencyIsUnassessed
-        }.count
-        let unassessed = documents.filter(\.transparencyIsUnassessed).count
-        let limited = documents.filter { $0.transparencyCertainty == .limitedNoFullText }.count
+        let counts = TransparencyReportCounts(documents: documents)
+        let highRisk = counts.high
+        let unassessed = counts.unassessed
+        let limited = counts.limited
 
         return VStack(alignment: .leading, spacing: 8) {
             Text("Transparency Analysis")
@@ -360,6 +358,12 @@ struct PrintableReportView: View {
                         .font(.caption)
                         .foregroundColor(.red)
                 }
+            }
+
+            if let unreadable = counts.unreadableSummary {
+                Text(unreadable)
+                    .font(.caption)
+                    .foregroundColor(.orange)
             }
 
             if let summary = HighRiskTransparencySection.unassessedSummary(count: unassessed) {

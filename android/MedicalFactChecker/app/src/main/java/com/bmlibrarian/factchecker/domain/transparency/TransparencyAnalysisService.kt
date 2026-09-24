@@ -25,12 +25,13 @@ sealed class TransparencyAnalysisException(message: String) : Exception(message)
  * Ported from the Swift `TransparencyAnalysisService` (BioMedLit), step for step,
  * except that the PubMed metadata lookup is injected ([ArticleMetadataLookup]).
  *
- * **Network failures degrade the result silently, as in Swift.** A failed
- * PubMed, CrossRef or ClinicalTrials.gov request is logged and the analysis
- * continues; nothing is added to [TransparencyResult.errors] or `warnings`, so a
- * stored result cannot tell a source that was unreachable from one that had
- * nothing to say. Only [TransparencyResult.dataSourcesUsed] records which
- * sources *did* answer.
+ * **A failed request is logged and the analysis continues, as in Swift.** A
+ * failed CrossRef or ClinicalTrials.gov lookup — unlike a 404, which is the
+ * source's answer — is also recorded in `warnings`, so an unchecked funder list
+ * or registration does not read as an absent one, and a missing registration is
+ * reported only when the registry answered for every cited trial. A failed
+ * PubMed lookup is only logged; [TransparencyResult.dataSourcesUsed] records
+ * which sources *did* answer.
  *
  * @param metadataLookup PubMed metadata by PMID.
  * @param crossRefService CrossRef client (work metadata and funders).
@@ -128,6 +129,9 @@ class TransparencyAnalysisService(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            // A 404 returns null above; anything thrown is a failed lookup, which must not
+            // read as a study with no funders.
+            builder.warnings = builder.warnings + TransparencyConstants.CROSSREF_UNREACHABLE_WARNING
             Log.w(TAG, "CrossRef fetch failed for DOI $doi: ${describeFailure(e)}")
         }
     }
@@ -159,10 +163,22 @@ class TransparencyAnalysisService(
         }
         Log.d(TAG, "Found ${nctIds.size} NCT ID(s): ${nctIds.joinToString(", ")}")
 
+        // The registration counts as assessed only if the registry answered for every trial:
+        // a failed or unreadable lookup leaves the list empty for a reason not the study's.
+        var everyTrialAnswered = true
         for (nctId in nctIds) {
             try {
-                val study = clinicalTrialsService.getStudy(nctId) ?: continue
-                val registration = clinicalTrialsService.extractTrialInfo(study) ?: continue
+                val study = clinicalTrialsService.getStudy(nctId)
+                if (study == null) {
+                    builder.warnings = builder.warnings + TrialComplianceAnalyzer.registryHasNoRecordWarning(nctId)
+                    continue
+                }
+                val registration = clinicalTrialsService.extractTrialInfo(study)
+                if (registration == null) {
+                    everyTrialAnswered = false
+                    builder.warnings = builder.warnings + TrialComplianceAnalyzer.unreadableRegistryRecordWarning(nctId)
+                    continue
+                }
 
                 builder.trialRegistrations = builder.trialRegistrations + registration
                 if (TransparencyConstants.CLINICAL_TRIALS_REGISTRY_NAME !in builder.dataSourcesUsed) {
@@ -178,9 +194,12 @@ class TransparencyAnalysisService(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                everyTrialAnswered = false
+                builder.warnings = builder.warnings + TrialComplianceAnalyzer.registryUnreachableWarning(nctId)
                 Log.w(TAG, "ClinicalTrials.gov fetch failed for $nctId: ${describeFailure(e)}")
             }
         }
+        builder.trialRegistrationAssessed = everyTrialAnswered
 
         builder.trialRegistrations.firstOrNull()?.let { firstTrial ->
             builder.resultsCompliance = TrialComplianceAnalyzer.checkResultsCompliance(
@@ -214,7 +233,11 @@ class TransparencyAnalysisService(
             builder.warnings = builder.warnings + it
             Log.d(TAG, "Discrepancy detected: $it")
         }
-        TrialComplianceAnalyzer.checkMissingRegistration(builder.title, builder.trialRegistrations)?.let {
+        TrialComplianceAnalyzer.checkMissingRegistration(
+            builder.title,
+            builder.trialRegistrations,
+            builder.trialRegistrationAssessed,
+        )?.let {
             builder.warnings = builder.warnings + it
             Log.d(TAG, "Missing registration warning: $it")
         }

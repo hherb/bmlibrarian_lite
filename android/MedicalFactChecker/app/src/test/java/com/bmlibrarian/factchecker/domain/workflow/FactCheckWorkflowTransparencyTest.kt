@@ -32,14 +32,19 @@ import com.bmlibrarian.factchecker.domain.transparency.COIAnalysisResult
 import com.bmlibrarian.factchecker.domain.transparency.DataAvailabilityResult
 import com.bmlibrarian.factchecker.domain.transparency.DataDisclosureLevel
 import com.bmlibrarian.factchecker.domain.transparency.HighRiskTransparencySection
+import com.bmlibrarian.factchecker.domain.transparency.TransparencyConstants
+import com.bmlibrarian.factchecker.domain.transparency.TransparencyJson
+import com.bmlibrarian.factchecker.domain.transparency.TransparencyResult
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyResultBuilder
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -174,6 +179,42 @@ class FactCheckWorkflowTransparencyTest {
         workflow.resumeSession(SESSION_ID, WorkflowConfig(searchProvider = SearchProvider.PUBMED))
 
         coVerify(exactly = 1) { runner.analyze(match { it.id == "relevant" }) }
+    }
+
+    /** A result stored by an older analyzer is analysed again, and the new one stored. */
+    @Test
+    fun `a stale result is analysed again`() = runTest {
+        documents["relevant"] = documents.getValue("relevant").copy(
+            transparencyResultJson = TransparencyJson.encode(
+                TransparencyResult(pmid = "1", analyzerVersion = TransparencyConstants.ANALYZER_VERSION - 1),
+            ),
+        )
+
+        workflow.resumeSession(SESSION_ID, WorkflowConfig(searchProvider = SearchProvider.PUBMED))
+
+        coVerify(exactly = 1) { runner.analyze(match { it.id == "relevant" }) }
+        coVerify(exactly = 1) { documentRepository.updateTransparency("relevant", any()) }
+    }
+
+    /**
+     * Cancelling during the transparency step stops the run: the cancellation is not logged
+     * as a document's failure, no report is written, and the session is not marked failed.
+     */
+    @Test
+    fun `cancellation during transparency analysis stops the run without failing it`() = runTest {
+        coEvery { runner.analyze(match { it.id == "failing" }) } throws CancellationException("cancelled")
+
+        val outcome = runCatching {
+            workflow.resumeSession(SESSION_ID, WorkflowConfig(searchProvider = SearchProvider.PUBMED))
+        }
+
+        assertTrue("got $outcome", outcome.exceptionOrNull() is CancellationException)
+        coVerify(exactly = 0) {
+            reportRepository.createReport(any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+        coVerify(exactly = 0) { sessionRepository.setError(any(), any()) }
+        assertFalse("got ${workflow.state.value}", workflow.state.value is WorkflowState.Failed)
+        assertFalse(Log.lines.any { it.contains("Transparency analysis failed for document failing") })
     }
 
     private companion object {

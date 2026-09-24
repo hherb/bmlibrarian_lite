@@ -170,6 +170,78 @@ final class HighRiskTransparencyReportTests: XCTestCase {
 
         document.fullTextContent = "Body text of the article."
         XCTAssertEqual(document.transparencyCertainty, .unrecorded)
+        // The text may have been searched, so the rating stays high and is
+        // discussed, under the note asking for re-analysis.
+        XCTAssertFalse(document.transparencyIsUnassessed)
+        XCTAssertEqual(Document.highRiskTransparencyEntries(in: [document]).count, 1)
+    }
+
+    /// A document whose stored analysis this build cannot read.
+    private func makeUnreadableDocument(pmid: String) -> Document {
+        let document = Document(pmid: pmid, title: "Unreadable", abstract: "")
+        document.transparencyResultJSON = "{\"not\": \"a result\"}"
+        return document
+    }
+
+    /// Every surface counts from one place, and its high count is exactly the
+    /// documents the discussion covers; an unreadable analysis is counted as
+    /// such, not dropped.
+    func testReportCountsAgreeWithTheDiscussion() {
+        let documents = [
+            makeDocument(pmid: "1", surname: "Adams", year: 2020, coiStatement: "None declared.", fullTextSearched: true),
+            makeDocument(pmid: "2", surname: "Young", year: 2021, coiStatement: nil, fullTextSearched: true),
+            makeDocument(pmid: "3", surname: "Baker", year: 2019, coiStatement: nil, fullTextSearched: false),
+            Document(pmid: "4", title: "Not analysed", abstract: ""),
+            makeUnreadableDocument(pmid: "5"),
+        ]
+        XCTAssertTrue(documents[4].transparencyResultIsUnreadable)
+        XCTAssertFalse(documents[3].transparencyResultIsUnreadable, "never analysed is not unreadable")
+
+        let counts = TransparencyReportCounts(documents: documents)
+
+        XCTAssertEqual(counts.analysed, 3)
+        XCTAssertEqual(counts.low + counts.medium, 1)
+        XCTAssertEqual(counts.high, 1)
+        XCTAssertEqual(counts.high, Document.highRiskTransparencyEntries(in: documents).count)
+        XCTAssertEqual(counts.unassessed, 1)
+        XCTAssertEqual(counts.limited, 1)
+        XCTAssertEqual(counts.unreadable, 1)
+        XCTAssertEqual(
+            counts.unreadableSummary,
+            "1 study's stored transparency analysis could not be read, so it carries no rating here. "
+                + "Re-analyse to rate it."
+        )
+        XCTAssertNil(TransparencyReportCounts(documents: Array(documents.prefix(4))).unreadableSummary)
+    }
+
+    /// Exported text names an unreadable analysis rather than omitting it.
+    func testSharedReportNamesUnreadableAnalyses() throws {
+        let container = try ModelContainer(
+            for: FactCheckSession.self, Document.self, EvidenceReport.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = ModelContext(container)
+        let session = FactCheckSession(claim: "A claim")
+        let documents = [makeUnreadableDocument(pmid: "1"), makeUnreadableDocument(pmid: "2")]
+        let report = EvidenceReport(
+            verdict: .supported,
+            summary: "A summary",
+            fullReport: "The body.",
+            citationCount: 1,
+            uniqueSourceCount: 1,
+            documentsReviewed: 2,
+            searchShortfallsRecord: ReportSearchCompleteness.completeSearchRecord
+        )
+        context.insert(session)
+        documents.forEach(context.insert)
+        context.insert(report)
+        session.documents = documents
+        report.session = session
+
+        XCTAssertTrue(
+            report.plainTextReport.contains("2 studies' stored transparency analyses could not be read"),
+            report.plainTextReport
+        )
     }
 
     /// Exported text carries the note with the rating it qualifies.

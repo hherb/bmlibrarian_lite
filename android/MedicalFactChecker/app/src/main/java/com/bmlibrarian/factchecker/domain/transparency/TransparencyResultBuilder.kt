@@ -82,6 +82,13 @@ class TransparencyResultBuilder(
     var fullTextSearched: Boolean? = null
 
     /**
+     * Whether ClinicalTrials.gov answered for every trial the article cites, so an empty
+     * [trialRegistrations] is the registry's answer. False when no trial ID was found to look
+     * up or a lookup failed.
+     */
+    var trialRegistrationAssessed: Boolean = false
+
+    /**
      * Build the result, computing its score, risk level and risk indicators with
      * [TransparencyScorer] from the fields populated so far. Stamped with the
      * current [TransparencyConstants.ANALYZER_VERSION].
@@ -111,6 +118,7 @@ class TransparencyResultBuilder(
             trialRegistrations = trialRegistrations,
             outcomeSwitchingDetected = outcomeSwitchingDetected,
             title = title,
+            trialRegistrationAssessed = trialRegistrationAssessed,
         )
         return build(score = score, riskLevel = riskLevel, riskIndicators = riskIndicators)
     }

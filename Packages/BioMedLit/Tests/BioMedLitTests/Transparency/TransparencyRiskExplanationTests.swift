@@ -176,12 +176,38 @@ final class TransparencyRiskExplanationTests: XCTestCase {
         XCTAssertTrue(explanation.caveats.contains { $0.contains("shown as unassessed") })
     }
 
-    /// A result stored before the field existed says its text coverage is unknown.
+    /// A result stored before the field existed says its text coverage is
+    /// unknown — not that the text was unsearched, which may be false — and
+    /// stays high rather than unassessed.
     func testUnrecordedFullTextIsReportedAsUnknown() {
         let explanation = TransparencyRiskExplanation(result: build(fullTextSearched: nil))
         XCTAssertEqual(explanation.certainty, .unrecorded)
         XCTAssertEqual(explanation.certainty.note, TransparencyConstants.unrecordedCertaintyNote)
-        XCTAssertTrue(explanation.caveats.contains { $0.contains("unassessed") })
+        XCTAssertEqual(explanation.reasons, [
+            "No conflict of interest statement was found; whether the full text, where one would "
+                + "appear, was searched was not recorded. A missing statement is enough on its own "
+                + "for a high rating.",
+        ])
+        XCTAssertFalse(explanation.isUnassessed)
+        XCTAssertFalse(explanation.caveats.contains { $0.contains("unassessed") })
+    }
+
+    /// Unrecorded coverage qualifies missing-statement score terms as possibly
+    /// unsearched, and the data phrase likewise.
+    func testUnrecordedFullTextQualifiesScoreTermsAsPossiblyUnsearched() {
+        var builder = TransparencyResultBuilder(doi: "10.1000/x")
+        builder.industryFundingDetected = true
+        builder.industryFundingConfidence = 0.9
+        builder.outcomeSwitchingDetected = true
+        builder.fullTextSearched = nil
+        let explanation = TransparencyRiskExplanation(result: builder.build())
+        XCTAssertTrue(explanation.scoreBreakdown.contains {
+            $0.label == "No conflict of interest statement found (full text may not have been searched)"
+        })
+        XCTAssertTrue(explanation.reasons.contains {
+            $0.contains("no data availability statement was found (whether the full text, where it "
+                + "would appear, was searched was not recorded)")
+        })
     }
 
     /// A reason that stands without the full text keeps the rating from
@@ -309,7 +335,104 @@ final class TransparencyRiskExplanationTests: XCTestCase {
         XCTAssertEqual(result.riskLevel, .high)
         XCTAssertTrue(TransparencyRiskExplanation.isUnassessed(result: result))
         XCTAssertTrue(TransparencyRiskExplanation(result: result).isUnassessed)
-        XCTAssertTrue(TransparencyRiskExplanation.isUnassessed(result: build(fullTextSearched: nil)))
+        XCTAssertFalse(
+            TransparencyRiskExplanation.isUnassessed(result: build(fullTextSearched: nil)),
+            "unrecorded coverage may have included the text, so the rating stays high"
+        )
+    }
+
+    /// Industry funding with no data statement rests on unsearched text alone.
+    func testIndustryFundingWithUnstatedDataWithoutTextIsUnassessed() {
+        let result = build(coi: cleanCOI, data: .notStated, industry: true, fullTextSearched: false)
+        XCTAssertEqual(TransparencyScorer.highRiskTriggers(for: result), [.industryFundingWithWithheldData(.notStated)])
+        XCTAssertTrue(TransparencyRiskExplanation.isUnassessed(result: result))
+    }
+
+    /// Restricted data is a stated finding, so the same rule stays high.
+    func testIndustryFundingWithRestrictedDataWithoutTextStaysHigh() {
+        let result = build(
+            coi: cleanCOI, data: DataAvailabilityResult(disclosureLevel: .restricted),
+            industry: true, fullTextSearched: false
+        )
+        XCTAssertEqual(TransparencyScorer.highRiskTriggers(for: result), [.industryFundingWithWithheldData(.restricted)])
+        XCTAssertFalse(TransparencyRiskExplanation.isUnassessed(result: result))
+    }
+
+    /// A stored result rated high at a given score, with no COI or data statement.
+    private func storedHigh(score: Int, fullTextSearched: Bool?) -> TransparencyResult {
+        TransparencyResult(
+            transparencyScore: score,
+            riskLevel: .high,
+            dataSourcesUsed: [TransparencyConstants.crossRefSourceName],
+            fullTextSearched: fullTextSearched
+        )
+    }
+
+    /// A low score counts as text-dependent exactly when the two unsearched
+    /// penalties alone carry it below the cut-off.
+    func testLowScoreIsUnassessedOnlyWhenUnsearchedPenaltiesCarryIt() {
+        let boundary = TransparencyConstants.highRiskScoreThreshold
+            + TransparencyConstants.missingCoiPenalty + TransparencyConstants.noStatementPenalty
+        XCTAssertTrue(TransparencyRiskExplanation.isUnassessed(result: storedHigh(score: boundary, fullTextSearched: false)))
+        XCTAssertFalse(TransparencyRiskExplanation.isUnassessed(result: storedHigh(score: boundary - 1, fullTextSearched: false)))
+    }
+
+    /// A stored high rating no rule explains is not reclassified as
+    /// unassessed; it keeps its "re-analyse" caveat.
+    func testUnexplainedHighRatingWithoutTextIsNotUnassessed() {
+        let result = TransparencyResult(
+            coiAnalysis: COIAnalysisResult(statement: "None declared."),
+            dataAvailability: DataAvailabilityResult(disclosureLevel: .fullOpen),
+            transparencyScore: 90,
+            riskLevel: .high,
+            dataSourcesUsed: [TransparencyConstants.crossRefSourceName],
+            fullTextSearched: false
+        )
+        XCTAssertTrue(TransparencyScorer.highRiskTriggers(for: result).isEmpty)
+        XCTAssertFalse(TransparencyRiskExplanation.isUnassessed(result: result))
+        let explanation = TransparencyRiskExplanation(result: result)
+        XCTAssertTrue(explanation.caveats.contains { $0.hasPrefix("None of the current high-risk rules") })
+        XCTAssertFalse(explanation.caveats.contains { $0.contains("shown as unassessed") })
+    }
+
+    /// The unassessed caveat appears exactly when the rating is shown as
+    /// unassessed, whatever the rating.
+    func testUnassessedCaveatAgreesWithTheFlag() {
+        let cases = [
+            build(fullTextSearched: false),
+            build(fullTextSearched: nil),
+            build(fullTextSearched: true),
+            storedHigh(score: 10, fullTextSearched: false),
+            TransparencyResult(transparencyScore: 30, riskLevel: .medium, fullTextSearched: false),
+        ]
+        for result in cases {
+            let explanation = TransparencyRiskExplanation(result: result)
+            XCTAssertEqual(
+                explanation.isUnassessed,
+                explanation.caveats.contains { $0.contains("shown as unassessed") },
+                "\(result.riskLevel), score \(result.transparencyScore), searched \(String(describing: result.fullTextSearched))"
+            )
+        }
+    }
+
+    /// The CrossRef warning is not repeated as a concern beside the no-CrossRef caveat.
+    func testCrossRefOutageIsNotRepeatedAsAConcern() {
+        var builder = TransparencyResultBuilder(doi: "10.1000/x")
+        builder.fullTextSearched = true
+        builder.warnings = [TransparencyConstants.crossRefUnreachableWarning]
+        let explanation = TransparencyRiskExplanation(result: builder.build())
+        XCTAssertTrue(explanation.caveats.contains { $0.contains("funders were not checked") })
+        XCTAssertFalse(explanation.otherConcerns.contains(TransparencyConstants.crossRefUnreachableWarning))
+    }
+
+    /// Score terms record a missing statement by flag, not by their wording.
+    func testScoreComponentsFlagMissingStatements() {
+        let flagged = TransparencyScorer.scoreComponents(for: build()).filter(\.recordsMissingStatement)
+        XCTAssertEqual(flagged.count, 2)
+        let stated = TransparencyScorer.scoreComponents(
+            for: build(coi: cleanCOI, data: DataAvailabilityResult(disclosureLevel: .restricted))
+        )
+        XCTAssertFalse(stated.contains(where: \.recordsMissingStatement))
     }
 
     /// The same finding from searched text is a real high rating.

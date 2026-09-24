@@ -27,9 +27,11 @@ object TransparencyConstants {
      * newer build is not mistaken for an older one. History (see Swift for the
      * full record): 1 — original scoring (stored results carry no version);
      * 2 — Europe PMC allow-list, JATS fixes and recalibrated funder patterns;
-     * 3 — PDF text reaches the analyzer, abstract-only deposits no longer do.
+     * 3 — PDF text reaches the analyzer, abstract-only deposits no longer do;
+     * 4 — results record whether the full text was searched, and a missing trial
+     * registration is reported only when ClinicalTrials.gov answered.
      */
-    const val ANALYZER_VERSION: Int = 3
+    const val ANALYZER_VERSION: Int = 4
 
     // ==================== API URLs ====================
 
@@ -185,6 +187,14 @@ object TransparencyConstants {
 
     /** Name recorded in `dataSourcesUsed` when CrossRef returned the work. */
     const val CROSSREF_SOURCE_NAME: String = "CrossRef"
+
+    /**
+     * Warning recorded when CrossRef, the only source of funders, could not be reached or
+     * its answer could not be read: "industry funding: not detected" then means not looked for.
+     */
+    const val CROSSREF_UNREACHABLE_WARNING: String =
+        "CrossRef could not be reached, so this study's funders were not checked; " +
+            "industry funding may be present though none is reported."
 
     // ==================== Date parsing defaults ====================
 

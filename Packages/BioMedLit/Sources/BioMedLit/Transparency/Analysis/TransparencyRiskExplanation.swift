@@ -88,15 +88,22 @@ public struct ScoreComponent: Sendable, Equatable {
     public let label: String
     /// Points added (positive) or subtracted (negative).
     public let points: Int
+    /// Whether the term records a statement as missing — no conflict-of-interest
+    /// or no data-availability statement — which is looked for only in the full
+    /// text, so a report must qualify it when that text was not searched.
+    public let recordsMissingStatement: Bool
 
     /// Creates a score component.
     ///
     /// - Parameters:
     ///   - label: What the term is for.
     ///   - points: Points added or subtracted.
-    public init(label: String, points: Int) {
+    ///   - recordsMissingStatement: Whether the term records a statement,
+    ///     looked for only in the full text, as missing.
+    public init(label: String, points: Int, recordsMissingStatement: Bool = false) {
         self.label = label
         self.points = points
+        self.recordsMissingStatement = recordsMissingStatement
     }
 
     /// The points with an explicit sign, e.g. "+5" or "-10".
@@ -153,8 +160,9 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
         let certainty = certainty ?? TransparencyCertainty(fullTextSearched: result.fullTextSearched)
         let triggers = TransparencyScorer.highRiskTriggers(for: result)
 
+        let unassessed = Self.isUnassessed(result: result, certainty: certainty)
         self.certainty = certainty
-        isUnassessed = Self.isUnassessed(result: result, certainty: certainty)
+        isUnassessed = unassessed
         score = result.transparencyScore
         reasons = triggers.map { Self.sentence(for: $0, result: result, certainty: certainty) }
 
@@ -175,8 +183,7 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
                 + "so the rating probably comes from an earlier version of the analysis. "
                 + "Re-analyse the study before relying on it."
             )
-        } else if certainty.isLimited && !triggers.isEmpty
-                    && triggers.allSatisfy({ Self.dependsOnFullText($0, result: result) }) {
+        } else if unassessed {
             caveats.append(
                 "Every reason for a high rating depends on statements that appear only in the "
                 + "full text, which was not searched, so the study is shown as unassessed "
@@ -189,9 +196,10 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
                 + "re-analysing may change the rating."
             )
         }
-        // Funders come from CrossRef alone, so its absence is what leaves them
-        // unchecked; a PubMed record does not stand in for it. Worded so as not
-        // to claim which it was — no record, or no answer.
+        // Funders come from CrossRef alone (`fetchBasicMetadata` merges CrossRef
+        // funders only; PubMed grants are not used here, unlike Python), so its
+        // absence is what leaves them unchecked; a PubMed record does not stand
+        // in for it. Worded so as not to claim which it was — no record, or no answer.
         if !result.dataSourcesUsed.contains(TransparencyConstants.crossRefSourceName) {
             caveats.append(
                 "No CrossRef record was retrieved for this study (none exists, it has no DOI, "
@@ -204,13 +212,17 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
         self.caveats = caveats
     }
 
-    /// Whether a high rating rests only on statements in unread full text.
+    /// Whether a high rating rests only on statements in full text known not
+    /// to have been searched.
     ///
     /// Such a rating records what could not be looked for, not what the study
     /// lacks, so every surface shows it as unassessed rather than high. Display
     /// only: the stored rating and the scoring rules are unchanged, so the
     /// platforms stay in step. A high rating any of whose reasons stands without
-    /// the text — unposted trial results, say — is still high.
+    /// the text — unposted trial results, say — is still high. So is one whose
+    /// record of full-text access is missing (``TransparencyCertainty/unrecorded``):
+    /// the text may have been searched, and saying it was not would be as
+    /// unfounded as the rating; its certainty note asks for re-analysis instead.
     ///
     /// - Parameters:
     ///   - result: A stored transparency result.
@@ -219,7 +231,7 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
     /// - Returns: `true` when the rating is to be shown as unassessed.
     public static func isUnassessed(result: TransparencyResult, certainty: TransparencyCertainty? = nil) -> Bool {
         let certainty = certainty ?? TransparencyCertainty(fullTextSearched: result.fullTextSearched)
-        guard result.riskLevel == .high, certainty.isLimited else { return false }
+        guard result.riskLevel == .high, certainty == .limitedNoFullText else { return false }
         let triggers = TransparencyScorer.highRiskTriggers(for: result)
         return !triggers.isEmpty && triggers.allSatisfy { dependsOnFullText($0, result: result) }
     }
@@ -269,10 +281,17 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
                 + "and \(dataPhrase(for: level, certainty: certainty))."
 
         case .missingCOIStatement:
-            let found = certainty == .fullText
-                ? "No conflict of interest statement was found in the full text."
-                : "No conflict of interest statement was found; the full text, where one "
+            let found: String
+            switch certainty {
+            case .fullText:
+                found = "No conflict of interest statement was found in the full text."
+            case .limitedNoFullText:
+                found = "No conflict of interest statement was found; the full text, where one "
                     + "would appear, was not searched."
+            case .unrecorded:
+                found = "No conflict of interest statement was found; whether the full text, "
+                    + "where one would appear, was searched was not recorded."
+            }
             return found + " A missing statement is enough on its own for a high rating."
         }
     }
@@ -284,11 +303,17 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
             return "its data are available only with restrictions"
         case .notAvailable:
             return "its data are not available"
-        case .notStated where certainty == .fullText:
-            return "no data availability statement was found in the full text"
         case .notStated:
-            return "no data availability statement was found (the full text, where it would "
-                + "appear, was not searched)"
+            switch certainty {
+            case .fullText:
+                return "no data availability statement was found in the full text"
+            case .limitedNoFullText:
+                return "no data availability statement was found (the full text, where it would "
+                    + "appear, was not searched)"
+            case .unrecorded:
+                return "no data availability statement was found (whether the full text, where "
+                    + "it would appear, was searched was not recorded)"
+            }
         case .fullOpen, .availableOnRequest, .unknown:
             return "its data availability is \(level.displayName.lowercased())"
         }
@@ -319,19 +344,21 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
     }
 
     /// Score terms, with those that record a statement as missing qualified
-    /// when the full text, the only place it is looked for, was not searched.
+    /// when the full text, the only place it is looked for, was not searched —
+    /// or may not have been.
     private static func qualified(
         _ components: [ScoreComponent],
         certainty: TransparencyCertainty
     ) -> [ScoreComponent] {
-        guard certainty != .fullText else { return components }
-        let unsearched = [
-            "No conflict of interest statement found",
-            "Data availability: \(DataDisclosureLevel.notStated.displayName.lowercased())",
-        ]
+        let suffix: String
+        switch certainty {
+        case .fullText: return components
+        case .limitedNoFullText: suffix = " (full text not searched)"
+        case .unrecorded: suffix = " (full text may not have been searched)"
+        }
         return components.map {
-            unsearched.contains($0.label)
-                ? ScoreComponent(label: $0.label + " (full text not searched)", points: $0.points)
+            $0.recordsMissingStatement
+                ? ScoreComponent(label: $0.label + suffix, points: $0.points, recordsMissingStatement: true)
                 : $0
         }
     }
@@ -352,6 +379,10 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
             case .scoreBelowThreshold:
                 break
             }
+        }
+        // The no-CrossRef caveat already says the funders were not checked.
+        if !result.dataSourcesUsed.contains(TransparencyConstants.crossRefSourceName) {
+            restated.insert(TransparencyConstants.crossRefUnreachableWarning)
         }
         var seen = restated
         var concerns: [String] = []
@@ -423,7 +454,9 @@ public enum HighRiskTransparencySection {
             + "it appears to."
     }
 
-    /// Heads the rules a high rating would rest on, for a rating shown as unassessed.
+    /// Heads the rules a high rating would rest on, for a rating shown as
+    /// unassessed. Used by Android's detail view; the iOS and macOS detail
+    /// views list no rules, only ``TransparencyConstants/unassessedNote``.
     public static let unassessedReasonsLabel = "A high rating would rest only on"
 
     /// The sentence accounting for ratings shown as unassessed.

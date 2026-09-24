@@ -31,6 +31,7 @@ import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.QueueDispatcher
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -111,6 +112,18 @@ class ClinicalTrialsServiceTest {
             fail("expected a server error")
         } catch (e: ClinicalTrialsException.ServerError) {
             assertEquals("ClinicalTrials.gov server error (HTTP 502). Try again later.", e.message)
+        }
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun `a dropped connection is a retried network error`() = runBlocking {
+        repeat(3) { server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)) }
+        try {
+            service.getStudy("NCT00000000")
+            fail("expected a network error")
+        } catch (e: ClinicalTrialsException.NetworkError) {
+            assertTrue(e.isRetryable)
         }
         assertEquals(3, server.requestCount)
     }

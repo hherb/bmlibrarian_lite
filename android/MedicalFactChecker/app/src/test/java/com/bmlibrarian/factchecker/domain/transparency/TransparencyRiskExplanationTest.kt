@@ -140,7 +140,7 @@ class TransparencyRiskExplanationTest {
             listOf(
                 ScoreComponent("Starting score", 50),
                 ScoreComponent("Data availability: not available", -15),
-                ScoreComponent("No conflict of interest statement found", -5),
+                ScoreComponent("No conflict of interest statement found", -5, recordsMissingStatement = true),
                 ScoreComponent("Trial registered", 10),
                 ScoreComponent("Trial results not posted", -10),
                 ScoreComponent("Industry ties with restricted or unavailable data", -10),
@@ -187,12 +187,48 @@ class TransparencyRiskExplanationTest {
         assertTrue(explanation.caveats.any { it.contains("shown as unassessed") })
     }
 
+    /**
+     * Unknown coverage is reported as unknown — not as unsearched text, which may be false —
+     * and the rating stays high rather than unassessed.
+     */
     @Test
     fun `unrecorded full text is reported as unknown`() {
         val explanation = TransparencyRiskExplanation.of(build(fullTextSearched = null))
         assertEquals(TransparencyCertainty.UNRECORDED, explanation.certainty)
         assertEquals(TransparencyConstants.UNRECORDED_CERTAINTY_NOTE, explanation.certainty.note)
-        assertTrue(explanation.caveats.any { it.contains("unassessed") })
+        assertEquals(
+            listOf(
+                "No conflict of interest statement was found; whether the full text, where one would " +
+                    "appear, was searched was not recorded. A missing statement is enough on its own " +
+                    "for a high rating.",
+            ),
+            explanation.reasons,
+        )
+        assertFalse(explanation.isUnassessed)
+        assertFalse(explanation.caveats.any { it.contains("unassessed") })
+    }
+
+    @Test
+    fun `unrecorded full text qualifies score terms as possibly unsearched`() {
+        val builder = TransparencyResultBuilder(doi = "10.1000/x")
+        builder.industryFundingDetected = true
+        builder.industryFundingConfidence = 0.9
+        builder.outcomeSwitchingDetected = true
+        builder.fullTextSearched = null
+        val explanation = TransparencyRiskExplanation.of(builder.build())
+        assertTrue(
+            explanation.scoreBreakdown.any {
+                it.label == "No conflict of interest statement found (full text may not have been searched)"
+            },
+        )
+        assertTrue(
+            explanation.reasons.any {
+                it.contains(
+                    "no data availability statement was found (whether the full text, where it " +
+                        "would appear, was searched was not recorded)",
+                )
+            },
+        )
     }
 
     @Test
@@ -461,7 +497,103 @@ class TransparencyRiskExplanationTest {
         assertEquals(TransparencyRiskLevel.HIGH, result.riskLevel)
         assertTrue(TransparencyRiskExplanation.isUnassessed(result))
         assertTrue(TransparencyRiskExplanation.of(result).isUnassessed)
-        assertTrue(TransparencyRiskExplanation.isUnassessed(build(fullTextSearched = null)))
+        assertFalse(
+            "unrecorded coverage may have included the text, so the rating stays high",
+            TransparencyRiskExplanation.isUnassessed(build(fullTextSearched = null)),
+        )
+    }
+
+    @Test
+    fun `industry funding with unstated data and no text is unassessed`() {
+        val result = build(coi = cleanCoi, industry = true, fullTextSearched = false)
+        assertEquals(
+            listOf(HighRiskTrigger.IndustryFundingWithWithheldData(DataDisclosureLevel.NOT_STATED)),
+            TransparencyScorer.highRiskTriggers(result),
+        )
+        assertTrue(TransparencyRiskExplanation.isUnassessed(result))
+    }
+
+    @Test
+    fun `industry funding with restricted data and no text stays high`() {
+        val result = build(coi = cleanCoi, data = data(DataDisclosureLevel.RESTRICTED), industry = true, fullTextSearched = false)
+        assertEquals(
+            listOf(HighRiskTrigger.IndustryFundingWithWithheldData(DataDisclosureLevel.RESTRICTED)),
+            TransparencyScorer.highRiskTriggers(result),
+        )
+        assertFalse(TransparencyRiskExplanation.isUnassessed(result))
+    }
+
+    /** A stored result rated high at a given score, with no COI or data statement. */
+    private fun storedHigh(score: Int, fullTextSearched: Boolean?) = TransparencyResult(
+        transparencyScore = score,
+        riskLevel = TransparencyRiskLevel.HIGH,
+        dataSourcesUsed = listOf(TransparencyConstants.CROSSREF_SOURCE_NAME),
+        fullTextSearched = fullTextSearched,
+    )
+
+    /** A low score is text-dependent exactly when the unsearched penalties alone carry it below the cut-off. */
+    @Test
+    fun `a low score is unassessed only when unsearched penalties carry it`() {
+        val boundary = TransparencyConstants.HIGH_RISK_SCORE_THRESHOLD +
+            TransparencyConstants.MISSING_COI_PENALTY + TransparencyConstants.NO_STATEMENT_PENALTY
+        assertTrue(TransparencyRiskExplanation.isUnassessed(storedHigh(boundary, false)))
+        assertFalse(TransparencyRiskExplanation.isUnassessed(storedHigh(boundary - 1, false)))
+    }
+
+    @Test
+    fun `an unexplained high rating without text is not unassessed`() {
+        val result = TransparencyResult(
+            coiAnalysis = COIAnalysisResult(statement = "None declared."),
+            dataAvailability = data(DataDisclosureLevel.FULL_OPEN),
+            transparencyScore = 90,
+            riskLevel = TransparencyRiskLevel.HIGH,
+            dataSourcesUsed = listOf(TransparencyConstants.CROSSREF_SOURCE_NAME),
+            fullTextSearched = false,
+        )
+        assertTrue(TransparencyScorer.highRiskTriggers(result).isEmpty())
+        assertFalse(TransparencyRiskExplanation.isUnassessed(result))
+        val explanation = TransparencyRiskExplanation.of(result)
+        assertTrue(explanation.caveats.contains(TransparencyRiskExplanation.UNEXPLAINED_RATING_CAVEAT))
+        assertFalse(explanation.caveats.contains(TransparencyRiskExplanation.UNASSESSED_CAVEAT))
+    }
+
+    @Test
+    fun `the unassessed caveat agrees with the flag`() {
+        val cases = listOf(
+            build(fullTextSearched = false),
+            build(fullTextSearched = null),
+            build(fullTextSearched = true),
+            storedHigh(10, false),
+            TransparencyResult(transparencyScore = 30, riskLevel = TransparencyRiskLevel.MEDIUM, fullTextSearched = false),
+        )
+        for (result in cases) {
+            val explanation = TransparencyRiskExplanation.of(result)
+            assertEquals(
+                "${result.riskLevel}, score ${result.transparencyScore}, searched ${result.fullTextSearched}",
+                explanation.isUnassessed,
+                explanation.caveats.contains(TransparencyRiskExplanation.UNASSESSED_CAVEAT),
+            )
+        }
+    }
+
+    @Test
+    fun `score components flag missing statements`() {
+        assertEquals(2, TransparencyScorer.scoreComponents(build()).count { it.recordsMissingStatement })
+        assertFalse(
+            TransparencyScorer.scoreComponents(build(coi = cleanCoi, data = data(DataDisclosureLevel.RESTRICTED)))
+                .any { it.recordsMissingStatement },
+        )
+    }
+
+    /** The CrossRef warning is not repeated as a concern beside the no-CrossRef caveat. */
+    @Test
+    fun `a CrossRef outage is not repeated as a concern`() {
+        val builder = TransparencyResultBuilder(doi = "10.1000/x")
+        builder.fullTextSearched = true
+        builder.warnings = listOf(TransparencyConstants.CROSSREF_UNREACHABLE_WARNING)
+        val explanation = TransparencyRiskExplanation.of(builder.build())
+        assertTrue(explanation.caveats.contains(TransparencyRiskExplanation.NO_CROSSREF_CAVEAT))
+        assertFalse(explanation.otherConcerns.contains(TransparencyConstants.CROSSREF_UNREACHABLE_WARNING))
     }
 
     @Test

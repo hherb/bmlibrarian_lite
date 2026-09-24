@@ -210,17 +210,23 @@ class TrialComplianceAnalyzerTest {
 
     @Test fun `missing registration detected`() = assertEquals(
         "Clinical trial without detected registration",
-        TrialComplianceAnalyzer.checkMissingRegistration("Randomized Controlled Trial of X", emptyList()),
+        TrialComplianceAnalyzer.checkMissingRegistration("Randomized Controlled Trial of X", emptyList(), true),
     )
 
-    @Test fun `not a trial`() = assertNull(TrialComplianceAnalyzer.checkMissingRegistration("Systematic Review", emptyList()))
+    /** No registry answer, no claim: an unlooked-up or failed lookup is not "unregistered". */
+    @Test fun `unassessed registration is not reported missing`() = assertNull(
+        TrialComplianceAnalyzer.checkMissingRegistration("Randomized Controlled Trial of X", emptyList(), false),
+    )
+
+    @Test fun `not a trial`() = assertNull(TrialComplianceAnalyzer.checkMissingRegistration("Systematic Review", emptyList(), true))
 
     @Test fun `has registration`() = assertNull(
         TrialComplianceAnalyzer.checkMissingRegistration(
             "Randomized Trial",
             listOf(TrialRegistration(registry = "CT.gov", registrationId = "NCT123")),
+            true,
         ),
     )
 
-    @Test fun `null title`() = assertNull(TrialComplianceAnalyzer.checkMissingRegistration(null, emptyList()))
+    @Test fun `null title`() = assertNull(TrialComplianceAnalyzer.checkMissingRegistration(null, emptyList(), true))
 }

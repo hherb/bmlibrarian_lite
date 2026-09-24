@@ -77,8 +77,11 @@ sealed class HighRiskTrigger {
  *
  * @property label What the term is for, e.g. "Trial results not posted".
  * @property points Points added (positive) or subtracted (negative).
+ * @property recordsMissingStatement Whether the term records a statement as missing — no
+ *   conflict-of-interest or no data-availability statement — which is looked for only in the
+ *   full text, so a report must qualify it when that text was not searched.
  */
-data class ScoreComponent(val label: String, val points: Int) {
+data class ScoreComponent(val label: String, val points: Int, val recordsMissingStatement: Boolean = false) {
     /** The points with an explicit sign, e.g. "+5" or "-10". */
     val signedPoints: String
         get() = if (points > 0) "+$points" else "$points"
@@ -93,7 +96,7 @@ data class ScoreComponent(val label: String, val points: Int) {
  * there was no full text to look in. This states the rules that produced the
  * rating, the score terms when the score was one of them, and every reason the
  * rating may not mean what it appears to. Ported from the Swift type of the same
- * name; every sentence is identical.
+ * name; every user-facing string is identical.
  *
  * @property score The study's transparency score (0-100).
  * @property reasons Each rule that rated the study high, as a sentence. Empty only when the
@@ -113,7 +116,7 @@ data class TransparencyRiskExplanation(
     val otherConcerns: List<String>,
     val caveats: List<String>,
     val certainty: TransparencyCertainty,
-    val isUnassessed: Boolean = false,
+    val isUnassessed: Boolean,
 ) {
     /** The explanation as indented plain-text lines, for exported reports. */
     val plainTextLines: List<String>
@@ -153,12 +156,16 @@ data class TransparencyRiskExplanation(
                 "rather than as evidence of poor transparency."
 
         /**
-         * Whether a high rating rests only on statements in unread full text.
+         * Whether a high rating rests only on statements in full text known not to have been
+         * searched.
          *
          * Such a rating records what could not be looked for, not what the study lacks, so
          * every surface shows it as unassessed rather than high. Display only: the stored
          * rating and the scoring rules are unchanged, so the platforms stay in step. A high
-         * rating any of whose reasons stands without the text is still high.
+         * rating any of whose reasons stands without the text — unposted trial results, say —
+         * is still high. So is one whose record of full-text access is missing
+         * ([TransparencyCertainty.UNRECORDED]): the text may have been searched, and saying it
+         * was not would be as unfounded as the rating; its certainty note asks for re-analysis.
          *
          * @param result A stored transparency result.
          * @param certainty What is known of its full-text access; defaults to the result's record.
@@ -166,7 +173,11 @@ data class TransparencyRiskExplanation(
          */
         fun isUnassessed(result: TransparencyResult, certainty: TransparencyCertainty? = null): Boolean {
             val resolved = certainty ?: TransparencyCertainty.from(result.fullTextSearched)
-            if (result.riskLevel != TransparencyRiskLevel.HIGH || !resolved.isLimited) return false
+            if (result.riskLevel != TransparencyRiskLevel.HIGH ||
+                resolved != TransparencyCertainty.LIMITED_NO_FULL_TEXT
+            ) {
+                return false
+            }
             val triggers = TransparencyScorer.highRiskTriggers(result)
             return triggers.isNotEmpty() && triggers.all { dependsOnFullText(it, result) }
         }
@@ -177,8 +188,10 @@ data class TransparencyRiskExplanation(
                 "re-analysing may change the rating."
 
         /**
-         * Caveat when no CrossRef record was retrieved. Funders come from CrossRef alone, so a
-         * PubMed record does not stand in for it; worded so as not to claim which it was.
+         * Caveat when no CrossRef record was retrieved. Funders come from CrossRef alone
+         * ([TransparencyAnalysisService] merges CrossRef funders only; PubMed grants are not used
+         * here, unlike Python), so a PubMed record does not stand in for it; worded so as not to
+         * claim which it was.
          */
         internal const val NO_CROSSREF_CAVEAT: String =
             "No CrossRef record was retrieved for this study (none exists, it has no DOI, " +
@@ -186,6 +199,9 @@ data class TransparencyRiskExplanation(
 
         /** Suffix for a score term recording a statement missing from text that was not searched. */
         private const val UNSEARCHED_SUFFIX: String = " (full text not searched)"
+
+        /** Suffix for such a term when whether the text was searched was not recorded. */
+        private const val POSSIBLY_UNSEARCHED_SUFFIX: String = " (full text may not have been searched)"
 
         /**
          * Explain a stored result's high rating.
@@ -201,12 +217,11 @@ data class TransparencyRiskExplanation(
             val triggers = TransparencyScorer.highRiskTriggers(result)
 
             val scoredLow = triggers.any { it is HighRiskTrigger.ScoreBelowThreshold }
+            val unassessed = isUnassessed(result, resolvedCertainty)
             val caveats = mutableListOf<String>()
             if (triggers.isEmpty() && result.riskLevel == TransparencyRiskLevel.HIGH) {
                 caveats.add(UNEXPLAINED_RATING_CAVEAT)
-            } else if (resolvedCertainty.isLimited && triggers.isNotEmpty() &&
-                triggers.all { dependsOnFullText(it, result) }
-            ) {
+            } else if (unassessed) {
                 caveats.add(UNASSESSED_CAVEAT)
             }
             if (result.isStale) caveats.add(STALE_CAVEAT)
@@ -228,7 +243,7 @@ data class TransparencyRiskExplanation(
                 otherConcerns = concerns(result, triggers),
                 caveats = caveats,
                 certainty = resolvedCertainty,
-                isUnassessed = isUnassessed(result, resolvedCertainty),
+                isUnassessed = unassessed,
             )
         }
 
@@ -254,11 +269,15 @@ data class TransparencyRiskExplanation(
                 }
 
                 HighRiskTrigger.MissingCOIStatement -> {
-                    val found = if (certainty == TransparencyCertainty.FULL_TEXT) {
-                        "No conflict of interest statement was found in the full text."
-                    } else {
-                        "No conflict of interest statement was found; the full text, where one " +
-                            "would appear, was not searched."
+                    val found = when (certainty) {
+                        TransparencyCertainty.FULL_TEXT ->
+                            "No conflict of interest statement was found in the full text."
+                        TransparencyCertainty.LIMITED_NO_FULL_TEXT ->
+                            "No conflict of interest statement was found; the full text, where one " +
+                                "would appear, was not searched."
+                        TransparencyCertainty.UNRECORDED ->
+                            "No conflict of interest statement was found; whether the full text, " +
+                                "where one would appear, was searched was not recorded."
                     }
                     "$found A missing statement is enough on its own for a high rating."
                 }
@@ -269,13 +288,16 @@ data class TransparencyRiskExplanation(
             when (level) {
                 DataDisclosureLevel.RESTRICTED -> "its data are available only with restrictions"
                 DataDisclosureLevel.NOT_AVAILABLE -> "its data are not available"
-                DataDisclosureLevel.NOT_STATED ->
-                    if (certainty == TransparencyCertainty.FULL_TEXT) {
+                DataDisclosureLevel.NOT_STATED -> when (certainty) {
+                    TransparencyCertainty.FULL_TEXT ->
                         "no data availability statement was found in the full text"
-                    } else {
+                    TransparencyCertainty.LIMITED_NO_FULL_TEXT ->
                         "no data availability statement was found (the full text, where it would " +
                             "appear, was not searched)"
-                    }
+                    TransparencyCertainty.UNRECORDED ->
+                        "no data availability statement was found (whether the full text, where " +
+                            "it would appear, was searched was not recorded)"
+                }
                 DataDisclosureLevel.FULL_OPEN,
                 DataDisclosureLevel.AVAILABLE_ON_REQUEST,
                 DataDisclosureLevel.UNKNOWN,
@@ -308,16 +330,16 @@ data class TransparencyRiskExplanation(
 
         /**
          * Score terms, with those recording a statement as missing qualified when the full
-         * text, the only place it is looked for, was not searched.
+         * text, the only place it is looked for, was not searched — or may not have been.
          */
         private fun qualified(components: List<ScoreComponent>, certainty: TransparencyCertainty): List<ScoreComponent> {
-            if (certainty == TransparencyCertainty.FULL_TEXT) return components
-            val unsearched = setOf(
-                "No conflict of interest statement found",
-                "Data availability: ${DataDisclosureLevel.NOT_STATED.displayName.lowercase()}",
-            )
+            val suffix = when (certainty) {
+                TransparencyCertainty.FULL_TEXT -> return components
+                TransparencyCertainty.LIMITED_NO_FULL_TEXT -> UNSEARCHED_SUFFIX
+                TransparencyCertainty.UNRECORDED -> POSSIBLY_UNSEARCHED_SUFFIX
+            }
             return components.map {
-                if (it.label in unsearched) ScoreComponent(it.label + UNSEARCHED_SUFFIX, it.points) else it
+                if (it.recordsMissingStatement) it.copy(label = it.label + suffix) else it
             }
         }
 
@@ -338,6 +360,10 @@ data class TransparencyRiskExplanation(
                     }
                     is HighRiskTrigger.ScoreBelowThreshold -> Unit
                 }
+            }
+            // The no-CrossRef caveat already says the funders were not checked.
+            if (TransparencyConstants.CROSSREF_SOURCE_NAME !in result.dataSourcesUsed) {
+                seen.add(TransparencyConstants.CROSSREF_UNREACHABLE_WARNING)
             }
             return (result.riskIndicators + result.warnings + result.outcomeSwitchingDetails)
                 .filter { seen.add(it) }

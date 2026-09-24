@@ -246,6 +246,30 @@ class TransparencyConstantsTest {
         assertEquals("Clinical trial without detected registration", RiskIndicatorStrings.MISSING_TRIAL_REGISTRATION)
     }
 
+    /** The failed-lookup warnings, pinned to the Swift strings. */
+    @Test
+    fun `failed lookup warnings match Swift`() {
+        assertEquals(
+            "CrossRef could not be reached, so this study's funders were not checked; " +
+                "industry funding may be present though none is reported.",
+            TransparencyConstants.CROSSREF_UNREACHABLE_WARNING,
+        )
+        assertEquals(
+            "Could not reach ClinicalTrials.gov for trial NCT01234567, so its registration could " +
+                "not be checked. Absence of a registration is not evidence the study is unregistered.",
+            TrialComplianceAnalyzer.registryUnreachableWarning("NCT01234567"),
+        )
+        assertEquals(
+            "ClinicalTrials.gov holds no record of trial NCT01234567, which the article cites as its registration.",
+            TrialComplianceAnalyzer.registryHasNoRecordWarning("NCT01234567"),
+        )
+        assertEquals(
+            "ClinicalTrials.gov returned a record for trial NCT01234567 that could not be read, so its " +
+                "registration could not be checked.",
+            TrialComplianceAnalyzer.unreadableRegistryRecordWarning("NCT01234567"),
+        )
+    }
+
     // ==================== TransparencyRegex (Swift RegexHelper semantics) ====================
 
     @Test

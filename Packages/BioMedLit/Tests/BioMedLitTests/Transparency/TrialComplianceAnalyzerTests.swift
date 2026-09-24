@@ -304,7 +304,8 @@ final class TrialComplianceAnalyzerTests: XCTestCase {
     func testCheckMissingRegistrationDetected() {
         let warning = TrialComplianceAnalyzer.checkMissingRegistration(
             title: "Randomized Controlled Trial of X",
-            registrations: []
+            registrations: [],
+            registrationAssessed: true
         )
 
         XCTAssertNotNil(warning)
@@ -315,7 +316,8 @@ final class TrialComplianceAnalyzerTests: XCTestCase {
     func testCheckMissingRegistrationNotTrial() {
         let warning = TrialComplianceAnalyzer.checkMissingRegistration(
             title: "Systematic Review",
-            registrations: []
+            registrations: [],
+            registrationAssessed: true
         )
 
         XCTAssertNil(warning)
@@ -327,7 +329,8 @@ final class TrialComplianceAnalyzerTests: XCTestCase {
             title: "Randomized Trial",
             registrations: [
                 TrialRegistration(registry: "CT.gov", registrationId: "NCT123")
-            ]
+            ],
+            registrationAssessed: true
         )
 
         XCTAssertNil(warning)
@@ -337,7 +340,43 @@ final class TrialComplianceAnalyzerTests: XCTestCase {
     func testCheckMissingRegistrationNilTitle() {
         let warning = TrialComplianceAnalyzer.checkMissingRegistration(
             title: nil,
-            registrations: []
+            registrations: [],
+            registrationAssessed: true
+        )
+
+        XCTAssertNil(warning)
+    }
+
+    /// The failed-lookup warnings, pinned to the strings Android pins.
+    func testFailedLookupWarningsArePinned() {
+        XCTAssertEqual(
+            TransparencyConstants.crossRefUnreachableWarning,
+            "CrossRef could not be reached, so this study's funders were not checked; "
+                + "industry funding may be present though none is reported."
+        )
+        XCTAssertEqual(
+            TrialComplianceAnalyzer.registryUnreachableWarning(nctId: "NCT01234567"),
+            "Could not reach ClinicalTrials.gov for trial NCT01234567, so its registration could "
+                + "not be checked. Absence of a registration is not evidence the study is unregistered."
+        )
+        XCTAssertEqual(
+            TrialComplianceAnalyzer.registryHasNoRecordWarning(nctId: "NCT01234567"),
+            "ClinicalTrials.gov holds no record of trial NCT01234567, which the article cites as its registration."
+        )
+        XCTAssertEqual(
+            TrialComplianceAnalyzer.unreadableRegistryRecordWarning(nctId: "NCT01234567"),
+            "ClinicalTrials.gov returned a record for trial NCT01234567 that could not be read, so its "
+                + "registration could not be checked."
+        )
+    }
+
+    /// No registry answer, no claim: a trial whose registration was never
+    /// looked up, or whose lookup failed, is not reported as unregistered.
+    func testCheckMissingRegistrationNotAssessed() {
+        let warning = TrialComplianceAnalyzer.checkMissingRegistration(
+            title: "Randomized Controlled Trial of X",
+            registrations: [],
+            registrationAssessed: false
         )
 
         XCTAssertNil(warning)

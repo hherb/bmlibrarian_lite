@@ -40,7 +40,7 @@ import com.bmlibrarian.factchecker.domain.transparency.TransparencyCertainty
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyConstants
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyRiskExplanation
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyRiskLevel
-import com.bmlibrarian.factchecker.domain.transparency.transparencyCertainty
+import com.bmlibrarian.factchecker.domain.transparency.transparencyCertaintyOf
 import com.bmlibrarian.factchecker.domain.transparency.transparencyResult
 import com.bmlibrarian.factchecker.ui.theme.Disabled
 import com.bmlibrarian.factchecker.ui.theme.Warning
@@ -115,7 +115,7 @@ fun TransparencyDetails(document: DocumentEntity, modifier: Modifier = Modifier)
         )
         return
     }
-    val certainty = document.transparencyCertainty
+    val certainty = document.transparencyCertaintyOf(result)
     val explanation = TransparencyRiskExplanation.of(result, certainty)
 
     Column(

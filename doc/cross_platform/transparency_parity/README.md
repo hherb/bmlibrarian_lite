@@ -124,8 +124,8 @@ The canonical Python now carries the calibrated lists and reads this file.
 
 **Adding a name to the corpus is not free.** Every published figure above is a
 fraction of its counts, so an edit moves precision, recall and composition on
-both platforms at once — while both suites stay green, because they would simply
-be measuring something else. `TestFunderCorpusContract` in
+all three platforms at once — while every suite stays green, because they would
+simply be measuring something else. `TestFunderCorpusContract` in
 `tests/test_transparency_parity.py` pins the counts, the label and source
 vocabularies, and that only ambiguous entries carry a reason, so that edit has to
 be deliberate. The corpus is also lifted byte-identical from bmlib, so a change

@@ -690,6 +690,11 @@ public struct TransparencyResultBuilder: Sendable {
     /// Whether the article's full text was given to the analysis.
     public var fullTextSearched: Bool?
 
+    /// Whether ClinicalTrials.gov answered for every trial the article cites,
+    /// so an empty ``trialRegistrations`` is the registry's answer. False when
+    /// no trial ID was found to look up or a lookup failed.
+    public var trialRegistrationAssessed: Bool = false
+
     /// Creates a new TransparencyResultBuilder.
     ///
     /// - Parameters:
@@ -733,7 +738,8 @@ public struct TransparencyResultBuilder: Sendable {
             coiAnalysis: coiAnalysis,
             trialRegistrations: trialRegistrations,
             outcomeSwitchingDetected: outcomeSwitchingDetected,
-            title: title
+            title: title,
+            trialRegistrationAssessed: trialRegistrationAssessed
         )
 
         return TransparencyResult(

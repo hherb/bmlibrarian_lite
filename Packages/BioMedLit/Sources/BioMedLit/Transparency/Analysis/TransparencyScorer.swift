@@ -105,7 +105,8 @@ public enum TransparencyScorer {
         let level = dataAvailability.disclosureLevel
         components.append(ScoreComponent(
             label: "Data availability: \(level.displayName.lowercased())",
-            points: dataAvailabilityPoints(for: level)
+            points: dataAvailabilityPoints(for: level),
+            recordsMissingStatement: level == .notStated
         ))
 
         // Stated as the separate terms `coiDisclosurePoints` adds up, so a
@@ -125,7 +126,8 @@ public enum TransparencyScorer {
         } else {
             components.append(ScoreComponent(
                 label: "No conflict of interest statement found",
-                points: coiDisclosurePoints(hasStatement: false)
+                points: coiDisclosurePoints(hasStatement: false),
+                recordsMissingStatement: true
             ))
         }
 
@@ -398,6 +400,9 @@ public enum TransparencyScorer {
     ///   - trialRegistrations: List of trial registrations found.
     ///   - outcomeSwitchingDetected: Whether outcome switching was detected.
     ///   - title: Study title (for missing registration check).
+    ///   - trialRegistrationAssessed: Whether ClinicalTrials.gov answered for
+    ///     every trial the article cites; without that answer a missing
+    ///     registration is not reported.
     /// - Returns: List of human-readable risk indicator strings.
     public static func identifyRiskIndicators(
         industryFundingDetected: Bool,
@@ -406,7 +411,8 @@ public enum TransparencyScorer {
         coiAnalysis: COIAnalysisResult,
         trialRegistrations: [TrialRegistration],
         outcomeSwitchingDetected: Bool,
-        title: String?
+        title: String?,
+        trialRegistrationAssessed: Bool = false
     ) -> [String] {
         var indicators: [String] = []
         let restrictedOrUnavailable: [DataDisclosureLevel] = [.notAvailable, .restricted]
@@ -466,7 +472,8 @@ public enum TransparencyScorer {
         // Missing trial registration
         if let warning = TrialComplianceAnalyzer.checkMissingRegistration(
             title: title,
-            registrations: trialRegistrations
+            registrations: trialRegistrations,
+            registrationAssessed: trialRegistrationAssessed
         ) {
             indicators.append(warning)
         }

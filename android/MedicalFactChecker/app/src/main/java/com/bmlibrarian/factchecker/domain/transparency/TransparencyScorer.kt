@@ -92,6 +92,7 @@ object TransparencyScorer {
             ScoreComponent(
                 label = "Data availability: ${level.displayName.lowercase()}",
                 points = dataAvailabilityPoints(level),
+                recordsMissingStatement = level == DataDisclosureLevel.NOT_STATED,
             ),
         )
 
@@ -118,6 +119,7 @@ object TransparencyScorer {
                 ScoreComponent(
                     label = "No conflict of interest statement found",
                     points = coiDisclosurePoints(hasStatement = false),
+                    recordsMissingStatement = true,
                 ),
             )
         }
@@ -346,6 +348,8 @@ object TransparencyScorer {
      * @param trialRegistrations Trial registrations found.
      * @param outcomeSwitchingDetected Whether outcome switching was detected.
      * @param title Study title (for the missing-registration check).
+     * @param trialRegistrationAssessed Whether ClinicalTrials.gov answered for every trial the
+     *   article cites; without that answer a missing registration is not reported.
      * @return The indicators, drawn from [RiskIndicatorStrings].
      */
     fun identifyRiskIndicators(
@@ -356,6 +360,7 @@ object TransparencyScorer {
         trialRegistrations: List<TrialRegistration>,
         outcomeSwitchingDetected: Boolean,
         title: String?,
+        trialRegistrationAssessed: Boolean = false,
     ): List<String> {
         val indicators = mutableListOf<String>()
         val level = dataAvailability.disclosureLevel
@@ -395,7 +400,8 @@ object TransparencyScorer {
             indicators.add(RiskIndicatorStrings.COMBINED_INDUSTRY_DATA)
         }
 
-        TrialComplianceAnalyzer.checkMissingRegistration(title, trialRegistrations)?.let { indicators.add(it) }
+        TrialComplianceAnalyzer.checkMissingRegistration(title, trialRegistrations, trialRegistrationAssessed)
+            ?.let { indicators.add(it) }
 
         return indicators.distinct()
     }

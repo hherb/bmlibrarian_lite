@@ -51,7 +51,12 @@ public enum TransparencyConstants {
     ///   tier, and when it is returned anyway because nothing better existed,
     ///   the app passes `nil` rather than its abstract to ``analyze``. Both
     ///   change which evidence reaches the scorer, in opposite directions.
-    public static let analyzerVersion = 3
+    /// - Version 4 (2026-09-24): results record whether the full text was
+    ///   searched (``TransparencyResult/fullTextSearched``), and a missing trial
+    ///   registration is reported only when ClinicalTrials.gov answered for
+    ///   every cited trial. A result without the record has unknown certainty,
+    ///   and its note asks for re-analysis, which only staleness offers.
+    public static let analyzerVersion = 4
 
 
     // MARK: - API URLs
@@ -209,6 +214,13 @@ public enum TransparencyConstants {
 
     /// Name recorded in `dataSourcesUsed` when CrossRef returned the work.
     public static let crossRefSourceName = "CrossRef"
+
+    /// Warning recorded when CrossRef, the only source of funders, could not be
+    /// reached or its answer could not be read: "industry funding: not detected"
+    /// then means not looked for.
+    public static let crossRefUnreachableWarning =
+        "CrossRef could not be reached, so this study's funders were not checked; "
+        + "industry funding may be present though none is reported."
 
     // MARK: - Date Parsing Defaults
 

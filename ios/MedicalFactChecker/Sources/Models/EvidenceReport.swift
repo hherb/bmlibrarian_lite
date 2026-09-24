@@ -192,10 +192,16 @@ final class EvidenceReport {
         // The screen and the printed report discuss every high-risk study;
         // text a reader copies or exports must not drop that discussion.
         let documents = session?.documents ?? []
-        let highRisk = HighRiskTransparencySection.plainText(
+        let counts = TransparencyReportCounts(documents: documents)
+        let highRiskSection = HighRiskTransparencySection.plainText(
             for: Document.highRiskTransparencyEntries(in: documents),
-            unassessedCount: documents.filter(\.transparencyIsUnassessed).count
-        ).map { "---\n\n\($0)\n\n" } ?? ""
+            unassessedCount: counts.unassessed
+        )
+        // An unreadable stored analysis is named, not dropped from the text.
+        let transparencyText = [counts.unreadableSummary, highRiskSection].compactMap { $0 }
+        let highRisk = transparencyText.isEmpty
+            ? ""
+            : "---\n\n\(transparencyText.joined(separator: "\n\n"))\n\n"
         return """
         MEDICAL FACT CHECK REPORT
         Generated: \(generatedAt.formatted(date: .abbreviated, time: .shortened))

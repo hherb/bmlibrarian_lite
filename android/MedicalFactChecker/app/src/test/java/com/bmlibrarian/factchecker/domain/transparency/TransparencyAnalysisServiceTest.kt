@@ -170,23 +170,22 @@ class TransparencyAnalysisServiceTest {
         assertEquals(SponsorType.UNKNOWN, result.sponsorType)
     }
 
-    // ==================== silent degradation (as in Swift) ====================
+    // ==================== failed lookups ====================
 
     /**
-     * Known defect, ported faithfully: an unreachable CrossRef produces the same
-     * stored result as a CrossRef that does not have the work. Only the log differs.
-     * Industry funding therefore goes undetected and cannot trigger the HIGH rule.
+     * An unreachable CrossRef is recorded, so "industry funding: not detected" does not
+     * read as a checked funder list; a work CrossRef does not have (404) records nothing.
      */
     @Test
-    fun `a CrossRef outage is indistinguishable from an absent work`() = runBlocking {
+    fun `a CrossRef outage is recorded, unlike an absent work`() = runBlocking {
         crossRefFails(doiWithFunders)
         val failed = service().analyze(doi = doiWithFunders)
         val absent = service().analyze(doi = "10.1000/absent")
 
         assertFalse(failed.industryFundingDetected)
         assertEquals(absent.dataSourcesUsed, failed.dataSourcesUsed)
-        assertEquals(absent.warnings, failed.warnings)
-        assertTrue(failed.errors.isEmpty())
+        assertEquals(listOf(TransparencyConstants.CROSSREF_UNREACHABLE_WARNING), failed.warnings)
+        assertFalse(absent.warnings.contains(TransparencyConstants.CROSSREF_UNREACHABLE_WARNING))
         assertTrue(Log.lines.any { it.contains("CrossRef fetch failed for DOI $doiWithFunders") })
     }
 
@@ -246,22 +245,44 @@ class TransparencyAnalysisServiceTest {
     }
 
     /**
-     * Known defect, ported faithfully: when ClinicalTrials.gov cannot be reached,
-     * a registered trial is reported as "without detected registration" — an
-     * unreachable registry asserted as a finding against the study.
+     * An unreachable registry leaves the registration unchecked, not missing: the outage
+     * is recorded and the trial is not reported as unregistered.
      */
     @Test
-    fun `a registry outage reports a registered trial as unregistered`() = runBlocking {
+    fun `a registry outage leaves the registration unchecked, not missing`() = runBlocking {
         crossRefWork("10.1000/trial", trialTitledWork("NCT01234567"))
         routes["/ctgov/studies/NCT01234567"] = MockResponse().setResponseCode(SERVER_ERROR)
 
         val result = service().analyze(doi = "10.1000/trial")
 
         assertTrue(result.trialRegistrations.isEmpty())
-        assertTrue(result.warnings.contains(RiskIndicatorStrings.MISSING_TRIAL_REGISTRATION))
-        assertTrue(result.riskIndicators.contains(RiskIndicatorStrings.MISSING_TRIAL_REGISTRATION))
-        assertTrue(result.errors.isEmpty())
+        assertTrue(result.warnings.contains(TrialComplianceAnalyzer.registryUnreachableWarning("NCT01234567")))
+        assertFalse(result.warnings.contains(RiskIndicatorStrings.MISSING_TRIAL_REGISTRATION))
+        assertFalse(result.riskIndicators.contains(RiskIndicatorStrings.MISSING_TRIAL_REGISTRATION))
         assertTrue(Log.lines.any { it.contains("ClinicalTrials.gov fetch failed for NCT01234567") })
+    }
+
+    /** A registry that answers it has no such trial is a finding about the study. */
+    @Test
+    fun `a trial the registry has no record of is reported missing`() = runBlocking {
+        crossRefWork("10.1000/trial", trialTitledWork("NCT07654321"))
+
+        val result = service().analyze(doi = "10.1000/trial")
+
+        assertTrue(result.trialRegistrations.isEmpty())
+        assertTrue(result.warnings.contains(TrialComplianceAnalyzer.registryHasNoRecordWarning("NCT07654321")))
+        assertTrue(result.riskIndicators.contains(RiskIndicatorStrings.MISSING_TRIAL_REGISTRATION))
+    }
+
+    /** With no trial ID to look up, nothing was asked, so nothing is reported missing. */
+    @Test
+    fun `a trial title without an NCT id is not reported unregistered`() = runBlocking {
+        crossRefWork("10.1000/trial", """{"title": ["A randomized trial of X"]}""")
+
+        val result = service().analyze(doi = "10.1000/trial")
+
+        assertFalse(result.riskIndicators.contains(RiskIndicatorStrings.MISSING_TRIAL_REGISTRATION))
+        assertFalse(result.warnings.contains(RiskIndicatorStrings.MISSING_TRIAL_REGISTRATION))
     }
 
     // ==================== full text ====================

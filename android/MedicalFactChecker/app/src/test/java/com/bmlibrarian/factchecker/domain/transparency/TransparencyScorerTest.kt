@@ -29,7 +29,10 @@ class TransparencyScorerTest {
         coi: COIAnalysisResult = COIAnalysisResult.NOT_AVAILABLE,
         switching: Boolean = false,
         title: String? = null,
-    ) = TransparencyScorer.identifyRiskIndicators(industry, data, compliance, coi, emptyList(), switching, title)
+        registrationAssessed: Boolean = false,
+    ) = TransparencyScorer.identifyRiskIndicators(
+        industry, data, compliance, coi, emptyList(), switching, title, registrationAssessed,
+    )
 
     // ==================== score ====================
 
@@ -198,7 +201,17 @@ class TransparencyScorerTest {
             data = data(DataDisclosureLevel.FULL_OPEN),
             coi = COIAnalysisResult(statement = "None"),
             title = "Randomized Controlled Trial",
+            registrationAssessed = true,
         ).any { it.contains("without detected registration") },
+    )
+
+    /** Without a registry's answer the empty list is not the study's, so nothing is reported. */
+    @Test fun `unassessed registration is not a missing registration`() = assertFalse(
+        indicators(
+            data = data(DataDisclosureLevel.FULL_OPEN),
+            coi = COIAnalysisResult(statement = "None"),
+            title = "Randomized Controlled Trial",
+        ).contains(RiskIndicatorStrings.MISSING_TRIAL_REGISTRATION),
     )
 
     @Test fun `outcome switching indicator`() = assertTrue(
@@ -255,6 +268,7 @@ class TransparencyScorerTest {
             coi = COIAnalysisResult(statement = "Grants from Pfizer", hasIndustryTies = true),
             switching = true,
             title = "Randomized Controlled Trial",
+            registrationAssessed = true,
         )
         assertEquals(
             listOf(
