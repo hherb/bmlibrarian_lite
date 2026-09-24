@@ -54,7 +54,8 @@ object CostCalculator {
      * @param modelId Model ID (e.g., "gpt-4o", "claude-sonnet-4-20250514")
      * @param inputTokens Number of input tokens
      * @param outputTokens Number of output tokens
-     * @return Cost in USD, or 0 if provider/model not found
+     * @return Cost in USD, or 0 if the provider is unknown or its rates cannot be
+     *   known (a custom endpoint)
      */
     fun calculateCost(
         providerId: String,
@@ -63,7 +64,7 @@ object CostCalculator {
         outputTokens: Int
     ): Double {
         val provider = LLMProvider.fromId(providerId) ?: return 0.0
-        val modelInfo = provider.getModel(modelId) ?: return 0.0
+        val modelInfo = provider.pricedModel(modelId) ?: return 0.0
         return calculateCost(modelInfo, inputTokens, outputTokens)
     }
 

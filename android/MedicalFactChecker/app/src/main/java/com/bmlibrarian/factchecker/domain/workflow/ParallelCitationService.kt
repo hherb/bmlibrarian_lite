@@ -107,7 +107,7 @@ class ParallelCitationService @Inject constructor(
         val semaphore = Semaphore(maxConcurrent.coerceAtLeast(1))
         val total = documents.size
         val completed = AtomicInteger(0)
-        val modelInfo = provider.getModel(model)
+        val modelInfo = provider.pricedModel(model)
 
         val deferredResults = documents.map { input ->
             async {

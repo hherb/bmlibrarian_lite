@@ -771,20 +771,85 @@ HTTP_STATUS_CODE_MAX = 999
 # Model Pricing (per 1M tokens, USD)
 # =============================================================================
 
-# Pricing data for cost estimation in benchmarking
-# Updated: December 2024
-# Source: https://www.anthropic.com/pricing (Anthropic)
-# Note: Ollama models are free (local inference)
-MODEL_PRICING: dict[str, dict[str, float]] = {
-    # Anthropic Claude models
-    "anthropic:claude-opus-4-20250514": {"input": 15.00, "output": 75.00},
-    "anthropic:claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
-    "anthropic:claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.00},
-    "anthropic:claude-3-5-sonnet-20241022": {"input": 3.00, "output": 15.00},
-    "anthropic:claude-3-opus-20240229": {"input": 15.00, "output": 75.00},
-    "anthropic:claude-3-sonnet-20240229": {"input": 3.00, "output": 15.00},
-    "anthropic:claude-3-haiku-20240307": {"input": 0.25, "output": 1.25},
+# Anthropic rates (input, output) per 1M tokens, September 2026.
+# Source: https://www.anthropic.com/pricing
+# Matched by substring, longest key first, so "claude-opus-4-8" is not captured
+# by the retired "claude-opus-4" rate and dated IDs resolve to their family row.
+# Mirrors the Anthropic rows of the iOS BioMedLit CostCalculator and the Android
+# ModelFetchService.
+ANTHROPIC_MODEL_PRICING: dict[str, tuple[float, float]] = {
+    "claude-fable-5-1": (10.00, 50.00),
+    "claude-fable-5": (10.00, 50.00),
+    "claude-mythos-5-1": (10.00, 50.00),
+    "claude-mythos-5": (10.00, 50.00),
+    "claude-opus-5-5": (4.00, 20.00),
+    "claude-opus-5": (5.00, 25.00),
+    "claude-opus-4-8": (5.00, 25.00),
+    "claude-opus-4-7": (5.00, 25.00),
+    "claude-opus-4-6": (5.00, 25.00),
+    "claude-opus-4-5": (5.00, 25.00),
+    "claude-opus-4-1": (15.00, 75.00),
+    "claude-opus-4": (15.00, 75.00),
+    "claude-sonnet-5": (2.00, 10.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-sonnet-4-5": (3.00, 15.00),
+    "claude-sonnet-4": (3.00, 15.00),
+    "claude-3-7-sonnet": (3.00, 15.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+    "claude-3-5-sonnet": (3.00, 15.00),
+    "claude-3-5-haiku": (0.80, 4.00),
+    "claude-3-opus": (15.00, 75.00),
+    "claude-3-sonnet": (3.00, 15.00),
+    "claude-3-haiku": (0.25, 1.25),
+}
 
+# Rates for a Claude ID missing from ANTHROPIC_MODEL_PRICING, by family, checked
+# in order. Anthropic ships models faster than this table is updated; each
+# family is quoted at its dearest current rate, so an unlisted model can be
+# overstated but never understated against its peers.
+ANTHROPIC_FAMILY_PRICING: tuple[tuple[str, float, float], ...] = (
+    ("fable", 10.00, 50.00),
+    ("mythos", 10.00, 50.00),
+    ("opus", 5.00, 25.00),
+    ("sonnet", 3.00, 15.00),
+    ("haiku", 1.00, 5.00),
+)
+
+# Rate for a Claude ID of no known family: the dearest current tier.
+ANTHROPIC_UNKNOWN_FAMILY_PRICING: tuple[float, float] = (10.00, 50.00)
+
+_ANTHROPIC_PRICING_KEYS_LONGEST_FIRST: tuple[str, ...] = tuple(
+    sorted(ANTHROPIC_MODEL_PRICING, key=lambda key: (-len(key), key))
+)
+
+
+def anthropic_model_pricing(model_id: str) -> tuple[float, float]:
+    """Get the per-1M-token rates for an Anthropic model.
+
+    Args:
+        model_id: Model ID as the API lists it, e.g. "claude-sonnet-5" or
+            "claude-haiku-4-5-20251001".
+
+    Returns:
+        (input, output) USD per 1M tokens. An ID matching no table key is
+        priced at its family's dearest current rate, or the dearest tier
+        overall if its family is not recognised.
+    """
+    normalized = model_id.lower()
+    for key in _ANTHROPIC_PRICING_KEYS_LONGEST_FIRST:
+        if key in normalized:
+            return ANTHROPIC_MODEL_PRICING[key]
+    for family, input_rate, output_rate in ANTHROPIC_FAMILY_PRICING:
+        if family in normalized:
+            return (input_rate, output_rate)
+    return ANTHROPIC_UNKNOWN_FAMILY_PRICING
+
+
+# Pricing data for cost estimation in benchmarking. Anthropic models are priced
+# by anthropic_model_pricing(); Ollama models are free (local inference).
+ANTHROPIC_MODEL_STRING_PREFIX = "anthropic:"
+
+MODEL_PRICING: dict[str, dict[str, float]] = {
     # Ollama models (free - local inference)
     "ollama:llama3.2": {"input": 0.0, "output": 0.0},
     "ollama:llama3.2:3b": {"input": 0.0, "output": 0.0},
@@ -811,6 +876,11 @@ def get_model_pricing(model_string: str) -> dict[str, float]:
     Returns:
         Dict with "input" and "output" keys (price per 1M tokens)
     """
+    if model_string.startswith(ANTHROPIC_MODEL_STRING_PREFIX):
+        input_rate, output_rate = anthropic_model_pricing(
+            model_string[len(ANTHROPIC_MODEL_STRING_PREFIX):]
+        )
+        return {"input": input_rate, "output": output_rate}
     return MODEL_PRICING.get(model_string, DEFAULT_MODEL_PRICING)
 
 

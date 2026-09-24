@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import BioMedLit
 import Foundation
 
 /// Service for fetching available models from LLM provider APIs.
@@ -122,6 +123,74 @@ actor ModelFetchService {
         }
     }
 
+    /// Build the model-list endpoint for a provider.
+    ///
+    /// `baseURL` follows the same convention as ``LLMProvider/baseURL`` and
+    /// `AppSettings.llmBaseURL`: it is the API root *including* the version segment
+    /// (`https://api.anthropic.com/v1`), which `LLMService` extends with
+    /// `chat/completions`. The model list therefore lives at `<root>/models`.
+    /// Appending `v1/models` instead - as this service once did - produced
+    /// `/v1/v1/models`, a 404 for Anthropic, OpenAI, Groq and Mistral alike, so the
+    /// Refresh button could never succeed however valid the key.
+    ///
+    /// Ollama is the exception: its model list is on the native API (`/api/tags`),
+    /// outside the OpenAI-compatible `/v1` root, so that segment is stripped.
+    ///
+    /// - Parameters:
+    ///   - provider: The LLM provider.
+    ///   - baseURL: The configured API root, or nil/blank for the provider default.
+    /// - Returns: The URL to request the model list from.
+    /// - Throws: `ModelFetchError.invalidBaseURL` if the root is not an http(s) URL.
+    static func modelListURL(for provider: LLMProvider, baseURL: String?) throws -> URL {
+        let configured = baseURL?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var root = configured.isEmpty ? provider.baseURL : configured
+        while root.hasSuffix("/") {
+            root.removeLast()
+        }
+
+        let versionSegment = "/v1"
+        let path: String
+        if provider == .ollama {
+            if root.hasSuffix(versionSegment) {
+                root.removeLast(versionSegment.count)
+            }
+            path = "api/tags"
+        } else {
+            path = "models"
+        }
+
+        guard let rootURL = URL(string: root),
+              let scheme = rootURL.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              rootURL.host != nil else {
+            throw ModelFetchError.invalidBaseURL
+        }
+        return rootURL.appendingPathComponent(path)
+    }
+
+    /// Page size requested from Anthropic's model list (the API maximum).
+    ///
+    /// The endpoint is paginated with a default page of 20; asking for the maximum
+    /// keeps a newer model from falling off the end of the picker.
+    static let anthropicModelPageLimit = 1000
+
+    /// Build Anthropic's model-list URL, asking for the largest page.
+    ///
+    /// - Parameter baseURL: The configured API root, or nil for the default.
+    /// - Returns: `<root>/models?limit=1000`.
+    /// - Throws: `ModelFetchError.invalidBaseURL` if the root is not an http(s) URL.
+    static func anthropicModelListURL(baseURL: String?) throws -> URL {
+        let url = try modelListURL(for: .anthropic, baseURL: baseURL)
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            throw ModelFetchError.invalidBaseURL
+        }
+        components.queryItems = [URLQueryItem(name: "limit", value: String(anthropicModelPageLimit))]
+        guard let pagedURL = components.url else {
+            throw ModelFetchError.invalidBaseURL
+        }
+        return pagedURL
+    }
+
     /// Decode a model-list response, reporting a shape change as a parse failure.
     ///
     /// A `DecodingError` surfaced as-is reads "The data couldn't be read because it isn't
@@ -150,8 +219,7 @@ actor ModelFetchService {
             throw ModelFetchError.noAPIKey
         }
 
-        let url = URL(string: baseURL ?? "https://api.anthropic.com")!
-            .appendingPathComponent("v1/models")
+        let url = try Self.anthropicModelListURL(baseURL: baseURL)
 
         var request = URLRequest(url: url, timeoutInterval: Self.requestTimeout)
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
@@ -168,20 +236,37 @@ actor ModelFetchService {
 
         let result = try Self.decodeModelList(AnthropicModelsResponse.self, from: data)
 
-        return result.data
+        let usable = result.data
             .filter { isUsableAnthropicModel($0.id) }
-            .map { model in
-                let pricing = getAnthropicPricing(for: model.id)
-                return LLMModel(
-                    id: model.id,
-                    displayName: formatAnthropicModelName(model.id),
-                    description: model.displayName ?? "Anthropic Claude model",
-                    inputPrice: pricing.input,
-                    outputPrice: pricing.output,
-                    isRecommended: model.id.contains("sonnet-4-5")
-                )
-            }
-            .sorted { $0.id > $1.id }  // Newest first
+            .sorted { $0.id > $1.id }  // Within a family, newer versions sort first
+        let recommendedID = Self.recommendedAnthropicModelID(among: usable.map(\.id))
+
+        return usable.map { model in
+            let pricing = CostCalculator.getPricing(for: model.id)
+            return LLMModel(
+                id: model.id,
+                displayName: formatAnthropicModelName(model.id),
+                description: model.displayName ?? "Anthropic Claude model",
+                inputPrice: pricing.input,
+                outputPrice: pricing.output,
+                isRecommended: model.id == recommendedID
+            )
+        }
+    }
+
+    /// Model family recommended as the Anthropic default.
+    private static let recommendedAnthropicFamily = "sonnet"
+
+    /// Pick the Anthropic model to flag as the recommended default.
+    ///
+    /// Keyed off the family rather than an exact ID: pinning "sonnet-4-5" left
+    /// Sonnet 5 unrecommended, and once Sonnet 4.5 retires nothing would be, so
+    /// the selection would fall through to whichever ID sorted first.
+    ///
+    /// - Parameter ids: Model IDs, newest version first within each family.
+    /// - Returns: The newest Sonnet, or nil if the list has none.
+    static func recommendedAnthropicModelID(among ids: [String]) -> String? {
+        ids.first { $0.lowercased().contains(recommendedAnthropicFamily) }
     }
 
     /// Check if an Anthropic model is usable for chat completion.
@@ -210,33 +295,13 @@ actor ModelFetchService {
         return "Claude \(modelName) \(version)"
     }
 
-    /// Get pricing for Anthropic models.
-    private func getAnthropicPricing(for modelId: String) -> (input: Double, output: Double) {
-        // Pricing per 1M tokens (January 2026)
-        if modelId.contains("opus-4-5") {
-            return (5.00, 25.00)
-        } else if modelId.contains("sonnet-4-5") {
-            return (3.00, 15.00)
-        } else if modelId.contains("haiku-4-5") {
-            return (1.00, 5.00)
-        } else if modelId.contains("opus-4-1") || modelId.contains("opus-4-0") {
-            return (15.00, 75.00)
-        } else if modelId.contains("sonnet-4") || modelId.contains("sonnet-3-7") {
-            return (3.00, 15.00)
-        } else if modelId.contains("haiku") {
-            return (0.25, 1.25)
-        }
-        return (3.00, 15.00)  // Default
-    }
-
     /// Fetch models from OpenAI API.
     private func fetchOpenAIModels(apiKey: String?, baseURL: String?) async throws -> [LLMModel] {
         guard let apiKey = apiKey, !apiKey.isEmpty else {
             throw ModelFetchError.noAPIKey
         }
 
-        let url = URL(string: baseURL ?? "https://api.openai.com")!
-            .appendingPathComponent("v1/models")
+        let url = try Self.modelListURL(for: .openai, baseURL: baseURL)
 
         var request = URLRequest(url: url, timeoutInterval: Self.requestTimeout)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -360,8 +425,7 @@ actor ModelFetchService {
             throw ModelFetchError.noAPIKey
         }
 
-        let url = URL(string: baseURL ?? "https://api.groq.com/openai")!
-            .appendingPathComponent("v1/models")
+        let url = try Self.modelListURL(for: .groq, baseURL: baseURL)
 
         var request = URLRequest(url: url, timeoutInterval: Self.requestTimeout)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -453,8 +517,7 @@ actor ModelFetchService {
             throw ModelFetchError.noAPIKey
         }
 
-        let url = URL(string: baseURL ?? "https://api.mistral.ai")!
-            .appendingPathComponent("v1/models")
+        let url = try Self.modelListURL(for: .mistral, baseURL: baseURL)
 
         var request = URLRequest(url: url, timeoutInterval: Self.requestTimeout)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -545,8 +608,7 @@ actor ModelFetchService {
             throw ModelFetchError.noAPIKey
         }
 
-        let url = URL(string: baseURL ?? "https://api.deepseek.com")!
-            .appendingPathComponent("models")
+        let url = try Self.modelListURL(for: .deepseek, baseURL: baseURL)
 
         var request = URLRequest(url: url, timeoutInterval: Self.requestTimeout)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -654,14 +716,7 @@ actor ModelFetchService {
 
     /// Fetch models from local Ollama server.
     private func fetchOllamaModels(baseURL: String?) async throws -> [LLMModel] {
-        // Ollama's native API is at /api/tags, not the OpenAI-compatible /v1 endpoint
-        // Strip /v1 suffix if present to get the base Ollama URL
-        var ollamaBaseURL = baseURL ?? "http://localhost:11434"
-        if ollamaBaseURL.hasSuffix("/v1") {
-            ollamaBaseURL = String(ollamaBaseURL.dropLast(3))
-        }
-        let url = URL(string: ollamaBaseURL)!
-            .appendingPathComponent("api/tags")
+        let url = try Self.modelListURL(for: .ollama, baseURL: baseURL)
 
         let request = URLRequest(url: url, timeoutInterval: Self.requestTimeout)
 
@@ -747,6 +802,7 @@ enum ModelFetchError: LocalizedError {
     case noAPIKey
     case apiError(statusCode: Int)
     case invalidResponse
+    case invalidBaseURL
     case parseError
 
     var errorDescription: String? {
@@ -760,6 +816,8 @@ enum ModelFetchError: LocalizedError {
             return "Model list request failed (HTTP \(statusCode))"
         case .invalidResponse:
             return "The server did not return an HTTP response - check the base URL"
+        case .invalidBaseURL:
+            return "The base URL is not a valid http(s) address"
         case .parseError:
             return "The provider's model list was not in the expected format"
         }

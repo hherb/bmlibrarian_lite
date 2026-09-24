@@ -209,6 +209,22 @@ data class LLMProvider(
     fun getModel(modelId: String): ModelInfo? = models.find { it.id == modelId }
 
     /**
+     * Get the pricing to record a model's cost with.
+     *
+     * [getModel] consults only this provider's fallback list, so a model the user
+     * picked from a fetched list is missing from it; costing with [getModel] alone
+     * recorded such a model at $0, which the run and monthly budgets never caught.
+     *
+     * @param modelId The model ID in use.
+     * @return The listed model, else one priced by [ModelPricing]; null only when
+     *   the rates cannot be known (a custom endpoint).
+     */
+    fun pricedModel(modelId: String): ModelInfo? =
+        getModel(modelId) ?: ModelPricing.forModel(id, modelId)?.let { (input, output) ->
+            ModelInfo(modelId, modelId, input, output)
+        }
+
+    /**
      * Get the chat completions endpoint URL.
      *
      * @return Full URL for chat completions API
