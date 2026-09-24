@@ -66,4 +66,53 @@ final class CostCalculatorPricingTests: XCTestCase {
         XCTAssertEqual(pro.input, 1.32, accuracy: 0.0001)
         XCTAssertEqual(pro.output, 3.96, accuracy: 0.0001)
     }
+
+    func testCurrentClaudeModelsArePriced() {
+        // Each of these used to miss every key and fall through to the $1/$3 default.
+        let expected: [(id: String, input: Double, output: Double)] = [
+            ("claude-fable-5-1", 10.00, 50.00),
+            ("claude-opus-5-5", 4.00, 20.00),
+            ("claude-opus-5", 5.00, 25.00),
+            ("claude-sonnet-5", 2.00, 10.00),
+            ("claude-haiku-4-5-20251001", 1.00, 5.00),
+        ]
+        for model in expected {
+            let pricing = CostCalculator.getPricing(for: model.id)
+            XCTAssertEqual(pricing.input, model.input, accuracy: 0.0001, model.id)
+            XCTAssertEqual(pricing.output, model.output, accuracy: 0.0001, model.id)
+        }
+    }
+
+    func testNewerOpus4IsNotCapturedByTheRetiredOpus4Rate() {
+        // "claude-opus-4-8" contains "claude-opus-4" ($15/$75, threefold dearer).
+        for id in ["claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8"] {
+            let pricing = CostCalculator.getPricing(for: id)
+            XCTAssertEqual(pricing.input, 5.00, accuracy: 0.0001, id)
+            XCTAssertEqual(pricing.output, 25.00, accuracy: 0.0001, id)
+        }
+        // "claude-sonnet-4-6" contains "claude-sonnet-4"; same rate, but must match.
+        XCTAssertEqual(CostCalculator.getPricing(for: "claude-sonnet-4-6").input, 3.00, accuracy: 0.0001)
+    }
+
+    func testUnlistedClaudeModelIsPricedByFamilyNotTheGenericDefault() {
+        // A model released after this table was written must not be quoted at $1/$3.
+        let sonnet = CostCalculator.getPricing(for: "claude-sonnet-6")
+        XCTAssertEqual(sonnet.input, 3.00, accuracy: 0.0001)
+        XCTAssertEqual(sonnet.output, 15.00, accuracy: 0.0001)
+
+        let opus = CostCalculator.getPricing(for: "claude-opus-6")
+        XCTAssertEqual(opus.input, 5.00, accuracy: 0.0001)
+        XCTAssertEqual(opus.output, 25.00, accuracy: 0.0001)
+
+        let unknownFamily = CostCalculator.getPricing(for: "claude-lyric-1")
+        XCTAssertEqual(unknownFamily.input, 10.00, accuracy: 0.0001)
+        XCTAssertEqual(unknownFamily.output, 50.00, accuracy: 0.0001)
+    }
+
+    func testUnknownNonClaudeModelKeepsGenericDefault() {
+        // Control: the family fallback applies to Claude IDs only.
+        let pricing = CostCalculator.getPricing(for: "some-unknown-model")
+        XCTAssertEqual(pricing.input, 1.00, accuracy: 0.0001)
+        XCTAssertEqual(pricing.output, 3.00, accuracy: 0.0001)
+    }
 }

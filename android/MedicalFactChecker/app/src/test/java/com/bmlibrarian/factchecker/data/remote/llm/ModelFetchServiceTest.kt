@@ -80,4 +80,28 @@ class ModelFetchServiceTest {
         assertEquals(1.32, pro.first, 0.0001)
         assertEquals(3.96, pro.second, 0.0001)
     }
+
+    // ==================== Anthropic Pricing Tests ====================
+
+    @Test
+    fun `current Claude models are priced`() {
+        // Each of these used to fall through to the $3/$15 default.
+        assertEquals(10.00 to 50.00, ModelFetchService.getAnthropicPricing("claude-fable-5-1"))
+        assertEquals(4.00 to 20.00, ModelFetchService.getAnthropicPricing("claude-opus-5-5"))
+        assertEquals(5.00 to 25.00, ModelFetchService.getAnthropicPricing("claude-opus-5"))
+        assertEquals(2.00 to 10.00, ModelFetchService.getAnthropicPricing("claude-sonnet-5"))
+        assertEquals(1.00 to 5.00, ModelFetchService.getAnthropicPricing("claude-haiku-4-5-20251001"))
+    }
+
+    @Test
+    fun `newer Opus 4 is not captured by the retired Opus 4 rate`() {
+        assertEquals(5.00 to 25.00, ModelFetchService.getAnthropicPricing("claude-opus-4-8"))
+        assertEquals(15.00 to 75.00, ModelFetchService.getAnthropicPricing("claude-opus-4-1"))
+    }
+
+    @Test
+    fun `unlisted Claude model is priced at its family's dearest rate`() {
+        assertEquals(3.00 to 15.00, ModelFetchService.getAnthropicPricing("claude-sonnet-6"))
+        assertEquals(10.00 to 50.00, ModelFetchService.getAnthropicPricing("claude-lyric-1"))
+    }
 }

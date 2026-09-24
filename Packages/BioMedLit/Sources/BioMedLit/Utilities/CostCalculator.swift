@@ -19,7 +19,7 @@ import Foundation
 /// Calculator for estimating LLM API costs.
 ///
 /// Prices are per 1 million tokens. Update these values as pricing changes.
-/// Last updated: February 2026
+/// Last updated: September 2026 (Anthropic); February-August 2026 (others)
 public enum CostCalculator {
     // MARK: - Pricing (per 1M tokens, USD)
 
@@ -40,7 +40,18 @@ public enum CostCalculator {
         "gpt-4.1-mini": (0.40, 1.60),
         "gpt-4-turbo": (10.00, 30.00),
 
-        // Anthropic models (February 2026)
+        // Anthropic models (September 2026)
+        "claude-fable-5-1": (10.00, 50.00),
+        "claude-fable-5": (10.00, 50.00),
+        "claude-mythos-5-1": (10.00, 50.00),
+        "claude-mythos-5": (10.00, 50.00),
+        "claude-opus-5-5": (4.00, 20.00),
+        "claude-opus-5": (5.00, 25.00),
+        "claude-opus-4-8": (5.00, 25.00),
+        "claude-opus-4-7": (5.00, 25.00),
+        "claude-opus-4-6": (5.00, 25.00),
+        "claude-sonnet-5": (2.00, 10.00),
+        "claude-sonnet-4-6": (3.00, 15.00),
         "claude-opus-4-5": (5.00, 25.00),
         "claude-sonnet-4-5": (3.00, 15.00),
         "claude-haiku-4-5": (1.00, 5.00),
@@ -78,6 +89,27 @@ public enum CostCalculator {
 
     /// Default pricing for unknown models.
     private static let defaultPricing: (input: Double, output: Double) = (1.0, 3.0)
+
+    /// Marker identifying an Anthropic model ID.
+    private static let anthropicModelMarker = "claude"
+
+    /// Rates for a Claude ID missing from ``modelPricing``, by family, checked in order.
+    ///
+    /// Anthropic ships new models faster than this table is updated, and the generic
+    /// ``defaultPricing`` ($1/$3) understated them up to seventeenfold - Sonnet 5 and
+    /// Opus 5.5 both fell through to it, so the monthly budget undercounted real
+    /// spend. Each family is quoted at its dearest current rate instead, so an
+    /// unlisted model can be overstated but never understated against its peers.
+    private static let anthropicFamilyPricing: [(family: String, input: Double, output: Double)] = [
+        ("fable", 10.00, 50.00),
+        ("mythos", 10.00, 50.00),
+        ("opus", 5.00, 25.00),
+        ("sonnet", 3.00, 15.00),
+        ("haiku", 1.00, 5.00),
+    ]
+
+    /// Rate for a Claude ID of no known family: the dearest current tier.
+    private static let anthropicUnknownFamilyPricing: (input: Double, output: Double) = (10.00, 50.00)
 
     /// Provider name constant for Ollama (local inference).
     public static let ollamaProviderName = "ollama"
@@ -190,7 +222,22 @@ public enum CostCalculator {
             }
         }
 
+        if normalizedModel.contains(anthropicModelMarker) {
+            return anthropicFallbackPricing(for: normalizedModel)
+        }
         return defaultPricing
+    }
+
+    /// Price a Claude ID that no ``modelPricing`` key matches.
+    ///
+    /// - Parameter normalizedModel: The lowercased model ID.
+    /// - Returns: The family's dearest current rate, or the dearest tier overall if
+    ///   the family is not recognised.
+    private static func anthropicFallbackPricing(for normalizedModel: String) -> (input: Double, output: Double) {
+        for entry in anthropicFamilyPricing where normalizedModel.contains(entry.family) {
+            return (entry.input, entry.output)
+        }
+        return anthropicUnknownFamilyPricing
     }
 
     /// Estimate the cost for a typical fact-check run.

@@ -78,6 +78,71 @@ class ModelFetchService @Inject constructor(
         private val DEEPSEEK_NON_CHAT_MARKERS =
             listOf("embed", "rerank", "moderation", "ocr", "tts", "whisper")
 
+        /** Page size requested from Anthropic's model list (the API maximum). */
+        private const val ANTHROPIC_MODEL_PAGE_LIMIT = 1000
+
+        /**
+         * Anthropic rates per 1M tokens (input, output), September 2026.
+         *
+         * Matched by substring, longest key first, so "claude-opus-4-8" is not
+         * captured by the retired "claude-opus-4" rate. Mirrors the Anthropic rows
+         * of the iOS BioMedLit CostCalculator.
+         */
+        private val ANTHROPIC_PRICING: List<Pair<String, Pair<Double, Double>>> = listOf(
+            "claude-fable-5-1" to (10.00 to 50.00),
+            "claude-fable-5" to (10.00 to 50.00),
+            "claude-mythos-5-1" to (10.00 to 50.00),
+            "claude-mythos-5" to (10.00 to 50.00),
+            "claude-opus-5-5" to (4.00 to 20.00),
+            "claude-opus-5" to (5.00 to 25.00),
+            "claude-opus-4-8" to (5.00 to 25.00),
+            "claude-opus-4-7" to (5.00 to 25.00),
+            "claude-opus-4-6" to (5.00 to 25.00),
+            "claude-opus-4-5" to (5.00 to 25.00),
+            "claude-opus-4-1" to (15.00 to 75.00),
+            "claude-opus-4" to (15.00 to 75.00),
+            "claude-sonnet-5" to (2.00 to 10.00),
+            "claude-sonnet-4-6" to (3.00 to 15.00),
+            "claude-sonnet-4-5" to (3.00 to 15.00),
+            "claude-sonnet-4" to (3.00 to 15.00),
+            "claude-3-7-sonnet" to (3.00 to 15.00),
+            "claude-haiku-4-5" to (1.00 to 5.00),
+            "claude-3-haiku" to (0.25 to 1.25),
+        ).sortedByDescending { it.first.length }
+
+        /**
+         * Rates for a Claude ID missing from [ANTHROPIC_PRICING], by family, checked
+         * in order. Each family is quoted at its dearest current rate, so a model
+         * released after this table was written is never shown below its peers.
+         */
+        private val ANTHROPIC_FAMILY_PRICING: List<Pair<String, Pair<Double, Double>>> = listOf(
+            "fable" to (10.00 to 50.00),
+            "mythos" to (10.00 to 50.00),
+            "opus" to (5.00 to 25.00),
+            "sonnet" to (3.00 to 15.00),
+            "haiku" to (1.00 to 5.00),
+        )
+
+        /** Rate for a Claude ID of no known family: the dearest current tier. */
+        private val ANTHROPIC_UNKNOWN_FAMILY_PRICING = 10.00 to 50.00
+
+        /**
+         * Get pricing for an Anthropic model (per 1M tokens).
+         *
+         * The previous table stopped at the 4.5 generation and quoted everything
+         * newer at a $3/$15 default, overstating Sonnet 5 and understating the
+         * Fable tier fivefold.
+         *
+         * @param modelId The model ID as listed by the API.
+         * @return (input, output) USD per 1M tokens.
+         */
+        internal fun getAnthropicPricing(modelId: String): Pair<Double, Double> {
+            val normalized = modelId.lowercase()
+            ANTHROPIC_PRICING.firstOrNull { normalized.contains(it.first) }?.let { return it.second }
+            ANTHROPIC_FAMILY_PRICING.firstOrNull { normalized.contains(it.first) }?.let { return it.second }
+            return ANTHROPIC_UNKNOWN_FAMILY_PRICING
+        }
+
         /** DeepSeek vendor prefix stripped before building a display name. */
         private const val DEEPSEEK_PREFIX = "deepseek-"
 
@@ -243,7 +308,9 @@ class ModelFetchService @Inject constructor(
         }
 
         val baseUrl = customBaseUrl ?: "https://api.anthropic.com"
-        val url = "$baseUrl/v1/models"
+        // The endpoint pages at 20 by default; ask for the maximum so newer models
+        // don't fall off the end of the picker.
+        val url = "$baseUrl/v1/models?limit=$ANTHROPIC_MODEL_PAGE_LIMIT"
 
         val response = anthropicApi.listModels(
             url = url,
@@ -303,21 +370,6 @@ class ModelFetchService @Inject constructor(
         }
 
         return "Claude $modelName $version"
-    }
-
-    /**
-     * Get pricing for Anthropic models (per 1M tokens, January 2026).
-     */
-    private fun getAnthropicPricing(modelId: String): Pair<Double, Double> {
-        return when {
-            modelId.contains("opus-4-5") -> 5.00 to 25.00
-            modelId.contains("sonnet-4-5") -> 3.00 to 15.00
-            modelId.contains("haiku-4-5") -> 1.00 to 5.00
-            modelId.contains("opus-4-1") || modelId.contains("opus-4-0") -> 15.00 to 75.00
-            modelId.contains("sonnet-4") || modelId.contains("sonnet-3-7") -> 3.00 to 15.00
-            modelId.contains("haiku") -> 0.25 to 1.25
-            else -> 3.00 to 15.00  // Default
-        }
     }
 
     /**
