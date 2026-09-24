@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.ui.report.components
 
+import com.bmlibrarian.factchecker.ui.common.TransparencyDetails
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -170,6 +171,12 @@ fun DocumentDetailSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
+
+        // Transparency analysis
+        if (document.transparencyResultJson != null) {
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+            TransparencyDetails(document = document)
         }
 
         // Abstract (rendered as markdown for structured abstracts)

@@ -23,6 +23,7 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import kotlinx.coroutines.flow.Flow
@@ -57,12 +58,36 @@ interface DocumentDao {
     // ==================== Update Operations ====================
 
     /**
-     * Update an existing document.
+     * Write every column of an existing document, as given.
+     *
+     * Prefer [update], which keeps the stored transparency result.
      *
      * @param document The document entity with updated values
      */
     @Update
-    suspend fun update(document: DocumentEntity)
+    suspend fun updateAllColumns(document: DocumentEntity)
+
+    /**
+     * Update an existing document, keeping its stored transparency result.
+     *
+     * Callers read a row, `copy()` it and write it back to change its full text
+     * or score; none of them means to change the transparency result. Writing
+     * the copy whole would erase a result the workflow stored after the read,
+     * so the stored result is carried over inside the same transaction.
+     * Transparency is written only by [updateTransparency].
+     *
+     * @param document The document entity with updated values
+     */
+    @Transaction
+    suspend fun update(document: DocumentEntity) {
+        val stored = getById(document.id)
+        updateAllColumns(
+            document.copy(
+                transparencyResultJson = stored?.transparencyResultJson,
+                transparencyAnalyzedAt = stored?.transparencyAnalyzedAt
+            )
+        )
+    }
 
     /**
      * Update relevance score for a document.
@@ -155,6 +180,28 @@ interface DocumentDao {
         id: String,
         embeddingScore: Double,
         embeddingScoreNormalized: Int
+    )
+
+    /**
+     * Store a document's transparency result.
+     *
+     * Targeted rather than a whole-row update, so it neither overwrites nor is
+     * overwritten by a concurrent full-text or score write.
+     *
+     * @param id Document ID
+     * @param resultJson The `TransparencyResult` as JSON
+     * @param analyzedAt When the analysis was stored (epoch millis)
+     */
+    @Query("""
+        UPDATE documents SET
+            transparency_result_json = :resultJson,
+            transparency_analyzed_at = :analyzedAt
+        WHERE id = :id
+    """)
+    suspend fun updateTransparency(
+        id: String,
+        resultJson: String,
+        analyzedAt: Long = System.currentTimeMillis()
     )
 
     // ==================== Delete Operations ====================

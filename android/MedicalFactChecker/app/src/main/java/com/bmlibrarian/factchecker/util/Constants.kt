@@ -162,6 +162,13 @@ object Constants {
     /** Maximum number of authors to display before showing "et al." */
     const val MAX_AUTHORS_BEFORE_ET_AL = 3
 
+    /**
+     * Most failed transparency analyses a notice names by title; past this it
+     * gives a count, since a notice nobody finishes reading reports nothing.
+     * Matches iOS `WorkflowConstants.maxFailedTitlesToName`.
+     */
+    const val MAX_TRANSPARENCY_FAILURES_NAMED = 3
+
     /** Maximum lines of abstract to show before truncation. */
     const val MAX_ABSTRACT_LINES = 8
 

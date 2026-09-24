@@ -1,7 +1,13 @@
 # Transparency parity contract
 
-Shared, language-neutral fixtures pinning the data-availability classifier to
+Shared, language-neutral fixtures pinning the study-transparency classifiers to
 identical behaviour on Python, Swift and Kotlin (issue #105).
+
+| Contract | Python | Swift | Kotlin (Android) |
+| --- | --- | --- | --- |
+| `data_availability_patterns.json` / `data_availability_cases.json` | bound | bound | bound |
+| `sponsor_patterns.json` | bound | bound | bound |
+| `funder_names.json` (floors and composition) | bound | bound | bound |
 
 ## Why this exists
 
@@ -23,7 +29,8 @@ directory makes that check permanent.
 `sponsor_patterns.json` is a second pattern contract, covering the
 government/academic sponsor lists — see
 [The sponsor-pattern contract](#the-sponsor-pattern-contract) below. It binds
-Python and Swift only, because Android carries no funder or sponsor classifier.
+all three platforms: Android gained its funder and sponsor classifier when the
+Swift transparency analysis was ported to Kotlin.
 
 `funder_names.json` is a *measurement* corpus rather than a pattern contract —
 see [The funder-name corpus](#the-funder-name-corpus) below.
@@ -76,20 +83,23 @@ diff "${BMLIB:-$HOME/src/bmlib}/tests/data/funder_names.json" \
 ```
 
 Unlike the two data-availability fixtures, this one does **not** pin strings. It
-pins *measured quality*, on both platforms:
+pins *measured quality*, on all three platforms:
 
 | Platform | Classifier | Lists | Measurement |
 | --- | --- | --- | --- |
 | Python (canonical) | `study_transparency_analyzer.classify_funder_name` | `FUNDER_NAME_STEMS` / `FUNDER_NAME_WORDS` | `tests/test_funder_classification.py` |
 | Swift (BioMedLit) | `FundingAnalyzer.classifyFunder` | `IndustryPatterns.funderNameStems` / `funderNameWords` | `FunderClassificationTests` |
+| Kotlin (Android) | `FundingAnalyzer.classifyFunder` | `IndustryPatterns.funderNameStems` / `funderNameWords` (`android/…/domain/transparency/IndustryPatterns.kt`) | `FunderClassificationTest` |
 
 Each asserts floors of precision 0.90 and recall 0.30, plus that it beats the
 substring matcher it replaced (precision 0.455 / recall 0.167). Current measured
-figures on both platforms: **precision 0.909, recall 0.333** — the same ten true
-positives, the same single false positive and the same twenty misses, pinned by
-name in `TestCorpusComposition` and `FunderCorpusCompositionTests`. That is what
-makes this a parity check rather than two independent claims: the two platforms
-cannot drift apart without one of them failing its own copy of the composition.
+figures on all three platforms: **precision 0.909, recall 0.333** — the same ten
+true positives, the same single false positive and the same twenty misses, pinned
+by name in `TestCorpusComposition`, `FunderCorpusCompositionTests` and
+`FunderCorpusCompositionTest`. That is what makes this a parity check rather than
+three independent claims: no platform can drift from the others without failing
+its own copy of the composition. (Kotlin's `java.util.regex`, compiled with the
+`(?U)` flag, classifies every labelled name exactly as Swift's ICU engine does.)
 
 The distinction matters because the classifier is asymmetric:
 `industry_funding_detected` / `industryFundingDetected` feeds a HIGH-risk rule and
@@ -112,9 +122,6 @@ Sciences Research Council), each of which set `industry_funding_detected`, fed
 the HIGH-risk rule, and so downgraded the quality tier of every paper they fund.
 The canonical Python now carries the calibrated lists and reads this file.
 
-Android has no funder classifier yet. When one is added it should read the same
-file and assert the same floors.
-
 **Adding a name to the corpus is not free.** Every published figure above is a
 fraction of its counts, so an edit moves precision, recall and composition on
 both platforms at once — while both suites stay green, because they would simply
@@ -129,15 +136,17 @@ here means the two repositories have drifted.
 ### `sponsor_patterns.json` — who counts as a public funder
 
 The two halves that decide `sponsor_type`, asserted **string-for-string** by
-`TestSponsorPatternManifestParity` (Python) and
-`TransparencyParityTests` (Swift).
+`TestSponsorPatternManifestParity` (Python), `TransparencyParityTests` (Swift)
+and `SponsorPatternParityTest` (Kotlin).
 
 | Platform | Lists | Tiering |
 | --- | --- | --- |
 | Python (canonical) | `GOVERNMENT_PATTERNS` / `ACADEMIC_PATTERNS` | `determine_sponsor_type` |
 | Swift (BioMedLit) | `IndustryPatterns.governmentPatterns` / `academicPatterns` | `FundingAnalyzer.determineSponsorType` |
+| Kotlin (Android) | `IndustryPatterns.governmentPatterns` / `academicPatterns` | `FundingAnalyzer.determineSponsorType` |
 
-Android is not a party to this contract: it has no funder classifier at all.
+`SponsorPatternParityTest` also asserts the confidence ladder, the pattern
+probes and the non-industry concatenation, exactly as the Swift suite does.
 
 The split carries two distinct meanings, and an edit can break either:
 
@@ -193,7 +202,7 @@ Both statements in this directory are true of different things, and the
 distinction matters when they disagree:
 
 - **The JSON is canonical for the values.** Change a pattern or a confidence here
-  first, then transcribe it to both platforms. Neither platform's literals are
+  first, then transcribe it to all three platforms. No platform's literals are
   the source.
 - **Python is canonical for the behaviour.** Where the two platforms compute
   different answers from the same values — as they did on the confidences before
@@ -212,8 +221,8 @@ That is the reason the confidences are in the contract at all.
 ## Changing a pattern
 
 1. Edit `data_availability_patterns.json` (or `sponsor_patterns.json`).
-2. Make the same edit in all platform sources bound by that contract — all three
-   for data availability, Python and Swift for sponsor patterns.
+2. Make the same edit in all three platform sources — Python, Swift and Kotlin
+   are bound by both pattern contracts.
 3. Add or update cases in `data_availability_cases.json` covering the new
    behaviour, then run all three suites.
 
@@ -223,40 +232,48 @@ the feature: a change that does not touch all three is meant to fail.
 ```bash
 pytest tests/test_transparency_parity.py
 cd Packages/BioMedLit && swift test --filter TransparencyParityTests
-cd android/MedicalFactChecker && ./gradlew test --tests '*TransparencyParityTest'
+cd android/MedicalFactChecker && ./gradlew test --tests '*TransparencyParityTest' --tests '*SponsorPatternParityTest'
 ```
 
-Changing a *funder* pattern is a different workflow: edit the lists on **both**
-platforms — `FUNDER_NAME_STEMS` / `FUNDER_NAME_WORDS` in
-`study_transparency_analyzer.py` and `IndustryPatterns.funderNameStems` /
-`funderNameWords` in `TransparencyConstants.swift` — then re-run the measurement
+Changing a *funder* pattern is a different workflow: edit the lists on **all
+three** platforms — `FUNDER_NAME_STEMS` / `FUNDER_NAME_WORDS` in
+`study_transparency_analyzer.py`, `IndustryPatterns.funderNameStems` /
+`funderNameWords` in `TransparencyConstants.swift` and the same names in
+`android/…/domain/transparency/IndustryPatterns.kt` — then re-run the measurement
 rather than a string comparison.
 
 ```bash
 pytest tests/test_funder_classification.py
 cd Packages/BioMedLit && swift test --filter 'Funder|IndustryPattern'
+cd android/MedicalFactChecker && ./gradlew test --tests '*Funder*' --tests '*IndustryPattern*'
 ```
 
 Each platform holds the floors (`TestCorpusMeasurement`,
-`FunderClassificationTests`) and pins *which* names are matched, missed and
-wrongly matched (`TestCorpusComposition`, `FunderCorpusCompositionTests`). The
-floors alone cannot see a swap — one recognised funder traded for another leaves
-both metrics identical — and the recall floor of 0.30 against a measured 10/30
-tolerates losing a true positive outright. All three name lists are expected to
+`FunderClassificationTests`, `FunderClassificationTest`) and pins *which* names
+are matched, missed and wrongly matched (`TestCorpusComposition`,
+`FunderCorpusCompositionTests`, `FunderCorpusCompositionTest`). The floors alone
+cannot see a swap — one recognised funder traded for another leaves both metrics
+identical — and the recall floor of 0.30 against a measured 10/30 tolerates
+losing a true positive outright. That is measured, not hypothetical: on Android,
+changing the stem `laboratories` to `laboratorias` drops "Dr. Reddy's
+Laboratories" to a miss and leaves every floor green (precision 9/10, recall
+9/30); only the composition pins fail. All three name lists are expected to
 change; the point is that changing one is a deliberate edit with the funder's
 name in the diff.
 
-`TestPatternStructure` and `IndustryPatternStructureTests` cover the third gap: a
+`TestPatternStructure`, `IndustryPatternStructureTests` and
+`IndustryPatternStructureTest` cover the third gap: a
 pattern that matches *nothing* moves no metric, so a `\b`-anchored string placed
 in the substring list (where it becomes a literal search for a backslash and a
 "b") or an uppercase stem (which can never match a lowercased name) would
 otherwise ship green and silently stop flagging funders.
 
-An invalid regex is the one case where the two platforms differ rather than
+An invalid regex is the one case where the platforms differ rather than
 mirror: Python raises `re.error` at classification time, a crash rather than a
 silent no-op, while Swift's `RegexHelper` turns it into `nil` via `try?` and
-skips it for good. Both suites check that every pattern compiles, which is what
-keeps the lists interchangeable despite that.
+skips it for good, and Kotlin's `TransparencyRegex` does the same as Swift. All
+three suites check that every pattern compiles, which is what keeps the lists
+interchangeable despite that.
 
 The fixtures are read from this directory by path — deliberately not copied into
 per-platform test resources, since all three must read the same bytes and a copy

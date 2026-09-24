@@ -104,6 +104,7 @@ data class WorkflowProgress(
             WorkflowStep.SCORING_DOCUMENTS to 0.50f,
             WorkflowStep.AWAITING_USER_DECISION to 0.55f,
             WorkflowStep.EXTRACTING_CITATIONS to 0.75f,
+            WorkflowStep.ANALYZING_TRANSPARENCY to 0.80f,
             WorkflowStep.GENERATING_REPORT to 0.90f,
             WorkflowStep.FETCHING_MORE_EVIDENCE to 0.60f,
             WorkflowStep.COMPLETED to 1.0f,
@@ -139,6 +140,12 @@ data class WorkflowProgress(
 
         /** Progress range for citation extraction (from EXTRACTION_START to this + EXTRACTION_START). */
         const val PROGRESS_EXTRACTION_RANGE = 0.15f
+
+        /** Progress percentage when starting transparency analysis. */
+        const val PROGRESS_TRANSPARENCY_START = 0.75f
+
+        /** Progress range for transparency analysis (from TRANSPARENCY_START to this + TRANSPARENCY_START). */
+        const val PROGRESS_TRANSPARENCY_RANGE = 0.10f
 
         /** Progress percentage when scoring new documents during fetch more evidence. */
         const val PROGRESS_SCORING_MORE_EVIDENCE = 0.65f

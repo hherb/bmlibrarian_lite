@@ -63,7 +63,7 @@ import com.bmlibrarian.factchecker.data.local.entity.UsageRecordEntity
         ProcessingCheckpointEntity::class,
         ProcessingErrorEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -243,6 +243,20 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE sessions ADD COLUMN epmc_results_received INTEGER")
                 database.execSQL("ALTER TABLE sessions ADD COLUMN retrieval_shortfalls_json TEXT")
+            }
+        }
+
+        /**
+         * Migration from version 6 to 7.
+         *
+         * Adds each document's study-transparency result (#116) and when it was
+         * stored. Existing documents have none: they were never analysed, which
+         * is what a null result says.
+         */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE documents ADD COLUMN transparency_result_json TEXT")
+                database.execSQL("ALTER TABLE documents ADD COLUMN transparency_analyzed_at INTEGER")
             }
         }
     }

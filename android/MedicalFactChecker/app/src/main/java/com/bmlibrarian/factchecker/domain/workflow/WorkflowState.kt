@@ -111,6 +111,19 @@ sealed class WorkflowState {
     }
 
     /**
+     * Analysing the transparency of relevant documents.
+     *
+     * @property currentDocument Number of documents analysed so far
+     * @property totalDocuments Total number of documents to analyse
+     */
+    data class AnalyzingTransparency(
+        val currentDocument: Int,
+        val totalDocuments: Int
+    ) : WorkflowState() {
+        override val step = WorkflowStep.ANALYZING_TRANSPARENCY
+    }
+
+    /**
      * Generating the evidence report.
      */
     data object GeneratingReport : WorkflowState() {

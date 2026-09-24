@@ -115,7 +115,8 @@ class FactCheckWorkflowSearchFailureTest {
         checkpointManager = mockk(relaxed = true),
         errorPersistenceManager = mockk(relaxed = true),
         embeddingService = mockk(relaxed = true),
-        hydeGenerator = mockk(relaxed = true)
+        hydeGenerator = mockk(relaxed = true),
+        transparencyRunner = mockk(relaxed = true)
     )
 
     @Test

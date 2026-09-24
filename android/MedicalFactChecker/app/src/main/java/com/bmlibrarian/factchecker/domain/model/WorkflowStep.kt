@@ -44,6 +44,9 @@ enum class WorkflowStep {
     /** Extracting citation passages from relevant documents. */
     EXTRACTING_CITATIONS,
 
+    /** Analysing relevant documents' transparency (funding, COI, data, registration). */
+    ANALYZING_TRANSPARENCY,
+
     /** Generating the final evidence report. */
     GENERATING_REPORT,
 
@@ -76,6 +79,7 @@ enum class WorkflowStep {
         SEARCHING_PUBMED,
         SCORING_DOCUMENTS,
         EXTRACTING_CITATIONS,
+        ANALYZING_TRANSPARENCY,
         GENERATING_REPORT,
         FETCHING_MORE_EVIDENCE
     )

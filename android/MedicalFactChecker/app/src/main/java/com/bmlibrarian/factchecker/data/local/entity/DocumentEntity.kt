@@ -168,6 +168,22 @@ data class DocumentEntity(
     @ColumnInfo(name = "full_text_unavailable")
     val fullTextUnavailable: Boolean = false,
 
+    // ==================== Transparency Analysis ====================
+
+    /**
+     * The study-transparency result, as `TransparencyResult` JSON.
+     *
+     * Written only by the targeted [com.bmlibrarian.factchecker.data.local.dao.DocumentDao.updateTransparency],
+     * never by a whole-row update: several screens read a row, `copy()` it and
+     * write it back, which would otherwise erase a result stored in between.
+     */
+    @ColumnInfo(name = "transparency_result_json")
+    val transparencyResultJson: String? = null,
+
+    /** When the transparency analysis was stored. */
+    @ColumnInfo(name = "transparency_analyzed_at")
+    val transparencyAnalyzedAt: Date? = null,
+
     // ==================== Batch Tracking ====================
 
     /** Batch number this document was retrieved in. */

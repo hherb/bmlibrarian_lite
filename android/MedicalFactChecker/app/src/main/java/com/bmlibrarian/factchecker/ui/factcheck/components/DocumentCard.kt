@@ -18,6 +18,9 @@
 
 package com.bmlibrarian.factchecker.ui.factcheck.components
 
+import com.bmlibrarian.factchecker.ui.common.TransparencyRiskBadge
+import com.bmlibrarian.factchecker.domain.transparency.transparencyResult
+import com.bmlibrarian.factchecker.domain.transparency.transparencyCertainty
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -273,6 +276,12 @@ fun DocumentCard(
                     SourceBadge(source = document.source)
                     if (document.isPreprint) {
                         PreprintBadge()
+                    }
+                    document.transparencyResult?.let { result ->
+                        TransparencyRiskBadge(
+                            level = result.riskLevel,
+                            certainty = document.transparencyCertainty
+                        )
                     }
                     document.pmid?.let {
                         Text(
