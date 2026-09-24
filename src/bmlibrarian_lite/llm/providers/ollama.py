@@ -298,26 +298,31 @@ class OllamaProvider(BaseProvider):
     def list_models(self) -> list[ModelMetadata]:
         """Query Ollama for available models with full metadata.
 
+        An unreachable server is raised, not reported as an empty list: a server
+        with no models pulled and one that is down call for different fixes, and
+        an empty list made the second look like the first.
+
         Returns:
-            List of ModelMetadata for all available models.
+            List of ModelMetadata for all available models. Empty only when the
+            server answered and has no models installed.
+
+        Raises:
+            ImportError: If the ollama package is not installed.
+            Exception: Whatever the ollama client raises when the server cannot
+                be reached or rejects the request.
         """
-        try:
-            client = self._get_client()
-            response = client.list()
-            models = []
-            # Response is a ListResponse object with .models attribute
-            model_list = getattr(response, "models", []) or []
-            for model_info in model_list:
-                # Each model_info is a Model object with .model attribute
-                name = getattr(model_info, "model", "") or ""
-                if name:
-                    # Get full metadata via show()
-                    metadata = self._get_model_info(name)
-                    models.append(metadata)
-            return models
-        except Exception as e:
-            logger.warning(f"Failed to list Ollama models: {e}")
-            return []
+        client = self._get_client()
+        response = client.list()
+        models = []
+        # Response is a ListResponse object with .models attribute
+        model_list = getattr(response, "models", []) or []
+        for model_info in model_list:
+            # Each model_info is a Model object with .model attribute
+            name = getattr(model_info, "model", "") or ""
+            if name:
+                # Get full metadata via show()
+                models.append(self._get_model_info(name))
+        return models
 
     def test_connection(self) -> tuple[bool, str]:
         """Test Ollama server connectivity.

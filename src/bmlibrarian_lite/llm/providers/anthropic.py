@@ -33,6 +33,7 @@ from .base import (
     ModelPricing,
     ProviderCapabilities,
 )
+from ...constants import anthropic_model_pricing
 from ..data_types import LLMMessage, LLMResponse, strip_thinking_tags
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,6 @@ class AnthropicProvider(BaseProvider):
     Class Attributes:
         PROVIDER_NAME: "anthropic"
         DISPLAY_NAME: "Anthropic"
-        MODEL_PRICING: Dict mapping model IDs to their pricing.
         CACHE_TTL: Cache time-to-live in seconds for model list.
     """
 
@@ -56,18 +56,6 @@ class AnthropicProvider(BaseProvider):
     DESCRIPTION = "Claude models via Anthropic API"
     WEBSITE_URL = "https://console.anthropic.com"
     SETUP_INSTRUCTIONS = "Get API key from console.anthropic.com/account/keys"
-
-    # Known model pricing (costs per million tokens)
-    # Models are discovered via API, this provides pricing metadata
-    MODEL_PRICING: dict[str, ModelPricing] = {
-        "claude-opus-4-20250514": ModelPricing(input_cost=15.0, output_cost=75.0),
-        "claude-sonnet-4-20250514": ModelPricing(input_cost=3.0, output_cost=15.0),
-        "claude-3-5-sonnet-20241022": ModelPricing(input_cost=3.0, output_cost=15.0),
-        "claude-3-5-haiku-20241022": ModelPricing(input_cost=1.0, output_cost=5.0),
-        "claude-3-opus-20240229": ModelPricing(input_cost=15.0, output_cost=75.0),
-        "claude-3-sonnet-20240229": ModelPricing(input_cost=3.0, output_cost=15.0),
-        "claude-3-haiku-20240307": ModelPricing(input_cost=0.25, output_cost=1.25),
-    }
 
     # Cache settings
     CACHE_TTL = 3600  # 1 hour
@@ -262,11 +250,20 @@ class AnthropicProvider(BaseProvider):
     def list_models(self, force_refresh: bool = False) -> list[ModelMetadata]:
         """Fetch available models from Anthropic API with caching.
 
+        A failed fetch is raised rather than answered with a hardcoded list: a
+        caller that cannot tell a live line-up from a stale one cannot tell a
+        retired model ID from a current one either, and a Refresh that "works"
+        while offline hides a bad key or an unreachable API.
+
         Args:
             force_refresh: Force refresh of cached models.
 
         Returns:
             List of available ModelMetadata.
+
+        Raises:
+            Exception: Whatever the Anthropic client raises when the list cannot
+                be retrieved (authentication, connection, API status errors).
         """
         # Return cached if valid
         if (
@@ -276,47 +273,28 @@ class AnthropicProvider(BaseProvider):
         ):
             return self._models_cache
 
-        try:
-            client = self._get_client()
-            api_models = client.models.list()
-            models = []
-            for model in api_models:
-                model_id = model.id
-                pricing = self.MODEL_PRICING.get(
-                    model_id,
-                    ModelPricing(input_cost=3.0, output_cost=15.0),
-                )
-                models.append(
-                    ModelMetadata(
-                        model_id=model_id,
-                        display_name=getattr(model, "display_name", model_id),
-                        context_window=getattr(model, "context_window", 200000),
-                        pricing=pricing,
-                        capabilities=ProviderCapabilities(
-                            supports_vision=True,
-                            supports_function_calling=True,
-                            supports_system_messages=True,
-                            max_context_window=getattr(
-                                model, "context_window", 200000
-                            ),
-                        ),
-                    )
-                )
-            self._models_cache = models
-            self._cache_timestamp = time.time()
-            return models
-        except Exception as e:
-            logger.warning(f"Failed to fetch models from API: {e}")
-            # Fallback: return models we know about from pricing dict
-            return [
+        client = self._get_client()
+        models = []
+        for model in client.models.list():
+            model_id = model.id
+            context_window = getattr(model, "context_window", 200000)
+            models.append(
                 ModelMetadata(
-                    model_id=mid,
-                    display_name=mid,
-                    context_window=200000,
-                    pricing=p,
+                    model_id=model_id,
+                    display_name=getattr(model, "display_name", model_id),
+                    context_window=context_window,
+                    pricing=self.get_model_pricing(model_id),
+                    capabilities=ProviderCapabilities(
+                        supports_vision=True,
+                        supports_function_calling=True,
+                        supports_system_messages=True,
+                        max_context_window=context_window,
+                    ),
                 )
-                for mid, p in self.MODEL_PRICING.items()
-            ]
+            )
+        self._models_cache = models
+        self._cache_timestamp = time.time()
+        return models
 
     def test_connection(self) -> tuple[bool, str]:
         """Test API connectivity.
@@ -365,7 +343,5 @@ class AnthropicProvider(BaseProvider):
         Returns:
             ModelPricing with input and output costs.
         """
-        if model in self.MODEL_PRICING:
-            return self.MODEL_PRICING[model]
-        # Default to Sonnet pricing for unknown models
-        return ModelPricing(input_cost=3.0, output_cost=15.0)
+        input_cost, output_cost = anthropic_model_pricing(model)
+        return ModelPricing(input_cost=input_cost, output_cost=output_cost)

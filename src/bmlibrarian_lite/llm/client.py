@@ -242,16 +242,18 @@ class LLMClient:
 
         Returns:
             If provider specified: List of model name strings (backward compat).
-            If no provider: List of ModelMetadata from all providers.
+            If no provider: List of ModelMetadata from all providers that
+            answered; a provider that failed is logged and left out.
+
+        Raises:
+            Exception: If a provider was specified and its model list could not
+                be retrieved. An empty list means the provider has no models,
+                never that it could not be asked.
         """
         if provider:
             # Return list of strings for backward compatibility
-            try:
-                p = self._get_provider(provider)
-                return [m.model_id for m in p.list_models()]
-            except Exception as e:
-                logger.warning(f"Failed to list models for {provider}: {e}")
-                return []
+            p = self._get_provider(provider)
+            return [m.model_id for m in p.list_models()]
 
         # Return ModelMetadata from all providers
         all_models = []
@@ -259,8 +261,8 @@ class LLMClient:
             try:
                 p = self._get_provider(name)
                 all_models.extend(p.list_models())
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to list models for {name}: {e}")
         return all_models
 
     def get_model_metadata(

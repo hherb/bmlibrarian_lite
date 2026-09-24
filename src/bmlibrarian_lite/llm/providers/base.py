@@ -198,7 +198,13 @@ class BaseProvider(ABC):
         """Return list of available models with metadata.
 
         Returns:
-            List of ModelMetadata objects for available models.
+            List of ModelMetadata objects for available models. Empty only when
+            the provider answered and offers no models.
+
+        Raises:
+            Exception: If the list cannot be retrieved. Implementations must not
+                answer a failure with an empty or hardcoded list, which the
+                caller cannot tell from a real answer.
         """
         pass
 
