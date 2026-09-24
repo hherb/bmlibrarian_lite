@@ -15,20 +15,28 @@ package com.bmlibrarian.factchecker.domain.transparency
  */
 object FullTextSections {
 
+    /**
+     * An optional trailing word of a statement's heading, as the canonical Python extractor
+     * allows (#359 there): "Data Availability Statement" and "Conflict of Interest Statement"
+     * are the commonest spellings, and without it the heading's last word was captured as the
+     * statement itself. Same pattern as Swift's `TransparencyAnalysisService.headingQualifier`.
+     */
+    const val HEADING_QUALIFIER: String = """(?:\s+(?:statements?|disclosures?|declarations?|section))?"""
+
     /** Data-availability section headings, in the order they are tried. */
     val dataAvailabilityPatterns: List<String> = listOf(
-        """(?i)data\s+availability[:\s]+([^§]+?)(?=\n\n|\z)""",
-        """(?i)availability\s+of\s+data[:\s]+([^§]+?)(?=\n\n|\z)""",
-        """(?i)data\s+sharing[:\s]+([^§]+?)(?=\n\n|\z)""",
-        """(?i)data\s+access[:\s]+([^§]+?)(?=\n\n|\z)""",
+        """(?i)data\s+availability""" + HEADING_QUALIFIER + """[:\s]+([^§]+?)(?=\n\n|\z)""",
+        """(?i)availability\s+of\s+data""" + HEADING_QUALIFIER + """[:\s]+([^§]+?)(?=\n\n|\z)""",
+        """(?i)data\s+sharing""" + HEADING_QUALIFIER + """[:\s]+([^§]+?)(?=\n\n|\z)""",
+        """(?i)data\s+access""" + HEADING_QUALIFIER + """[:\s]+([^§]+?)(?=\n\n|\z)""",
     )
 
     /** Conflict-of-interest section headings, in the order they are tried. */
     val coiPatterns: List<String> = listOf(
-        """(?i)conflict(?:s)?\s+of\s+interest[:\s]+([^§]+?)(?=\n\n|\z)""",
-        """(?i)competing\s+interest(?:s)?[:\s]+([^§]+?)(?=\n\n|\z)""",
-        """(?i)disclosure(?:s)?[:\s]+([^§]+?)(?=\n\n|\z)""",
-        """(?i)financial\s+disclosure(?:s)?[:\s]+([^§]+?)(?=\n\n|\z)""",
+        """(?i)conflict(?:s)?\s+of\s+interest""" + HEADING_QUALIFIER + """[:\s]+([^§]+?)(?=\n\n|\z)""",
+        """(?i)competing\s+interest(?:s)?""" + HEADING_QUALIFIER + """[:\s]+([^§]+?)(?=\n\n|\z)""",
+        """(?i)disclosure(?:s)?""" + HEADING_QUALIFIER + """[:\s]+([^§]+?)(?=\n\n|\z)""",
+        """(?i)financial\s+disclosure(?:s)?""" + HEADING_QUALIFIER + """[:\s]+([^§]+?)(?=\n\n|\z)""",
     )
 
     /**

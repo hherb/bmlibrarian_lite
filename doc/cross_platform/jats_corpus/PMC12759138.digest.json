@@ -234,12 +234,20 @@
       "title" : "Supplemental Material"
     },
     {
-      "paragraphCount" : 23,
-      "scalarCount" : 1942,
+      "paragraphCount" : 8,
+      "scalarCount" : 1558,
       "subsections" : [
 
       ],
       "title" : ""
+    },
+    {
+      "paragraphCount" : 15,
+      "scalarCount" : 384,
+      "subsections" : [
+
+      ],
+      "title" : "Abbreviations"
     }
   ],
   "doi" : "10.1177/20552076251406653",
@@ -269,10 +277,10 @@
       "label" : "Figure 3."
     }
   ],
-  "htmlScalarCount" : 84091,
+  "htmlScalarCount" : 84114,
   "issue" : "",
   "journal" : "Digital Health",
-  "markdownScalarCount" : 69461,
+  "markdownScalarCount" : 69479,
   "pages" : "",
   "pmcId" : "PMC12759138",
   "pmid" : "41488273",

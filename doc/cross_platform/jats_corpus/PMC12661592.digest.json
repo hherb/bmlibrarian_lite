@@ -21,22 +21,38 @@
       "title" : ""
     },
     {
-      "paragraphCount" : 5,
-      "scalarCount" : 450,
+      "paragraphCount" : 1,
+      "scalarCount" : 236,
+      "subsections" : [
+
+      ],
+      "title" : "Acknowledgments"
+    },
+    {
+      "paragraphCount" : 3,
+      "scalarCount" : 191,
       "subsections" : [
 
       ],
       "title" : ""
+    },
+    {
+      "paragraphCount" : 1,
+      "scalarCount" : 23,
+      "subsections" : [
+
+      ],
+      "title" : "Abbreviations"
     }
   ],
   "doi" : "10.2196/82550",
   "figures" : [
 
   ],
-  "htmlScalarCount" : 15290,
+  "htmlScalarCount" : 15338,
   "issue" : "",
   "journal" : "JMIR Formative Research",
-  "markdownScalarCount" : 13783,
+  "markdownScalarCount" : 13821,
   "pages" : "",
   "pmcId" : "PMC12661592",
   "pmid" : "41313195",
