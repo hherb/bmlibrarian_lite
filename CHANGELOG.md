@@ -43,6 +43,19 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 
 ### Fixed
 
+- **iOS/macOS: conflict-of-interest and data statements missed.** The Swift
+  JATS parser dropped the heading of an unsectioned `<ack>`/`<notes>`
+  ("Competing interests", "Data availability"), so the heading-based
+  extractors found nothing and studies were rated high risk for a missing
+  COI statement they had. The Swift and Android extractors also captured the
+  word "Statement" from "Data Availability Statement" headings as the
+  statement itself. On 220 surveyed PMC articles, usable COI statements rose
+  from 150 to 182 and usable data statements from 43 to 179. Analyzer
+  version 5.
+- **iOS/macOS: funders never checked for PubMed results.** The Swift PubMed
+  parser never read a record's DOI or PMC ID, so CrossRef was never asked
+  for the funders of documents found through a PubMed search.
+
 - **A failure is not an empty result.** Across search, scoring, quality and
   transparency analysis, benchmarks and the Research Questions tab, a source
   that could not be reached, a failed analysis, or an unparsed heading or COI

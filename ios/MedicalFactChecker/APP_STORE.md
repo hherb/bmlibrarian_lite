@@ -68,6 +68,10 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
   read are shown as "Unassessed" rather than as high risk
 - A trial registry or funder database that could not be reached is noted,
   never reported as a missing registration or missing funding
+- Conflict-of-interest and data-availability statements are found far
+  more reliably, so studies are no longer rated high risk for statements
+  they actually contain
+- Funders are now checked for studies found through PubMed
 
 **Full Text from PDFs**
 - Downloaded PDFs now contribute their text to the analysis
