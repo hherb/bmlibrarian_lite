@@ -276,6 +276,37 @@ public final class JATSXMLParser: NSObject {
     /// such an article was silently dropped (bmlib issue #30).
     private var implicitBodySection: SectionBuilder?
 
+    /// A heading an unsectioned container deposited for its own prose (port of
+    /// bmlib #231).
+    ///
+    /// `<ack>`, `<notes>` and `<fn-group>` are not `<sec>` and must never rename
+    /// one (#125), but their `<title>` is the publisher's heading for the prose
+    /// beneath it. Dropping it left "The authors declare no competing
+    /// interests." headless — and the transparency analysis finds a statement
+    /// by its heading, so PMC13458455 was rated high risk for having none.
+    ///
+    /// A class, compared by identity: two sibling containers depositing the same
+    /// heading are two frames and two sections.
+    private final class HeadingFrame {
+        /// The heading, whitespace-normalised and never empty.
+        let title: String
+        /// `elementStack` index of the element that deposited the heading; the
+        /// frame ends at that element's close.
+        let ownerDepth: Int
+
+        init(title: String, ownerDepth: Int) {
+            self.title = title
+            self.ownerDepth = ownerDepth
+        }
+    }
+
+    /// Open container headings, innermost last; see ``HeadingFrame``.
+    private var headingStack: [HeadingFrame] = []
+
+    /// The frame `implicitBodySection` was opened under, or `nil` for none. The
+    /// section accepts prose only while this is still the innermost frame.
+    private var implicitSectionHeading: HeadingFrame?
+
     // Figure/Table state
 
     /// Open and finished `<fig>` elements, in document order.
@@ -1723,14 +1754,54 @@ extension JATSXMLParser: XMLParserDelegate {
 
     /// Emit any pending unsectioned `<body>` prose as a body section.
     ///
-    /// Called when a real `<sec>` opens and again at `</body>`, so loose
-    /// paragraphs keep their position in document order. The section carries no
-    /// title — JATS gave it none, and inventing one would put a heading in the
-    /// rendered article that the publisher never wrote.
+    /// Called when a real `<sec>` opens, at `</body>` and `</back>`, and when
+    /// unsectioned prose arrives under a different container heading, so loose
+    /// paragraphs keep their position in document order. The section carries
+    /// the heading its container deposited, or none — inventing one would put a
+    /// heading in the rendered article that the publisher never wrote.
     private func flushImplicitBodySection() {
         guard let pending = implicitBodySection else { return }
         bodySections.append(pending.build())
         implicitBodySection = nil
+        implicitSectionHeading = nil
+    }
+
+    /// The implicit section the next unsectioned paragraph joins, opening one if
+    /// needed (port of bmlib's `_implicit_section_for_prose`).
+    ///
+    /// The flush is lazy and keyed on the frame's identity: a pending section
+    /// ends only when prose arrives under a different innermost heading, so a
+    /// heading that titles nothing — an umbrella `<notes>` whose inner notes
+    /// head their own prose — ends nothing.
+    private func openImplicitSectionForProse() {
+        let heading = headingStack.last
+        if implicitBodySection != nil, implicitSectionHeading !== heading {
+            flushImplicitBodySection()
+        }
+        if implicitBodySection == nil {
+            var builder = SectionBuilder()
+            builder.title = heading?.title ?? ""
+            implicitBodySection = builder
+            implicitSectionHeading = heading
+        }
+    }
+
+    /// Keep an unsectioned container's own heading (bmlib #231).
+    ///
+    /// Pushes a frame and flushes nothing; the section it titles opens with the
+    /// first prose routed under it. A second heading from the same element
+    /// replaces the first with a new frame.
+    ///
+    /// - Parameter title: The heading, whitespace-normalised.
+    private func recoverContainerHeading(_ title: String) {
+        guard !title.isEmpty else { return }
+        // At `</title>` the stack holds the owner and then the title itself.
+        let frame = HeadingFrame(title: title, ownerDepth: elementStack.count - 2)
+        if let top = headingStack.last, top.ownerDepth == frame.ownerDepth {
+            headingStack[headingStack.count - 1] = frame
+        } else {
+            headingStack.append(frame)
+        }
     }
 
     public func parser(
@@ -1991,6 +2062,11 @@ extension JATSXMLParser: XMLParserDelegate {
         let normalizedText = normalizeWhitespace(elementText)
 
         defer {
+            // A container's heading ends at the container's own close, where
+            // the stack still holds that element as its last entry.
+            if let top = headingStack.last, top.ownerDepth == elementStack.count - 1 {
+                headingStack.removeLast()
+            }
             _ = elementStack.popLast()
         }
 
@@ -2125,6 +2201,13 @@ extension JATSXMLParser: XMLParserDelegate {
                 // titles first. The emptiness check guards the subscript either
                 // way.
                 sectionStack[sectionStack.count - 1].title = normalizedText
+            } else if inBody || inBack, sectionStack.isEmpty, innermostExhibit == nil, !inRefList {
+                // An unsectioned container's own heading — `<ack>`, `<notes>`,
+                // `<fn-group>` — kept for the prose beneath it rather than
+                // dropped (bmlib #231). Last, so every owner with a destination
+                // of its own has been offered the title first; under an open
+                // `<sec>` it still renames nothing (#125).
+                recoverContainerHeading(normalizedText)
             }
         case "p":
             if let owner = captionStack.last {
@@ -2162,9 +2245,7 @@ extension JATSXMLParser: XMLParserDelegate {
                 // analysis. Empty paragraphs are dropped rather than opening a
                 // section, so a body holding nothing but whitespace stays
                 // section-less.
-                if implicitBodySection == nil {
-                    implicitBodySection = SectionBuilder()
-                }
+                openImplicitSectionForProse()
                 if inBody {
                     bodyParagraphCount += 1
                 }

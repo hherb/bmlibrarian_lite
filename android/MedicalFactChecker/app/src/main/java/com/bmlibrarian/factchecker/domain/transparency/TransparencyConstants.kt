@@ -29,9 +29,11 @@ object TransparencyConstants {
      * 2 — Europe PMC allow-list, JATS fixes and recalibrated funder patterns;
      * 3 — PDF text reaches the analyzer, abstract-only deposits no longer do;
      * 4 — results record whether the full text was searched, and a missing trial
-     * registration is reported only when ClinicalTrials.gov answered.
+     * registration is reported only when ClinicalTrials.gov answered;
+     * 5 — back-matter headings kept by the Swift JATS parser, "… Statement"
+     * headings accepted by the extractors, PubMed DOIs read by Swift.
      */
-    const val ANALYZER_VERSION: Int = 4
+    const val ANALYZER_VERSION: Int = 5
 
     // ==================== API URLs ====================
 

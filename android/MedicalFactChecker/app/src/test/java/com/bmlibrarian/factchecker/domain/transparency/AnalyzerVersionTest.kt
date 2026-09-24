@@ -22,7 +22,7 @@ class AnalyzerVersionTest {
 
     /** Must move with Swift's `TransparencyConstants.analyzerVersion`: results sync between platforms. */
     @Test
-    fun `analyzer version matches Swift`() = assertEquals(4, TransparencyConstants.ANALYZER_VERSION)
+    fun `analyzer version matches Swift`() = assertEquals(5, TransparencyConstants.ANALYZER_VERSION)
 
     @Test
     fun `built result carries the current version`() =

@@ -535,6 +535,16 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
     private var currentAuthorLastName = ""
     private var currentAuthorForeName = ""
 
+    /// The `IdType` of the `<ArticleId>`, or the `EIdType` of the
+    /// `<ELocationID>`, now open; `nil` for one that must not be read (an
+    /// `ELocationID` marked `ValidYN="N"`).
+    private var currentIdType: String?
+
+    /// How many `<Reference>` elements are open. A cited paper's
+    /// `<ArticleIdList>` sits inside one, and its identifiers are not the
+    /// article's.
+    private var referenceDepth = 0
+
     init(data: Data) {
         self.parser = XMLParser(data: data)
         super.init()
@@ -582,6 +592,12 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
             resetCurrentArticle()
         case "Abstract":
             inAbstract = true
+        case "Reference":
+            referenceDepth += 1
+        case "ArticleId":
+            currentIdType = attributeDict["IdType"]?.lowercased()
+        case "ELocationID":
+            currentIdType = attributeDict["ValidYN"] == "N" ? nil : attributeDict["EIdType"]?.lowercased()
         default:
             break
         }
@@ -604,9 +620,23 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
             if currentPMID.isEmpty {
                 currentPMID = text
             }
-        case "ArticleId":
-            // This would need attribute handling for IdType
-            break
+        case "ArticleId", "ELocationID":
+            // The record's own identifiers, never a cited paper's. The first
+            // of each kind wins: `<ELocationID>` precedes the `<ArticleIdList>`
+            // and names the same DOI when both are present.
+            if referenceDepth == 0, !text.isEmpty {
+                switch currentIdType {
+                case "doi" where currentDOI == nil:
+                    currentDOI = text
+                case "pmc" where currentPMCID == nil:
+                    currentPMCID = text
+                default:
+                    break
+                }
+            }
+            currentIdType = nil
+        case "Reference":
+            referenceDepth = max(0, referenceDepth - 1)
         case "ArticleTitle":
             currentTitle = text
         case "AbstractText":
@@ -684,6 +714,8 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
         currentPMID = ""
         currentPMCID = nil
         currentDOI = nil
+        currentIdType = nil
+        referenceDepth = 0
         currentTitle = ""
         currentAbstract = ""
         currentAuthors = []
