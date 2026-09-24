@@ -125,6 +125,7 @@ struct PrintableReportView: View {
                 let docs = session.documents ?? []
                 if docs.contains(where: { $0.hasTransparencyAnalysis }) {
                     printableTransparencySection(docs)
+                    MacHighRiskTransparencyDetails(documents: docs)
                 }
             }
 
@@ -382,6 +383,7 @@ struct PrintableReportView: View {
         let industryCount = results.filter { $0.industryFundingDetected }.count
         let industryPercent = results.isEmpty ? 0 : (industryCount * 100) / results.count
         let highRisk = results.filter { $0.riskLevel == .high }.count
+        let limited = documents.filter { $0.transparencyCertainty == .limitedNoFullText }.count
 
         return VStack(alignment: .leading, spacing: 8) {
             Text("Transparency Analysis")
@@ -396,6 +398,15 @@ struct PrintableReportView: View {
                         .font(.caption)
                         .foregroundColor(.red)
                 }
+            }
+
+            if limited > 0 {
+                Text(
+                    "\(limited) of \(results.count) ratings made without the full text. "
+                    + "\(TransparencyConstants.limitedCertaintyNote)."
+                )
+                .font(.caption)
+                .foregroundColor(.orange)
             }
 
             HStack(spacing: 40) {

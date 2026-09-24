@@ -179,6 +179,28 @@ public enum TransparencyConstants {
     /// ClinicalTrials.gov registry display name.
     public static let clinicalTrialsRegistryName = "ClinicalTrials.gov"
 
+    // MARK: - Certainty Notes
+
+    /// Shown with every rating made without the article's full text.
+    public static let limitedCertaintyNote =
+        "Limited certainty because of lack of full text access"
+
+    /// Shown with a rating that did not record whether the full text was read.
+    public static let unrecordedCertaintyNote =
+        "Certainty unknown: this analysis did not record whether the full text was "
+        + "accessed. Re-analyse for a rating of known certainty."
+
+    /// Suffix a compact risk badge carries when its rating's certainty is limited.
+    public static let limitedCertaintyBadgeSuffix = "· limited"
+
+    // MARK: - Metadata Sources
+
+    /// Name recorded in `dataSourcesUsed` when PubMed returned the article.
+    public static let pubMedSourceName = "PubMed"
+
+    /// Name recorded in `dataSourcesUsed` when CrossRef returned the work.
+    public static let crossRefSourceName = "CrossRef"
+
     // MARK: - Date Parsing Defaults
 
     /// Default month value when parsing dates with only year.

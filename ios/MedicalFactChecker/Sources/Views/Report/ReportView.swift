@@ -186,6 +186,7 @@ struct ReportContentView: View {
             // Transparency Summary
             if let session = report.session {
                 TransparencySummarySection(documents: session.documents ?? [])
+                HighRiskTransparencyDetails(documents: session.documents ?? [])
             }
 
             // Cost (if session available)
@@ -385,6 +386,7 @@ struct ReportView: View {
                     // Transparency Summary
                     if let session = report.session {
                         TransparencySummarySection(documents: session.documents ?? [])
+                        HighRiskTransparencyDetails(documents: session.documents ?? [])
                     }
 
                     // Cost (if session available)
@@ -792,7 +794,7 @@ struct DocumentCard: View {
                         ScoreBadge(score: score)
                     }
                     if let riskLevel = document.transparencyRiskLevel {
-                        TransparencyRiskBadge(riskLevel: riskLevel)
+                        TransparencyRiskBadge(riskLevel: riskLevel, certainty: document.transparencyCertainty)
                     }
                 }
             }
@@ -1374,7 +1376,7 @@ struct DocumentDetailSheet: View {
                 .fontWeight(.medium)
 
             if let result = document.transparencyResult {
-                TransparencyDetailView(result: result)
+                TransparencyDetailView(result: result, certainty: document.transparencyCertainty)
 
                 // A stale result keeps its score on screen but has to be
                 // re-runnable, or the notice above names a fix the user cannot apply.

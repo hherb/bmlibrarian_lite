@@ -460,6 +460,54 @@ final class Document {
         transparencyResult?.riskLevel
     }
 
+    /// How far this document's transparency rating can be relied on.
+    ///
+    /// The result's own record of whether the full text was analysed, when it
+    /// has one. A result stored before that was recorded falls back on the
+    /// document: one with no analysable full text now had none when it was
+    /// analysed either, so its rating is limited. The fallback can only err
+    /// towards calling a rating limited — if cached text was later removed —
+    /// never towards presenting a text-less rating as full strength.
+    ///
+    /// `nil` when there is no readable analysis.
+    var transparencyCertainty: TransparencyCertainty? {
+        guard let result = transparencyResult else { return nil }
+        if let searched = result.fullTextSearched {
+            return TransparencyCertainty(fullTextSearched: searched)
+        }
+        return analyzableFullText == nil ? .limitedNoFullText : .unrecorded
+    }
+
+    /// The documents rated high transparency risk, as a report discusses them.
+    ///
+    /// The same documents the report's "flagged as high transparency risk"
+    /// count covers, so the count and the discussion never disagree. Ordered
+    /// by reference, then title: a session's documents are an unordered
+    /// relationship, and a report should list them the same way every time.
+    ///
+    /// - Parameter documents: A session's documents.
+    /// - Returns: One entry per document rated high, with why it was.
+    static func highRiskTransparencyEntries(in documents: [Document]) -> [HighRiskTransparencyEntry] {
+        documents
+            .compactMap { document -> (Document, TransparencyResult)? in
+                guard let result = document.transparencyResult, result.riskLevel == .high else {
+                    return nil
+                }
+                return (document, result)
+            }
+            .sorted { ($0.0.shortReference, $0.0.displayTitle) < ($1.0.shortReference, $1.0.displayTitle) }
+            .map { document, result in
+                HighRiskTransparencyEntry(
+                    reference: document.shortReference,
+                    citation: [document.displayTitle, document.journal, document.citationIdentifier?.labelled]
+                        .compactMap { $0 }
+                        .joined(separator: ". "),
+                    result: result,
+                    certainty: document.transparencyCertainty
+                )
+            }
+    }
+
     // MARK: - Relationships
 
     var session: FactCheckSession?

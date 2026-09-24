@@ -110,6 +110,9 @@ public actor TransparencyAnalysisService {
         }
 
         var builder = TransparencyResultBuilder(doi: doi, pmid: pmid)
+        // Recorded so a report can tell a statement the article lacks from one
+        // there was no text to look for: both analyzers below read full text only.
+        builder.fullTextSearched = !(fullText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
 
         BioMedLitLib.logger?.info(
             "Starting transparency analysis for DOI: \(doi ?? "nil"), PMID: \(pmid ?? "nil")",
@@ -170,7 +173,7 @@ public actor TransparencyAnalysisService {
                         builder.doi = article.doi
                     }
 
-                    builder.dataSourcesUsed.append("PubMed")
+                    builder.dataSourcesUsed.append(TransparencyConstants.pubMedSourceName)
 
                     BioMedLitLib.logger?.debug(
                         "PubMed metadata retrieved for PMID: \(pmid)",
@@ -192,7 +195,7 @@ public actor TransparencyAnalysisService {
                 let work = try await crossRef.getWork(doi: doi)
 
                 if let work = work {
-                    builder.dataSourcesUsed.append("CrossRef")
+                    builder.dataSourcesUsed.append(TransparencyConstants.crossRefSourceName)
 
                     // Fill in missing data from CrossRef
                     if builder.title == nil {

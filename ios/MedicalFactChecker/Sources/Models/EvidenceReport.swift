@@ -189,6 +189,11 @@ final class EvidenceReport {
     /// which carries a namespace-labelled identifier.
     var plainTextReport: String {
         let notice = incompleteSearchNotice.map { "\($0)\n\n" } ?? ""
+        // The screen and the printed report discuss every high-risk study;
+        // text a reader copies or exports must not drop that discussion.
+        let highRisk = HighRiskTransparencySection.plainText(
+            for: Document.highRiskTransparencyEntries(in: session?.documents ?? [])
+        ).map { "---\n\n\($0)\n\n" } ?? ""
         return """
         MEDICAL FACT CHECK REPORT
         Generated: \(generatedAt.formatted(date: .abbreviated, time: .shortened))
@@ -202,7 +207,7 @@ final class EvidenceReport {
 
         \(ReportFormatter.plainText(fromReportMarkdown: reportBodyAfterNotice))
 
-        ---
+        \(highRisk)---
         Based on \(uniqueSourceCount) sources, \(citationCount) citations.
         \(documentsReviewed) documents reviewed.
 

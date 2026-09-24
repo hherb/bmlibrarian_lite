@@ -37,11 +37,29 @@ private enum TransparencyBadgeConstants {
 struct TransparencyRiskBadge: View {
     let riskLevel: TransparencyRiskLevel
 
+    /// How far the rating can be relied on. A limited one says so on the badge
+    /// itself: full-text analysis is the standard, and a rating short of it
+    /// must not look like one that met it. `nil` shows the rating alone.
+    var certainty: TransparencyCertainty? = nil
+
+    /// The badge's label, qualified when its certainty is limited.
+    private var label: String {
+        guard certainty?.isLimited == true else { return riskLevel.shortLabel }
+        return "\(riskLevel.shortLabel) \(TransparencyConstants.limitedCertaintyBadgeSuffix)"
+    }
+
+    /// What assistive technology reads, including any certainty note.
+    private var spokenLabel: String {
+        let rating = "Transparency risk: \(riskLevel.fullLabel)"
+        guard let note = certainty?.note else { return rating }
+        return "\(rating). \(note)"
+    }
+
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: iconName)
                 .font(.system(size: TransparencyBadgeConstants.iconFontSize))
-            Text(riskLevel.shortLabel)
+            Text(label)
                 .font(.system(size: TransparencyBadgeConstants.labelFontSize, weight: .medium))
         }
         .foregroundColor(badgeColor)
@@ -49,7 +67,8 @@ struct TransparencyRiskBadge: View {
         .padding(.vertical, TransparencyBadgeConstants.verticalPadding)
         .background(badgeColor.opacity(TransparencyBadgeConstants.backgroundOpacity))
         .cornerRadius(TransparencyBadgeConstants.cornerRadius)
-        .accessibilityLabel("Transparency risk: \(riskLevel.fullLabel)")
+        .help(certainty?.note ?? riskLevel.fullLabel)
+        .accessibilityLabel(spokenLabel)
     }
 
     private var badgeColor: Color {
@@ -78,6 +97,7 @@ struct TransparencyRiskBadge: View {
         TransparencyRiskBadge(riskLevel: .low)
         TransparencyRiskBadge(riskLevel: .medium)
         TransparencyRiskBadge(riskLevel: .high)
+        TransparencyRiskBadge(riskLevel: .high, certainty: .limitedNoFullText)
         TransparencyRiskBadge(riskLevel: .unknown)
     }
     .padding()
