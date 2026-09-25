@@ -97,7 +97,9 @@ class TransparencyUnassessed:
 #: disclosure, and the headings journals actually print), #353--#356 and #250
 #: (a source nobody asked is not a source that answered "nothing"). Between
 #: them these move data availability and COI for the majority of articles.
-TRANSPARENCY_ANALYZER_VERSION = "2.0"
+#: 2.1: #394 (a funder named by brand -- "Pfizer", "The Pfizer company" -- is
+#: industry, and that company's foundation is not).
+TRANSPARENCY_ANALYZER_VERSION = "2.1"
 
 #: What every row written before #360 says, whatever analysed it: the field
 #: was never compared to anything, so it never moved off its default.

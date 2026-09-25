@@ -90,6 +90,57 @@ object IndustryPatterns {
     )
 
     /**
+     * Industry company names matched as whole words (#394): the brand layer.
+     *
+     * [funderNameStems] and [funderNameWords] recognise a company *form*; CrossRef and
+     * PubMed often return a bare brand instead — "Pfizer", "The Pfizer company" — which no
+     * form reaches. These are the companies of [KnownIndustryFunders] plus their most-named
+     * subsidiaries (Janssen, Genentech), chosen from that curated list rather than from the
+     * corpus. "Eli Lilly" only, never bare "Lilly" (the Lilly Endowment is a charity); UCB
+     * is left out (also UC Berkeley). Pinned to `industry_brands.patterns` in
+     * `sponsor_patterns.json`.
+     */
+    val funderBrandPatterns: List<String> = listOf(
+        """\bpfizer\b""",
+        """\bastra\s?zeneca\b""",
+        """\bbayer\b""",
+        """\bglaxo\s?smith\s?kline\b""",
+        """\bgsk\b""",
+        """\bjohnson\s*(?:&|and)\s*johnson\b""",
+        """\beli\s+lilly\b""",
+        """\bmerck\b""",
+        """\bnovartis\b""",
+        """\bnovo\s+nordisk\b""",
+        """\broche\b""",
+        """\bsanofi\b""",
+        """\bgilead\b""",
+        """\babbvie\b""",
+        """\bcelgene\b""",
+        """\bamgen\b""",
+        """\bbristol[-\s]?myers[-\s]?squibb\b""",
+        """\bbiogen\b""",
+        """\bboehringer\b""",
+        """\btakeda\b""",
+        """\bregeneron\b""",
+        """\bteva\b""",
+        """\ballergan\b""",
+        """\bmedtronic\b""",
+        """\bboston\s+scientific\b""",
+        """\babbott\b""",
+        """\bjanssen\b""",
+        """\bgenentech\b""",
+    )
+
+    /**
+     * A brand beside one of these is a charitable foundation, not the company — the Novo
+     * Nordisk Foundation, the Boehringer Ingelheim Fonds. Guards the brand layer only.
+     * Pinned to `industry_brands.foundation_markers`.
+     */
+    val foundationMarkerPatterns: List<String> = listOf(
+        """\b(?:foundation|fondation|fondazione|fundaci[oó]n|funda[cç][aã]o|stiftung|stiftelse|stichting|fond|fonden|fonds|endowment|charitable)\b""",
+    )
+
+    /**
      * Known government/public funder patterns — the "government" half of
      * `sponsor_patterns.json`. Tested before [academicPatterns], so one public
      * agency outranks any number of universities.

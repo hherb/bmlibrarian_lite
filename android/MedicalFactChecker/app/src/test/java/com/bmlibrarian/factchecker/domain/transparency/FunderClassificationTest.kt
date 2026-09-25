@@ -117,8 +117,9 @@ class FunderClassificationTest {
             "Lincoln Medical Center" to false,
             "University of Calgary, Calgary, AB, Canada" to false,
             "Key Laboratory of Molecular Biology" to false,
-            "Novo Nordisk A/S" to false,
-            "Bristol-Myers Squibb Company" to false,
+            // Missed on every platform when the table was written; the brand layer since #394.
+            "Novo Nordisk A/S" to true,
+            "Bristol-Myers Squibb Company" to true,
         )
         for ((name, want) in expected) assertEquals(name, want, isIndustry(name))
     }
@@ -168,9 +169,9 @@ class FunderClassificationTest {
     }
 
     private companion object {
-        /** Floors one notch below the measured 0.909 / 0.333, as on Swift and Python. */
-        const val MIN_PRECISION = 0.90
-        const val MIN_RECALL = 0.30
+        /** Floors one notch below the measured 0.958 / 0.657 (after #394), as on Swift and Python. */
+        const val MIN_PRECISION = 0.95
+        const val MIN_RECALL = 0.65
 
         /** What the substring matcher this replaced scored on the same corpus. */
         const val PREVIOUS_PRECISION = 0.455

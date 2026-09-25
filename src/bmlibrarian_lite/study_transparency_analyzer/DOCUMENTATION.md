@@ -348,8 +348,9 @@ FUNDER_NAME_WORDS = [
 
 Both lists are **calibrated against measured data**, not intuition: 417
 hand-labelled CrossRef and PubMed funder names in
-`doc/cross_platform/transparency_parity/funder_names.json`, where they score
-precision 0.909 / recall 0.333. `tests/test_funder_classification.py` re-measures
+`doc/cross_platform/transparency_parity/funder_names.json`, where, with the
+brand layer (`FUNDER_BRAND_PATTERNS`, #394), they score precision 0.958 / recall
+0.657. `tests/test_funder_classification.py` re-measures
 that on every run and pins which names are matched, missed and wrongly matched.
 
 Membership is therefore evidence-driven, and the exclusions matter as much as the

@@ -196,8 +196,10 @@ final class FunderClassificationTests: XCTestCase {
             ("Lincoln Medical Center", false),
             ("University of Calgary, Calgary, AB, Canada", false),
             ("Key Laboratory of Molecular Biology", false),
-            ("Novo Nordisk A/S", false),
-            ("Bristol-Myers Squibb Company", false),
+            // Missed on both platforms when the table was written; recognised
+            // by the brand layer since #394.
+            ("Novo Nordisk A/S", true),
+            ("Bristol-Myers Squibb Company", true),
         ]
 
         for (name, want) in expected {
@@ -209,10 +211,10 @@ final class FunderClassificationTests: XCTestCase {
 
     /// Floors one notch below the measured figures, so an unrelated refactor does
     /// not have to move them but a real regression trips. Measured against the
-    /// committed corpus: precision 0.909, recall 0.333 — identical to what
-    /// bmlib's `_is_industry_funder` scores on the same names.
-    private static let minPrecision = 0.90
-    private static let minRecall = 0.30
+    /// committed corpus after the brand layer (#394) and its re-audit: precision
+    /// 0.958 (23/24), recall 0.657 (23/35), identical to the canonical Python.
+    private static let minPrecision = 0.95
+    private static let minRecall = 0.65
 
     /// What the matcher this replaced scored on the same corpus.
     private static let previousPrecision = 0.455

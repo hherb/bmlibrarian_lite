@@ -35,6 +35,16 @@ class SponsorPatternParityTest {
         val confidences: Map<String, Double>,
         @SerialName("confidence_probes") val confidenceProbes: List<ConfidenceProbe>,
         @SerialName("pattern_probes") val patternProbes: List<String>,
+        @SerialName("industry_brands") val industryBrands: IndustryBrands,
+    )
+
+    /** The brand layer's section of the contract (#394). */
+    @Serializable
+    private data class IndustryBrands(
+        val patterns: List<String>,
+        @SerialName("foundation_markers") val foundationMarkers: List<String>,
+        @SerialName("brand_probes") val brandProbes: List<String>,
+        @SerialName("foundation_probes") val foundationProbes: List<String>,
     )
 
     private companion object {
@@ -46,6 +56,41 @@ class SponsorPatternParityTest {
             requireNotNull(manifest.patterns[name]) { "shared sponsor contract has no '$name' half" }
 
         const val CONFIDENCE_TOLERANCE = 1e-9
+    }
+
+    // ==================== brand layer (#394) ====================
+
+    @Test
+    fun `brand patterns and foundation markers match the shared contract`() {
+        val brands = manifest.industryBrands
+        ParityFixtures.assertPatternsMatch(IndustryPatterns.funderBrandPatterns, brands.patterns, "industry_brands")
+        ParityFixtures.assertPatternsMatch(
+            IndustryPatterns.foundationMarkerPatterns,
+            brands.foundationMarkers,
+            "foundation_markers",
+        )
+    }
+
+    @Test
+    fun `every brand and foundation marker is exercised by a probe`() {
+        val brands = manifest.industryBrands
+        val groups = listOf(brands.patterns to brands.brandProbes, brands.foundationMarkers to brands.foundationProbes)
+        for ((patterns, probes) in groups) {
+            val lowered = probes.map { it.lowercase() }
+            for (pattern in patterns) {
+                assertTrue(
+                    "$pattern is matched by no probe name in the contract",
+                    lowered.any { TransparencyRegex.anyMatch(listOf(pattern), it) },
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `brand probes are industry and foundation probes are not`() {
+        val brands = manifest.industryBrands
+        for (name in brands.brandProbes) assertTrue(name, FundingAnalyzer.classifyFunder(name).isIndustry)
+        for (name in brands.foundationProbes) assertFalse(name, FundingAnalyzer.classifyFunder(name).isIndustry)
     }
 
     // ==================== pattern strings ====================

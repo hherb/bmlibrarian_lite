@@ -29,58 +29,63 @@ class FunderCorpusCompositionTest {
         assertEquals(EXPECTED_FALSE_NEGATIVES, FunderCorpus.classify().falseNegatives)
     }
 
-    /** Every figure is a fraction of these counts, and the corpus is shared byte-for-byte with bmlib. */
+    /** Every figure is a fraction of these counts. Re-audited for #394, so it now differs from bmlib's copy. */
     @Test
     fun `the labelled corpus is unchanged`() {
         val entries = FunderCorpus.entries
         assertEquals(417, entries.size)
-        assertEquals(30, entries.count { it.label == "industry" })
-        assertEquals(382, entries.count { it.label == "not_industry" })
-        assertEquals(5, entries.count { it.label == "ambiguous" })
+        assertEquals(35, entries.count { it.label == "industry" })
+        assertEquals(372, entries.count { it.label == "not_industry" })
+        assertEquals(10, entries.count { it.label == "ambiguous" })
     }
 
     private companion object {
-        /** The ten industry funders recognised — each by a legal suffix or company-form stem. */
+        /** The industry funders recognised: ten by a legal suffix or company-form stem, thirteen by brand (#394). */
         val EXPECTED_TRUE_POSITIVES = setOf(
+            "AbbVie",
+            "Amgen",
             "Astex Pharmaceuticals, Inc.",
+            "AstraZeneca",
+            "AstraZeneca.",
+            "Bristol Myers Squibb",
             "Cardinal Health, LLC",
             "Chia Tai Tianqing Pharmaceutical Group Co., Ltd.",
             "Chugai Pharmaceutical Co., Ltd",
             "Dr. Reddy's Laboratories, Hyderabad, India",
             "Geneos Therapeutics",
             "ImmVira Co., Limited",
-            "NanOlogy, LLC",
-            "Natera, Inc",
-            "Treatment Technologies and Insights, Incorporated",
-        )
-
-        /** The one false positive, and the whole reason precision is 0.909 rather than 1.0. */
-        val EXPECTED_FALSE_POSITIVES = setOf(
-            "National Inheritance Studio of Veteran Pharmaceutical Workers of Zhong Lingyun",
-        )
-
-        /** The twenty industry funders missed — mostly bare brand names. A record of known cost. */
-        val EXPECTED_FALSE_NEGATIVES = setOf(
-            "AbbVie",
-            "Arima Genomics",
-            "AstraZeneca.",
-            "Bristol Myers Squibb",
-            "Diaceutics",
-            "Guardant Health",
-            "Invitae Corporation",
             "Janssen Scientific Affairs",
             "La Roche Posay",
-            "Lockheed Martin",
             "Merck & Co.; Merck Sharp & Dohme",
-            "NVIDIA",
-            "Personalis",
+            "NanOlogy, LLC",
+            "Natera, Inc",
             "Pfizer",
             "Pfizer and Jazz",
             "Roche",
             "Roche Sweden AB",
+            "Teva",
+            "Treatment Technologies and Insights, Incorporated",
+        )
+
+        /** The one false positive, and the whole reason precision is 0.958 rather than 1.0. */
+        val EXPECTED_FALSE_POSITIVES = setOf(
+            "National Inheritance Studio of Veteran Pharmaceutical Workers of Zhong Lingyun",
+        )
+
+        /** The industry funders missed — none a drug or device maker the brand list names. A record of known cost. */
+        val EXPECTED_FALSE_NEGATIVES = setOf(
+            "Arima Genomics",
+            "Diaceutics",
+            "Guardant Health",
+            "Invitae Corporation",
+            "Lockheed Martin",
+            "Lån & Spar",
+            "NVIDIA",
+            "Personalis",
+            "PetroChina Major Science and Technology Project",
+            "Siemens Healthineers",
             "Tempus Labs",
             "TerumoBCT",
-            "Teva",
         )
     }
 }

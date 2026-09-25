@@ -77,12 +77,30 @@ final class TransparencyParityTests: XCTestCase {
         /// One representative funder name per pattern, so a pattern that matches
         /// nothing anywhere cannot hide behind a string-for-string pin.
         let patternProbes: [String]
+        /// The brand layer (#394).
+        let industryBrands: IndustryBrands
+
+        /// The `industry_brands` section: companies, foundation markers, probes.
+        struct IndustryBrands: Decodable {
+            let patterns: [String]
+            let foundationMarkers: [String]
+            let brandProbes: [String]
+            let foundationProbes: [String]
+
+            enum CodingKeys: String, CodingKey {
+                case patterns
+                case foundationMarkers = "foundation_markers"
+                case brandProbes = "brand_probes"
+                case foundationProbes = "foundation_probes"
+            }
+        }
 
         enum CodingKeys: String, CodingKey {
             case patterns
             case confidences
             case confidenceProbes = "confidence_probes"
             case patternProbes = "pattern_probes"
+            case industryBrands = "industry_brands"
         }
     }
 
@@ -455,6 +473,40 @@ final class TransparencyParityTests: XCTestCase {
         for name in manifest.patternProbes {
             let (isIndustry, _) = FundingAnalyzer.classifyFunder(name: name, doi: nil)
             XCTAssertFalse(isIndustry, "'\(name)' classified as industry")
+        }
+    }
+
+    // MARK: - Brand layer parity (#394)
+
+    func testBrandPatternsMatchContract() throws {
+        let brands = try Self.sponsorManifest.get().industryBrands
+        XCTAssertEqual(IndustryPatterns.funderBrandPatterns, brands.patterns)
+        XCTAssertEqual(IndustryPatterns.foundationMarkerPatterns, brands.foundationMarkers)
+    }
+
+    /// Every brand and every marker is matched by a probe of its kind.
+    func testEveryBrandPatternAndMarkerIsExercised() throws {
+        let brands = try Self.sponsorManifest.get().industryBrands
+        let groups = [(brands.patterns, brands.brandProbes), (brands.foundationMarkers, brands.foundationProbes)]
+        for (patterns, probes) in groups {
+            let lowered = probes.map { $0.lowercased() }
+            for pattern in patterns {
+                XCTAssertTrue(
+                    lowered.contains { RegexHelper.anyMatch(patterns: [pattern], in: $0) },
+                    "\(pattern) is matched by no probe name in the contract"
+                )
+            }
+        }
+    }
+
+    /// Each company, named bare, is industry; each of its foundations is not.
+    func testBrandAndFoundationProbesClassifyAsTheContractSays() throws {
+        let brands = try Self.sponsorManifest.get().industryBrands
+        for name in brands.brandProbes {
+            XCTAssertTrue(FundingAnalyzer.classifyFunder(name: name, doi: nil).isIndustry, name)
+        }
+        for name in brands.foundationProbes {
+            XCTAssertFalse(FundingAnalyzer.classifyFunder(name: name, doi: nil).isIndustry, name)
         }
     }
 

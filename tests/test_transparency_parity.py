@@ -47,6 +47,8 @@ import pytest
 from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
     ACADEMIC_PATTERNS,
     DATA_REPOSITORIES,
+    FOUNDATION_MARKER_PATTERNS,
+    FUNDER_BRAND_PATTERNS,
     GOVERNMENT_PATTERNS,
     NEGATED_OPENNESS_PATTERNS,
     NON_INDUSTRY_PATTERNS,
@@ -236,6 +238,56 @@ class TestSponsorPatternManifestParity:
         for name in _load_fixture(SPONSOR_PATTERNS_FIXTURE)["pattern_probes"]:
             is_industry, _ = classify_funder_name(name)
             assert not is_industry, f"{name!r} classified as industry"
+
+
+class TestIndustryBrandParity:
+    """The brand layer's lists and probes (#394), bound like the sponsor halves.
+
+    Swift's ``IndustryPatterns.funderBrandPatterns`` and Android's
+    ``IndustryPatterns.funderBrandPatterns`` are held to the same section.
+    """
+
+    @pytest.fixture(scope="class")
+    def brands(self) -> dict[str, Any]:
+        """The ``industry_brands`` section of the shared contract."""
+        return cast(dict[str, Any], _load_fixture(SPONSOR_PATTERNS_FIXTURE)["industry_brands"])
+
+    def test_brand_patterns_match_manifest(self, brands: dict[str, Any]) -> None:
+        """The companies, string for string."""
+        assert FUNDER_BRAND_PATTERNS == brands["patterns"]
+
+    def test_foundation_markers_match_manifest(self, brands: dict[str, Any]) -> None:
+        """The words that make a brand a foundation."""
+        assert FOUNDATION_MARKER_PATTERNS == brands["foundation_markers"]
+
+    def test_every_brand_pattern_is_exercised(self, brands: dict[str, Any]) -> None:
+        """A brand no probe matches is a typo every platform agrees on."""
+        probes = [name.lower() for name in brands["brand_probes"]]
+        unexercised = [p for p in brands["patterns"] if not any(re.search(p, x) for x in probes)]
+        assert unexercised == []
+
+    def test_every_foundation_marker_is_exercised(self, brands: dict[str, Any]) -> None:
+        """Each marker is reached by a foundation probe."""
+        probes = [name.lower() for name in brands["foundation_probes"]]
+        unexercised = [
+            m for m in brands["foundation_markers"] if not any(re.search(m, x) for x in probes)
+        ]
+        assert unexercised == []
+
+    def test_every_brand_probe_is_industry(self, brands: dict[str, Any]) -> None:
+        """Each company, named bare, classifies as industry."""
+        missed = [n for n in brands["brand_probes"] if not classify_funder_name(n)[0]]
+        assert missed == []
+
+    def test_every_foundation_probe_is_not_industry(self, brands: dict[str, Any]) -> None:
+        """A company's charitable foundation is not the company."""
+        flagged = [n for n in brands["foundation_probes"] if classify_funder_name(n)[0]]
+        assert flagged == []
+
+    def test_every_brand_pattern_compiles(self, brands: dict[str, Any]) -> None:
+        """An invalid pattern must fail here, not at classification time."""
+        for pattern in brands["patterns"] + brands["foundation_markers"]:
+            re.compile(pattern)
 
 
 class TestFunderConfidenceParity:
@@ -484,11 +536,14 @@ class TestFunderCorpusContract:
     #: CrossRef and the PubMed sample.
     EXPECTED_SOURCES = {"crossref", "pubmed", "both"}
 
-    #: Pinned composition of the labelled subset.
+    #: Pinned composition of the labelled subset. Re-audited for #394: five
+    #: commercial entities had been labelled not_industry (Amgen, AstraZeneca,
+    #: Siemens Healthineers, PetroChina, the bank Lån & Spar) and five names
+    #: nothing identifies, or that name several funders, moved to ambiguous.
     EXPECTED_TOTAL = 417
-    EXPECTED_INDUSTRY = 30
-    EXPECTED_NOT_INDUSTRY = 382
-    EXPECTED_AMBIGUOUS = 5
+    EXPECTED_INDUSTRY = 35
+    EXPECTED_NOT_INDUSTRY = 372
+    EXPECTED_AMBIGUOUS = 10
 
     @staticmethod
     def _entries() -> list[dict[str, Any]]:
