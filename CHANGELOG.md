@@ -11,6 +11,66 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-24
+
+### Added
+
+- **Polite request pacing.** A host-keyed, thread-safe rate limiter
+  (`rate_limit.py`) mounted on each `requests.Session` (`polite_session.py`)
+  now paces PubMed, Europe PMC and the PDF/full-text discovery clients,
+  honours `Retry-After` in full and shares one retry budget. Loopback hosts
+  are never paced.
+- A re-runnable structural survey of real JATS articles, reporting the
+  journal mix it was drawn from.
+- **iOS/macOS/Android: transparency ratings explained.** Reports name every
+  study rated high transparency risk and why: the rules that applied, the
+  score's terms, other concerns and caveats. Android gains the full
+  transparency analysis (funding, COI, trial registration, data
+  availability), risk badges and report sections.
+- **iOS/macOS/Android:** a downloaded PDF contributes its text to the
+  analysis; an abstract-only deposit is not treated as an article.
+
+### Changed
+
+- The canonical funder classifier runs on the shared parity corpus; FDA, VA,
+  AHRQ and PCORI funding is tiered as government, and NONPROFIT survives the
+  trial-sponsor upgrade.
+- **Apps:** a rating made without the full text is labelled "Limited
+  certainty"; one resting only on unsearched text is shown as "Unassessed".
+  A missing trial registration is reported only when ClinicalTrials.gov
+  answered. The transparency analyzer version is now 4, so stored results
+  are re-analysed.
+
+### Fixed
+
+- **iOS/macOS: conflict-of-interest and data statements missed.** The Swift
+  JATS parser dropped the heading of an unsectioned `<ack>`/`<notes>`
+  ("Competing interests", "Data availability"), so the heading-based
+  extractors found nothing and studies were rated high risk for a missing
+  COI statement they had. The Swift and Android extractors also captured the
+  word "Statement" from "Data Availability Statement" headings as the
+  statement itself. On 220 surveyed PMC articles, usable COI statements rose
+  from 150 to 182 and usable data statements from 43 to 179. Analyzer
+  version 5.
+- **iOS/macOS: funders never checked for PubMed results.** The Swift PubMed
+  parser never read a record's DOI or PMC ID, so CrossRef was never asked
+  for the funders of documents found through a PubMed search.
+
+- **A failure is not an empty result.** Across search, scoring, quality and
+  transparency analysis, benchmarks and the Research Questions tab, a source
+  that could not be reached, a failed analysis, or an unparsed heading or COI
+  statement is reported as such, never as a finding of absence.
+- One undecodable stored transparency row no longer fails a whole batch
+  read; it is shown as not assessed for that document alone.
+- Cancelling a run, a worker or a benchmark ends it and says what was done.
+- A failed model list is reported as an error, not shown as an empty or
+  stale list.
+- Security: the NCBI API key is sent to NCBI only, redirects are refused,
+  credential files are written owner-only, and four CodeQL alerts are closed.
+- **iOS/macOS/Android:** a failed literature source is reported, not shown
+  as empty; Swift PubMed searches report every match and page on; current
+  Claude model pricing; an unreadable stored analysis is named in reports.
+
 ## [0.4.1] - 2026-08-20
 
 ### Added
@@ -211,7 +271,8 @@ First published release.
   `QTimer`.
 - Ollama model listing using object attributes rather than dict access.
 
-[Unreleased]: https://github.com/hherb/bmlibrarian_lite/compare/0.4.1...HEAD
+[Unreleased]: https://github.com/hherb/bmlibrarian_lite/compare/0.5.0...HEAD
+[0.5.0]: https://github.com/hherb/bmlibrarian_lite/compare/0.4.1...0.5.0
 [0.4.1]: https://github.com/hherb/bmlibrarian_lite/compare/0.4.0...0.4.1
 [0.4.0]: https://github.com/hherb/bmlibrarian_lite/compare/0.3.0...0.4.0
 [0.3.0]: https://github.com/hherb/bmlibrarian_lite/compare/0.2.0...0.3.0

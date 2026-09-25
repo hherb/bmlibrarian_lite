@@ -58,14 +58,36 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
 
 ---
 
-## What's New (Version 1.5.1)
+## What's New (Version 1.6.0)
 
-**DeepSeek V4**
-- Updated to DeepSeek V4 Flash and V4 Pro, replacing the retired V3 models
-- Model discovery keeps working when a provider renames its line-up
-- A stored model the provider no longer offers is replaced automatically
-- Model list failures now report the actual reason instead of quietly
-  showing the built-in list
+**Transparency Ratings Explained**
+- Reports now explain why each study was rated high transparency risk:
+  the rules that applied, how the score was reached, and any caveats
+- Every rating made without the article's full text says so
+- Studies whose only warning signs come from full text that could not be
+  read are shown as "Unassessed" rather than as high risk
+- A trial registry or funder database that could not be reached is noted,
+  never reported as a missing registration or missing funding
+- Conflict-of-interest and data-availability statements are found far
+  more reliably, so studies are no longer rated high risk for statements
+  they actually contain
+- Funders are now checked for studies found through PubMed
+
+**Full Text from PDFs**
+- Downloaded PDFs now contribute their text to the analysis
+- Abstract-only records are no longer treated as full articles
+- Improved full-text parsing for PubMed Central articles
+
+**More Reliable Searches**
+- A literature source that fails is reported as a failure, not as
+  "no results"
+- PubMed searches report every match and page through all of them
+- Reports record what a search could not retrieve
+
+**Bug Fixes & Improvements**
+- Current Claude model pricing
+- Uploaded PDFs reopen correctly
+- Fixed the model list request for OpenAI-compatible providers
 
 **Supported AI Models**
 - Claude 4.5 (Sonnet, Haiku, Opus)
@@ -92,6 +114,12 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
 ---
 
 ## Version History
+
+### Version 1.6.0 (September 2026)
+- High-risk transparency ratings explained in every report
+- Limited-certainty and "Unassessed" ratings when full text was not read
+- PDF text used for analysis; abstract-only records recognised
+- Failed literature sources reported instead of shown as empty
 
 ### Version 1.5.1 (August 2026)
 - DeepSeek V4 migration after the V3 model retirement
