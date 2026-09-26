@@ -42,7 +42,6 @@ struct MacFullTextTab: View {
 
     // MARK: - State
 
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var filterOption: FullTextFilterOption = .withFullText
 
     // MARK: - Computed Properties
@@ -67,18 +66,27 @@ struct MacFullTextTab: View {
 
     // MARK: - Body
 
+    // Nesting a `NavigationSplitView` inside another one's `detail` slot (the
+    // outer sidebar in `MacContentView` is itself a `NavigationSplitView`) is
+    // unsupported on macOS and produces exactly the symptom reported: a
+    // window that balloons far past any of the configured column widths,
+    // with a blank gutter left over between the two panes. A plain `HStack`
+    // has no such ideal-size feedback loop — the window can only grow to fit
+    // the finite widths declared below.
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        HStack(spacing: 0) {
             documentList
-                .navigationSplitViewColumnWidth(
-                    min: MacLayout.leftColumnMinWidth,
-                    ideal: MacLayout.leftColumnIdealWidth,
-                    max: MacLayout.leftColumnMaxWidth
+                .frame(
+                    minWidth: MacLayout.leftColumnMinWidth,
+                    idealWidth: MacLayout.leftColumnIdealWidth,
+                    maxWidth: MacLayout.leftColumnMaxWidth
                 )
-        } detail: {
+
+            Divider()
+
             detailView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .navigationSplitViewStyle(.balanced)
     }
 
     // MARK: - Document List
