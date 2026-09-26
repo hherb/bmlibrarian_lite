@@ -619,8 +619,11 @@ extension TransparencyAnalysisService {
                 document.storeTransparencyResult(result)
             }
         } catch {
+            // `privacy:` interpolation is not supported for this logger call in
+            // the Swift toolchain used by CI, so keep the message plain while
+            // retaining the essential metadata.
             AppLogger.fullText.error(
-                "Automatic post-full-text transparency re-analysis failed for \(document.pmid, privacy: .public): \(String(describing: error), privacy: .public)"
+                "Automatic post-full-text transparency re-analysis failed for \(document.pmid): \(String(describing: error))"
             )
         }
     }
