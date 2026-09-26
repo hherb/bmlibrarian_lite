@@ -1337,6 +1337,16 @@ struct DocumentDetailSheet: View {
                     document.applyFullTextResult(result)
                     save(document, "full text")
 
+                    // Full text just arrived; if the transparency badge was
+                    // computed without it, catch it up in the background
+                    // rather than leaving the reader to notice and re-run it.
+                    if document.transparencyNeedsFullTextRerun {
+                        Task {
+                            let transparencyService = TransparencyAnalysisService.create(from: .shared)
+                            await transparencyService.reanalyzeAfterFullTextIfNeeded(for: document)
+                        }
+                    }
+
                     fullTextResult = result
                     isLoadingFullText = false
 

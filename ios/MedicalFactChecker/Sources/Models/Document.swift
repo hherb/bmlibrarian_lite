@@ -440,6 +440,24 @@ final class Document {
         pubmedID != nil || usableDOI != nil
     }
 
+    /// Whether a full text just became available for a document whose stored
+    /// transparency result was produced without one.
+    ///
+    /// Conflict-of-interest and data-availability statements are looked for
+    /// only in the full text (``TransparencyResult/fullTextSearched``), so an
+    /// analysis run while only the abstract was on hand cannot see them —
+    /// full text fetched afterward makes that result incomplete rather than
+    /// merely old, which ``transparencyAnalysisIsStale`` does not capture
+    /// since nothing about the analyzer version changed. `false` when there
+    /// is no analysis to catch up, or when the analysis already searched full
+    /// text, or when there is still nothing to search now.
+    var transparencyNeedsFullTextRerun: Bool {
+        guard hasTransparencyAnalysis, canAnalyzeTransparency else { return false }
+        guard let result = transparencyResult, result.fullTextSearched != true else { return false }
+        guard let text = analyzableFullText else { return false }
+        return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// ``doi`` with surrounding whitespace removed, or nil when it names nothing.
     ///
     /// The stored value arrives straight from a provider's JSON through

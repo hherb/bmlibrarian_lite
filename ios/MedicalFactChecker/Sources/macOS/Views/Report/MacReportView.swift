@@ -1099,6 +1099,16 @@ struct MacDocumentDetailSheet: View {
                     // Update document model
                     document.applyFullTextResult(result)
 
+                    // Full text just arrived; if the transparency badge was
+                    // computed without it, catch it up in the background
+                    // rather than leaving the reader to notice and re-run it.
+                    if document.transparencyNeedsFullTextRerun {
+                        Task {
+                            let transparencyService = TransparencyAnalysisService.create(from: AppSettings.shared)
+                            await transparencyService.reanalyzeAfterFullTextIfNeeded(for: document)
+                        }
+                    }
+
                     isLoadingFullText = false
 
                     // Handle result based on content type
