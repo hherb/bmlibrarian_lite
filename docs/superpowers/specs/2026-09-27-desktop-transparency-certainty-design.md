@@ -166,9 +166,12 @@ New pure module, `transparency/risk_explanation.py`:
      analysis. Re-analyse the study before relying on it.` This applies when
      the row is HIGH and no trigger matches under the current settings.
   2. The provisional caveat, when `sources_unreachable`.
-  3. When the breakdown is wanted but not recorded: `How the score was reached
-     was not recorded by this analysis; re-analyse the study to see it.` This
-     one is desktop-only and is not in the contract.
+  3. When the breakdown is wanted but not available: `How the score was
+     reached is not available for this analysis; re-analyse the study to see
+     it.` This applies both to a row stored before its terms were recorded and
+     to one whose stored terms could not be read back. In the second case the
+     unreadable-column caveat among the other concerns says why. This caveat
+     is desktop-only and is not in the contract.
 
 ### 3. Surfaces
 
