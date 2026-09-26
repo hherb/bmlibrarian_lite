@@ -15,7 +15,19 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import Foundation
+import OSLog
 import BioMedLit
+
+/// Logger for failures in the BioMedLit adapters.
+///
+/// Declared here rather than taken from the per-platform `AppLogger`, which
+/// exists twice — once behind `#if os(iOS)` and once in the macOS-only
+/// sources — so a file shared by both platforms and the test target can use
+/// neither (#290).
+private let adapterLog = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "com.bmlibrarian.MedicalFactChecker",
+    category: "FullText"
+)
 
 // MARK: - Module Type Aliases
 // Note: Types from the BioMedLit module are imported directly (not via BioMedLit. prefix)
@@ -619,11 +631,8 @@ extension TransparencyAnalysisService {
                 document.storeTransparencyResult(result)
             }
         } catch {
-            // `privacy:` interpolation is not supported for this logger call in
-            // the Swift toolchain used by CI, so keep the message plain while
-            // retaining the essential metadata.
-            AppLogger.fullText.error(
-                "Automatic post-full-text transparency re-analysis failed for \(document.pmid): \(String(describing: error))"
+            adapterLog.error(
+                "Automatic post-full-text transparency re-analysis failed for \(document.pmid, privacy: .public): \(String(describing: error), privacy: .public)"
             )
         }
     }
