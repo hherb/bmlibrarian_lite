@@ -130,6 +130,20 @@ class JATSXMLParser(
     private var inRefList = false
     private var inRef = false
     private var inRefCitation = false
+
+    /**
+     * How many `<mixed-citation>` elements are open inside a `<ref>`.
+     *
+     * A `<mixed-citation>` is the reference as the publisher typeset it, with
+     * their punctuation between the tagged parts, so every descendant's text is
+     * also the citation's. Without the merge this counter licenses, each tagged
+     * child took its text with it and a standard NLM deposit read
+     * `". . . ;():-."` (#398; bmlib's #146). It is an *ancestor* test because
+     * mixed content is inherited: a `<surname>` sits inside `<name>` inside
+     * `<person-group>`. `<element-citation>` is deliberately not counted: it has
+     * no deposited string, only the tagged parts.
+     */
+    private var mixedCitationDepth = 0
     private var inRefPersonGroup = false
     private var currentReference: ReferenceBuilder? = null
 
@@ -342,7 +356,10 @@ class JATSXMLParser(
                 }
             }
             "mixed-citation", "element-citation" -> {
-                if (inRef) inRefCitation = true
+                if (inRef) {
+                    inRefCitation = true
+                    if (elementName == "mixed-citation") mixedCitationDepth++
+                }
             }
             "person-group" -> {
                 if (inRefCitation) inRefPersonGroup = true
@@ -371,7 +388,10 @@ class JATSXMLParser(
             val isInlineElement = elementName in INLINE_ELEMENTS
             val isFigureOrTableXref = elementName == "xref" &&
                     (currentXrefType in listOf("fig", "figure", "table", "table-wrap"))
-            elementText = popTextBuffer(mergeWithParent = isInlineElement && !isFigureOrTableXref)
+            val isInsideMixedCitation = mixedCitationDepth > 0 && elementName != "mixed-citation"
+            elementText = popTextBuffer(
+                mergeWithParent = (isInlineElement || isInsideMixedCitation) && !isFigureOrTableXref
+            )
         } else {
             elementText = currentText
         }
@@ -502,12 +522,24 @@ class JATSXMLParser(
                 currentReference?.build()?.let { references.add(it) }
                 inRef = false
                 inRefCitation = false
+                mixedCitationDepth = 0
                 inRefPersonGroup = false
                 currentReference = null
             }
             "mixed-citation", "element-citation" -> {
                 if (inRef) {
-                    currentReference?.citation = normalizedText
+                    // Only a mixed citation deposits a string. An element citation's
+                    // buffer holds the text of the children not modelled here (a
+                    // `<comment>`, a `<publisher-name>`), kept as before, but it must
+                    // not overwrite the deposit where `<citation-alternatives>`
+                    // carries both.
+                    if (elementName == "mixed-citation") {
+                        currentReference?.citation = normalizedText
+                        currentReference?.citationIsDeposit = true
+                        mixedCitationDepth = maxOf(0, mixedCitationDepth - 1)
+                    } else if (currentReference?.citationIsDeposit == false) {
+                        currentReference?.citation = normalizedText
+                    }
                     inRefCitation = false
                 }
             }
@@ -1110,7 +1142,7 @@ class JATSXMLParser(
             parts.add("<a href=\"https://doi.org/${escapeHtml(ref.doi)}\">doi:${escapeHtml(ref.doi)}</a>")
         }
 
-        return if (parts.isEmpty()) escapeHtml(ref.citation) else parts.joinToString(". ")
+        return if (ref.defersToTheDeposit(parts.size)) escapeHtml(ref.citation) else parts.joinToString(". ")
     }
 
     private fun convertInlineLinksToHtml(text: String): String {
@@ -1448,6 +1480,7 @@ private class ReferenceBuilder {
     var id = ""
     var label = ""
     var citation = ""
+    var citationIsDeposit = false
     val authors = mutableListOf<String>()
     var currentAuthorSurname = ""
     var currentAuthorGivenNames = ""
@@ -1488,7 +1521,8 @@ private class ReferenceBuilder {
             firstPage = firstPage,
             lastPage = lastPage,
             doi = doi,
-            pmid = pmid
+            pmid = pmid,
+            citationIsDeposit = citationIsDeposit
         )
     }
 }

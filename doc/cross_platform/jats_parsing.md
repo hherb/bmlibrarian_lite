@@ -230,8 +230,10 @@ function on_end_element(name: string):
     element_text = ""
     if name in TEXT_ACCUMULATING_ELEMENTS:
         element_text = text_stack.pop()
-        # Inline elements merge with parent
-        if is_inline_element(name) and text_stack:
+        # Inline elements merge with parent, and so does every descendant of
+        # a <mixed-citation> (see "References" below)
+        inside_mixed_citation = mixed_citation_depth > 0 and name != "mixed-citation"
+        if (is_inline_element(name) or inside_mixed_citation) and text_stack:
             text_stack[-1] += element_text
 
     element_stack.pop()
@@ -827,6 +829,7 @@ class ReferenceBuilder:
     doi: string = ""
     pmid: string = ""
     citation: string = ""  # Raw citation text
+    citation_is_deposit: bool = false  # citation came from a <mixed-citation>
 
     # Author accumulation
     current_surname: string = ""
@@ -896,8 +899,31 @@ class ReferenceBuilder:
         if doi:
             parts.append(f"doi:{doi}")
 
+        if defers_to_the_deposit(len(parts)):
+            return citation
         return ". ".join(parts)
+
+    # One component is never a citation: print the deposit instead. The HTML
+    # renderer applies the same rule to the parts list it builds.
+    function defers_to_the_deposit(printed_part_count: int) -> bool:
+        return printed_part_count == 0 or
+               (printed_part_count == 1 and citation_is_deposit and citation != "")
 ```
+
+A `<mixed-citation>` is the reference as the publisher typeset it, with their
+punctuation between the tagged parts, so every descendant's text is also the
+citation's: each child merges its buffer back, through any depth
+(`<surname>` → `<name>` → `<person-group>` → `<mixed-citation>`). Without that
+merge a standard NLM deposit read `". . . ;():-."`. `<element-citation>` is not
+a deposit: its `citation` holds only the text of children the parser does not
+model (`<comment>`, `<publisher-name>`), is printed only where no component
+prints, and never overwrites a mixed citation's deposit inside
+`<citation-alternatives>`. Where a renderer would print a single component (a
+bare volume `36`, a bare `(2023)`) and there is a deposit, the deposit is
+printed. Measured on 320 PMC articles: 47 references in 12 articles change, all
+gaining text. A *pair* naming no work (authors + year) still renders
+structured; bmlib tracks that residual as its #276. Rules from bmlib's #146 and
+#268 (#398).
 
 **Important:** Call `finish_current_author()` when closing each `</name>` element, not at `</person-group>`.
 
