@@ -72,6 +72,8 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
   more reliably, so studies are no longer rated high risk for statements
   they actually contain
 - Funders are now checked for studies found through PubMed
+- Industry funders named without a legal suffix ("Pfizer") are now
+  recognised, while company-named charitable foundations are not
 
 **Full Text from PDFs**
 - Downloaded PDFs now contribute their text to the analysis

@@ -38,11 +38,19 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 - **Apps:** a rating made without the full text is labelled "Limited
   certainty"; one resting only on unsearched text is shown as "Unassessed".
   A missing trial registration is reported only when ClinicalTrials.gov
-  answered. The transparency analyzer version is now 4, so stored results
-  are re-analysed.
+  answered. The transparency analyzer version is now 6 (Python 2.1), so
+  stored results are re-analysed.
 
 ### Fixed
 
+- **Funders named by brand are industry.** "Pfizer" or "The Pfizer company"
+  with no legal suffix was classified as not industry on every platform, so
+  industry funding went undetected. A brand layer, shared through
+  `sponsor_patterns.json`, recognises the curated known-funder companies by
+  name, while their charitable foundations stay non-industry. The labelled
+  funder corpus was re-audited (five commercial entities relabelled
+  industry, five undecidable names made ambiguous); on it, precision rises
+  from 0.909 to 0.958 and recall from 0.333 to 0.657.
 - **iOS/macOS: conflict-of-interest and data statements missed.** The Swift
   JATS parser dropped the heading of an unsectioned `<ack>`/`<notes>`
   ("Competing interests", "Data availability"), so the heading-based
@@ -50,8 +58,7 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   COI statement they had. The Swift and Android extractors also captured the
   word "Statement" from "Data Availability Statement" headings as the
   statement itself. On 220 surveyed PMC articles, usable COI statements rose
-  from 150 to 182 and usable data statements from 43 to 179. Analyzer
-  version 5.
+  from 150 to 182 and usable data statements from 43 to 179.
 - **iOS/macOS: funders never checked for PubMed results.** The Swift PubMed
   parser never read a record's DOI or PMC ID, so CrossRef was never asked
   for the funders of documents found through a PubMed search.
