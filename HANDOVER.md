@@ -8,59 +8,7 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#385 — an unreachable source was stored as a finding (Swift + Android), and
-the trial test misfired on all three platforms**, branch
-`fix/unreachable-transparency-sources-385`, **PR #410**. Compress into **Recently landed**
-once merged. PR #388's review commit (`3c71a15`) had already gated the
-missing-registration indicator on Swift and Android and added the CrossRef
-warning; what remained:
-
-- **Provisional results (Swift + Android).** `TransparencyResult.sourcesUnreachable`
-  (`Bool?`, nil = not recorded, so older JSON still decodes) is set when
-  PubMed, CrossRef or ClinicalTrials.gov fails *or answers unreadably*; a 404
-  is an answer. `isProvisional`, and `needsReanalysis` = stale, or provisional
-  and not written by a newer build (Python's `may_replace_stored`). The iOS
-  `Document.transparencyAnalysisIsStale` became `…NeedsRerun` (workflow filter
-  and both Re-analyze buttons); Android's `needsTransparencyAnalysis` asks
-  `needsReanalysis`. Detail views and the explanation carry
-  `provisionalResultCaveat`. A PubMed failure now warns
-  (`pubMedUnreachableWarning`) instead of only logging.
-- **Python (canonical) had two gaps Swift didn't.** `trial_registration_assessed`
-  meant only "PubMed answered", so a registry outage *and* an ISRCTN/EudraCT
-  registration both raised "Clinical trial without detected registration"
-  beside a warning saying the opposite. Now every cited trial must be
-  answered (`every_trial_answered`); an outage also sets
-  `registry_record_unreachable`, which feeds `sources_unreachable`. A registry
-  with no client is unassessed but *not* provisional (no re-analysis reads it).
-- **Trial titles by whole word, all three** — new shared contract
-  `doc/cross_platform/transparency_parity/trial_title_patterns.json`. The
-  substring test read "atrial fibrillation" (`trial`) and "myocardial
-  infarction" (`rct`) as trials.
-- **Found on the way:** `export_to_csv` raised `ValueError` on every report
-  since #359 (`coi_disclosure_level` missing from `fieldnames`) — fixed; its
-  100-character title cut lodged as **#409**.
-- **Review round (same PR).** Swift: esearch listing the PMID and efetch then
-  failing (or breaking off) returned an empty page with the loss in
-  `shortfalls`, not a throw — now provisional too; and a cancel inside
-  `analyze` is rethrown (`isCancellation`) instead of stored as an outage.
-  Python: every NLM trial registry counts (`PUBMED_TRIAL_REGISTRY_DATABANKS`;
-  ANZCTR, ChiCTR… read as unregistered), a registry body without a
-  `protocolSection` is unreachable (was a registration with an empty ID),
-  and `extract_trial_info` checks every shape. Kotlin folds Unicode
-  whitespace before the trial match (Java's `\s` is ASCII-only; contract
-  gained no-break-space cases). iOS: the workflow gate is
-  `Document.needsTransparencyAnalysis`. Constructors default
-  `sourcesUnreachable` to `false`. Lodged: #411 (provisional shown only in
-  detail views), #412 (newer build's provisional caveat, no button), #413
-  (undecodable newer-build result overwritten), #414 (Swift PMID lookup
-  adopts the first hit), #415 (permanent failures re-analysed forever);
-  malformed CrossRef funders added to #391.
-- Versions: Python `2.2`, Swift and Android `7`. `errors` stays in the Swift
-  and Kotlin models (a required key; dropping it breaks an older synced build)
-  though nothing writes it.
-- Out of scope, still open: #389 (`hasResults`), #390 (NCT IDs from the title
-  only), #391 ("funders not checked" on Low/Medium). "Phase 1/2" digit forms
-  are not trial words; they never were.
+Nothing. Pick from **Potential follow-ups**.
 
 ## Recently landed (context)
 
@@ -68,6 +16,21 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **An unreachable source is provisional, not a finding; a trial is a whole
+  word** (all three; PR #410, #385; merged 2026-09-27). Swift + Android
+  record `TransparencyResult.sourcesUnreachable` (`Bool?`, nil = older JSON)
+  when PubMed, CrossRef or ClinicalTrials.gov fails *or answers unreadably*
+  (a 404 is an answer; an esearch hit whose efetch fails counts);
+  `needsReanalysis` = stale, or provisional and not from a newer build; a
+  cancel is rethrown, never stored as an outage. Python: **every cited trial
+  must be answered** (`every_trial_answered`) before "without detected
+  registration" can fire; every NLM registry databank counts
+  (`PUBMED_TRIAL_REGISTRY_DATABANKS`); a registry with no client is
+  unassessed but not provisional. Trial titles match by whole word from
+  `trial_title_patterns.json` ("atrial", "myocardial" were trials). Versions:
+  Python `2.2`, Swift and Android `7`; `errors` stays in the Swift/Kotlin
+  models (an older synced build requires it). `export_to_csv` raised on
+  every report since #359 — fixed. Lodged: #409, #411–#415.
 - **Inline markup and mixed citations keep their text** (PR #397; PR #405,
   #398; merged 2026-09-26). **Never `findtext` a mixed-content element** —
   it returns the text before the first child: Python reads the whole element
@@ -259,12 +222,16 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **#386 — the desktop has none of PR #388**: no "Limited certainty" wording,
   no high-risk explanation section, no Unassessed display. Python is otherwise
   canonical for transparency, so this is the platform that lags.
-- **#385** in flight above. **#390** Swift + Android look trial registrations up from the title only
+- **#390** Swift + Android look trial registrations up from the title only
   (port Python's PubMed databank-link source); **#389** a missing
   `hasResults` reads as "results not posted"; **#391** unchecked funders are
   not flagged on Low/Medium, and a malformed CrossRef funder array is silent;
   **#392** document-set parity, a shared explanation fixture, a
-  `StoredTransparency` type.
+  `StoredTransparency` type. From PR #410: **#411** provisional shown only in
+  detail views; **#412** a newer build's provisional caveat offers no button;
+  **#413** an undecodable newer-build result is overwritten (Swift + Android);
+  **#414** Swift's PMID lookup adopts the first hit; **#415** permanent
+  lookup failures are re-analysed forever.
 - Android: **#384** analyse full text (every rating is "limited" until then);
   **#387** data-availability parity, DAO/migration tests.
 - **#400** the data-availability heading rule (`'data' in title and ('avail'
