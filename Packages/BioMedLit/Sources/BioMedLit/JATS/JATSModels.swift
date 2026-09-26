@@ -201,6 +201,17 @@ public struct JATSReferenceInfo: Sendable, Equatable {
     /// Raw citation text.
     public let citation: String
 
+    /// Whether ``citation`` is a `<mixed-citation>`'s deposited string.
+    ///
+    /// An `<element-citation>` deposits no string: its ``citation`` holds the
+    /// leftover text of children not captured into a structured field
+    /// (unmodelled ones such as `<comment>` or `<publisher-name>`, inline ones
+    /// such as `<uri>`), often run together without separators. It is printed
+    /// where nothing else would print but never *in place of* a tagged part.
+    /// bmlib instead leaves an element citation's `citation` empty; the ports
+    /// keep the leftover text, which is why this flag exists.
+    public let citationIsDeposit: Bool
+
     /// Structured reference fields.
     public let authors: [String]
     public let articleTitle: String
@@ -226,11 +237,13 @@ public struct JATSReferenceInfo: Sendable, Equatable {
         firstPage: String,
         lastPage: String,
         doi: String,
-        pmid: String
+        pmid: String,
+        citationIsDeposit: Bool = false
     ) {
         self.id = id
         self.label = label
         self.citation = citation
+        self.citationIsDeposit = citationIsDeposit
         self.authors = authors
         self.articleTitle = articleTitle
         self.source = source
@@ -297,12 +310,30 @@ public struct JATSReferenceInfo: Sendable, Equatable {
             parts.append("doi:\(doi)")
         }
 
-        // If we have structured data, use it; otherwise fall back to raw citation
-        if parts.isEmpty {
+        if defersToTheDeposit(printedPartCount: parts.count) {
             return citation
         }
 
         return parts.joined(separator: ". ")
+    }
+
+    /// Would a rendering of that many components print ``citation`` instead?
+    ///
+    /// Where one component is all a renderer would print and there is a
+    /// deposit, the deposit is printed: a lone volume or year is no citation
+    /// (#398; bmlib's #268). An `<element-citation>` has no deposit (see
+    /// ``citationIsDeposit``), so there the lone component still prints. With
+    /// no components at all ``citation`` is printed whatever it holds.
+    ///
+    /// Read by ``formattedCitation`` and by the parser's HTML renderer, each
+    /// passing the length of the parts list it has just built, so the rule is
+    /// stated once. A *pair* that names no work (authors and year) still
+    /// renders structured; bmlib tracks that residual as its #276.
+    ///
+    /// - Parameter printedPartCount: How many components the renderer built.
+    /// - Returns: `true` when ``citation`` should be printed instead.
+    func defersToTheDeposit(printedPartCount: Int) -> Bool {
+        printedPartCount == 0 || (printedPartCount == 1 && citationIsDeposit && !citation.isEmpty)
     }
 }
 
@@ -771,6 +802,7 @@ struct ReferenceBuilder {
     var id = ""
     var label = ""
     var citation = ""
+    var citationIsDeposit = false
     var authors: [String] = []
     var currentAuthorSurname = ""
     var currentAuthorGivenNames = ""
@@ -811,7 +843,8 @@ struct ReferenceBuilder {
             firstPage: firstPage,
             lastPage: lastPage,
             doi: doi,
-            pmid: pmid
+            pmid: pmid,
+            citationIsDeposit: citationIsDeposit
         )
     }
 }

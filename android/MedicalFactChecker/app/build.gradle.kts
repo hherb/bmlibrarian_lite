@@ -165,6 +165,9 @@ dependencies {
     // Local HTTP server for tests that check what reaches the wire (#243);
     // keep in step with the okhttp version above
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    // A real XmlPullParser for JVM tests of the JATS parser: android.jar's
+    // org.xmlpull classes are stubs that throw "not mocked" (#398)
+    testImplementation("net.sf.kxml:kxml2:2.3.0")
 
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")

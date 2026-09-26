@@ -139,6 +139,14 @@ data class JATSTableInfo(
  * @param lastPage Last page.
  * @param doi Digital Object Identifier.
  * @param pmid PubMed ID.
+ * @param citationIsDeposit Whether [citation] is a `<mixed-citation>`'s deposited
+ *   string. An `<element-citation>` deposits none: its [citation] holds the
+ *   leftover text of children not captured into a structured field
+ *   (unmodelled ones such as `<comment>` or `<publisher-name>`, inline ones
+ *   such as `<uri>`), often run together without separators. It is printed
+ *   where nothing else would print but never *in place of* a tagged part.
+ *   bmlib instead leaves an element citation's `citation` empty; the ports
+ *   keep the leftover text, which is why this flag exists.
  */
 data class JATSReferenceInfo(
     val id: String,
@@ -153,8 +161,29 @@ data class JATSReferenceInfo(
     val firstPage: String,
     val lastPage: String,
     val doi: String,
-    val pmid: String
+    val pmid: String,
+    val citationIsDeposit: Boolean = false
 ) {
+    /**
+     * Would a rendering of that many components print [citation] instead?
+     *
+     * Where one component is all a renderer would print and there is a
+     * deposit, the deposit is printed: a lone volume or year is no citation
+     * (#398; bmlib's #268). An `<element-citation>` has no deposit (see
+     * [citationIsDeposit]), so there the lone component still prints. With no
+     * components at all [citation] is printed whatever it holds.
+     *
+     * Read by [formattedCitation] and by the parser's HTML renderer, each
+     * passing the length of the parts list it has just built, so the rule is
+     * stated once. A *pair* that names no work (authors and year) still renders
+     * structured; bmlib tracks that residual as its #276.
+     *
+     * @param printedPartCount How many components the renderer built.
+     * @return `true` when [citation] should be printed instead.
+     */
+    internal fun defersToTheDeposit(printedPartCount: Int): Boolean =
+        printedPartCount == 0 || (printedPartCount == 1 && citationIsDeposit && citation.isNotEmpty())
+
     /**
      * Format the reference as a complete citation string.
      */
@@ -212,8 +241,7 @@ data class JATSReferenceInfo(
                 parts.add("doi:$doi")
             }
 
-            // If we have structured data, use it; otherwise fall back to raw citation
-            return if (parts.isEmpty()) citation else parts.joinToString(". ")
+            return if (defersToTheDeposit(parts.size)) citation else parts.joinToString(". ")
         }
 }
 

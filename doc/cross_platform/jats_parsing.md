@@ -114,6 +114,7 @@ class JATSParser:
     in_ref_list: bool = false
     in_ref: bool = false
     in_ref_citation: bool = false
+    mixed_citation_depth: int = 0  # open <mixed-citation>s inside a <ref>
     in_person_group: bool = false
     current_reference: ReferenceBuilder | null
 
@@ -205,7 +206,9 @@ const TEXT_ACCUMULATING_ELEMENTS = {
     "mixed-citation", "element-citation", "caption",
     "bold", "b", "italic", "i", "sub", "sup", "monospace", "code",
     "xref", "ext-link", "uri", "email", "named-content",
-    "list-item", "source", "article-title", "person-group", "pub-id"
+    "list-item", "def", "term", "kwd", "alt-title",
+    "inline-formula", "disp-formula", "tex-math",
+    "source", "person-group", "pub-id", "collab"
 }
 
 function on_start_element(name: string, attrs: dict):
@@ -230,8 +233,12 @@ function on_end_element(name: string):
     element_text = ""
     if name in TEXT_ACCUMULATING_ELEMENTS:
         element_text = text_stack.pop()
-        # Inline elements merge with parent
-        if is_inline_element(name) and text_stack:
+        # Inline elements merge with parent, and so does every descendant of
+        # a <mixed-citation> (see "References" below) except <tex-math>,
+        # whose buffer is a whole LaTeX document and is always dropped
+        inside_mixed_citation = mixed_citation_depth > 0 and
+                                name not in {"mixed-citation", "tex-math"}
+        if (is_inline_element(name) or inside_mixed_citation) and text_stack:
             text_stack[-1] += element_text
 
     element_stack.pop()
@@ -827,6 +834,7 @@ class ReferenceBuilder:
     doi: string = ""
     pmid: string = ""
     citation: string = ""  # Raw citation text
+    citation_is_deposit: bool = false  # citation came from a <mixed-citation>
 
     # Author accumulation
     current_surname: string = ""
@@ -896,8 +904,56 @@ class ReferenceBuilder:
         if doi:
             parts.append(f"doi:{doi}")
 
+        if defers_to_the_deposit(len(parts)):
+            return citation
         return ". ".join(parts)
+
+    # A lone component is no citation where there is a deposit: print the
+    # deposit instead. The HTML renderer applies the same rule to the parts
+    # list it builds.
+    function defers_to_the_deposit(printed_part_count: int) -> bool:
+        return printed_part_count == 0 or
+               (printed_part_count == 1 and citation_is_deposit and citation != "")
+
+# The citation arms, inside a <ref>
+on_start_element("mixed-citation"):
+    in_ref_citation = true
+    mixed_citation_depth += 1
+on_start_element("element-citation"):
+    in_ref_citation = true
+
+on_end_element("mixed-citation", text):  # text: its merged buffer
+    current_reference.citation = normalize_whitespace(text)
+    current_reference.citation_is_deposit = true
+    mixed_citation_depth = max(0, mixed_citation_depth - 1)
+    in_ref_citation = false
+on_end_element("element-citation", text):
+    if not current_reference.citation_is_deposit:
+        current_reference.citation = normalize_whitespace(text)
+    in_ref_citation = false
+
+on_end_element("ref"):
+    ...
+    mixed_citation_depth = 0
 ```
+
+A `<mixed-citation>` is the reference as deposited, with whatever characters
+the depositor put between its tagged parts, so every descendant's text is also
+the citation's: each child merges its buffer back, through any depth (e.g. a
+`<surname>` inside `<name>` inside `<person-group>`), except `<tex-math>`.
+Without that merge a standard NLM deposit read as little more than its
+punctuation. Where a renderer would print a single component (a bare volume
+`36`, a bare `(2023)`) and there is a deposit, the deposit is printed. A *pair*
+naming no work (authors + year) still renders structured; bmlib tracks that
+residual as its #276. These rules are bmlib's #146 and #268 (#398).
+
+One rule differs from bmlib. bmlib leaves an `<element-citation>`'s `citation`
+empty; the ports keep its leftover text — unmodelled children such as
+`<comment>` or `<publisher-name>`, and inline ones such as `<uri>`, often run
+together without separators. That text is not a deposit
+(`citation_is_deposit` stays false): it is printed only where no component
+prints, and never overwrites a mixed citation's deposit inside
+`<citation-alternatives>`, in either order.
 
 **Important:** Call `finish_current_author()` when closing each `</name>` element, not at `</person-group>`.
 
@@ -930,7 +986,8 @@ Handle inline formatting elements:
 ```pseudocode
 const INLINE_ELEMENTS = {
     "bold", "b", "italic", "i", "sub", "sup",
-    "monospace", "code", "xref", "ext-link"
+    "monospace", "code", "xref", "ext-link",
+    "uri", "email", "named-content", "inline-formula"
 }
 
 function is_inline_element(name: string) -> bool:

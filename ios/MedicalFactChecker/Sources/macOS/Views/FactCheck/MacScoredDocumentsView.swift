@@ -652,6 +652,16 @@ struct MacDocumentCard: View {
                     // Update document model based on result type
                     document.applyFullTextResult(result)
 
+                    // Full text just arrived; if the transparency badge was
+                    // computed without it, catch it up in the background
+                    // rather than leaving the reader to notice and re-run it.
+                    if document.transparencyNeedsFullTextRerun {
+                        Task {
+                            let transparencyService = TransparencyAnalysisService.create(from: AppSettings.shared)
+                            await transparencyService.reanalyzeAfterFullTextIfNeeded(for: document)
+                        }
+                    }
+
                     switch result.content {
                     case .markdown, .html, .pdfURL:
                         // Everything the tab needs is already on the document:

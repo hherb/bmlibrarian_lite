@@ -15,7 +15,19 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import Foundation
+import OSLog
 import BioMedLit
+
+/// Logger for failures in the BioMedLit adapters.
+///
+/// Declared here rather than taken from the per-platform `AppLogger`, which
+/// exists twice — once behind `#if os(iOS)` and once in the macOS-only
+/// sources — so a file shared by both platforms and the test target can use
+/// neither (#290).
+private let adapterLog = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "com.bmlibrarian.MedicalFactChecker",
+    category: "FullText"
+)
 
 // MARK: - Module Type Aliases
 // Note: Types from the BioMedLit module are imported directly (not via BioMedLit. prefix)
@@ -587,5 +599,41 @@ extension TransparencyAnalysisService {
         let email = settings.ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : settings.ncbiEmail
         let apiKey = settings.ncbiAPIKey.isEmpty ? nil : settings.ncbiAPIKey
         return TransparencyAnalysisService(email: email, pubmedApiKey: apiKey)
+    }
+
+    /// Re-runs transparency analysis for a document whose full text just
+    /// arrived, if the stored result was produced without one.
+    ///
+    /// Called from every full-text fetch site right after
+    /// `Document.applyFullTextResult(_:)` succeeds, so the transparency badge
+    /// catches up on its own — the reader who just fetched the full text
+    /// should not also have to notice the badge is stale and press
+    /// "Re-analyze" themselves. `Document.transparencyNeedsFullTextRerun`
+    /// gates on there being a prior abstract-only result and a non-empty
+    /// full text to hand it now, so this is a no-op for a document with no
+    /// analysis yet, one already analysed with full text, or one still
+    /// without usable text.
+    ///
+    /// Silent on failure: this runs opportunistically after a fetch the
+    /// reader already asked for, and re-throwing would surface a second
+    /// error alongside a full-text fetch that just succeeded.
+    ///
+    /// - Parameter document: The document to re-analyze, mutated in place.
+    func reanalyzeAfterFullTextIfNeeded(for document: Document) async {
+        guard document.transparencyNeedsFullTextRerun else { return }
+        do {
+            let result = try await analyze(
+                doi: document.usableDOI,
+                pmid: document.pubmedID,
+                fullText: document.analyzableFullText
+            )
+            await MainActor.run {
+                document.storeTransparencyResult(result)
+            }
+        } catch {
+            adapterLog.error(
+                "Automatic post-full-text transparency re-analysis failed for \(document.pmid, privacy: .public): \(String(describing: error), privacy: .public)"
+            )
+        }
     }
 }
