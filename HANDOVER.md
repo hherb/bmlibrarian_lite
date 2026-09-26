@@ -8,75 +8,59 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#374 — one undecodable transparency row fails a whole batch read**, branch
-`fix/one-undecodable-transparency-row-374`, **PR #379**. Python only. Compress into
-**Recently landed** once merged.
-**User's call (2026-09-23): split by version.** A row whose `analyzer_version`
-is strictly newer than this build's was written by a newer build and is never
-overwritten (not pending, not re-queued); any other undecodable row is
-damaged, stays pending, and re-analysis replaces it. Either way it is shown
-as "not assessed" for that document alone, never dropped.
+**#385 — an unreachable source was stored as a finding (Swift + Android), and
+the trial test misfired on all three platforms**, branch
+`fix/unreachable-transparency-sources-385`, **PR #410**. Compress into **Recently landed**
+once merged. PR #388's review commit (`3c71a15`) had already gated the
+missing-registration indicator on Swift and Android and added the CrossRef
+warning; what remained:
 
-- **The value.** `LiteStorage._stored_transparency_from_row` catches
-  `ValueError`/`TypeError` per row and returns `UndecodableTransparencyRow`
-  (document id + raw version); both readers now return `StoredTransparency`
-  (`TransparencyResult | UndecodableTransparencyRow`), so mypy finds every
-  consumer. `undecodable_row_caveat` is the one sentence the badge and the
-  reference annotation share; `damaged_assessment_caveat` for damage, the new
-  `TransparencyFailureKind.WRITTEN_BY_NEWER_BUILD` (no cause, like
-  `NO_IDENTIFIER`) for the newer build's row.
-- **Where it reaches:** `TransparencyCounts.undecodable` (inside
-  `not_assessed`), `pending_transparency_ids` (`_needs_analysis`),
-  `stored_transparency_outcomes` (re-analysis advice only for damage),
-  `withheld_reference_caveats`, the manager's cache check, the review tab's
-  getter. `_show_stored_transparency`'s catch narrowed to database errors;
-  the Research Questions tab keeps `ValueError` because `get_documents`'
-  `json.loads` still raises it.
-- **Verified:** `pytest tests/` 2358 passed, 3 xfailed; `lint_delta.py` 0 new.
-  Mutation sweep (both guards, `cp` backups, `cmp` after): 19 of 20 caught;
-  the survivor (`isinstance(result, TransparencyResult)` in the reporting
-  agent's risky loop → `is not None`) is equivalent, since every undecodable
-  row is already in `withheld`, and mypy rejects it.
-- **Review round (two agents), addressed:**
-  - Invalid UTF-8 in any column still raised from the cursor and failed the
-    batch, so both readers now set `conn.text_factory = _text_or_bytes`, and
-    a row holding bytes is withheld.
-  - With *Cache results* off, the manager skipped the newer-build check, so
-    it now runs before the cache guard. The old
-    `test_caching_disabled_skips_cache` pinned "the store is not read"; it
-    is now `test_caching_disabled_serves_no_stored_finding`.
-  - The methodology's "Not assessed" sentence now lists an unreadable row
-    and a row at no nameable level.
-  - A newer build's row logs a warning, not an ERROR traceback.
-  - A second sweep caught 7 of 7.
-  - `pytest tests/` 2365 passed, 3 xfailed; `lint_delta.py` 0 new.
-- **Second review round (five agents), addressed:**
-  - A newer build's row that *decoded* but was provisional was still pending
-    and re-analysed, even with the cache on (`is_final` is false for it), and
-    with the cache off any decodable newer row was. One test now decides
-    it, `may_replace_stored` (on `is_newer_than_this_build`), asked by
-    `_needs_analysis` and by the manager before the cache guard; a decodable
-    newer row is served as stored.
-  - The catch wrapped the whole mapper, so a field the mapper forgot
-    (`TypeError`) would have called every row damaged. Only the decoding
-    (`_decoded_transparency_keys`) now raises the private
-    `_UndecodableColumnError`; anything else propagates.
-  - Bytes now withhold the row only outside the list and COI columns
-    (`_TRANSPARENCY_COLUMNS_READ_ALONE`), which degrade per column.
-  - The handler names the withheld row by the queried id, so it cannot
-    raise over the row's own id. A numeric version is kept as text.
-  - `TransparencyCounts` validates its buckets. The logs name the column
-    and the error's class, never the value.
-  - Every new fix test fails on the pre-round code (11 of them); a 4-mutation
-    sweep over the storage changes caught all 4.
-  - `pytest tests/` 2384 passed, 3 xfailed; `lint_delta.py` 0 new.
-- Lodged: **#378** — its undecodable and decodable halves are fixed here;
-  still open is that nothing re-reads a row just before saving over it, so a
-  newer build writing mid-analysis can lose its row. **#380** — the report
-  count and the Re-analyse dialog do not tell a newer build's row from a
-  damaged one. **#381** — a store error in the manager's cache check stops
-  the review's queueing loop. **#382** — the startup COI migration fails on
-  non-UTF-8 text.
+- **Provisional results (Swift + Android).** `TransparencyResult.sourcesUnreachable`
+  (`Bool?`, nil = not recorded, so older JSON still decodes) is set when
+  PubMed, CrossRef or ClinicalTrials.gov fails *or answers unreadably*; a 404
+  is an answer. `isProvisional`, and `needsReanalysis` = stale, or provisional
+  and not written by a newer build (Python's `may_replace_stored`). The iOS
+  `Document.transparencyAnalysisIsStale` became `…NeedsRerun` (workflow filter
+  and both Re-analyze buttons); Android's `needsTransparencyAnalysis` asks
+  `needsReanalysis`. Detail views and the explanation carry
+  `provisionalResultCaveat`. A PubMed failure now warns
+  (`pubMedUnreachableWarning`) instead of only logging.
+- **Python (canonical) had two gaps Swift didn't.** `trial_registration_assessed`
+  meant only "PubMed answered", so a registry outage *and* an ISRCTN/EudraCT
+  registration both raised "Clinical trial without detected registration"
+  beside a warning saying the opposite. Now every cited trial must be
+  answered (`every_trial_answered`); an outage also sets
+  `registry_record_unreachable`, which feeds `sources_unreachable`. A registry
+  with no client is unassessed but *not* provisional (no re-analysis reads it).
+- **Trial titles by whole word, all three** — new shared contract
+  `doc/cross_platform/transparency_parity/trial_title_patterns.json`. The
+  substring test read "atrial fibrillation" (`trial`) and "myocardial
+  infarction" (`rct`) as trials.
+- **Found on the way:** `export_to_csv` raised `ValueError` on every report
+  since #359 (`coi_disclosure_level` missing from `fieldnames`) — fixed; its
+  100-character title cut lodged as **#409**.
+- **Review round (same PR).** Swift: esearch listing the PMID and efetch then
+  failing (or breaking off) returned an empty page with the loss in
+  `shortfalls`, not a throw — now provisional too; and a cancel inside
+  `analyze` is rethrown (`isCancellation`) instead of stored as an outage.
+  Python: every NLM trial registry counts (`PUBMED_TRIAL_REGISTRY_DATABANKS`;
+  ANZCTR, ChiCTR… read as unregistered), a registry body without a
+  `protocolSection` is unreachable (was a registration with an empty ID),
+  and `extract_trial_info` checks every shape. Kotlin folds Unicode
+  whitespace before the trial match (Java's `\s` is ASCII-only; contract
+  gained no-break-space cases). iOS: the workflow gate is
+  `Document.needsTransparencyAnalysis`. Constructors default
+  `sourcesUnreachable` to `false`. Lodged: #411 (provisional shown only in
+  detail views), #412 (newer build's provisional caveat, no button), #413
+  (undecodable newer-build result overwritten), #414 (Swift PMID lookup
+  adopts the first hit), #415 (permanent failures re-analysed forever);
+  malformed CrossRef funders added to #391.
+- Versions: Python `2.2`, Swift and Android `7`. `errors` stays in the Swift
+  and Kotlin models (a required key; dropping it breaks an older synced build)
+  though nothing writes it.
+- Out of scope, still open: #389 (`hasResults`), #390 (NCT IDs from the title
+  only), #391 ("funders not checked" on Low/Medium). "Phase 1/2" digit forms
+  are not trial words; they never were.
 
 ## Recently landed (context)
 
@@ -84,123 +68,87 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
-- **A correction reaches a question nobody reviews again** (Python; #373,
-  #372, PR #375, merged 2026-09-23). Contract: *A correction only reaches the
-  reader if something re-analyses* in
-  `doc/cross_platform/analysis_failure_reporting.md`. What binds: **a stored
-  row nothing reads is unreachable, not merely stale** — a reloaded question
-  showed no badge at all. **Load shows and fetches nothing**
-  (`stored_transparency_outcomes`); re-analysis is an explicit pass
-  (*Re-analyse Transparency*, `TransparencyReanalysisWorker`), question-scoped
-  and decided by the cache's own `is_final` (`pending_transparency_ids`).
-  **One analysis body** (`transparency/assessment.py`) for the manager and the
-  pass. **Provisional is a third count** (`PassOutcome.provisional`). **Every
-  counted study must be findable in the references**
-  (`withheld_reference_caveats` annotates superseded, not-stored and
-  no-nameable-level rows), and **the counts and annotations come from one
-  read** (`_record_transparency_counts` returns its rows). Reports name both
-  populations ("12 of the 40 studies reviewed; 3 of them are cited").
-  **A status message is overwritten by the load's summary** — carry a clause
-  instead. Lodged: #374, #376, #377.
-
-- **A correction only reaches the reader if something re-analyses** (Python;
-  #360, #361, #249, PR #366, merged 2026-09-23). Rules in
-  `doc/cross_platform/analysis_failure_reporting.md` (two new sections). What
-  binds: **bump `TRANSPARENCY_ANALYZER_VERSION`** (now `"2.0"`) whenever the
-  same inputs could produce a different score, level, indicator or caveat —
-  not for a refactor or a settings change. **The comparison is an ordering**
-  (`analyzer_version_ordinal`): only a *strictly older* row is superseded,
-  since `save_transparency_result` is `INSERT OR REPLACE`. **`is_final` is the
-  cache's question**, not `is_current`: a row with `sources_unreachable` is a
-  cache miss but is still presented with its caveat. **A stale row is a cache
-  miss**, re-analysed on the paced path; no bulk invalidation on open. **Every
-  surface that reads a stored row is gated** (badge, small badge,
-  `should_warn_for_citation`, report risk distribution, tier downgrade inside
-  `apply_transparency_adjustment`, quality filter, the review tab's getter),
-  and a withheld row reads **"Not assessed"** — annotated in the reference
-  list, never printed bare, because bare reads as low risk. **"Applied" means
-  asked**: `transparency_unassessed_count` and `TransparencyCounts.unknown`.
-  **A signal nothing connects is not reporting**: `LiteMainWindow._connect_signals`
-  is extracted and tested, and a second test asserts `_setup_ui` calls it.
-  **The done-callback catches `BaseException`**, so no document is left without
-  an outcome. **The failure payload is a value** (`TransparencyAnalysisFailure`
-  + `EvaluationErrorCode`), never `str(e)`. **`classify_request_exception`
-  reads the status**: 400 is a refused key only for `_KEYED_HOSTS`, a 5xx is the
-  source's trouble, our own `KeyError`/`AttributeError`/`TypeError`/`IndexError`
-  are `INTERNAL_ERROR`; `source_failure_advice` sits beside `advice_for_causes`.
-  **`TransparencyOutcome` = `TransparencyResult | TransparencyUnassessed`.**
-  Every existing row was superseded, so badges go blank until a review revisits
-  them (#373). **Swift already had this** (`analyzerVersion` Int 3, `isStale`);
-  the two version spaces are not comparable. Lodged: #367–#373.
-
-- **A source nobody asked is not a source that answered "nothing"** (Python;
-  #353, #354, #355, #356, #250, #363, PR #365, merged 2026-09-22). The other
-  half of #346/#347, and the rules are in
-  `doc/cross_platform/analysis_failure_reporting.md`. What binds:
-  **only a text we read and segmented can produce `NOT_STATED`** —
-  `_analyze_data_availability` used to fall through to
-  `analyze_data_availability(None)` for every article outside PMC whose full
-  text was not retrieved, which is the majority; `_any_section_was_parsed` is
-  #359's rule one dimension over (a data statement sits anywhere, so the test
-  is "any section", not "end matter"). **A skip is a third state, not a
-  failure**: `SourceLookupSkipped` (`NOT_CONFIGURED` / `NO_IDENTIFIER`) sits
-  beside `SourceLookupFailure` and `LookupRecord` carries both, because a
-  failure may not recur while a skip recurs every search — and only the
-  second is the reader's to act on, so `configuration_nudge()` fires for
-  `NOT_CONFIGURED` and nothing else (#335). **Record a skip only where it
-  changes what can be claimed**: a `NO_IDENTIFIER` skip for PMC on every
-  DOI-only article withheld the paywall claim from the honest majority.
-  **`absence_established` is derived** — `NOT_FOUND` *and* nothing unasked,
-  because either condition alone lies — and MCP's `get_document_fulltext`
-  states the absence only then. **`RecordFetch` / `ArticleInfoFetch`
-  (served / absent / unreachable)** replace the `Optional[Dict]` from efetch,
-  CrossRef, ClinicalTrials.gov and `get_article_info`; a CrossRef 404 and an
-  efetch with no `PubmedArticle` stay absences, XML that will not parse does
-  not (#250). **A withheld claim must stay withheld at every surface** —
-  `trial_registration_assessed` and `funding_was_assessed()` gate the risk
-  indicator, `format_report_summary`'s two KEY FINDINGS lines and two CSV
-  columns; a caveat elsewhere in the document withholds nothing.
-  **A three-state value needs three arms**: `FullTextFetch.absent()` sets
-  neither `failure` nor `xml`, so it fell past both guards onto the −5 for
-  every PMC deposit outside the OA subset. **A PDF we hold and cannot read is
-  not an article without one** (`_pdf_unreadable`). **A source that answered
-  must never be called unread** — `*_record_read` is set only when a record is
-  *served*, so a CrossRef 404 read as "CrossRef was not read"; the words now
-  come from `unread_records_clause`.
-  **Two survivors were the assertion, not the code**: a nudge test matched
-  `"onfigur"`, which the skip reason's own phrase contains, and two funding
-  tests matched a sentence a *second* caveat also emits — assert the built
-  sentence, never a substring another caveat shares.
-  **Scores moved**: data availability −5 → neutral for the majority, and
-  `RISK_INDICATOR_DATA_EFFECTIVELY_UNAVAILABLE` / `..._RESTRICTED_DATA` stop
-  firing for papers nobody read. Stored rows keep their old scores (#145), so
-  old and new documents disagreed until **#360** (PR #366).
-  Still open from this family: **#350**, **#362**,
-  **#364**, and **#357** / **#300** for Swift and Android.
-
-- **A COI statement nobody read is not a disclosure** (Python; #352, #348,
-  #351, #359, PR #358, merged 2026-09-22). The rules are in
-  `doc/cross_platform/analysis_failure_reporting.md`; the ones that bind:
-  **`COIDisclosureLevel` has three states and no default**, and
-  `ConflictOfInterest` is frozen and refuses a "disclosed" with no statement
-  behind it, or a finding drawn from a statement never read.
-  `analyze_coi_statement` *raises* on a blank statement rather than
-  answering an absence for its caller. **Only the article's own text can
-  establish an absence** (user's call, 2026-09-22): PubMed carries a
-  `CoiStatement` for 36.5% of a 2018 sample and 79.7% of a 2024 one, so its
-  silence is the publisher's; its *positive* answer is still a disclosure.
-  **A fix that activates dead code changes what every other defect on that
-  path costs** — #352 made `missing_coi_triggers_downgrade` live, turning a
-  latent extractor miss into a forced HIGH-risk badge on papers that
-  disclose (#359: `extract_fulltext_sections` anchored its heading match and
-  missed 7 of 12 real COI headings). **A field in `to_dict` and in no column
-  is lost on reload**; `_migrate_transparency_coi_and_warnings` adds
-  `coi_disclosure` and `warnings`, **drops** `coi_disclosed` and
-  **retracts** `RISK_INDICATOR_MISSING_COI_STATEMENT` from converted rows.
-  Stored scores are *not* recomputed (#145). **`to_dict()` must emit
-  primitives** — a raw enum made `json.dumps` raise for every report. A
-  failed `DROP COLUMN` is logged and tolerated: Python commits DDL as it
-  goes. Lodged: #357, #360–#364.
+- **Inline markup and mixed citations keep their text** (PR #397; PR #405,
+  #398; merged 2026-09-26). **Never `findtext` a mixed-content element** —
+  it returns the text before the first child: Python reads the whole element
+  (`_element_text`, `_abstract_text`, `_get_text` for captions), and Swift's
+  `PubMedXMLParser` resets its buffer only at the `textElements` it reads, not
+  at every `<i>`. Swift + Android JATS: every descendant of a `<mixed-citation>`
+  merges into it (`mixedCitationDepth`, an ancestor test — bmlib #146), and
+  `defersToTheDeposit(printedPartCount:)` prints the deposit wherever fewer than
+  two parts would print (bmlib #268); `citationIsDeposit` keeps an
+  `<element-citation>`'s stray text from standing in for a tagged part. The
+  Android JATS parser is JVM-testable now (kxml2, test-only). Stored documents
+  keep their truncated title until searched again. Lodged: #399–#404,
+  #406–#408.
+- **Funders named by brand; back-matter headings; PubMed identifiers**
+  (PR #395 Swift + Android, PR #396 all three, #394; merged 2026-09-24/25).
+  `sponsor_patterns.json` schema 4 adds `industry_brands`: whole-word brands
+  from the curated known-funder list plus Janssen and Genentech; **"Eli Lilly"
+  is the one spelled-out exception** (Lilly Endowment), **UCB is left out**
+  (UC Berkeley), and **a brand beside a foundation word is the charity**.
+  Every brand and foundation word has a probe on every platform. The funder
+  corpus was re-audited (precision 0.958, recall 0.657, floors 0.95 / 0.65)
+  and **now differs from bmlib's copy**. Swift JATS: a container's own
+  heading titles its implicit section (bmlib #231); Swift PubMed reads
+  `ArticleId` / `ELocationID` (a cited reference's are ignored); the Swift and
+  Kotlin extractors accept a trailing "Statement"/"Disclosure"/"Declaration"/
+  "Section" as Python does. Analyzer versions: Python `2.1`, Swift and
+  Android `6`.
+- **Reports explain transparency ratings; Android analyses transparency**
+  (Swift + Android; PR #388, #116; merged 2026-09-24). **Rating and
+  explanation come from one function** (`highRiskTriggers` /
+  `scoreComponents`). **Full text is the gold standard**: every rating made
+  without it says "Limited certainty because of lack of full text access",
+  and a High whose every reason rests on unsearched text shows as
+  **Unassessed** — display only, stored ratings unchanged
+  (`TransparencyResult.fullTextSearched`). Android: Kotlin port of the
+  analysers, Room v7 transparency column, an `ANALYZING_TRANSPARENCY` step;
+  every Android rating says "limited" until #384. **The desktop has none of
+  this yet (#386).** Lodged: #384–#387, #389–#392.
+- **Model lists and pricing** (all three; PR #383, merged 2026-09-24). Swift
+  builds every model-list URL from the same `/v1` root as `chat/completions`
+  (`modelListURL(for:baseURL:)`) — it used to request `/v1/v1/models`. **An
+  unlisted Claude ID gets its family's dearest current rate.** Android prices
+  through one `ModelPricing` (`LLMProvider.pricedModel`); a fetched-only model
+  was recorded at $0. Python's `list_models` raises rather than answering
+  with a fallback table. Release **0.5.0 / apps 1.6.0** followed (PR #393).
+- **One undecodable transparency row is one row** (Python; #374, PR #379,
+  merged 2026-09-23). Readers return `StoredTransparency`
+  (`TransparencyResult | UndecodableTransparencyRow`). **Split by version
+  (user's call):** a row whose `analyzer_version` is strictly newer than this
+  build's is never overwritten (`may_replace_stored`, asked by
+  `_needs_analysis` and the manager *before* the cache guard); any other
+  undecodable row is damaged and re-analysed. Both read "not assessed" for
+  that document alone. Only decoding raises (`_UndecodableColumnError`), so a
+  mapper bug is not called damage; `conn.text_factory = _text_or_bytes` keeps
+  invalid UTF-8 from failing the cursor. Lodged: #378, #380–#382.
+- **A correction reaches the reader only if something re-analyses** (Python;
+  #360, #361, #249, #372, #373; PRs #366, #375). Contract in
+  `doc/cross_platform/analysis_failure_reporting.md`. **Bump
+  `TRANSPARENCY_ANALYZER_VERSION`** whenever the same inputs could produce a
+  different score, level, indicator or caveat; **the comparison is an
+  ordering** (`analyzer_version_ordinal`) — only a *strictly older* row is
+  superseded. **`is_final` is the cache's question**, not `is_current`.
+  **Every surface that reads a stored row is gated**, and a withheld row reads
+  "Not assessed", annotated in the reference list, never bare. **Load shows
+  and fetches nothing**; re-analysis is an explicit, question-scoped pass
+  (`TransparencyReanalysisWorker`), with one analysis body
+  (`transparency/assessment.py`). **A signal nothing connects is not
+  reporting** (`_connect_signals` is tested). **A status message is
+  overwritten by the load's summary** — carry a clause instead. Swift's
+  `analyzerVersion` is an Int; the two version spaces are not comparable.
+- **A source nobody asked is not a source that answered "nothing"**, and **a
+  COI statement nobody read is not a disclosure** (Python; PRs #358, #365).
+  **Only a text we read and segmented can produce `NOT_STATED`**; **a skip is
+  a third state** (`SourceLookupSkipped`, and `configuration_nudge()` fires for
+  `NOT_CONFIGURED` only); `absence_established` is *derived*; **a three-state
+  value needs three arms**; **a withheld claim stays withheld at every
+  surface**. `COIDisclosureLevel` has three states and no default, and **only
+  the article's own text can establish an absence** (user's call). **A fix
+  that activates dead code changes what every other defect on that path
+  costs** (#359). **Assert the built sentence, never a substring another
+  caveat shares.**
 
 - **Older rounds, compressed to the rules that still bind.** Each cost a
   defect; the archaeology is in git history and the `doc/cross_platform/`
@@ -306,6 +254,24 @@ the rest.
 
 Open issues by family; each issue carries the detail. None blocks another.
 
+### Transparency after PR #388: desktop parity and the ports
+
+- **#386 — the desktop has none of PR #388**: no "Limited certainty" wording,
+  no high-risk explanation section, no Unassessed display. Python is otherwise
+  canonical for transparency, so this is the platform that lags.
+- **#385** in flight above. **#390** Swift + Android look trial registrations up from the title only
+  (port Python's PubMed databank-link source); **#389** a missing
+  `hasResults` reads as "results not posted"; **#391** unchecked funders are
+  not flagged on Low/Medium, and a malformed CrossRef funder array is silent;
+  **#392** document-set parity, a shared explanation fixture, a
+  `StoredTransparency` type.
+- Android: **#384** analyse full text (every rating is "limited" until then);
+  **#387** data-availability parity, DAO/migration tests.
+- **#400** the data-availability heading rule (`'data' in title and ('avail'
+  … 'shar' … 'access')`) matches ~25 body sections per 5,000 articles, and
+  the first match wins; a markup-tolerant title read alone nets zero, so it
+  lands with a tighter rule (see the markup-tolerance memory).
+
 ### The analysis-failure family: what is left
 
 - **#300 — Swift and Android are unchecked against
@@ -317,7 +283,7 @@ Open issues by family; each issue carries the detail. None blocks another.
   **#371** the model path's 5xx advice still blames the reader's connection;
   **#367** the quality filter has no caller; **#368** `TransparencyResult` is
   mutable and unvalidated; **#370** Android has no version comparison;
-  **#374** (in flight above); **#378** nothing re-reads a newer build's row
+  **#378** nothing re-reads a newer build's row
   before saving over it; **#380** newer-build vs damaged rows in the report
   count and the dialog; **#381** a store error stops the review's queueing
   loop; **#382** the startup COI migration and non-UTF-8 text; **#376** one
@@ -328,6 +294,7 @@ Open issues by family; each issue carries the detail. None blocks another.
   paths still put `str(e)` in reader-facing fields (no secret leaks today);
   **#364** type cleanup (stringly-typed `coi_disclosure`, `coi_info:
   Optional` as an implicit fourth absence, substring-sniffed provenance).
+  **#409** the batch CSV cuts every title to 100 characters.
 - **#357** — Swift has the other half of #352: its `hasStatement` boolean is
   honest, but COI is read from the full text alone, so every article whose
   full text was not retrieved is scored and badged as declaring no conflicts.
@@ -447,8 +414,14 @@ enables DEBUG; **#245** the transparency CLIs take the NCBI key only as
   #272, #299** JATS reference/metadata defects in Swift and Kotlin; **#406**
   `<citation-alternatives>` lists authors twice; **#407** an empty reference
   renders as an unlogged blank entry; **#408** a deposit glues name parts
-  (decide in bmlib #314 first); **#121** Android's parser swallows errors
+  (decide in bmlib #314 first); **#399** display formulas dropped from
+  paragraph text (port bmlib's formula renderer, never paste raw MathML);
+  **#401** Android caption/section routing defects Swift already fixed;
+  **#121** Android's parser swallows errors
   (it is JVM-testable since PR #405 added kxml2 as a test dependency).
+- **PubMed parsers (Swift + Android)**: **#402** the year comes from
+  `DateCompleted`, not `PubDate`; **#403** Swift appends a translated
+  `<OtherAbstract>`; **#404** Android's `ArticleId` has no `<Reference>` guard.
 - **#190** CI never builds the iOS app target; cheapest guard: fail when a
   `.swift` file under `ios/MedicalFactChecker/Sources/` belongs to no target.
 
@@ -487,6 +460,8 @@ enables DEBUG; **#245** the transparency CLIs take the NCBI key only as
 - Touching any data-availability pattern? Run all three parity suites; a change
   that does not update `doc/cross_platform/transparency_parity/` **and** all
   three platforms is meant to fail.
+- Touching the trial-title patterns? `trial_title_patterns.json` plus all
+  three platforms, and bump every analyser version: the indicator moves.
 - Touching a *funder* pattern is a different workflow — edit the lists on both
   platforms, then re-run the **measurement**, not a string comparison:
   `pytest tests/test_funder_classification.py` and

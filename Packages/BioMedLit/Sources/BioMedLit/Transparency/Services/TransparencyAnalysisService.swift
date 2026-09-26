@@ -100,6 +100,10 @@ public actor TransparencyAnalysisService {
     ///     and COI statements embedded in the article.
     /// - Returns: TransparencyResult with complete analysis including score and risk level.
     /// - Throws: TransparencyAnalysisError if analysis fails (e.g., no identifiers provided).
+    ///   `CancellationError` when the caller cancelled while a source was being
+    ///   asked: a cancelled lookup is not an outage, and a result built from it
+    ///   would carry false "could not be reached" warnings over whatever the
+    ///   caller had stored.
     public func analyze(
         doi: String? = nil,
         pmid: String? = nil,
@@ -120,13 +124,13 @@ public actor TransparencyAnalysisService {
         )
 
         // Step 1: Fetch basic metadata from PubMed and CrossRef
-        await fetchBasicMetadata(builder: &builder)
+        try await fetchBasicMetadata(builder: &builder)
 
         // Step 2: Fetch and analyze funder information
         await fetchFunderInfo(builder: &builder)
 
         // Step 3: Fetch clinical trial registration info
-        await fetchTrialInfo(builder: &builder)
+        try await fetchTrialInfo(builder: &builder)
 
         // Step 4: Analyze COI statement
         analyzeCOI(builder: &builder, fullText: fullText)
@@ -156,7 +160,9 @@ public actor TransparencyAnalysisService {
     /// then CrossRef is used to fill in any missing information.
     ///
     /// - Parameter builder: The result builder to populate with metadata.
-    private func fetchBasicMetadata(builder: inout TransparencyResultBuilder) async {
+    /// - Throws: `CancellationError` when the caller cancelled; every other
+    ///   failure is recorded on the builder as an unreachable source.
+    private func fetchBasicMetadata(builder: inout TransparencyResultBuilder) async throws {
         // Try PubMed first if we have a PMID
         if let pmid = builder.pmid {
             do {
@@ -179,11 +185,20 @@ public actor TransparencyAnalysisService {
                         "PubMed metadata retrieved for PMID: \(pmid)",
                         category: .transparency
                     )
+                } else if let shortfall = results.shortfalls.first {
+                    // esearch listed the PMID and efetch then failed, or served
+                    // XML that broke off. `search` returns that as an empty page
+                    // with the loss in `shortfalls`, not as a throw, so reading
+                    // only `articles` took the lost record for no record.
+                    Self.recordPubMedUnreachable(
+                        builder: &builder, pmid: pmid, reason: shortfall.failure.describe()
+                    )
                 }
+            } catch where error.isCancellation {
+                throw CancellationError()
             } catch {
-                BioMedLitLib.logger?.warning(
-                    "PubMed fetch failed for PMID \(pmid): \(error.localizedDescription)",
-                    category: .network
+                Self.recordPubMedUnreachable(
+                    builder: &builder, pmid: pmid, reason: error.localizedDescription
                 )
             }
         }
@@ -220,9 +235,13 @@ public actor TransparencyAnalysisService {
                         category: .transparency
                     )
                 }
+            } catch where error.isCancellation {
+                throw CancellationError()
             } catch {
                 // A 404 returns nil above; anything thrown is a failed lookup,
-                // which must not read as a study with no funders.
+                // which must not read as a study with no funders — nor be kept
+                // as a final result nothing would revisit (#385).
+                builder.sourcesUnreachable = true
                 builder.warnings.append(TransparencyConstants.crossRefUnreachableWarning)
                 BioMedLitLib.logger?.warning(
                     "CrossRef fetch failed for DOI \(doi): \(error.localizedDescription)",
@@ -230,6 +249,30 @@ public actor TransparencyAnalysisService {
                 )
             }
         }
+    }
+
+    /// Record that PubMed's record for this study could not be read.
+    ///
+    /// Our silence, not the article's. PubMed's title is the only place NCT IDs
+    /// are read from, it supplies the PMC ID, and when the caller gave no DOI
+    /// it supplies the DOI CrossRef is asked for funders by. So the result is
+    /// provisional rather than a finding, and is re-analysed (#385).
+    ///
+    /// - Parameters:
+    ///   - builder: The result builder to mark.
+    ///   - pmid: The PMID that was asked for.
+    ///   - reason: Why the record went unread, for the log.
+    private static func recordPubMedUnreachable(
+        builder: inout TransparencyResultBuilder,
+        pmid: String,
+        reason: String
+    ) {
+        builder.sourcesUnreachable = true
+        builder.warnings.append(TransparencyConstants.pubMedUnreachableWarning)
+        BioMedLitLib.logger?.warning(
+            "PubMed fetch failed for PMID \(pmid): \(reason)",
+            category: .network
+        )
     }
 
     /// Fetch and analyze funder information.
@@ -265,7 +308,9 @@ public actor TransparencyAnalysisService {
     /// unassessed; a 404 is the registry's answer and is recorded as such.
     ///
     /// - Parameter builder: The result builder to populate with trial info.
-    private func fetchTrialInfo(builder: inout TransparencyResultBuilder) async {
+    /// - Throws: `CancellationError` when the caller cancelled; every other
+    ///   failure is recorded on the builder as an unreachable registry.
+    private func fetchTrialInfo(builder: inout TransparencyResultBuilder) async throws {
         // Extract NCT IDs from title
         var nctIds: [String] = []
 
@@ -300,7 +345,9 @@ public actor TransparencyAnalysisService {
                     continue
                 }
                 guard let registration = clinicalTrials.extractTrialInfo(from: study) else {
+                    // Unparsed is not absent, and a re-read may succeed.
                     everyTrialAnswered = false
+                    builder.sourcesUnreachable = true
                     builder.warnings.append(TrialComplianceAnalyzer.unreadableRegistryRecordWarning(nctId: nctId))
                     continue
                 }
@@ -322,8 +369,11 @@ public actor TransparencyAnalysisService {
                     "Trial info retrieved for \(nctId): sponsor=\(registration.leadSponsor ?? "unknown")",
                     category: .transparency
                 )
+            } catch where error.isCancellation {
+                throw CancellationError()
             } catch {
                 everyTrialAnswered = false
+                builder.sourcesUnreachable = true
                 builder.warnings.append(TrialComplianceAnalyzer.registryUnreachableWarning(nctId: nctId))
                 BioMedLitLib.logger?.warning(
                     "ClinicalTrials.gov fetch failed for \(nctId): \(error.localizedDescription)",

@@ -161,6 +161,7 @@ def build_transparency_result(
         sources_unreachable=(
             report.pubmed_record_unreachable
             or report.crossref_record_unreachable
+            or report.registry_record_unreachable
         ),
     )
 

@@ -13,9 +13,9 @@ import kotlinx.serialization.encoding.Encoder
  * Ported from the Swift `TransparencyResult` (BioMedLit). Serialized (see
  * [TransparencyResultSerializer] and [TransparencyJson]) as the JSON object
  * Swift's `Codable` writes with the `.iso8601` date strategy — the keys are the
- * property names below. Two fields are optional in that JSON and decode as null
- * when absent, because results stored before they existed must still load:
- * [analyzerVersion] and [fullTextSearched]. Unknown keys are ignored.
+ * property names below. Three fields were added after results were first stored, so they
+ * decode as null when absent and those results still load: [analyzerVersion],
+ * [fullTextSearched] and [sourcesUnreachable]. Unknown keys are ignored.
  *
  * @property id Unique identifier (uppercase UUID string).
  * @property doi Digital Object Identifier.
@@ -41,7 +41,6 @@ import kotlinx.serialization.encoding.Encoder
  * @property analysisTimestamp When the analysis was performed.
  * @property dataSourcesUsed Data sources that returned a record (see [TransparencyConstants.PUBMED_SOURCE_NAME] etc.).
  * @property warnings Non-fatal warnings encountered during analysis.
- * @property errors Errors encountered during analysis (partial results may still be valid).
  * @property analyzerVersion Version of the analyzer that produced this result; null for
  *   results stored before versioning existed. Defaults to the current version, as in Swift —
  *   pass null only to represent a pre-versioning result.
@@ -50,6 +49,18 @@ import kotlinx.serialization.encoding.Encoder
  *   must be able to tell "the article has no statement" from "there was no text to look in".
  *   Null when not recorded (results stored before the field existed): then it is unknown,
  *   and must be reported as unknown.
+ * @property sourcesUnreachable Whether a source the analysis needed (PubMed, CrossRef,
+ *   ClinicalTrials.gov) failed or answered unreadably, as opposed to answering that it holds
+ *   no such record. The finding then rests on less than the full record — a CrossRef outage
+ *   reads exactly like a study with no funders — so it is provisional ([isProvisional]) and
+ *   re-analysed rather than kept as final (#385; Python's `sources_unreachable`). Null only for
+ *   results stored before it was recorded, all of which are stale anyway; the constructor
+ *   defaults it to false, so a result built here always records it.
+ * @property errors Errors encountered during analysis. Nothing in [TransparencyAnalysisService]
+ *   writes it: an unreadable source is recorded in [warnings] and [sourcesUnreachable]. It stays
+ *   a required key because an older build reading a synced or stored result — this app's
+ *   earlier [TransparencyResultJson], or Swift's synthesized `Codable` — fails to decode one
+ *   without it.
  */
 @Serializable(with = TransparencyResultSerializer::class)
 data class TransparencyResult(
@@ -80,6 +91,7 @@ data class TransparencyResult(
     val errors: List<String> = emptyList(),
     val analyzerVersion: Int? = TransparencyConstants.ANALYZER_VERSION,
     val fullTextSearched: Boolean? = null,
+    val sourcesUnreachable: Boolean? = false,
 ) {
     /**
      * Whether this result was produced by an older analyzer than the current one.
@@ -92,6 +104,27 @@ data class TransparencyResult(
      */
     val isStale: Boolean
         get() = analyzerVersion == null || analyzerVersion < TransparencyConstants.ANALYZER_VERSION
+
+    /** Whether a source the analysis needed could not be read ([sourcesUnreachable]). */
+    val isProvisional: Boolean
+        get() = sourcesUnreachable == true
+
+    /** Whether a build newer than this one produced the result. */
+    val isFromNewerAnalyzer: Boolean
+        get() = analyzerVersion != null && analyzerVersion > TransparencyConstants.ANALYZER_VERSION
+
+    /**
+     * Whether the result should be analysed again rather than kept: stale, or provisional and
+     * this build's own to replace.
+     *
+     * Python's `_needs_analysis`: `may_replace_stored` and not `is_final`. A provisional
+     * result stamped with the current version was otherwise final forever, so a transient
+     * outage became a permanent finding (#385). A newer
+     * build's result is never replaced, provisional or not: this build's answer would be the
+     * older analyzer's (Python's `may_replace_stored`, #374).
+     */
+    val needsReanalysis: Boolean
+        get() = isStale || (isProvisional && !isFromNewerAnalyzer)
 }
 
 /**
@@ -133,6 +166,7 @@ internal class TransparencyResultJson(
     val errors: List<String>,
     val analyzerVersion: Int? = null,
     val fullTextSearched: Boolean? = null,
+    val sourcesUnreachable: Boolean? = null,
 )
 
 /** Serializes a [TransparencyResult] through its stored JSON form ([TransparencyResultJson]). */
@@ -173,6 +207,7 @@ object TransparencyResultSerializer : KSerializer<TransparencyResult> {
                 errors = value.errors,
                 analyzerVersion = value.analyzerVersion,
                 fullTextSearched = value.fullTextSearched,
+                sourcesUnreachable = value.sourcesUnreachable,
             ),
         )
     }
@@ -207,6 +242,7 @@ object TransparencyResultSerializer : KSerializer<TransparencyResult> {
             errors = stored.errors,
             analyzerVersion = stored.analyzerVersion,
             fullTextSearched = stored.fullTextSearched,
+            sourcesUnreachable = stored.sourcesUnreachable,
         )
     }
 }

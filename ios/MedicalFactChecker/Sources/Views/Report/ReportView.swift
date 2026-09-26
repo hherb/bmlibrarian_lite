@@ -1392,9 +1392,11 @@ struct DocumentDetailSheet: View {
             if let result = document.transparencyResult {
                 TransparencyDetailView(result: result, certainty: document.transparencyCertainty)
 
-                // A stale result keeps its score on screen but has to be
-                // re-runnable, or the notice above names a fix the user cannot apply.
-                if document.transparencyAnalysisIsStale, document.canAnalyzeTransparency {
+                // A stale or provisional result keeps its score on screen but has
+                // to be re-runnable, or the notice above names a fix the user cannot apply.
+                // The exception is a newer build's provisional result, which this build
+                // must not replace; its caveat still says "Re-analyse" (#412).
+                if document.transparencyAnalysisNeedsRerun, document.canAnalyzeTransparency {
                     transparencyAnalyzeButton(title: "Re-analyze")
                 }
             } else if !document.canAnalyzeTransparency {

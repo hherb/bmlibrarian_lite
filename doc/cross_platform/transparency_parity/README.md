@@ -7,6 +7,7 @@ identical behaviour on Python, Swift and Kotlin (issue #105).
 | --- | --- | --- | --- |
 | `data_availability_patterns.json` / `data_availability_cases.json` | bound | bound | bound |
 | `sponsor_patterns.json` | bound | bound | bound |
+| `trial_title_patterns.json` | bound | bound | bound |
 | `funder_names.json` (floors and composition) | bound | bound | bound |
 
 ## Why this exists
@@ -220,21 +221,48 @@ had always reported 0.85 and 0.80. The funder corpus scores the `is_industry`
 boolean, which agreed throughout, so nothing caught it for as long as it existed.
 That is the reason the confidences are in the contract at all.
 
+## The trial-title contract
+
+### `trial_title_patterns.json` — whether a title reads as a trial's
+
+The answer gates one risk indicator, "Clinical trial without detected
+registration", raised when the article's registration was assessed and none
+was found (#385). When that is differs by platform: Python assesses it once
+PubMed is read and every trial PubMed cites was answered for, including when
+it cites none; Swift and Kotlin need every NCT ID in the title answered for,
+and leave it unassessed when the title names none (#390).
+`patterns` are regex fragments over the lowercased title, asserted
+string-for-string and in order; each platform wraps their alternation as
+`(?<![a-z0-9])(?:…)(?![a-z0-9])`, spelled out rather than `\b` because the
+three engines disagree on word characters outside ASCII. They disagree on
+`\s` too: Python's and ICU's match any Unicode space, Java's only ASCII, so
+Kotlin folds Unicode whitespace to a space before matching
+(`ClinicalTrialPatterns.normalizedTitle`); the no-break-space cases pin it. `cases` are run
+through each platform's own matcher: Python's `appears_to_be_clinical_trial`
+(`tests/test_trial_registration_gate.py`), Swift's and Kotlin's
+`TrialComplianceAnalyzer.appearsToBeClinicalTrial` (`TransparencyParityTests`,
+`TrialTitlePatternParityTest`). The negative cases are the point: a bare
+substring test, which all three used until #385, read "atrial fibrillation",
+"myocardial infarction", "industrial" and "gas phase isomerization" as
+trials. Changing a fragment moves the indicator, so bump every analyser
+version with it.
+
 ## Changing a pattern
 
-1. Edit `data_availability_patterns.json` (or `sponsor_patterns.json`).
+1. Edit `data_availability_patterns.json`, `sponsor_patterns.json` or
+   `trial_title_patterns.json`.
 2. Make the same edit in all three platform sources — Python, Swift and Kotlin
-   are bound by both pattern contracts.
-3. Add or update cases in `data_availability_cases.json` covering the new
-   behaviour, then run all three suites.
+   are bound by all three pattern contracts.
+3. Add or update cases covering the new behaviour (`data_availability_cases.json`,
+   or the `cases` inside `trial_title_patterns.json`), then run all three suites.
 
-Do **not** regenerate either file mechanically from one platform. The friction is
-the feature: a change that does not touch all three is meant to fail.
+Do **not** regenerate any of these files mechanically from one platform. The
+friction is the feature: a change that does not touch all three is meant to fail.
 
 ```bash
-pytest tests/test_transparency_parity.py
+pytest tests/test_transparency_parity.py tests/test_sponsor_type.py tests/test_trial_registration_gate.py
 cd Packages/BioMedLit && swift test --filter TransparencyParityTests
-cd android/MedicalFactChecker && ./gradlew test --tests '*TransparencyParityTest' --tests '*SponsorPatternParityTest'
+cd android/MedicalFactChecker && ./gradlew test --tests '*TransparencyParityTest' --tests '*SponsorPatternParityTest' --tests '*TrialTitlePatternParityTest'
 ```
 
 Changing a *funder* pattern is a different workflow: edit the lists on **all

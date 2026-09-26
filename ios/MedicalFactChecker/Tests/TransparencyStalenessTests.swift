@@ -18,28 +18,31 @@ import XCTest
 import BioMedLit
 @testable import MedicalFactChecker
 
-/// Tests for recognising a stored transparency result that predates the current analyzer.
+/// Tests for recognising a stored transparency result that must be re-run: one
+/// that predates the current analyzer, is provisional (#385), or will not decode.
 final class TransparencyStalenessTests: XCTestCase {
 
     private func makeDocument() -> Document {
         Document(pmid: "12345678", title: "A Study", abstract: "")
     }
 
-    func testDocumentWithNoAnalysisIsNotStale() {
+    func testDocumentWithNoAnalysisHasNothingToRerun() {
         let document = makeDocument()
 
         XCTAssertFalse(document.hasTransparencyAnalysis)
-        XCTAssertFalse(document.transparencyAnalysisIsStale)
+        XCTAssertFalse(document.transparencyAnalysisNeedsRerun)
+        XCTAssertTrue(document.needsTransparencyAnalysis, "never analysed, so the workflow analyses it")
     }
 
-    func testFreshlyStoredAnalysisIsNotStale() {
+    func testFreshlyStoredAnalysisNeedsNoRerun() {
         let document = makeDocument()
         var builder = TransparencyResultBuilder(pmid: "12345678")
         builder.title = "A Study"
         document.storeTransparencyResult(builder.build())
 
         XCTAssertTrue(document.hasTransparencyAnalysis)
-        XCTAssertFalse(document.transparencyAnalysisIsStale)
+        XCTAssertFalse(document.transparencyAnalysisNeedsRerun)
+        XCTAssertFalse(document.needsTransparencyAnalysis)
     }
 
     /// Stored JSON written before the version field existed: the analysis is
@@ -62,7 +65,7 @@ final class TransparencyStalenessTests: XCTestCase {
 
         XCTAssertTrue(document.hasTransparencyAnalysis)
         XCTAssertNotNil(document.transparencyResult, "legacy JSON must still decode")
-        XCTAssertTrue(document.transparencyAnalysisIsStale)
+        XCTAssertTrue(document.transparencyAnalysisNeedsRerun)
     }
 
     /// Stored JSON that is present but unreadable is not the same as no analysis.
@@ -71,21 +74,21 @@ final class TransparencyStalenessTests: XCTestCase {
     /// `transparencyResult` is nil so nothing renders, staleness was false so
     /// nothing warned, and `hasTransparencyAnalysis` reads the raw string and
     /// returns true, so the workflow filtered it out of re-analysis permanently.
-    func testUndecodableStoredJSONCountsAsStale() {
+    func testUndecodableStoredJSONNeedsARerun() {
         let document = makeDocument()
         document.transparencyResultJSON = #"{"this":"is not a TransparencyResult"}"#
 
         XCTAssertTrue(document.hasTransparencyAnalysis)
         XCTAssertNil(document.transparencyResult)
         XCTAssertTrue(
-            document.transparencyAnalysisIsStale,
+            document.transparencyAnalysisNeedsRerun,
             "unreadable stored JSON must be re-runnable, not silently inert"
         )
     }
 
     /// A newer result arriving by CloudKit sync from a device on a later build is
     /// not stale, and must not be offered for a re-analysis that would downgrade it.
-    func testAnalysisFromANewerAnalyzerIsNotStale() throws {
+    func testAnalysisFromANewerAnalyzerIsNotRerun() throws {
         let document = makeDocument()
         document.storeTransparencyResult(
             TransparencyResult(
@@ -94,7 +97,22 @@ final class TransparencyStalenessTests: XCTestCase {
             )
         )
 
-        XCTAssertFalse(document.transparencyAnalysisIsStale)
+        XCTAssertFalse(document.transparencyAnalysisNeedsRerun)
+    }
+
+    /// A current result a source could not be read for is provisional, and the
+    /// workflow and the Re-analyze button both read this gate (#385): kept as
+    /// final, a CrossRef outage stood as "no industry funding" forever.
+    func testAProvisionalAnalysisNeedsARerun() {
+        let document = makeDocument()
+        var builder = TransparencyResultBuilder(pmid: "12345678")
+        builder.title = "A Study"
+        builder.sourcesUnreachable = true
+        document.storeTransparencyResult(builder.build())
+
+        XCTAssertFalse(document.transparencyResult?.isStale ?? true)
+        XCTAssertTrue(document.transparencyAnalysisNeedsRerun)
+        XCTAssertTrue(document.needsTransparencyAnalysis, "the workflow re-analyses it")
     }
 
     // MARK: - Storing

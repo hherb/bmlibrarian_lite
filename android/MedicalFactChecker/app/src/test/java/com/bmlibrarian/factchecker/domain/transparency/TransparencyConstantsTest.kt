@@ -194,11 +194,15 @@ class TransparencyConstantsTest {
 
     // ==================== clinical trial patterns ====================
 
+    /**
+     * The whole-word boundary is what keeps "atrial fibrillation" from reading as a trial
+     * (#385); the fragments themselves are pinned by [TrialTitlePatternParityTest].
+     */
     @Test
-    fun `trial keywords`() {
-        for (keyword in listOf("trial", "randomized", "rct", "phase iii")) {
-            assertTrue(keyword, keyword in ClinicalTrialPatterns.trialKeywords)
-        }
+    fun `trial title regex matches whole words only`() {
+        val pattern = ClinicalTrialPatterns.trialTitleRegex.pattern
+        assertTrue(pattern.startsWith("(?<![a-z0-9])"))
+        assertTrue(pattern.endsWith("(?![a-z0-9])"))
     }
 
     @Test

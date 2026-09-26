@@ -66,7 +66,13 @@ public enum TransparencyConstants {
     ///   Pfizer company") is industry, and that company's foundation is not
     ///   (#394). Moves industry funding, and with it the rating, wherever a
     ///   funder is named without a legal suffix.
-    public static let analyzerVersion = 6
+    /// - Version 7 (2026-09-26): a title reads as a trial's only by whole word
+    ///   (``ClinicalTrialPatterns/trialTitlePatterns``), so "atrial
+    ///   fibrillation" and "myocardial infarction" no longer raise "Clinical
+    ///   trial without detected registration"; and a result a source could not
+    ///   be read for records it (``TransparencyResult/sourcesUnreachable``), so
+    ///   it is re-analysed rather than kept as final (#385).
+    public static let analyzerVersion = 7
 
 
     // MARK: - API URLs
@@ -231,6 +237,22 @@ public enum TransparencyConstants {
     public static let crossRefUnreachableWarning =
         "CrossRef could not be reached, so this study's funders were not checked; "
         + "industry funding may be present though none is reported."
+
+    /// Caveat on a result a source could not be read for
+    /// (``TransparencyResult/isProvisional``). Python's reference annotation
+    /// says the same: the level rests on less than the full record.
+    public static let provisionalResultCaveat =
+        "A source this analysis needed could not be read, so the rating is provisional: "
+        + "it rests on less than the full record. Re-analyse the study before relying on it."
+
+    /// Warning recorded when PubMed's record for the article's PubMed ID could
+    /// not be read: the request failed, or esearch listed the record and efetch
+    /// did not deliver it. The title — the only place NCT IDs are read from —
+    /// and the PMC ID are then missing, and when the caller gave no DOI so is
+    /// the DOI CrossRef, the only source of funders, is asked by.
+    public static let pubMedUnreachableWarning =
+        "PubMed could not be reached, so this study's record was not read; its DOI, "
+        + "and with it the funders CrossRef holds, may be missing from this analysis."
 
     // MARK: - Date Parsing Defaults
 
@@ -855,17 +877,27 @@ public enum RiskIndicatorStrings {
 /// extract trial registration identifiers.
 public enum ClinicalTrialPatterns {
 
-    /// Keywords suggesting the study is a clinical trial.
-    public static let trialKeywords: [String] = [
-        "trial",
-        "randomized",
-        "randomised",
-        "rct",
-        "phase i",
-        "phase ii",
-        "phase iii",
-        "phase iv",
+    /// What makes a title read as a clinical trial's, as regex fragments over
+    /// the lowercased title, each matched only as a whole word
+    /// (``trialTitlePattern``).
+    ///
+    /// A bare substring test read "atrial fibrillation" as a trial (`trial`)
+    /// and "myocardial infarction" too (`rct`), raising "Clinical trial without
+    /// detected registration" across cardiology (#385). The shared contract is
+    /// `doc/cross_platform/transparency_parity/trial_title_patterns.json`,
+    /// asserted from Python, Swift and Kotlin — edit all four together.
+    public static let trialTitlePatterns: [String] = [
+        #"trials?"#,
+        #"randomi[sz]ed"#,
+        #"rcts?"#,
+        #"phase\s+(?:i{1,3}|iv)[ab]?"#,
     ]
+
+    /// ``trialTitlePatterns`` as one whole-word alternation. The boundary is
+    /// spelled out rather than `\b` because ICU, Java and Python disagree on
+    /// what a word character is outside ASCII.
+    public static let trialTitlePattern =
+        #"(?<![a-z0-9])(?:"# + trialTitlePatterns.joined(separator: "|") + #")(?![a-z0-9])"#
 
     /// NCT ID pattern for ClinicalTrials.gov registration numbers.
     /// Matches format: NCT followed by exactly 8 digits (e.g., NCT01234567).

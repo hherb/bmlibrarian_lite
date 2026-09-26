@@ -235,9 +235,10 @@ required field would strand every earlier analysis behind a decode failure that
 reads as "never analysed". A result decoding to `nil` predates versioning and is
 therefore stale by definition.
 
-`TransparencyResult.isStale` and `Document.transparencyAnalysisIsStale` drive a
-notice in `TransparencyDetailView` / `MacTransparencyDetailView` and a
-"Re-analyze" button in `ReportView` / `MacReportView`. The stale score stays
+`TransparencyResult.isStale` drives a notice in `TransparencyDetailView` /
+`MacTransparencyDetailView`, and `Document.transparencyAnalysisNeedsRerun` — stale,
+or provisional since #385 (`TransparencyResult.needsReanalysis`) — a "Re-analyze"
+button in `ReportView` / `MacReportView`. The stale score stays
 visible — it is the last thing that was actually measured — but it is marked so
 it is not read beside a current one as if the two were interchangeable.
 

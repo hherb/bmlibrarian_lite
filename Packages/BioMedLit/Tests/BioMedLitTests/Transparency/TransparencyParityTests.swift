@@ -124,6 +124,27 @@ final class TransparencyParityTests: XCTestCase {
         let cases: [Case]
     }
 
+    /// The trial-title contract (#385): the fragments, and titles each
+    /// platform's matcher must classify as the fixture says.
+    private struct TrialTitleManifest: Decodable {
+        struct Case: Decodable {
+            let title: String
+            let isTrial: Bool
+
+            enum CodingKeys: String, CodingKey {
+                case title
+                case isTrial = "is_trial"
+            }
+        }
+
+        let patterns: [String]
+        let cases: [Case]
+    }
+
+    /// Whether a title reads as a trial's, asserted string-for-string and
+    /// behaviourally; binds Python, Swift and Kotlin.
+    private static let trialTitleFixture = "trial_title_patterns.json"
+
     /// Pattern/label contract, asserted string-for-string.
     private static let patternsFixture = "data_availability_patterns.json"
 
@@ -229,6 +250,11 @@ final class TransparencyParityTests: XCTestCase {
     /// The sponsor-pattern contract, decoded once per test run. See `manifest`.
     private static let sponsorManifest = Result<SponsorPatternManifest, Error> {
         try decodeFixture(sponsorPatternsFixture)
+    }
+
+    /// The trial-title contract, decoded once per test run. See `manifest`.
+    private static let trialTitleManifest = Result<TrialTitleManifest, Error> {
+        try decodeFixture(trialTitleFixture)
     }
 
     /// The shared pattern/label contract.
@@ -604,6 +630,29 @@ final class TransparencyParityTests: XCTestCase {
                 result.restrictions,
                 testCase.restrictions,
                 "restrictions — \(context)"
+            )
+        }
+    }
+
+    // MARK: - Trial-title parity (#385)
+
+    func testTrialTitlePatternsMatchTheSharedContract() throws {
+        XCTAssertEqual(
+            ClinicalTrialPatterns.trialTitlePatterns,
+            try Self.trialTitleManifest.get().patterns,
+            "trial-title patterns have drifted from the shared contract"
+        )
+    }
+
+    func testEveryTrialTitleCaseClassifiesAsSpecified() throws {
+        let cases = try Self.trialTitleManifest.get().cases
+        XCTAssertFalse(cases.isEmpty, "trial-title fixture is empty")
+
+        for testCase in cases {
+            XCTAssertEqual(
+                TrialComplianceAnalyzer.appearsToBeClinicalTrial(title: testCase.title),
+                testCase.isTrial,
+                "title: \(testCase.title)"
             )
         }
     }

@@ -8,6 +8,8 @@ Create pure functions for analyzing clinical trial registration and results comp
 
 ### `Sources/BioMedLit/Transparency/Analysis/TrialComplianceAnalyzer.swift`
 
+> **Superseded (#385):** the substring keyword test in `appearsToBeClinicalTrial` below read "atrial fibrillation" and "myocardial infarction" as trials. The shipped matcher uses whole-word regex fragments from `doc/cross_platform/transparency_parity/trial_title_patterns.json`; do not copy this one.
+
 ```swift
 // BMLibrarian Lite - Biomedical Literature Research Tool
 // Copyright (C) 2024-2025 Dr Horst Herb

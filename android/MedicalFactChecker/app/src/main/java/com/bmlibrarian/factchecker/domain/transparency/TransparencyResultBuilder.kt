@@ -89,6 +89,12 @@ class TransparencyResultBuilder(
     var trialRegistrationAssessed: Boolean = false
 
     /**
+     * Whether a source the analysis needed could not be read, which makes the result
+     * provisional ([TransparencyResult.sourcesUnreachable]).
+     */
+    var sourcesUnreachable: Boolean = false
+
+    /**
      * Build the result, computing its score, risk level and risk indicators with
      * [TransparencyScorer] from the fields populated so far. Stamped with the
      * current [TransparencyConstants.ANALYZER_VERSION].
@@ -163,5 +169,6 @@ class TransparencyResultBuilder(
             warnings = warnings,
             errors = errors,
             fullTextSearched = fullTextSearched,
+            sourcesUnreachable = sourcesUnreachable,
         )
 }

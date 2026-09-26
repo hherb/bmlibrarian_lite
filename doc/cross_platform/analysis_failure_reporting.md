@@ -125,6 +125,29 @@ logged **and reported**).
   (#196, #330). Python's `unreachable_source_caveat()` and
   `no_pdf_sources_message()` are pure, so the sentence is tested without the
   network.
+- **A registration nobody could check is not a missing one (#385).** "Clinical
+  trial without detected registration" may be raised only when every trial
+  the article cites was answered for. A registry outage and a registry
+  record that is not a study leave the registration *unassessed* and the
+  result provisional — Python's `trial_registration_assessed`, Swift's and
+  Kotlin's `everyTrialAnswered`. Python alone also reads registrations from
+  PubMed's databank links, so two cases are Python-only: a registry no client
+  here reads (every NLM registry but ClinicalTrials.gov — ISRCTN, EudraCT,
+  ANZCTR, ChiCTR, …) or a registry named with no accession number leaves it
+  unassessed but *not* provisional, since no re-analysis would read it; and
+  a PubMed record citing no trial at all counts as assessed. The apps read
+  NCT IDs from the title only and leave the registration unassessed when it
+  names none (#390).
+  The title test the indicator also rests on matches whole words only
+  (`doc/cross_platform/transparency_parity/trial_title_patterns.json`): a
+  substring test read "atrial fibrillation" and "myocardial infarction" as
+  trials on all three platforms.
+- **An outage is provisional on every platform.** A result a source could not
+  be read for records it — Python's `sources_unreachable`, Swift's and
+  Kotlin's `sourcesUnreachable` — and is re-analysed rather than kept as
+  final (`is_final` / `needsReanalysis`), unless a newer build wrote it. The
+  sources are PubMed, CrossRef and ClinicalTrials.gov; a registry with no
+  client is not one, since no re-analysis would ever read it.
 - **Withhold the claim, do not merely deny it.** The discovery sentence used
   to read "The document may require institutional access." When a lookup
   failed, the replacement says a freely available copy may exist and that open
@@ -794,7 +817,8 @@ wrapper carries nothing to classify.
 
 ## Ports
 
-Nothing here has been checked against Swift or Android (#300).
+Apart from the analyser version and provisional results below, nothing here
+has been checked against Swift or Android (#300).
 
 On the analyser version (#360) the ledger is not symmetric. **Swift already
 carries it**, and carries it better: `TransparencyConstants.analyzerVersion`
@@ -803,15 +827,18 @@ carries it**, and carries it better: `TransparencyConstants.analyzerVersion`
 written down, since a CloudKit-synced `Document` can arrive from a device on
 a newer build — and consumers in `Document`, `TransparencyDetailView` and
 `MacTransparencyDetailView`, under `TransparencyStalenessTests`. Python
-followed it here, to an ordering over dotted components. **Android has
-nothing**, and carries #360 in full.
+followed it here, to an ordering over dotted components. Android gained the
+same `Int` and `isStale` with its transparency port (PR #388). Since #385 all
+three also re-analyse a *provisional* result — one a source could not be read
+for — and none replaces a newer build's result.
 
-Note the two version spaces are not comparable: Swift counts `Int` (at 3),
-Python counts a dotted string (at `"2.0"`). Each platform's constant orders
-only against itself; a stored row never crosses between them. Swift's
+Note the version spaces are not comparable: Swift and Android count an `Int`
+(at 7, moved together), Python counts a dotted string (at `"2.2"`). Each
+platform's constant orders only against itself; a stored row never crosses
+between Python and the apps. Swift's
 `TransparencyAnalysisService` additionally reads COI from the full text
-alone (#357). Both run the
-same pipeline with the same shape — a parallel scoring service that drops
+alone (#357). Swift and Android both run the
+same review pipeline with the same shape — a parallel scoring service that drops
 what it could not score, and a report built from whatever citations arrived —
 so the same defects are likely present. A port conforms when a review whose
 model is unreachable ends in an error naming the stage, the counts and the

@@ -395,22 +395,36 @@ final class Document {
         transparencyResultJSON != nil
     }
 
-    /// Whether the stored analysis was produced by an older analyzer.
+    /// Whether the stored analysis should be run again: produced by an older
+    /// analyzer, or provisional because a source could not be read.
     ///
-    /// `false` when there is no analysis at all — nothing stale to warn about.
-    /// Otherwise mirrors ``TransparencyResult/isStale``: the evidence reaching the
-    /// scorer changed, so the stored score cannot be read beside a current one and
-    /// the UI should offer a re-run.
+    /// `false` when there is no analysis at all — nothing to re-run.
+    /// Otherwise mirrors ``TransparencyResult/needsReanalysis``: a stale result's
+    /// evidence reaching the scorer changed, so its score cannot be read beside a
+    /// current one; a provisional one rests on less than the full record, and
+    /// kept as it is, a transient outage became a permanent finding (#385).
+    /// Either way the UI should offer a re-run and the workflow re-analyses it.
     ///
     /// Stored JSON that is present but will not decode counts as stale, not as
     /// absent. Treating it as absent left the document in a state it could never
     /// leave: nothing to display, nothing to warn about, and — because
     /// ``hasTransparencyAnalysis`` reads the raw string and returns `true` —
     /// permanently filtered out of re-analysis.
-    var transparencyAnalysisIsStale: Bool {
+    var transparencyAnalysisNeedsRerun: Bool {
         guard hasTransparencyAnalysis else { return false }
         guard let result = transparencyResult else { return true }
-        return result.isStale
+        return result.needsReanalysis
+    }
+
+    /// Whether the transparency step should analyse this document: it has no
+    /// analysis yet, or its stored one needs a re-run
+    /// (``transparencyAnalysisNeedsRerun``: stale, provisional, or unreadable).
+    ///
+    /// The workflow's gate, named so it can be tested: dropping the second half
+    /// would leave provisional results un-refreshed while the Re-analyze buttons
+    /// still offered a fix (#385). Android's `needsTransparencyAnalysis`.
+    var needsTransparencyAnalysis: Bool {
+        !hasTransparencyAnalysis || transparencyAnalysisNeedsRerun
     }
 
     /// Whether transparency analysis can be attempted for this document at all.
@@ -447,7 +461,7 @@ final class Document {
     /// only in the full text (``TransparencyResult/fullTextSearched``), so an
     /// analysis run while only the abstract was on hand cannot see them —
     /// full text fetched afterward makes that result incomplete rather than
-    /// merely old, which ``transparencyAnalysisIsStale`` does not capture
+    /// merely old, which ``transparencyAnalysisNeedsRerun`` does not capture
     /// since nothing about the analyzer version changed. `false` when there
     /// is no analysis to catch up, or when the analysis already searched full
     /// text, or when there is still nothing to search now.

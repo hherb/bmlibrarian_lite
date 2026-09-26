@@ -88,17 +88,18 @@ public enum TrialComplianceAnalyzer {
     /// Check if a study title suggests it's a clinical trial.
     ///
     /// Examines the title for common clinical trial indicators such as "randomized",
-    /// "RCT", "phase II", "trial", etc.
+    /// "RCT", "phase II", "trial", each as a whole word
+    /// (``ClinicalTrialPatterns/trialTitlePatterns``): "atrial fibrillation" is
+    /// not a trial. Mirrors Python's `appears_to_be_clinical_trial`.
     ///
     /// - Parameter title: Study title to analyze.
     /// - Returns: True if clinical trial indicators found, false otherwise.
     public static func appearsToBeClinicalTrial(title: String?) -> Bool {
         guard let title = title else { return false }
-
-        let titleLower = title.lowercased()
-        return ClinicalTrialPatterns.trialKeywords.contains { keyword in
-            titleLower.contains(keyword)
-        }
+        return RegexHelper.anyMatch(
+            patterns: [ClinicalTrialPatterns.trialTitlePattern],
+            in: title.lowercased()
+        )
     }
 
     /// Extract NCT IDs from text.

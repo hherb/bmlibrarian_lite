@@ -48,7 +48,9 @@ from ..analysis_failures import (
     unreachable_source_caveat,
 )
 from ..constants import (
+    CLINICALTRIALS_GOV_DATABANK,
     HTTP_NOT_FOUND,
+    PUBMED_TRIAL_REGISTRY_DATABANKS,
     SERVICE_CROSSREF,
     SERVICE_EUROPE_PMC,
     SERVICE_PUBMED,
@@ -301,6 +303,13 @@ class TransparencyReport:
     # Whether CrossRef could not be read at all, as opposed to answering
     # that it holds no such DOI (its 404, which is a genuine absence).
     crossref_record_unreachable: bool = False
+
+    # Whether ClinicalTrials.gov could not be read for a trial the article
+    # cites, or served a record that is not a study, as opposed to answering
+    # that it holds no such trial. Like ``pubmed_record_unreachable`` and
+    # ``crossref_record_unreachable`` it feeds ``sources_unreachable``, so the
+    # finding is provisional and re-analysed rather than cached (#385).
+    registry_record_unreachable: bool = False
 
     # Data availability
     data_availability: Optional[DataAvailabilityInfo] = None
@@ -1095,6 +1104,97 @@ def determine_sponsor_type(funders: list[FunderInfo]) -> SponsorType:
     return SponsorType.NONPROFIT
 
 
+#: What makes a title read as a clinical trial's, as regex fragments over the
+#: lowercased title. Each matches only as a whole word: a bare substring test
+#: read "atrial fibrillation" as a trial (``trial``), and "myocardial
+#: infarction" too (``rct``), which raised "Clinical trial without detected
+#: registration" across cardiology (#385). The shared contract is
+#: ``doc/cross_platform/transparency_parity/trial_title_patterns.json``;
+#: Swift's and Kotlin's ``ClinicalTrialPatterns.trialTitlePatterns`` are
+#: asserted against it too, so edit all four together.
+TRIAL_TITLE_PATTERNS = (
+    r"trials?",
+    r"randomi[sz]ed",
+    r"rcts?",
+    r"phase\s+(?:i{1,3}|iv)[ab]?",
+)
+
+#: The fragments as one whole-word alternation. The boundary is spelled out
+#: rather than ``\b`` because the three regex engines disagree on what a word
+#: character is outside ASCII.
+_TRIAL_TITLE_RE = re.compile(
+    r"(?<![a-z0-9])(?:" + "|".join(TRIAL_TITLE_PATTERNS) + r")(?![a-z0-9])"
+)
+
+
+def appears_to_be_clinical_trial(title: str | None) -> bool:
+    """Whether a study's title reads as a clinical trial's.
+
+    It decides one thing: whether a registration that was assessed and not
+    found makes the study an unregistered trial. Mirrors Swift's and
+    Kotlin's ``TrialComplianceAnalyzer.appearsToBeClinicalTrial``.
+
+    Args:
+        title: The article title, if known.
+
+    Returns:
+        True when a :data:`TRIAL_TITLE_PATTERNS` fragment occurs in the title
+        as a whole word.
+    """
+    if not title:
+        return False
+    return _TRIAL_TITLE_RE.search(title.lower()) is not None
+
+
+def cited_trial_registrations(
+    databanks: Any,
+) -> list[tuple[str, str | None]]:
+    """The trial registrations a PubMed record's databank links cite.
+
+    Every registry NLM lists counts (:data:`PUBMED_TRIAL_REGISTRY_DATABANKS`),
+    matched without regard to case; data repositories such as GEO do not. The
+    list is PubMed's, parsed from XML, so every shape is checked rather than
+    trusted.
+
+    Args:
+        databanks: The ``databanks`` PubMed's record carried: a list of
+            ``{"name": ..., "accession_numbers": [...]}`` dicts.
+
+    Returns:
+        One ``(registry, accession)`` pair per cited registration, in order.
+        The accession is None where PubMed names a registry with an empty
+        or missing accession number: the study is registered, somewhere the
+        record does not say.
+    """
+    if not isinstance(databanks, list):
+        return []
+    cited: list[tuple[str, str | None]] = []
+    for databank in databanks:
+        if not isinstance(databank, dict):
+            continue
+        name = databank.get('name')
+        if not isinstance(name, str):
+            continue
+        registry = _TRIAL_REGISTRIES_BY_CASEFOLD.get(name.strip().casefold())
+        if registry is None:
+            continue
+        accessions = databank.get('accession_numbers')
+        if not isinstance(accessions, list) or not accessions:
+            cited.append((registry, None))
+            continue
+        for accession in accessions:
+            usable = accession.strip() if isinstance(accession, str) else ""
+            cited.append((registry, usable or None))
+    return cited
+
+
+#: :data:`PUBMED_TRIAL_REGISTRY_DATABANKS` keyed for a case-blind lookup,
+#: each mapped to NLM's own spelling for the sentence the reader sees.
+_TRIAL_REGISTRIES_BY_CASEFOLD = {
+    name.casefold(): name for name in PUBMED_TRIAL_REGISTRY_DATABANKS
+}
+
+
 #: ``lead_sponsor['class']`` value that marks a registered trial as industry-run.
 INDUSTRY_TRIAL_SPONSOR_CLASS = "INDUSTRY"
 
@@ -1591,6 +1691,57 @@ class CrossRefClient:
         return funders
 
 
+def _mapping_at(container: Any, key: str) -> dict[str, Any]:
+    """The object under ``key``, or an empty one when it is not an object.
+
+    Args:
+        container: A parsed JSON value, trusted to be nothing in particular.
+        key: The member to read.
+
+    Returns:
+        The member when it is a dict, else ``{}``.
+    """
+    if not isinstance(container, dict):
+        return {}
+    value = container.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _text_at(container: dict[str, Any], key: str) -> str | None:
+    """The string under ``key``, or None when it is absent or not a string.
+
+    Args:
+        container: A parsed JSON object.
+        key: The member to read.
+
+    Returns:
+        The member when it is a string, else None.
+    """
+    value = container.get(key)
+    return value if isinstance(value, str) else None
+
+
+def _outcome_measures(outcomes: Any) -> list[str]:
+    """The ``measure`` of each registered outcome that states one.
+
+    Args:
+        outcomes: A registry outcome list, trusted to be nothing in
+            particular.
+
+    Returns:
+        Each readable measure, in order. An entry of the wrong shape is
+        skipped, not allowed to cost the entries beside it.
+    """
+    if not isinstance(outcomes, list):
+        return []
+    measures = []
+    for outcome in outcomes:
+        measure = _text_at(outcome, 'measure') if isinstance(outcome, dict) else None
+        if measure is not None:
+            measures.append(measure)
+    return measures
+
+
 class ClinicalTrialsClient:
     """Client for ClinicalTrials.gov API v2."""
 
@@ -1650,7 +1801,13 @@ class ClinicalTrialsClient:
                 failure.describe(),
             )
             return RecordFetch.unreachable(failure)
-        if not isinstance(record, dict) or not record:
+        # Parsed is not read: a body holding no protocol section is not a
+        # study, and served it became a registration with an empty ID, kept
+        # as final. Swift's and Kotlin's extractTrialInfo return nil for the
+        # same body, making the result provisional (#385).
+        if not isinstance(record, dict) or not isinstance(
+            record.get('protocolSection'), dict
+        ):
             logger.warning(
                 "ClinicalTrials.gov's answer for %s could not be read, so "
                 "this trial's registration is not assessed.",
@@ -1669,39 +1826,57 @@ class ClinicalTrialsClient:
         return []
 
     def extract_trial_info(self, study: Dict) -> TrialRegistration:
-        """Extract structured trial information."""
-        protocol = study.get('protocolSection', {})
+        """Extract structured trial information from a served record.
+
+        Every field is the registry's JSON and is checked rather than
+        trusted: one of the wrong shape reads as absent, as Swift's and
+        Kotlin's ``extractTrialInfo`` read it. A list where a module belongs
+        used to raise ``AttributeError`` out of ``analyze()``, losing the
+        whole study rather than one field. ``get_study`` has already refused
+        a record with no protocol section.
+
+        Args:
+            study: A ClinicalTrials.gov v2 study record ``get_study`` served.
+
+        Returns:
+            The registration, with each unreadable field empty.
+        """
+        protocol = _mapping_at(study, 'protocolSection')
 
         # Get identification
-        id_module = protocol.get('identificationModule', {})
-        nct_id = id_module.get('nctId', '')
-        title = id_module.get('officialTitle') or id_module.get('briefTitle', '')
+        id_module = _mapping_at(protocol, 'identificationModule')
+        nct_id = _text_at(id_module, 'nctId') or ''
+        title = (
+            _text_at(id_module, 'officialTitle')
+            or _text_at(id_module, 'briefTitle')
+            or ''
+        )
 
         # Get sponsor info
-        sponsor_module = protocol.get('sponsorCollaboratorsModule', {})
-        lead_sponsor = sponsor_module.get('leadSponsor', {})
-        sponsor_name = lead_sponsor.get('name', '')
+        sponsor_module = _mapping_at(protocol, 'sponsorCollaboratorsModule')
+        lead_sponsor = _mapping_at(sponsor_module, 'leadSponsor')
+        sponsor_name = _text_at(lead_sponsor, 'name') or ''
         # INDUSTRY, NIH, OTHER, etc. Left as None when the registry reports no
         # class, so "registered but unreadable" stays distinguishable from a
         # class we simply do not act on. Mirrors Swift's ClinicalTrialsService,
         # where `leadSponsor["class"] as? String` is nil for the same input.
-        sponsor_class = lead_sponsor.get('class')
+        sponsor_class = _text_at(lead_sponsor, 'class')
 
         # Get outcomes
-        outcomes_module = protocol.get('outcomesModule', {})
-        primary_outcomes = [
-            o.get('measure', '')
-            for o in outcomes_module.get('primaryOutcomes', [])
-        ]
-        secondary_outcomes = [
-            o.get('measure', '')
-            for o in outcomes_module.get('secondaryOutcomes', [])
-        ]
+        outcomes_module = _mapping_at(protocol, 'outcomesModule')
+        primary_outcomes = _outcome_measures(
+            outcomes_module.get('primaryOutcomes')
+        )
+        secondary_outcomes = _outcome_measures(
+            outcomes_module.get('secondaryOutcomes')
+        )
 
         # Get completion date
-        status_module = protocol.get('statusModule', {})
+        status_module = _mapping_at(protocol, 'statusModule')
         completion_date = None
-        completion_str = status_module.get('completionDateStruct', {}).get('date')
+        completion_str = _text_at(
+            _mapping_at(status_module, 'completionDateStruct'), 'date'
+        )
         if completion_str:
             try:
                 completion_date = datetime.strptime(completion_str, '%Y-%m-%d')
@@ -1711,8 +1886,9 @@ class ClinicalTrialsClient:
                 except ValueError:
                     pass
 
-        # Check if results posted
-        has_results = study.get('hasResults', False)
+        # Check if results posted. Only a JSON true says so, as Swift's
+        # `as? Bool` reads it; a missing key is #389.
+        has_results = study.get('hasResults') is True
 
         return TrialRegistration(
             registry='ClinicalTrials.gov',
@@ -2994,33 +3170,55 @@ class StudyTransparencyAnalyzer:
             )
             return
 
-        # PubMed answered, so an empty registration list below is the
-        # record's own answer and may be read as one.
-        report.trial_registration_assessed = True
+        # PubMed answered. The registration counts as assessed only if every
+        # trial it cites was answered for as well: a registry outage, or a
+        # registry no client here reads, leaves the list empty for a reason
+        # that is not the study's, and "Clinical trial without detected
+        # registration" then contradicted the warning explaining why (#385).
+        # A record citing no trial at all is assessed: PubMed was read and
+        # names none. Swift and Kotlin apply the same per-trial rule
+        # (``everyTrialAnswered``) but read NCT IDs from the title alone and
+        # leave the registration unassessed when it names none (#390).
+        every_trial_answered = True
 
-        # Get trial IDs from PubMed databank links
-        trial_ids = []
-        if hasattr(report, '_databanks'):
-            for databank in report._databanks:
-                if databank.get('name') in ['ClinicalTrials.gov', 'ISRCTN', 'EudraCT']:
-                    trial_ids.extend(databank.get('accession_numbers', []))
-
-        # Fetch each trial
-        for trial_id in trial_ids:
-            # Only ClinicalTrials.gov is fetchable; ISRCTN and EudraCT accessions
-            # were collected above but have no client. Say so — silently dropping
-            # them makes a registered trial read as "None found".
-            if 'NCT' not in trial_id.upper():
+        for registry, trial_id in cited_trial_registrations(
+            getattr(report, '_databanks', None)
+        ):
+            if trial_id is None:
                 logger.info(
-                    "Trial %s is registered outside ClinicalTrials.gov; no client "
-                    "for that registry, so its registration is not analysed.",
-                    trial_id,
+                    "PubMed cites a %s registration with no accession number.",
+                    registry,
                 )
                 report.warnings.append(
-                    f"Trial {trial_id} is registered outside ClinicalTrials.gov, "
-                    "which is the only registry this analysis can read. The study "
-                    "is registered even though no registration is reported below."
+                    f"PubMed cites a {registry} registration without its "
+                    "accession number, so it could not be checked. The study "
+                    "is registered even though no registration is reported "
+                    "below."
                 )
+                # PubMed's record, not an outage: re-reading it would say
+                # the same, so the finding is unassessed, not provisional.
+                every_trial_answered = False
+                continue
+
+            # Only ClinicalTrials.gov has a client. Say so of the rest:
+            # silently dropping them made a registered trial read as
+            # "None found".
+            if registry != CLINICALTRIALS_GOV_DATABANK:
+                logger.info(
+                    "Trial %s is registered in %s; no client for that "
+                    "registry, so its registration is not analysed.",
+                    trial_id,
+                    registry,
+                )
+                report.warnings.append(
+                    f"Trial {trial_id} is registered in {registry}, not "
+                    "ClinicalTrials.gov, which is the only registry this "
+                    "analysis can read. The study is registered even though "
+                    "no registration is reported below."
+                )
+                # Not an outage: no re-analysis will ever read it, so the
+                # finding is not provisional, only unassessed.
+                every_trial_answered = False
                 continue
 
             logger.info(f"Fetching ClinicalTrials.gov data for {trial_id}")
@@ -3031,6 +3229,8 @@ class StudyTransparencyAnalyzer:
                 # A registry outage makes registered trials look
                 # unregistered — and costs them the registration score —
                 # with the evidence only in a server log.
+                every_trial_answered = False
+                report.registry_record_unreachable = True
                 report.warnings.append(
                     f"Could not reach ClinicalTrials.gov for trial {trial_id}, so "
                     "its registration could not be checked. Absence of a "
@@ -3071,6 +3271,8 @@ class StudyTransparencyAnalyzer:
                 compliance = check_results_compliance(trial_info, report.publication_date)
                 if compliance != ResultsComplianceStatus.UNKNOWN:
                     report.results_compliance = compliance
+
+        report.trial_registration_assessed = every_trial_answered
 
     def _analyze_conflicts(
         self,
@@ -3381,8 +3583,7 @@ class StudyTransparencyAnalyzer:
         # registration was not assessed, so the two halves contradicted each
         # other (#356). Same rule as COI above.
         if report.trial_registration_assessed and not report.trial_registrations:
-            if report.title and any(kw in report.title.lower() for kw in
-                ['trial', 'randomized', 'randomised', 'rct', 'phase i', 'phase ii', 'phase iii']):
+            if appears_to_be_clinical_trial(report.title):
                 indicators.append(RISK_INDICATOR_MISSING_TRIAL_REGISTRATION)
 
         # Deduplicate while preserving order

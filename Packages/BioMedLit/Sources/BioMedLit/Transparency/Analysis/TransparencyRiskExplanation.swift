@@ -196,6 +196,9 @@ public struct TransparencyRiskExplanation: Sendable, Equatable {
                 + "re-analysing may change the rating."
             )
         }
+        if result.isProvisional {
+            caveats.append(TransparencyConstants.provisionalResultCaveat)
+        }
         // Funders come from CrossRef alone (`fetchBasicMetadata` merges CrossRef
         // funders only; PubMed grants are not used here, unlike Python), so its
         // absence is what leaves them unchecked; a PubMed record does not stand
