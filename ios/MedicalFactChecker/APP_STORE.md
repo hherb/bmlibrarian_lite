@@ -92,26 +92,13 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
 - Fixed the model list request for OpenAI-compatible providers
 
 **Supported AI Models**
-- Claude 4.5 (Sonnet, Haiku, Opus)
-- GPT-5.2 and o4-mini reasoning models
-- DeepSeek V4 Flash and V4 Pro
-- Llama 4 Maverick and Scout via Groq
-- Mistral Large 3 and Codestral
-
-**Dynamic Model Discovery**
-- Models are now fetched automatically from provider APIs
-- Always see the latest available models
-- Refresh button to update model list
-
-**Improved Settings**
-- Models organized by provider with pricing info
-- Updated cost estimates for all models
-- Better model selection with recommendations
-
-**Bug Fixes & Improvements**
-- Fixed SwiftData persistence for document metadata
-- Improved iPad layout for reports
-- Better PDF export with text-based rendering
+- Anthropic Claude (all models)
+- OpenAI GPT (all models)
+- DeepSeek (all models)
+- Mistral AI (all models)
+- Open models hosted by Groq
+- Local models via Ollama
+- Any OpenAI-compatible endpoint
 
 ---
 
@@ -143,7 +130,7 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
 ---
 
 ## Promotional Text (170 characters max)
-Fact-check medical claims with PubMed research and AI. Now with Claude 4.5, GPT-5.2, and dynamic model updates!
+Fact-check medical claims against PubMed research with the AI of your choice: Claude, GPT, DeepSeek, Mistral or models running locally on your Mac.
 
 ---
 
