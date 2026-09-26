@@ -50,7 +50,8 @@
     {
       "name": "Abdominal Core Health Quality Collaborative, EndoEvolve, Advanced Medical Solutions",
       "source": "pubmed",
-      "label": "not_industry"
+      "label": "ambiguous",
+      "reason": "One string naming three funders: a non-profit surgical registry and two medical-device companies."
     },
     {
       "name": "Agence Régionale de Santé -Grand Est",
@@ -95,7 +96,7 @@
     {
       "name": "Amgen",
       "source": "pubmed",
-      "label": "not_industry"
+      "label": "industry"
     },
     {
       "name": "Anusandhan Research Funding",
@@ -105,7 +106,8 @@
     {
       "name": "Aqua-Synapse",
       "source": "pubmed",
-      "label": "not_industry"
+      "label": "ambiguous",
+      "reason": "No organisation of this name could be identified; nothing establishes it as public-sector or commercial."
     },
     {
       "name": "Arima Genomics",
@@ -130,7 +132,7 @@
     {
       "name": "AstraZeneca",
       "source": "pubmed",
-      "label": "not_industry"
+      "label": "industry"
     },
     {
       "name": "AstraZeneca.",
@@ -533,7 +535,8 @@
     {
       "name": "FIGS",
       "source": "crossref",
-      "label": "not_industry"
+      "label": "ambiguous",
+      "reason": "A bare acronym: a company of that name exists, and so do several grant programmes."
     },
     {
       "name": "FONDECYT",
@@ -764,7 +767,8 @@
     {
       "name": "Industry Research",
       "source": "pubmed",
-      "label": "not_industry"
+      "label": "ambiguous",
+      "reason": "Names a category of funding, not a funder; the string does not say whose."
     },
     {
       "name": "Inheritance and Innovation Team of Traditional Chinese Medicine Processing Technology, Jiangxi University of Chinese Medicine",
@@ -970,7 +974,7 @@
     {
       "name": "Lån & Spar",
       "source": "pubmed",
-      "label": "not_industry"
+      "label": "industry"
     },
     {
       "name": "MEC | Agencia Estatal de Investigación (AEI)",
@@ -1365,7 +1369,7 @@
     {
       "name": "PetroChina Major Science and Technology Project",
       "source": "crossref",
-      "label": "not_industry"
+      "label": "industry"
     },
     {
       "name": "Pfizer",
@@ -1600,7 +1604,7 @@
     {
       "name": "Siemens Healthineers",
       "source": "pubmed",
-      "label": "not_industry"
+      "label": "industry"
     },
     {
       "name": "Slovak Research and Development Agency",
@@ -1775,7 +1779,8 @@
     {
       "name": "UK Browsweat",
       "source": "crossref",
-      "label": "not_industry"
+      "label": "ambiguous",
+      "reason": "No organisation of this name could be identified; nothing establishes it as public-sector or commercial."
     },
     {
       "name": "UK EPSRC",

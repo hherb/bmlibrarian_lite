@@ -66,8 +66,8 @@ CORPUS_PATH = (
 
 #: Floors, one notch below the measured figures, so an unrelated refactor does not
 #: have to move them but a real regression trips. Same values as Swift's.
-MIN_PRECISION = 0.90
-MIN_RECALL = 0.30
+MIN_PRECISION = 0.95
+MIN_RECALL = 0.65
 
 #: What the substring matcher this replaced scored on the same names. The
 #: canonical Python's own ``INDUSTRY_KEYWORDS[:6]`` slice scored strictly worse
@@ -374,8 +374,10 @@ class TestTheAlignmentTable:
         ("Lincoln Medical Center", False),
         ("University of Calgary, Calgary, AB, Canada", False),
         ("Key Laboratory of Molecular Biology", False),
-        ("Novo Nordisk A/S", False),
-        ("Bristol-Myers Squibb Company", False),
+        # Missed on both platforms when the table was written; recognised by
+        # the brand layer since #394.
+        ("Novo Nordisk A/S", True),
+        ("Bristol-Myers Squibb Company", True),
     ]
 
     @pytest.mark.parametrize("name,expected", ALIGNMENT_TABLE)
@@ -390,7 +392,7 @@ class TestCorpusMeasurement:
     def test_precision_meets_the_floor(
         self, scored_corpus: tuple[set[str], set[str], set[str]]
     ) -> None:
-        """Measured 0.909. Ties go to precision: a false positive costs more."""
+        """Measured 0.958 (23/24). Ties go to precision: a false positive costs more."""
         true_positives, false_positives, _ = scored_corpus
         precision = len(true_positives) / (len(true_positives) + len(false_positives))
         assert precision >= MIN_PRECISION, f"precision fell to {precision}"
@@ -398,7 +400,7 @@ class TestCorpusMeasurement:
     def test_recall_meets_the_floor(
         self, scored_corpus: tuple[set[str], set[str], set[str]]
     ) -> None:
-        """Measured 0.333."""
+        """Measured 0.657 (23/35), after the brand layer (#394)."""
         true_positives, _, false_negatives = scored_corpus
         recall = len(true_positives) / (len(true_positives) + len(false_negatives))
         assert recall >= MIN_RECALL, f"recall fell to {recall}"
@@ -417,9 +419,9 @@ class TestCorpusMeasurement:
 class TestCorpusComposition:
     """Pins *which* names the classifier gets right and wrong, not just how many.
 
-    The floors leave two gaps. The recall floor sits at 0.30 against a measured
-    10/30, so losing a true positive outright still passes (9/30 = 0.30) and
-    precision then reads 9/10 = 0.90 and passes too. And nothing says which ten:
+    The floors leave two gaps. The recall floor sits at 0.65 against a measured
+    23/35, so losing a true positive outright still passes (22/35 = 0.629 does
+    not — but a floor is a notch, not a pin). And nothing says which funders:
     swapping one recognised funder for another leaves both metrics identical.
 
     All three sets are expected to change — that is the point. A change becomes a
@@ -429,53 +431,56 @@ class TestCorpusComposition:
     fails here as well as there.
     """
 
-    #: The ten industry funders the matcher recognises. Every one carries a legal
-    #: suffix or a company-form stem; none is recognised by brand.
+    #: The industry funders the matcher recognises: ten by a legal suffix or a
+    #: company-form stem, and thirteen by brand (#394).
     EXPECTED_TRUE_POSITIVES = {
+        "AbbVie",
+        "Amgen",
         "Astex Pharmaceuticals, Inc.",
+        "AstraZeneca",
+        "AstraZeneca.",
+        "Bristol Myers Squibb",
         "Cardinal Health, LLC",
         "Chia Tai Tianqing Pharmaceutical Group Co., Ltd.",
         "Chugai Pharmaceutical Co., Ltd",
         "Dr. Reddy's Laboratories, Hyderabad, India",
         "Geneos Therapeutics",
         "ImmVira Co., Limited",
+        "Janssen Scientific Affairs",
+        "La Roche Posay",
+        "Merck & Co.; Merck Sharp & Dohme",
         "NanOlogy, LLC",
         "Natera, Inc",
+        "Pfizer",
+        "Pfizer and Jazz",
+        "Roche",
+        "Roche Sweden AB",
+        "Teva",
         "Treatment Technologies and Insights, Incorporated",
     }
 
-    #: The one false positive, and the whole reason precision is 0.909 rather than
+    #: The one false positive, and the whole reason precision is 0.958 rather than
     #: 1.0: a Chinese state heritage studio whose name contains "Pharmaceutical".
     EXPECTED_FALSE_POSITIVES = {
         "National Inheritance Studio of Veteran Pharmaceutical Workers of Zhong Lingyun",
     }
 
-    #: The twenty industry funders the matcher misses — the recall debt, written
-    #: down. Almost all are bare brand names: CrossRef and PubMed frequently return
-    #: "Pfizer" or "Roche" with no legal suffix, and the matcher recognises company
-    #: *forms*, not companies. Closing this needs a brand list, which is a
-    #: different mechanism with a different false-positive profile.
+    #: The industry funders the matcher misses — the recall debt, written down.
+    #: None is a drug or device maker the brand list names: technology,
+    #: diagnostics, finance and energy companies named without a legal suffix.
     EXPECTED_FALSE_NEGATIVES = {
-        "AbbVie",
         "Arima Genomics",
-        "AstraZeneca.",
-        "Bristol Myers Squibb",
         "Diaceutics",
         "Guardant Health",
         "Invitae Corporation",
-        "Janssen Scientific Affairs",
-        "La Roche Posay",
         "Lockheed Martin",
-        "Merck & Co.; Merck Sharp & Dohme",
+        "Lån & Spar",
         "NVIDIA",
         "Personalis",
-        "Pfizer",
-        "Pfizer and Jazz",
-        "Roche",
-        "Roche Sweden AB",
+        "PetroChina Major Science and Technology Project",
+        "Siemens Healthineers",
         "Tempus Labs",
         "TerumoBCT",
-        "Teva",
     }
 
     def test_true_positive_composition_is_unchanged(

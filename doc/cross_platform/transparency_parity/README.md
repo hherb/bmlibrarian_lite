@@ -91,10 +91,12 @@ pins *measured quality*, on all three platforms:
 | Swift (BioMedLit) | `FundingAnalyzer.classifyFunder` | `IndustryPatterns.funderNameStems` / `funderNameWords` | `FunderClassificationTests` |
 | Kotlin (Android) | `FundingAnalyzer.classifyFunder` | `IndustryPatterns.funderNameStems` / `funderNameWords` (`android/…/domain/transparency/IndustryPatterns.kt`) | `FunderClassificationTest` |
 
-Each asserts floors of precision 0.90 and recall 0.30, plus that it beats the
+Each asserts floors of precision 0.95 and recall 0.65, plus that it beats the
 substring matcher it replaced (precision 0.455 / recall 0.167). Current measured
-figures on all three platforms: **precision 0.909, recall 0.333** — the same ten
-true positives, the same single false positive and the same twenty misses, pinned
+figures on all three platforms, with the brand layer (`industry_brands` in
+`sponsor_patterns.json`, #394): **precision 0.958, recall 0.657** — the same
+twenty-three true positives, the same single false positive and the same twelve
+misses, pinned
 by name in `TestCorpusComposition`, `FunderCorpusCompositionTests` and
 `FunderCorpusCompositionTest`. That is what makes this a parity check rather than
 three independent claims: no platform can drift from the others without failing
@@ -253,11 +255,19 @@ Each platform holds the floors (`TestCorpusMeasurement`,
 are matched, missed and wrongly matched (`TestCorpusComposition`,
 `FunderCorpusCompositionTests`, `FunderCorpusCompositionTest`). The floors alone
 cannot see a swap — one recognised funder traded for another leaves both metrics
-identical — and the recall floor of 0.30 against a measured 10/30 tolerates
-losing a true positive outright. That is measured, not hypothetical: on Android,
-changing the stem `laboratories` to `laboratorias` drops "Dr. Reddy's
-Laboratories" to a miss and leaves every floor green (precision 9/10, recall
-9/30); only the composition pins fail. All three name lists are expected to
+identical. That is measured, not hypothetical: when the floors were 0.90 / 0.30
+against a measured 10/30, changing the stem `laboratories` to `laboratorias` on
+Android dropped "Dr. Reddy's Laboratories" to a miss and left every floor green
+(precision 9/10, recall 9/30); only the composition pins failed.
+
+**The corpus was re-audited for #394.** Five commercial entities had been
+labelled `not_industry` — Amgen, AstraZeneca (while "AstraZeneca." was
+`industry`), Siemens Healthineers, PetroChina and the bank Lån & Spar — and are
+now `industry`, as the corpus's own definition ("a commercial entity") requires.
+Five names moved to `ambiguous` with a reason: three nothing identifies
+(Aqua-Synapse, UK Browsweat, FIGS), one naming several funders including two
+device companies, and "Industry Research". The corpus therefore differs from
+bmlib's copy until bmlib takes the same corrections (hherb/bmlib#292). All three name lists are expected to
 change; the point is that changing one is a deliberate edit with the funder's
 name in the diff.
 

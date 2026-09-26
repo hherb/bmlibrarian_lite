@@ -20,11 +20,9 @@ import XCTest
 /// Pins *which* corpus names the classifier gets right and wrong, not just how
 /// many.
 ///
-/// `FunderClassificationTests` asserts floors — precision ≥ 0.90, recall ≥ 0.30.
-/// Floors leave two gaps. The recall floor sits at 0.30 against a measured 10/30,
-/// so losing a true positive outright still passes (9/30 = 0.30), and precision
-/// then reads 9/10 = 0.90 and passes too. And nothing says which ten: swapping
-/// one recognised funder for another leaves both metrics identical.
+/// `FunderClassificationTests` asserts floors — precision ≥ 0.95, recall ≥ 0.65.
+/// Floors leave a gap: nothing says which funders. Swapping one recognised
+/// funder for another leaves both metrics identical.
 ///
 /// So the composition is pinned here. Both lists are expected to change — that is
 /// the point. A change is a deliberate edit to this file with the new name in the
@@ -33,61 +31,60 @@ final class FunderCorpusCompositionTests: XCTestCase {
 
     // MARK: - What the classifier catches today
 
-    /// The ten industry funders the matcher recognises. Every one carries a legal
-    /// suffix or a company-form stem; none is recognised by brand.
+    /// The industry funders the matcher recognises: ten by a legal suffix or a
+    /// company-form stem, and thirteen by brand (#394).
     private static let expectedTruePositives: Set<String> = [
+        "AbbVie",
+        "Amgen",
         "Astex Pharmaceuticals, Inc.",
+        "AstraZeneca",
+        "AstraZeneca.",
+        "Bristol Myers Squibb",
         "Cardinal Health, LLC",
         "Chia Tai Tianqing Pharmaceutical Group Co., Ltd.",
         "Chugai Pharmaceutical Co., Ltd",
         "Dr. Reddy's Laboratories, Hyderabad, India",
         "Geneos Therapeutics",
         "ImmVira Co., Limited",
+        "Janssen Scientific Affairs",
+        "La Roche Posay",
+        "Merck & Co.; Merck Sharp & Dohme",
         "NanOlogy, LLC",
         "Natera, Inc",
+        "Pfizer",
+        "Pfizer and Jazz",
+        "Roche",
+        "Roche Sweden AB",
+        "Teva",
         "Treatment Technologies and Insights, Incorporated",
     ]
 
-    /// The one false positive, and the whole reason precision is 0.909 rather
+    /// The one false positive, and the whole reason precision is 0.958 rather
     /// than 1.0: a Chinese state heritage studio whose name contains
     /// "Pharmaceutical".
     private static let expectedFalsePositives: Set<String> = [
         "National Inheritance Studio of Veteran Pharmaceutical Workers of Zhong Lingyun",
     ]
 
-    /// The twenty industry funders the matcher misses — the recall debt, written
-    /// down.
-    ///
-    /// Almost all are bare brand names: CrossRef and PubMed frequently return
-    /// "Pfizer" or "Roche" with no legal suffix, and the matcher recognises
-    /// company *forms*, not companies. Closing this needs a brand list, which is a
-    /// different mechanism with a different false-positive profile — see the
-    /// funder-name corpus section of
-    /// `doc/cross_platform/transparency_parity/README.md`.
+    /// The industry funders the matcher misses — the recall debt, written down.
+    /// None is a drug or device maker the brand list names: technology,
+    /// diagnostics, finance and energy companies named without a legal suffix.
     ///
     /// This list is a record of known cost, not an endorsement. Removing a name
     /// from it because the matcher improved is the expected kind of edit.
     private static let expectedFalseNegatives: Set<String> = [
-        "AbbVie",
         "Arima Genomics",
-        "AstraZeneca.",
-        "Bristol Myers Squibb",
         "Diaceutics",
         "Guardant Health",
         "Invitae Corporation",
-        "Janssen Scientific Affairs",
-        "La Roche Posay",
         "Lockheed Martin",
-        "Merck & Co.; Merck Sharp & Dohme",
+        "Lån & Spar",
         "NVIDIA",
         "Personalis",
-        "Pfizer",
-        "Pfizer and Jazz",
-        "Roche",
-        "Roche Sweden AB",
+        "PetroChina Major Science and Technology Project",
+        "Siemens Healthineers",
         "Tempus Labs",
         "TerumoBCT",
-        "Teva",
     ]
 
     // MARK: - Tests
@@ -104,17 +101,18 @@ final class FunderCorpusCompositionTests: XCTestCase {
         XCTAssertEqual(try classify().falseNegatives, Self.expectedFalseNegatives)
     }
 
-    /// The labelled corpus itself: 417 entries, of which 30 are industry. Pinned
-    /// because every figure above is a fraction of these, and the corpus is
-    /// shared byte-for-byte with bmlib — a change here means the two repositories
-    /// have drifted.
+    /// The labelled corpus itself: 417 entries, of which 35 are industry. Pinned
+    /// because every figure above is a fraction of these. Re-audited for #394
+    /// (five commercial entities had been labelled not_industry, five names moved
+    /// to ambiguous), so it now differs from bmlib's copy until bmlib takes the
+    /// same corrections.
     func testTheLabelledCorpusIsUnchanged() throws {
         let entries = try loadEntries()
 
         XCTAssertEqual(entries.count, 417)
-        XCTAssertEqual(entries.filter { $0.label == "industry" }.count, 30)
-        XCTAssertEqual(entries.filter { $0.label == "not_industry" }.count, 382)
-        XCTAssertEqual(entries.filter { $0.label == "ambiguous" }.count, 5)
+        XCTAssertEqual(entries.filter { $0.label == "industry" }.count, 35)
+        XCTAssertEqual(entries.filter { $0.label == "not_industry" }.count, 372)
+        XCTAssertEqual(entries.filter { $0.label == "ambiguous" }.count, 10)
     }
 
     // MARK: - Corpus

@@ -44,7 +44,7 @@
     "",
     "See doc/cross_platform/transparency_parity/README.md."
   ],
-  "schema_version": 3,
+  "schema_version": 4,
   "patterns": {
     "government": [
       "\\bnih\\b",
@@ -141,5 +141,100 @@
       "doi": null,
       "is_industry": false
     }
-  ]
+  ],
+  "industry_brands": {
+    "_readme": [
+      "Industry company names matched as whole words (issue #394), the fourth name layer after",
+      "the stems and whole words that recognise a company FORM. CrossRef and PubMed often return",
+      "a bare brand ('Pfizer', 'The Pfizer company') with no legal suffix, which the form layer",
+      "cannot see. The list is the companies of KNOWN_INDUSTRY_FUNDER_DOIS / KnownIndustryFunders",
+      "plus their most-named subsidiaries (Janssen, Genentech) -- chosen from that curated list,",
+      "not from the corpus. 'Eli Lilly' only, never bare 'Lilly': the Lilly Endowment is a",
+      "charity. UCB is left out: a bare three-letter acronym is also UC Berkeley.",
+      "",
+      "A brand next to a foundation marker is NOT industry: the Novo Nordisk Foundation and the",
+      "Boehringer Ingelheim Fonds are charitable foundations. The markers guard the brand layer",
+      "only; a company form ('... Pharmaceuticals Foundation') is judged by its own layer.",
+      "",
+      "Checked after the government and academic patterns, like every name layer, and reported",
+      "at the industry_name confidence. Every brand must match a brand probe, every brand probe",
+      "must classify as industry, and every foundation probe as non-industry."
+    ],
+    "patterns": [
+      "\\bpfizer\\b",
+      "\\bastra\\s?zeneca\\b",
+      "\\bbayer\\b",
+      "\\bglaxo\\s?smith\\s?kline\\b",
+      "\\bgsk\\b",
+      "\\bjohnson\\s*(?:&|and)\\s*johnson\\b",
+      "\\beli\\s+lilly\\b",
+      "\\bmerck\\b",
+      "\\bnovartis\\b",
+      "\\bnovo\\s+nordisk\\b",
+      "\\broche\\b",
+      "\\bsanofi\\b",
+      "\\bgilead\\b",
+      "\\babbvie\\b",
+      "\\bcelgene\\b",
+      "\\bamgen\\b",
+      "\\bbristol[-\\s]?myers[-\\s]?squibb\\b",
+      "\\bbiogen\\b",
+      "\\bboehringer\\b",
+      "\\btakeda\\b",
+      "\\bregeneron\\b",
+      "\\bteva\\b",
+      "\\ballergan\\b",
+      "\\bmedtronic\\b",
+      "\\bboston\\s+scientific\\b",
+      "\\babbott\\b",
+      "\\bjanssen\\b",
+      "\\bgenentech\\b"
+    ],
+    "foundation_markers": [
+      "\\b(?:foundation|fondation|fondazione|fundaci[oó]n|funda[cç][aã]o|stiftung|stiftelse|stichting|fond|fonden|fonds|endowment|charitable)\\b"
+    ],
+    "brand_probes": [
+      "Pfizer",
+      "AstraZeneca",
+      "Bayer AG",
+      "GlaxoSmithKline",
+      "GSK",
+      "Johnson & Johnson",
+      "Eli Lilly and Company",
+      "Merck Sharp & Dohme",
+      "Novartis",
+      "Novo Nordisk",
+      "Roche",
+      "Sanofi",
+      "Gilead Sciences",
+      "AbbVie",
+      "Celgene",
+      "Amgen",
+      "Bristol-Myers Squibb",
+      "Biogen",
+      "Boehringer Ingelheim",
+      "Takeda",
+      "Regeneron",
+      "Teva",
+      "Allergan",
+      "Medtronic",
+      "Boston Scientific",
+      "Abbott",
+      "Janssen Research & Development",
+      "Genentech",
+      "The Pfizer company"
+    ],
+    "foundation_probes": [
+      "Novo Nordisk Foundation",
+      "Novo Nordisk Fonden",
+      "Boehringer Ingelheim Fonds",
+      "Takeda Science Foundation",
+      "Bayer Stiftung",
+      "Fondation Roche",
+      "Pfizer Charitable Trust",
+      "Fundación Merck Salud",
+      "Fondazione Roche",
+      "Abbott Endowment"
+    ]
+  }
 }

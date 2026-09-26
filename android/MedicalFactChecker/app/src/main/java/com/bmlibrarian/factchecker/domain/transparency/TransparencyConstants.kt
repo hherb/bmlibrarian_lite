@@ -31,9 +31,10 @@ object TransparencyConstants {
      * 4 — results record whether the full text was searched, and a missing trial
      * registration is reported only when ClinicalTrials.gov answered;
      * 5 — back-matter headings kept by the Swift JATS parser, "… Statement"
-     * headings accepted by the extractors, PubMed DOIs read by Swift.
+     * headings accepted by the extractors, PubMed DOIs read by Swift;
+     * 6 — funders named by brand classified as industry, their foundations not (#394).
      */
-    const val ANALYZER_VERSION: Int = 5
+    const val ANALYZER_VERSION: Int = 6
 
     // ==================== API URLs ====================
 

@@ -55,8 +55,9 @@ object FundingAnalyzer {
      *     suffixes ("Department of Veterans Affairs" is not a company);
      *  3. the calibrated funder-name stems and whole words.
      *
-     * Layer 3 scores precision 0.909 / recall 0.333 on the shared labelled
-     * corpus, against 0.455 / 0.167 for the substring matcher it replaced.
+     * Layer 3, with the brand list (#394), scores precision 0.958 / recall 0.657
+     * on the shared labelled corpus, against 0.455 / 0.167 for the substring
+     * matcher it replaced.
      *
      * @param name Funder name.
      * @param doi CrossRef Funder Registry DOI, if known (e.g. "10.13039/100004319").
@@ -90,7 +91,19 @@ object FundingAnalyzer {
      */
     private fun matchesIndustryName(nameLower: String): Boolean =
         IndustryPatterns.funderNameStems.any { nameLower.contains(it) } ||
-            TransparencyRegex.anyMatch(IndustryPatterns.funderNameWords, nameLower)
+            TransparencyRegex.anyMatch(IndustryPatterns.funderNameWords, nameLower) ||
+            matchesIndustryBrand(nameLower)
+
+    /**
+     * Whether a lowercased funder name names a known company, and not its foundation (#394).
+     *
+     * @param nameLower The funder name, already lowercased.
+     * @return True if an [IndustryPatterns.funderBrandPatterns] entry matches and no
+     *   [IndustryPatterns.foundationMarkerPatterns] entry does.
+     */
+    internal fun matchesIndustryBrand(nameLower: String): Boolean =
+        TransparencyRegex.anyMatch(IndustryPatterns.funderBrandPatterns, nameLower) &&
+            !TransparencyRegex.anyMatch(IndustryPatterns.foundationMarkerPatterns, nameLower)
 
     /**
      * Create a classified [FunderInfo] from raw funder data.

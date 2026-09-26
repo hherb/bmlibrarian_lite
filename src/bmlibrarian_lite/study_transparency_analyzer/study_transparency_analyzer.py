@@ -458,7 +458,7 @@ INDUSTRY_KEYWORDS = [
 #:   as a bare substring ("pharma") instead reached "Pharmacy", "Pharmacology" and
 #:   "Pharmacogenetics", all academic. The one false positive it does keep —
 #:   "National Inheritance Studio of Veteran Pharmaceutical Workers of Zhong
-#:   Lingyun" — is the entire reason overall precision is 0.909 rather than 1.0,
+#:   Lingyun" — is the entire reason overall precision is 0.958 rather than 1.0,
 #:   so it is worth knowing about rather than filed under "no false positives".
 #: * ``therapeutics`` — 1 TP / 0 FP.
 #: * ``laboratories`` — 1 TP / 0 FP. The plural only: "Key Laboratory" (singular)
@@ -513,6 +513,53 @@ FUNDER_NAME_WORDS = [
     r'\bgmbh\b',
     r'\bllc\b',
     r'\bplc\b',
+]
+
+#: Industry company names matched as whole words (#394): the brand layer.
+#:
+#: The stems and words above recognise a company *form*; CrossRef and PubMed
+#: often return a bare brand instead — "Pfizer", "The Pfizer company" — which no
+#: form reaches. These are the companies of ``KNOWN_INDUSTRY_FUNDER_DOIS`` plus
+#: their most-named subsidiaries (Janssen, Genentech), chosen from that curated
+#: list rather than from the corpus. "Eli Lilly" only, never bare "Lilly" (the
+#: Lilly Endowment is a charity); UCB is left out (also UC Berkeley). Pinned to
+#: ``industry_brands.patterns`` in ``sponsor_patterns.json``.
+FUNDER_BRAND_PATTERNS = [
+    r'\bpfizer\b',
+    r'\bastra\s?zeneca\b',
+    r'\bbayer\b',
+    r'\bglaxo\s?smith\s?kline\b',
+    r'\bgsk\b',
+    r'\bjohnson\s*(?:&|and)\s*johnson\b',
+    r'\beli\s+lilly\b',
+    r'\bmerck\b',
+    r'\bnovartis\b',
+    r'\bnovo\s+nordisk\b',
+    r'\broche\b',
+    r'\bsanofi\b',
+    r'\bgilead\b',
+    r'\babbvie\b',
+    r'\bcelgene\b',
+    r'\bamgen\b',
+    r'\bbristol[-\s]?myers[-\s]?squibb\b',
+    r'\bbiogen\b',
+    r'\bboehringer\b',
+    r'\btakeda\b',
+    r'\bregeneron\b',
+    r'\bteva\b',
+    r'\ballergan\b',
+    r'\bmedtronic\b',
+    r'\bboston\s+scientific\b',
+    r'\babbott\b',
+    r'\bjanssen\b',
+    r'\bgenentech\b',
+]
+
+#: A brand beside one of these is a charitable foundation, not the company —
+#: the Novo Nordisk Foundation, the Boehringer Ingelheim Fonds. Guards the brand
+#: layer only. Pinned to ``industry_brands.foundation_markers``.
+FOUNDATION_MARKER_PATTERNS = [
+    r'\b(?:foundation|fondation|fondazione|fundaci[oó]n|funda[cç][aã]o|stiftung|stiftelse|stichting|fond|fonden|fonds|endowment|charitable)\b',
 ]
 
 #: Confidence reported when a CrossRef Funder Registry DOI is a known industry
@@ -874,14 +921,32 @@ def matches_industry_funder_name(name: str) -> bool:
         name: Funder name as it arrives from the provider, in any case.
 
     Returns:
-        True if a stem matches anywhere in the name, or one of the whole-word
-        terms matches as a word.
+        True if a stem matches anywhere in the name, one of the whole-word
+        terms matches as a word, or it names a known company that is not that
+        company's foundation (:func:`matches_industry_brand`).
     """
     name_lower = name.lower()
 
     if any(stem in name_lower for stem in FUNDER_NAME_STEMS):
         return True
-    return any(re.search(pattern, name_lower) for pattern in FUNDER_NAME_WORDS)
+    if any(re.search(pattern, name_lower) for pattern in FUNDER_NAME_WORDS):
+        return True
+    return matches_industry_brand(name_lower)
+
+
+def matches_industry_brand(name_lower: str) -> bool:
+    """Whether a funder name names a known company, and not its foundation (#394).
+
+    Args:
+        name_lower: The funder name, already lowercased.
+
+    Returns:
+        True if a ``FUNDER_BRAND_PATTERNS`` entry matches as a word and no
+        ``FOUNDATION_MARKER_PATTERNS`` entry does.
+    """
+    if not any(re.search(pattern, name_lower) for pattern in FUNDER_BRAND_PATTERNS):
+        return False
+    return not any(re.search(marker, name_lower) for marker in FOUNDATION_MARKER_PATTERNS)
 
 
 def classify_funder_name(name: str, funder_doi: str | None = None) -> Tuple[bool, float]:
@@ -900,7 +965,8 @@ def classify_funder_name(name: str, funder_doi: str | None = None) -> Tuple[bool
 
     Layer 3 is measured against the shared labelled corpus at
     ``doc/cross_platform/transparency_parity/funder_names.json``, where it scores
-    precision 0.909 / recall 0.333. ``tests/test_funder_classification.py`` holds
+    precision 0.958 / recall 0.657 with the brand layer (#394).
+    ``tests/test_funder_classification.py`` holds
     the floors and pins which names are matched, missed and wrongly matched;
     Swift's ``FundingAnalyzer.classifyFunder`` scores identically on the same
     bytes.

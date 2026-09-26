@@ -61,7 +61,7 @@ public enum FundingAnalyzer {
     ///
     /// Layer 3 is measured against the shared labelled corpus at
     /// `doc/cross_platform/transparency_parity/funder_names.json`, where it scores
-    /// precision 0.909 / recall 0.333 — the substring matcher it replaced scored
+    /// precision 0.958 / recall 0.657 with the brand list (#394) — the substring matcher it replaced scored
     /// precision 0.455 / recall 0.167 on the same names. `FunderClassificationTests`
     /// holds the floors.
     ///
@@ -108,13 +108,29 @@ public enum FundingAnalyzer {
     /// with different failure modes.
     ///
     /// - Parameter nameLower: The funder name, already lowercased.
-    /// - Returns: True if a stem matches anywhere in the name, or one of the
-    ///   whole-word terms matches as a word.
+    /// - Returns: True if a stem matches anywhere in the name, one of the
+    ///   whole-word terms matches as a word, or it names a known company that is
+    ///   not that company's foundation (``matchesIndustryBrand(_:)``).
     private static func matchesIndustryName(_ nameLower: String) -> Bool {
         if IndustryPatterns.funderNameStems.contains(where: { nameLower.contains($0) }) {
             return true
         }
-        return RegexHelper.anyMatch(patterns: IndustryPatterns.funderNameWords, in: nameLower)
+        if RegexHelper.anyMatch(patterns: IndustryPatterns.funderNameWords, in: nameLower) {
+            return true
+        }
+        return matchesIndustryBrand(nameLower)
+    }
+
+    /// Whether a funder name names a known company, and not its foundation (#394).
+    ///
+    /// - Parameter nameLower: The funder name, already lowercased.
+    /// - Returns: True if a ``IndustryPatterns/funderBrandPatterns`` entry
+    ///   matches and no ``IndustryPatterns/foundationMarkerPatterns`` entry does.
+    static func matchesIndustryBrand(_ nameLower: String) -> Bool {
+        guard RegexHelper.anyMatch(patterns: IndustryPatterns.funderBrandPatterns, in: nameLower) else {
+            return false
+        }
+        return !RegexHelper.anyMatch(patterns: IndustryPatterns.foundationMarkerPatterns, in: nameLower)
     }
 
     /// Create a FunderInfo from raw funder data.

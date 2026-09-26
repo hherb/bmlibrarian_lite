@@ -62,7 +62,11 @@ public enum TransparencyConstants {
     ///   PubMed record's own DOI and PMC ID are read — so CrossRef funders are
     ///   checked for PubMed-sourced documents. All three change which evidence
     ///   reaches the scorer.
-    public static let analyzerVersion = 5
+    /// - Version 6 (2026-09-26): a funder named by brand ("Pfizer", "The
+    ///   Pfizer company") is industry, and that company's foundation is not
+    ///   (#394). Moves industry funding, and with it the rating, wherever a
+    ///   funder is named without a legal suffix.
+    public static let analyzerVersion = 6
 
 
     // MARK: - API URLs
@@ -359,7 +363,7 @@ public enum IndustryPatterns {
     ///   "Pharmacology" and "Pharmacogenetics", all academic. The one false
     ///   positive it does keep — "National Inheritance Studio of Veteran
     ///   Pharmaceutical Workers of Zhong Lingyun" — is the entire reason overall
-    ///   precision is 0.909 rather than 1.0, so it is worth knowing about rather
+    ///   precision is 0.958 rather than 1.0, so it is worth knowing about rather
     ///   than filed under "no false positives".
     /// - `therapeutics` — 1 TP / 0 FP.
     /// - `laboratories` — 1 TP / 0 FP. The plural only: "Key Laboratory"
@@ -423,6 +427,54 @@ public enum IndustryPatterns {
         #"\bgmbh\b"#,
         #"\bllc\b"#,
         #"\bplc\b"#,
+    ]
+
+    /// Industry company names matched as whole words (#394): the brand layer.
+    ///
+    /// ``funderNameStems`` and ``funderNameWords`` recognise a company *form*;
+    /// CrossRef and PubMed often return a bare brand instead — "Pfizer", "The
+    /// Pfizer company" — which no form reaches. These are the companies of
+    /// ``KnownIndustryFunders`` plus their most-named subsidiaries (Janssen,
+    /// Genentech), chosen from that curated list rather than from the corpus.
+    /// "Eli Lilly" only, never bare "Lilly" (the Lilly Endowment is a charity);
+    /// UCB is left out (also UC Berkeley). Pinned to `industry_brands.patterns`
+    /// in `sponsor_patterns.json`.
+    public static let funderBrandPatterns: [String] = [
+        #"\bpfizer\b"#,
+        #"\bastra\s?zeneca\b"#,
+        #"\bbayer\b"#,
+        #"\bglaxo\s?smith\s?kline\b"#,
+        #"\bgsk\b"#,
+        #"\bjohnson\s*(?:&|and)\s*johnson\b"#,
+        #"\beli\s+lilly\b"#,
+        #"\bmerck\b"#,
+        #"\bnovartis\b"#,
+        #"\bnovo\s+nordisk\b"#,
+        #"\broche\b"#,
+        #"\bsanofi\b"#,
+        #"\bgilead\b"#,
+        #"\babbvie\b"#,
+        #"\bcelgene\b"#,
+        #"\bamgen\b"#,
+        #"\bbristol[-\s]?myers[-\s]?squibb\b"#,
+        #"\bbiogen\b"#,
+        #"\bboehringer\b"#,
+        #"\btakeda\b"#,
+        #"\bregeneron\b"#,
+        #"\bteva\b"#,
+        #"\ballergan\b"#,
+        #"\bmedtronic\b"#,
+        #"\bboston\s+scientific\b"#,
+        #"\babbott\b"#,
+        #"\bjanssen\b"#,
+        #"\bgenentech\b"#,
+    ]
+
+    /// A brand beside one of these is a charitable foundation, not the company —
+    /// the Novo Nordisk Foundation, the Boehringer Ingelheim Fonds. Guards the
+    /// brand layer only. Pinned to `industry_brands.foundation_markers`.
+    public static let foundationMarkerPatterns: [String] = [
+        #"\b(?:foundation|fondation|fondazione|fundaci[oó]n|funda[cç][aã]o|stiftung|stiftelse|stichting|fond|fonden|fonds|endowment|charitable)\b"#,
     ]
 
     /// Known government/public funder patterns.

@@ -146,6 +146,10 @@ The same 17 names through `FundingAnalyzer.classifyFunder` and through bmlib's
 | Key Laboratory of Molecular Biology *(Chinese state lab)* | not-industry ✅ | not-industry |
 | Novo Nordisk A/S · Bristol-Myers Squibb Company | not-industry | not-industry |
 
+*Update (2026-09-26, #394):* the last row is industry on all three platforms of
+this repository since the brand layer (`industry_brands` in
+`transparency_parity/sponsor_patterns.json`); bmlib still misses both.
+
 Six of the nine mismatches are the **plural**: `#"\bpharma(?:ceutical)?\b"#` cannot
 match "Pharmaceuticals", because the `\b` lands before the "s". "X Pharmaceuticals"
 is the standard company-name form, so the pattern that exists to catch pharma
