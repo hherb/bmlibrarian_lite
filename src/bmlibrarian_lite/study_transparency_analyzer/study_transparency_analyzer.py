@@ -302,6 +302,12 @@ class TransparencyReport:
     # that it holds no such DOI (its 404, which is a genuine absence).
     crossref_record_unreachable: bool = False
 
+    # Whether ClinicalTrials.gov could not be read for a trial the article
+    # cites, as opposed to answering that it holds no such trial. Like the
+    # two above it makes the finding provisional, so it is re-analysed
+    # rather than cached (#385).
+    registry_record_unreachable: bool = False
+
     # Data availability
     data_availability: Optional[DataAvailabilityInfo] = None
 
@@ -1093,6 +1099,48 @@ def determine_sponsor_type(funders: list[FunderInfo]) -> SponsorType:
     if _any_match(ACADEMIC_PATTERNS):
         return SponsorType.ACADEMIC
     return SponsorType.NONPROFIT
+
+
+#: What makes a title read as a clinical trial's, as regex fragments over the
+#: lowercased title. Each matches only as a whole word: a bare substring test
+#: read "atrial fibrillation" as a trial (``trial``), and "myocardial
+#: infarction" too (``rct``), which raised "Clinical trial without detected
+#: registration" across cardiology (#385). The shared contract is
+#: ``doc/cross_platform/transparency_parity/trial_title_patterns.json``;
+#: Swift's and Kotlin's ``ClinicalTrialPatterns.trialTitlePatterns`` are
+#: asserted against it too, so edit all four together.
+TRIAL_TITLE_PATTERNS = (
+    r"trials?",
+    r"randomi[sz]ed",
+    r"rcts?",
+    r"phase\s+(?:i{1,3}|iv)[ab]?",
+)
+
+#: The fragments as one whole-word alternation. The boundary is spelled out
+#: rather than ``\b`` because the three regex engines disagree on what a word
+#: character is outside ASCII.
+_TRIAL_TITLE_RE = re.compile(
+    r"(?<![a-z0-9])(?:" + "|".join(TRIAL_TITLE_PATTERNS) + r")(?![a-z0-9])"
+)
+
+
+def appears_to_be_clinical_trial(title: str | None) -> bool:
+    """Whether a study's title reads as a clinical trial's.
+
+    It decides one thing: whether a registry that holds nothing for the study
+    means the trial is unregistered. Mirrors Swift's and Kotlin's
+    ``TrialComplianceAnalyzer.appearsToBeClinicalTrial``.
+
+    Args:
+        title: The article title, if known.
+
+    Returns:
+        True when a :data:`TRIAL_TITLE_PATTERNS` fragment occurs in the title
+        as a whole word.
+    """
+    if not title:
+        return False
+    return _TRIAL_TITLE_RE.search(title.lower()) is not None
 
 
 #: ``lead_sponsor['class']`` value that marks a registered trial as industry-run.
@@ -2994,9 +3042,13 @@ class StudyTransparencyAnalyzer:
             )
             return
 
-        # PubMed answered, so an empty registration list below is the
-        # record's own answer and may be read as one.
-        report.trial_registration_assessed = True
+        # PubMed answered. The registration counts as assessed only if every
+        # trial it cites was answered for as well: a registry outage, or a
+        # registry no client here reads, leaves the list empty for a reason
+        # that is not the study's, and "Clinical trial without detected
+        # registration" then contradicted the warning explaining why (#385).
+        # Swift's and Kotlin's ``everyTrialAnswered`` is the same gate.
+        every_trial_answered = True
 
         # Get trial IDs from PubMed databank links
         trial_ids = []
@@ -3021,6 +3073,9 @@ class StudyTransparencyAnalyzer:
                     "which is the only registry this analysis can read. The study "
                     "is registered even though no registration is reported below."
                 )
+                # Not an outage: no re-analysis will ever read it, so the
+                # finding is not provisional, only unassessed.
+                every_trial_answered = False
                 continue
 
             logger.info(f"Fetching ClinicalTrials.gov data for {trial_id}")
@@ -3031,6 +3086,8 @@ class StudyTransparencyAnalyzer:
                 # A registry outage makes registered trials look
                 # unregistered — and costs them the registration score —
                 # with the evidence only in a server log.
+                every_trial_answered = False
+                report.registry_record_unreachable = True
                 report.warnings.append(
                     f"Could not reach ClinicalTrials.gov for trial {trial_id}, so "
                     "its registration could not be checked. Absence of a "
@@ -3071,6 +3128,8 @@ class StudyTransparencyAnalyzer:
                 compliance = check_results_compliance(trial_info, report.publication_date)
                 if compliance != ResultsComplianceStatus.UNKNOWN:
                     report.results_compliance = compliance
+
+        report.trial_registration_assessed = every_trial_answered
 
     def _analyze_conflicts(
         self,
@@ -3381,8 +3440,7 @@ class StudyTransparencyAnalyzer:
         # registration was not assessed, so the two halves contradicted each
         # other (#356). Same rule as COI above.
         if report.trial_registration_assessed and not report.trial_registrations:
-            if report.title and any(kw in report.title.lower() for kw in
-                ['trial', 'randomized', 'randomised', 'rct', 'phase i', 'phase ii', 'phase iii']):
+            if appears_to_be_clinical_trial(report.title):
                 indicators.append(RISK_INDICATOR_MISSING_TRIAL_REGISTRATION)
 
         # Deduplicate while preserving order

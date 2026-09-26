@@ -280,6 +280,9 @@ def export_to_csv(result: BatchResult, filepath: str):
         'doi', 'pmid', 'title', 'journal',
         'sponsor_type', 'industry_funding', 'industry_funding_confidence',
         'data_disclosure_level', 'trial_registration_count', 'results_compliance',
+        # Written by every row since #359; without it here ``DictWriter``
+        # raised on the first report, so no export produced a file.
+        'coi_disclosure_level',
         'coi_has_industry_ties', 'transparency_score', 'risk_indicators_count',
         'warnings'
     ]
@@ -312,10 +315,13 @@ def export_to_csv(result: BatchResult, filepath: str):
                     if report.data_availability else 'unknown'
                 ),
                 # Blank, not 0, where the registration question never reached
-                # a source: 0 reads as "this trial is unregistered" (#356).
+                # a source: 0 reads as "this trial is unregistered" (#356). A
+                # registration that was found is still counted when another
+                # the article cites could not be checked (#385).
                 'trial_registration_count': (
                     len(report.trial_registrations)
                     if report.trial_registration_assessed
+                    or report.trial_registrations
                     else ''
                 ),
                 'results_compliance': report.results_compliance.value,

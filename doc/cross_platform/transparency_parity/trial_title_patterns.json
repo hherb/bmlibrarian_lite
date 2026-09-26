@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "description": "Whether a study's title reads as a clinical trial's. The answer gates one risk indicator, 'Clinical trial without detected registration', raised when a registry was asked and holds nothing. Each pattern is a regex fragment applied to the lowercased title, and a fragment matches only as a whole word: the platforms wrap the alternation as (?<![a-z0-9])(?:p1|p2|...)(?![a-z0-9]). A bare substring test, which all three platforms used until #385, read 'atrial fibrillation' as a trial (via 'trial'), 'myocardial infarction' (via 'rct'), 'industrial' and 'gas phase isomerisation' (via 'phase i'). Asserted string-for-string and order-sensitively against each platform's list, and behaviourally through each platform's own matcher over the cases below.",
+  "patterns": [
+    "trials?",
+    "randomi[sz]ed",
+    "rcts?",
+    "phase\\s+(?:i{1,3}|iv)[ab]?"
+  ],
+  "cases": [
+    {"title": "A randomized controlled trial of drug X in adults", "is_trial": true},
+    {"title": "A Randomised Trial of Exercise", "is_trial": true},
+    {"title": "Outcomes in three large clinical trials", "is_trial": true},
+    {"title": "Pooled analysis of RCTs of statins", "is_trial": true},
+    {"title": "The ABC RCT: design and rationale", "is_trial": true},
+    {"title": "A Phase IIb study of compound Y", "is_trial": true},
+    {"title": "Phase I/II dose-escalation study of Z", "is_trial": true},
+    {"title": "A phase III study of W versus placebo", "is_trial": true},
+    {"title": "Phase IV surveillance of vaccine V", "is_trial": true},
+    {"title": "Non-randomized comparison of two surgical techniques", "is_trial": true},
+    {"title": "Trial-level heterogeneity in meta-analyses", "is_trial": true},
+    {"title": "Atrial fibrillation in older adults", "is_trial": false},
+    {"title": "Myocardial infarction and long-term outcomes", "is_trial": false},
+    {"title": "Industrial exposure and asthma incidence", "is_trial": false},
+    {"title": "Gas phase isomerization of small molecules", "is_trial": false},
+    {"title": "The liquid phase is where the reaction occurs", "is_trial": false},
+    {"title": "Views of trialists on data sharing", "is_trial": false},
+    {"title": "Randomization procedures in observational cohorts", "is_trial": false},
+    {"title": "A cohort study of diet and cancer", "is_trial": false},
+    {"title": "", "is_trial": false}
+  ]
+}

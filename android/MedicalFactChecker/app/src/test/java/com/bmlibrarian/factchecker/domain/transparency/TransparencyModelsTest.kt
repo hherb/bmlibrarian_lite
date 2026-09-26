@@ -309,7 +309,7 @@ class TransparencyModelsTest {
                 "industryFundingDetected", "industryFundingConfidence", "trialRegistrations", "resultsCompliance",
                 "coiAnalysis", "dataAvailability", "outcomeSwitchingDetected", "outcomeSwitchingDetails",
                 "transparencyScore", "riskLevel", "riskIndicators", "analysisTimestamp", "dataSourcesUsed",
-                "warnings", "errors", "analyzerVersion", "fullTextSearched",
+                "warnings", "errors", "analyzerVersion", "fullTextSearched", "sourcesUnreachable",
             ),
             encoded.keys,
         )

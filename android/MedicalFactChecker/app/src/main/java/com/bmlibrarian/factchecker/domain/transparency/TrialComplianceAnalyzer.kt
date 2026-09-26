@@ -60,15 +60,17 @@ object TrialComplianceAnalyzer {
     }
 
     /**
-     * Whether a title suggests a clinical trial ("randomized", "RCT", "phase II", "trial", ...).
+     * Whether a title suggests a clinical trial ("randomized", "RCT", "phase II", "trial", ...),
+     * each as a whole word: "atrial fibrillation" is not a trial (#385). Mirrors Python's
+     * `appears_to_be_clinical_trial` and Swift's `appearsToBeClinicalTrial`.
      *
      * @param title The study title, or null.
-     * @return True if any [ClinicalTrialPatterns.trialKeywords] occurs in the lowercased title.
+     * @return True if a [ClinicalTrialPatterns.trialTitlePatterns] fragment occurs in the
+     *   lowercased title as a whole word.
      */
     fun appearsToBeClinicalTrial(title: String?): Boolean {
         if (title == null) return false
-        val titleLower = title.lowercase()
-        return ClinicalTrialPatterns.trialKeywords.any { titleLower.contains(it) }
+        return ClinicalTrialPatterns.trialTitleRegex.containsMatchIn(title.lowercase())
     }
 
     /**

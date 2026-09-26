@@ -52,6 +52,10 @@ struct MacTransparencyDetailView: View {
             if result.isStale {
                 staleNotice
             }
+            // A source could not be read: the rating is provisional (#385).
+            if result.isProvisional {
+                certaintyNotice(TransparencyConstants.provisionalResultCaveat)
+            }
 
             scoreHeader
             fundingSection

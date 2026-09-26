@@ -29,7 +29,7 @@ final class TransparencyStalenessTests: XCTestCase {
         let document = makeDocument()
 
         XCTAssertFalse(document.hasTransparencyAnalysis)
-        XCTAssertFalse(document.transparencyAnalysisIsStale)
+        XCTAssertFalse(document.transparencyAnalysisNeedsRerun)
     }
 
     func testFreshlyStoredAnalysisIsNotStale() {
@@ -39,7 +39,7 @@ final class TransparencyStalenessTests: XCTestCase {
         document.storeTransparencyResult(builder.build())
 
         XCTAssertTrue(document.hasTransparencyAnalysis)
-        XCTAssertFalse(document.transparencyAnalysisIsStale)
+        XCTAssertFalse(document.transparencyAnalysisNeedsRerun)
     }
 
     /// Stored JSON written before the version field existed: the analysis is
@@ -62,7 +62,7 @@ final class TransparencyStalenessTests: XCTestCase {
 
         XCTAssertTrue(document.hasTransparencyAnalysis)
         XCTAssertNotNil(document.transparencyResult, "legacy JSON must still decode")
-        XCTAssertTrue(document.transparencyAnalysisIsStale)
+        XCTAssertTrue(document.transparencyAnalysisNeedsRerun)
     }
 
     /// Stored JSON that is present but unreadable is not the same as no analysis.
@@ -78,7 +78,7 @@ final class TransparencyStalenessTests: XCTestCase {
         XCTAssertTrue(document.hasTransparencyAnalysis)
         XCTAssertNil(document.transparencyResult)
         XCTAssertTrue(
-            document.transparencyAnalysisIsStale,
+            document.transparencyAnalysisNeedsRerun,
             "unreadable stored JSON must be re-runnable, not silently inert"
         )
     }
@@ -94,7 +94,21 @@ final class TransparencyStalenessTests: XCTestCase {
             )
         )
 
-        XCTAssertFalse(document.transparencyAnalysisIsStale)
+        XCTAssertFalse(document.transparencyAnalysisNeedsRerun)
+    }
+
+    /// A current result a source could not be read for is provisional, and the
+    /// workflow and the Re-analyze button both read this gate (#385): kept as
+    /// final, a CrossRef outage stood as "no industry funding" forever.
+    func testAProvisionalAnalysisNeedsARerun() {
+        let document = makeDocument()
+        var builder = TransparencyResultBuilder(pmid: "12345678")
+        builder.title = "A Study"
+        builder.sourcesUnreachable = true
+        document.storeTransparencyResult(builder.build())
+
+        XCTAssertFalse(document.transparencyResult?.isStale ?? true)
+        XCTAssertTrue(document.transparencyAnalysisNeedsRerun)
     }
 
     // MARK: - Storing

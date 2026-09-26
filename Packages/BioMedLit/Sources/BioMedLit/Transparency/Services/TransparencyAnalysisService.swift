@@ -181,6 +181,11 @@ public actor TransparencyAnalysisService {
                     )
                 }
             } catch {
+                // Our silence, not the article's: without PubMed's record there
+                // is no DOI to ask CrossRef for funders by, so the result is
+                // provisional rather than a finding (#385).
+                builder.sourcesUnreachable = true
+                builder.warnings.append(TransparencyConstants.pubMedUnreachableWarning)
                 BioMedLitLib.logger?.warning(
                     "PubMed fetch failed for PMID \(pmid): \(error.localizedDescription)",
                     category: .network
@@ -222,7 +227,9 @@ public actor TransparencyAnalysisService {
                 }
             } catch {
                 // A 404 returns nil above; anything thrown is a failed lookup,
-                // which must not read as a study with no funders.
+                // which must not read as a study with no funders — nor be kept
+                // as a final result nothing would revisit (#385).
+                builder.sourcesUnreachable = true
                 builder.warnings.append(TransparencyConstants.crossRefUnreachableWarning)
                 BioMedLitLib.logger?.warning(
                     "CrossRef fetch failed for DOI \(doi): \(error.localizedDescription)",
@@ -300,7 +307,9 @@ public actor TransparencyAnalysisService {
                     continue
                 }
                 guard let registration = clinicalTrials.extractTrialInfo(from: study) else {
+                    // Unparsed is not absent, and a re-read may succeed.
                     everyTrialAnswered = false
+                    builder.sourcesUnreachable = true
                     builder.warnings.append(TrialComplianceAnalyzer.unreadableRegistryRecordWarning(nctId: nctId))
                     continue
                 }
@@ -324,6 +333,7 @@ public actor TransparencyAnalysisService {
                 )
             } catch {
                 everyTrialAnswered = false
+                builder.sourcesUnreachable = true
                 builder.warnings.append(TrialComplianceAnalyzer.registryUnreachableWarning(nctId: nctId))
                 BioMedLitLib.logger?.warning(
                     "ClinicalTrials.gov fetch failed for \(nctId): \(error.localizedDescription)",

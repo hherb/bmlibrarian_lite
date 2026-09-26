@@ -106,11 +106,12 @@ val DocumentEntity.canAnalyzeTransparency: Boolean
     get() = usablePmid != null || usableDoi != null
 
 /**
- * Whether the document needs (re-)analysis: never analysed, unreadable, or
- * analysed by an older analyzer.
+ * Whether the document needs (re-)analysis: never analysed, unreadable, analysed
+ * by an older analyzer, or provisional because a source could not be read
+ * ([TransparencyResult.needsReanalysis], #385).
  */
 val DocumentEntity.needsTransparencyAnalysis: Boolean
-    get() = transparencyResultJson == null || transparencyResult?.isStale != false
+    get() = transparencyResultJson == null || transparencyResult?.needsReanalysis != false
 
 /**
  * How the report refers to the document, e.g. "Smith et al., 2021".

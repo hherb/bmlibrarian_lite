@@ -984,9 +984,9 @@ struct MacDocumentDetailSheet: View {
             if let result = document.transparencyResult {
                 MacTransparencyDetailView(result: result, certainty: document.transparencyCertainty)
 
-                // A stale result keeps its score on screen but has to be
-                // re-runnable, or the notice above names a fix the user cannot apply.
-                if document.transparencyAnalysisIsStale, document.canAnalyzeTransparency {
+                // A stale or provisional result keeps its score on screen but has
+                // to be re-runnable, or the notice above names a fix the user cannot apply.
+                if document.transparencyAnalysisNeedsRerun, document.canAnalyzeTransparency {
                     transparencyAnalyzeButton(title: "Re-analyze")
                 }
             } else if !document.canAnalyzeTransparency {

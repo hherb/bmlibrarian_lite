@@ -26,12 +26,14 @@ sealed class TransparencyAnalysisException(message: String) : Exception(message)
  * except that the PubMed metadata lookup is injected ([ArticleMetadataLookup]).
  *
  * **A failed request is logged and the analysis continues, as in Swift.** A
- * failed CrossRef or ClinicalTrials.gov lookup — unlike a 404, which is the
- * source's answer — is also recorded in `warnings`, so an unchecked funder list
- * or registration does not read as an absent one, and a missing registration is
- * reported only when the registry answered for every cited trial. A failed
- * PubMed lookup is only logged; [TransparencyResult.dataSourcesUsed] records
- * which sources *did* answer.
+ * failed PubMed, CrossRef or ClinicalTrials.gov lookup — unlike a 404, which is
+ * the source's answer — is also recorded in `warnings`, so an unchecked funder
+ * list or registration does not read as an absent one, and a missing
+ * registration is reported only when the registry answered for every cited
+ * trial. Each such failure also marks the result provisional
+ * ([TransparencyResult.sourcesUnreachable]), so it is re-analysed rather than
+ * kept as final (#385). [TransparencyResult.dataSourcesUsed] records which
+ * sources *did* answer.
  *
  * @param metadataLookup PubMed metadata by PMID.
  * @param crossRefService CrossRef client (work metadata and funders).
@@ -112,6 +114,10 @@ class TransparencyAnalysisService(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                // Our silence, not the article's: without PubMed's record there is no DOI to
+                // ask CrossRef for funders by, so the result is provisional (#385).
+                builder.sourcesUnreachable = true
+                builder.warnings = builder.warnings + TransparencyConstants.PUBMED_UNREACHABLE_WARNING
                 Log.w(TAG, "PubMed fetch failed for PMID $pmid: ${describeFailure(e)}")
             }
         }
@@ -130,7 +136,8 @@ class TransparencyAnalysisService(
             throw e
         } catch (e: Exception) {
             // A 404 returns null above; anything thrown is a failed lookup, which must not
-            // read as a study with no funders.
+            // read as a study with no funders — nor be kept as a final result (#385).
+            builder.sourcesUnreachable = true
             builder.warnings = builder.warnings + TransparencyConstants.CROSSREF_UNREACHABLE_WARNING
             Log.w(TAG, "CrossRef fetch failed for DOI $doi: ${describeFailure(e)}")
         }
@@ -175,7 +182,9 @@ class TransparencyAnalysisService(
                 }
                 val registration = clinicalTrialsService.extractTrialInfo(study)
                 if (registration == null) {
+                    // Unparsed is not absent, and a re-read may succeed.
                     everyTrialAnswered = false
+                    builder.sourcesUnreachable = true
                     builder.warnings = builder.warnings + TrialComplianceAnalyzer.unreadableRegistryRecordWarning(nctId)
                     continue
                 }
@@ -195,6 +204,7 @@ class TransparencyAnalysisService(
                 throw e
             } catch (e: Exception) {
                 everyTrialAnswered = false
+                builder.sourcesUnreachable = true
                 builder.warnings = builder.warnings + TrialComplianceAnalyzer.registryUnreachableWarning(nctId)
                 Log.w(TAG, "ClinicalTrials.gov fetch failed for $nctId: ${describeFailure(e)}")
             }

@@ -481,6 +481,12 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
     public let warnings: [String]
 
     /// Errors encountered during analysis (partial results may still be valid).
+    ///
+    /// Nothing in ``TransparencyAnalysisService`` writes this: a source it could
+    /// not read is recorded as a warning and in ``sourcesUnreachable``. It stays
+    /// non-optional because synthesized `Codable` makes it a required key, and a
+    /// build without it would be unreadable to an older build receiving it by
+    /// CloudKit sync.
     public let errors: [String]
 
     /// Version of the analyzer that produced this result.
@@ -504,6 +510,19 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
     /// text was searched is then unknown, and must be reported as unknown.
     public let fullTextSearched: Bool?
 
+    /// Whether a source the analysis needed could not be read: PubMed, CrossRef
+    /// or ClinicalTrials.gov failed or answered with something unreadable, as
+    /// opposed to answering that it holds no such record.
+    ///
+    /// The finding then rests on less than the full record — a CrossRef outage
+    /// reads exactly like a study with no funders — so it is provisional
+    /// (``isProvisional``) and offered for re-analysis rather than kept as
+    /// final. Mirrors Python's `TransparencyResult.sources_unreachable` (#385).
+    /// `nil` for results stored before this was recorded; every one of those
+    /// is stale anyway, since recording it came with analyzer version 7.
+    /// Optional so that stored JSON without the key still decodes.
+    public let sourcesUnreachable: Bool?
+
     /// Whether this result was produced by an older analyzer than the current one.
     ///
     /// A stale result is not wrong so much as incomparable: the evidence reaching
@@ -518,6 +537,33 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
     public var isStale: Bool {
         guard let analyzerVersion else { return true }
         return analyzerVersion < TransparencyConstants.analyzerVersion
+    }
+
+    /// Whether a source this analysis needed could not be read
+    /// (``sourcesUnreachable``), so its rating is provisional.
+    public var isProvisional: Bool {
+        sourcesUnreachable == true
+    }
+
+    /// Whether a build newer than this one produced the result.
+    public var isFromNewerAnalyzer: Bool {
+        guard let analyzerVersion else { return false }
+        return analyzerVersion > TransparencyConstants.analyzerVersion
+    }
+
+    /// Whether the result should be analysed again rather than kept: produced
+    /// by an older analyzer (``isStale``), or provisional (``isProvisional``)
+    /// and this build's own to replace.
+    ///
+    /// Python's `is_final`, negated. A provisional result stamped with the
+    /// current version was otherwise final forever, so a transient outage
+    /// became a permanent finding nothing would revisit (#385). A newer
+    /// build's result is never replaced, provisional or not: it arrives by
+    /// CloudKit sync, and this build's re-analysis would overwrite it with an
+    /// older analyzer's answer and sync the downgrade back (Python's
+    /// `may_replace_stored`, #374).
+    public var needsReanalysis: Bool {
+        isStale || (isProvisional && !isFromNewerAnalyzer)
     }
 
     /// Creates a new TransparencyResult instance.
@@ -552,6 +598,8 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
     ///     to the current one; pass `nil` only to represent a pre-versioning result).
     ///   - fullTextSearched: Whether the article's full text was given to the
     ///     analysis (`nil` when not recorded).
+    ///   - sourcesUnreachable: Whether a source the analysis needed could not be
+    ///     read (`nil` when not recorded).
     public init(
         id: UUID = UUID(),
         doi: String? = nil,
@@ -579,7 +627,8 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
         warnings: [String] = [],
         errors: [String] = [],
         analyzerVersion: Int? = TransparencyConstants.analyzerVersion,
-        fullTextSearched: Bool? = nil
+        fullTextSearched: Bool? = nil,
+        sourcesUnreachable: Bool? = nil
     ) {
         self.id = id
         self.doi = doi
@@ -608,6 +657,7 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
         self.errors = errors
         self.analyzerVersion = analyzerVersion
         self.fullTextSearched = fullTextSearched
+        self.sourcesUnreachable = sourcesUnreachable
     }
 }
 
@@ -695,6 +745,10 @@ public struct TransparencyResultBuilder: Sendable {
     /// no trial ID was found to look up or a lookup failed.
     public var trialRegistrationAssessed: Bool = false
 
+    /// Whether a source the analysis needed could not be read, which makes the
+    /// result provisional (``TransparencyResult/sourcesUnreachable``).
+    public var sourcesUnreachable: Bool = false
+
     /// Creates a new TransparencyResultBuilder.
     ///
     /// - Parameters:
@@ -766,7 +820,8 @@ public struct TransparencyResultBuilder: Sendable {
             dataSourcesUsed: dataSourcesUsed,
             warnings: warnings,
             errors: errors,
-            fullTextSearched: fullTextSearched
+            fullTextSearched: fullTextSearched,
+            sourcesUnreachable: sourcesUnreachable
         )
     }
 
@@ -809,7 +864,8 @@ public struct TransparencyResultBuilder: Sendable {
             dataSourcesUsed: dataSourcesUsed,
             warnings: warnings,
             errors: errors,
-            fullTextSearched: fullTextSearched
+            fullTextSearched: fullTextSearched,
+            sourcesUnreachable: sourcesUnreachable
         )
     }
 

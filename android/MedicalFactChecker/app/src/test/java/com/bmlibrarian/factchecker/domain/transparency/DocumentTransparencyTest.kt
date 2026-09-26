@@ -98,6 +98,14 @@ class DocumentTransparencyTest {
         assertTrue(document().needsTransparencyAnalysis)
     }
 
+    /** A provisional result is redone, so an outage does not stand as a finding (#385). */
+    @Test
+    fun `a provisional analysis is redone`() {
+        val provisional = TransparencyResultBuilder(pmid = "1").apply { sourcesUnreachable = true }.build()
+        assertFalse(provisional.isStale)
+        assertTrue(document(stored = provisional).needsTransparencyAnalysis)
+    }
+
     @Test
     fun `a document with no identifier cannot be analysed`() {
         assertTrue(document().canAnalyzeTransparency)

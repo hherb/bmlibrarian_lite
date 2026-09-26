@@ -187,6 +187,11 @@ class TransparencyAnalysisServiceTest {
         assertEquals(listOf(TransparencyConstants.CROSSREF_UNREACHABLE_WARNING), failed.warnings)
         assertFalse(absent.warnings.contains(TransparencyConstants.CROSSREF_UNREACHABLE_WARNING))
         assertTrue(Log.lines.any { it.contains("CrossRef fetch failed for DOI $doiWithFunders") })
+        // Kept as final, the outage stood as "no industry funding" forever (#385).
+        assertEquals(true, failed.sourcesUnreachable)
+        assertTrue(failed.needsReanalysis)
+        assertEquals(false, absent.sourcesUnreachable)
+        assertFalse(absent.needsReanalysis)
     }
 
     /** A PubMed failure with only a PMID also loses CrossRef, hence every funder. */
@@ -201,6 +206,9 @@ class TransparencyAnalysisServiceTest {
         assertTrue(result.errors.isEmpty())
         assertEquals(0, server.requestCount)
         assertTrue(Log.lines.any { it.contains("PubMed fetch failed for PMID 12345678: IOException") })
+        // Once logged only; now the reader is told, and the result is provisional (#385).
+        assertEquals(listOf(TransparencyConstants.PUBMED_UNREACHABLE_WARNING), result.warnings)
+        assertEquals(true, result.sourcesUnreachable)
         assertTrue(
             TransparencyRiskExplanation.of(result).caveats.any { it.startsWith("No CrossRef record was retrieved") },
         )
@@ -242,6 +250,7 @@ class TransparencyAnalysisServiceTest {
         // Completed 2022-01-01, no results posted: past the FDAAA deadline.
         assertEquals(ResultsComplianceStatus.MISSING, result.resultsCompliance)
         assertFalse(result.warnings.contains(RiskIndicatorStrings.MISSING_TRIAL_REGISTRATION))
+        assertEquals(false, result.sourcesUnreachable)
     }
 
     /**
@@ -260,6 +269,19 @@ class TransparencyAnalysisServiceTest {
         assertFalse(result.warnings.contains(RiskIndicatorStrings.MISSING_TRIAL_REGISTRATION))
         assertFalse(result.riskIndicators.contains(RiskIndicatorStrings.MISSING_TRIAL_REGISTRATION))
         assertTrue(Log.lines.any { it.contains("ClinicalTrials.gov fetch failed for NCT01234567") })
+        assertEquals(true, result.sourcesUnreachable)
+    }
+
+    /** Unparsed is not absent: an unreadable record is re-read, not kept (#385). */
+    @Test
+    fun `an unreadable registry record makes the result provisional`() = runBlocking {
+        crossRefWork("10.1000/trial", trialTitledWork("NCT01234567"))
+        routes["/ctgov/studies/NCT01234567"] = MockResponse().setBody("{}")
+
+        val result = service().analyze(doi = "10.1000/trial")
+
+        assertTrue(result.warnings.contains(TrialComplianceAnalyzer.unreadableRegistryRecordWarning("NCT01234567")))
+        assertEquals(true, result.sourcesUnreachable)
     }
 
     /** A registry that answers it has no such trial is a finding about the study. */
@@ -272,6 +294,8 @@ class TransparencyAnalysisServiceTest {
         assertTrue(result.trialRegistrations.isEmpty())
         assertTrue(result.warnings.contains(TrialComplianceAnalyzer.registryHasNoRecordWarning("NCT07654321")))
         assertTrue(result.riskIndicators.contains(RiskIndicatorStrings.MISSING_TRIAL_REGISTRATION))
+        // The registry answered: a finding, not an outage.
+        assertEquals(false, result.sourcesUnreachable)
     }
 
     /** With no trial ID to look up, nothing was asked, so nothing is reported missing. */

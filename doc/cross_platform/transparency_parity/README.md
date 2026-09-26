@@ -7,6 +7,7 @@ identical behaviour on Python, Swift and Kotlin (issue #105).
 | --- | --- | --- | --- |
 | `data_availability_patterns.json` / `data_availability_cases.json` | bound | bound | bound |
 | `sponsor_patterns.json` | bound | bound | bound |
+| `trial_title_patterns.json` | bound | bound | bound |
 | `funder_names.json` (floors and composition) | bound | bound | bound |
 
 ## Why this exists
@@ -219,6 +220,25 @@ Python returned a flat 0.80 for both non-industry halves until #152, where Swift
 had always reported 0.85 and 0.80. The funder corpus scores the `is_industry`
 boolean, which agreed throughout, so nothing caught it for as long as it existed.
 That is the reason the confidences are in the contract at all.
+
+## The trial-title contract
+
+### `trial_title_patterns.json` — whether a title reads as a trial's
+
+The answer gates one risk indicator, "Clinical trial without detected
+registration", raised when a registry was asked and holds nothing (#385).
+`patterns` are regex fragments over the lowercased title, asserted
+string-for-string and in order; each platform wraps their alternation as
+`(?<![a-z0-9])(?:…)(?![a-z0-9])`, spelled out rather than `\b` because the
+three engines disagree on word characters outside ASCII. `cases` are run
+through each platform's own matcher: Python's `appears_to_be_clinical_trial`
+(`tests/test_trial_registration_gate.py`), Swift's and Kotlin's
+`TrialComplianceAnalyzer.appearsToBeClinicalTrial` (`TransparencyParityTests`,
+`TrialTitlePatternParityTest`). The negative cases are the point: a bare
+substring test, which all three used until #385, read "atrial fibrillation",
+"myocardial infarction", "industrial" and "gas phase isomerization" as
+trials. Changing a fragment moves the indicator, so bump every analyser
+version with it.
 
 ## Changing a pattern
 

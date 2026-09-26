@@ -398,13 +398,13 @@ final class TransparencyConstantsTests: XCTestCase {
 
     // MARK: - ClinicalTrialPatterns Tests
 
-    func testTrialKeywordsMatch() {
-        let keywords = ClinicalTrialPatterns.trialKeywords
-
-        XCTAssertTrue(keywords.contains("trial"))
-        XCTAssertTrue(keywords.contains("randomized"))
-        XCTAssertTrue(keywords.contains("rct"))
-        XCTAssertTrue(keywords.contains("phase iii"))
+    /// The fragments compile, and only as whole words: the whole-word
+    /// boundary is what keeps "atrial fibrillation" from reading as a trial
+    /// (#385). The fragments themselves are pinned by `TransparencyParityTests`.
+    func testTrialTitlePatternCompiles() {
+        XCTAssertNotNil(RegexHelper.regex(ClinicalTrialPatterns.trialTitlePattern))
+        XCTAssertTrue(ClinicalTrialPatterns.trialTitlePattern.hasPrefix("(?<![a-z0-9])"))
+        XCTAssertTrue(ClinicalTrialPatterns.trialTitlePattern.hasSuffix("(?![a-z0-9])"))
     }
 
     func testNCTIdPatternExtraction() {

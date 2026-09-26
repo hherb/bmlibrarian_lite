@@ -33,8 +33,11 @@ object TransparencyConstants {
      * 5 — back-matter headings kept by the Swift JATS parser, "… Statement"
      * headings accepted by the extractors, PubMed DOIs read by Swift;
      * 6 — funders named by brand classified as industry, their foundations not (#394).
+     * 7 — a title reads as a trial's only by whole word, so "atrial fibrillation" no longer
+     *     raises the missing-registration indicator; a result a source could not be read for
+     *     records it ([TransparencyResult.sourcesUnreachable]) and is re-analysed (#385).
      */
-    const val ANALYZER_VERSION: Int = 6
+    const val ANALYZER_VERSION: Int = 7
 
     // ==================== API URLs ====================
 
@@ -198,6 +201,23 @@ object TransparencyConstants {
     const val CROSSREF_UNREACHABLE_WARNING: String =
         "CrossRef could not be reached, so this study's funders were not checked; " +
             "industry funding may be present though none is reported."
+
+    /**
+     * Warning recorded when PubMed could not be reached for the article's PubMed ID: without
+     * its DOI, CrossRef — the only source of funders — is never asked. Swift's
+     * `pubMedUnreachableWarning`.
+     */
+    const val PUBMED_UNREACHABLE_WARNING: String =
+        "PubMed could not be reached, so this study's record was not read; its DOI, " +
+            "and with it the funders CrossRef holds, may be missing from this analysis."
+
+    /**
+     * Caveat on a result a source could not be read for ([TransparencyResult.isProvisional]).
+     * Swift's `provisionalResultCaveat`.
+     */
+    const val PROVISIONAL_RESULT_CAVEAT: String =
+        "A source this analysis needed could not be read, so the rating is provisional: " +
+            "it rests on less than the full record. Re-analyse the study before relying on it."
 
     // ==================== Date parsing defaults ====================
 

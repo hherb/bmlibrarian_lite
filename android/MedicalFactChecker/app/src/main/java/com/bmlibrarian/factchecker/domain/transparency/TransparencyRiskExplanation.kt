@@ -225,6 +225,7 @@ data class TransparencyRiskExplanation(
                 caveats.add(UNASSESSED_CAVEAT)
             }
             if (result.isStale) caveats.add(STALE_CAVEAT)
+            if (result.isProvisional) caveats.add(TransparencyConstants.PROVISIONAL_RESULT_CAVEAT)
             if (TransparencyConstants.CROSSREF_SOURCE_NAME !in result.dataSourcesUsed) {
                 caveats.add(NO_CROSSREF_CAVEAT)
             }
