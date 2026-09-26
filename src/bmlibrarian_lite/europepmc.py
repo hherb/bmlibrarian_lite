@@ -945,11 +945,11 @@ class EuropePMCClient:
                 if list_content:
                     parts.append(list_content)
             elif child.tag == "table-wrap":
-                table_caption = child.findtext(".//caption/p", "")
+                table_caption = self._get_text(child.find(".//caption/p"))
                 if table_caption:
                     parts.append(f"*Table: {table_caption}*")
             elif child.tag == "fig":
-                fig_caption = child.findtext(".//caption/p", "")
+                fig_caption = self._get_text(child.find(".//caption/p"))
                 if fig_caption:
                     parts.append(f"*Figure: {fig_caption}*")
 
@@ -995,7 +995,7 @@ class EuropePMCClient:
 
         return "\n".join(parts)
 
-    def _get_text(self, element: ET.Element) -> str:
+    def _get_text(self, element: ET.Element | None) -> str:
         """Extract all text content from an element, handling nested elements.
 
         Preserves inline formatting like italic/bold where appropriate.

@@ -891,6 +891,39 @@ RESTRICTION_LABELS = {
 }
 
 
+def _element_text(elem: Any) -> str | None:
+    """All the text of a PubMed element, its inline markup's included.
+
+    efetch carries ``<i>``, ``<b>``, ``<sup>`` and ``<sub>`` as child
+    elements. ``findtext`` returns only the text before the first of them, so
+    a title read "... Optimization, " and a COI statement "Funded by".
+
+    Args:
+        elem: The element, or ``None`` when the record has none.
+
+    Returns:
+        Its text with surrounding whitespace removed, or ``None`` for no element.
+    """
+    if elem is None:
+        return None
+    return "".join(elem.itertext()).strip()
+
+
+def _abstract_text(article_elem: Any) -> str | None:
+    """Every ``AbstractText`` section of a PubMed record, joined by spaces.
+
+    Args:
+        article_elem: The record's ``<Article>`` element.
+
+    Returns:
+        The abstract, or ``None`` when the record has no ``AbstractText``.
+    """
+    sections = [_element_text(s) for s in article_elem.findall('.//AbstractText')]
+    if not sections:
+        return None
+    return " ".join(s for s in sections if s)
+
+
 def _label_for_pattern(pattern: str) -> str:
     """Resolve the human-readable label for a restriction/refusal pattern.
 
@@ -1326,18 +1359,19 @@ class PubMedClient:
                 logger.info("PubMed returned no article for this request.")
                 return RecordFetch.absent()
 
-            medline = article.find('MedlineCitation')
-            article_elem = medline.find('Article')
+            # Either may be None; the AttributeError that follows is caught below
+            medline: Any = article.find('MedlineCitation')
+            article_elem: Any = medline.find('Article')
 
             result = {
                 'pmid': medline.findtext('PMID'),
-                'title': article_elem.findtext('ArticleTitle'),
-                'abstract': article_elem.findtext('.//AbstractText'),
+                'title': _element_text(article_elem.find('ArticleTitle')),
+                'abstract': _abstract_text(article_elem),
                 'journal': article_elem.findtext('.//Journal/Title'),
                 'pub_date': self._extract_pub_date(article_elem),
                 'authors': self._extract_authors(article_elem),
                 'grants': self._extract_grants(article_elem),
-                'coi_statement': medline.findtext('CoiStatement'),
+                'coi_statement': _element_text(medline.find('CoiStatement')),
                 'databanks': self._extract_databanks(article_elem),
                 'publication_types': self._extract_pub_types(article_elem),
                 'mesh_terms': self._extract_mesh_terms(medline),

@@ -493,6 +493,19 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
     /// The root element of NCBI's error document (#255).
     static let errorDocumentRoot = "eFetchResult"
 
+    /// Elements whose text the parser reads.
+    ///
+    /// The buffer is reset only at their boundaries, so inline markup inside
+    /// one — `<i>`, `<b>`, `<sup>`, `<sub>` in an `ArticleTitle` or
+    /// `AbstractText` — stays part of its text. Resetting at every element
+    /// kept only what followed the last inline child: PMID 42357316's title
+    /// read "Evaluation.". None of these nest another, so one flat buffer
+    /// serves; Android reads the same set (`TEXT_ELEMENTS` in PubMedService.kt).
+    static let textElements: Set<String> = [
+        "PMID", "ArticleId", "ELocationID", "ArticleTitle", "AbstractText",
+        "LastName", "ForeName", "Title", "Year",
+    ]
+
     /// An efetch answer as parsed.
     struct ParsedArticleSet {
         /// The articles that carried a PMID and a title.
@@ -530,6 +543,9 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
     // Parsing state
     private var currentElement = ""
     private var textBuffer = ""
+
+    /// Whether one of ``textElements`` is open, so its characters are kept.
+    private var inTextElement = false
     private var inArticle = false
     private var inAbstract = false
     private var currentAuthorLastName = ""
@@ -584,7 +600,10 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
             rootElement = elementName
         }
         currentElement = elementName
-        textBuffer = ""
+        if Self.textElements.contains(elementName) {
+            textBuffer = ""
+            inTextElement = true
+        }
 
         switch elementName {
         case "PubmedArticle":
@@ -604,7 +623,9 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
     }
 
     func parser(_ parser: XMLParser, foundCharacters string: String) {
-        textBuffer += string
+        if inTextElement {
+            textBuffer += string
+        }
     }
 
     func parser(
@@ -613,7 +634,8 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
         namespaceURI: String?,
         qualifiedName qName: String?
     ) {
-        let text = textBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isTextElement = Self.textElements.contains(elementName)
+        let text = isTextElement ? textBuffer.trimmingCharacters(in: .whitespacesAndNewlines) : ""
 
         switch elementName {
         case "PMID":
@@ -675,7 +697,10 @@ final class PubMedXMLParser: NSObject, XMLParserDelegate {
             break
         }
 
-        textBuffer = ""
+        if isTextElement {
+            textBuffer = ""
+            inTextElement = false
+        }
     }
 
     /// Keep the article that just closed, or count it as one that could not be read.
