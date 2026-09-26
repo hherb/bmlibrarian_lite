@@ -444,8 +444,11 @@ enables DEBUG; **#245** the transparency CLIs take the NCBI key only as
   spread first; **#144** captions on supplementary material are dropped;
   **#204** unsectioned `<back>` sweeps `<ref-list>` into the body (bmlib
   decides by an ancestor test; port it, or record the divergence); **#257,
-  #272, #299** JATS reference/metadata defects in Swift and Kotlin; **#121**
-  Android's parser swallows errors and is unit-untestable.
+  #272, #299** JATS reference/metadata defects in Swift and Kotlin; **#406**
+  `<citation-alternatives>` lists authors twice; **#407** an empty reference
+  renders as an unlogged blank entry; **#408** a deposit glues name parts
+  (decide in bmlib #314 first); **#121** Android's parser swallows errors
+  (it is JVM-testable since PR #405 added kxml2 as a test dependency).
 - **#190** CI never builds the iOS app target; cheapest guard: fail when a
   `.swift` file under `ios/MedicalFactChecker/Sources/` belongs to no target.
 

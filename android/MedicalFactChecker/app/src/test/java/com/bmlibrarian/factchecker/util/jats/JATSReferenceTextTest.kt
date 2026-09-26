@@ -28,7 +28,9 @@ import org.junit.Test
  *
  * Mirrors the Swift `JATSReferenceTextTests`: descendants merge into the
  * deposit (bmlib's #146), and the deposit is printed wherever fewer than two
- * components would print (bmlib's #268).
+ * components would print (bmlib's #268). Unlike bmlib, an `<element-citation>`
+ * keeps its leftover text in `citation`; `citationIsDeposit` keeps that from
+ * standing in for a tagged part.
  */
 class JATSReferenceTextTest {
 
@@ -74,7 +76,54 @@ class JATSReferenceTextTest {
         val expected = "Sullivan, W. J. Jr. & Jeffers, V. Mechanisms of Toxoplasma gondii " +
             "persistence and latency. FEMS Microbiol. Rev.36, 717–733 (2012)."
         assertEquals(expected, references(volumeOnly).first().formattedCitation)
-        assertTrue(html(volumeOnly).contains("Mechanisms of Toxoplasma gondii persistence"))
+        assertTrue(html(volumeOnly).contains("Sullivan, W. J. Jr. &amp; Jeffers, V. Mechanisms"))
+    }
+
+    /**
+     * A lone DOI defers too, so the deposit prints (and the DOI loses its link,
+     * as in bmlib, which tracks linkifying a deposit as its #278).
+     */
+    @Test
+    fun aLoneDoiDefersToTheDeposit() {
+        val refs = "<ref id=\"r5\"><mixed-citation>Smith J. A study. Nature 2020. " +
+            "<pub-id pub-id-type=\"doi\">10.1/abc</pub-id></mixed-citation></ref>"
+        assertEquals("Smith J. A study. Nature 2020. 10.1/abc", references(refs).first().formattedCitation)
+        assertTrue(html(refs).contains("Smith J. A study. Nature 2020. 10.1/abc"))
+    }
+
+    /**
+     * Control: a *pair* of parts renders structured, not the deposit.
+     *
+     * Pins the threshold at two. That a pair naming no work (authors and year)
+     * still drops the deposit is bmlib's open #276, not settled here.
+     */
+    @Test
+    fun aPairOfTaggedPartsStillRendersStructured() {
+        val refs = "<ref id=\"r6\"><mixed-citation><person-group person-group-type=\"author\">" +
+            "<name><surname>Kalahasty</surname><given-names>R</given-names></name>, " +
+            "<name><surname>Motati</surname><given-names>L</given-names></name></person-group>. " +
+            "Strokesight: a novel system. arXiv <year>2022</year></mixed-citation></ref>"
+        assertEquals("R Kalahasty, L Motati. (2022)", references(refs).first().formattedCitation)
+        val html = html(refs)
+        assertTrue(html.contains("(2022)"))
+        assertFalse(html.contains("Strokesight"))
+    }
+
+    /**
+     * A formula in a cited title keeps its expression, not its LaTeX source.
+     *
+     * `<tex-math>` holds a whole LaTeX document; it is dropped everywhere, and
+     * the merge into the deposit must not bring it back (bmlib's #147).
+     */
+    @Test
+    fun aFormulaInADepositDropsItsLatex() {
+        val refs = "<ref id=\"r7\"><mixed-citation>Smith J. Role of <inline-formula><alternatives>" +
+            "<tex-math>\\documentclass{minimal}\\begin{document}\$\\beta\$\\end{document}</tex-math>" +
+            "<mml:math xmlns:mml=\"http://www.w3.org/1998/Math/MathML\"><mml:mi>β</mml:mi></mml:math>" +
+            "</alternatives></inline-formula>-cells. <source>Diabetes</source></mixed-citation></ref>"
+        val citation = references(refs).first().citation
+        assertEquals("Smith J. Role of β-cells. Diabetes", citation)
+        assertFalse(citation.contains("documentclass"))
     }
 
     /** Control: a reference tagging several parts still renders structured. */
@@ -91,16 +140,18 @@ class JATSReferenceTextTest {
     /** Control: an `<element-citation>` has no deposit, so its lone part still prints. */
     @Test
     fun anElementCitationPrintsItsLonePart() {
-        val reference = references(
-            "<ref id=\"r3\"><element-citation publication-type=\"journal\">" +
-                "<source>Lancet</source><comment>Available online</comment></element-citation></ref>"
-        ).first()
+        val refs = "<ref id=\"r3\"><element-citation publication-type=\"journal\">" +
+            "<source>Lancet</source><comment>Available online</comment></element-citation></ref>"
+        val reference = references(refs).first()
         assertEquals("Available online", reference.citation)
         assertFalse(reference.citationIsDeposit)
         assertEquals("*Lancet*", reference.formattedCitation)
+        val html = html(refs)
+        assertTrue(html.contains("<em>Lancet</em>"))
+        assertFalse(html.contains("Available online"))
     }
 
-    /** Where `<citation-alternatives>` carries both, the deposit wins in either order. */
+    /** Where `<citation-alternatives>` carries both, the deposit wins (element citation after it). */
     @Test
     fun theDepositSurvivesAnElementCitationAfterIt() {
         val reference = references(
@@ -111,6 +162,43 @@ class JATSReferenceTextTest {
         ).first()
         assertEquals("WHO. Global report. Geneva; 2020.", reference.citation)
         assertEquals("WHO. Global report. Geneva; 2020.", reference.formattedCitation)
+    }
+
+    /** The same, with the `<element-citation>` deposited first. */
+    @Test
+    fun theDepositReplacesAnElementCitationBeforeIt() {
+        val reference = references(
+            "<ref id=\"r4\"><citation-alternatives>" +
+                "<element-citation><year>2020</year><comment>stray</comment></element-citation>" +
+                "<mixed-citation>WHO. Global report. Geneva; <year>2020</year>.</mixed-citation>" +
+                "</citation-alternatives></ref>"
+        ).first()
+        assertEquals("WHO. Global report. Geneva; 2020.", reference.citation)
+        assertTrue(reference.citationIsDeposit)
+        assertEquals("WHO. Global report. Geneva; 2020.", reference.formattedCitation)
+    }
+
+    /**
+     * Control: the merge ends with its `<mixed-citation>`.
+     *
+     * A following `<element-citation>` reference keeps only its own leftover
+     * text, and a figure after the reference list keeps its caption.
+     */
+    @Test
+    fun theMergeEndsWithItsCitation() {
+        val xml = """
+            <?xml version="1.0"?>
+            <article><front><article-meta>
+              <title-group><article-title>Host article</article-title></title-group>
+            </article-meta></front>
+            <body><sec><title>Intro</title><p>Text.</p></sec></body>
+            <back><ref-list>$volumeOnly<ref id="r8"><element-citation><source>Lancet</source><comment>c</comment></element-citation></ref></ref-list></back>
+            <floats-group><fig id="f1"><label>Figure 1</label><caption><title>Cells</title><p>Stained <italic>in vitro</italic>.</p></caption></fig></floats-group></article>
+        """.trimIndent().toByteArray()
+        val article = JATSXMLParser(xml).parseToArticle()
+        assertEquals("c", article.references.last().citation)
+        assertEquals("*Lancet*", article.references.last().formattedCitation)
+        assertTrue(article.figures.first().caption.contains("Stained in vitro."))
     }
 
     /** Outside a citation the same elements are metadata, not prose. */

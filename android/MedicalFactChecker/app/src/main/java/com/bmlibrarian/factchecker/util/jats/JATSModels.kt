@@ -140,10 +140,13 @@ data class JATSTableInfo(
  * @param doi Digital Object Identifier.
  * @param pmid PubMed ID.
  * @param citationIsDeposit Whether [citation] is a `<mixed-citation>`'s deposited
- *   string. An `<element-citation>` deposits none: its [citation] holds only the
- *   text of children the parser does not model (a `<comment>`, a
- *   `<publisher-name>`), so it is printed where nothing else would print but
- *   never *in place of* a tagged part.
+ *   string. An `<element-citation>` deposits none: its [citation] holds the
+ *   leftover text of children not captured into a structured field
+ *   (unmodelled ones such as `<comment>` or `<publisher-name>`, inline ones
+ *   such as `<uri>`), often run together without separators. It is printed
+ *   where nothing else would print but never *in place of* a tagged part.
+ *   bmlib instead leaves an element citation's `citation` empty; the ports
+ *   keep the leftover text, which is why this flag exists.
  */
 data class JATSReferenceInfo(
     val id: String,
@@ -164,11 +167,9 @@ data class JATSReferenceInfo(
     /**
      * Would a rendering of that many components print [citation] instead?
      *
-     * One component is never a citation. A `<mixed-citation>` tagging just its
-     * volume rendered `36` in place of the whole deposited string, and one
-     * tagging just its year a bare `(2023)` (#398; bmlib's #268). Where one
-     * component is all a renderer would print and there is a deposit, the
-     * deposit is printed. An `<element-citation>` has no deposit (see
+     * Where one component is all a renderer would print and there is a
+     * deposit, the deposit is printed: a lone volume or year is no citation
+     * (#398; bmlib's #268). An `<element-citation>` has no deposit (see
      * [citationIsDeposit]), so there the lone component still prints. With no
      * components at all [citation] is printed whatever it holds.
      *
@@ -180,7 +181,7 @@ data class JATSReferenceInfo(
      * @param printedPartCount How many components the renderer built.
      * @return `true` when [citation] should be printed instead.
      */
-    fun defersToTheDeposit(printedPartCount: Int): Boolean =
+    internal fun defersToTheDeposit(printedPartCount: Int): Boolean =
         printedPartCount == 0 || (printedPartCount == 1 && citationIsDeposit && citation.isNotEmpty())
 
     /**

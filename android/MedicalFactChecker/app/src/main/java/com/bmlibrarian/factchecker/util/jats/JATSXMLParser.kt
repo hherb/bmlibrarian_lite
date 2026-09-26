@@ -134,14 +134,13 @@ class JATSXMLParser(
     /**
      * How many `<mixed-citation>` elements are open inside a `<ref>`.
      *
-     * A `<mixed-citation>` is the reference as the publisher typeset it, with
-     * their punctuation between the tagged parts, so every descendant's text is
-     * also the citation's. Without the merge this counter licenses, each tagged
-     * child took its text with it and a standard NLM deposit read
-     * `". . . ;():-."` (#398; bmlib's #146). It is an *ancestor* test because
-     * mixed content is inherited: a `<surname>` sits inside `<name>` inside
-     * `<person-group>`. `<element-citation>` is deliberately not counted: it has
-     * no deposited string, only the tagged parts.
+     * A `<mixed-citation>` is the reference as deposited, with whatever
+     * characters the depositor put between its tagged parts, so every
+     * descendant's text is also the citation's (#398; bmlib's #146). It is an
+     * *ancestor* test because mixed content is inherited: a `<surname>` sits
+     * inside `<name>` inside `<person-group>`. `<element-citation>` is
+     * deliberately not counted: it deposits no string (see
+     * [JATSReferenceInfo.citationIsDeposit]).
      */
     private var mixedCitationDepth = 0
     private var inRefPersonGroup = false
@@ -388,7 +387,11 @@ class JATSXMLParser(
             val isInlineElement = elementName in INLINE_ELEMENTS
             val isFigureOrTableXref = elementName == "xref" &&
                     (currentXrefType in listOf("fig", "figure", "table", "table-wrap"))
-            val isInsideMixedCitation = mixedCitationDepth > 0 && elementName != "mixed-citation"
+            // `<tex-math>` stays out: its buffer is a whole LaTeX document,
+            // dropped everywhere else, and its MathML sibling already carries
+            // the expression (bmlib's #147).
+            val isInsideMixedCitation = mixedCitationDepth > 0 &&
+                elementName != "mixed-citation" && elementName != "tex-math"
             elementText = popTextBuffer(
                 mergeWithParent = (isInlineElement || isInsideMixedCitation) && !isFigureOrTableXref
             )
@@ -529,10 +532,10 @@ class JATSXMLParser(
             "mixed-citation", "element-citation" -> {
                 if (inRef) {
                     // Only a mixed citation deposits a string. An element citation's
-                    // buffer holds the text of the children not modelled here (a
-                    // `<comment>`, a `<publisher-name>`), kept as before, but it must
-                    // not overwrite the deposit where `<citation-alternatives>`
-                    // carries both.
+                    // buffer holds its leftover text (unmodelled children such as a
+                    // `<comment>`, and inline ones such as a `<uri>`), kept as before,
+                    // but it must not overwrite the deposit where
+                    // `<citation-alternatives>` carries both.
                     if (elementName == "mixed-citation") {
                         currentReference?.citation = normalizedText
                         currentReference?.citationIsDeposit = true
