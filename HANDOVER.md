@@ -10,7 +10,7 @@ its slice has landed; add a new section when handing off new work.
 
 **#385 — an unreachable source was stored as a finding (Swift + Android), and
 the trial test misfired on all three platforms**, branch
-`fix/unreachable-transparency-sources-385`. Compress into **Recently landed**
+`fix/unreachable-transparency-sources-385`, **PR #410**. Compress into **Recently landed**
 once merged. PR #388's review commit (`3c71a15`) had already gated the
 missing-registration indicator on Swift and Android and added the CrossRef
 warning; what remained:
