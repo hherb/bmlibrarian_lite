@@ -267,7 +267,7 @@ now `industry`, as the corpus's own definition ("a commercial entity") requires.
 Five names moved to `ambiguous` with a reason: three nothing identifies
 (Aqua-Synapse, UK Browsweat, FIGS), one naming several funders including two
 device companies, and "Industry Research". The corpus therefore differs from
-bmlib's copy until bmlib takes the same corrections. All three name lists are expected to
+bmlib's copy until bmlib takes the same corrections (hherb/bmlib#292). All three name lists are expected to
 change; the point is that changing one is a deliberate edit with the funder's
 name in the diff.
 
