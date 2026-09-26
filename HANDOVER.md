@@ -39,6 +39,22 @@ warning; what remained:
 - **Found on the way:** `export_to_csv` raised `ValueError` on every report
   since #359 (`coi_disclosure_level` missing from `fieldnames`) — fixed; its
   100-character title cut lodged as **#409**.
+- **Review round (same PR).** Swift: esearch listing the PMID and efetch then
+  failing (or breaking off) returned an empty page with the loss in
+  `shortfalls`, not a throw — now provisional too; and a cancel inside
+  `analyze` is rethrown (`isCancellation`) instead of stored as an outage.
+  Python: every NLM trial registry counts (`PUBMED_TRIAL_REGISTRY_DATABANKS`;
+  ANZCTR, ChiCTR… read as unregistered), a registry body without a
+  `protocolSection` is unreachable (was a registration with an empty ID),
+  and `extract_trial_info` checks every shape. Kotlin folds Unicode
+  whitespace before the trial match (Java's `\s` is ASCII-only; contract
+  gained no-break-space cases). iOS: the workflow gate is
+  `Document.needsTransparencyAnalysis`. Constructors default
+  `sourcesUnreachable` to `false`. Lodged: #411 (provisional shown only in
+  detail views), #412 (newer build's provisional caveat, no button), #413
+  (undecodable newer-build result overwritten), #414 (Swift PMID lookup
+  adopts the first hit), #415 (permanent failures re-analysed forever);
+  malformed CrossRef funders added to #391.
 - Versions: Python `2.2`, Swift and Android `7`. `errors` stays in the Swift
   and Kotlin models (a required key; dropping it breaks an older synced build)
   though nothing writes it.

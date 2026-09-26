@@ -398,7 +398,7 @@ final class Document {
     /// Whether the stored analysis should be run again: produced by an older
     /// analyzer, or provisional because a source could not be read.
     ///
-    /// `false` when there is no analysis at all — nothing stale to warn about.
+    /// `false` when there is no analysis at all — nothing to re-run.
     /// Otherwise mirrors ``TransparencyResult/needsReanalysis``: a stale result's
     /// evidence reaching the scorer changed, so its score cannot be read beside a
     /// current one; a provisional one rests on less than the full record, and
@@ -414,6 +414,17 @@ final class Document {
         guard hasTransparencyAnalysis else { return false }
         guard let result = transparencyResult else { return true }
         return result.needsReanalysis
+    }
+
+    /// Whether the transparency step should analyse this document: it has no
+    /// analysis yet, or its stored one needs a re-run
+    /// (``transparencyAnalysisNeedsRerun``: stale, provisional, or unreadable).
+    ///
+    /// The workflow's gate, named so it can be tested: dropping the second half
+    /// would leave provisional results un-refreshed while the Re-analyze buttons
+    /// still offered a fix (#385). Android's `needsTransparencyAnalysis`.
+    var needsTransparencyAnalysis: Bool {
+        !hasTransparencyAnalysis || transparencyAnalysisNeedsRerun
     }
 
     /// Whether transparency analysis can be attempted for this document at all.

@@ -2009,7 +2009,7 @@ final class FactCheckWorkflow {
         // is the common case for that population rather than an edge.
         let documentsToAnalyze = (session.documents ?? [])
             .filter { $0.meetsThreshold(settings.minScoreThreshold) }
-            .filter { !$0.hasTransparencyAnalysis || $0.transparencyAnalysisNeedsRerun }
+            .filter { $0.needsTransparencyAnalysis }
             .filter { $0.canAnalyzeTransparency }
 
         guard !documentsToAnalyze.isEmpty else {

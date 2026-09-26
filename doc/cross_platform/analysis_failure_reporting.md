@@ -127,10 +127,17 @@ logged **and reported**).
   network.
 - **A registration nobody could check is not a missing one (#385).** "Clinical
   trial without detected registration" may be raised only when every trial
-  the article cites was answered for. A registry outage, an unreadable
-  registry record, and a registry no client here reads (ISRCTN, EudraCT)
-  each leave the registration *unassessed* — Python's
-  `trial_registration_assessed`, Swift's and Kotlin's `everyTrialAnswered`.
+  the article cites was answered for. A registry outage and a registry
+  record that is not a study leave the registration *unassessed* and the
+  result provisional — Python's `trial_registration_assessed`, Swift's and
+  Kotlin's `everyTrialAnswered`. Python alone also reads registrations from
+  PubMed's databank links, so two cases are Python-only: a registry no client
+  here reads (every NLM registry but ClinicalTrials.gov — ISRCTN, EudraCT,
+  ANZCTR, ChiCTR, …) or a registry named with no accession number leaves it
+  unassessed but *not* provisional, since no re-analysis would read it; and
+  a PubMed record citing no trial at all counts as assessed. The apps read
+  NCT IDs from the title only and leave the registration unassessed when it
+  names none (#390).
   The title test the indicator also rests on matches whole words only
   (`doc/cross_platform/transparency_parity/trial_title_patterns.json`): a
   substring test read "atrial fibrillation" and "myocardial infarction" as
@@ -810,7 +817,8 @@ wrapper carries nothing to classify.
 
 ## Ports
 
-Nothing here has been checked against Swift or Android (#300).
+Apart from the analyser version and provisional results below, nothing here
+has been checked against Swift or Android (#300).
 
 On the analyser version (#360) the ledger is not symmetric. **Swift already
 carries it**, and carries it better: `TransparencyConstants.analyzerVersion`
@@ -829,8 +837,8 @@ Note the version spaces are not comparable: Swift and Android count an `Int`
 platform's constant orders only against itself; a stored row never crosses
 between Python and the apps. Swift's
 `TransparencyAnalysisService` additionally reads COI from the full text
-alone (#357). Both run the
-same pipeline with the same shape — a parallel scoring service that drops
+alone (#357). Swift and Android both run the
+same review pipeline with the same shape — a parallel scoring service that drops
 what it could not score, and a report built from whatever citations arrived —
 so the same defects are likely present. A port conforms when a review whose
 model is unreachable ends in an error naming the stage, the counts and the

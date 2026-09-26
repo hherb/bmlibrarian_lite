@@ -998,6 +998,38 @@ SERVICE_EUROPE_PMC = "Europe PMC"
 SERVICE_PUBMED = "PubMed"
 SERVICE_CROSSREF = "CrossRef"
 
+# The one trial registry a client here can read, spelled as PubMed's
+# DataBankName spells it.
+CLINICALTRIALS_GOV_DATABANK = "ClinicalTrials.gov"
+
+# Every PubMed DataBankName that is a clinical trial registry, as NLM lists
+# them (https://www.nlm.nih.gov/bsd/medline_databank_source.html). A
+# registration in any of them is a registration: collecting only three let an
+# ANZCTR or ChiCTR trial read as unregistered (#385). The other databanks
+# (GEO, PDB, GenBank, Dryad, ...) hold data, not registrations.
+PUBMED_TRIAL_REGISTRY_DATABANKS = frozenset({
+    "ANZCTR",
+    "ChiCTR",
+    "CRiS",
+    CLINICALTRIALS_GOV_DATABANK,
+    "CTRI",
+    "DRKS",
+    "EudraCT",
+    "IRCT",
+    "ISRCTN",
+    "JapicCTI",
+    "JMACCT",
+    "JPRN",
+    "NTR",
+    "PACTR",
+    "ReBec",
+    "REPEC",
+    "RPCEC",
+    "SLCTR",
+    "TCTR",
+    "UMIN CTR",
+})
+
 # Not a host but a document: the PDF a source did serve us, named so that a
 # file we could not read is reported as the thing that went unread, rather
 # than blamed on a lookup that answered perfectly well (#354).

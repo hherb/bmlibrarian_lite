@@ -118,6 +118,23 @@ def _trial_report(*accessions: str, title: str = "A randomized trial of X"):
     return report
 
 
+def _citing(registry: str, *accessions: str) -> TransparencyReport:
+    """A trial report whose PubMed record cites one named databank.
+
+    Args:
+        registry: PubMed's ``DataBankName``.
+        *accessions: The accession numbers listed under it.
+
+    Returns:
+        The report.
+    """
+    report = _trial_report()
+    report._databanks = [  # type: ignore[attr-defined]
+        {"name": registry, "accession_numbers": list(accessions)}
+    ]
+    return report
+
+
 def _run_trial_steps(report: TransparencyReport, registry: Any) -> None:
     """Fetch trial info with the registry answering as given, then judge.
 
@@ -292,6 +309,208 @@ class TestARegistrationElsewhereIsNotAMissingOne:
 
         assert report.registry_record_unreachable is False
 
+    @pytest.mark.parametrize(
+        ("registry", "accession"),
+        [
+            ("EudraCT", "2004-000123-45"),
+            ("ANZCTR", "ACTRN12610000123456"),
+            ("ChiCTR", "ChiCTR2000029308"),
+            ("DRKS", "DRKS00012345"),
+            ("UMIN CTR", "UMIN000012345"),
+            ("CTRI", "CTRI/2020/05/025013"),
+        ],
+    )
+    def test_every_registry_pubmed_names_is_a_registration(
+        self, registry: str, accession: str
+    ) -> None:
+        """Only three registries were collected; the rest read as none.
+
+        An ANZCTR or ChiCTR registration was dropped with no warning, the
+        registration still counted as assessed, and the indicator said the
+        registered trial was unregistered.
+        """
+        report = _citing(registry, accession)
+
+        _run_trial_steps(report, RecordFetch.absent())
+
+        assert RISK_INDICATOR_MISSING_TRIAL_REGISTRATION not in (
+            report.risk_of_bias_indicators
+        )
+        assert report.trial_registration_assessed is False
+        assert report.registry_record_unreachable is False
+        assert any(
+            accession in w and registry in w for w in report.warnings
+        )
+
+    def test_a_databank_that_is_not_a_registry_is_not_a_registration(
+        self,
+    ) -> None:
+        """The control: a GEO dataset says nothing about registration."""
+        report = _citing("GEO", "GSE12345")
+
+        _run_trial_steps(report, RecordFetch.absent())
+
+        assert report.trial_registration_assessed is True
+        assert RISK_INDICATOR_MISSING_TRIAL_REGISTRATION in (
+            report.risk_of_bias_indicators
+        )
+        assert not any("GSE12345" in w for w in report.warnings)
+
+    def test_a_registry_named_without_an_accession_is_not_a_missing_one(
+        self,
+    ) -> None:
+        """An empty ``<AccessionNumber/>`` crashed ``trial_id.upper()``.
+
+        PubMed still names the registry, so the study is registered; the
+        record just does not say where.
+        """
+        report = _trial_report()
+        report._databanks = [  # type: ignore[attr-defined]
+            {"name": "ClinicalTrials.gov", "accession_numbers": [None, "  "]}
+        ]
+
+        _run_trial_steps(report, RecordFetch.absent())
+
+        assert report.trial_registration_assessed is False
+        assert report.registry_record_unreachable is False
+        assert any("ClinicalTrials.gov" in w for w in report.warnings)
+
+
+class TestEveryTrialMustBeAnswered:
+    """The gate holds whichever order the trials come in."""
+
+    @pytest.mark.parametrize(
+        "second",
+        [RecordFetch.absent(), RecordFetch.served(SERVED_STUDY)],
+        ids=["then-absent", "then-served"],
+    )
+    def test_an_unreachable_first_trial_is_not_forgotten(
+        self, second: RecordFetch
+    ) -> None:
+        """A per-trial assignment would let the second answer reset it."""
+        report = _trial_report("NCT01234567", "NCT07654321")
+        answers = iter([RecordFetch.unreachable(THROTTLED), second])
+        analyzer = _analyzer()
+        analyzer.clinicaltrials.get_study = lambda *_a, **_k: next(answers)
+
+        analyzer._fetch_trial_info(report)
+        analyzer._identify_risk_indicators(report)
+
+        assert report.trial_registration_assessed is False
+        assert report.registry_record_unreachable is True
+
+    @pytest.mark.parametrize(
+        "registry",
+        [RecordFetch.absent(), RecordFetch.served(SERVED_STUDY)],
+        ids=["nct-absent", "nct-served"],
+    )
+    def test_an_unreadable_registry_beside_an_answered_trial(
+        self, registry: RecordFetch
+    ) -> None:
+        """An ISRCTN accession first, then an NCT the registry answers."""
+        report = _trial_report("ISRCTN12345678", "NCT01234567")
+
+        _run_trial_steps(report, registry)
+
+        assert report.trial_registration_assessed is False
+        assert report.registry_record_unreachable is False
+
+
+class _FakeResponse:
+    """Just enough of ``requests.Response`` for ``get_study``."""
+
+    def __init__(self, body: Any, status_code: int = 200) -> None:
+        """Hold the body the registry "served".
+
+        Args:
+            body: What ``json()`` returns.
+            status_code: The HTTP status.
+        """
+        self._body = body
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        """A 200 raises nothing."""
+
+    def json(self) -> Any:
+        """Return the served body.
+
+        Returns:
+            The body.
+        """
+        return self._body
+
+
+class TestARegistryAnswerThatIsNotAStudyIsUnread:
+    """Parsed is not read: a body with no study in it is unreadable (#385).
+
+    Swift's and Kotlin's ``extractTrialInfo`` return nil without a
+    ``protocolSection``, making the result provisional. Python served it,
+    built a registration with an empty ID, and kept the result final.
+    """
+
+    @staticmethod
+    def _fetch(body: Any) -> RecordFetch:
+        """Ask ``get_study`` with the registry serving ``body``.
+
+        Args:
+            body: The parsed JSON the registry answers with.
+
+        Returns:
+            What ``get_study`` made of it.
+        """
+        client = _analyzer().clinicaltrials
+        client.session.get = (  # type: ignore[method-assign]
+            lambda *_a, **_k: _FakeResponse(body)
+        )
+        return client.get_study("NCT01234567")
+
+    @pytest.mark.parametrize(
+        "body",
+        [{"hasResults": False}, {"protocolSection": []}, {}, []],
+        ids=["no-protocol", "protocol-a-list", "empty", "not-a-dict"],
+    )
+    def test_it_is_unreachable(self, body: Any) -> None:
+        """Each would have been read as a registered trial, or crashed."""
+        assert self._fetch(body).is_unreachable
+
+    def test_a_study_is_served(self) -> None:
+        """The control: a record with a protocol section is the answer."""
+        fetch = self._fetch(SERVED_STUDY)
+
+        assert fetch.record == SERVED_STUDY
+        assert not fetch.is_unreachable
+
+    def test_a_malformed_module_does_not_abort_the_analysis(self) -> None:
+        """Shapes inside the protocol section are untrusted too.
+
+        A list where a module belongs raised ``AttributeError`` out of
+        ``analyze()``, losing the whole study, not just its registration.
+        Swift reads each such field as absent; so does this.
+        """
+        study = {
+            "protocolSection": {
+                "identificationModule": [],
+                "sponsorCollaboratorsModule": {"leadSponsor": "Pfizer"},
+                "outcomesModule": {
+                    "primaryOutcomes": ["x", {"measure": "Mortality"}],
+                    "secondaryOutcomes": {"measure": "y"},
+                },
+                "statusModule": {"completionDateStruct": "2020-01"},
+            },
+            "hasResults": "yes",
+        }
+
+        info = _analyzer().clinicaltrials.extract_trial_info(study)
+
+        assert info.registration_id == ""
+        assert info.lead_sponsor == ""
+        assert info.sponsor_class is None
+        assert info.primary_outcomes_registered == ["Mortality"]
+        assert info.secondary_outcomes_registered == []
+        assert info.completion_date is None
+        assert info.results_posted is False
+
 
 class TestTheBatchCountKeepsWhatWasFound:
     """The CSV blanks the count only where nothing was established."""
@@ -345,6 +564,15 @@ class TestTheBatchCountKeepsWhatWasFound:
         report.trial_registration_assessed = False
 
         assert self._count(report, tmp_path) == "1"
+
+    def test_an_assessed_study_with_none_found_counts_zero(
+        self, tmp_path: Path
+    ) -> None:
+        """The one cell that says "unregistered" must not be blanked."""
+        report = _trial_report("NCT01234567")
+        report.trial_registration_assessed = True
+
+        assert self._count(report, tmp_path) == "0"
 
     def test_nothing_checked_stays_blank(self, tmp_path: Path) -> None:
         """The control: 0 would read as "this trial is unregistered"."""

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Whether a study's title reads as a clinical trial's. The answer gates one risk indicator, 'Clinical trial without detected registration', raised when a registry was asked and holds nothing. Each pattern is a regex fragment applied to the lowercased title, and a fragment matches only as a whole word: the platforms wrap the alternation as (?<![a-z0-9])(?:p1|p2|...)(?![a-z0-9]). A bare substring test, which all three platforms used until #385, read 'atrial fibrillation' as a trial (via 'trial'), 'myocardial infarction' (via 'rct'), 'industrial' and 'gas phase isomerisation' (via 'phase i'). Asserted string-for-string and order-sensitively against each platform's list, and behaviourally through each platform's own matcher over the cases below.",
+  "description": "Whether a study's title reads as a clinical trial's. The answer gates one risk indicator, 'Clinical trial without detected registration', raised when the article's registration was assessed and none was found (Python: PubMed was read and every trial it cites was answered for, including when it cites none; Swift and Kotlin: every NCT ID in the title was answered for). Each pattern is a regex fragment applied to the lowercased title, and a fragment matches only as a whole word: the platforms wrap the alternation as (?<![a-z0-9])(?:p1|p2|...)(?![a-z0-9]). Any Unicode space separates words, as Python's and ICU's \\s already read it; Java's \\s is ASCII-only, so Kotlin folds Unicode whitespace to a space before matching. A bare substring test, which all three platforms used until #385, read 'atrial fibrillation' as a trial (via 'trial'), 'myocardial infarction' (via 'rct'), 'industrial' and 'gas phase isomerization' (via 'phase i'). Asserted string-for-string and order-sensitively against each platform's list, and behaviourally through each platform's own matcher over the cases below.",
   "patterns": [
     "trials?",
     "randomi[sz]ed",
@@ -17,6 +17,8 @@
     {"title": "Phase I/II dose-escalation study of Z", "is_trial": true},
     {"title": "A phase III study of W versus placebo", "is_trial": true},
     {"title": "Phase IV surveillance of vaccine V", "is_trial": true},
+    {"title": "A phase\u00a0II study of compound Y", "is_trial": true},
+    {"title": "Phase\u202fIII study of compound Y", "is_trial": true},
     {"title": "Non-randomized comparison of two surgical techniques", "is_trial": true},
     {"title": "Trial-level heterogeneity in meta-analyses", "is_trial": true},
     {"title": "Atrial fibrillation in older adults", "is_trial": false},

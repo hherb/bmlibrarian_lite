@@ -203,9 +203,11 @@ object TransparencyConstants {
             "industry funding may be present though none is reported."
 
     /**
-     * Warning recorded when PubMed could not be reached for the article's PubMed ID: without
-     * its DOI, CrossRef — the only source of funders — is never asked. Swift's
-     * `pubMedUnreachableWarning`.
+     * Warning recorded when the article's PubMed metadata could not be read. The title — the
+     * only place NCT IDs are read from — is then missing, and when no DOI was given so is the
+     * DOI CrossRef, the only source of funders, is asked by. Swift's `pubMedUnreachableWarning`.
+     * Android reads that metadata from the stored document (`storedMetadataLookup`), which
+     * never fails, so in the app this fires only for a lookup that asks a network.
      */
     const val PUBMED_UNREACHABLE_WARNING: String =
         "PubMed could not be reached, so this study's record was not read; its DOI, " +

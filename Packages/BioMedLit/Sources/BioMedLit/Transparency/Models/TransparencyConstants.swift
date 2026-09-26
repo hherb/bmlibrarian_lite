@@ -245,9 +245,11 @@ public enum TransparencyConstants {
         "A source this analysis needed could not be read, so the rating is provisional: "
         + "it rests on less than the full record. Re-analyse the study before relying on it."
 
-    /// Warning recorded when PubMed could not be reached for the article's
-    /// PubMed ID: its title, DOI and PMC ID then come from nowhere, and without
-    /// the DOI CrossRef — the only source of funders — is never asked.
+    /// Warning recorded when PubMed's record for the article's PubMed ID could
+    /// not be read: the request failed, or esearch listed the record and efetch
+    /// did not deliver it. The title — the only place NCT IDs are read from —
+    /// and the PMC ID are then missing, and when the caller gave no DOI so is
+    /// the DOI CrossRef, the only source of funders, is asked by.
     public static let pubMedUnreachableWarning =
         "PubMed could not be reached, so this study's record was not read; its DOI, "
         + "and with it the funders CrossRef holds, may be missing from this analysis."

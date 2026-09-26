@@ -484,9 +484,9 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
     ///
     /// Nothing in ``TransparencyAnalysisService`` writes this: a source it could
     /// not read is recorded as a warning and in ``sourcesUnreachable``. It stays
-    /// non-optional because synthesized `Codable` makes it a required key, and a
-    /// build without it would be unreadable to an older build receiving it by
-    /// CloudKit sync.
+    /// non-optional because synthesized `Codable` makes it a required key: a
+    /// result written without it would not decode on an older build receiving
+    /// it by CloudKit sync.
     public let errors: [String]
 
     /// Version of the analyzer that produced this result.
@@ -518,9 +518,10 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
     /// reads exactly like a study with no funders — so it is provisional
     /// (``isProvisional``) and offered for re-analysis rather than kept as
     /// final. Mirrors Python's `TransparencyResult.sources_unreachable` (#385).
-    /// `nil` for results stored before this was recorded; every one of those
-    /// is stale anyway, since recording it came with analyzer version 7.
-    /// Optional so that stored JSON without the key still decodes.
+    /// `nil` only for results stored before this was recorded, which decode
+    /// without the key; every one of those is stale anyway, since recording it
+    /// came with analyzer version 7. The initializer defaults to `false`, so a
+    /// result built here always records it.
     public let sourcesUnreachable: Bool?
 
     /// Whether this result was produced by an older analyzer than the current one.
@@ -555,7 +556,8 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
     /// by an older analyzer (``isStale``), or provisional (``isProvisional``)
     /// and this build's own to replace.
     ///
-    /// Python's `is_final`, negated. A provisional result stamped with the
+    /// Python's `_needs_analysis`: `may_replace_stored` and not `is_final`.
+    /// A provisional result stamped with the
     /// current version was otherwise final forever, so a transient outage
     /// became a permanent finding nothing would revisit (#385). A newer
     /// build's result is never replaced, provisional or not: it arrives by
@@ -599,7 +601,8 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
     ///   - fullTextSearched: Whether the article's full text was given to the
     ///     analysis (`nil` when not recorded).
     ///   - sourcesUnreachable: Whether a source the analysis needed could not be
-    ///     read (`nil` when not recorded).
+    ///     read. Defaults to `false`; `nil` represents a result stored before
+    ///     this was recorded.
     public init(
         id: UUID = UUID(),
         doi: String? = nil,
@@ -628,7 +631,7 @@ public struct TransparencyResult: Sendable, Codable, Equatable, Identifiable {
         errors: [String] = [],
         analyzerVersion: Int? = TransparencyConstants.analyzerVersion,
         fullTextSearched: Bool? = nil,
-        sourcesUnreachable: Bool? = nil
+        sourcesUnreachable: Bool? = false
     ) {
         self.id = id
         self.doi = doi
@@ -742,7 +745,8 @@ public struct TransparencyResultBuilder: Sendable {
 
     /// Whether ClinicalTrials.gov answered for every trial the article cites,
     /// so an empty ``trialRegistrations`` is the registry's answer. False when
-    /// no trial ID was found to look up or a lookup failed.
+    /// no trial ID was found to look up, a lookup failed, or a record the
+    /// registry served could not be read.
     public var trialRegistrationAssessed: Bool = false
 
     /// Whether a source the analysis needed could not be read, which makes the

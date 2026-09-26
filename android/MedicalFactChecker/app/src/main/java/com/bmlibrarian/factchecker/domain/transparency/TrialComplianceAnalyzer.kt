@@ -66,11 +66,13 @@ object TrialComplianceAnalyzer {
      *
      * @param title The study title, or null.
      * @return True if a [ClinicalTrialPatterns.trialTitlePatterns] fragment occurs in the
-     *   lowercased title as a whole word.
+     *   lowercased title as a whole word ([ClinicalTrialPatterns.normalizedTitle]).
      */
     fun appearsToBeClinicalTrial(title: String?): Boolean {
         if (title == null) return false
-        return ClinicalTrialPatterns.trialTitleRegex.containsMatchIn(title.lowercase())
+        return ClinicalTrialPatterns.trialTitleRegex.containsMatchIn(
+            ClinicalTrialPatterns.normalizedTitle(title),
+        )
     }
 
     /**

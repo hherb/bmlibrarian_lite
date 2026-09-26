@@ -164,13 +164,8 @@ fun TransparencyDetails(document: DocumentEntity, modifier: Modifier = Modifier)
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        if (result.isProvisional) {
-            Text(
-                text = TransparencyConstants.PROVISIONAL_RESULT_CAVEAT,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        // A provisional result's caveat (#385) is not repeated here: the explanation's
+        // caveats, listed below for every rating, already carry it.
         BulletList(
             if (explanation.isUnassessed) {
                 HighRiskTransparencySection.UNASSESSED_REASONS_LABEL

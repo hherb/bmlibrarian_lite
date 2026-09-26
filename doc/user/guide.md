@@ -218,7 +218,13 @@ Each study is automatically analyzed for transparency indicators:
 - **Funding Disclosure**: Whether funding sources are declared
 - **Conflict of Interest**: Whether COI statements are present
 - **Data Availability**: Whether underlying data is shared
-- **Trial Registration**: Whether the study is registered (e.g., ClinicalTrials.gov)
+- **Trial Registration**: Whether the study is registered. Registrations in any
+  trial registry PubMed links (ClinicalTrials.gov, ISRCTN, EudraCT, ANZCTR,
+  ChiCTR and the rest) count; only ClinicalTrials.gov records are read in
+  detail, so a registration elsewhere is reported as registered but not
+  assessed. "Clinical trial without detected registration" is raised only
+  when every cited registration was checked and the title reads as a trial's
+  by whole word, so "atrial fibrillation" is not a trial.
 - **Transparency Score**: Overall transparency rating
 
 Transparency results feed into risk warnings that appear in generated reports, flagging studies with potential concerns.

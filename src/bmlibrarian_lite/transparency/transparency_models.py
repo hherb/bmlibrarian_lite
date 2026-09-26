@@ -100,9 +100,12 @@ class TransparencyUnassessed:
 #: 2.1: #394 (a funder named by brand -- "Pfizer", "The Pfizer company" -- is
 #: industry, and that company's foundation is not).
 #: 2.2: #385 (a trial registration nobody could check is not a missing one --
-#: an unreachable registry or a registry with no client no longer raises
-#: "Clinical trial without detected registration" -- and a title is a trial's
-#: only by whole word, so "atrial fibrillation" is not).
+#: an unreachable registry, a registry with no client, or any of the trial
+#: registries PubMed names beyond the three once collected no longer raises
+#: "Clinical trial without detected registration"; a registry outage, or a
+#: registry record that is not a study, now makes the result provisional --
+#: and a title is a trial's only by whole word, so "atrial fibrillation" is
+#: not).
 TRANSPARENCY_ANALYZER_VERSION = "2.2"
 
 #: What every row written before #360 says, whatever analysed it: the field

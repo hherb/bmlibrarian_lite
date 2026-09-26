@@ -23,6 +23,12 @@ class ProvisionalResultTest {
 
         assertNull(decoded.sourcesUnreachable)
         assertFalse(decoded.isProvisional)
+        assertFalse("a current result missing the flag is not re-run", decoded.needsReanalysis)
+    }
+
+    @Test
+    fun `a result built here records the flag`() {
+        assertEquals(false, TransparencyResult(pmid = "1").sourcesUnreachable)
     }
 
     @Test

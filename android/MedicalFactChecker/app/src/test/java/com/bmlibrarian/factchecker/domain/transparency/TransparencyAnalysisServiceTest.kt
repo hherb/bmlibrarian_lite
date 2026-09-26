@@ -141,6 +141,9 @@ class TransparencyAnalysisServiceTest {
         assertEquals(1.0, result.industryFundingConfidence, 0.0)
         assertEquals(SponsorType.INDUSTRY, result.sponsorType)
         assertTrue(result.publicationDate != null)
+        // The control for the PubMed failure: an answered lookup is not an outage.
+        assertEquals(false, result.sourcesUnreachable)
+        assertFalse(TransparencyConstants.PUBMED_UNREACHABLE_WARNING in result.warnings)
     }
 
     @Test

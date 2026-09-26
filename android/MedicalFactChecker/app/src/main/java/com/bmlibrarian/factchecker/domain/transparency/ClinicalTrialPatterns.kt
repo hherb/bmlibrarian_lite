@@ -32,6 +32,23 @@ object ClinicalTrialPatterns {
         Regex("""(?<![a-z0-9])(?:""" + trialTitlePatterns.joinToString("|") + """)(?![a-z0-9])""")
 
     /**
+     * The title as [trialTitleRegex] reads it: lowercased, with every Unicode space folded to
+     * an ASCII one.
+     *
+     * The shared `phase\s+` fragment needs the fold on the JVM: Java's `\s` is ASCII-only, so
+     * "Phase II" written with a no-break space — common in PubMed and CrossRef titles — matched
+     * in Python and on ICU (Swift, and Android devices) but not in the JVM the parity test
+     * runs on. Folding here makes both engines read the title Python reads.
+     *
+     * @param title The study title.
+     * @return The lowercased title with Unicode whitespace replaced by `' '`.
+     */
+    fun normalizedTitle(title: String): String =
+        buildString(title.length) {
+            for (char in title.lowercase()) append(if (char.isWhitespace()) ' ' else char)
+        }
+
+    /**
      * ClinicalTrials.gov registration number: NCT followed by exactly 8 digits.
      *
      * The lookarounds reject IDs embedded in longer tokens, such as

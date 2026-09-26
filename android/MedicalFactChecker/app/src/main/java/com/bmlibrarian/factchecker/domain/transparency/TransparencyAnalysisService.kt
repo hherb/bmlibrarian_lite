@@ -114,8 +114,9 @@ class TransparencyAnalysisService(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // Our silence, not the article's: without PubMed's record there is no DOI to
-                // ask CrossRef for funders by, so the result is provisional (#385).
+                // Our silence, not the article's: without PubMed's record the title NCT IDs
+                // are read from is missing, and so, when none was given, is the DOI CrossRef
+                // is asked for funders by. So the result is provisional (#385).
                 builder.sourcesUnreachable = true
                 builder.warnings = builder.warnings + TransparencyConstants.PUBMED_UNREACHABLE_WARNING
                 Log.w(TAG, "PubMed fetch failed for PMID $pmid: ${describeFailure(e)}")
