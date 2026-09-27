@@ -6,12 +6,26 @@ Kotlin in ``RiskExplanationParityTest``. The cases are appended to this file
 in Task 5, once the explanation exists.
 """
 
+import dataclasses
 import json
 from pathlib import Path
 
 import pytest
 
 from bmlibrarian_lite import transparency_terms as terms
+from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
+    COIDisclosureLevel,
+    ConflictOfInterest,
+    DataAvailabilityInfo,
+    DataDisclosureLevel,
+    ResultsComplianceStatus,
+    TransparencyReport,
+    TrialRegistration,
+    calculate_transparency_score,
+)
+from bmlibrarian_lite.transparency import TransparencyRisk, get_default_settings
+from bmlibrarian_lite.transparency.assessment import build_transparency_result
+from bmlibrarian_lite.transparency.risk_explanation import TransparencyRiskExplanation
 
 CONTRACT = (
     Path(__file__).resolve().parents[1]
@@ -102,3 +116,56 @@ class TestConfidencePercent:
     def test_half_rounds_away_from_zero(self, confidence, percent) -> None:
         """62.5 is 63 on every platform; ``round`` would say 62."""
         assert terms.confidence_percent(confidence) == percent
+
+
+def _case_ids(contract_path=CONTRACT):
+    return [c["name"] for c in json.loads(contract_path.read_text())["cases"]]
+
+
+def _report(findings: dict) -> TransparencyReport:
+    report = TransparencyReport(doi="10.1000/test", pmid="123")
+    report.data_availability = DataAvailabilityInfo(
+        disclosure_level=DataDisclosureLevel(findings["data_availability"])
+    )
+    report.coi_info = (
+        ConflictOfInterest(
+            statement="The authors declare no competing interests.",
+            disclosure_level=COIDisclosureLevel.DISCLOSED,
+        )
+        if findings["coi"] == "disclosed"
+        else ConflictOfInterest.not_stated()
+    )
+    report.industry_funding_detected = findings["industry_funding"]
+    report.industry_funding_confidence = findings["industry_confidence"]
+    if findings["trial_registered"]:
+        report.trial_registrations = [
+            TrialRegistration(registry="ClinicalTrials.gov", registration_id="NCT00000001")
+        ]
+    report.results_compliance = ResultsComplianceStatus(findings["results"])
+    report.outcome_switching_detected = findings["outcome_switching"]
+    report.crossref_record_unreachable = findings["sources_unreachable"]
+    report.transparency_score = calculate_transparency_score(report)
+    return report
+
+
+@pytest.mark.parametrize("name", _case_ids())
+def test_case(contract, name) -> None:
+    """Python scores, rates and explains each case as the contract says."""
+    case = next(c for c in contract["cases"] if c["name"] == name)
+    settings = get_default_settings()
+    result = build_transparency_result(
+        "doc", _report(case["findings"]), settings, "full text"
+    )
+    if case["stored_risk_level"]:
+        result = dataclasses.replace(
+            result, risk_level=TransparencyRisk(case["stored_risk_level"])
+        )
+    explanation = TransparencyRiskExplanation.of(result, settings)
+    expected = case["expected"]
+    assert result.transparency_score == expected["score"]
+    assert result.risk_level.value == expected["risk_level"]
+    assert list(explanation.reasons) == expected["reasons"]
+    assert [
+        f"{c.label}: {c.signed_points()}" for c in explanation.score_breakdown
+    ] == expected["score_breakdown"]
+    assert list(explanation.caveats) == expected["caveats"]
