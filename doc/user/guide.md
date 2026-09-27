@@ -267,6 +267,28 @@ studies are annotated in the reference list. If
 transparency analysis was switched on, the report says so even when every
 analysis failed.
 
+A rating made without the article's full text is never shown as an
+unqualified score. Its badge carries a **· limited** suffix — for example
+**High · limited** — and its tooltip says **Limited certainty because of
+lack of full text access** directly under the risk level, because full-text
+analysis is BMLibrarian's gold standard and a rating made from metadata
+alone rests on less. For a **High** rating, the tooltip also lists **Rated
+high risk because** — the specific rule or rules that decided it, such as a
+low transparency score or a missing conflict-of-interest statement — so you
+can see why a study was flagged rather than only that it was. If a source
+the analysis needed could not be read, the tooltip adds a line saying the
+rating is **provisional** and should be re-checked before you rely on it.
+
+A generated report explains its own High ratings the same way. A **Why
+Studies Were Rated High Transparency Risk** section, between the reference
+list and the methodology, gives every cited High-risk study its score, the
+rules that decided it, and any caveats — in the same words as the badge. The
+section is left out entirely when no cited study was rated High. The
+**Methodology** section's transparency summary gains two counts of its own:
+how many ratings were made without the full text (**Limited certainty
+because of lack of full text access**), and how many were made while a
+source could not be read (**Provisional**) and so are due for re-analysis.
+
 ### Full-Text Discovery
 
 BMLibrarian Lite can automatically find and retrieve full-text content through a fallback chain:

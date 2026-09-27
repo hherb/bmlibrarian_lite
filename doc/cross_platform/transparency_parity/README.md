@@ -267,9 +267,10 @@ The file has three parts, with different reach:
   `RiskExplanationParityTest`
   (`android/…/domain/transparency/RiskExplanationParityTest.kt`).
 - **`swift_kotlin_only`** — the "certainty unknown" note and the "Unassessed"
-  label and note. Bound on **Swift and Android only**, by the same three test
-  methods above reading a different key: the desktop makes neither of these
-  states (see below), so Python's copy of the contract does not assert them.
+  label and note. Bound on **Swift and Android only**, by
+  `testRiskExplanationStringsMatchTheContract` and `RiskExplanationParityTest`
+  reading a different key: the desktop makes neither of these states (see
+  below), so Python's copy of the contract does not assert them.
 - **`cases`** — worked findings, each scored, rated and explained by every
   platform's own code, asserting the reasons, the score breakdown (when the
   score is itself a reason) and the caveats. Bound on **all three platforms**:
@@ -304,10 +305,13 @@ Porting it would only add a branch that never runs and a "(full text not
 searched)" qualifier that never prints.
 
 `tests/test_no_high_rests_on_unread_text.py` pins the invariant this
-argument depends on, across every combination of full-text and Europe-PMC
-XML availability. If it ever fails, the desktop's scoring has stopped fixing
-the defect at its source, and needs the Unassessed rule and the "not
-searched" wording after all.
+argument depends on: every combination of PubMed read or not with the three
+states Europe PMC XML can be in (no PMC ID, no open-access copy, XML with no
+sections) charges nothing, plus one control case where full text *was* read
+and is still charged, so the six unread cases are not passing by an analyser
+that charges nothing at all. If it ever fails, the desktop's scoring has
+stopped fixing the defect at its source, and needs the Unassessed rule and
+the "not searched" wording after all.
 
 ## Changing a pattern
 
