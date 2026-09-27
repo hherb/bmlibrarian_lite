@@ -254,7 +254,7 @@ class TestAnUnreachableRegistryIsNotAMissingRegistration:
         _run_trial_steps(report, RecordFetch.unreachable(THROTTLED))
 
         result = build_transparency_result(
-            "doc-1", report, TransparencySettings(), full_text_supplied=False
+            "doc-1", report, TransparencySettings(), None
         )
 
         assert result.sources_unreachable is True
@@ -266,7 +266,7 @@ class TestAnUnreachableRegistryIsNotAMissingRegistration:
         _run_trial_steps(report, RecordFetch.absent())
 
         result = build_transparency_result(
-            "doc-1", report, TransparencySettings(), full_text_supplied=False
+            "doc-1", report, TransparencySettings(), None
         )
 
         assert result.sources_unreachable is False

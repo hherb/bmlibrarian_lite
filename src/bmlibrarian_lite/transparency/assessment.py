@@ -29,6 +29,7 @@ from ..constants import FALLBACK_CONTACT_EMAIL
 from ..study_transparency_analyzer.study_transparency_analyzer import (
     StudyTransparencyAnalyzer,
     TransparencyReport,
+    score_components,
 )
 from .transparency_models import (
     COI_NOT_ASSESSED,
@@ -85,7 +86,7 @@ def build_transparency_result(
     document_id: str,
     report: TransparencyReport,
     settings: "TransparencySettings",
-    full_text_supplied: bool,
+    full_text: str | None,
 ) -> TransparencyResult:
     """Turn an analyser's report into the result that is stored and shown.
 
@@ -93,8 +94,9 @@ def build_transparency_result(
         document_id: The document the report is about.
         report: What the analyser found.
         settings: The transparency settings the risk level is judged by.
-        full_text_supplied: Whether the caller handed the analyser the full
-            text, rather than leaving it to discover one.
+        full_text: The full text the caller handed the analyser, if any.
+            Blank text is ignored by the analyser and so is not counted as
+            analysed.
 
     Returns:
         The result, stamped with this build's analyser version.
@@ -149,9 +151,10 @@ def build_transparency_result(
             else 0
         ),
         full_text_analyzed=(
-            full_text_supplied
+            bool(full_text and full_text.strip())
             or any("Full-text" in s for s in report.data_sources_used)
         ),
+        score_components=tuple(score_components(report)),
         # A source that could not be read is our silence, not the
         # study's. Neither fetch raises -- each returns "unreachable" and
         # the analysis finishes with a caveat and a score that fell
@@ -195,8 +198,6 @@ def assess_document(
             classifies it: the raw text can carry a credential (#330).
     """
     report = analyzer.analyze(pmid=pmid, doi=doi, fulltext=full_text)
-    result = build_transparency_result(
-        document_id, report, settings, full_text_supplied=full_text is not None
-    )
+    result = build_transparency_result(document_id, report, settings, full_text)
     storage.save_transparency_result(result)
     return result
