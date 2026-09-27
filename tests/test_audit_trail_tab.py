@@ -35,6 +35,7 @@ from bmlibrarian_lite.gui.audit_literature_tab import AuditLiteratureTab
 from bmlibrarian_lite.gui.audit_citations_tab import AuditCitationsTab, CitationCard
 from bmlibrarian_lite.data_models import LiteDocument, ScoredDocument, Citation
 from bmlibrarian_lite.config import LiteConfig
+from bmlibrarian_lite.transparency import get_default_settings
 
 
 @pytest.fixture(scope="module")
@@ -48,8 +49,16 @@ def qapp():
 
 @pytest.fixture
 def mock_config():
-    """Create mock config."""
-    return MagicMock(spec=LiteConfig)
+    """Create mock config.
+
+    ``transparency`` is a dataclass field with a ``default_factory``, so it
+    is never a class attribute of ``LiteConfig`` -- ``spec=LiteConfig``
+    inspects the class, not an instance, and does not see it. Set it
+    explicitly so ``AuditTrailTab`` can read ``config.transparency`` (#386).
+    """
+    config = MagicMock(spec=LiteConfig)
+    config.transparency = get_default_settings()
+    return config
 
 
 @pytest.fixture

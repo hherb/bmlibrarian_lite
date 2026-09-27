@@ -125,7 +125,9 @@ class AuditTrailTab(QWidget):
 
         # Create sub-tabs
         self.queries_tab = AuditQueriesTab()
-        self.literature_tab = AuditLiteratureTab()
+        self.literature_tab = AuditLiteratureTab(
+            transparency_settings=self.config.transparency
+        )
         self.citations_tab = AuditCitationsTab()
 
         # Add sub-tabs

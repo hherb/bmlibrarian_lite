@@ -34,6 +34,7 @@ from bmlibrarian_lite.transparency import (
     TransparencyRisk,
     TransparencySettings,
     count_transparency_over,
+    get_default_settings,
 )
 
 DOC = "pmid-12345678"
@@ -59,6 +60,9 @@ def a_result(
         transparency_score=20,
         risk_level=risk,
         analyzer_version=version,
+        # This file is about stale analyser versions, not certainty (#386):
+        # every row here stands for a completed, full-text analysis.
+        full_text_analyzed=True,
     )
 
 
@@ -502,7 +506,10 @@ class TestTheGatesAreActuallyAsked:
         from bmlibrarian_lite.gui.audit_trail_tab import AuditTrailTab
 
         QApplication.instance() or QApplication([])
-        tab = AuditTrailTab(config=MagicMock(), storage=MagicMock())
+        tab = AuditTrailTab(
+            config=MagicMock(transparency=get_default_settings()),
+            storage=MagicMock(),
+        )
         tab.literature_tab._add_document_card(
             LiteDocument(
                 id=DOC,
@@ -529,7 +536,10 @@ class TestTheGatesAreActuallyAsked:
         from bmlibrarian_lite.gui.audit_trail_tab import AuditTrailTab
 
         QApplication.instance() or QApplication([])
-        tab = AuditTrailTab(config=MagicMock(), storage=MagicMock())
+        tab = AuditTrailTab(
+            config=MagicMock(transparency=get_default_settings()),
+            storage=MagicMock(),
+        )
         tab.literature_tab._add_document_card(
             LiteDocument(
                 id=DOC,

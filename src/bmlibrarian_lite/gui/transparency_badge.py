@@ -38,8 +38,17 @@ from ..transparency import (
     TransparencyResult,
     TransparencyRisk,
     TransparencyUnassessed,
+    get_default_settings,
 )
-from ..transparency_terms import DATA_AVAILABILITY_DISPLAY_NAMES
+from ..transparency.risk_explanation import TransparencyRiskExplanation, certainty_note
+from ..transparency.transparency_settings import TransparencySettings
+from ..transparency_terms import (
+    DATA_AVAILABILITY_DISPLAY_NAMES,
+    LIMITED_CERTAINTY_BADGE_SUFFIX,
+    PROVISIONAL_RESULT_CAVEAT,
+    REASONS_LABEL,
+    UNEXPLAINED_RATING_CAVEAT,
+)
 
 #: The label of a badge with no finding behind it. One form, compact or not:
 #: both production badges are compact, so an abbreviation would be the only
@@ -124,6 +133,7 @@ class TransparencyBadge(QFrame):
         outcome: TransparencyOutcome,
         compact: bool = False,
         parent: Optional[QWidget] = None,
+        settings: TransparencySettings | None = None,
     ) -> None:
         """
         Initialize the transparency badge.
@@ -132,10 +142,14 @@ class TransparencyBadge(QFrame):
             outcome: The document's transparency finding, or why it has none
             compact: If True, use shorter labels and smaller padding
             parent: Parent widget
+            settings: The transparency settings the rating was judged by.
+                The tooltip names the rules under these; defaults when
+                omitted.
         """
         super().__init__(parent)
         self.outcome = outcome
         self.compact = compact
+        self._settings = settings or get_default_settings()
         # The layout and the label are built once, here, and every later
         # outcome re-renders them in place. Rebuilding them meant calling
         # ``QHBoxLayout(self)`` on a widget that already had one, which Qt
@@ -186,6 +200,10 @@ class TransparencyBadge(QFrame):
                 RISK_LABELS_SHORT[risk_level] if self.compact
                 else RISK_LABELS[risk_level]
             )
+            # Every rating made without the article's full text says so,
+            # wherever it is shown (user decision, PR #388; #386)
+            if certainty_note(self.outcome) is not None:
+                label_text = f"{label_text} {LIMITED_CERTAINTY_BADGE_SUFFIX}"
 
         self.label.setText(label_text)
 
@@ -224,6 +242,19 @@ class TransparencyBadge(QFrame):
         # Header
         lines.append(f"<b>Transparency Score:</b> {r.transparency_score}/100")
         lines.append(f"<b>Risk Level:</b> {RISK_LABELS[r.risk_level]}")
+        note = certainty_note(r)
+        if note:
+            lines.append(f"<i>{note}</i>")
+        if r.sources_unreachable:
+            lines.append(f"<b>Provisional:</b> {PROVISIONAL_RESULT_CAVEAT}")
+        if r.risk_level is TransparencyRisk.HIGH:
+            explanation = TransparencyRiskExplanation.of(r, self._settings)
+            lines.append("")
+            lines.append(f"<b>{REASONS_LABEL}:</b>")
+            for reason in explanation.reasons:
+                lines.append(f"  • {reason}")
+            if UNEXPLAINED_RATING_CAVEAT in explanation.caveats:
+                lines.append(f"  • {UNEXPLAINED_RATING_CAVEAT}")
         lines.append("")
 
         # Funding section
@@ -280,11 +311,6 @@ class TransparencyBadge(QFrame):
         if r.tier_downgrade_applied > 0:
             lines.append("")
             lines.append(f"<b>Quality Tier Adjusted:</b> -{r.tier_downgrade_applied} tier(s)")
-
-        # Full text analysis status
-        if r.full_text_analyzed:
-            lines.append("")
-            lines.append("<i>Analysis includes full text</i>")
 
         self.setToolTip("<br>".join(lines))
 

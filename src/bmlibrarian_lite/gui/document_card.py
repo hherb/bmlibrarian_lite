@@ -69,6 +69,7 @@ from .card_utils import (
 )
 from .quality_badge import QualityBadge
 from ..transparency import TransparencyOutcome
+from ..transparency.transparency_settings import TransparencySettings
 from .transparency_badge import TransparencyBadge
 
 logger = logging.getLogger(__name__)
@@ -288,6 +289,7 @@ class DocumentCard(QFrame):
         citation_rationale: Optional[str] = None,
         show_abstract: bool = False,
         parent: Optional[QWidget] = None,
+        transparency_settings: TransparencySettings | None = None,
     ) -> None:
         """
         Initialize the document card.
@@ -303,6 +305,8 @@ class DocumentCard(QFrame):
             citation_rationale: Why this passage was selected as citation
             show_abstract: Whether to initially show abstract (expanded state)
             parent: Parent widget
+            transparency_settings: The settings the transparency badge names
+                its high-risk rules under; defaults when omitted.
         """
         super().__init__(parent)
         self.document = document
@@ -312,6 +316,7 @@ class DocumentCard(QFrame):
         self._transparency_outcome = transparency_outcome
         self._citation_rationale = citation_rationale
         self._expanded = show_abstract
+        self._transparency_settings = transparency_settings
 
         # Track child widgets for updates
         self._score_badge: Optional[ScoreBadge] = None
@@ -373,6 +378,7 @@ class DocumentCard(QFrame):
             self._transparency_badge = TransparencyBadge(
                 self._transparency_outcome,
                 compact=True,  # Use compact mode in card header
+                settings=self._transparency_settings,
             )
             title_row.addWidget(self._transparency_badge)
 
@@ -765,7 +771,9 @@ class DocumentCard(QFrame):
             self._transparency_badge.update_outcome(outcome)
         else:
             # Create new badge and insert into title row
-            self._transparency_badge = TransparencyBadge(outcome, compact=True)
+            self._transparency_badge = TransparencyBadge(
+                outcome, compact=True, settings=self._transparency_settings
+            )
 
             # Find title row in header and insert after quality badge
             if self._header_widget:
