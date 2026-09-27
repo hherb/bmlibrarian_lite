@@ -44,6 +44,7 @@ from bmlibrarian_lite.gui.document_interrogation_tab import (  # noqa: E402
     PDF_UNREADABLE,
     DocumentInterrogationTab,
 )
+from bmlibrarian_lite.pdf_utils import fulltext_cache_stamp  # noqa: E402
 
 #: What a provider's error text can carry on this path: the Unpaywall request
 #: URL holds the user's email address, and a URL is what error text prints.
@@ -451,3 +452,53 @@ class TestClosingTheProgressDialogIsNotCancellingIt:
 
         assert succeeded == ["/tmp/aspirin.pdf"]
         assert failed == []
+
+
+class TestACachedFullTextFromAnEarlierConverter:
+    """#420: markdown an earlier converter cached is fetched again, not shown."""
+
+    def _load(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch, cached: str
+    ) -> tuple[Any, list[str], list[str]]:
+        """Load a citation whose full text is cached with the given content.
+
+        Returns:
+            The tab, the texts it displayed from the cache, and the titles
+            it started discovery for.
+        """
+        widget = make_tab(tmp_path, monkeypatch)
+        cached_file = tmp_path / "PMC1.md"
+        cached_file.write_text(cached, encoding="utf-8")
+        monkeypatch.setattr(tab_module, "find_existing_fulltext", lambda _m: cached_file)
+        shown: list[str] = []
+        discovered: list[str] = []
+        monkeypatch.setattr(
+            widget,
+            "_load_citation_fulltext",
+            lambda content, _citation, _label: shown.append(content),
+        )
+        monkeypatch.setattr(
+            widget,
+            "_start_fulltext_discovery",
+            lambda _doc, title, _citation, **_kw: discovered.append(title),
+        )
+        widget.load_from_citation(make_citation())
+        return widget, shown, discovered
+
+    def test_an_unstamped_file_is_fetched_again(
+        self, qapp: Any, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An unstamped file is fetched again."""
+        _widget, shown, discovered = self._load(tmp_path, monkeypatch, "# Old markdown")
+        assert shown == []
+        assert discovered
+
+    def test_a_current_file_is_shown_without_its_stamp(
+        self, qapp: Any, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Control: the cache still serves what the current converter wrote."""
+        _widget, shown, discovered = self._load(
+            tmp_path, monkeypatch, f"{fulltext_cache_stamp()}\n# Current"
+        )
+        assert shown == ["# Current"]
+        assert discovered == []

@@ -555,6 +555,15 @@ section_headers = {
 }
 ```
 
+A section runs from its heading to the next heading at the same level or
+above (for markdown), to the next recognised heading, or to the references
+(#420). Converted JATS carries the back-matter statements and PLOS's
+front-matter ones under their own headings (`jats_markdown.py`), placed after
+the body and before the references. A missing COI or data statement is charged
+(`not_stated`) only when the text read does not use the statement's wording
+anywhere; a text that does holds a statement we failed to find, so it is
+`not_assessed` / `unknown` with a caveat.
+
 ### Priority Order
 
 Full-text sections take priority over API-sourced data:
@@ -563,7 +572,10 @@ Full-text sections take priority over API-sourced data:
    is consulted: only the article's own text can establish that a study
    declares no conflicts, and neither source having been read is recorded
    as `not_assessed` rather than charged (#352).
-2. **Data availability:** Full-text `data_sharing` section > Europe PMC XML extraction
+2. **Data availability:** Full-text `data_sharing` section only. Without a
+   full text it is `unknown` (not assessed), with a caveat; the Europe PMC XML
+   fallback that once read the XML for this statement alone was removed
+   (#421), because discovery already reads that XML for every dimension.
 
 ### Example
 

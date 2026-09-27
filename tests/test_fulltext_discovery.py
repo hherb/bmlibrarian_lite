@@ -37,6 +37,8 @@ from bmlibrarian_lite.fulltext_discovery import (
     discover_fulltext,
 )
 from bmlibrarian_lite.europepmc import ArticleInfo, ArticleInfoFetch
+from bmlibrarian_lite.jats_markdown import JATS_MARKDOWN_CONVERTER_VERSION
+from bmlibrarian_lite.pdf_utils import fulltext_cache_stamp
 
 
 class TestFulltextSourceType:
@@ -123,9 +125,9 @@ class TestFulltextDiscovererDiscover:
         self, mock_find: MagicMock, temp_dir: Path
     ) -> None:
         """Test that cached fulltext is found and returned."""
-        # Create a cached file
+        # Create a cached file, stamped as the current converter writes it
         cached_file = temp_dir / "cached.md"
-        cached_file.write_text("# Cached Content")
+        cached_file.write_text(f"{fulltext_cache_stamp()}\n# Cached Content")
         mock_find.return_value = cached_file
 
         discoverer = FulltextDiscoverer()
@@ -134,6 +136,39 @@ class TestFulltextDiscovererDiscover:
         assert result.success is True
         assert result.source_type == FulltextSourceType.CACHED_FULLTEXT
         assert result.markdown_content == "# Cached Content"
+
+    @pytest.mark.parametrize(
+        "cached",
+        [
+            "# Cached before the stamp existed",
+            f"{fulltext_cache_stamp(JATS_MARKDOWN_CONVERTER_VERSION - 1)}\n# Older",
+        ],
+        ids=["unstamped", "older-converter"],
+    )
+    @patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext")
+    def test_a_stale_cache_is_converted_again(
+        self, mock_find: MagicMock, temp_dir: Path, cached: str
+    ) -> None:
+        """#420: an earlier converter's file must not outlive the fix.
+
+        The cache is read before Europe PMC is asked, so a stale file served
+        as current would keep every cached article on the old converter.
+        """
+        cached_file = temp_dir / "cached.md"
+        cached_file.write_text(cached)
+        mock_find.return_value = cached_file
+
+        discoverer = FulltextDiscoverer()
+        fresh = FulltextResult(
+            success=True,
+            source_type=FulltextSourceType.EUROPEPMC_XML,
+            markdown_content="# Converted again",
+        )
+        with patch.object(discoverer, "_try_europepmc_xml", return_value=fresh) as asked:
+            result = discoverer.discover_fulltext(pmid="12345")
+
+        asked.assert_called_once()
+        assert result.markdown_content == "# Converted again"
 
     @patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext")
     @patch("bmlibrarian_lite.fulltext_discovery.EuropePMCClient")

@@ -183,100 +183,12 @@ class RequestFailure:
 
 
 @dataclass(frozen=True)
-class FullTextFetch:
-    """What asking a source for an article's full text produced (#346).
-
-    ``Optional[str]`` answered two different questions with one ``None`` --
-    "this article has no open-access full text" and "we could not reach the
-    service" -- and the caller read both as the first. A paper whose data
-    availability statement we never managed to fetch was then reported to a
-    clinician as a paper that has none, and charged the score for it. The
-    full account is in ``doc/cross_platform/analysis_failure_reporting.md``.
-
-    The three states -- served, absent, unreachable -- are reached through
-    :meth:`served`, :meth:`absent` and :meth:`unreachable` rather than by
-    choosing which fields to pass, because the dangerous one is the claim
-    about the article and it must not be what a caller gets by default.
-
-    Attributes:
-        xml: The full text, when it was fetched. Never empty: a source that
-            answers 2xx with nothing in the body has told us nothing about
-            the article, so that is a malformed answer, not an absence.
-        failure: Why it could not be fetched, when the service could not be
-            reached. ``None`` with no ``xml`` means the source answered, and
-            answered that it holds no open-access full text.
-
-    Raises:
-        ValueError: On construction, if both an XML and a failure are given,
-            or if the XML is present but blank.
-    """
-
-    xml: str | None = None
-    failure: RequestFailure | None = None
-
-    def __post_init__(self) -> None:
-        """Refuse a fetch that both succeeded and failed, or served nothing."""
-        if self.xml is not None and self.failure is not None:
-            raise ValueError("A full-text fetch either succeeded or failed, not both")
-        if self.xml is not None and not self.xml.strip():
-            raise ValueError("A full-text fetch that served nothing is not a full text")
-
-    @classmethod
-    def served(cls, xml: str) -> "FullTextFetch":
-        """The source served the full text.
-
-        Args:
-            xml: The full text, which must not be blank.
-
-        Returns:
-            The fetch.
-
-        Raises:
-            ValueError: If the XML is blank.
-        """
-        return cls(xml=xml)
-
-    @classmethod
-    def absent(cls) -> "FullTextFetch":
-        """The source answered, and holds no open-access full text.
-
-        This is the one state that is a fact about the article, so it is
-        named rather than left as the zero-argument default.
-
-        Returns:
-            The fetch.
-        """
-        return cls()
-
-    @classmethod
-    def unreachable(cls, failure: RequestFailure) -> "FullTextFetch":
-        """The source could not be reached, so the article is unassessed.
-
-        Args:
-            failure: Why it could not be reached.
-
-        Returns:
-            The fetch.
-        """
-        return cls(failure=failure)
-
-    @property
-    def is_unreachable(self) -> bool:
-        """Whether the source could not be reached.
-
-        Returns:
-            ``True`` when nothing about the article was established.
-        """
-        return self.failure is not None
-
-
-@dataclass(frozen=True)
 class RecordFetch:
     """What asking a metadata source for an article's record produced (#356).
 
-    The sibling of :class:`FullTextFetch`, for the sources that answer with
-    a record rather than a document: PubMed's efetch and CrossRef's works
-    endpoint. Both returned ``Optional[Dict]``, which answered two questions
+    For the sources that answer with a record: PubMed's efetch and
+    CrossRef's works endpoint. Its first sibling, ``FullTextFetch`` (#346),
+    went with the Europe PMC fallback it served (#421). Both returned ``Optional[Dict]``, which answered two questions
     with one ``None`` -- "this source holds no such article" and "we could
     not read this source" -- so an unreachable PubMed left ``trial_ids``
     empty and the report printed "Trial Registration: None found", and an

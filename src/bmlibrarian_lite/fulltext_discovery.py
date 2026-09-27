@@ -63,6 +63,7 @@ from .europepmc import EuropePMCClient, ArticleInfo
 from .search_failures import request_failure_from_exception
 from .pdf_utils import (
     find_existing_fulltext,
+    read_cached_fulltext,
     find_existing_pdf,
     generate_fulltext_path,
     generate_pdf_path,
@@ -278,13 +279,16 @@ class FulltextDiscoverer:
         if cached_fulltext:
             logger.info(f"Found cached full-text: {cached_fulltext}")
             try:
-                content = cached_fulltext.read_text(encoding='utf-8')
-                return FulltextResult(
-                    success=True,
-                    source_type=FulltextSourceType.CACHED_FULLTEXT,
-                    markdown_content=content,
-                    file_path=cached_fulltext,
-                )
+                # None means an earlier converter wrote it: Europe PMC is
+                # asked again below, and the file replaced (#420).
+                content = read_cached_fulltext(cached_fulltext)
+                if content is not None:
+                    return FulltextResult(
+                        success=True,
+                        source_type=FulltextSourceType.CACHED_FULLTEXT,
+                        markdown_content=content,
+                        file_path=cached_fulltext,
+                    )
             except Exception as e:
                 logger.warning(f"Failed to read cached full-text: {e}")
 

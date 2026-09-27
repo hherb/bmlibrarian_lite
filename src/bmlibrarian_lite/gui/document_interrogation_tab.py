@@ -59,6 +59,7 @@ from ..pdf_utils import (
     get_pdf_base_dir,
     find_existing_pdf,
     find_existing_fulltext,
+    read_cached_fulltext,
     extract_pdf_text,
     get_progress_stage_message,
 )
@@ -819,9 +820,12 @@ class DocumentInterrogationTab(QWidget):
         if cached_fulltext:
             logger.info(f"load_from_citation: Found cached full-text at {cached_fulltext}")
             try:
-                content = cached_fulltext.read_text(encoding='utf-8')
-                self._load_citation_fulltext(content, citation, "Full Text (Europe PMC - cached)")
-                return
+                # None means an earlier converter wrote it; the paths below
+                # fetch and convert the article again (#420).
+                content = read_cached_fulltext(cached_fulltext)
+                if content is not None:
+                    self._load_citation_fulltext(content, citation, "Full Text (Europe PMC - cached)")
+                    return
             except Exception as e:
                 logger.warning(f"Failed to read cached full-text: {e}")
 

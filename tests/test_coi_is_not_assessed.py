@@ -37,6 +37,7 @@ import sqlite3
 from datetime import datetime
 
 import pytest
+import requests
 
 from bmlibrarian_lite.agents.report_risk_helpers import (
     build_risk_context_for_prompt,
@@ -47,11 +48,13 @@ from bmlibrarian_lite.analysis_failures import (
     unassessed_caveat,
 )
 from bmlibrarian_lite.data_models import RecordFetch
+from bmlibrarian_lite.study_transparency_analyzer import (
+    study_transparency_analyzer as analyzer_module,
+)
 from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
     RISK_INDICATOR_MISSING_COI_STATEMENT,
     COIDisclosureLevel,
     ConflictOfInterest,
-    EuropePMCClient,
     StudyTransparencyAnalyzer,
     TransparencyReport,
     analyze_coi_statement,
@@ -80,16 +83,19 @@ def analyzer() -> StudyTransparencyAnalyzer:
     )
 
 
-class ExplodingSession:
-    """A session that fails the test if anything asks it for a request."""
+@pytest.fixture
+def no_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail the test if anything makes an HTTP request.
 
-    def get(self, *_args, **_kwargs):
-        """Refuse to make the request.
+    Patched on ``requests.Session`` rather than on one client's session: the
+    Europe PMC client the COI path once called no longer exists (#421), and
+    what these tests pin is that no request is made at all.
+    """
 
-        Raises:
-            AssertionError: Always.
-        """
+    def refuse(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("the COI path must make no request here (#348)")
+
+    monkeypatch.setattr(requests.Session, "request", refuse)
 
 
 class TestTheThreeStatesAreNotCollapsible:
@@ -316,13 +322,14 @@ class TestWhatTheAnalyserRecords:
 class TestTheEuropePMCFetchIsGone:
     """#348 and #351: a request that read nothing, through an ambiguous API."""
 
-    def test_the_coi_path_makes_no_europe_pmc_request(self, analyzer) -> None:
+    def test_the_coi_path_makes_no_europe_pmc_request(
+        self, analyzer, no_requests
+    ) -> None:
         """A core result carries no COI field, so the fetch bought nothing.
 
         It was made once per document with no COI statement, against a
         service paced at one request a second.
         """
-        analyzer.europepmc.session = ExplodingSession()
         report = TransparencyReport(pmid="1", pmcid="PMC1")
 
         analyzer._analyze_conflicts(report, fulltext_sections={}, fulltext_read=False)
@@ -330,23 +337,27 @@ class TestTheEuropePMCFetchIsGone:
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_ASSESSED
 
     def test_europe_pmc_is_not_credited_for_contributing_nothing(
-        self, analyzer
+        self, analyzer, no_requests
     ) -> None:
         """``data_sources_used`` is reader-facing provenance."""
-        analyzer.europepmc.session = ExplodingSession()
         report = TransparencyReport(pmid="1", pmcid="PMC1")
 
         analyzer._analyze_conflicts(report, fulltext_sections={}, fulltext_read=False)
 
         assert "Europe PMC" not in report.data_sources_used
 
-    def test_the_ambiguous_get_article_no_longer_exists(self) -> None:
-        """#351: its ``None`` meant "no record" and "unreachable" alike."""
-        assert not hasattr(EuropePMCClient, "get_article")
+    def test_the_analyser_has_no_europe_pmc_client_of_its_own(
+        self, analyzer
+    ) -> None:
+        """#351 and #421: both of its methods are gone, and so is the client.
 
-    def test_the_full_text_fetch_is_still_there(self) -> None:
-        """The control: the method that does report honestly is untouched."""
-        assert hasattr(EuropePMCClient, "get_full_text_xml")
+        ``get_article`` answered "no record" and "unreachable" with one
+        ``None``; ``get_full_text_xml`` served a fallback that read the
+        article for data availability alone. Discovery is the one path to
+        Europe PMC's full text.
+        """
+        assert not hasattr(analyzer_module, "EuropePMCClient")
+        assert not hasattr(analyzer, "europepmc")
 
 
 class TestWhatItCostsTheStudy:
@@ -813,7 +824,6 @@ class TestTheWiringItself:
         analyzer.pubmed.convert_ids = lambda *a, **k: {}
         analyzer.crossref.get_work = lambda doi: RecordFetch.absent()
         analyzer.clinicaltrials.get_study = lambda nct: None
-        analyzer.europepmc.session = ExplodingSession()
 
     def test_reading_the_article_reaches_the_decision(self, analyzer) -> None:
         """A full text without a COI section is the article's own answer."""

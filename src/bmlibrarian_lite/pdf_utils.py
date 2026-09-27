@@ -24,6 +24,8 @@ Pure functions for PDF/full-text file path management and document formatting:
 - generate_fulltext_path(): Generate standard full-text markdown path for a document
 - find_existing_pdf(): Check if a PDF already exists locally
 - find_existing_fulltext(): Check if a full-text markdown already exists locally
+- save_fulltext_markdown(): Cache converted markdown, stamped with its converter
+- read_cached_fulltext(): Read cached markdown, or None if an older converter wrote it
 - format_abstract_as_document(): Format abstract and citation as readable document
 - extract_pdf_text(): Extract text from a PDF file
 
@@ -64,6 +66,7 @@ from .constants import (
     DEFAULT_PDF_BASE_DIR,
     PDF_BASE_DIR_ENV_VAR,
 )
+from .jats_markdown import JATS_MARKDOWN_CONVERTER_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -338,6 +341,23 @@ def find_existing_fulltext(
     return None
 
 
+def fulltext_cache_stamp(version: int = JATS_MARKDOWN_CONVERTER_VERSION) -> str:
+    """The first line of a cached full-text markdown file.
+
+    An HTML comment, so it renders as nothing wherever the file is opened as
+    markdown. It names the converter that wrote the file: the cache is read
+    before Europe PMC is asked, so without it a converter fix would never
+    reach an article already cached (#420).
+
+    Args:
+        version: The converter version to stamp.
+
+    Returns:
+        The stamp line, without its newline.
+    """
+    return f"<!-- bmlibrarian-lite jats-markdown v{version} -->"
+
+
 def save_fulltext_markdown(
     doc_dict: Dict[str, Any],
     markdown_content: str,
@@ -345,6 +365,9 @@ def save_fulltext_markdown(
 ) -> Path:
     """
     Save full-text markdown to the cache directory.
+
+    The file opens with :func:`fulltext_cache_stamp`, which
+    :func:`read_cached_fulltext` checks and strips.
 
     Args:
         doc_dict: Document dictionary with pmcid, pmid, doi, year, etc.
@@ -362,9 +385,36 @@ def save_fulltext_markdown(
     """
     path = generate_fulltext_path(doc_dict, base_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(markdown_content, encoding='utf-8')
+    path.write_text(f"{fulltext_cache_stamp()}\n{markdown_content}", encoding='utf-8')
     logger.info(f"Saved full-text markdown to: {path}")
     return path
+
+
+def read_cached_fulltext(path: Path) -> str | None:
+    """Read cached full-text markdown written by the current converter.
+
+    Args:
+        path: A file :func:`find_existing_fulltext` found.
+
+    Returns:
+        The markdown without its stamp; or ``None`` when the file carries no
+        stamp or another converter's, so the caller converts the article
+        again and :func:`save_fulltext_markdown` replaces the file.
+
+    Raises:
+        OSError: If the file cannot be read.
+        UnicodeDecodeError: If it is not UTF-8.
+    """
+    content = path.read_text(encoding='utf-8')
+    first_line, _, rest = content.partition("\n")
+    if first_line.strip() != fulltext_cache_stamp():
+        logger.info(
+            "Cached full text at %s was written by an earlier converter; "
+            "converting it again.",
+            path,
+        )
+        return None
+    return rest
 
 
 def format_abstract_as_document(

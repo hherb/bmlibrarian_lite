@@ -1053,54 +1053,9 @@ class TestTheGapsTheMutationSweepFound:
             is DataDisclosureLevel.UNKNOWN
         )
 
-    def test_europepmc_xml_with_no_sections_is_not_assessed(self) -> None:
-        """XML that parses to nothing has told us nothing (#359's rule)."""
-        from bmlibrarian_lite.data_models import FullTextFetch
-        from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (  # noqa: E501
-            DataDisclosureLevel,
-        )
-
-        analyzer = self._analyzer()
-        analyzer.europepmc.get_full_text_xml = lambda *_a, **_k: (
-            FullTextFetch.served("<article><front/></article>")
-        )
-        report = self._report(pmcid="PMC1")
-
-        analyzer._analyze_data_availability(report, None, False)
-
-        assert (
-            report.data_availability.disclosure_level
-            is DataDisclosureLevel.UNKNOWN
-        )
-
-    def test_europepmc_xml_with_sections_and_no_data_one_is_not_stated(
-        self,
-    ) -> None:
-        """The control: Europe PMC served the article and it states nothing."""
-        from bmlibrarian_lite.data_models import FullTextFetch
-        from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (  # noqa: E501
-            DataDisclosureLevel,
-        )
-
-        analyzer = self._analyzer()
-        analyzer.europepmc.get_full_text_xml = lambda *_a, **_k: (
-            FullTextFetch.served(
-                "<article><body><sec><title>Methods</title>"
-                "<p>We did things.</p></sec></body></article>"
-            )
-        )
-        report = self._report(pmcid="PMC1")
-
-        analyzer._analyze_data_availability(report, None, False)
-
-        assert (
-            report.data_availability.disclosure_level
-            is DataDisclosureLevel.NOT_STATED
-        )
-
     def test_analyze_passes_on_whether_the_full_text_was_read(self) -> None:
         """The wiring: a mutation to ``True`` restored the old behaviour."""
-        from bmlibrarian_lite.data_models import FullTextFetch, RecordFetch
+        from bmlibrarian_lite.data_models import RecordFetch
         from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (  # noqa: E501
             DATA_AVAILABILITY_NOWHERE_TO_LOOK,
             DataDisclosureLevel,
@@ -1110,9 +1065,6 @@ class TestTheGapsTheMutationSweepFound:
         analyzer.pubmed.fetch_article = lambda *_a, **_k: RecordFetch.absent()
         analyzer.pubmed.convert_ids = lambda *_a, **_k: {}
         analyzer.crossref.get_work = lambda *_a, **_k: RecordFetch.absent()
-        analyzer.europepmc.get_full_text_xml = lambda *_a, **_k: (
-            FullTextFetch.absent()
-        )
 
         report = analyzer.analyze(doi="10.1/x")
 
@@ -1389,65 +1341,8 @@ class TestTheGapsTheReviewFound:
             fd.FulltextDiscoverer = original
 
     # ---- C1: Europe PMC holds no open-access copy -----------------------
-
-    def test_no_open_access_copy_is_not_the_article_saying_nothing(
-        self,
-    ) -> None:
-        """The state the PMC branch had no arm for (#353).
-
-        ``FullTextFetch.absent()`` leaves both ``failure`` and ``xml`` None,
-        so it fell past the unreachable guard *and* the sections guard onto
-        ``analyze_data_availability(None)`` -- NOT_STATED, five points, and
-        no warning at all.
-        """
-        from bmlibrarian_lite.data_models import FullTextFetch
-        from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (  # noqa: E501
-            DATA_AVAILABILITY_NO_OPEN_ACCESS_COPY,
-            DataDisclosureLevel,
-        )
-
-        analyzer = self._analyzer()
-        analyzer.europepmc.get_full_text_xml = lambda *_a, **_k: (
-            FullTextFetch.absent()
-        )
-        report = self._report(pmid="1", pmcid="PMC123")
-
-        analyzer._analyze_data_availability(report)
-
-        assert (
-            report.data_availability.disclosure_level
-            is DataDisclosureLevel.UNKNOWN
-        )
-        assert any(
-            DATA_AVAILABILITY_NO_OPEN_ACCESS_COPY in w
-            for w in report.warnings
-        )
-
-    def test_a_served_pmc_text_with_no_statement_still_says_not_stated(
-        self,
-    ) -> None:
-        """The control: the arm above must not mute the honest finding."""
-        from bmlibrarian_lite.data_models import FullTextFetch
-        from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (  # noqa: E501
-            DataDisclosureLevel,
-        )
-
-        analyzer = self._analyzer()
-        analyzer.europepmc.get_full_text_xml = lambda *_a, **_k: (
-            FullTextFetch.served(
-                "<article><body><sec><title>Methods</title>"
-                "<p>We did things.</p></sec></body></article>"
-            )
-        )
-        report = self._report(pmid="1", pmcid="PMC123")
-
-        analyzer._analyze_data_availability(report)
-
-        assert (
-            report.data_availability.disclosure_level
-            is DataDisclosureLevel.NOT_STATED
-        )
-        assert not report.warnings
+    # Its tests went with the fallback that asked (#421): without a full
+    # text, data availability is not assessed whatever Europe PMC holds.
 
     # ---- C2: a PDF we hold but cannot read ------------------------------
 

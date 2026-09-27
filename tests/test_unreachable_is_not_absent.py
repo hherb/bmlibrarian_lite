@@ -34,7 +34,6 @@ from bmlibrarian_lite.analysis_failures import (
     unreachable_source_caveat,
 )
 from bmlibrarian_lite.data_models import (
-    FullTextFetch,
     LookupRecord,
     RequestFailure,
     RequestFailureKind,
@@ -47,26 +46,6 @@ from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer im
     TransparencyReport,
     calculate_transparency_score,
 )
-
-
-class RaisingSession:
-    """A session whose every GET fails the way a throttled host's does."""
-
-    def __init__(self, exc: Exception) -> None:
-        """Record what to raise.
-
-        Args:
-            exc: The exception every ``get`` raises.
-        """
-        self._exc = exc
-
-    def get(self, *_args, **_kwargs):
-        """Fail as the real session would.
-
-        Raises:
-            Exception: Whatever this double was built with.
-        """
-        raise self._exc
 
 
 def _http_error(status: int) -> requests.HTTPError:
@@ -93,80 +72,32 @@ def analyzer() -> StudyTransparencyAnalyzer:
     )
 
 
-class TestFullTextFetch:
-    """The ambiguity #346 is about is not representable."""
+@pytest.fixture
+def no_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail the test if the analysis makes any HTTP request."""
 
-    def test_an_xml_and_a_failure_cannot_both_be_present(self) -> None:
-        """A fetch that both succeeded and failed is not a state."""
-        with pytest.raises(ValueError):
-            FullTextFetch(
-                xml="<article/>",
-                failure=RequestFailure(RequestFailureKind.TIMEOUT),
-            )
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("no request may be made when no text is read (#421)")
 
-    def test_absent_is_a_state_of_its_own(self) -> None:
-        """No XML and no failure means the article has no open-access text."""
-        fetch = FullTextFetch()
-
-        assert fetch.xml is None
-        assert fetch.failure is None
-
-    def test_a_failure_is_not_an_absence(self) -> None:
-        """A fetch that failed carries why, so no caller can read it as none."""
-        fetch = FullTextFetch(failure=RequestFailure(RequestFailureKind.TIMEOUT))
-
-        assert fetch.failure is not None
-        assert fetch.xml is None
+    monkeypatch.setattr(requests.Session, "request", refuse)
 
 
-class TestGetFullTextXml:
-    """``get_full_text_xml`` stops answering two questions with one ``None``."""
+class TestDataAvailabilityWithNoTextRead:
+    """No text read is 'not assessed', never 'no statement' (#346, #353).
 
-    def test_a_throttled_host_is_reported_as_a_failure(self, analyzer) -> None:
-        """429 is the service refusing, not the article lacking full text."""
-        analyzer.europepmc.session = RaisingSession(_http_error(429))
-
-        fetch = analyzer.europepmc.get_full_text_xml("PMC123")
-
-        assert fetch.failure is not None
-        assert fetch.failure.status_code == 429
-
-    def test_a_timeout_is_reported_as_a_failure(self, analyzer) -> None:
-        """A connection we never completed says nothing about the article."""
-        analyzer.europepmc.session = RaisingSession(requests.Timeout("slow"))
-
-        fetch = analyzer.europepmc.get_full_text_xml("PMC123")
-
-        assert fetch.failure is not None
-        assert fetch.failure.kind is RequestFailureKind.TIMEOUT
-
-    def test_a_404_is_an_article_without_open_access_full_text(
-        self, analyzer
-    ) -> None:
-        """Europe PMC answers 404 for a PMC ID it holds no full text for.
-
-        This is the one status that is genuinely about the article, so it
-        must stay 'absent' -- reporting it as unreachable would put a caveat
-        on every closed-access paper and make the honest majority unreadable.
-        """
-        analyzer.europepmc.session = RaisingSession(_http_error(404))
-
-        fetch = analyzer.europepmc.get_full_text_xml("PMC123")
-
-        assert fetch.failure is None
-        assert fetch.xml is None
-
-
-class TestDataAvailabilityFromAnUnreachableSource:
-    """An unreachable Europe PMC is 'not assessed', never 'no statement'."""
+    These tests once drove a Europe PMC fallback that fetched the XML for
+    the data statement alone: a throttled host, a 404, an unparseable body.
+    The fallback is gone (#421) -- discovery is the one path to Europe
+    PMC's full text, and its failures are tested with it -- so what is left
+    to pin is the rule itself, for an article with a PMC ID.
+    """
 
     def _report(self) -> TransparencyReport:
-        """A report with a PMC ID, so the Europe PMC fallback is taken."""
+        """A report with a PMC ID, which once sent this path to Europe PMC."""
         return TransparencyReport(pmid="1", pmcid="PMC123")
 
-    def test_the_level_is_unknown_not_not_stated(self, analyzer) -> None:
+    def test_the_level_is_unknown_not_not_stated(self, analyzer, no_requests) -> None:
         """NOT_STATED is a finding about the paper; UNKNOWN is about us."""
-        analyzer.europepmc.session = RaisingSession(_http_error(429))
         report = self._report()
 
         analyzer._analyze_data_availability(report)
@@ -176,61 +107,41 @@ class TestDataAvailabilityFromAnUnreachableSource:
             is DataDisclosureLevel.UNKNOWN
         )
 
-    def test_the_reader_is_told_the_source_was_unreachable(
-        self, analyzer
-    ) -> None:
+    def test_the_reader_is_told_nothing_was_read(self, analyzer, no_requests) -> None:
         """Logging is not reporting (golden rule 8)."""
-        analyzer.europepmc.session = RaisingSession(_http_error(429))
         report = self._report()
 
         analyzer._analyze_data_availability(report)
 
-        assert any("Europe PMC" in w for w in report.warnings)
-
-    def test_the_caveat_carries_no_provider_text(self, analyzer) -> None:
-        """Provider text can carry a credential (#330, #196)."""
-        analyzer.europepmc.session = RaisingSession(
-            requests.ConnectionError("failed: api_key=SECRETVALUE")
+        assert any(
+            "Neither the article's full text nor an open-access copy" in w
+            for w in report.warnings
         )
-        report = self._report()
 
-        analyzer._analyze_data_availability(report)
-
-        assert not any("SECRETVALUE" in w for w in report.warnings)
-
-    def test_an_unreachable_source_costs_the_paper_no_score(
-        self, analyzer
+    def test_an_unread_statement_costs_the_paper_no_score(
+        self, analyzer, no_requests
     ) -> None:
-        """A throttle on our side must not be a penalty on their paper.
-
-        NOT_STATED scores -5. Charging that for a request we could not make
-        is a fabricated number shown to a clinician.
-        """
-        analyzer.europepmc.session = RaisingSession(_http_error(429))
-        unreachable = self._report()
-        analyzer._analyze_data_availability(unreachable)
+        """NOT_STATED scores -5; charging it for text nobody read is fabricated."""
+        unread = self._report()
+        analyzer._analyze_data_availability(unread)
 
         not_assessed = TransparencyReport(pmid="1", pmcid="PMC123")
 
-        assert calculate_transparency_score(
-            unreachable
-        ) == calculate_transparency_score(not_assessed)
+        assert calculate_transparency_score(unread) == calculate_transparency_score(
+            not_assessed
+        )
 
-    def test_no_risk_indicator_is_raised_from_an_unreachable_source(
-        self, analyzer
+    def test_no_risk_indicator_is_raised_from_an_unread_statement(
+        self, analyzer, no_requests
     ) -> None:
         """A risk indicator is a statement about the study.
 
-        Asserting only that UNKNOWN raises nothing proves nothing: no data
-        level except NOT_AVAILABLE and RESTRICTED raises an indicator, so
-        such a test passes with #346 still present. The level that *does*
-        raise one is checked alongside, so this fails the day UNKNOWN is
-        added to that set.
+        The level that *does* raise one is checked alongside, so this fails
+        the day UNKNOWN is added to that set.
         """
-        analyzer.europepmc.session = RaisingSession(_http_error(429))
-        unreachable = self._report()
-        analyzer._analyze_data_availability(unreachable)
-        analyzer._identify_risk_indicators(unreachable)
+        unread = self._report()
+        analyzer._analyze_data_availability(unread)
+        analyzer._identify_risk_indicators(unread)
 
         withheld = self._report()
         withheld.data_availability = DataAvailabilityInfo(
@@ -238,35 +149,26 @@ class TestDataAvailabilityFromAnUnreachableSource:
         )
         analyzer._identify_risk_indicators(withheld)
 
-        assert unreachable.risk_of_bias_indicators == []
+        assert unread.risk_of_bias_indicators == []
         assert withheld.risk_of_bias_indicators != [], (
             "control: a level that is about the study must raise one"
         )
 
     def test_a_read_full_text_with_no_statement_still_says_not_stated(
-        self, analyzer
+        self, analyzer, no_requests
     ) -> None:
         """The control: the fix must not mute the honest finding.
 
         Without this, returning UNKNOWN unconditionally would pass every
         other test in this class.
-
-        The reachable source has to *serve the article's text* for its
-        silence to be the article's. This test used to stub a 404, but
-        "Europe PMC holds no open-access copy" is a fact about Europe PMC's
-        holdings, not about what the paper states -- see the sibling test
-        below, which pins that case the other way (#353).
         """
-        analyzer.europepmc.get_full_text_xml = lambda *_a, **_k: (
-            FullTextFetch.served(
-                "<article><body>"
-                "<sec><title>Methods</title><p>We did things.</p></sec>"
-                "</body></article>"
-            )
-        )
         report = self._report()
 
-        analyzer._analyze_data_availability(report)
+        analyzer._analyze_data_availability(
+            report,
+            fulltext_sections={"funding": "NIH grant R01."},
+            fulltext_read=True,
+        )
 
         assert (
             report.data_availability.disclosure_level
@@ -274,28 +176,21 @@ class TestDataAvailabilityFromAnUnreachableSource:
         )
         assert not report.warnings
 
-    def test_no_open_access_copy_is_not_the_article_saying_nothing(
-        self, analyzer
-    ) -> None:
-        """A 404 is about Europe PMC's holdings, not the paper (#353).
-
-        Every sibling state in this branch was handled -- unreachable,
-        unparseable, parsed-but-sectionless -- and this one fell through to
-        ``analyze_data_availability(None)``, charging five points and
-        telling a clinician the study publishes no data statement, with no
-        warning at all. The population is every embargoed deposit and
-        author manuscript that is in PMC but outside the OA subset.
-        """
-        analyzer.europepmc.session = RaisingSession(_http_error(404))
+    def test_a_read_statement_is_scored(self, analyzer, no_requests) -> None:
+        """The control's other half: a statement found is classified."""
         report = self._report()
 
-        analyzer._analyze_data_availability(report)
-
-        assert (
-            report.data_availability.disclosure_level
-            is DataDisclosureLevel.UNKNOWN
+        analyzer._analyze_data_availability(
+            report,
+            fulltext_sections={"data_sharing": "All data are openly available in Zenodo."},
+            fulltext_read=True,
         )
-        assert any("open-access" in w for w in report.warnings)
+
+        assert report.data_availability.disclosure_level not in (
+            DataDisclosureLevel.NOT_STATED,
+            DataDisclosureLevel.UNKNOWN,
+        )
+        assert report.warnings == []
 
 
 class TestUnreachableSourceCaveat:
@@ -608,141 +503,6 @@ class TestDiscoveryResultSaysWhyItFoundNothing:
 
         assert sources
         assert record == LookupRecord()
-
-
-class AnsweringSession:
-    """A session that answers 200 with a body, as a reachable host does."""
-
-    def __init__(self, body: str) -> None:
-        """Record the body to answer with.
-
-        Args:
-            body: What ``response.text`` should be.
-        """
-        self._body = body
-
-    def get(self, *_args, **_kwargs):
-        """Answer 200 with the recorded body.
-
-        Returns:
-            A response carrying the recorded text.
-        """
-        response = requests.Response()
-        response.status_code = 200
-        response._content = self._body.encode()
-        return response
-
-
-_DATA_STATEMENT_XML = (
-    "<article><body><sec><title>Data Availability</title>"
-    "<p>All data are openly available in Zenodo.</p>"
-    "</sec></body></article>"
-)
-
-
-class TestAFetchedFullTextIsActuallyUsed:
-    """The control the failure tests need: the success path must work.
-
-    Without these, returning ``FullTextFetch.absent()`` unconditionally --
-    every article silently losing its full text -- passes every other test
-    in this file. That is the failure mode of the fix itself.
-    """
-
-    def test_a_served_body_comes_back_as_the_xml(self, analyzer) -> None:
-        """A reachable Europe PMC that serves the text must hand it over."""
-        analyzer.europepmc.session = AnsweringSession(_DATA_STATEMENT_XML)
-
-        fetch = analyzer.europepmc.get_full_text_xml("PMC123")
-
-        assert fetch.xml == _DATA_STATEMENT_XML
-        assert fetch.failure is None
-
-    def test_a_served_statement_is_read_and_scored(self, analyzer) -> None:
-        """The branch that parses the XML, which no test reached before."""
-        analyzer.europepmc.session = AnsweringSession(_DATA_STATEMENT_XML)
-        report = TransparencyReport(pmid="1", pmcid="PMC123")
-
-        analyzer._analyze_data_availability(report)
-
-        assert (
-            report.data_availability.disclosure_level
-            is not DataDisclosureLevel.NOT_STATED
-        )
-        assert report.warnings == []
-
-    def test_an_empty_body_is_not_an_article_without_a_statement(
-        self, analyzer
-    ) -> None:
-        """A 2xx that served nothing establishes nothing about the article.
-
-        ``raise_for_status`` admits a 200 with an empty body, and
-        ``FullTextFetch(xml="")`` used to read as an absence at every
-        truthiness check -- #346 reached through the type built to stop it.
-        """
-        analyzer.europepmc.session = AnsweringSession("   ")
-
-        fetch = analyzer.europepmc.get_full_text_xml("PMC123")
-
-        assert fetch.is_unreachable
-
-    def test_an_unparseable_body_is_not_an_absence(self, analyzer) -> None:
-        """The statement may be in the half we failed to parse.
-
-        Logging it and still charging NOT_STATED leaves the fabricated
-        finding in front of the clinician (golden rule 8).
-        """
-        analyzer.europepmc.session = AnsweringSession("<article><not-closed>")
-        report = TransparencyReport(pmid="1", pmcid="PMC123")
-
-        analyzer._analyze_data_availability(report)
-
-        assert (
-            report.data_availability.disclosure_level
-            is DataDisclosureLevel.UNKNOWN
-        )
-        assert any("Europe PMC" in w for w in report.warnings)
-
-
-class TestOnlyA404IsAnAbsence:
-    """404 is the one status about the article; the rest are about us."""
-
-    @pytest.mark.parametrize("status", [401, 403, 429, 500, 503])
-    def test_every_other_status_leaves_the_article_unassessed(
-        self, analyzer, status
-    ) -> None:
-        """401/403 are this repo's paywall statuses, so widening is tempting.
-
-        Adding them to the 404 arm would restore #346 for every paywalled
-        paper, and nothing else in the suite would notice.
-        """
-        analyzer.europepmc.session = RaisingSession(_http_error(status))
-
-        fetch = analyzer.europepmc.get_full_text_xml("PMC123")
-
-        assert fetch.is_unreachable, f"HTTP {status} read as an absence"
-
-
-class TestFullTextFetchRefusesNonStates:
-    """The invariants, since a docstring stopped no caller before."""
-
-    def test_a_blank_xml_is_not_a_full_text(self) -> None:
-        """Empty would read as an absence at every truthiness check."""
-        with pytest.raises(ValueError):
-            FullTextFetch(xml="")
-
-    def test_a_whitespace_xml_is_not_a_full_text(self) -> None:
-        """Whitespace is empty for every purpose this serves."""
-        with pytest.raises(ValueError):
-            FullTextFetch.served("   \n ")
-
-    def test_the_named_states_are_what_they_say(self) -> None:
-        """The factories exist so the dangerous state is never the default."""
-        assert FullTextFetch.served("<a/>").xml == "<a/>"
-        assert FullTextFetch.absent().xml is None
-        assert not FullTextFetch.absent().is_unreachable
-        assert FullTextFetch.unreachable(
-            RequestFailure(RequestFailureKind.TIMEOUT)
-        ).is_unreachable
 
 
 class TestSourceLookupFailureNamesItsService:

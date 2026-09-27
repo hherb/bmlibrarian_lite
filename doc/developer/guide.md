@@ -86,6 +86,7 @@ bmlibrarian_lite/
 │   ├── exceptions.py        # Custom exceptions
 │   ├── data_models.py       # Core data structures
 │   ├── europepmc.py         # Europe PMC client (cursor pagination)
+│   ├── jats_markdown.py     # JATS XML → markdown (front/back-matter statements)
 │   ├── search_merger.py     # Deduplication (PMID/DOI/PMC/title)
 │   ├── search_service.py    # Unified search across providers
 │   ├── search_failures.py   # Failed requests → shortfalls → reader-facing notice
@@ -484,6 +485,34 @@ Full Europe PMC REST API client with:
 - Preprint filtering
 - Full-text XML retrieval
 - Query translation from PubMed syntax
+
+#### JATS to Markdown (`jats_markdown.py`)
+
+The markdown the document view shows, interrogation embeds and the
+transparency analyser segments. The analyser finds a statement only by its
+heading, so the converter carries every `<back>` element but the reference
+list, and the statements PLOS keeps in `<front>` (the competing interests
+footnote, a titled `<notes>`, `<funding-statement>`), each under its own
+heading, after the body and before the references (#420). A heading comes
+from the element's stated statement type (`fn-type`, `notes-type`,
+`sec-type`) when it holds no sections of its own, with the printed heading
+kept in bold beneath; else from a title, a label holding a word, or a bold
+run-in. Every paragraph opening "**X:**" is a heading of its own, and a bare
+footnote about conflicts of interest is headed "Competing Interests".
+
+**Recognising more end matter makes a missed statement cost the study
+points** (a recognised funding section enables the COI `NOT_STATED` charge).
+So the analyser charges a missing COI or data statement only when the text
+does not use its wording at all (`_mentions`); otherwise it is not assessed.
+Measure outcomes, not just recognised sections, before and after any change
+here.
+
+Converted markdown is cached with a first-line stamp naming the converter
+version (`pdf_utils.save_fulltext_markdown`). **Bump
+`JATS_MARKDOWN_CONVERTER_VERSION` whenever the same XML would convert
+differently**: the cache is read before Europe PMC is asked, and a file with
+any other stamp is converted again. A change that moves what the analyser
+finds also bumps `TRANSPARENCY_ANALYZER_VERSION`.
 
 #### Full-Text Discovery (`fulltext_discovery.py`)
 
