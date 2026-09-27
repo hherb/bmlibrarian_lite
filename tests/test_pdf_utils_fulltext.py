@@ -30,11 +30,17 @@ from pathlib import Path
 from typing import Dict, Any
 from unittest.mock import patch
 
+from bmlibrarian_lite.jats_markdown import JATS_MARKDOWN_CONVERTER_VERSION
+
 from bmlibrarian_lite.pdf_utils import (
     get_fulltext_base_dir,
     generate_fulltext_path,
     find_existing_fulltext,
+    fulltext_cache_stamp,
+    read_cached_fulltext,
+    read_stale_cached_fulltext,
     save_fulltext_markdown,
+    split_cache_stamp,
 )
 from bmlibrarian_lite.constants import DEFAULT_FULLTEXT_BASE_DIR
 
@@ -199,23 +205,34 @@ class TestSaveFulltextMarkdown:
         path = save_fulltext_markdown(doc_dict, content, temp_dir)
 
         assert path.exists()
-        assert path.read_text(encoding="utf-8") == content
+        assert read_cached_fulltext(path) == content
+
+    def test_the_file_is_stamped_with_its_converter(self, temp_dir: Path) -> None:
+        """#420: the stamp is what lets a converter fix reach cached articles."""
+        path = save_fulltext_markdown({"pmcid": "PMC1", "year": 2025}, "# T", temp_dir)
+
+        first_line = path.read_text(encoding="utf-8").split("\n", 1)[0]
+        assert first_line == fulltext_cache_stamp()
+        assert str(JATS_MARKDOWN_CONVERTER_VERSION) in first_line
+
+    def test_the_stamp_is_an_html_comment(self) -> None:
+        """It must render as nothing where the file is opened as markdown."""
+        stamp = fulltext_cache_stamp()
+        assert stamp.startswith("<!--") and stamp.endswith("-->")
 
     def test_creates_directories(self, temp_dir: Path) -> None:
         """Test that necessary directories are created."""
         doc_dict = {"pmcid": "PMC12101959", "year": 2025}
-        content = "# Test"
 
-        path = save_fulltext_markdown(doc_dict, content, temp_dir)
+        save_fulltext_markdown(doc_dict, "# Test", temp_dir)
 
         assert (temp_dir / "2025").exists()
 
     def test_returns_path(self, temp_dir: Path) -> None:
         """Test that function returns the file path."""
         doc_dict = {"pmcid": "PMC12101959", "year": 2025}
-        content = "# Test"
 
-        path = save_fulltext_markdown(doc_dict, content, temp_dir)
+        path = save_fulltext_markdown(doc_dict, "# Test", temp_dir)
 
         assert isinstance(path, Path)
         assert path.suffix == ".md"
@@ -224,13 +241,10 @@ class TestSaveFulltextMarkdown:
         """Test that existing files are overwritten."""
         doc_dict = {"pmcid": "PMC12101959", "year": 2025}
 
-        # Save first version
         save_fulltext_markdown(doc_dict, "Version 1", temp_dir)
-
-        # Save second version
         path = save_fulltext_markdown(doc_dict, "Version 2", temp_dir)
 
-        assert path.read_text(encoding="utf-8") == "Version 2"
+        assert read_cached_fulltext(path) == "Version 2"
 
     def test_handles_unicode(self, temp_dir: Path) -> None:
         """Test that unicode content is handled correctly."""
@@ -239,4 +253,120 @@ class TestSaveFulltextMarkdown:
 
         path = save_fulltext_markdown(doc_dict, content, temp_dir)
 
-        assert path.read_text(encoding="utf-8") == content
+        assert read_cached_fulltext(path) == content
+
+
+class TestReadCachedFulltext:
+    """Tests for read_cached_fulltext() function."""
+
+    def test_an_unstamped_file_is_stale(self, temp_dir: Path) -> None:
+        """Every file cached before #420 carries no stamp."""
+        path = temp_dir / "PMC1.md"
+        path.write_text("# Old markdown", encoding="utf-8")
+        assert read_cached_fulltext(path) is None
+
+    def test_an_older_converters_file_is_stale(self, temp_dir: Path) -> None:
+        """A file an earlier converter stamped is converted again too."""
+        path = temp_dir / "PMC1.md"
+        older = fulltext_cache_stamp(JATS_MARKDOWN_CONVERTER_VERSION - 1)
+        path.write_text(f"{older}\n# Old markdown", encoding="utf-8")
+        assert read_cached_fulltext(path) is None
+
+    def test_a_current_file_is_read_without_its_stamp(self, temp_dir: Path) -> None:
+        """Control: the current converter's file is served, stamp removed."""
+        path = temp_dir / "PMC1.md"
+        path.write_text(f"{fulltext_cache_stamp()}\n# Current\n\nBody.", encoding="utf-8")
+        assert read_cached_fulltext(path) == "# Current\n\nBody."
+
+    @pytest.mark.parametrize(
+        "rest", ["", "\n", "\n   \n"], ids=["stamp-only", "newline", "whitespace"]
+    )
+    def test_a_stamped_file_with_nothing_after_it_is_stale(
+        self, temp_dir: Path, rest: str
+    ) -> None:
+        """#426 review: a damaged file must not stop the article being fetched.
+
+        A cached file is never written empty, and served as a hit it made
+        discovery return an empty document for good.
+        """
+        path = temp_dir / "PMC1.md"
+        path.write_text(f"{fulltext_cache_stamp()}{rest}", encoding="utf-8")
+        assert read_cached_fulltext(path) is None
+
+    def test_an_empty_file_is_stale(self, temp_dir: Path) -> None:
+        """An empty file carries no stamp."""
+        path = temp_dir / "PMC1.md"
+        path.write_text("", encoding="utf-8")
+        assert read_cached_fulltext(path) is None
+
+    def test_a_newer_converters_file_is_stale(self, temp_dir: Path) -> None:
+        """After a downgrade, a file a later converter wrote is not trusted."""
+        path = temp_dir / "PMC1.md"
+        newer = fulltext_cache_stamp(JATS_MARKDOWN_CONVERTER_VERSION + 1)
+        path.write_text(f"{newer}\n# Newer", encoding="utf-8")
+        assert read_cached_fulltext(path) is None
+
+
+class TestReadStaleCachedFulltext:
+    """The reader's fallback: an earlier converter's text, stamp removed."""
+
+    def test_an_unstamped_file_is_read_whole(self, temp_dir: Path) -> None:
+        """Every file cached before #420 is all markdown."""
+        path = temp_dir / "PMC1.md"
+        path.write_text("# Old markdown\n\nBody.", encoding="utf-8")
+        assert read_stale_cached_fulltext(path) == "# Old markdown\n\nBody."
+
+    def test_an_older_stamp_is_removed(self, temp_dir: Path) -> None:
+        """The stamp is an HTML comment, but it is not the article's text."""
+        path = temp_dir / "PMC1.md"
+        older = fulltext_cache_stamp(JATS_MARKDOWN_CONVERTER_VERSION - 1)
+        path.write_text(f"{older}\n# Old", encoding="utf-8")
+        assert read_stale_cached_fulltext(path) == "# Old"
+
+    def test_a_blank_file_yields_nothing(self, temp_dir: Path) -> None:
+        """Nothing to show is not a document to show."""
+        path = temp_dir / "PMC1.md"
+        path.write_text(f"{fulltext_cache_stamp()}\n  ", encoding="utf-8")
+        assert read_stale_cached_fulltext(path) is None
+
+
+class TestSplitCacheStamp:
+    """split_cache_stamp() recognises a stamp of any version."""
+
+    @pytest.mark.parametrize("version", [1, JATS_MARKDOWN_CONVERTER_VERSION, 99])
+    def test_a_stamp_of_any_version_is_split_off(self, version: int) -> None:
+        """Any version's stamp is split off."""
+        stamp = fulltext_cache_stamp(version)
+        assert split_cache_stamp(f"{stamp}\n# T") == (stamp, "# T")
+
+    def test_a_file_without_one_is_all_markdown(self) -> None:
+        """A heading on the first line is not a stamp."""
+        assert split_cache_stamp("# T\n\nBody") == (None, "# T\n\nBody")
+
+
+class TestSaveIsAtomic:
+    """#426 review: a write cut short must not leave a stamped half-article."""
+
+    def test_no_partial_file_is_left_behind(self, temp_dir: Path) -> None:
+        """The file is written aside and moved into place."""
+        path = save_fulltext_markdown({"pmcid": "PMC1", "year": 2025}, "# T", temp_dir)
+        assert [p.name for p in path.parent.iterdir()] == [path.name]
+
+    def test_a_failed_write_leaves_the_old_file(self, temp_dir: Path) -> None:
+        """A write that fails midway does not replace what was cached."""
+        doc = {"pmcid": "PMC1", "year": 2025}
+        path = save_fulltext_markdown(doc, "# Complete", temp_dir)
+        with patch("pathlib.Path.write_text", side_effect=OSError("disk full")):
+            with pytest.raises(OSError):
+                save_fulltext_markdown(doc, "# Half", temp_dir)
+        assert read_cached_fulltext(path) == "# Complete"
+
+    def test_a_failed_move_leaves_no_partial_file(self, temp_dir: Path) -> None:
+        """The aside copy is removed when it cannot be moved into place."""
+        doc = {"pmcid": "PMC1", "year": 2025}
+        path = save_fulltext_markdown(doc, "# Complete", temp_dir)
+        with patch("bmlibrarian_lite.pdf_utils.os.replace", side_effect=OSError("busy")):
+            with pytest.raises(OSError):
+                save_fulltext_markdown(doc, "# New", temp_dir)
+        assert [p.name for p in path.parent.iterdir()] == [path.name]
+        assert read_cached_fulltext(path) == "# Complete"

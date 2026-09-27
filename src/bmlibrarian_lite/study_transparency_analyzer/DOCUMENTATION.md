@@ -47,7 +47,7 @@ Research has consistently shown that industry-sponsored studies are more likely 
 
 Given a **DOI** or **PubMed ID (PMID)**, and optionally **full-text content**, the analyzer:
 
-1. Queries multiple databases (PubMed, CrossRef, ClinicalTrials.gov, Europe PMC, OpenAlex)
+1. Queries multiple databases (PubMed, CrossRef, ClinicalTrials.gov, OpenAlex); full-text discovery reads Europe PMC's XML for the article's own text
 2. Extracts funding/sponsor information
 3. Classifies sponsors as industry vs. government/academic
 4. Analyzes conflict of interest statements using multi-pass pharma name detection
@@ -225,11 +225,11 @@ The tool chains multiple APIs to gather comprehensive information:
 
 ### 4. Europe PMC
 
-**What it provides:**
-- Enhanced funding data
-- Full-text access for open access articles
-- Data availability statements (from full text)
-- Better structured metadata than PubMed for some fields
+**What it provides:** full-text XML for open access articles, read through
+full-text discovery (`fulltext_discovery.py`), never by the analyser itself.
+The converted text is what every full-text dimension -- COI, data
+availability, funding -- is read from. The analyser has no Europe PMC client
+of its own since #421.
 
 **API Documentation:** https://europepmc.org/RestfulWebService
 
@@ -544,16 +544,33 @@ By default, `analyze()` automatically attempts to retrieve full-text content whe
 Once full text is available (auto-discovered or manually provided), `extract_fulltext_sections()` scans for standard biomedical section headers:
 
 ```python
-# Sections extracted (canonical key -> header patterns)
+# Sections extracted (canonical key -> examples of the header patterns;
+# the full lists are in extract_fulltext_sections)
 section_headers = {
-    'coi': ['declaration of interests', 'conflict of interest', 'competing interests', 'disclosures'],
-    'data_sharing': ['data sharing', 'data availability', 'data access'],
-    'funding': ['funding', 'financial support', 'sources of funding'],
-    'funding_role': ['role of the funding source', 'role of the sponsor'],
+    'coi': ['conflict of interest', 'competing interests', 'disclosures',
+            "authors' relationships and activities", 'duality of interest',
+            "conflits d'intérêts", 'interessenkonflikt', ...],
+    'data_sharing': ['data sharing', 'data availability', 'data access',
+                     'availability of data and materials', 'data accessibility', ...],
+    'funding': ['funding', 'financial support', 'sources of funding', ...],
+    'funding_role': ['role of the funding source', 'role of the sponsor', ...],
     'acknowledgments': ['acknowledgments', 'acknowledgements'],
     'contributors': ['contributors', 'author contributions'],
 }
 ```
+
+A section runs from its heading to the next recognised heading, to the
+references, or to a markdown heading at the same level or above -- any
+markdown heading, when the section's own heading is a plain-text one from a
+PDF (#420). Only the first section found for each key is kept. Converted JATS carries the back-matter statements and PLOS's
+front-matter ones under their own headings (`jats_markdown.py`), placed after
+the body and before the references. In the end matter nothing is emitted
+without a heading once a sibling has had one, so an untitled abbreviation
+list or disclaimer is never read as part of the statement before it (#426
+review). A missing COI or data statement is charged (`not_stated`) only when
+the text read does not use the statement's wording outside its reference
+list; a text that does may hold a statement we failed to find, so it is
+`not_assessed` / `unknown` with a caveat.
 
 ### Priority Order
 
@@ -563,7 +580,10 @@ Full-text sections take priority over API-sourced data:
    is consulted: only the article's own text can establish that a study
    declares no conflicts, and neither source having been read is recorded
    as `not_assessed` rather than charged (#352).
-2. **Data availability:** Full-text `data_sharing` section > Europe PMC XML extraction
+2. **Data availability:** Full-text `data_sharing` section only. Without a
+   full text it is `unknown` (not assessed), with a caveat; the Europe PMC XML
+   fallback that once read the XML for this statement alone was removed
+   (#421), because discovery already reads that XML for every dimension.
 
 ### Example
 
@@ -841,7 +861,7 @@ RISK INDICATORS:
   * Industry ties combined with restricted/unavailable data
   * Clinical trial without detected registration
 
-Data sources: PubMed, CrossRef, Europe PMC, Full-text
+Data sources: PubMed, CrossRef, Full-text
 ============================================================
 ```
 

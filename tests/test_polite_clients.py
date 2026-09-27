@@ -25,9 +25,6 @@ from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer im
     OpenAlexClient,
     PubMedClient,
 )
-from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
-    EuropePMCClient as TransparencyEuropePMCClient,
-)
 
 
 def adapters(session: object) -> list[object]:
@@ -142,7 +139,6 @@ TRANSPARENCY_CLIENTS = [
         lambda: CrossRefClient(email="researcher@example.org").session, id="crossref"
     ),
     pytest.param(lambda: ClinicalTrialsClient().session, id="clinicaltrials"),
-    pytest.param(lambda: TransparencyEuropePMCClient().session, id="europepmc"),
     pytest.param(
         lambda: OpenAlexClient(email="researcher@example.org").session, id="openalex"
     ),

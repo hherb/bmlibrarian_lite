@@ -111,7 +111,17 @@ class TransparencyUnassessed:
 #: 2.3: #386 (a full text counts as analysed only when a section of it was
 #: recognised, and whitespace is no text -- a rating resting on neither now
 #: says its certainty is limited -- and each score records its terms).
-TRANSPARENCY_ANALYZER_VERSION = "2.3"
+#: 2.4: #420 and #421 (the statements journals keep in the back matter, and
+#: PLOS in the front matter, reach the analyser under their headings, a
+#: stated statement type naming the heading; a markdown heading at the same
+#: or a higher level ends the section before it; nothing in the end matter
+#: runs on into a statement, and a group of one statement's footnotes is
+#: read whole; "Acknowledgements" and more competing interests and data
+#: availability headings are recognised, some of them non-English; a read
+#: text that still uses a statement's wording outside its references is
+#: not charged for missing it; and data availability is no longer read from
+#: Europe PMC's XML when no full text was).
+TRANSPARENCY_ANALYZER_VERSION = "2.4"
 
 #: What every row written before #360 says, whatever analysed it: the field
 #: was never compared to anything, so it never moved off its default.

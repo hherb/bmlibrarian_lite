@@ -100,12 +100,14 @@ absence leaves the reader with the fabricated finding (golden rule 8: handled,
 logged **and reported**).
 
 - **Make the ambiguity unrepresentable, not documented.** Python's
-  `FullTextFetch` carries the XML *or* a `RequestFailure`, and refuses both
-  at once; `SourceLookupFailure` names the service a discovery could not ask.
+  `RecordFetch` carries the record *or* a `RequestFailure`, and refuses both
+  at once (its first sibling, `FullTextFetch`, went with the Europe PMC
+  fallback it served, #421); `SourceLookupFailure` names the service a
+  discovery could not ask.
   A docstring saying "`None` is ambiguous here" did not stop a single caller.
 - **"Not assessed" is a state of its own, and it costs the paper nothing.**
-  An unreachable Europe PMC leaves `DataDisclosureLevel.UNKNOWN`, which scores
-  neutral. `NOT_STATED` scores −5 and tells a clinician the study publishes no
+  A full text discovery could not retrieve -- Europe PMC throttled us, say --
+  leaves `DataDisclosureLevel.UNKNOWN`, which scores neutral. `NOT_STATED` scores −5 and tells a clinician the study publishes no
   data availability statement — a number and a claim invented out of our own
   throttling. No risk-of-bias indicator may be raised from a source that was
   never read. The conflict of interest path keeps the same rule through
@@ -156,7 +158,7 @@ logged **and reported**).
 - **Unreadable is not absent either.** A source that answers `2xx` with an
   empty body, or XML that does not parse, has told us nothing about the
   article — so that is "not assessed" too, not an absence. The same for a
-  body whose shape we cannot read: `FullTextFetch` refuses a blank XML, and
+  body whose shape we cannot read: `RecordFetch` refuses an empty record, and
   the id converter routes a `pmcid` it cannot read to a failure while a
   `pmcid` key that is simply *absent* stays the article's answer.
 - **Every unsuccessful path says it in words.** Carrying the failures in a
@@ -252,8 +254,9 @@ logged **and reported**).
 
 **Ports.** Python is canonical and has landed this for every path listed
 here (see *Still outstanding* below for what it has not):
-the Europe PMC full-text fetch behind data availability and the three
-full-text discovery lookups (#346, #347), the conflict of interest
+the three full-text discovery lookups (#346, #347; the Europe PMC
+full-text fetch behind data availability had the same fix until #421
+removed it), the conflict of interest
 disclosure (#352, #348, #351), and the sources nobody asked -- data
 availability outside PMC, full-text discovery's own failures, the skipped
 lookups, and the metadata records behind trial registration and funding
@@ -473,7 +476,8 @@ the claim was still made, because a correct `absence_established` can only
 be as honest as what it is fed:
 
 - **Europe PMC holding no open-access copy is not the article saying
-  nothing.** `FullTextFetch.absent()` sets neither `failure` nor `xml`, so
+  nothing.** (The fallback this was found in is gone since #421; the rule
+  stands.) `FullTextFetch.absent()` set neither `failure` nor `xml`, so
   it fell past the unreachable guard *and* the sections guard onto
   `analyze_data_availability(None)` -- `NOT_STATED`, five points, no
   warning. Every embargoed deposit and author manuscript in PMC but outside

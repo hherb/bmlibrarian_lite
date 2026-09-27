@@ -43,6 +43,7 @@ config.py             # LiteConfig (~/.bmlibrarian_lite/)
 storage.py            # LiteStorage (SQLite + sqlite-vec)
 data_models.py        # LiteDocument, ScoredDocument, Citation, SearchProvider, RequestFailure, RetrievalShortfall, pagination models
 europepmc.py          # EuropePMCClient (cursor pagination)
+jats_markdown.py      # JATS XML → markdown; front/back-matter statements; cache version
 search_service.py     # Unified search across PubMed + Europe PMC
 search_failures.py    # RequestFailure from requests errors; shortfall clauses, notice, advice, session metadata
 analysis_failures.py  # AnalysisShortfall → notice, advice (the stages after the search); also_failed_text

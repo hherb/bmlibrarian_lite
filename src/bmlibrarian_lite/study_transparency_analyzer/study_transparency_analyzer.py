@@ -52,16 +52,15 @@ from ..constants import (
     HTTP_NOT_FOUND,
     PUBMED_TRIAL_REGISTRY_DATABANKS,
     SERVICE_CROSSREF,
-    SERVICE_EUROPE_PMC,
     SERVICE_PUBMED,
 )
 from ..data_models import (
-    FullTextFetch,
     LookupRecord,
     RecordFetch,
     RequestFailure,
     RequestFailureKind,
 )
+from ..jats_markdown import COI_WORDING_PATTERN
 from ..search_failures import request_failure_from_exception
 from ..transparency_terms import (
     COI_INDUSTRY_TIES_LABEL,
@@ -84,7 +83,7 @@ from ..transparency_terms import (
 # The adapter must therefore retry a 429/503 zero times on its own: left to
 # the default of POLITE_MAX_THROTTLE_RETRIES, a persistent 503 would cost
 # four requests where it used to cost one, which is the opposite of being
-# polite -- and www.ebi.ac.uk's budget is shared with the main search path.
+# polite -- and NCBI's budget is shared with the main search path.
 _ADAPTER_OWNS_NO_THROTTLE_RETRIES = 0
 
 # Configure logging
@@ -342,9 +341,8 @@ class TransparencyReport:
     # established nothing -- the COI and data availability analyses each
     # record that dimension as not assessed -- so a rating resting on it has
     # the certainty of one made without the full text, and must say so.
-    # The Europe PMC XML the data availability fallback reads does not set
-    # it: that XML is read for the data statement alone, and the COI
-    # analysis has by then recorded that the full text was not read.
+    # Text reaches the analyser only through the caller or discovery; there
+    # is no side channel read for one dimension alone (#421).
     full_text_analyzed: bool = False
 
     # Metadata
@@ -1928,84 +1926,6 @@ class ClinicalTrialsClient:
         )
 
 
-class EuropePMCClient:
-    """Client for Europe PMC API - better structured data than PubMed."""
-
-    BASE_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest"
-
-    def __init__(self):
-        self.session = mount_politely(
-            requests.Session(),
-            retry=Retry(total=_ADAPTER_OWNS_NO_THROTTLE_RETRIES),
-        )
-
-    # ``get_article`` used to live here: a ``resultType=core`` search whose
-    # ``Optional[Dict]`` return meant either "Europe PMC holds no record of
-    # this article" or "we could not reach Europe PMC" (#351). Its only
-    # caller was the COI path, which never read the response (#348) -- and
-    # could not have, since a core result carries no conflict of interest
-    # field. Both defects are answered by the method not existing.
-
-    def get_full_text_xml(self, pmcid: str) -> FullTextFetch:
-        """Get full text XML for open access articles.
-
-        Args:
-            pmcid: The PMC identifier, with or without its ``PMC`` prefix.
-
-        Returns:
-            The fetch. It carries the XML when Europe PMC served it, a
-            :class:`RequestFailure` when Europe PMC could not be reached,
-            and neither when Europe PMC answered that it holds no
-            open-access full text for this article.
-
-        Note:
-            A ``404`` is the one failure that really is about the article:
-            it is how Europe PMC says it holds no full text for that PMC ID,
-            so it stays an absence. Treating it as unreachable would put a
-            caveat on every closed-access paper and drown the honest ones.
-
-            Why this is not an ``Optional[str]`` is in
-            ``doc/cross_platform/analysis_failure_reporting.md``.
-        """
-        pmcid = pmcid.upper()
-        if not pmcid.startswith('PMC'):
-            pmcid = f'PMC{pmcid}'
-
-        url = f"{self.BASE_URL}/{pmcid}/fullTextXML"
-        try:
-            response = self.session.get(url, timeout=30)
-            response.raise_for_status()
-            if not response.text.strip():
-                # A 2xx that served nothing tells us nothing about the
-                # article, so it is a malformed answer, not an absence.
-                logger.warning(
-                    "Europe PMC served an empty body for %s, so any statement "
-                    "it carries is not assessed.",
-                    pmcid,
-                )
-                return FullTextFetch.unreachable(
-                    RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
-                )
-            return FullTextFetch.served(response.text)
-        except requests.RequestException as e:
-            failure = request_failure_from_exception(e)
-            if failure.status_code == HTTP_NOT_FOUND:
-                logger.info(
-                    "Europe PMC holds no open-access full text for %s.", pmcid
-                )
-                return FullTextFetch.absent()
-            # Never silently: a throttled Europe PMC and an article without
-            # full text are not the same thing, and only one of them is the
-            # article's fault (golden rule 8).
-            logger.warning(
-                "Europe PMC full text for %s could not be fetched (%s), so "
-                "any statement it carries is not assessed.",
-                pmcid,
-                failure.describe(),
-            )
-            return FullTextFetch.unreachable(failure)
-
-
 class OpenAlexClient:
     """Client for OpenAlex API - comprehensive scholarly metadata."""
 
@@ -2247,7 +2167,7 @@ def _full_text_unassessed_caveat(lookups: LookupRecord) -> str:
 
 
 #: What the data availability caveats say was not established, as the
-#: reader is told it. One place, because four sentences end with it.
+#: reader is told it. One place, because every such caveat ends with it.
 DATA_AVAILABILITY_SOUGHT = "this study's data availability statement"
 
 #: Why the commonest unassessed case arose: nothing that could carry the
@@ -2257,16 +2177,6 @@ DATA_AVAILABILITY_SOUGHT = "this study's data availability statement"
 DATA_AVAILABILITY_NOWHERE_TO_LOOK = (
     "Neither the article's full text nor an open-access copy in PMC was read"
 )
-
-#: Why the PMC branch found nothing to read: Europe PMC answered, and holds
-#: no open-access copy. Its own answer is about Europe PMC's holdings, never
-#: about what the article states, so it opens a caveat rather than closing
-#: the question (#353).
-DATA_AVAILABILITY_NO_OPEN_ACCESS_COPY = (
-    "Europe PMC holds no open-access full text for this article, and the "
-    "article's own text was not read"
-)
-
 
 def _any_section_was_parsed(fulltext_sections: Optional[Dict[str, str]]) -> bool:
     """Say whether any part of the full text was segmented at all.
@@ -2288,6 +2198,97 @@ def _any_section_was_parsed(fulltext_sections: Optional[Dict[str, str]]) -> bool
     if not fulltext_sections:
         return False
     return any(value for value in fulltext_sections.values())
+
+
+#: Wording that shows a text speaks of its conflicts of interest: the pattern
+#: the JATS converter heads a bare footnote by, and the declarations that
+#: stand without one -- BMJ deposits "Competing interests: None declared."
+#: as a bare "None declared." footnote.
+_COI_WORDING_RE = re.compile(
+    rf'{COI_WORDING_PATTERN}|none declared|nothing to (?:declare|disclose)'
+    r"|conflits? d['’]int[ée]r[êe]ts?|conflictos? de intereses?"
+    r'|conflitos? de interesses?|interessenkonflikt',
+    re.IGNORECASE,
+)
+
+#: Wording that shows a text speaks of its data availability.
+_DATA_AVAILABILITY_WORDING_RE = re.compile(
+    r'data (?:availability|accessibility|sharing)'
+    r'|data and (?:code|materials?|software) availability'
+    r'|availability of (?:the )?(?:materials? and )?data',
+    re.IGNORECASE,
+)
+
+#: Why a conflict of interest statement the text seems to hold was not
+#: assessed. "Seems": the wording includes "none declared", which is a
+#: statement's words but says nothing of conflicts on its own.
+COI_WORDING_WITHOUT_STATEMENT = (
+    "The article's full text uses the wording of a conflict of interest "
+    "statement, but no such statement could be identified in it"
+)
+
+#: The same, for data availability.
+DATA_AVAILABILITY_WORDING_WITHOUT_STATEMENT = (
+    "The article's full text uses the wording of a data availability "
+    "statement, but no such statement could be identified in it"
+)
+
+#: A reference list's heading. Cited titles are not the article's own words:
+#: a paper that cites "Conflicts of interest in surgery" has not thereby said
+#: anything about its own.
+_REFERENCES_HEADING_RE = re.compile(r'#{1,6}\s+references\s*', re.IGNORECASE)
+
+
+def _mentions(fulltext: str | None, wording: "re.Pattern[str]") -> bool:
+    """Whether a full text uses the wording of a statement.
+
+    Consulted only once no section carrying the statement was recognised:
+    a text that still uses its words may hold a statement we failed to
+    find, and charging its absence would charge the study for our parser
+    (#359, and the review of #420). Deliberately generous: the body counts,
+    so a study *about* data sharing is not charged either. Only the
+    reference list is left out, whose words are other papers' titles.
+
+    Args:
+        fulltext: The full text, or ``None``.
+        wording: The statement's wording.
+
+    Returns:
+        True if the wording occurs in the text outside its reference lists.
+    """
+    if not fulltext:
+        return False
+    return wording.search(_without_reference_lists(fulltext)) is not None
+
+
+def _without_reference_lists(fulltext: str) -> str:
+    """A full text with each markdown reference list left out.
+
+    A list runs from its heading to the next heading of the same or a higher
+    level, not to the end: BMJ deposits a titled references section inside
+    its back matter, and the author notes after it hold the competing
+    interests statement ("None declared.").
+
+    Args:
+        fulltext: The full text.
+
+    Returns:
+        The text without its reference lists.
+    """
+    kept: list[str] = []
+    skipping_below: int | None = None
+    for line in fulltext.split('\n'):
+        stripped = line.strip()
+        level = _markdown_heading_level(stripped)
+        if skipping_below is not None:
+            if not level or level > skipping_below:
+                continue
+            skipping_below = None
+        if level and _REFERENCES_HEADING_RE.fullmatch(stripped):
+            skipping_below = level
+            continue
+        kept.append(line)
+    return '\n'.join(kept)
 
 
 def _text_or_none(text: str | None) -> str | None:
@@ -2467,12 +2468,35 @@ def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
     )
 
 
+#: A markdown heading line: one to six ``#`` then a space. Converted JATS
+#: marks every heading this way; extracted PDF text marks none, and a line
+#: of it that happens to open "# " only ends a section early.
+_MARKDOWN_HEADING_RE = re.compile(r'(#{1,6})\s')
+
+
+def _markdown_heading_level(line: str) -> int:
+    """The level of a markdown heading line.
+
+    Args:
+        line: A stripped line of full text.
+
+    Returns:
+        The number of ``#`` marks opening it, or 0 when it is not a
+        markdown heading -- a plain-text heading from a PDF, or prose.
+    """
+    match = _MARKDOWN_HEADING_RE.match(line)
+    return len(match.group(1)) if match else 0
+
+
 def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
     """Extract transparency-relevant sections from full-text content.
 
     Scans for common section headers used in biomedical articles and
-    returns the text content following each header until the next
-    recognised section begins.
+    returns the text content following each header until the section
+    ends: at the next recognised header; at a references, bibliography or
+    supplementary line; or at a markdown heading of the same or a higher
+    level -- any markdown heading, when the header was a plain-text one
+    from a PDF. Only the first section found for each key is kept.
 
     Args:
         fulltext: Plain-text (or simple markdown) article content.
@@ -2495,16 +2519,38 @@ def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
             'conflicts? of interests?',
             'conflict[-‐-―\\s]of[-‐-―\\s]interests?',
             'potential conflicts? of interests?',
-            'declarations? of (?:competing |conflicting )?interests?',
-            'competing (?:financial )?interests?',
+            'declarations? of (?:competing |conflicting |conflicts? of )?interests?',
+            '(?:potential )?competing (?:financial )?interests?',
+            # One heading for two statements; the funding half is still
+            # found by the funder lookups (#420).
+            'conflicts? of interests? and sources? of funding',
             'author disclosures?',
             'disclosures?',
+            # Diabetologia's heading for every competing interests statement,
+            # and another journal's; missed, each read as an article that
+            # declares nothing, industry ties and all (#426 review).
+            "authors?['’]? relationships and activities",
+            '(?:financial and non-?financial )?relationships? and activities',
+            'duality of interests?',
+            # The statement's heading in the languages surveyed articles
+            # print it in untyped: French, Spanish, Portuguese, German.
+            "conflits? d['’]int[ée]r[êe]ts?",
+            'conflictos? de intereses?',
+            'conflitos? de interesses?',
+            'interessenkonflikte?',
         ],
         'data_sharing': [
             'data sharing',
             'data availability',
             'data access',
             'availability of data',
+            # BMC's standard "Availability of data and materials", Cell's
+            # "Data and code availability", and Wiley's "Data accessibility"
+            # (#426 review).
+            'availability of (?:the )?data and (?:materials?|code)',
+            'availability of materials? and data',
+            'data and (?:code|materials?|software) availability',
+            'data accessibility',
         ],
         'funding': [
             'funding',
@@ -2519,7 +2565,10 @@ def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
             'funder role',
         ],
         'acknowledgments': [
-            'acknowledgm?ents?',
+            # "Acknowledgements", the British spelling, heads a third of the
+            # surveyed <ack> elements; ``acknowledgm?ents?`` matched only the
+            # American one (#420).
+            'acknowledge?ments?',
         ],
         'contributors': [
             'contributors?',
@@ -2559,12 +2608,26 @@ def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
                     stripped_lower,
                 ):
                     # Found a header — collect content until next section
+                    header_level = _markdown_heading_level(stripped)
                     content_lines = []
                     for j in range(i + 1, len(lines)):
                         next_stripped = lines[j].strip()
                         if not next_stripped:
                             content_lines.append('')
                             continue
+
+                        # A markdown heading at this section's level or
+                        # above ends it, whatever it says; a subsection's
+                        # does not. Only recognised headings used to, so a
+                        # section ran on into an unrecognised sibling: a
+                        # Frontiers "Publisher's note" read as part of the
+                        # competing interests statement, and its
+                        # "manufacturer" as an industry tie (#420).
+                        next_level = _markdown_heading_level(next_stripped)
+                        if next_level and (
+                            not header_level or next_level <= header_level
+                        ):
+                            break
 
                         # Stop at next recognised section header
                         if len(next_stripped) <= 120:
@@ -2783,7 +2846,6 @@ class StudyTransparencyAnalyzer:
         self.pubmed = PubMedClient(email, pubmed_api_key)
         self.crossref = CrossRefClient(email)
         self.clinicaltrials = ClinicalTrialsClient()
-        self.europepmc = EuropePMCClient()
         self.openalex = OpenAlexClient(email)
 
         self._unpaywall_email = unpaywall_email or email
@@ -2863,12 +2925,10 @@ class StudyTransparencyAnalyzer:
         self._fetch_trial_info(report)
 
         # Step 5: Analyze COI statement (full text overrides API data)
-        self._analyze_conflicts(report, fulltext_sections, bool(fulltext))
+        self._analyze_conflicts(report, fulltext_sections, fulltext)
 
-        # Step 6: Analyze data availability (full text overrides API data)
-        self._analyze_data_availability(
-            report, fulltext_sections, bool(fulltext)
-        )
+        # Step 6: Analyze data availability (full text only)
+        self._analyze_data_availability(report, fulltext_sections, fulltext)
 
         # Step 7: Calculate transparency score
         report.transparency_score = calculate_transparency_score(report)
@@ -3379,7 +3439,7 @@ class StudyTransparencyAnalyzer:
         self,
         report: TransparencyReport,
         fulltext_sections: Optional[Dict[str, str]] = None,
-        fulltext_read: bool = False,
+        fulltext: str | None = None,
     ):
         """Analyze conflict of interest disclosures.
 
@@ -3402,10 +3462,16 @@ class StudyTransparencyAnalyzer:
             fulltext_sections: Optional dict from extract_fulltext_sections().
                 The 'coi' key, if present, takes priority over API data
                 because it contains the complete disclosure text.
-            fulltext_read: Whether the article's own full text was obtained.
-                It is what separates "this article declares no conflicts"
-                from "nobody read the article".
+            fulltext: The article's own full text, or ``None`` when none was
+                read. Whether there is one is what separates "this article
+                declares no conflicts" from "nobody read the article", and a
+                text that uses a statement's wording outside every section
+                we recognised may hold one we failed to find, so its silence
+                is not charged. One argument, not a flag beside the text: a
+                flag saying "read" with no text beside it skipped the
+                wording check and charged the study (#426 review).
         """
+        fulltext = _text_or_none(fulltext)
         # Priority: full-text COI section > PubMed COI statement
         coi_text = None
 
@@ -3417,12 +3483,24 @@ class StudyTransparencyAnalyzer:
 
         if coi_text and coi_text.strip():
             report.coi_info = analyze_coi_statement(coi_text)
-        elif fulltext_read and _end_matter_was_parsed(fulltext_sections):
+        elif fulltext and _mentions(fulltext, _COI_WORDING_RE):
+            # Recognising more of the end matter (#420) made the charge
+            # below reachable for articles whose statement still has no
+            # heading we know -- "The authors declared no potential
+            # conflicts of interest" as a bare footnote. The words are
+            # there, so the statement may be ours to have missed.
+            report.coi_info = ConflictOfInterest.not_assessed()
+            report.warnings.append(
+                unassessed_caveat(
+                    COI_WORDING_WITHOUT_STATEMENT, COI_DISCLOSURE_SOUGHT
+                )
+            )
+        elif fulltext and _end_matter_was_parsed(fulltext_sections):
             # The article itself was read, its end matter was recognised, and
             # no disclosure is among it. That is the study's own answer, and
             # the only one that costs it points.
             report.coi_info = ConflictOfInterest.not_stated()
-        elif fulltext_read:
+        elif fulltext:
             # Full text arrived but not one end-matter section was
             # recognised in it, so the parse -- not the article -- is what
             # came up empty. Unparsed is not absent (#359).
@@ -3452,42 +3530,16 @@ class StudyTransparencyAnalyzer:
             )
 
     @staticmethod
-    def _record_data_availability_unassessed(
-        report: TransparencyReport, failure: RequestFailure
-    ) -> None:
-        """Record that nobody established this study's data availability.
-
-        UNKNOWN scores neutral and is matched by no risk indicator, so the
-        paper is charged nothing for a source we could not read. NOT_STATED
-        would cost it five points and tell a clinician it publishes no data
-        availability statement -- a number and a claim invented out of our
-        own throttling (#346).
-
-        Args:
-            report: The report to record it on; its warnings gain the caveat.
-            failure: Why Europe PMC could not be read, or its answer read.
-        """
-        report.data_availability = DataAvailabilityInfo(
-            disclosure_level=DataDisclosureLevel.UNKNOWN
-        )
-        report.warnings.append(
-            unreachable_source_caveat(
-                SERVICE_EUROPE_PMC, failure, DATA_AVAILABILITY_SOUGHT
-            )
-        )
-
-    @staticmethod
     def _record_data_availability_unassessed_because(
         report: TransparencyReport, because: str
     ) -> None:
         """Record an unassessed data availability for a reason of our own.
 
-        The sibling of :meth:`_record_data_availability_unassessed`, for the
-        cases where no request failed because no request was made: the
-        article is outside PMC and its full text was never retrieved, or a
-        full text arrived that we could not segment. Both leave exactly the
-        empty statement an article without one leaves, and until #353 both
-        were charged for it.
+        The article's full text was never retrieved; or a full text arrived
+        that we could not segment; or one uses a statement's wording where no
+        statement was recognised. Each leaves exactly the empty statement an
+        article without one leaves, and until #353 the first two were
+        charged for it.
 
         Args:
             report: The report to record it on; its warnings gain the caveat.
@@ -3505,7 +3557,7 @@ class StudyTransparencyAnalyzer:
         self,
         report: TransparencyReport,
         fulltext_sections: Optional[Dict[str, str]] = None,
-        fulltext_read: bool = False,
+        fulltext: str | None = None,
     ):
         """Analyze data availability and sharing.
 
@@ -3519,27 +3571,31 @@ class StudyTransparencyAnalyzer:
         Args:
             report: TransparencyReport being built.
             fulltext_sections: Optional dict from extract_fulltext_sections().
-                The 'data_sharing' key, if present, takes priority over
-                Europe PMC XML extraction.
-            fulltext_read: Whether the article's own full text was obtained.
-                With ``fulltext_sections``, it is what separates "this
-                article states nothing about its data" from "nobody read the
-                article".
+                The 'data_sharing' key, if present, is the statement.
+            fulltext: The article's own full text, or ``None`` when none was
+                read. With ``fulltext_sections``, whether there is one is
+                what separates "this article states nothing about its data"
+                from "nobody read the article"; a text that uses a
+                statement's wording outside every section we recognised may
+                hold one we failed to find.
         """
-        data_statement = None
-
-        # Priority: full-text data sharing section > Europe PMC XML
+        fulltext = _text_or_none(fulltext)
         if fulltext_sections and fulltext_sections.get('data_sharing'):
             data_statement = fulltext_sections['data_sharing']
             logger.info("Using data sharing statement from full-text (%d chars)", len(data_statement))
             report.data_availability = analyze_data_availability(data_statement)
-            return
-        elif fulltext_read:
+        elif fulltext:
             # The article itself was read. Whether its silence is the
             # article's own depends on whether we segmented it at all: a
             # full text in which not one section was recognised has told us
             # nothing, and is the #359 defect one dimension over.
-            if _any_section_was_parsed(fulltext_sections):
+            if _mentions(fulltext, _DATA_AVAILABILITY_WORDING_RE):
+                # The #420 review's rule, one dimension over: the words are
+                # in the text, so the statement is ours to have missed.
+                self._record_data_availability_unassessed_because(
+                    report, DATA_AVAILABILITY_WORDING_WITHOUT_STATEMENT
+                )
+            elif _any_section_was_parsed(fulltext_sections):
                 report.data_availability = analyze_data_availability(None)
             else:
                 self._record_data_availability_unassessed_because(
@@ -3547,78 +3603,21 @@ class StudyTransparencyAnalyzer:
                     "The article's full text was read but none of its "
                     "sections could be identified",
                 )
-            return
-        elif report.pmcid:
-            # Fallback: Check Europe PMC for open access full text
-            fetch = self.europepmc.get_full_text_xml(report.pmcid)
-            unreachable = fetch.failure
-            if unreachable is not None:
-                # A service we could not reach says nothing about this study,
-                # so the analysis stops here rather than reading its silence
-                # as a finding. NOT_STATED would cost the paper five points
-                # and tell a clinician it publishes no data statement (#346).
-                self._record_data_availability_unassessed(report, unreachable)
-                return
-            if fetch.xml is None:
-                # Europe PMC answered, and holds no open-access full text for
-                # this PMC ID. That is a fact about what *Europe PMC* has, not
-                # about what the article states: the statement may sit in a
-                # text nobody read. Falling through to
-                # ``analyze_data_availability(None)`` charged the paper five
-                # points for our own reach -- #353's harm in the one branch
-                # #353 left, and the population is every embargoed deposit and
-                # author manuscript in PMC but outside the OA subset.
-                self._record_data_availability_unassessed_because(
-                    report, DATA_AVAILABILITY_NO_OPEN_ACCESS_COPY
-                )
-                return
-            if fetch.xml is not None:
-                import xml.etree.ElementTree as ET
-                try:
-                    root = ET.fromstring(fetch.xml)
-                    sections = root.findall('.//sec')
-                    sections_seen = bool(sections)
-                    for section in sections:
-                        title = section.findtext('title', '').lower()
-                        if 'data' in title and ('avail' in title or 'shar' in title or 'access' in title):
-                            data_statement = ' '.join(section.itertext())
-                            break
-                except ET.ParseError:
-                    # A full text we could not read is not a study without a
-                    # statement: the statement may be right there, in the
-                    # half we failed to parse. Logging it and still charging
-                    # NOT_STATED leaves the fabricated finding in front of
-                    # the clinician (golden rule 8, #346).
-                    logger.warning(
-                        "Europe PMC full text for %s did not parse, so any "
-                        "data availability statement in it is not assessed.",
-                        report.pmcid,
-                    )
-                    self._record_data_availability_unassessed(
-                        report,
-                        RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
-                    )
-                    return
-                if not sections_seen:
-                    # Europe PMC served XML we could parse and it holds no
-                    # sections at all, so there was nowhere for a statement
-                    # to be found. Unparsed is not absent (#359).
-                    self._record_data_availability_unassessed_because(
-                        report,
-                        "Europe PMC's full text for this article holds no "
-                        "sections we could read",
-                    )
-                    return
         else:
-            # Not in PMC and no full text was read, so nothing that could
-            # carry a data availability statement was ever consulted. This
-            # is the majority of articles (#353).
+            # No text of the article's own was read, so nothing that could
+            # carry a data availability statement was consulted. There used
+            # to be a fallback here that fetched Europe PMC's XML and scanned
+            # its <sec> titles for this one statement. It read the article
+            # for data availability alone, so a row could say both "limited
+            # certainty because of lack of full text access" and "no data
+            # availability statement was found in the full text" (#421); it
+            # missed statements kept in <notes> and charged NOT_STATED beside
+            # them (#420); and it fetched a full text the caller had declined
+            # with ``auto_discover_fulltext=False``. Discovery already tries
+            # Europe PMC's XML first, and reads it for every dimension.
             self._record_data_availability_unassessed_because(
                 report, DATA_AVAILABILITY_NOWHERE_TO_LOOK
             )
-            return
-
-        report.data_availability = analyze_data_availability(data_statement)
 
     def _identify_risk_indicators(self, report: TransparencyReport):
         """Identify potential risk of bias indicators."""

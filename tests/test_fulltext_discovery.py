@@ -37,6 +37,9 @@ from bmlibrarian_lite.fulltext_discovery import (
     discover_fulltext,
 )
 from bmlibrarian_lite.europepmc import ArticleInfo, ArticleInfoFetch
+from bmlibrarian_lite.constants import SERVICE_CACHED_FULLTEXT
+from bmlibrarian_lite.jats_markdown import JATS_MARKDOWN_CONVERTER_VERSION
+from bmlibrarian_lite.pdf_utils import fulltext_cache_stamp
 
 
 class TestFulltextSourceType:
@@ -123,9 +126,9 @@ class TestFulltextDiscovererDiscover:
         self, mock_find: MagicMock, temp_dir: Path
     ) -> None:
         """Test that cached fulltext is found and returned."""
-        # Create a cached file
+        # Create a cached file, stamped as the current converter writes it
         cached_file = temp_dir / "cached.md"
-        cached_file.write_text("# Cached Content")
+        cached_file.write_text(f"{fulltext_cache_stamp()}\n# Cached Content")
         mock_find.return_value = cached_file
 
         discoverer = FulltextDiscoverer()
@@ -134,6 +137,104 @@ class TestFulltextDiscovererDiscover:
         assert result.success is True
         assert result.source_type == FulltextSourceType.CACHED_FULLTEXT
         assert result.markdown_content == "# Cached Content"
+
+    @pytest.mark.parametrize(
+        "cached",
+        [
+            "# Cached before the stamp existed",
+            f"{fulltext_cache_stamp(JATS_MARKDOWN_CONVERTER_VERSION - 1)}\n# Older",
+        ],
+        ids=["unstamped", "older-converter"],
+    )
+    @patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext")
+    def test_a_stale_cache_is_converted_again(
+        self, mock_find: MagicMock, temp_dir: Path, cached: str
+    ) -> None:
+        """#420: an earlier converter's file must not outlive the fix.
+
+        The cache is read before Europe PMC is asked, so a stale file served
+        as current would keep every cached article on the old converter.
+        """
+        cached_file = temp_dir / "cached.md"
+        cached_file.write_text(cached)
+        mock_find.return_value = cached_file
+
+        discoverer = FulltextDiscoverer()
+        fresh = FulltextResult(
+            success=True,
+            source_type=FulltextSourceType.EUROPEPMC_XML,
+            markdown_content="# Converted again",
+        )
+        with patch.object(discoverer, "_try_europepmc_xml", return_value=fresh) as asked:
+            result = discoverer.discover_fulltext(pmid="12345")
+
+        asked.assert_called_once()
+        assert result.markdown_content == "# Converted again"
+
+    @patch("bmlibrarian_lite.fulltext_discovery.find_existing_pdf", return_value=None)
+    @patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext")
+    def test_an_unreadable_cache_unmakes_an_absence(
+        self, mock_find: MagicMock, _no_pdf: MagicMock, temp_dir: Path
+    ) -> None:
+        """#426 review: a cached full text we cannot read is recorded, not only logged.
+
+        We hold the article's full text; a chain that then ends "none found"
+        has not shown that it has none.
+        """
+        cached_file = temp_dir / "cached.md"
+        cached_file.write_bytes(b"\xff\xfe not UTF-8")
+        mock_find.return_value = cached_file
+
+        discoverer = FulltextDiscoverer()
+        unasked = FulltextResult(success=False, source_type=FulltextSourceType.NOT_ASSESSED)
+        none_found = FulltextResult(success=False, source_type=FulltextSourceType.NOT_FOUND)
+        with patch.object(discoverer, "_try_europepmc_xml", return_value=unasked), \
+                patch.object(discoverer, "_try_pdf_download", return_value=none_found):
+            result = discoverer.discover_fulltext(pmid="12345")
+
+        assert not result.absence_established
+        assert SERVICE_CACHED_FULLTEXT in [f.service for f in result.lookups.failures]
+
+    @patch("bmlibrarian_lite.fulltext_discovery.find_existing_pdf", return_value=None)
+    @patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext", return_value=None)
+    def test_a_clean_not_found_still_establishes_an_absence(
+        self, _no_cache: MagicMock, _no_pdf: MagicMock
+    ) -> None:
+        """Control: with no cached file, the same chain does establish one."""
+        discoverer = FulltextDiscoverer()
+        unasked = FulltextResult(success=False, source_type=FulltextSourceType.NOT_ASSESSED)
+        none_found = FulltextResult(success=False, source_type=FulltextSourceType.NOT_FOUND)
+        with patch.object(discoverer, "_try_europepmc_xml", return_value=unasked), \
+                patch.object(discoverer, "_try_pdf_download", return_value=none_found):
+            result = discoverer.discover_fulltext(pmid="12345")
+
+        assert result.absence_established
+
+    @patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext", return_value=None)
+    def test_a_failed_cache_write_keeps_the_full_text(self, _no_cache: MagicMock) -> None:
+        """#426 review: a full disk loses the cache, not the article.
+
+        The write sat inside the step's catch-all, so a converted full text
+        was reported as "Europe PMC could not be read".
+        """
+        client = MagicMock()
+        info = ArticleInfo(pmid="12345", pmcid="PMC67890", has_fulltext_xml=True, year=2024)
+        client.fetch_article_info.return_value = ArticleInfoFetch.served(info)
+        client.get_fulltext_xml.return_value = "<article>Test</article>"
+        client.xml_to_markdown.return_value = "# Converted Content"
+
+        discoverer = FulltextDiscoverer()
+        discoverer._europepmc = client
+        with patch(
+            "bmlibrarian_lite.fulltext_discovery.save_fulltext_markdown",
+            side_effect=OSError("No space left on device"),
+        ):
+            result = discoverer.discover_fulltext(pmid="12345")
+
+        assert result.success is True
+        assert result.source_type == FulltextSourceType.EUROPEPMC_XML
+        assert result.markdown_content == "# Converted Content"
+        assert result.file_path is None
 
     @patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext")
     @patch("bmlibrarian_lite.fulltext_discovery.EuropePMCClient")

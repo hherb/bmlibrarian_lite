@@ -148,7 +148,7 @@ class TestWhatAnUnsegmentedFullTextRecords:
         report = TransparencyReport(pmid="1", pubmed_record_read=True)
 
         analyzer._analyze_conflicts(
-            report, fulltext_sections={"methods": "..."}, fulltext_read=True
+            report, fulltext_sections={"methods": "..."}, fulltext="The article's full text."
         )
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_ASSESSED
@@ -165,7 +165,7 @@ class TestWhatAnUnsegmentedFullTextRecords:
         analyzer._analyze_conflicts(
             report,
             fulltext_sections={"funding": "NIH grant R01."},
-            fulltext_read=True,
+            fulltext="The article's full text.",
         )
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_STATED
@@ -209,7 +209,7 @@ class TestWhatAnUnsegmentedFullTextRecords:
         )
         report = TransparencyReport(pmid="1")
 
-        analyzer._analyze_conflicts(report, sections, fulltext_read=True)
+        analyzer._analyze_conflicts(report, sections, fulltext="The article's full text.")
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.DISCLOSED
         assert report.coi_info.has_industry_ties

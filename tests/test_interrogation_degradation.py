@@ -42,8 +42,10 @@ from bmlibrarian_lite.gui.document_interrogation_tab import (  # noqa: E402
     NO_FULLTEXT_IDENTIFIER,
     PDF_NO_TEXT,
     PDF_UNREADABLE,
+    STALE_CACHED_FULLTEXT_LABEL,
     DocumentInterrogationTab,
 )
+from bmlibrarian_lite.pdf_utils import fulltext_cache_stamp  # noqa: E402
 
 #: What a provider's error text can carry on this path: the Unpaywall request
 #: URL holds the user's email address, and a URL is what error text prints.
@@ -451,3 +453,133 @@ class TestClosingTheProgressDialogIsNotCancellingIt:
 
         assert succeeded == ["/tmp/aspirin.pdf"]
         assert failed == []
+
+
+class TestACachedFullTextFromAnEarlierConverter:
+    """#420: markdown an earlier converter cached is fetched again, not shown."""
+
+    def _load(
+        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch, cached: str
+    ) -> tuple[Any, list[str], list[str]]:
+        """Load a citation whose full text is cached with the given content.
+
+        Returns:
+            The tab, the texts it displayed from the cache, and the titles
+            it started discovery for.
+        """
+        widget = make_tab(tmp_path, monkeypatch)
+        cached_file = tmp_path / "PMC1.md"
+        cached_file.write_text(cached, encoding="utf-8")
+        monkeypatch.setattr(tab_module, "find_existing_fulltext", lambda _m: cached_file)
+        shown: list[str] = []
+        discovered: list[str] = []
+        monkeypatch.setattr(
+            widget,
+            "_load_citation_fulltext",
+            lambda content, _citation, _label: shown.append(content),
+        )
+        monkeypatch.setattr(
+            widget,
+            "_start_fulltext_discovery",
+            lambda _doc, title, _citation, **_kw: discovered.append(title),
+        )
+        widget.load_from_citation(make_citation())
+        return widget, shown, discovered
+
+    def test_an_unstamped_file_is_fetched_again(
+        self, qapp: Any, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An unstamped file is fetched again."""
+        _widget, shown, discovered = self._load(tmp_path, monkeypatch, "# Old markdown")
+        assert shown == []
+        assert discovered
+
+    def test_a_current_file_is_shown_without_its_stamp(
+        self, qapp: Any, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Control: the cache still serves what the current converter wrote."""
+        _widget, shown, discovered = self._load(
+            tmp_path, monkeypatch, f"{fulltext_cache_stamp()}\n# Current"
+        )
+        assert shown == ["# Current"]
+        assert discovered == []
+
+    def _load_and_fail(
+        self,
+        tmp_path: Any,
+        monkeypatch: pytest.MonkeyPatch,
+        cached: str | None,
+        outcome: str,
+    ) -> tuple[list[tuple[str, str]], list[str]]:
+        """Load a citation, then let the refresh fail or be cancelled.
+
+        Args:
+            tmp_path: A directory for the cached file.
+            monkeypatch: Patches the tab's cache lookups and loaders.
+            cached: The cached file's content, or ``None`` for no file.
+            outcome: ``"error"`` or ``"cancel"``.
+
+        Returns:
+            The (content, label) pairs shown as full text, and the reasons
+            the abstract was shown for.
+        """
+        widget = make_tab(tmp_path, monkeypatch)
+        cached_file = tmp_path / "PMC1.md"
+        if cached is not None:
+            cached_file.write_text(cached, encoding="utf-8")
+        monkeypatch.setattr(
+            tab_module,
+            "find_existing_fulltext",
+            lambda _m: cached_file if cached is not None else None,
+        )
+        shown: list[tuple[str, str]] = []
+        abstracts: list[str] = []
+        callbacks: dict[str, Any] = {}
+        monkeypatch.setattr(
+            widget,
+            "_load_citation_fulltext",
+            lambda content, _citation, label: shown.append((content, label)),
+        )
+        monkeypatch.setattr(
+            widget,
+            "_load_citation_abstract",
+            lambda _citation, reason: abstracts.append(reason),
+        )
+        monkeypatch.setattr(
+            widget,
+            "_start_fulltext_discovery",
+            lambda _doc, _title, _citation, **kw: callbacks.update(kw),
+        )
+        widget.load_from_citation(make_citation())
+        if outcome == "error":
+            callbacks["on_error"]("Europe PMC could not be read")
+        else:
+            callbacks["on_cancel"]()
+        return shown, abstracts
+
+    @pytest.mark.parametrize("outcome", ["error", "cancel"])
+    def test_an_earlier_conversion_is_shown_when_the_refresh_fails(
+        self, qapp: Any, tmp_path: Any, monkeypatch: pytest.MonkeyPatch, outcome: str
+    ) -> None:
+        """#426 review: a readable copy on disk beats the abstract.
+
+        Offline or throttled, every article cached before #420 fell back to
+        the abstract. The reader is shown the older text, labelled as such.
+        """
+        shown, abstracts = self._load_and_fail(
+            tmp_path, monkeypatch, "# Old markdown\n\nBody.", outcome
+        )
+        assert shown == [("# Old markdown\n\nBody.", STALE_CACHED_FULLTEXT_LABEL)]
+        assert abstracts == []
+
+    def test_without_a_cached_copy_the_abstract_is_shown(
+        self, qapp: Any, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Control: with nothing cached, the fall back names its cause."""
+        shown, abstracts = self._load_and_fail(tmp_path, monkeypatch, None, "error")
+        assert shown == []
+        assert abstracts == [FULLTEXT_UNAVAILABLE]
+
+    def test_the_label_says_statements_may_be_missing(self) -> None:
+        """The reader is told why the older text is not the whole story."""
+        assert "statements may be missing" in STALE_CACHED_FULLTEXT_LABEL

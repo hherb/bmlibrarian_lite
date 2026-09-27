@@ -8,49 +8,72 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#386 — desktop transparency certainty and high-risk explanation**, branch
-`feat/desktop-transparency-certainty-386`, **PR #419**. Compress into
+**#420 + #421 — statements reach the analyser; the XML fallback is gone**
+(Python), branch `fix/plos-front-matter-statements-420`, **PR #426**. Compress into
 **Recently landed** once merged.
 
-- **What the reader sees.** Every rating made without full text says "Limited
-  certainty because of lack of full text access" (badge `High · limited`),
-  and so does the report prompt's line for it. The badge tooltip names the
-  rules that made a study High. A new report section, "Why Studies Were
-  Rated High Transparency Risk", also gives the score's stored terms when
-  the score was one of them, the other concerns and the caveats. The
-  methodology gains limited and provisional counts.
-- **"Without full text" means nothing was recognised in it.** The analyser's
-  `TransparencyReport.full_text_analyzed` is set only when the article's own
-  text was read *and* a section of it recognised; blank text is no text.
-  PLOS ONE's front-matter statements never reach the markdown, so its
-  articles read as limited until #420. **Analyser version `2.3`**, so stored
-  rows are re-analysed under the new meaning.
-- **One function each.** The score is the clamped sum of
-  `score_components(report)`, and a rating is High iff `high_risk_triggers`
-  is non-empty. The explanation re-reads the triggers under the **user's
-  settings**, which are threaded down to the badge, and which are **one
-  shared object**: the advanced dialog's values are copied into
-  `config.transparency` (`TransparencySettings.assign_from`), so ratings and
-  their explanations cannot use different rules (part 1 of #417).
-  `score_components` is a stored column: NULL means not recorded. A value
-  that will not decode, is empty, or does not add up to the stored score
-  also reads as `None`, and the section then says the breakdown is not
-  available. Neither the analyser nor storage records a breakdown that does
-  not add up.
-- **Contract.** `doc/cross_platform/transparency_parity/risk_explanation_strings.json`
-  is bound by Python, Swift and Kotlin tests: 9 cases, and a `binds` key for
-  platform-specific ones.
-- **No Unassessed rule on the desktop, deliberately.** Python charges a
-  missing statement only against text it read (#352, #353, #359), pinned by
-  `tests/test_no_high_rests_on_unread_text.py`. If that ever fails, the
-  desktop needs Swift's rule and its "(full text not searched)" wording.
-- **User decision (2026-09-27):** the desktop words the "no current rule
-  matches" and breakdown-unavailable caveats itself. On the desktop an
-  earlier analyser's rows are never shown, and Re-analyse offers only
-  missing, provisional or out-of-date rows, so Swift's cause and remedy are
-  false there.
-- Lodged: #416–#418, #420–#422 (see **Potential follow-ups**); a note
-  added to #391, and to #417 on what is left of it.
+- **The converter is `jats_markdown.py`** (`EuropePMCClient` delegates):
+  every `<back>` element but the ref-list, and PLOS's front statements
+  (`<author-notes>` fn, titled `<notes>`, `<funding-statement>`), each under
+  a heading, after the body, before the references. Body walked in order.
+  `<award-group>` alone is **not** a funding statement; `custom-meta` data
+  availability is skipped (duplicates the front `<notes>`).
+- **Review round (the #359 trap again):** recognising a funding section made
+  every *missed* COI statement a −5 charge. Fixed five ways: a stated type
+  (`COI-statement` …) names the heading on leaf elements, printed heading
+  kept in bold; every "**X:**" paragraph is its own heading; a bare footnote
+  about conflicts is headed; headless author notes are kept ("Author
+  Notes" — BMJ's bare "None declared."); and **the analyser charges a
+  missing COI/data statement only if the text never uses its wording**
+  (`_mentions`). Dedupe compares heading + body, never body alone ("None").
+  Measured on 997 articles, HEAD → branch: COI read 420→891, charged
+  152→24 (none mentions COI), data read 419→720.
+- **The extractor ends a section at a markdown heading of the same level or
+  above** (not at a subsection's: Cureus nests its COI run-in), keeping
+  Frontiers' "Publisher's note" ("manufacturer") out of the COI text. New:
+  "Acknowledgements" (British spelling; `acknowledgm?ents?` never matched
+  it), "Declaration of Conflicts of Interest", "Potential Competing
+  Interests", "Conflicts of interest and source of funding".
+- **Cache stamp.** Cached markdown opens with
+  `<!-- bmlibrarian-lite jats-markdown vN -->`; `read_cached_fulltext`
+  returns `None` for any other stamp, so the article is converted again.
+  **Bump `JATS_MARKDOWN_CONVERTER_VERSION`** whenever the same XML converts
+  differently (now **3**: the second review round changed the output).
+  Analyser version **`2.4`**.
+- **#421 (user's call): the fallback is removed**, with the analyser's
+  `EuropePMCClient` and `FullTextFetch`. Without a full text, data
+  availability is `unknown` (`DATA_AVAILABILITY_NOWHERE_TO_LOOK`), and no
+  request is made, also under `auto_discover_fulltext=False`.
+- PLOS ONE COI 0→150/150 (`tmp/jats-*`, gitignored); every newly flagged
+  industry tie read by hand: genuine. Lodged: #423 (the apps' front-matter
+  gap), #424 ("within the manuscript" → `UNKNOWN`), #425 (headings missed).
+- **Second review round (PR #426).** The emitted back matter let text with
+  no heading run on into a statement, and headed each footnote of a group
+  anew so only the first was read. Now:
+  - In the end matter no piece goes without a heading once a sibling has
+    one (`DEFAULT_HEADING_BY_OWNER`), and a list's `<title>` heads it
+    (JMIR's abbreviations had become industry ties).
+  - A heading the same as the one in force is merged (eLife's per-author
+    COI footnotes).
+  - A block's later run-ins are its siblings. In the body a run-in heads
+    only if no plain paragraph follows.
+  - `<fn>`/`<fn-group>`/`<notes>`/`<ack>`/`<glossary>` are end matter
+    anywhere (SAGE ships articles with no `<back>`).
+  - `<sub-article>`s are ignored.
+  - More headings: Diabetologia's "Authors' relationships and activities",
+    "Duality of interest", FR/ES/PT/DE COI headings, BMC/Cell/Wiley data
+    headings.
+  - The guard ignores the reference list's own section (BMJ puts one above
+    its author notes).
+  - `fulltext_read` is gone: the text is the flag.
+  - The cache write is atomic, a stamp with no body is stale, and an
+    unreadable cache is recorded. The interrogation tab shows a stale cache,
+    labelled, when the refresh fails.
+  - 410 local articles, PR head → now: COI charged 12→5, all five print no
+    statement. All 82 ties lost since master were run-on text (Frontiers'
+    Publisher's note, whole STAR Methods). Lodged: #427 (stale fallback for
+    MCP/discovery), #428 (charge only when every end-matter heading is
+    classified), #429 (typed `get_fulltext_xml`).
 
 ## Recently landed (context)
 
@@ -58,6 +81,22 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **Desktop certainty and high-risk explanation** (Python; PR #419, #386;
+  merged 2026-09-27). Every no-full-text rating says "Limited certainty
+  because of lack of full text access" (badge `High · limited`); the badge
+  tooltip and a report section ("Why Studies Were Rated High Transparency
+  Risk") name the rules that made a study High. **"Without full text" means
+  nothing in it was recognised** (`full_text_analyzed`; blank text is no
+  text); analyser version **`2.3`**. **Score = clamped sum of
+  `score_components`; High iff `high_risk_triggers` is non-empty**, read
+  under the **user's settings, one shared object** (`assign_from` copies the
+  dialog into `config.transparency`). A stored breakdown that will not
+  decode, is empty or does not sum to the score reads as `None`. Contract:
+  `transparency_parity/risk_explanation_strings.json` (bound by all three,
+  with `binds`). **No Unassessed rule on the desktop**, pinned by
+  `test_no_high_rests_on_unread_text.py`; the desktop words its own "no
+  current rule matches" and breakdown caveats (user's call). Lodged:
+  #416–#418, #420–#422.
 - **An unreachable source is provisional, not a finding; a trial is a whole
   word** (all three; PR #410, #385; merged 2026-09-27). Swift + Android store
   `sourcesUnreachable` (`Bool?`) when a source fails *or answers unreadably*
@@ -88,55 +127,37 @@ the rest.
   without it says "Limited certainty because of lack of full text access",
   and on the apps a High whose every reason rests on unsearched text shows
   as **Unassessed** (display only). Every Android rating says "limited" until
-  #384. The desktop port is PR #419 (#386), in flight above.
+  #384. The desktop port landed as PR #419.
 - **Model lists and pricing** (all three; PR #383, merged 2026-09-24). Swift
   builds every model-list URL from the `/v1` root; **an unlisted Claude ID
   gets its family's dearest current rate**; Python's `list_models` raises
   rather than answering with a fallback table. Release **0.5.0 / apps
   1.6.0** followed (PR #393).
-- **One undecodable transparency row is one row** (Python; #374, PR #379,
-  merged 2026-09-23). Readers return `StoredTransparency`
-  (`TransparencyResult | UndecodableTransparencyRow`). **Split by version
-  (user's call):** a row whose `analyzer_version` is strictly newer than this
-  build's is never overwritten (`may_replace_stored`, asked by
-  `_needs_analysis` and the manager *before* the cache guard); any other
-  undecodable row is damaged and re-analysed. Both read "not assessed" for
-  that document alone. Only decoding raises (`_UndecodableColumnError`), so a
-  mapper bug is not called damage; `conn.text_factory = _text_or_bytes` keeps
-  invalid UTF-8 from failing the cursor. Lodged: #378, #380–#382.
-- **A correction reaches the reader only if something re-analyses** (Python;
-  #360, #361, #249, #372, #373; PRs #366, #375). Contract in
-  `doc/cross_platform/analysis_failure_reporting.md`. **Bump
-  `TRANSPARENCY_ANALYZER_VERSION`** whenever the same inputs could produce a
-  different score, level, indicator or caveat; **the comparison is an
-  ordering** (`analyzer_version_ordinal`) — only a *strictly older* row is
-  superseded. **`is_final` is the cache's question**, not `is_current`.
-  **Every surface that reads a stored row is gated**, and a withheld row reads
-  "Not assessed", annotated in the reference list, never bare. **Load shows
-  and fetches nothing**; re-analysis is an explicit, question-scoped pass
-  (`TransparencyReanalysisWorker`), with one analysis body
-  (`transparency/assessment.py`). **A signal nothing connects is not
-  reporting** (`_connect_signals` is tested). **A status message is
-  overwritten by the load's summary** — carry a clause instead. Swift's
-  `analyzerVersion` is an Int; the two version spaces are not comparable.
-- **A source nobody asked is not a source that answered "nothing"**, and **a
-  COI statement nobody read is not a disclosure** (Python; PRs #358, #365).
-  **Only a text we read and segmented can produce `NOT_STATED`**; **a skip is
-  a third state** (`SourceLookupSkipped`, and `configuration_nudge()` fires for
-  `NOT_CONFIGURED` only); `absence_established` is *derived*; **a three-state
-  value needs three arms**; **a withheld claim stays withheld at every
-  surface**. `COIDisclosureLevel` has three states and no default, and **only
-  the article's own text can establish an absence** (user's call). **A fix
-  that activates dead code changes what every other defect on that path
-  costs** (#359). **Assert the built sentence, never a substring another
+- **Stored transparency rows** (Python; #374, #360, PRs #379, #366, #375).
+  Readers return `StoredTransparency`; a row **strictly newer** than this
+  build is never overwritten (`may_replace_stored`), any other undecodable
+  row is damaged and re-analysed. **Bump `TRANSPARENCY_ANALYZER_VERSION`**
+  whenever the same inputs could move a score, level, indicator or caveat;
+  the comparison is an ordering (`analyzer_version_ordinal`). **Every surface
+  reading a stored row is gated**, a withheld row reads "Not assessed", and
+  re-analysis is an explicit, question-scoped pass with one analysis body
+  (`transparency/assessment.py`). Contract:
+  `doc/cross_platform/analysis_failure_reporting.md`.
+- **A source nobody asked is not a source that answered "nothing"** (Python;
+  PRs #358, #365). Only a text we read and segmented can produce
+  `NOT_STATED`; a skip is a third state (`SourceLookupSkipped`); a
+  three-state value needs three arms; a withheld claim stays withheld at
+  every surface. **Assert the built sentence, never a substring another
   caveat shares.**
 
 - **Older rounds, compressed to the rules that still bind.** Each cost a
   defect; the archaeology is in git history and the `doc/cross_platform/`
   READMEs, which these point at.
   - **A source we could not reach is not a finding** (#346, #347, #344,
-    PR #349). `FullTextFetch` carries the XML *or* a `RequestFailure`
-    (`served()` / `absent()` / `unreachable()`); **404 is the one status
+    PR #349). A typed fetch carries the answer *or* a `RequestFailure`
+    (`served()` / `absent()` / `unreachable()`: `RecordFetch`,
+    `ArticleInfoFetch`; `FullTextFetch` went with #421, and
+    `get_fulltext_xml` still needs one, #429); **404 is the one status
     about the article**; unreadable is not absent either; caveats carry no
     provider text (`RequestFailure.describe()` only). **Always keep a
     control test** — mutating the fetch to `absent()` once passed the suite.
@@ -250,11 +271,12 @@ Open issues by family; each issue carries the detail. None blocks another.
   limited-certainty summary is worded differently on Swift and Android;
   **#417** a replaced `LiteConfig` never reaches the tabs (the dialog half
   is done); **#418** stored levels are not re-rated when settings change;
-  **#420** PLOS front-matter COI/data statements are dropped from the
-  markdown, and the XML fallback charges `not_stated` beside a `<notes>`
-  statement; **#421** that fallback reads the XML for data availability
-  only, so its note and reason contradict; **#422** Swift detail views
-  truncate the confidence the reason sentence rounds.
+  **#422** Swift detail views truncate the confidence the reason sentence
+  rounds. From the #420 round: **#423** Swift + Android drop front-matter
+  statements (PLOS COI footnote, front `<notes>`, `<funding-statement>`);
+  **#424** "data within the manuscript" classifies `UNKNOWN` (a
+  parity-contract change); **#425** headings still missed (non-English
+  typed, plain-text run-ins).
 - Android: **#384** analyse full text (every rating is "limited" until then);
   **#387** data-availability parity, DAO/migration tests.
 - **#400** the data-availability heading rule (`'data' in title and ('avail'
@@ -433,20 +455,12 @@ enables DEBUG; **#245** the transparency CLIs take the NCBI key only as
 
 ### Verify
 
-- **Closing an issue is a claim; check the commit made it true.** #183, #192,
-  #217, #219 and now **#360** were closed by commits listing them as deferred:
-  "Lodged rather than fixed: #217" contains `fixed: #217`, and only the *first*
-  number closes, so it is easy to miss twice. **"not fixed: #N" is not a
-  negation as far as GitHub is concerned** — that exact wording took #360 with
-  #359 in commit `9caf78b`, five rounds after the rule was written down. No
-  closing keyword *at all* before a deferred number: write "Deferred: #N" or
-  "Lodged, unaddressed: #N". **Quoting the phrase closes the issue too**:
-  commit `743f508` reopened #360 and, in explaining what had gone wrong,
-  repeated the offending words — which closed it a second time. Name the
-  keyword, never write it beside a number. After every merge, re-read the
-  list of issues the commit said it deferred and confirm each is still open,
-  and re-read the ones it said it *fixed* beyond the `Closes` lines: PR #365
-  fixed #363 and listed it as deferred, leaving it open.
+- **Closing an issue is a claim; check the commit made it true.** Five
+  deferred issues were closed by their own commits: "Lodged rather than
+  fixed: #217" contains `fixed: #217`, "not fixed: #N" is no negation to
+  GitHub, and quoting the phrase to explain it closes the issue again. Write
+  no closing keyword before a deferred number ("Deferred: #N"). After every
+  merge, confirm each deferred issue is still open and each fixed one closed.
 - Touching any data-availability pattern? Run all three parity suites; a change
   that does not update `doc/cross_platform/transparency_parity/` **and** all
   three platforms is meant to fail.

@@ -314,8 +314,12 @@ full text was ever read, so a display-time check is needed to keep that
 absence from reading as a finding. Python fixed it earlier, in *scoring*
 (#352, #353, #359): `not_stated` for COI is recorded only from a full text
 that was read and its end matter parsed, and `not_stated` for data
-availability only from a full text that was read and segmented, or from
-Europe PMC XML that was read and holds sections. Anywhere else, Python
+availability only from a full text that was read and segmented. Since
+#420 neither is recorded from a text that uses the statement's wording
+where no statement was recognised (outside its reference list): the
+statement may be one the parser missed. (A Europe PMC XML fallback once
+charged data availability from XML read for that one statement; it was
+removed in #421.) Anywhere else, Python
 records `not_assessed` / `unknown` — neutral values that score 0 and trigger
 nothing.
 
@@ -325,14 +329,12 @@ Porting it would only add a branch that never runs and a "(full text not
 searched)" qualifier that never prints.
 
 `tests/test_no_high_rests_on_unread_text.py` pins the invariant this
-argument depends on: every combination of PubMed read or not with the three
-Europe PMC states in which no text is read (no PMC ID, no open-access copy,
-XML with no sections) charges nothing, plus one control case where full text
-*was* read and is still charged, so the six unread cases are not passing by
-an analyser that charges nothing at all. A third test covers Europe PMC XML
-*with* sections: that is read text, so a data statement missing from it is
-charged, and the rating still carries the limited-certainty note, because
-the fallback reads it for the data statement alone (#421). If the invariant
+argument depends on: every combination of PubMed read or not with a PMC ID
+or none charges nothing when no text was read, and no request is made; plus
+one control case where full text *was* read and is still charged, so the
+unread cases are not passing by an analyser that charges nothing at all. A
+third test pins #421: a rating can no longer carry the limited-certainty
+note beside a data statement charged as missing from the full text. If the invariant
 ever fails, the desktop's scoring has stopped fixing the defect at its
 source, and needs the Unassessed rule and the "not searched" wording after
 all.
@@ -341,9 +343,10 @@ The desktop's certainty note follows the analyser's
 `TransparencyReport.full_text_analyzed`: set only when the article's own
 text was read *and* at least one section of it was recognised
 (`tests/test_full_text_analyzed.py`). Blank text is no text, and a full text
-in which nothing could be recognised — the whole of PLOS ONE, until #420 —
-established nothing, so a rating resting on it says its certainty is
-limited.
+in which nothing could be recognised established nothing, so a rating
+resting on it says its certainty is limited. Until #420 that was the whole
+of PLOS ONE: the JATS converter dropped front- and back-matter statements,
+so no section was recognised in them.
 
 ## Changing a pattern
 

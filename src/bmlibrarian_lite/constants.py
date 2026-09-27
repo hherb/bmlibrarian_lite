@@ -1035,6 +1035,10 @@ PUBMED_TRIAL_REGISTRY_DATABANKS = frozenset({
 # than blamed on a lookup that answered perfectly well (#354).
 SERVICE_RETRIEVED_PDF = "the retrieved PDF"
 
+# The full text we converted earlier and cached, named for the same reason:
+# a cached copy we hold and cannot read is not an article without one.
+SERVICE_CACHED_FULLTEXT = "the cached full text"
+
 # The PDF download step itself, named for the case where a caller asks for
 # discovery without it. Not a host either, but it is a lookup the reader's
 # answer depends on, so a skipped one is reportable (#355).

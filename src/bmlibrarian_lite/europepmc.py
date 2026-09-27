@@ -37,10 +37,7 @@ Usage:
 """
 
 import logging
-import re
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from html import unescape
 from typing import Any
 
 import requests
@@ -67,6 +64,7 @@ from .data_models import (
     SearchProvider,
 )
 from .exceptions import SourceRequestError
+from .jats_markdown import jats_to_markdown
 from .polite_session import mount_politely
 from .search_failures import request_failure_from_exception
 
@@ -144,8 +142,9 @@ def _extract_free_pdf_url(result: dict) -> str | None:
 class ArticleInfoFetch:
     """What asking Europe PMC about an article produced (#363).
 
-    The sibling of :class:`FullTextFetch`, for the availability lookup that
-    precedes it. :meth:`EuropePMCClient.get_article_info` answers both "this
+    The sibling of :class:`~bmlibrarian_lite.data_models.RecordFetch`, for
+    the availability lookup that precedes a full-text fetch.
+    :meth:`EuropePMCClient.get_article_info` answers both "this
     article is not in Europe PMC" and "we could not reach Europe PMC" with
     one ``None``, and its caller read both as the first -- so a throttled
     Europe PMC produced a full-text result whose record said every lookup
@@ -794,273 +793,17 @@ class EuropePMCClient:
     def xml_to_markdown(self, xml_content: str) -> str:
         """Convert JATS XML to readable markdown.
 
-        Extracts and formats the key sections:
-        - Title and metadata
-        - Abstract
-        - Body sections
-        - References
+        Delegates to :func:`bmlibrarian_lite.jats_markdown.jats_to_markdown`,
+        which documents what the markdown holds.
 
         Args:
             xml_content: JATS XML string
 
         Returns:
-            Formatted markdown string
+            Formatted markdown string, or an empty string when the XML does
+            not parse
         """
-        try:
-            root = ET.fromstring(xml_content)
-        except ET.ParseError as e:
-            logger.error(f"Failed to parse XML: {e}")
-            return ""
-
-        sections = []
-
-        # Extract front matter (title, authors, abstract)
-        front = root.find(".//front")
-        if front is not None:
-            sections.append(self._extract_front_matter(front))
-
-        # Extract body
-        body = root.find(".//body")
-        if body is not None:
-            sections.append(self._extract_body(body))
-
-        # Extract references
-        back = root.find(".//back")
-        if back is not None:
-            refs = self._extract_references(back)
-            if refs:
-                sections.append(refs)
-
-        return "\n\n".join(filter(None, sections))
-
-    def _extract_front_matter(self, front: ET.Element) -> str:
-        """Extract title, authors, and abstract from front matter."""
-        parts = []
-
-        # Title
-        title_group = front.find(".//title-group")
-        if title_group is not None:
-            article_title = title_group.find("article-title")
-            if article_title is not None:
-                title_text = self._get_text(article_title)
-                parts.append(f"# {title_text}")
-
-        # Authors
-        contrib_group = front.find(".//contrib-group")
-        if contrib_group is not None:
-            authors = []
-            for contrib in contrib_group.findall("contrib[@contrib-type='author']"):
-                name = contrib.find("name")
-                if name is not None:
-                    given = name.findtext("given-names", "")
-                    surname = name.findtext("surname", "")
-                    if surname:
-                        authors.append(f"{given} {surname}".strip())
-            if authors:
-                parts.append(f"**Authors:** {', '.join(authors)}")
-
-        # Journal and date
-        journal_meta = front.find(".//journal-meta")
-        article_meta = front.find(".//article-meta")
-
-        meta_parts = []
-        if journal_meta is not None:
-            journal_title = journal_meta.findtext(".//journal-title", "")
-            if journal_title:
-                meta_parts.append(f"*{journal_title}*")
-
-        if article_meta is not None:
-            pub_date = article_meta.find(".//pub-date")
-            if pub_date is not None:
-                year = pub_date.findtext("year", "")
-                if year:
-                    meta_parts.append(f"({year})")
-
-            # DOI
-            for article_id in article_meta.findall("article-id"):
-                if article_id.get("pub-id-type") == "doi":
-                    doi = article_id.text
-                    if doi:
-                        meta_parts.append(f"DOI: {doi}")
-                        break
-
-        if meta_parts:
-            parts.append(" | ".join(meta_parts))
-
-        # Abstract
-        abstract = front.find(".//abstract")
-        if abstract is not None:
-            abstract_text = self._get_text(abstract)
-            if abstract_text:
-                parts.append(f"## Abstract\n\n{abstract_text}")
-
-        return "\n\n".join(parts)
-
-    def _extract_body(self, body: ET.Element) -> str:
-        """Extract main body content."""
-        sections = []
-
-        for sec in body.findall(".//sec"):
-            section_content = self._process_section(sec)
-            if section_content:
-                sections.append(section_content)
-
-        # If no sections found, try to get paragraphs directly
-        if not sections:
-            paragraphs = []
-            for p in body.findall(".//p"):
-                text = self._get_text(p)
-                if text:
-                    paragraphs.append(text)
-            if paragraphs:
-                sections.append("\n\n".join(paragraphs))
-
-        return "\n\n".join(sections)
-
-    def _process_section(self, sec: ET.Element, level: int = 2) -> str:
-        """Process a section element recursively."""
-        parts = []
-
-        # Section title
-        title = sec.find("title")
-        if title is not None:
-            title_text = self._get_text(title)
-            if title_text:
-                prefix = "#" * min(level, 6)
-                parts.append(f"{prefix} {title_text}")
-
-        # Direct paragraphs in this section
-        for child in sec:
-            if child.tag == "p":
-                text = self._get_text(child)
-                if text:
-                    parts.append(text)
-            elif child.tag == "sec":
-                # Nested section
-                nested = self._process_section(child, level + 1)
-                if nested:
-                    parts.append(nested)
-            elif child.tag == "list":
-                list_content = self._process_list(child)
-                if list_content:
-                    parts.append(list_content)
-            elif child.tag == "table-wrap":
-                table_caption = self._get_text(child.find(".//caption/p"))
-                if table_caption:
-                    parts.append(f"*Table: {table_caption}*")
-            elif child.tag == "fig":
-                fig_caption = self._get_text(child.find(".//caption/p"))
-                if fig_caption:
-                    parts.append(f"*Figure: {fig_caption}*")
-
-        return "\n\n".join(parts)
-
-    def _process_list(self, list_elem: ET.Element) -> str:
-        """Process a list element."""
-        items = []
-        list_type = list_elem.get("list-type", "bullet")
-
-        for i, item in enumerate(list_elem.findall("list-item"), 1):
-            text = self._get_text(item)
-            if text:
-                if list_type == "order":
-                    items.append(f"{i}. {text}")
-                else:
-                    items.append(f"- {text}")
-
-        return "\n".join(items)
-
-    def _extract_references(self, back: ET.Element) -> str:
-        """Extract references section."""
-        ref_list = back.find(".//ref-list")
-        if ref_list is None:
-            return ""
-
-        parts = ["## References"]
-
-        for ref in ref_list.findall("ref"):
-            citation = ref.find(".//mixed-citation")
-            if citation is None:
-                citation = ref.find(".//element-citation")
-
-            if citation is not None:
-                ref_text = self._get_text(citation)
-                if ref_text:
-                    # Clean up extra whitespace
-                    ref_text = " ".join(ref_text.split())
-                    parts.append(f"- {ref_text}")
-
-        if len(parts) == 1:
-            return ""
-
-        return "\n".join(parts)
-
-    def _get_text(self, element: ET.Element | None) -> str:
-        """Extract all text content from an element, handling nested elements.
-
-        Preserves inline formatting like italic/bold where appropriate.
-        """
-        if element is None:
-            return ""
-
-        parts = []
-
-        # Get text before first child
-        if element.text:
-            parts.append(element.text)
-
-        # Process children
-        for child in element:
-            # Handle inline formatting
-            if child.tag == "italic":
-                child_text = self._get_text(child)
-                if child_text:
-                    parts.append(f"*{child_text}*")
-            elif child.tag == "bold":
-                child_text = self._get_text(child)
-                if child_text:
-                    parts.append(f"**{child_text}**")
-            elif child.tag == "sup":
-                child_text = self._get_text(child)
-                if child_text:
-                    parts.append(f"^{child_text}^")
-            elif child.tag == "sub":
-                child_text = self._get_text(child)
-                if child_text:
-                    parts.append(f"_{child_text}_")
-            elif child.tag == "xref":
-                # Cross-reference (citation, figure, table)
-                child_text = self._get_text(child)
-                if child_text:
-                    parts.append(f"[{child_text}]")
-            elif child.tag == "ext-link":
-                # External link
-                href = child.get("{http://www.w3.org/1999/xlink}href", "")
-                child_text = self._get_text(child)
-                if child_text and href:
-                    parts.append(f"[{child_text}]({href})")
-                elif child_text:
-                    parts.append(child_text)
-            elif child.tag in ("title", "label"):
-                # Skip titles and labels (handled separately)
-                pass
-            else:
-                # Recursively get text from other elements
-                child_text = self._get_text(child)
-                if child_text:
-                    parts.append(child_text)
-
-            # Get tail text after this child
-            if child.tail:
-                parts.append(child.tail)
-
-        text = "".join(parts)
-        # Clean up whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
-        # Unescape HTML entities
-        text = unescape(text)
-
-        return text
+        return jats_to_markdown(xml_content)
 
 
 def get_fulltext_markdown(

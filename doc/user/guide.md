@@ -274,7 +274,12 @@ lack of full text access** directly under the risk level, because full-text
 analysis is BMLibrarian's gold standard and a rating made from metadata
 alone rests on less. A full text counts only when part of it could actually
 be read: an article whose text arrived but in which none of the statements
-the analysis looks for could be found is rated as limited too. For a
+the analysis looks for could be found is rated as limited too. The
+statements are read in the places journals usually print them, including the
+competing-interests, data-availability and funding statements that PLOS
+journals keep with the article's front matter and that most journals keep
+after the main text; an article an earlier version analysed is offered
+for re-analysis so that its rating reflects them. For a
 **High** rating, the tooltip also lists **Rated high risk because** — the
 specific rule or rules that decided it, such as a low transparency score or
 a missing conflict-of-interest statement — so you can see why a study was

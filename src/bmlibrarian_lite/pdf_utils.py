@@ -24,6 +24,10 @@ Pure functions for PDF/full-text file path management and document formatting:
 - generate_fulltext_path(): Generate standard full-text markdown path for a document
 - find_existing_pdf(): Check if a PDF already exists locally
 - find_existing_fulltext(): Check if a full-text markdown already exists locally
+- fulltext_cache_stamp(): The first line naming the converter that wrote a cached file
+- save_fulltext_markdown(): Cache converted markdown, stamped with its converter
+- read_cached_fulltext(): Read cached markdown, or None if an older converter wrote it
+- read_stale_cached_fulltext(): Read cached markdown whichever converter wrote it
 - format_abstract_as_document(): Format abstract and citation as readable document
 - extract_pdf_text(): Extract text from a PDF file
 
@@ -50,8 +54,10 @@ Usage:
     # Check for existing PDF
     existing = find_existing_pdf(doc, base_dir)
 
-    # Check for existing full-text markdown (from Europe PMC XML)
-    fulltext = find_existing_fulltext(doc)
+    # Check for existing full-text markdown (from Europe PMC XML), and read
+    # it only through read_cached_fulltext, which checks and strips its stamp
+    path = find_existing_fulltext(doc)
+    markdown = read_cached_fulltext(path) if path else None
 """
 
 import logging
@@ -64,6 +70,7 @@ from .constants import (
     DEFAULT_PDF_BASE_DIR,
     PDF_BASE_DIR_ENV_VAR,
 )
+from .jats_markdown import JATS_MARKDOWN_CONVERTER_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -338,6 +345,27 @@ def find_existing_fulltext(
     return None
 
 
+#: How every cache stamp opens, whatever its version.
+_CACHE_STAMP_PREFIX = "<!-- bmlibrarian-lite jats-markdown v"
+
+
+def fulltext_cache_stamp(version: int = JATS_MARKDOWN_CONVERTER_VERSION) -> str:
+    """The first line of a cached full-text markdown file.
+
+    An HTML comment, so it renders as nothing wherever the file is opened as
+    markdown. It names the converter that wrote the file: the cache is read
+    before Europe PMC is asked, so without it a converter fix would never
+    reach an article already cached (#420).
+
+    Args:
+        version: The converter version to stamp.
+
+    Returns:
+        The stamp line, without its newline.
+    """
+    return f"{_CACHE_STAMP_PREFIX}{version} -->"
+
+
 def save_fulltext_markdown(
     doc_dict: Dict[str, Any],
     markdown_content: str,
@@ -345,6 +373,9 @@ def save_fulltext_markdown(
 ) -> Path:
     """
     Save full-text markdown to the cache directory.
+
+    The file opens with :func:`fulltext_cache_stamp`, which
+    :func:`read_cached_fulltext` checks and strips.
 
     Args:
         doc_dict: Document dictionary with pmcid, pmid, doi, year, etc.
@@ -362,9 +393,88 @@ def save_fulltext_markdown(
     """
     path = generate_fulltext_path(doc_dict, base_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(markdown_content, encoding='utf-8')
+    # Written aside and moved into place: a write cut short by a full disk
+    # or a killed process left a stamped file holding half an article, read
+    # as current for good -- and if the cut fell before the competing
+    # interests statement, charged as an article that makes none.
+    partial = path.with_name(f"{path.name}.partial")
+    try:
+        partial.write_text(f"{fulltext_cache_stamp()}\n{markdown_content}", encoding='utf-8')
+        os.replace(partial, path)
+    except OSError:
+        partial.unlink(missing_ok=True)
+        raise
     logger.info(f"Saved full-text markdown to: {path}")
     return path
+
+
+def read_cached_fulltext(path: Path) -> str | None:
+    """Read cached full-text markdown written by the current converter.
+
+    Args:
+        path: A file :func:`find_existing_fulltext` found.
+
+    Returns:
+        The markdown without its stamp; or ``None`` when the file carries no
+        stamp or another converter's, so the caller converts the article
+        again, or when nothing follows the stamp. A cached file is never
+        written empty, so an empty one is damaged, and serving it as a hit
+        would stop the article ever being fetched again.
+
+    Raises:
+        OSError: If the file cannot be read.
+        UnicodeDecodeError: If it is not UTF-8.
+    """
+    stamp, markdown = split_cache_stamp(path.read_text(encoding='utf-8'))
+    if stamp != fulltext_cache_stamp():
+        logger.info(
+            "Cached full text at %s was written by an earlier converter; "
+            "converting it again.",
+            path,
+        )
+        return None
+    if not markdown.strip():
+        logger.warning("Cached full text at %s is empty; fetching it again.", path)
+        return None
+    return markdown
+
+
+def read_stale_cached_fulltext(path: Path) -> str | None:
+    """Read cached full-text markdown, whichever converter wrote it.
+
+    For a reader who would otherwise be shown only the abstract, when the
+    article could not be fetched again. Never for the transparency analyser:
+    an earlier converter dropped the statements it reads, and their silence
+    would be charged to the study.
+
+    Args:
+        path: A file :func:`find_existing_fulltext` found.
+
+    Returns:
+        The markdown without any stamp, or ``None`` when nothing is left.
+
+    Raises:
+        OSError: If the file cannot be read.
+        UnicodeDecodeError: If it is not UTF-8.
+    """
+    _, markdown = split_cache_stamp(path.read_text(encoding='utf-8'))
+    return markdown if markdown.strip() else None
+
+
+def split_cache_stamp(content: str) -> tuple[str | None, str]:
+    """Split a cached file's stamp from its markdown.
+
+    Args:
+        content: The file's content.
+
+    Returns:
+        The stamp line, stripped, or ``None`` when the file opens with none
+        (every file written before the stamp existed); and the markdown.
+    """
+    first_line, _, rest = content.partition("\n")
+    if first_line.strip().startswith(_CACHE_STAMP_PREFIX):
+        return first_line.strip(), rest
+    return None, content
 
 
 def format_abstract_as_document(
