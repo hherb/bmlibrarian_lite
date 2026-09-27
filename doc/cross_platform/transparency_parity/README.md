@@ -9,6 +9,7 @@ identical behaviour on Python, Swift and Kotlin (issue #105).
 | `sponsor_patterns.json` | bound | bound | bound |
 | `trial_title_patterns.json` | bound | bound | bound |
 | `funder_names.json` (floors and composition) | bound | bound | bound |
+| `risk_explanation_strings.json` | bound | bound | bound |
 
 ## Why this exists
 
@@ -246,6 +247,67 @@ substring test, which all three used until #385, read "atrial fibrillation",
 "myocardial infarction", "industrial" and "gas phase isomerization" as
 trials. Changing a fragment moves the indicator, so bump every analyser
 version with it.
+
+## The risk-explanation contract
+
+### `risk_explanation_strings.json` — how a rating is qualified and explained
+
+Binds the wording PR #388 (Swift + Android) and #386 (Python) share for
+saying how far a transparency rating can be relied on, and for explaining why
+a study was rated high risk (#392).
+
+The file has three parts, with different reach:
+
+- **`strings`** — the certainty note, the badge suffix, the provisional and
+  unexplained-rating caveats, and the high-risk section's heading and labels.
+  Bound on **all three platforms**, string-for-string:
+  `TestTheStringsMatchTheContract` (Python, `tests/test_risk_explanation_contract.py`),
+  `testRiskExplanationStringsMatchTheContract` (Swift,
+  `TransparencyParityTests`), and the equivalent in Kotlin's
+  `RiskExplanationParityTest`
+  (`android/…/domain/transparency/RiskExplanationParityTest.kt`).
+- **`swift_kotlin_only`** — the "certainty unknown" note and the "Unassessed"
+  label and note. Bound on **Swift and Android only**, by the same three test
+  methods above reading a different key: the desktop makes neither of these
+  states (see below), so Python's copy of the contract does not assert them.
+- **`cases`** — worked findings, each scored, rated and explained by every
+  platform's own code, asserting the reasons, the score breakdown (when the
+  score is itself a reason) and the caveats. Bound on **all three platforms**:
+  Python's parametrized `test_case` (one case per `contract["cases"]` entry,
+  same file), Swift's `testRiskExplanationCasesMatchTheContract`, and
+  Kotlin's `RiskExplanationParityTest`. Every case has
+  `full_text_searched: true` — the only form in which the desktop can record
+  a missing COI or data statement at all (see below), so it is the only form
+  all three platforms can agree on.
+
+### Why the desktop has no Unassessed rule
+
+Swift and Android show a High as **Unassessed** when every reason for it
+depends on a statement that appears only in full text nobody searched, and
+qualify such a statement "(full text not searched)". Python has neither.
+
+The reason is where each platform fixed the underlying defect. Swift and
+Android fixed it in *display*: their analysers record a COI or data-
+availability statement as missing (`not_stated` / `notStated`) even when no
+full text was ever read, so a display-time check is needed to keep that
+absence from reading as a finding. Python fixed it earlier, in *scoring*
+(#352, #353, #359): `not_stated` for COI is recorded only from a full text
+that was read and its end matter parsed, and `not_stated` for data
+availability only from a full text that was read and segmented, or from
+Europe PMC XML that was read and holds sections. Anywhere else, Python
+records `not_assessed` / `unknown` — neutral values that score 0 and trigger
+nothing.
+
+So **no desktop High can rest on text nobody searched**, by construction of
+the score, and the Unassessed rule would never have anything to catch.
+Porting it would only add a branch that never runs and a "(full text not
+searched)" qualifier that never prints.
+
+`tests/test_no_high_rests_on_unread_text.py` pins the invariant this
+argument depends on, across every combination of full-text and Europe-PMC
+XML availability. If it ever fails, the desktop's scoring has stopped fixing
+the defect at its source, and needs the Unassessed rule and the "not
+searched" wording after all.
 
 ## Changing a pattern
 

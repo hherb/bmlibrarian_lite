@@ -8,7 +8,9 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-Nothing. Pick from **Potential follow-ups**.
+- **#386 — desktop transparency certainty and high-risk explanation** (branch `feat/desktop-transparency-certainty-386`; PR: to be opened). Ports PR #388's qualifiers to the desktop: every rating made without full text carries "Limited certainty because of lack of full text access" (badge suffix "· limited"); each High is explained in the badge tooltip and a new report section, "Why Studies Were Rated High Transparency Risk" (reasons, the score breakdown from stored `score_components`, other concerns, caveats); the report methodology gains limited/provisional counts. `doc/cross_platform/transparency_parity/risk_explanation_strings.json` binds Python, Swift and Kotlin (`tests/test_risk_explanation_contract.py`; Swift's `TransparencyParityTests.testRiskExplanationStringsMatchTheContract` / `testRiskExplanationCasesMatchTheContract`; Kotlin's `RiskExplanationParityTest`). **No Unassessed rule on the desktop, deliberately**: Python's scoring already keeps a High from resting on unread text (#352, #353, #359), pinned by `tests/test_no_high_rests_on_unread_text.py` — if that ever fails, the desktop needs Swift's Unassessed rule and "(full text not searched)" wording after all. `score_components` is stored per result; `NULL` means not recorded (an older or damaged row), and the report shows a breakdown-unavailable caveat, never an empty list. The badge explains a High from the **user's configured settings**, not the defaults. **No `TRANSPARENCY_ANALYZER_VERSION` bump** — this surfaces existing terms, it computes no new ones.
+
+  To lodge: Swift ("ratings made"; `TransparencySummarySection.swift:86` + Mac variant `:87`, `PrintableReportView.swift:377` + Mac variant `:430`) vs Android ("ratings were made"; `TransparencyReportMarkdown.kt:68`) word the limited-certainty summary differently; the Advanced Transparency Settings dialog edits a disconnected copy and never writes `config.transparency` (`quality_filter_panel.py`), and tabs keep the config they were built with after `app.py`'s `_show_settings` replaces it, so the badge can cite rules under stale settings until restart. To note on #391: Swift's "No CrossRef record was retrieved" caveat has no desktop counterpart. #411's remaining Python items (batch CSV has no `sources_unreachable` column; `industry_funding_percent` counts unread CrossRef as not funded) are unaffected and stay open, listed below.
 
 ## Recently landed (context)
 
@@ -219,9 +221,6 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Transparency after PR #388: desktop parity and the ports
 
-- **#386 — the desktop has none of PR #388**: no "Limited certainty" wording,
-  no high-risk explanation section, no Unassessed display. Python is otherwise
-  canonical for transparency, so this is the platform that lags.
 - **#390** Swift + Android look trial registrations up from the title only
   (port Python's PubMed databank-link source); **#389** a missing
   `hasResults` reads as "results not posted"; **#391** unchecked funders are
