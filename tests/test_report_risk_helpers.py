@@ -4,9 +4,13 @@
 
 """Tests for report risk warning helper functions."""
 
+import dataclasses
+
 import pytest
 
 from bmlibrarian_lite.agents.report_risk_helpers import (
+    PROMPT_LIMITED_CERTAINTY_QUALIFIER,
+    PROMPT_PROVISIONAL_QUALIFIER,
     build_risk_context_for_prompt,
     format_reference_risk_annotation,
     inject_risk_warnings,
@@ -27,6 +31,7 @@ from bmlibrarian_lite.transparency.transparency_settings import (
     TransparencySettings,
     get_default_settings,
 )
+from bmlibrarian_lite.transparency_terms import LIMITED_CERTAINTY_NOTE
 
 
 @pytest.fixture
@@ -173,6 +178,29 @@ class TestBuildRiskContextForPrompt:
         context = build_risk_context_for_prompt({})
         assert context == ""
 
+    def test_a_rating_without_full_text_is_qualified(self, high_risk_result):
+        """The narrative must not state it more firmly than every other surface (#386)."""
+        result = dataclasses.replace(high_risk_result, full_text_analyzed=False)
+        context = build_risk_context_for_prompt({1: ("Smith et al., 2023", result)})
+        assert PROMPT_LIMITED_CERTAINTY_QUALIFIER in context
+        assert PROMPT_PROVISIONAL_QUALIFIER not in context
+
+    def test_a_provisional_rating_is_qualified(self, high_risk_result):
+        """A source that could not be read makes the rating provisional."""
+        result = dataclasses.replace(
+            high_risk_result, full_text_analyzed=True, sources_unreachable=True
+        )
+        context = build_risk_context_for_prompt({1: ("Smith et al., 2023", result)})
+        assert PROMPT_PROVISIONAL_QUALIFIER in context
+        assert PROMPT_LIMITED_CERTAINTY_QUALIFIER not in context
+
+    def test_a_settled_rating_is_not_qualified(self, high_risk_result):
+        """The control: qualifying every line would say nothing."""
+        result = dataclasses.replace(high_risk_result, full_text_analyzed=True)
+        context = build_risk_context_for_prompt({1: ("Smith et al., 2023", result)})
+        assert PROMPT_LIMITED_CERTAINTY_QUALIFIER not in context
+        assert PROMPT_PROVISIONAL_QUALIFIER not in context
+
 
 class TestInjectRiskWarnings:
     """Tests for inject_risk_warnings function."""
@@ -215,10 +243,22 @@ class TestFormatReferenceRiskAnnotation:
         annotation = format_reference_risk_annotation(medium_risk_result)
         assert "⚠️ MEDIUM RISK" in annotation
 
-    def test_returns_empty_for_low_risk(self, low_risk_result):
-        """Returns empty string for low-risk results."""
+    def test_a_warned_low_rating_is_annotated(self, low_risk_result):
+        """At a Low report threshold a Low citation is warned about inline.
+
+        Its reference used to carry nothing, so the marker had no
+        explanation and the rating no limited-certainty note (#386).
+        """
         annotation = format_reference_risk_annotation(low_risk_result)
-        assert annotation == ""
+        assert annotation.splitlines() == [
+            "    ⚠️ LOW RISK",
+            f"    - {LIMITED_CERTAINTY_NOTE}",
+        ]
+
+    def test_a_low_rating_from_the_full_text_is_only_its_level(self, low_risk_result):
+        """The control: nothing to qualify, and no risk factor to list."""
+        result = dataclasses.replace(low_risk_result, full_text_analyzed=True)
+        assert format_reference_risk_annotation(result) == "    ⚠️ LOW RISK"
 
 
 class TestConfidenceAgreesWithTheReasonSentence:

@@ -2,8 +2,7 @@
 
 ``doc/cross_platform/transparency_parity/risk_explanation_strings.json`` is
 asserted from Python here, from Swift in ``TransparencyParityTests`` and from
-Kotlin in ``RiskExplanationParityTest``. The cases are appended to this file
-in Task 5, once the explanation exists.
+Kotlin in ``RiskExplanationParityTest``.
 """
 
 import dataclasses
@@ -132,7 +131,7 @@ def _case_ids(contract_path=CONTRACT):
     ``"python"``) is excluded here rather than skipped inside the test: the
     desktop's own wording would not match the contract's, so running it
     would either fail for the wrong reason or need a special-cased skip.
-    See ``test_a_case_bound_away_from_python_is_excluded``.
+    See ``TestTheCaseBoundAwayFromPython.test_is_excluded_from_pythons_parametrization``.
 
     Args:
         contract_path: The contract file to read names from.
@@ -187,9 +186,11 @@ def _report(findings: dict) -> TransparencyReport:
             whether a source was unreachable).
 
     Returns:
-        The report, scored by :func:`calculate_transparency_score`.
+        The report, scored by :func:`calculate_transparency_score`, and
+        with its full text read, as every case is built.
     """
     report = TransparencyReport(doi="10.1000/test", pmid="123")
+    report.full_text_analyzed = True
     report.data_availability = DataAvailabilityInfo(
         disclosure_level=DataDisclosureLevel(findings["data_availability"])
     )
@@ -212,17 +213,24 @@ def test_case(contract, name) -> None:
     """Python scores, rates and explains each case as the contract says."""
     case = next(c for c in contract["cases"] if c["name"] == name)
     settings = get_default_settings()
-    result = build_transparency_result(
-        "doc", _report(case["findings"]), settings, "full text"
-    )
+    result = build_transparency_result("doc", _report(case["findings"]), settings)
     if case["stored_risk_level"]:
         result = dataclasses.replace(
             result, risk_level=TransparencyRisk(case["stored_risk_level"])
         )
-    explanation = TransparencyRiskExplanation.of(result, settings)
     expected = case["expected"]
     assert result.transparency_score == expected["score"]
     assert result.risk_level.value == expected["risk_level"]
+    if result.risk_level is not TransparencyRisk.HIGH:
+        # The desktop explains only a High; anything else has no reasons,
+        # no breakdown and no caveats to give, which is what the case says
+        assert expected["reasons"] == []
+        assert expected["score_breakdown"] == []
+        assert expected["caveats"] == []
+        with pytest.raises(ValueError):
+            TransparencyRiskExplanation.of(result, settings)
+        return
+    explanation = TransparencyRiskExplanation.of(result, settings)
     assert list(explanation.reasons) == expected["reasons"]
     assert [
         f"{c.label}: {c.signed_points()}" for c in explanation.score_breakdown
@@ -236,7 +244,8 @@ class TestTheCaseBoundAwayFromPython:
     Its Swift/Kotlin caveat names a cause and remedy ("an earlier version of
     the analysis"; "Re-analyse") that do not hold on the desktop: an earlier
     analyser's rows are never shown, and Re-analyse never offers a current
-    row. The desktop names its own cause and remedy instead (#386).
+    row whose sources were all read. The desktop gives its own caveat
+    instead, naming the likely cause (#386).
     """
 
     _NAME = "a stored high rating no current rule explains"
@@ -248,13 +257,11 @@ class TestTheCaseBoundAwayFromPython:
             "the case itself must still exist, for Swift and Kotlin"
         )
 
-    def test_desktop_names_its_own_cause_and_remedy(self, contract) -> None:
+    def test_desktop_gives_its_own_caveat(self, contract) -> None:
         """The same findings produce the desktop's caveat, not the shared one."""
         case = next(c for c in contract["cases"] if c["name"] == self._NAME)
         settings = get_default_settings()
-        result = build_transparency_result(
-            "doc", _report(case["findings"]), settings, "full text"
-        )
+        result = build_transparency_result("doc", _report(case["findings"]), settings)
         result = dataclasses.replace(
             result, risk_level=TransparencyRisk(case["stored_risk_level"])
         )

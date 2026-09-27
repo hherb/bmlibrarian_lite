@@ -34,6 +34,8 @@ def analyzer() -> StudyTransparencyAnalyzer:
     )
 
 
+#: The Europe PMC answers in which no text is read. XML *with* sections is
+#: read text, and has a test of its own below.
 EUROPE_PMC = {
     "no pmcid": None,
     "no open-access copy": FullTextFetch.absent(),
@@ -61,7 +63,7 @@ class TestNoMissingStatementIsChargedAgainstTextNobodyRead:
         analyzer._analyze_conflicts(report, fulltext_sections={}, fulltext_read=False)
         analyzer._analyze_data_availability(report, fulltext_sections={}, fulltext_read=False)
         report.transparency_score = calculate_transparency_score(report)
-        result = build_transparency_result("d", report, get_default_settings(), None)
+        result = build_transparency_result("d", report, get_default_settings())
 
         triggers = high_risk_triggers_for(result, get_default_settings())
         assert MissingCoiStatement() not in triggers
@@ -76,8 +78,36 @@ class TestNoMissingStatementIsChargedAgainstTextNobodyRead:
         analyzer._analyze_conflicts(report, fulltext_sections=sections, fulltext_read=True)
         analyzer._analyze_data_availability(report, fulltext_sections=sections, fulltext_read=True)
         report.transparency_score = calculate_transparency_score(report)
-        result = build_transparency_result("d", report, get_default_settings(), "text")
+        result = build_transparency_result("d", report, get_default_settings())
 
         triggers = high_risk_triggers_for(result, get_default_settings())
         assert MissingCoiStatement() in triggers
         assert IndustryFundingWithWithheldData("not_stated") in triggers
+
+    def test_europe_pmc_sections_are_read_text(self, analyzer) -> None:
+        """The fallback's XML is the article's own text, searched section by section.
+
+        No full text was discovered, but Europe PMC served XML with sections
+        and none of them is a data statement: that is the article's answer,
+        so it is charged. It stays out of ``full_text_analyzed`` -- only the
+        data statement was looked for there, and the conflict of interest
+        analysis has already recorded that no full text was read -- so the
+        rating keeps its limited-certainty note.
+        """
+        report = TransparencyReport(doi="10.1/x", pmid="1", pubmed_record_read=True)
+        report.industry_funding_detected = True
+        report.industry_funding_confidence = 0.9
+        report.pmcid = "PMC1"
+        analyzer.europepmc.get_full_text_xml = lambda *_a, **_k: FullTextFetch.served(
+            "<article><body><sec><title>Methods</title><p>We did X.</p></sec>"
+            "</body></article>"
+        )
+        analyzer._analyze_conflicts(report, fulltext_sections={}, fulltext_read=False)
+        analyzer._analyze_data_availability(report, fulltext_sections={}, fulltext_read=False)
+        report.transparency_score = calculate_transparency_score(report)
+        result = build_transparency_result("d", report, get_default_settings())
+
+        triggers = high_risk_triggers_for(result, get_default_settings())
+        assert IndustryFundingWithWithheldData("not_stated") in triggers
+        assert MissingCoiStatement() not in triggers
+        assert result.full_text_analyzed is False

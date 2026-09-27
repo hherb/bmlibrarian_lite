@@ -441,6 +441,33 @@ class TestUpdateSettings:
         manager.start()
         assert manager._executor is not old_executor
 
+    def test_an_in_place_concurrency_change_restarts_the_executor(self, manager):
+        """The shared settings object is edited in place, then handed back (#386).
+
+        Compared with itself, the old and new worker counts always agreed,
+        so the pool kept its old size.
+        """
+        manager.start()
+        old_executor = manager._executor
+
+        settings = manager.settings
+        settings.max_concurrent_analyses += 2
+        manager.update_settings(settings)
+
+        assert manager._executor is not None
+        assert manager._executor is not old_executor
+
+    def test_an_unchanged_concurrency_keeps_the_executor(self, manager):
+        """The control: restarting on every settings change drops queued work."""
+        manager.start()
+        old_executor = manager._executor
+
+        settings = manager.settings
+        settings.score_threshold += 5
+        manager.update_settings(settings)
+
+        assert manager._executor is old_executor
+
 
 class TestUtilityMethods:
     """Tests for utility methods."""

@@ -22,7 +22,7 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Union
 
-from ..transparency_terms import ScoreComponent
+from ..transparency_terms import DATA_PHRASES, ScoreComponent
 
 if TYPE_CHECKING:
     from ..data_models import LiteDocument
@@ -108,7 +108,10 @@ class TransparencyUnassessed:
 #: registry record that is not a study, now makes the result provisional --
 #: and a title is a trial's only by whole word, so "atrial fibrillation" is
 #: not).
-TRANSPARENCY_ANALYZER_VERSION = "2.2"
+#: 2.3: #386 (a full text counts as analysed only when a section of it was
+#: recognised, and whitespace is no text -- a rating resting on neither now
+#: says its certainty is limited -- and each score records its terms).
+TRANSPARENCY_ANALYZER_VERSION = "2.3"
 
 #: What every row written before #360 says, whatever analysed it: the field
 #: was never compared to anything, so it never moved off its default.
@@ -635,11 +638,13 @@ class TransparencyResult:
             so it is re-analysed rather than cached as a settled answer, and
             the reference annotation says so rather than printing its risk
             level unqualified (#346, #360).
-        full_text_analyzed: Whether the article's full text was analysed.
-            False rates it with limited certainty, and every surface says
-            so (#386).
+        full_text_analyzed: Whether the article's own full text was read and
+            at least one section of it recognised -- the analyser's
+            ``TransparencyReport.full_text_analyzed``. False rates it with
+            limited certainty, and every surface says so (#386).
         score_components: The terms the score was summed from; None when
-            not recorded.
+            not recorded, or when the stored terms could not be read or did
+            not add up to the score.
     """
 
     document_id: str
@@ -673,12 +678,12 @@ class TransparencyResult:
     # silence, and only the first makes the finding provisional (#346).
     sources_unreachable: bool = False
 
-    # For future full-text enhancement
+    # Whether the rating rests on the article's own text; see the docstring
     full_text_analyzed: bool = False
 
     # The terms the score was summed from, in order (#386). ``None`` means
     # not recorded: a row stored before the terms were, or one whose stored
-    # terms could not be read back.
+    # terms could not be read back or did not add up to its score.
     score_components: tuple[ScoreComponent, ...] | None = None
 
     @property
@@ -819,7 +824,8 @@ class TransparencyResult:
 
 
 #: Data availability levels that, with industry funding, rate a study high.
-WITHHELD_DATA_LEVELS = ("restricted", "not_available", "not_stated")
+#: The levels a reason sentence has words for, so the two cannot drift apart.
+WITHHELD_DATA_LEVELS = tuple(DATA_PHRASES)
 
 
 @dataclass(frozen=True)
@@ -828,6 +834,18 @@ class ScoreBelowThreshold:
 
     score: int
     threshold: int
+
+    def __post_init__(self) -> None:
+        """Refuse a score that is not below the cut-off.
+
+        Raises:
+            ValueError: If ``score`` is not below ``threshold``.
+        """
+        if self.score >= self.threshold:
+            raise ValueError(
+                f"a score of {self.score} is not below the cut-off of "
+                f"{self.threshold}"
+            )
 
 
 @dataclass(frozen=True)
@@ -839,6 +857,18 @@ class IndustryFundingWithWithheldData:
     """
 
     data_availability: str
+
+    def __post_init__(self) -> None:
+        """Refuse a level that does not withhold data.
+
+        Raises:
+            ValueError: If ``data_availability`` is not one of
+                ``WITHHELD_DATA_LEVELS``.
+        """
+        if self.data_availability not in WITHHELD_DATA_LEVELS:
+            raise ValueError(
+                f"{self.data_availability!r} is not a withheld data level"
+            )
 
 
 @dataclass(frozen=True)
@@ -930,8 +960,7 @@ def calculate_risk_level(
     Determine risk level from transparency metrics.
 
     Risk levels:
-    - High Risk: score < threshold OR (industry + restricted data) OR a COI
-      statement the article was read to be missing
+    - High Risk: exactly when :func:`high_risk_triggers` returns any rule
     - Medium Risk: between ``settings.score_threshold`` and
       ``MEDIUM_RISK_SCORE_THRESHOLD`` OR industry with disclosure
     - Low Risk: above ``MEDIUM_RISK_SCORE_THRESHOLD``, transparent

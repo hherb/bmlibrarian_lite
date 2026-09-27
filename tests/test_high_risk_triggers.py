@@ -105,7 +105,7 @@ class TestTheResultKeepsItsTerms:
 
     def test_the_built_result_carries_the_components(self) -> None:
         """The same terms the score was summed from."""
-        result = build_transparency_result("d", self._report(), _settings(), "full text")
+        result = build_transparency_result("d", self._report(), _settings())
         assert result.score_components == (
             ScoreComponent("Starting score", 50),
             ScoreComponent("Data availability: fully open", 20),
@@ -113,18 +113,26 @@ class TestTheResultKeepsItsTerms:
 
     def test_components_survive_the_dict(self) -> None:
         """``to_dict``/``from_dict`` keep them, and ``None`` stays ``None``."""
-        result = build_transparency_result("d", self._report(), _settings(), None)
+        result = build_transparency_result("d", self._report(), _settings())
         assert TransparencyResult.from_dict(result.to_dict()) == result
         unrecorded = dataclasses.replace(result, score_components=None)
         assert TransparencyResult.from_dict(unrecorded.to_dict()).score_components is None
 
-    @pytest.mark.parametrize("full_text", [None, "", "   \n"])
-    def test_blank_full_text_is_not_full_text(self, full_text) -> None:
-        """The analyser ignores blank text, so it must not count as searched."""
-        result = build_transparency_result("d", self._report(), _settings(), full_text)
-        assert result.full_text_analyzed is False
+    def test_terms_that_do_not_add_up_are_not_recorded(self) -> None:
+        """A breakdown the reader could add up and find false is not kept."""
+        report = self._report()
+        report.transparency_score = 65.0  # the terms add up to 70
+        result = build_transparency_result("d", report, _settings())
+        assert result.transparency_score == 65
+        assert result.score_components is None
 
-    def test_supplied_full_text_counts(self) -> None:
-        """The control."""
-        result = build_transparency_result("d", self._report(), _settings(), "Methods ...")
-        assert result.full_text_analyzed is True
+    @pytest.mark.parametrize("analysed", [True, False])
+    def test_full_text_analysed_is_the_analysers_answer(self, analysed) -> None:
+        """Only the analyser knows whether it recognised anything it read.
+
+        ``tests/test_full_text_analyzed.py`` drives the analyser itself.
+        """
+        report = self._report()
+        report.full_text_analyzed = analysed
+        result = build_transparency_result("d", report, _settings())
+        assert result.full_text_analyzed is analysed

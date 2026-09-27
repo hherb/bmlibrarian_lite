@@ -97,12 +97,26 @@ class TestTheTooltip:
         assert PROVISIONAL_RESULT_CAVEAT in tip
 
     def test_uses_the_settings_it_was_given(self, qapp) -> None:
-        """Review focus 1: the user's settings, not the defaults."""
+        """The user's settings, not the defaults."""
         settings = dataclasses.replace(
             get_default_settings(), missing_coi_triggers_downgrade=False
         )
         tip = TransparencyBadge(_row(), settings=settings).toolTip()
         assert UNEXPLAINED_RATING_CAVEAT in tip
+
+    def test_no_matching_rule_is_a_caveat_not_a_reason(self, qapp) -> None:
+        """It says there is no reason to give, so it is not listed as one."""
+        settings = dataclasses.replace(
+            get_default_settings(), missing_coi_triggers_downgrade=False
+        )
+        tip = TransparencyBadge(_row(), settings=settings).toolTip()
+        assert "Rated high risk because" not in tip
+        assert f"<b>Caveats:</b><br>  • {UNEXPLAINED_RATING_CAVEAT}" in tip
+
+    def test_a_medium_rating_meeting_a_rule_lists_none(self, qapp) -> None:
+        """Its findings meet a rule under these settings, and it is not High."""
+        row = _row(risk_level=TransparencyRisk.MEDIUM)
+        assert "Rated high risk because" not in TransparencyBadge(row).toolTip()
 
     def test_a_lower_rating_lists_no_rules(self, qapp) -> None:
         """Only a High rating gets a "Rated high risk because" section."""

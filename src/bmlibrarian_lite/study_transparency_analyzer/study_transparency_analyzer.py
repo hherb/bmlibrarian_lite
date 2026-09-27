@@ -76,6 +76,7 @@ from ..transparency_terms import (
     STARTING_SCORE_LABEL,
     TRIAL_REGISTERED_LABEL,
     ScoreComponent,
+    clamped_score,
 )
 
 # Each client below owns its own request loop and its own error handling,
@@ -335,6 +336,16 @@ class TransparencyReport:
     # Overall scores
     transparency_score: float = 0.0  # 0-100
     risk_of_bias_indicators: List[str] = field(default_factory=list)
+
+    # Whether the article's own full text was read and at least one section
+    # of it recognised (#386). Text that arrived but could not be segmented
+    # established nothing -- the COI and data availability analyses each
+    # record that dimension as not assessed -- so a rating resting on it has
+    # the certainty of one made without the full text, and must say so.
+    # The Europe PMC XML the data availability fallback reads does not set
+    # it: that XML is read for the data statement alone, and the COI
+    # analysis has by then recorded that the full text was not read.
+    full_text_analyzed: bool = False
 
     # Metadata
     analysis_timestamp: datetime = field(default_factory=datetime.now)
@@ -2279,6 +2290,19 @@ def _any_section_was_parsed(fulltext_sections: Optional[Dict[str, str]]) -> bool
     return any(value for value in fulltext_sections.values())
 
 
+def _text_or_none(text: str | None) -> str | None:
+    """A full text, or ``None`` when there is nothing in it to read.
+
+    Args:
+        text: A supplied or discovered full text.
+
+    Returns:
+        ``text`` unchanged when it has any non-whitespace character, else
+        ``None``.
+    """
+    return text if text and text.strip() else None
+
+
 def _end_matter_was_parsed(fulltext_sections: Optional[Dict[str, str]]) -> bool:
     """Say whether the article's end matter was recognised at all.
 
@@ -2600,7 +2624,7 @@ def check_results_compliance(trial: TrialRegistration, publication_date: Optiona
 
 BASE_TRANSPARENCY_SCORE = 50
 
-#: Points for each data availability level (+/- 20).
+#: Points for each data availability level (+20 to -15).
 DATA_AVAILABILITY_POINTS: dict[DataDisclosureLevel, int] = {
     DataDisclosureLevel.FULL_OPEN: 20,
     DataDisclosureLevel.AVAILABLE_ON_REQUEST: 5,
@@ -2720,8 +2744,7 @@ def calculate_transparency_score(report: TransparencyReport) -> float:
     Returns:
         The clamped sum of :func:`score_components`, as a float as before.
     """
-    total = sum(term.points for term in score_components(report))
-    return float(max(0, min(100, total)))
+    return float(clamped_score(score_components(report)))
 
 
 # =============================================================================
@@ -2809,9 +2832,16 @@ class StudyTransparencyAnalyzer:
         # Step 1: Get basic metadata and resolve IDs
         self._fetch_basic_metadata(report)
 
+        # Whitespace is no text. Left as it was, it passed every ``if
+        # fulltext:`` below, was recorded as a full-text source, and a
+        # rating made from nothing but metadata was shown without its
+        # limited-certainty note (#386). Discovered text is held to the
+        # same rule: an image-only PDF extracts to blank lines.
+        fulltext = _text_or_none(fulltext)
+
         # Step 2: Auto-discover full text if not provided
         if not fulltext and self._auto_discover_fulltext:
-            fulltext = self._discover_fulltext(report)
+            fulltext = _text_or_none(self._discover_fulltext(report))
 
         # Extract sections from full text
         fulltext_sections = {}
@@ -2824,6 +2854,7 @@ class StudyTransparencyAnalyzer:
                     "Extracted full-text sections: %s",
                     list(fulltext_sections.keys()),
                 )
+        report.full_text_analyzed = _any_section_was_parsed(fulltext_sections)
 
         # Step 3: Get funder information
         self._fetch_funder_info(report)

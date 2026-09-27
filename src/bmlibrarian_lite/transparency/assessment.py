@@ -23,6 +23,7 @@ reviewing (#373). One body, so the two cannot come to store different
 results for the same study. Nothing here imports Qt.
 """
 
+import logging
 from typing import TYPE_CHECKING
 
 from ..constants import FALLBACK_CONTACT_EMAIL
@@ -31,6 +32,7 @@ from ..study_transparency_analyzer.study_transparency_analyzer import (
     TransparencyReport,
     score_components,
 )
+from ..transparency_terms import ScoreComponent, components_explain_score
 from .transparency_models import (
     COI_NOT_ASSESSED,
     TransparencyResult,
@@ -42,6 +44,8 @@ if TYPE_CHECKING:
     from ..config import LiteConfig
     from ..storage import LiteStorage
     from .transparency_settings import TransparencySettings
+
+logger = logging.getLogger(__name__)
 
 
 def contact_email(config: "LiteConfig") -> str:
@@ -86,21 +90,15 @@ def build_transparency_result(
     document_id: str,
     report: TransparencyReport,
     settings: "TransparencySettings",
-    full_text: str | None,
 ) -> TransparencyResult:
     """Turn an analyser's report into the result that is stored and shown.
 
     Args:
         document_id: The document the report is about.
-        report: What the analyser found.
+        report: What the analyser found. Its ``full_text_analyzed`` is
+            copied as it is: only the analyser knows whether it recognised
+            anything in the text it was given or found (#386).
         settings: The transparency settings the risk level is judged by.
-        full_text: The full text the caller handed the analyser, if any.
-            ``full_text_analyzed`` on the result is set when this is
-            non-blank (whitespace-only does not count), or when the
-            analyser discovered full text of its own -- recorded in
-            ``report.data_sources_used`` -- regardless of whether what it
-            found was blank: the analyser's own ``if fulltext:`` check does
-            not strip whitespace before testing it.
 
     Returns:
         The result, stamped with this build's analyser version.
@@ -154,11 +152,8 @@ def build_transparency_result(
             if risk_level == TransparencyRisk.HIGH
             else 0
         ),
-        full_text_analyzed=(
-            bool(full_text and full_text.strip())
-            or any("Full-text" in s for s in report.data_sources_used)
-        ),
-        score_components=tuple(score_components(report)),
+        full_text_analyzed=report.full_text_analyzed,
+        score_components=_recorded_components(document_id, report),
         # A source that could not be read is our silence, not the
         # study's. Neither fetch raises -- each returns "unreachable" and
         # the analysis finishes with a caveat and a score that fell
@@ -171,6 +166,37 @@ def build_transparency_result(
             or report.registry_record_unreachable
         ),
     )
+
+
+def _recorded_components(
+    document_id: str, report: TransparencyReport
+) -> tuple[ScoreComponent, ...] | None:
+    """The score's terms, as long as they add up to the score being stored.
+
+    They do by construction: the analyser's score is the clamped sum of these
+    same terms. A report whose score was set any other way would store a
+    breakdown the reader can add up and find false, so it is not recorded
+    -- the report then says the breakdown is not available.
+
+    Args:
+        document_id: The document the report is about, for the log line.
+        report: What the analyser found.
+
+    Returns:
+        The terms, or ``None`` when they do not explain the score.
+    """
+    components = tuple(score_components(report))
+    score = int(report.transparency_score)
+    if components_explain_score(components, score):
+        return components
+    logger.error(
+        "The score terms of document %s add up to %d, not its score of %d; "
+        "storing it without a breakdown.",
+        document_id,
+        sum(component.points for component in components),
+        score,
+    )
+    return None
 
 
 def assess_document(
@@ -202,6 +228,6 @@ def assess_document(
             classifies it: the raw text can carry a credential (#330).
     """
     report = analyzer.analyze(pmid=pmid, doi=doi, fulltext=full_text)
-    result = build_transparency_result(document_id, report, settings, full_text)
+    result = build_transparency_result(document_id, report, settings)
     storage.save_transparency_result(result)
     return result

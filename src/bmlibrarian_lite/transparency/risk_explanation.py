@@ -24,7 +24,7 @@ text it read (#352, #353, #359), so both would be unreachable; see
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 from ..transparency_terms import (
     BREAKDOWN_UNAVAILABLE_CAVEAT,
@@ -87,22 +87,21 @@ def _sentence(trigger: HighRiskTrigger, result: TransparencyResult) -> str:
 
     Returns:
         The reason sentence.
-
-    Raises:
-        TypeError: If ``trigger`` is not one of the known variants.
     """
-    if isinstance(trigger, ScoreBelowThreshold):
-        return SCORE_BELOW_THRESHOLD_REASON.format(
-            score=trigger.score, threshold=trigger.threshold
-        )
-    if isinstance(trigger, IndustryFundingWithWithheldData):
-        return INDUSTRY_WITHHELD_DATA_REASON.format(
-            percent=confidence_percent(result.industry_funding_confidence),
-            data_phrase=DATA_PHRASES[trigger.data_availability],
-        )
-    if isinstance(trigger, MissingCoiStatement):
-        return MISSING_COI_REASON
-    raise TypeError(f"unknown high-risk trigger {trigger!r}")
+    match trigger:
+        case ScoreBelowThreshold(score=score, threshold=threshold):
+            return SCORE_BELOW_THRESHOLD_REASON.format(
+                score=score, threshold=threshold
+            )
+        case IndustryFundingWithWithheldData(data_availability=level):
+            return INDUSTRY_WITHHELD_DATA_REASON.format(
+                percent=confidence_percent(result.industry_funding_confidence),
+                data_phrase=DATA_PHRASES[level],
+            )
+        case MissingCoiStatement():
+            return MISSING_COI_REASON
+        case _:
+            assert_never(trigger)
 
 
 def _restated(triggers: list[HighRiskTrigger]) -> set[str]:
@@ -117,12 +116,18 @@ def _restated(triggers: list[HighRiskTrigger]) -> set[str]:
     """
     restated: set[str] = set()
     for trigger in triggers:
-        if isinstance(trigger, MissingCoiStatement):
-            restated.add(_MISSING_COI_INDICATOR)
-        elif isinstance(trigger, IndustryFundingWithWithheldData):
-            restated.update(
-                {_INDUSTRY_FUNDING_INDICATOR, _INDUSTRY_RESTRICTED_DATA_INDICATOR}
-            )
+        match trigger:
+            case MissingCoiStatement():
+                restated.add(_MISSING_COI_INDICATOR)
+            case IndustryFundingWithWithheldData():
+                restated.update(
+                    {_INDUSTRY_FUNDING_INDICATOR, _INDUSTRY_RESTRICTED_DATA_INDICATOR}
+                )
+            case ScoreBelowThreshold():
+                # Its reason quotes the score; no indicator restates that
+                pass
+            case _:
+                assert_never(trigger)
     return restated
 
 
@@ -133,12 +138,12 @@ class TransparencyRiskExplanation:
     Attributes:
         score: The transparency score (0-100).
         reasons: Each rule that rated the study high, as a sentence. Empty
-            only when no current rule explains a stored High; ``caveats``
+            only when no current rule explains the stored High; ``caveats``
             then says so.
         score_breakdown: The score's terms, given only when a low score is
             among ``reasons`` and the terms were recorded.
-        other_concerns: Recorded indicators and caveats a reason does not
-            already say.
+        other_concerns: The stored risk indicators and analysis warnings a
+            reason does not already say.
         caveats: Reasons the rating may rest on less than it appears to.
         certainty_note: The limited-certainty note, or ``None``.
     """
@@ -154,20 +159,30 @@ class TransparencyRiskExplanation:
     def of(
         cls, result: TransparencyResult, settings: "TransparencySettings"
     ) -> "TransparencyRiskExplanation":
-        """Explain a stored result's rating under the user's settings.
+        """Explain a stored High under the user's settings.
 
         Args:
-            result: A shown (current) result, normally one rated high.
+            result: A shown (current) result rated high.
             settings: The settings its level was judged by.
 
         Returns:
             The explanation.
+
+        Raises:
+            ValueError: If ``result`` is not rated high. Its findings could
+                still meet a rule -- the settings may have changed since --
+                and "Rated high risk because" would then be printed for a
+                study that is not.
         """
+        if result.risk_level is not TransparencyRisk.HIGH:
+            raise ValueError(
+                f"only a high rating is explained, not {result.risk_level.value}"
+            )
         triggers = high_risk_triggers_for(result, settings)
         scored_low = any(isinstance(t, ScoreBelowThreshold) for t in triggers)
 
         caveats: list[str] = []
-        if not triggers and result.risk_level is TransparencyRisk.HIGH:
+        if not triggers:
             caveats.append(UNEXPLAINED_RATING_CAVEAT)
         if result.sources_unreachable:
             caveats.append(PROVISIONAL_RESULT_CAVEAT)

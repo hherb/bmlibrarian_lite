@@ -15,6 +15,13 @@ from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer im
     calculate_transparency_score,
     score_components,
 )
+from bmlibrarian_lite.transparency_terms import (
+    MAX_TRANSPARENCY_SCORE,
+    MIN_TRANSPARENCY_SCORE,
+    ScoreComponent,
+    clamped_score,
+    components_explain_score,
+)
 
 DISCLOSURE = "The authors declare no competing interests."
 TIES = "Dr A has received consulting fees from Pfizer."
@@ -136,3 +143,52 @@ class TestTheLabels:
             ("Trial registered", 10),
             ("Trial results posted on time", 5),
         ]
+
+
+class TestAComponentIsWhatStorageCanReadBack:
+    """The constructor refuses what ``from_dict`` would refuse on the way back."""
+
+    @pytest.mark.parametrize(
+        ("label", "points", "missing"),
+        [(None, 5, False), ("x", True, False), ("x", 5.0, False), ("x", 5, 1)],
+        ids=["label not text", "bool points", "float points", "int flag"],
+    )
+    def test_a_wrong_type_is_refused(self, label, points, missing) -> None:
+        """Saved, it would be refused on read and cost the breakdown."""
+        with pytest.raises(ValueError):
+            ScoreComponent(label, points, missing)
+
+    def test_an_older_dict_without_the_flag_reads(self) -> None:
+        """The flag defaults off, rather than the breakdown being lost."""
+        component = ScoreComponent.from_dict({"label": "Trial registered", "points": 5})
+        assert component == ScoreComponent("Trial registered", 5, False)
+
+    def test_a_non_mapping_is_refused(self) -> None:
+        """A stored list item that is not an object."""
+        with pytest.raises(ValueError):
+            ScoreComponent.from_dict([1, 2])  # type: ignore[arg-type]
+
+
+class TestABreakdownExplainsItsScore:
+    """Only terms that add up to the score are shown as how it was reached."""
+
+    def test_the_sum_is_clamped(self) -> None:
+        """The score stays within its bounds, as the analyser's does."""
+        low = (ScoreComponent("Starting score", 50), ScoreComponent("x", -90))
+        high = (ScoreComponent("Starting score", 50), ScoreComponent("x", 90))
+        assert clamped_score(low) == MIN_TRANSPARENCY_SCORE
+        assert clamped_score(high) == MAX_TRANSPARENCY_SCORE
+
+    def test_terms_that_add_up_explain(self) -> None:
+        """The control."""
+        terms = (ScoreComponent("Starting score", 50), ScoreComponent("x", -5))
+        assert components_explain_score(terms, 45) is True
+
+    def test_terms_that_do_not_add_up_do_not(self) -> None:
+        """A sum the reader could check and find false."""
+        terms = (ScoreComponent("Starting score", 50), ScoreComponent("x", -5))
+        assert components_explain_score(terms, 65) is False
+
+    def test_no_terms_explain_nothing(self) -> None:
+        """Even a score an empty sum would clamp to."""
+        assert components_explain_score((), MIN_TRANSPARENCY_SCORE) is False

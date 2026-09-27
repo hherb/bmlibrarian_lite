@@ -43,6 +43,7 @@ from ..transparency import (
 from ..transparency.risk_explanation import TransparencyRiskExplanation, certainty_note
 from ..transparency.transparency_settings import TransparencySettings
 from ..transparency_terms import (
+    CAVEATS_LABEL,
     DATA_AVAILABILITY_DISPLAY_NAMES,
     LIMITED_CERTAINTY_BADGE_SUFFIX,
     PROVISIONAL_RESULT_CAVEAT,
@@ -250,11 +251,15 @@ class TransparencyBadge(QFrame):
             lines.append(f"<b>Provisional:</b> {PROVISIONAL_RESULT_CAVEAT}")
         if r.risk_level is TransparencyRisk.HIGH:
             explanation = TransparencyRiskExplanation.of(r, self._settings)
-            lines.append("")
-            lines.append(f"<b>{REASONS_LABEL}:</b>")
-            for reason in explanation.reasons:
-                lines.append(f"  • {reason}")
+            if explanation.reasons:
+                lines.append("")
+                lines.append(f"<b>{REASONS_LABEL}:</b>")
+                for reason in explanation.reasons:
+                    lines.append(f"  • {reason}")
             if UNEXPLAINED_RATING_CAVEAT in explanation.caveats:
+                # Not listed as a reason: it says there is none to give
+                lines.append("")
+                lines.append(f"<b>{CAVEATS_LABEL}:</b>")
                 lines.append(f"  • {UNEXPLAINED_RATING_CAVEAT}")
         lines.append("")
 

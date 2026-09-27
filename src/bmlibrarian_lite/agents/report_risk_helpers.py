@@ -45,6 +45,11 @@ from ..transparency_terms import (
 # (#386); aliased rather than redefined so the two lists cannot drift.
 RISKY_DATA_AVAILABILITY_LEVELS = WITHHELD_DATA_LEVELS
 
+# How the report prompt qualifies a concern the narrative must not overstate:
+# a rating made without the full text, and one a source was unreadable for.
+PROMPT_LIMITED_CERTAINTY_QUALIFIER = "rated without its full text; limited certainty"
+PROMPT_PROVISIONAL_QUALIFIER = "provisional: a source could not be read"
+
 
 def select_inline_warning(
     result: TransparencyResult,
@@ -154,7 +159,17 @@ def build_risk_context_for_prompt(
             concerns.append(f"Data availability: {result.data_availability_level}")
 
         concerns_str = ", ".join(concerns) if concerns else "Low transparency score"
-        lines.append(f"- [Citation {citation_num}] {author_ref}: {concerns_str}")
+        # The narrative must not present these ratings as more settled than
+        # every other surface does (#386)
+        qualifiers = []
+        if certainty_note(result) is not None:
+            qualifiers.append(PROMPT_LIMITED_CERTAINTY_QUALIFIER)
+        if result.sources_unreachable:
+            qualifiers.append(PROMPT_PROVISIONAL_QUALIFIER)
+        qualifier_str = f" ({'; '.join(qualifiers)})" if qualifiers else ""
+        lines.append(
+            f"- [Citation {citation_num}] {author_ref}: {concerns_str}{qualifier_str}"
+        )
 
     lines.extend([
         "",
@@ -277,18 +292,19 @@ def format_reference_risk_annotation(
 ) -> str:
     """Format risk annotation for reference list entry.
 
-    Creates structured sub-items showing specific risk factors
-    for HIGH and MEDIUM risk citations.
+    Creates structured sub-items showing specific risk factors for a
+    citation the report warns about -- HIGH and MEDIUM ones, and LOW ones
+    too when the user's report threshold is Low. A LOW annotation used to
+    be empty, so such a citation carried an inline warning marker with
+    nothing in the references to say why, nor that its rating's certainty
+    was limited (#386).
 
     Args:
         result: Transparency analysis result
 
     Returns:
-        Formatted annotation string, or empty string for low risk
+        Formatted annotation string
     """
-    if result.risk_level == TransparencyRisk.LOW:
-        return ""
-
     risk_label = result.risk_level.value.upper()
     lines = [f"    ⚠️ {risk_label} RISK"]
 

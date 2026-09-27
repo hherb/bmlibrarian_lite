@@ -4,14 +4,23 @@
 
 """A result's score terms survive the store, and a damaged column is named (#386)."""
 
+import dataclasses
 import sqlite3
 from datetime import datetime
 from typing import Any
 
 import pytest
 
-from bmlibrarian_lite.transparency import TransparencyResult, TransparencyRisk
-from bmlibrarian_lite.transparency_terms import ScoreComponent
+from bmlibrarian_lite.transparency import (
+    TransparencyResult,
+    TransparencyRisk,
+    get_default_settings,
+)
+from bmlibrarian_lite.transparency.risk_explanation import TransparencyRiskExplanation
+from bmlibrarian_lite.transparency_terms import (
+    BREAKDOWN_UNAVAILABLE_CAVEAT,
+    ScoreComponent,
+)
 
 COMPONENTS = (
     ScoreComponent("Starting score", 50),
@@ -38,6 +47,23 @@ def _result(components: Any = COMPONENTS) -> TransparencyResult:
         analyzed_at=datetime(2026, 9, 27),
         score_components=components,
     )
+
+
+#: A value nested deeply enough to exhaust the JSON parser's recursion.
+TOO_DEEP = "[" * 100_000 + "]" * 100_000
+
+
+def _explained(row: TransparencyResult) -> TransparencyRiskExplanation:
+    """Explain a row whose low score is its reason.
+
+    Args:
+        row: The stored High.
+
+    Returns:
+        Its explanation under a cut-off its score of 45 is below.
+    """
+    settings = dataclasses.replace(get_default_settings(), score_threshold=50)
+    return TransparencyRiskExplanation.of(row, settings)
 
 
 def _set_column(storage: Any, value: Any) -> None:
@@ -70,19 +96,75 @@ class TestTheTermsAreStored:
 
 
 class TestADamagedColumn:
-    """Unreadable is not absent: the row is shown, and says what it lost."""
+    """Unreadable is not absent: the row is shown, and says what it lost.
+
+    An unusable breakdown reads as "not recorded", and the high-risk section
+    -- the one place a breakdown is shown -- says it is not available. No
+    caveat is added to the row's own warnings: the generic one ends "It is
+    recorded as not assessed", and nothing here is.
+    """
 
     @pytest.mark.parametrize(
-        "raw", ["not json", '{"label": "x"}', '[{"label": "x"}]', "[1, 2]"]
+        "raw",
+        [
+            "not json",
+            '{"label": "x"}',
+            '[{"label": "x"}]',
+            "[1, 2]",
+            # Shapes that parse but explain nothing: an empty breakdown, and
+            # values that are not a list at all
+            "[]",
+            "{}",
+            '""',
+            # Well-formed terms that add up to 70, on a row scored 45
+            '[{"label": "Starting score", "points": 50}, '
+            '{"label": "Data availability: fully open", "points": 20}]',
+            TOO_DEEP,
+        ],
+        ids=[
+            "not json",
+            "object",
+            "incomplete term",
+            "not terms",
+            "empty",
+            "empty object",
+            "string",
+            "wrong sum",
+            "too deep",
+        ],
     )
     def test_is_named_not_hidden(self, storage: Any, raw: str) -> None:
-        """None of these shapes are silently swallowed as an empty list."""
+        """None of these shapes is shown as how the score was reached."""
         storage.save_transparency_result(_result())
         _set_column(storage, raw)
         row = storage.get_transparency_result("doc-1")
         assert isinstance(row, TransparencyResult)
         assert row.score_components is None
-        assert any("score breakdown could not be read" in w for w in row.warnings)
+        assert not any("could not be read" in w for w in row.warnings)
+        explanation = _explained(row)
+        assert explanation.score_breakdown == ()
+        assert BREAKDOWN_UNAVAILABLE_CAVEAT in explanation.caveats
+
+    def test_the_control_is_shown(self, storage: Any) -> None:
+        """Terms that add up to the score are the breakdown, uncaveated."""
+        storage.save_transparency_result(_result())
+        explanation = _explained(storage.get_transparency_result("doc-1"))
+        assert explanation.score_breakdown == COMPONENTS
+        assert BREAKDOWN_UNAVAILABLE_CAVEAT not in explanation.caveats
+
+    def test_a_too_deep_list_column_costs_only_that_column(self, storage: Any) -> None:
+        """A value that exhausts the parser used to fail the whole batch."""
+        storage.save_transparency_result(_result())
+        with storage._sqlite_connection() as conn:
+            conn.execute(
+                "UPDATE transparency_results SET risk_indicators = ? "
+                "WHERE document_id = ?",
+                (TOO_DEEP, "doc-1"),
+            )
+            conn.commit()
+        rows = storage.get_transparency_results_batch(["doc-1"])
+        assert rows["doc-1"].risk_indicators == []
+        assert any("risk indicators could not be read" in w for w in rows["doc-1"].warnings)
 
     def test_null_is_not_damage(self, storage: Any) -> None:
         """NULL is "not recorded", not corruption -- no caveat is owed for it."""
@@ -110,7 +192,7 @@ class TestADamagedColumn:
         assert row.risk_level is TransparencyRisk.HIGH
         assert row.transparency_score == 45
         assert row.score_components is None
-        assert any("score breakdown could not be read" in w for w in row.warnings)
+        assert BREAKDOWN_UNAVAILABLE_CAVEAT in _explained(row).caveats
 
 
 class TestTheMigration:

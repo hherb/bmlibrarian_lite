@@ -28,9 +28,13 @@ so the analyser importing anything under ``transparency`` would start a cycle.
 """
 
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
+
+#: The bounds a transparency score is clamped to.
+MIN_TRANSPARENCY_SCORE = 0
+MAX_TRANSPARENCY_SCORE = 100
 
 #: Shown with every rating made without the article's full text.
 LIMITED_CERTAINTY_NOTE = "Limited certainty because of lack of full text access"
@@ -50,10 +54,11 @@ PROVISIONAL_RESULT_CAVEAT = (
 #: Kotlin's shared sentence names a cause ("an earlier version of the
 #: analysis") and a remedy ("Re-analyse the study") that do not hold here --
 #: on the desktop, rows from an earlier analyser are never shown (see
-#: ``is_current``) and "Re-analyse" never offers a current row -- so this
-#: names the real cause (a settings change) and the real state (the stored
-#: rating stands until the study is re-analysed). Bound only for Swift and
-#: Kotlin in the shared contract's ``swift_kotlin_only`` section.
+#: ``is_current``), and "Re-analyse" never offers a current row whose
+#: sources were all read (a final row) -- so this names the likely cause (a
+#: settings change) and says that a stored rating is not re-rated when the
+#: settings change. Not bound by the shared contract: the Swift/Kotlin
+#: sentence it replaces is, under ``swift_kotlin_only``.
 UNEXPLAINED_RATING_CAVEAT = (
     "None of the current high-risk rules matches this study's recorded "
     "findings, so it was probably rated under transparency settings that "
@@ -172,6 +177,23 @@ class ScoreComponent:
     points: int
     records_missing_statement: bool = False
 
+    def __post_init__(self) -> None:
+        """Refuse a term that storage could not read back.
+
+        Raises:
+            ValueError: If a field is of the wrong type. A bool is not
+                accepted as points, though ``bool`` subclasses ``int``.
+        """
+        if not isinstance(self.label, str):
+            raise ValueError(f"score component label must be a string: {self.label!r}")
+        if not isinstance(self.points, int) or isinstance(self.points, bool):
+            raise ValueError(f"score component points must be an int: {self.points!r}")
+        if not isinstance(self.records_missing_statement, bool):
+            raise ValueError(
+                "records_missing_statement must be a bool: "
+                f"{self.records_missing_statement!r}"
+            )
+
     def signed_points(self) -> str:
         """The points with an explicit sign, e.g. "+5" or "-10".
 
@@ -206,19 +228,43 @@ class ScoreComponent:
             ValueError: If a field is missing or of the wrong type. A bool is
                 not accepted as points, though ``bool`` subclasses ``int``.
         """
-        label = data.get("label") if isinstance(data, Mapping) else None
-        points = data.get("points") if isinstance(data, Mapping) else None
-        missing = (
-            data.get("records_missing_statement", False)
-            if isinstance(data, Mapping)
-            else None
-        )
-        if not isinstance(label, str):
-            raise ValueError(f"score component label must be a string: {label!r}")
-        if not isinstance(points, int) or isinstance(points, bool):
-            raise ValueError(f"score component points must be an int: {points!r}")
-        if not isinstance(missing, bool):
-            raise ValueError(
-                f"records_missing_statement must be a bool: {missing!r}"
-            )
+        if not isinstance(data, Mapping):
+            raise ValueError(f"score component must be a mapping: {data!r}")
+        # Untrusted until ``__post_init__`` has checked each type
+        label: Any = data.get("label")
+        points: Any = data.get("points")
+        missing: Any = data.get("records_missing_statement", False)
         return cls(label=label, points=points, records_missing_statement=missing)
+
+
+def clamped_score(components: Iterable[ScoreComponent]) -> int:
+    """The transparency score a sequence of terms adds up to.
+
+    Args:
+        components: The score's terms.
+
+    Returns:
+        Their sum, clamped to ``MIN_TRANSPARENCY_SCORE`` to
+        ``MAX_TRANSPARENCY_SCORE``.
+    """
+    total = sum(component.points for component in components)
+    return max(MIN_TRANSPARENCY_SCORE, min(MAX_TRANSPARENCY_SCORE, total))
+
+
+def components_explain_score(
+    components: tuple[ScoreComponent, ...], score: int
+) -> bool:
+    """Whether a breakdown can be shown as how ``score`` was reached.
+
+    An empty breakdown explains nothing -- every score starts from a base
+    term -- and one that adds up to another score would print a sum the
+    reader can check and find false.
+
+    Args:
+        components: The recorded terms.
+        score: The score they are to explain.
+
+    Returns:
+        True when there is at least one term and they add up to ``score``.
+    """
+    return bool(components) and clamped_score(components) == score

@@ -30,7 +30,7 @@ from bmlibrarian_lite.transparency.transparency_settings import (
     ReportRiskThreshold,
     TransparencySettings,
 )
-from bmlibrarian_lite.transparency_terms import ScoreComponent
+from bmlibrarian_lite.transparency_terms import UNEXPLAINED_RATING_CAVEAT, ScoreComponent
 
 
 def _row(**changes) -> TransparencyResult:
@@ -74,7 +74,7 @@ class TestTheHighRiskSection:
     """The section explaining every cited study rated high risk (#386)."""
 
     def test_absent_when_no_study_is_high(self) -> None:
-        """Review focus 5: no heading, no introduction."""
+        """No heading, no introduction."""
         assert format_high_risk_section([], get_default_settings()) == ""
 
     def test_one_study(self) -> None:
@@ -137,6 +137,11 @@ class TestTheCounts:
         """A count that could not have come from real rows is rejected."""
         with pytest.raises(ValueError):
             TransparencyCounts(low=1, limited=2)
+
+    def test_more_provisional_than_assessed_is_refused(self) -> None:
+        """The same guard, for the other count."""
+        with pytest.raises(ValueError):
+            TransparencyCounts(low=1, provisional=2)
 
 
 def _metadata(
@@ -292,3 +297,114 @@ class TestGenerateReportHighRiskSection:
         assert "**1. Smith, 2023**" in section
         assert "Lee, 2020" not in section
         assert "Jones, 2024" not in section
+
+    @patch.object(LiteReportingAgent, "_chat")
+    def test_explains_by_the_users_settings_and_leaves_out_a_medium(
+        self, mock_chat, mock_config
+    ) -> None:
+        """The section judges by the config's settings, and lists Highs alone.
+
+        The user has switched the missing-COI rule off, so the High it rated
+        is explained by no current rule and carries the desktop's caveat.
+        The Medium meets that same rule's findings and must not be listed
+        at all: it is not High.
+        """
+        mock_config.transparency.missing_coi_triggers_downgrade = False
+        documents = [
+            LiteDocument(
+                id=f"pmid-{key}",
+                title=f"{key} study",
+                authors=[author],
+                year=2023,
+                pmid=key,
+                journal="Test Journal",
+                abstract="Abstract.",
+            )
+            for key, author in (("high", "Smith J"), ("medium", "Jones B"))
+        ]
+        citations = [
+            Citation(document=doc, passage="Passage.", relevance_score=5)
+            for doc in documents
+        ]
+        mock_chat.return_value = (
+            "One [Smith, 2023](docid:pmid-high). Two [Jones, 2023](docid:pmid-medium)."
+        )
+        transparency_results = {
+            "pmid-high": TransparencyResult(
+                document_id="pmid-high",
+                transparency_score=60,
+                risk_level=TransparencyRisk.HIGH,
+                coi_disclosure=COI_NOT_STATED,
+                full_text_analyzed=True,
+            ),
+            "pmid-medium": TransparencyResult(
+                document_id="pmid-medium",
+                transparency_score=55,
+                risk_level=TransparencyRisk.MEDIUM,
+                coi_disclosure=COI_NOT_STATED,
+                full_text_analyzed=True,
+            ),
+        }
+
+        report = LiteReportingAgent(config=mock_config).generate_report(
+            question="Test question",
+            citations=citations,
+            transparency_results=transparency_results,
+            metadata=ReportMetadata(),
+        )
+
+        heading = "## Why Studies Were Rated High Transparency Risk"
+        section = report[report.index(heading) : report.index("## Methodology")]
+        assert "1 study was rated high transparency risk" in section
+        assert "Smith, 2023" in section
+        assert "Jones, 2023" not in section
+        assert UNEXPLAINED_RATING_CAVEAT in section
+        assert "No conflict of interest statement was found" not in section
+
+
+class TestTheWorkflowCountsLimitedAndProvisional:
+    """The methodology's two new lines are filled from the stored rows (#386)."""
+
+    def test_the_worker_records_both_counts(self) -> None:
+        """Filled by the worker that fills the rest, not only hand-built."""
+        pytest.importorskip("PySide6")
+        from bmlibrarian_lite.gui.systematic_review_tab import WorkflowWorker
+
+        def row(document_id: str, **fields) -> TransparencyResult:
+            return TransparencyResult(
+                document_id=document_id,
+                transparency_score=80,
+                risk_level=TransparencyRisk.LOW,
+                coi_disclosure=COI_DISCLOSED,
+                **fields,
+            )
+
+        worker = MagicMock()
+        worker.storage.get_transparency_results_batch.return_value = {
+            "limited": row("limited", full_text_analyzed=False),
+            "provisional": row(
+                "provisional", full_text_analyzed=True, sources_unreachable=True
+            ),
+            "settled": row("settled", full_text_analyzed=True),
+        }
+        metadata = ReportMetadata(research_question="Q")
+
+        WorkflowWorker._record_transparency_counts(
+            worker, metadata, ["limited", "provisional", "settled"]
+        )
+
+        assert metadata.transparency_low_risk_count == 3
+        assert metadata.transparency_limited_count == 1
+        assert metadata.transparency_provisional_count == 1
+
+    def test_the_counts_survive_the_dict(self) -> None:
+        """The JSON methodology export is written from ``to_dict``."""
+        metadata = ReportMetadata(
+            transparency_limited_count=2, transparency_provisional_count=3
+        )
+        data = metadata.to_dict()
+        assert data["transparency_limited_count"] == 2
+        assert data["transparency_provisional_count"] == 3
+        restored = ReportMetadata.from_dict(data)
+        assert restored.transparency_limited_count == 2
+        assert restored.transparency_provisional_count == 3
