@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#420 + #421 — statements reach the analyser; the XML fallback is gone**
-(Python), branch `fix/plos-front-matter-statements-420`. Compress into
+(Python), branch `fix/plos-front-matter-statements-420`, **PR #426**. Compress into
 **Recently landed** once merged.
 
 - **The converter is `jats_markdown.py`** (`EuropePMCClient` delegates):
