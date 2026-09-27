@@ -114,11 +114,11 @@ def _text_or_bytes(raw: bytes) -> str | bytes:
 
 #: The ``transparency_results`` columns read one at a time, each degrading on
 #: its own when it will not read: a list to empty with a caveat saying it was
-#: lost, the COI disclosure to "not assessed". Text in them that is not UTF-8
-#: costs that column, not the row: it once withheld a finding whose risk
-#: level and score read perfectly well.
+#: lost, the COI disclosure to "not assessed", the score's terms to None with
+#: a caveat. Text in them that is not UTF-8 costs that column, not the row:
+#: it once withheld a finding whose risk level and score read perfectly well.
 _TRANSPARENCY_COLUMNS_READ_ALONE = frozenset(
-    {"risk_indicators", "warnings", "coi_disclosure"}
+    {"risk_indicators", "warnings", "coi_disclosure", "score_components"}
 )
 
 

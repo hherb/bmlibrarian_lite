@@ -92,6 +92,26 @@ class TestADamagedColumn:
         assert row.score_components is None
         assert not any("could not be read" in w for w in row.warnings)
 
+    def test_non_utf8_bytes_cost_only_the_column(self, storage: Any) -> None:
+        """Bytes that are not UTF-8 must not fail the whole row.
+
+        Mirrors ``test_a_list_that_is_not_utf8_costs_that_list_not_the_finding``
+        in ``tests/test_an_undecodable_transparency_row.py``: the score and
+        risk level read perfectly well, so only the breakdown is lost.
+        Reproduces the review round-1 finding: without
+        ``score_components`` in ``_TRANSPARENCY_COLUMNS_READ_ALONE``, this
+        made ``_decoded_transparency_keys`` withhold the whole row as an
+        ``UndecodableTransparencyRow``, losing the score and risk level too.
+        """
+        storage.save_transparency_result(_result())
+        _set_column(storage, b"\xff\xfe\xfd")
+        row = storage.get_transparency_result("doc-1")
+        assert isinstance(row, TransparencyResult)
+        assert row.risk_level is TransparencyRisk.HIGH
+        assert row.transparency_score == 45
+        assert row.score_components is None
+        assert any("score breakdown could not be read" in w for w in row.warnings)
+
 
 class TestTheMigration:
     """A table built before #386 gains the column without losing its rows."""
