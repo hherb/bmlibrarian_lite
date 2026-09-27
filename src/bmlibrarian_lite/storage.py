@@ -87,6 +87,7 @@ if TYPE_CHECKING:
         TransparencyResult,
         TransparencyRisk,
     )
+    from .transparency_terms import ScoreComponent
 
 logger = logging.getLogger(__name__)
 
@@ -298,6 +299,7 @@ class LiteStorage:
         """
         self._migrate_transparency_coi_and_warnings()
         self._migrate_transparency_source_reachability()
+        self._migrate_transparency_score_components()
 
     def _migrate_transparency_coi_and_warnings(self) -> None:
         """Replace the always-true coi_disclosed column, and keep the caveats.
@@ -532,6 +534,38 @@ class LiteStorage:
             caveats.append(cls._unreadable_column_caveat("analysis caveats"))
         return indicators, caveats
 
+    @classmethod
+    def _stored_score_components(
+        cls, row: sqlite3.Row
+    ) -> tuple[tuple["ScoreComponent", ...] | None, str | None]:
+        """Read a row's score terms, or say they were lost.
+
+        Args:
+            row: The ``transparency_results`` row being rebuilt.
+
+        Returns:
+            The terms (``None`` when NULL or unreadable), and the caveat to
+            append when they could not be read.
+        """
+        from .transparency_terms import ScoreComponent
+
+        raw = row["score_components"]
+        if raw is None:
+            return None, None
+        try:
+            items = json.loads(raw)
+            if not isinstance(items, list):
+                raise ValueError("score_components is not a list")
+            return tuple(ScoreComponent.from_dict(item) for item in items), None
+        except (ValueError, TypeError) as error:
+            logger.warning(
+                "Document %s has unreadable score_components (%s); "
+                "showing it without a breakdown.",
+                row["document_id"],
+                type(error).__name__,
+            )
+            return None, cls._unreadable_column_caveat("score breakdown")
+
     def _migrate_transparency_source_reachability(self) -> None:
         """Record whether an analysis reached its sources, for older rows.
 
@@ -571,6 +605,33 @@ class LiteStorage:
         except sqlite3.Error as e:
             raise SQLiteError(
                 f"Could not add transparency_results.sources_unreachable: {e}"
+            ) from e
+
+    def _migrate_transparency_score_components(self) -> None:
+        """Give older tables the column a score's terms are stored in (#386).
+
+        Rows written before it read NULL, which is "not recorded": the
+        report then says the breakdown is not available rather than listing
+        none.
+
+        Raises:
+            SQLiteError: If the column cannot be added. Runs from
+                ``_init_sqlite``, so it aborts construction.
+        """
+        try:
+            with self._sqlite_connection() as conn:
+                cursor = conn.execute("PRAGMA table_info(transparency_results)")
+                columns = [row["name"] for row in cursor.fetchall()]
+                if "score_components" not in columns:
+                    conn.execute(
+                        "ALTER TABLE transparency_results "
+                        "ADD COLUMN score_components TEXT"
+                    )
+                    logger.info("Added score_components to transparency_results.")
+                conn.commit()
+        except sqlite3.Error as e:
+            raise SQLiteError(
+                f"Could not add transparency_results.score_components: {e}"
             ) from e
 
     @staticmethod
@@ -978,6 +1039,7 @@ class LiteStorage:
             analyzer_version TEXT DEFAULT '1.0',
             sources_unreachable INTEGER DEFAULT 0,
             full_text_analyzed INTEGER DEFAULT 0,
+            score_components TEXT,  -- JSON array; NULL = not recorded (#386)
             FOREIGN KEY (document_id) REFERENCES documents(id)
         );
 
@@ -3616,6 +3678,9 @@ class LiteStorage:
 
         risk_level, analyzed_at = self._decoded_transparency_keys(row)
         indicators, caveats = self._stored_transparency_lists(row)
+        components, lost = self._stored_score_components(row)
+        if lost:
+            caveats.append(lost)
         return TransparencyResult(
             document_id=row["document_id"],
             transparency_score=row["transparency_score"],
@@ -3644,6 +3709,7 @@ class LiteStorage:
             ),
             sources_unreachable=bool(row["sources_unreachable"]),
             full_text_analyzed=bool(row["full_text_analyzed"]),
+            score_components=components,
         )
 
     def _stored_transparency_from_row(
@@ -3721,8 +3787,9 @@ class LiteStorage:
                 data_availability_level, coi_disclosure, trial_registered,
                 trial_results_compliant, outcome_switching_detected,
                 risk_indicators, warnings, tier_downgrade_applied, analyzed_at,
-                analyzer_version, sources_unreachable, full_text_analyzed
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                analyzer_version, sources_unreachable, full_text_analyzed,
+                score_components
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         with self._sqlite_connection() as conn:
@@ -3746,6 +3813,9 @@ class LiteStorage:
                     result.analyzer_version,
                     1 if result.sources_unreachable else 0,
                     1 if result.full_text_analyzed else 0,
+                    None
+                    if result.score_components is None
+                    else json.dumps([c.to_dict() for c in result.score_components]),
                 ),
             )
             conn.commit()
