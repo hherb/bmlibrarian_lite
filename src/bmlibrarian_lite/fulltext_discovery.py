@@ -48,6 +48,7 @@ from typing import Any, Callable, Dict, Optional
 
 from .constants import (
     SERVICE_EUROPE_PMC,
+    SERVICE_CACHED_FULLTEXT,
     SERVICE_PDF_DOWNLOAD,
     SERVICE_RETRIEVED_PDF,
 )
@@ -276,11 +277,14 @@ class FulltextDiscoverer:
         # 1. Check for cached full-text markdown
         self._emit_progress("discovery", "checking_cache")
         cached_fulltext = find_existing_fulltext(doc_dict)
+        cache_lookups = LookupRecord()
         if cached_fulltext:
             logger.info(f"Found cached full-text: {cached_fulltext}")
             try:
-                # None means an earlier converter wrote it: Europe PMC is
-                # asked again below, and the file replaced (#420).
+                # None means an earlier converter wrote it, or the file is
+                # empty: Europe PMC is asked again below and, if it serves
+                # the XML, the file is rewritten. A stale file is never used
+                # as a fallback here, since its statements are missing (#420).
                 content = read_cached_fulltext(cached_fulltext)
                 if content is not None:
                     return FulltextResult(
@@ -289,8 +293,12 @@ class FulltextDiscoverer:
                         markdown_content=content,
                         file_path=cached_fulltext,
                     )
-            except Exception as e:
+            except (OSError, UnicodeDecodeError) as e:
                 logger.warning(f"Failed to read cached full-text: {e}")
+                # Recorded, not only logged, as the cached PDF's failure is:
+                # we hold this article's full text, so a chain that ends in
+                # "none" has not established that it has none.
+                cache_lookups = _unreadable_cache_record()
 
         if self._cancelled:
             return self._cancelled_result()
@@ -301,7 +309,7 @@ class FulltextDiscoverer:
         # The record travels even though this result may be discarded: a
         # Europe PMC we could not reach is exactly what makes the final
         # "no full text" not the article's answer (#354).
-        lookups = result.lookups
+        lookups = cache_lookups.merged(result.lookups)
         if result.success:
             return result
 
@@ -508,6 +516,10 @@ class FulltextDiscoverer:
                 # The XML arrived and our own conversion produced nothing.
                 # That is a parse we could not make, not an article without
                 # a full text (#359, one layer down).
+                logger.warning(
+                    "Europe PMC's full text for %s could not be converted.",
+                    info.pmcid,
+                )
                 return FulltextResult(
                     success=False,
                     source_type=FulltextSourceType.NOT_ASSESSED,
@@ -528,8 +540,14 @@ class FulltextDiscoverer:
                     ),
                 )
 
-            # Save to cache
-            cache_path = save_fulltext_markdown(doc_dict, markdown_content)
+            # Save to cache. A failed write loses the cache, not the article:
+            # inside the catch below, a full disk turned a full text we had
+            # converted into "Europe PMC could not be read" (#426 review).
+            cache_path: Path | None = None
+            try:
+                cache_path = save_fulltext_markdown(doc_dict, markdown_content)
+            except OSError as e:
+                logger.warning("Could not cache the full text of %s: %s", info.pmcid, e)
 
             logger.info(f"Successfully retrieved full-text from Europe PMC: {info.pmcid}")
             return FulltextResult(
@@ -792,6 +810,22 @@ def _classify(exc: Exception) -> RequestFailure:
     if isinstance(exc, requests.RequestException):
         return request_failure_from_exception(exc)
     return RequestFailure(RequestFailureKind.REQUEST_FAILED)
+
+
+def _unreadable_cache_record() -> LookupRecord:
+    """Record that a full text we cached could not be read.
+
+    Returns:
+        A record naming the cached full text as the source that went unread.
+    """
+    return LookupRecord(
+        failures=(
+            SourceLookupFailure(
+                SERVICE_CACHED_FULLTEXT,
+                RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
+            ),
+        )
+    )
 
 
 def _unreadable_pdf_record() -> LookupRecord:

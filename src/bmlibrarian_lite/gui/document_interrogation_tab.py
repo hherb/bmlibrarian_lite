@@ -60,6 +60,7 @@ from ..pdf_utils import (
     find_existing_pdf,
     find_existing_fulltext,
     read_cached_fulltext,
+    read_stale_cached_fulltext,
     extract_pdf_text,
     get_progress_stage_message,
 )
@@ -98,6 +99,14 @@ FULLTEXT_UNREADABLE = "the full text was retrieved but could not be read"
 FULLTEXT_PAYWALLED = "the full text is behind a paywall"
 FULLTEXT_CANCELLED = "retrieving the full text was cancelled"
 NO_FULLTEXT_IDENTIFIER = "the article has no DOI, PMID or PMC ID to find a full text by"
+
+# The label of a full text cached by an earlier converter, shown when the
+# article could not be fetched again. Readable, but its end-matter statements
+# may be missing (#420), and the reader is told so rather than shown the
+# abstract with a readable copy on disk.
+STALE_CACHED_FULLTEXT_LABEL = (
+    "Full Text (Europe PMC - cached by an earlier version; statements may be missing)"
+)
 PDF_NO_TEXT = "no text could be extracted from the PDF"
 PDF_UNREADABLE = "the PDF was retrieved but could not be read"
 
@@ -817,15 +826,18 @@ class DocumentInterrogationTab(QWidget):
 
         # Check for cached full-text markdown first (from Europe PMC XML)
         cached_fulltext = find_existing_fulltext(self._current_doc_metadata)
+        stale_fulltext: str | None = None
         if cached_fulltext:
             logger.info(f"load_from_citation: Found cached full-text at {cached_fulltext}")
             try:
-                # None means an earlier converter wrote it; the paths below
-                # fetch and convert the article again (#420).
+                # None means an earlier converter wrote it; it falls through
+                # to the cached-PDF and discovery paths below, and is shown
+                # only if neither yields a full text (#420).
                 content = read_cached_fulltext(cached_fulltext)
                 if content is not None:
                     self._load_citation_fulltext(content, citation, "Full Text (Europe PMC - cached)")
                     return
+                stale_fulltext = read_stale_cached_fulltext(cached_fulltext)
             except Exception as e:
                 logger.warning(f"Failed to read cached full-text: {e}")
 
@@ -844,16 +856,21 @@ class DocumentInterrogationTab(QWidget):
             self._load_citation_abstract(citation, NO_FULLTEXT_IDENTIFIER)
             return
 
+        def fall_back(reason: str) -> None:
+            """Show the stale cached full text if there is one, else the abstract."""
+            if stale_fulltext is not None:
+                self._load_citation_fulltext(
+                    stale_fulltext, citation, STALE_CACHED_FULLTEXT_LABEL
+                )
+            else:
+                self._load_citation_abstract(citation, reason)
+
         # Start full-text discovery (tries Europe PMC XML first, then PDF)
         logger.info("load_from_citation: Starting full-text discovery")
         self._start_fulltext_discovery(
             self._current_doc_metadata, title, citation,
-            on_error=lambda _error: self._load_citation_abstract(
-                citation, FULLTEXT_UNAVAILABLE
-            ),
-            on_cancel=lambda: self._load_citation_abstract(
-                citation, FULLTEXT_CANCELLED
-            ),
+            on_error=lambda _error: fall_back(FULLTEXT_UNAVAILABLE),
+            on_cancel=lambda: fall_back(FULLTEXT_CANCELLED),
         )
 
     def _start_fulltext_discovery(

@@ -167,7 +167,7 @@ class TestDataAvailabilityWithNoTextRead:
         analyzer._analyze_data_availability(
             report,
             fulltext_sections={"funding": "NIH grant R01."},
-            fulltext_read=True,
+            fulltext="The article's full text.",
         )
 
         assert (
@@ -183,7 +183,7 @@ class TestDataAvailabilityWithNoTextRead:
         analyzer._analyze_data_availability(
             report,
             fulltext_sections={"data_sharing": "All data are openly available in Zenodo."},
-            fulltext_read=True,
+            fulltext="The article's full text.",
         )
 
         assert report.data_availability.disclosure_level not in (

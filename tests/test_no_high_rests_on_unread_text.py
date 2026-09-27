@@ -64,8 +64,8 @@ class TestNoMissingStatementIsChargedAgainstTextNobodyRead:
         report.industry_funding_confidence = 0.9
         report.pmcid = pmcid
 
-        analyzer._analyze_conflicts(report, fulltext_sections={}, fulltext_read=False)
-        analyzer._analyze_data_availability(report, fulltext_sections={}, fulltext_read=False)
+        analyzer._analyze_conflicts(report, fulltext_sections={})
+        analyzer._analyze_data_availability(report, fulltext_sections={})
         report.transparency_score = calculate_transparency_score(report)
         result = build_transparency_result("d", report, get_default_settings())
 
@@ -79,8 +79,8 @@ class TestNoMissingStatementIsChargedAgainstTextNobodyRead:
         report = TransparencyReport(doi="10.1/x", pmid="1", pubmed_record_read=True)
         report.industry_funding_detected = True
         sections = {"methods": "...", "funding": "NIH grant R01."}
-        analyzer._analyze_conflicts(report, fulltext_sections=sections, fulltext_read=True)
-        analyzer._analyze_data_availability(report, fulltext_sections=sections, fulltext_read=True)
+        analyzer._analyze_conflicts(report, fulltext_sections=sections, fulltext="The article's full text.")
+        analyzer._analyze_data_availability(report, fulltext_sections=sections, fulltext="The article's full text.")
         report.transparency_score = calculate_transparency_score(report)
         result = build_transparency_result("d", report, get_default_settings())
 
@@ -103,8 +103,8 @@ class TestNoMissingStatementIsChargedAgainstTextNobodyRead:
         report.industry_funding_detected = True
         report.industry_funding_confidence = 0.9
         report.pmcid = "PMC1"
-        analyzer._analyze_conflicts(report, fulltext_sections={}, fulltext_read=False)
-        analyzer._analyze_data_availability(report, fulltext_sections={}, fulltext_read=False)
+        analyzer._analyze_conflicts(report, fulltext_sections={})
+        analyzer._analyze_data_availability(report, fulltext_sections={})
         report.transparency_score = calculate_transparency_score(report)
         result = build_transparency_result("d", report, get_default_settings())
 

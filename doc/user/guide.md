@@ -275,7 +275,7 @@ analysis is BMLibrarian's gold standard and a rating made from metadata
 alone rests on less. A full text counts only when part of it could actually
 be read: an article whose text arrived but in which none of the statements
 the analysis looks for could be found is rated as limited too. The
-statements are read wherever the journal prints them, including the
+statements are read in the places journals usually print them, including the
 competing-interests, data-availability and funding statements that PLOS
 journals keep with the article's front matter and that most journals keep
 after the main text; an article an earlier version analysed is offered

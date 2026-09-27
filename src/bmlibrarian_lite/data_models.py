@@ -187,13 +187,14 @@ class RecordFetch:
     """What asking a metadata source for an article's record produced (#356).
 
     For the sources that answer with a record: PubMed's efetch and
-    CrossRef's works endpoint. Its first sibling, ``FullTextFetch`` (#346),
-    went with the Europe PMC fallback it served (#421). Both returned ``Optional[Dict]``, which answered two questions
-    with one ``None`` -- "this source holds no such article" and "we could
-    not read this source" -- so an unreachable PubMed left ``trial_ids``
-    empty and the report printed "Trial Registration: None found", and an
-    unreachable CrossRef left the study looking unfunded. Neither raised a
-    caveat, because neither had anything to raise one from.
+    CrossRef's works endpoint. Both returned ``Optional[Dict]``, which
+    answered two questions with one ``None`` -- "this source holds no such
+    article" and "we could not read this source" -- so an unreachable PubMed
+    left ``trial_ids`` empty and the report printed "Trial Registration: None
+    found", and an unreachable CrossRef left the study looking unfunded.
+    Neither raised a caveat, because neither had anything to raise one from.
+    (Its first sibling, ``FullTextFetch`` (#346), went with the Europe PMC
+    fallback it served, #421.)
 
     The three states -- served, absent, unreachable -- are reached through
     :meth:`served`, :meth:`absent` and :meth:`unreachable` rather than by

@@ -106,8 +106,8 @@ logged **and reported**).
   discovery could not ask.
   A docstring saying "`None` is ambiguous here" did not stop a single caller.
 - **"Not assessed" is a state of its own, and it costs the paper nothing.**
-  An unreachable Europe PMC leaves `DataDisclosureLevel.UNKNOWN`, which scores
-  neutral. `NOT_STATED` scores −5 and tells a clinician the study publishes no
+  A full text discovery could not retrieve -- Europe PMC throttled us, say --
+  leaves `DataDisclosureLevel.UNKNOWN`, which scores neutral. `NOT_STATED` scores −5 and tells a clinician the study publishes no
   data availability statement — a number and a claim invented out of our own
   throttling. No risk-of-bias indicator may be raised from a source that was
   never read. The conflict of interest path keeps the same rule through
@@ -254,8 +254,9 @@ logged **and reported**).
 
 **Ports.** Python is canonical and has landed this for every path listed
 here (see *Still outstanding* below for what it has not):
-the Europe PMC full-text fetch behind data availability and the three
-full-text discovery lookups (#346, #347), the conflict of interest
+the three full-text discovery lookups (#346, #347; the Europe PMC
+full-text fetch behind data availability had the same fix until #421
+removed it), the conflict of interest
 disclosure (#352, #348, #351), and the sources nobody asked -- data
 availability outside PMC, full-text discovery's own failures, the skipped
 lookups, and the metadata records behind trial registration and funding

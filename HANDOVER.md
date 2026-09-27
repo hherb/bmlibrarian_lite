@@ -19,7 +19,7 @@ its slice has landed; add a new section when handing off new work.
   `<award-group>` alone is **not** a funding statement; `custom-meta` data
   availability is skipped (duplicates the front `<notes>`).
 - **Review round (the #359 trap again):** recognising a funding section made
-  every *missed* COI statement a −5 charge. Fixed four ways: a stated type
+  every *missed* COI statement a −5 charge. Fixed five ways: a stated type
   (`COI-statement` …) names the heading on leaf elements, printed heading
   kept in bold; every "**X:**" paragraph is its own heading; a bare footnote
   about conflicts is headed; headless author notes are kept ("Author
@@ -38,7 +38,8 @@ its slice has landed; add a new section when handing off new work.
   `<!-- bmlibrarian-lite jats-markdown vN -->`; `read_cached_fulltext`
   returns `None` for any other stamp, so the article is converted again.
   **Bump `JATS_MARKDOWN_CONVERTER_VERSION`** whenever the same XML converts
-  differently. Analyser version **`2.4`**.
+  differently (now **3**: the second review round changed the output).
+  Analyser version **`2.4`**.
 - **#421 (user's call): the fallback is removed**, with the analyser's
   `EuropePMCClient` and `FullTextFetch`. Without a full text, data
   availability is `unknown` (`DATA_AVAILABILITY_NOWHERE_TO_LOOK`), and no
@@ -46,6 +47,33 @@ its slice has landed; add a new section when handing off new work.
 - PLOS ONE COI 0→150/150 (`tmp/jats-*`, gitignored); every newly flagged
   industry tie read by hand: genuine. Lodged: #423 (the apps' front-matter
   gap), #424 ("within the manuscript" → `UNKNOWN`), #425 (headings missed).
+- **Second review round (PR #426).** The emitted back matter let text with
+  no heading run on into a statement, and headed each footnote of a group
+  anew so only the first was read. Now:
+  - In the end matter no piece goes without a heading once a sibling has
+    one (`DEFAULT_HEADING_BY_OWNER`), and a list's `<title>` heads it
+    (JMIR's abbreviations had become industry ties).
+  - A heading the same as the one in force is merged (eLife's per-author
+    COI footnotes).
+  - A block's later run-ins are its siblings. In the body a run-in heads
+    only if no plain paragraph follows.
+  - `<fn>`/`<fn-group>`/`<notes>`/`<ack>`/`<glossary>` are end matter
+    anywhere (SAGE ships articles with no `<back>`).
+  - `<sub-article>`s are ignored.
+  - More headings: Diabetologia's "Authors' relationships and activities",
+    "Duality of interest", FR/ES/PT/DE COI headings, BMC/Cell/Wiley data
+    headings.
+  - The guard ignores the reference list's own section (BMJ puts one above
+    its author notes).
+  - `fulltext_read` is gone: the text is the flag.
+  - The cache write is atomic, a stamp with no body is stale, and an
+    unreadable cache is recorded. The interrogation tab shows a stale cache,
+    labelled, when the refresh fails.
+  - 410 local articles, PR head → now: COI charged 12→5, all five print no
+    statement. All 82 ties lost since master were run-on text (Frontiers'
+    Publisher's note, whole STAR Methods). Lodged: #427 (stale fallback for
+    MCP/discovery), #428 (charge only when every end-matter heading is
+    classified), #429 (typed `get_fulltext_xml`).
 
 ## Recently landed (context)
 
@@ -126,8 +154,10 @@ the rest.
   defect; the archaeology is in git history and the `doc/cross_platform/`
   READMEs, which these point at.
   - **A source we could not reach is not a finding** (#346, #347, #344,
-    PR #349). `FullTextFetch` carries the XML *or* a `RequestFailure`
-    (`served()` / `absent()` / `unreachable()`); **404 is the one status
+    PR #349). A typed fetch carries the answer *or* a `RequestFailure`
+    (`served()` / `absent()` / `unreachable()`: `RecordFetch`,
+    `ArticleInfoFetch`; `FullTextFetch` went with #421, and
+    `get_fulltext_xml` still needs one, #429); **404 is the one status
     about the article**; unreadable is not absent either; caveats carry no
     provider text (`RequestFailure.describe()` only). **Always keep a
     control test** — mutating the fetch to `absent()` once passed the suite.

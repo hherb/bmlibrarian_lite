@@ -40,7 +40,11 @@ articles across journals, 146 had no statement recognised at all.
 Statements are emitted after the body and before the references, each under
 its own heading. A heading also ends the section before it in the analyser,
 so a Publisher's note that follows a competing interests statement is not
-read as part of it.
+read as part of it. For the same reason nothing in the end matter is emitted
+without a heading once a sibling has had one: an untitled abbreviation list
+or disclaimer printed after a competing interests statement would otherwise
+be read as part of it, and a vaccine maker it names as an industry tie
+(#426 review).
 """
 
 import copy
@@ -61,15 +65,20 @@ logger = logging.getLogger(__name__)
 #: 1: every file cached before the stamp existed (implicitly; they carry none).
 #: 2: #420 -- back matter, front-matter statements, body paragraphs before the
 #: first section, and nested sections emitted once instead of twice.
-JATS_MARKDOWN_CONVERTER_VERSION = 2
+#: 3: the review of PR #426 -- end-matter pieces headed, repeated statement
+#: headings merged, body run-ins kept inline, sub-articles ignored. Bumped
+#: before release, so no file a pre-review build of the branch cached is
+#: trusted.
+JATS_MARKDOWN_CONVERTER_VERSION = 3
 
 #: The heading a statement gets from its type when the article gives it no
 #: heading of its own. Read from ``fn-type``, ``notes-type`` and ``sec-type``:
 #: PLOS types its competing interests footnote, ACS its untitled ``<notes>``.
 #: Keys are case-folded, because deposits vary the case of ``COI-statement``.
-#: Only statement types are listed; an element of any other type without a
-#: heading is kept as a paragraph in the back matter and omitted from the
-#: front matter.
+#: Only statement types are listed. An element of any other type without a
+#: heading gets a neutral one in the end matter (:data:`DEFAULT_HEADING_BY_OWNER`);
+#: in the front matter an author-notes footnote is kept under "Author Notes",
+#: and an untitled ``<notes>`` contributes only its titled sections.
 STATEMENT_HEADING_BY_TYPE: dict[str, str] = {
     "coi-statement": "Competing Interests",
     "conflict": "Competing Interests",
@@ -87,14 +96,22 @@ STATEMENT_HEADING_BY_TYPE: dict[str, str] = {
 #: The attributes a JATS element states its type in.
 _TYPE_ATTRIBUTES = ("fn-type", "notes-type", "sec-type")
 
-#: The heading a back-matter container gets when it carries no title and
-#: holds paragraphs of its own. One that holds only titled sections -- an
-#: ``<ack>`` some publishers wrap their declarations in -- gets none, or its
-#: default heading would stand empty over sections that are not its subject.
-DEFAULT_HEADING_BY_TAG: dict[str, str] = {
+#: The heading an end-matter piece without one is emitted under, by the tag
+#: of the element that holds it. Given only where the piece would otherwise
+#: run on into a heading that is not its own: at the top of the end matter,
+#: or after a sibling that had a heading. An ``<ack>`` some publishers wrap
+#: their declarations in gets none, since each of its sections has its own.
+DEFAULT_HEADING_BY_OWNER: dict[str, str] = {
     "ack": "Acknowledgments",
     "glossary": "Glossary",
+    "fn": "Footnotes",
+    "fn-group": "Footnotes",
 }
+
+#: The heading for an end-matter piece whose holder is not in
+#: :data:`DEFAULT_HEADING_BY_OWNER`. No statement heading the analyser
+#: recognises: a piece nobody headed is not a statement we know.
+DEFAULT_HEADING = "Notes"
 
 #: The heading a competing interests statement is emitted under when only
 #: its wording says what it is.
@@ -103,9 +120,23 @@ COI_HEADING = "Competing Interests"
 #: Wording that marks a footnote as a competing interests statement when it
 #: carries no heading or type ("The authors declared no potential conflicts
 #: of interest ..."). Shared with the analyser, which will not charge a
-#: missing statement against a text that uses it (#420 review).
-COI_WORDING_PATTERN = r"conflicts? of interests?|competing (?:financial )?interests?"
+#: missing statement against a text that uses it (#420 review). Diabetologia
+#: words its statement "no relationships or activities that might bias ...
+#: their work", and some journals "no duality of interest" (#426 review).
+COI_WORDING_PATTERN = (
+    r"conflicts? of interests?|competing (?:financial )?interests?"
+    r"|duality of interests?|relationships? (?:or|and) activities"
+)
 _COI_WORDING_RE = re.compile(COI_WORDING_PATTERN, re.IGNORECASE)
+
+#: What makes a footnote that uses that wording a declaration rather than a
+#: sentence about conflicts of interest: it declares, or it denies. A
+#: meta-research footnote ("trials were coded as having conflicts of
+#: interest when ...") is neither, and heading it "Competing Interests"
+#: would put it before the article's real statement (#426 review).
+_DECLARATION_RE = re.compile(
+    r"\b(?:declared?s?|disclosed?s?|none|no|nothing|not)\b", re.IGNORECASE
+)
 
 #: The heading author-notes footnotes without one of their own are kept under.
 AUTHOR_NOTES_HEADING = "Author Notes"
@@ -129,9 +160,37 @@ MAX_RUN_IN_HEADING_CHARS = 80
 _WORD_RE = re.compile(r"[^\W\d_]{3,}")
 
 #: Containers rendered as sections of their own wherever they appear.
+#: ``<statement>`` among them: one journal wraps its competing interests
+#: text in it inside the titled section, and an unknown tag renders to
+#: nothing, so the disclosure was lost (#426 review).
 _BLOCK_TAGS = frozenset({
     "sec", "notes", "ack", "app", "app-group", "boxed-text", "fn-group",
-    "fn", "glossary", "bio",
+    "fn", "glossary", "bio", "statement",
+})
+
+#: Containers that are end matter wherever they appear. Europe PMC serves
+#: some articles with no ``<back>`` at all, their footnotes, funding and
+#: competing interests statements in a ``<sec>`` of the body; read as body,
+#: a bare "The authors declared no potential conflicts of interest" footnote
+#: after a funding one was read as part of the funding statement.
+_END_MATTER_TAGS = frozenset({"fn-group", "fn", "notes", "ack", "glossary"})
+
+#: Lists whose own ``<title>`` heads them. JMIR prints its abbreviations as
+#: an untitled ``<notes>`` holding ``<def-list><title>Abbreviations</title>``
+#: straight after the competing interests footnote; with the title dropped,
+#: the list was read as part of the statement (#426 review).
+_TITLED_LIST_TAGS = frozenset({"list", "def-list"})
+
+#: Front-matter containers that can hold statements, besides the
+#: ``<author-notes>``, ``<notes>`` and ``<funding-statement>`` read by name.
+#: JATS allows each as a direct child of ``<front>``.
+_FRONT_STATEMENT_CONTAINERS = frozenset({"fn-group", "ack", "glossary"})
+
+#: Elements that are known to carry no prose, so dropping them in the end
+#: matter is not worth a log line.
+_SILENT_TAGS = frozenset({
+    "ref-list", "title", "label", "disp-formula", "inline-formula",
+    "alternatives", "graphic", "media", "table", "object-id",
 })
 
 _XLINK_HREF = "{http://www.w3.org/1999/xlink}href"
@@ -152,20 +211,25 @@ def jats_to_markdown(xml_content: str) -> str:
     try:
         root = ET.fromstring(xml_content)
     except ET.ParseError as e:
-        logger.error(f"Failed to parse XML: {e}")
+        logger.error("Failed to parse JATS XML: %s", e)
         return ""
 
     parts: list[str] = []
+    article = _article_element(root)
 
-    front = root.find(".//front")
+    # The article's own parts, not the first found anywhere: a decision
+    # letter or author reply is a <sub-article> with its own <back>, and
+    # in an article without one, "Competing interests: Reviewer has none"
+    # was read as the study's statement (#426 review).
+    front = article.find("front")
     if front is not None:
         parts.append(_front_matter(front))
 
-    body = root.find(".//body")
+    body = article.find("body")
     if body is not None:
         parts.append(_body(body))
 
-    back = root.find(".//back")
+    back = article.find("back")
     if back is not None:
         parts.append(_back_matter(back))
 
@@ -177,6 +241,23 @@ def jats_to_markdown(xml_content: str) -> str:
         parts.append(_references(back))
 
     return "\n\n".join(part for part in parts if part)
+
+
+def _article_element(root: ET.Element) -> ET.Element:
+    """The ``<article>`` whose parts are converted.
+
+    Args:
+        root: The parsed document's root: the article itself as Europe PMC
+            serves it, or a wrapper such as ``<pmc-articleset>``.
+
+    Returns:
+        The root when it is the article, else the first ``<article>`` in it,
+        else the root, so a fragment without one still converts.
+    """
+    if root.tag == "article":
+        return root
+    article = root.find(".//article")
+    return article if article is not None else root
 
 
 def _front_matter(front: ET.Element) -> str:
@@ -255,9 +336,9 @@ def _body(body: ET.Element) -> str:
         body: The article's ``<body>``.
 
     Returns:
-        The body's markdown. When no paragraph sits anywhere this walk
-        reaches, every ``<p>`` in the body, so a body wrapped in an element
-        this module does not know is not lost.
+        The body's markdown. When the walk renders nothing, every ``<p>`` in
+        the body, so a body wrapped in an element this module does not know
+        is not lost.
     """
     rendered = _render_children(body, SECTION_HEADING_LEVEL)
     if rendered:
@@ -275,14 +356,7 @@ def _back_matter(back: ET.Element) -> str:
     Returns:
         Each back-matter element under its heading, in document order.
     """
-    parts = []
-    for child in back:
-        if child.tag == "ref-list":
-            continue
-        rendered = _render_element(child, SECTION_HEADING_LEVEL)
-        if rendered:
-            parts.append(rendered)
-    return "\n\n".join(parts)
+    return _render_children(back, SECTION_HEADING_LEVEL, end_matter=True)
 
 
 def _front_statements(front: ET.Element, already: str) -> list[str]:
@@ -290,9 +364,12 @@ def _front_statements(front: ET.Element, already: str) -> list[str]:
 
     An author-notes footnote with a heading is a statement under it; those
     without one -- "these authors contributed equally", and BMJ's bare
-    "None declared." -- are kept together under "Author Notes". The
-    ``custom-meta`` data availability PLOS deposits is left out: it repeats
-    the titled ``<notes>`` in every surveyed article that has one.
+    "None declared." -- are kept together under "Author Notes", as are the
+    paragraphs JATS allows directly in ``<author-notes>``. A ``<fn-group>``,
+    ``<ack>`` or ``<glossary>`` placed directly in ``<front>`` is rendered as
+    back matter is. The ``custom-meta`` data availability PLOS deposits is
+    left out: it repeats the titled ``<notes>`` in every surveyed article
+    that has one.
 
     Args:
         front: The article's ``<front>``.
@@ -306,12 +383,23 @@ def _front_statements(front: ET.Element, already: str) -> list[str]:
 
     for notes in front.iter("author-notes"):
         unheaded: list[str] = []
-        for fn in notes.iter("fn"):
-            if _heading_of(fn) is not None:
-                candidates.append(_render_element(fn, SECTION_HEADING_LEVEL))
-            else:
-                text = text_of(fn)
-                if text:
+        # A paragraph inside a footnote is the footnote's; only one standing
+        # directly in <author-notes> is read on its own.
+        direct_paragraphs = {id(child) for child in notes if child.tag == "p"}
+        for note in notes.iter():
+            if note.tag == "fn" and _heading_of(note) is not None:
+                candidates.append(
+                    _render_element(note, SECTION_HEADING_LEVEL, end_matter=True)
+                )
+            elif note.tag == "fn" or id(note) in direct_paragraphs:
+                text = text_of(note)
+                if not text:
+                    continue
+                if _is_coi_declaration(text):
+                    candidates.append(
+                        f"{_heading_line(COI_HEADING, SECTION_HEADING_LEVEL)}\n\n{text}"
+                    )
+                else:
                     unheaded.append(text)
         if unheaded:
             # Kept, not dropped: BMJ deposits its competing interests
@@ -325,13 +413,25 @@ def _front_statements(front: ET.Element, already: str) -> list[str]:
 
     for notes in front.iter("notes"):
         if _heading_of(notes) is not None:
-            candidates.append(_render_element(notes, SECTION_HEADING_LEVEL))
+            candidates.append(
+                _render_element(notes, SECTION_HEADING_LEVEL, end_matter=True)
+            )
             continue
         # An untitled front <notes> is PLOS's article-history wrapper; only
         # the titled sections inside it are statements.
         for sec in notes.findall("sec"):
             if _heading_of(sec) is not None:
-                candidates.append(_render_element(sec, SECTION_HEADING_LEVEL))
+                candidates.append(
+                    _render_element(sec, SECTION_HEADING_LEVEL, end_matter=True)
+                )
+
+    containers = [child for child in front if child.tag in _FRONT_STATEMENT_CONTAINERS]
+    if containers:
+        holder = ET.Element("front-statements")
+        holder.extend(containers)
+        candidates.append(
+            _render_children(holder, SECTION_HEADING_LEVEL, end_matter=True)
+        )
 
     for statement in front.iter("funding-statement"):
         text = text_of(statement)
@@ -344,15 +444,18 @@ def _front_statements(front: ET.Element, already: str) -> list[str]:
     # Compared heading and statement together: a statement's words alone
     # can be a single "None", which any article contains, and dropping it as
     # a duplicate charged the study for a missing statement (#420 review).
-    seen = _comparable(already)
+    # Whole words only, for the same reason: "## Funding None" is not
+    # repeated by a body that says "cofunding none of ..." (#426 review).
+    seen = f" {_comparable(already)} "
     kept = []
     for candidate in candidates:
         if not candidate:
             continue
-        if _comparable(candidate) in seen:
+        comparable = _comparable(candidate)
+        if f" {comparable} " in seen:
             continue
         kept.append(candidate)
-        seen += " " + _comparable(candidate)
+        seen += f"{comparable} "
     return kept
 
 
@@ -387,12 +490,25 @@ def _references(back: ET.Element) -> str:
     return "\n".join(parts)
 
 
-def _render_element(element: ET.Element, level: int) -> str:
+def _render_element(
+    element: ET.Element,
+    level: int,
+    end_matter: bool = False,
+    in_force: str | None = None,
+) -> str:
     """Render one element of a body or back-matter walk.
 
     Args:
         element: The element.
         level: The heading level a section here would take.
+        end_matter: Whether the element is back matter or a front-matter
+            statement, where every piece gets a heading. An element in
+            :data:`_END_MATTER_TAGS` is end matter wherever it stands.
+        in_force: The heading the element falls under. A section headed the
+            same is not headed again: eLife prints one footnote per author
+            group under a titled "Competing interests" group, and with each
+            footnote headed anew the analyser read only the first (#426
+            review).
 
     Returns:
         Its markdown, or an empty string for an element that renders to
@@ -401,14 +517,18 @@ def _render_element(element: ET.Element, level: int) -> str:
         prose (#399).
     """
     tag = element.tag
+    end_matter = end_matter or tag in _END_MATTER_TAGS
     if tag in _BLOCK_TAGS:
-        return _render_block(element, level)
+        return _render_block(element, level, end_matter, in_force)
     if tag == "p":
         return text_of(element)
-    if tag == "list":
-        return _render_list(element)
-    if tag == "def-list":
-        return _render_def_list(element)
+    if tag in _TITLED_LIST_TAGS:
+        items = _render_list(element) if tag == "list" else _render_def_list(element)
+        title = text_of(element.find("title"))
+        if not title or _same_heading(title, in_force):
+            return items
+        heading_line = _heading_line(title, level)
+        return f"{heading_line}\n\n{items}" if items else heading_line
     if tag == "disp-quote":
         return text_of(element)
     if tag == "table-wrap":
@@ -417,15 +537,25 @@ def _render_element(element: ET.Element, level: int) -> str:
     if tag == "fig":
         caption = text_of(element.find(".//caption/p"))
         return f"*Figure: {caption}*" if caption else ""
+    if end_matter and tag not in _SILENT_TAGS and text_of(element):
+        logger.debug("Dropped a <%s> holding text from the end matter", tag)
     return ""
 
 
-def _render_block(block: ET.Element, level: int) -> str:
+def _render_block(
+    block: ET.Element,
+    level: int,
+    end_matter: bool = False,
+    in_force: str | None = None,
+) -> str:
     """Render a section-like element under its heading.
 
     Args:
         block: A ``<sec>``, ``<notes>``, ``<fn>`` or other container.
         level: Its heading level.
+        end_matter: Whether it is back matter or a front-matter statement.
+        in_force: The heading it falls under; a block headed the same is not
+            headed again (see :func:`_render_element`).
 
     Returns:
         The heading, when it has one, followed by its content. The content
@@ -436,48 +566,190 @@ def _render_block(block: ET.Element, level: int) -> str:
     """
     found = _heading_of(block)
     if found is None:
-        return _render_children(block, level)
+        return _render_children(block, level, end_matter, in_force)
 
     if found.from_run_in:
         block = _without_run_in(block)
-    content = _render_children(block, level + 1)
+    # A block headed by its first paragraph's run-in holds statements side by
+    # side, so a later run-in heads a sibling, not a subsection: nested one
+    # level down, a "Publisher's note" run-in did not end the competing
+    # interests statement it followed (#426 review).
+    content = _render_children(
+        block,
+        level + 1,
+        end_matter,
+        in_force=found.heading,
+        run_in_level=level if found.from_run_in else None,
+    )
     if found.printed is not None:
         content = f"**{found.printed}**\n\n{content}" if content else f"**{found.printed}**"
+    if _same_heading(found.heading, in_force):
+        return content
     heading_line = _heading_line(found.heading, level)
     return f"{heading_line}\n\n{content}" if content else heading_line
 
 
-def _render_children(parent: ET.Element, level: int) -> str:
+def _render_children(
+    parent: ET.Element,
+    level: int,
+    end_matter: bool = False,
+    in_force: str | None = None,
+    run_in_level: int | None = None,
+) -> str:
     """Render an element's children in document order.
+
+    A child block without a heading contributes its own children in its
+    place (see :func:`_pieces`).
 
     A paragraph opening with a bold run-in ending in a colon becomes a
     heading of its own: several statements often share one container
     ("**Source of support:** Nil" then "**Conflict of interest:** None"),
     and only the first used to be headed, so the second was read as part of
-    the first (#420 review).
+    the first (#420 review). In the body only a run-in no plain paragraph
+    follows does: a heading cannot be closed in markdown, so "**Data
+    availability:** On request." in the middle of the methods made the rest
+    of the methods its statement (#426 review).
+
+    In the end matter a piece without a heading of its own gets one when it
+    would otherwise fall under a heading that is not its own -- at the top,
+    or after a sibling that had one (:data:`DEFAULT_HEADING_BY_OWNER`). A
+    piece after a run-in in the same holder is taken as the run-in's own
+    continuation.
 
     Args:
         parent: The element whose children are rendered.
         level: The heading level a section among them would take.
+        end_matter: Whether they are back matter or a front-matter statement.
+        in_force: The parent's heading, which they fall under until one of
+            them has a heading; ``None`` when the parent has none.
+        run_in_level: The level a run-in heading here takes; ``level`` when
+            not given.
 
     Returns:
         Their markdown, joined by blank lines.
     """
+    pieces = _pieces(parent, end_matter)
+    sibling_level = run_in_level or level
     parts = []
+    current = in_force
+    heading_holder: ET.Element | None = None
+    headed_here = False
+    for index, piece in enumerate(pieces):
+        child, holder = piece.element, piece.holder
+        if child.tag == "p":
+            run_in = _paragraph_run_in(child, colon_only=True)
+            if run_in is not None and (
+                piece.end_matter or _only_run_ins_follow(pieces[index + 1:])
+            ):
+                rest = text_of(_paragraph_without_run_in(child))
+                heading_line = _heading_line(run_in, sibling_level)
+                parts.append(f"{heading_line}\n\n{rest}" if rest else heading_line)
+                current, heading_holder, headed_here = run_in, holder, True
+                continue
+
+        found = _piece_heading(child)
+        rendered = _render_element(child, level, piece.end_matter, current)
+        if not rendered:
+            continue
+        if found is not None:
+            if not _same_heading(found.heading, current):
+                current, heading_holder, headed_here = found.heading, child, True
+        elif piece.end_matter and (
+            current is None or (headed_here and heading_holder is not holder)
+        ):
+            default = DEFAULT_HEADING_BY_OWNER.get(holder.tag, DEFAULT_HEADING)
+            if not _same_heading(default, current):
+                rendered = f"{_heading_line(default, sibling_level)}\n\n{rendered}"
+            current, heading_holder, headed_here = default, holder, True
+        parts.append(rendered)
+    return "\n\n".join(parts)
+
+
+@dataclass(frozen=True)
+class _Piece:
+    """One piece of a walk: a child, or the child of a block without a heading.
+
+    Attributes:
+        element: The piece.
+        holder: The element it is a direct child of.
+        end_matter: Whether it is end matter (see :data:`_END_MATTER_TAGS`).
+    """
+
+    element: ET.Element
+    holder: ET.Element
+    end_matter: bool
+
+
+def _pieces(parent: ET.Element, end_matter: bool) -> list[_Piece]:
+    """An element's children, each paired with the element that holds it.
+
+    A child block without a heading is replaced by its own pieces: it opens
+    no section, so what it holds stands beside its siblings. Its title and
+    label are skipped, as the parent's are.
+
+    Args:
+        parent: The element.
+        end_matter: Whether it is back matter or a front-matter statement.
+
+    Returns:
+        The pieces in document order.
+    """
+    pieces: list[_Piece] = []
     for child in parent:
         if child.tag in ("title", "label"):
             continue
-        if child.tag == "p":
-            run_in = _paragraph_run_in(child, colon_only=True)
-            if run_in is not None:
-                rest = text_of(_paragraph_without_run_in(child))
-                heading_line = _heading_line(run_in, level)
-                parts.append(f"{heading_line}\n\n{rest}" if rest else heading_line)
-                continue
-        rendered = _render_element(child, level)
-        if rendered:
-            parts.append(rendered)
-    return "\n\n".join(parts)
+        child_end_matter = end_matter or child.tag in _END_MATTER_TAGS
+        if child.tag in _BLOCK_TAGS and _heading_of(child) is None:
+            pieces.extend(_pieces(child, child_end_matter))
+        else:
+            pieces.append(_Piece(child, parent, child_end_matter))
+    return pieces
+
+
+def _only_run_ins_follow(pieces: list[_Piece]) -> bool:
+    """Whether every paragraph among some pieces opens with a run-in.
+
+    Args:
+        pieces: The pieces after a run-in paragraph.
+
+    Returns:
+        True if no plain paragraph is among them.
+    """
+    return all(
+        _paragraph_run_in(piece.element, colon_only=True) is not None
+        for piece in pieces
+        if piece.element.tag == "p"
+    )
+
+
+def _piece_heading(piece: ET.Element) -> "_Heading | None":
+    """The heading a piece of a walk opens, if any.
+
+    Args:
+        piece: A child from :func:`_pieces`.
+
+    Returns:
+        The block's heading, or a list's own title, or ``None``.
+    """
+    if piece.tag in _BLOCK_TAGS:
+        return _heading_of(piece)
+    if piece.tag in _TITLED_LIST_TAGS:
+        title = text_of(piece.find("title"))
+        return _Heading(title) if title else None
+    return None
+
+
+def _same_heading(heading: str, other: str | None) -> bool:
+    """Whether two headings are the same, ignoring case and spacing.
+
+    Args:
+        heading: A heading.
+        other: Another, or ``None``.
+
+    Returns:
+        True if ``other`` is given and reads the same.
+    """
+    return other is not None and _normalised(heading) == _normalised(other)
 
 
 @dataclass(frozen=True)
@@ -508,8 +780,9 @@ def _heading_of(element: ET.Element) -> _Heading | None:
     and "Conflicts of interest/Competing interests", "INTERESSENKONFLIKT"
     or "Disclosure and potential conflicts of interest" under a
     ``COI-statement`` type are all one statement it would otherwise miss.
-    Then a footnote whose text speaks of conflicts of interest; then, for a
-    container, its default heading.
+    Then a footnote -- end matter wherever it stands -- that declares its
+    conflicts of interest (:func:`_is_coi_declaration`). A footnote inside
+    a body paragraph is not a block, and is read as the paragraph's text.
 
     Args:
         element: The element.
@@ -536,13 +809,25 @@ def _heading_of(element: ET.Element) -> _Heading | None:
         return _Heading(stated, from_run_in, printed)
     if own is not None:
         return _Heading(own, from_run_in)
-    if element.tag == "fn" and _COI_WORDING_RE.search(text_of(element)):
+    if element.tag == "fn" and _is_coi_declaration(text_of(element)):
         return _Heading(COI_HEADING)
-
-    default = DEFAULT_HEADING_BY_TAG.get(element.tag)
-    if default is not None and element.find("p") is not None:
-        return _Heading(default)
     return None
+
+
+def _is_coi_declaration(text: str) -> bool:
+    """Whether a text without a heading declares competing interests.
+
+    Args:
+        text: A footnote's or paragraph's text.
+
+    Returns:
+        True if it uses the wording of a competing interests statement and
+        declares or denies something (:data:`_DECLARATION_RE`).
+    """
+    return (
+        _COI_WORDING_RE.search(text) is not None
+        and _DECLARATION_RE.search(text) is not None
+    )
 
 
 def _stated_statement_heading(element: ET.Element) -> str | None:
@@ -636,7 +921,11 @@ def _paragraph_run_in(
     if not heading or not qualifies:
         return None
     heading = heading.rstrip(":").strip()
-    if not heading or len(heading) > MAX_RUN_IN_HEADING_CHARS:
+    if len(heading) > MAX_RUN_IN_HEADING_CHARS:
+        return None
+    # A marker is no heading: "<bold>*</bold> Deceased." was headed "*",
+    # which the label rule has always refused (#426 review).
+    if not _WORD_RE.search(heading):
         return None
     return heading
 

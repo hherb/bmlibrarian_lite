@@ -143,7 +143,8 @@ class ArticleInfoFetch:
     """What asking Europe PMC about an article produced (#363).
 
     The sibling of :class:`~bmlibrarian_lite.data_models.RecordFetch`, for
-    the availability lookup that precedes a full-text fetch. :meth:`EuropePMCClient.get_article_info` answers both "this
+    the availability lookup that precedes a full-text fetch.
+    :meth:`EuropePMCClient.get_article_info` answers both "this
     article is not in Europe PMC" and "we could not reach Europe PMC" with
     one ``None``, and its caller read both as the first -- so a throttled
     Europe PMC produced a full-text result whose record said every lookup

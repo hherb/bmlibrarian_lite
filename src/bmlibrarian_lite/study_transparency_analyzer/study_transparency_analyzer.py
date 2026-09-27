@@ -83,7 +83,7 @@ from ..transparency_terms import (
 # The adapter must therefore retry a 429/503 zero times on its own: left to
 # the default of POLITE_MAX_THROTTLE_RETRIES, a persistent 503 would cost
 # four requests where it used to cost one, which is the opposite of being
-# polite -- and www.ebi.ac.uk's budget is shared with the main search path.
+# polite -- and NCBI's budget is shared with the main search path.
 _ADAPTER_OWNS_NO_THROTTLE_RETRIES = 0
 
 # Configure logging
@@ -341,9 +341,8 @@ class TransparencyReport:
     # established nothing -- the COI and data availability analyses each
     # record that dimension as not assessed -- so a rating resting on it has
     # the certainty of one made without the full text, and must say so.
-    # The Europe PMC XML the data availability fallback reads does not set
-    # it: that XML is read for the data statement alone, and the COI
-    # analysis has by then recorded that the full text was not read.
+    # Text reaches the analyser only through the caller or discovery; there
+    # is no side channel read for one dimension alone (#421).
     full_text_analyzed: bool = False
 
     # Metadata
@@ -2168,7 +2167,7 @@ def _full_text_unassessed_caveat(lookups: LookupRecord) -> str:
 
 
 #: What the data availability caveats say was not established, as the
-#: reader is told it. One place, because four sentences end with it.
+#: reader is told it. One place, because every such caveat ends with it.
 DATA_AVAILABILITY_SOUGHT = "this study's data availability statement"
 
 #: Why the commonest unassessed case arose: nothing that could carry the
@@ -2206,33 +2205,90 @@ def _any_section_was_parsed(fulltext_sections: Optional[Dict[str, str]]) -> bool
 #: stand without one -- BMJ deposits "Competing interests: None declared."
 #: as a bare "None declared." footnote.
 _COI_WORDING_RE = re.compile(
-    rf'{COI_WORDING_PATTERN}|none declared|nothing to (?:declare|disclose)',
+    rf'{COI_WORDING_PATTERN}|none declared|nothing to (?:declare|disclose)'
+    r"|conflits? d['’]int[ée]r[êe]ts?|conflictos? de intereses?"
+    r'|conflitos? de interesses?|interessenkonflikt',
     re.IGNORECASE,
 )
 
 #: Wording that shows a text speaks of its data availability.
 _DATA_AVAILABILITY_WORDING_RE = re.compile(
-    r'data (?:availability|sharing)|availability of (?:the )?data',
+    r'data (?:availability|accessibility|sharing)'
+    r'|data and (?:code|materials?|software) availability'
+    r'|availability of (?:the )?(?:materials? and )?data',
     re.IGNORECASE,
 )
+
+#: Why a conflict of interest statement the text seems to hold was not
+#: assessed. "Seems": the wording includes "none declared", which is a
+#: statement's words but says nothing of conflicts on its own.
+COI_WORDING_WITHOUT_STATEMENT = (
+    "The article's full text uses the wording of a conflict of interest "
+    "statement, but no such statement could be identified in it"
+)
+
+#: The same, for data availability.
+DATA_AVAILABILITY_WORDING_WITHOUT_STATEMENT = (
+    "The article's full text uses the wording of a data availability "
+    "statement, but no such statement could be identified in it"
+)
+
+#: A reference list's heading. Cited titles are not the article's own words:
+#: a paper that cites "Conflicts of interest in surgery" has not thereby said
+#: anything about its own.
+_REFERENCES_HEADING_RE = re.compile(r'#{1,6}\s+references\s*', re.IGNORECASE)
 
 
 def _mentions(fulltext: str | None, wording: "re.Pattern[str]") -> bool:
     """Whether a full text uses the wording of a statement.
 
     Consulted only once no section carrying the statement was recognised:
-    a text that still uses its words holds a statement we failed to find,
-    and charging its absence would charge the study for our parser (#359,
-    and the review of #420).
+    a text that still uses its words may hold a statement we failed to
+    find, and charging its absence would charge the study for our parser
+    (#359, and the review of #420). Deliberately generous: the body counts,
+    so a study *about* data sharing is not charged either. Only the
+    reference list is left out, whose words are other papers' titles.
 
     Args:
         fulltext: The full text, or ``None``.
         wording: The statement's wording.
 
     Returns:
-        True if the wording occurs anywhere in the text.
+        True if the wording occurs in the text outside its reference lists.
     """
-    return bool(fulltext) and wording.search(fulltext or "") is not None
+    if not fulltext:
+        return False
+    return wording.search(_without_reference_lists(fulltext)) is not None
+
+
+def _without_reference_lists(fulltext: str) -> str:
+    """A full text with each markdown reference list left out.
+
+    A list runs from its heading to the next heading of the same or a higher
+    level, not to the end: BMJ deposits a titled references section inside
+    its back matter, and the author notes after it hold the competing
+    interests statement ("None declared.").
+
+    Args:
+        fulltext: The full text.
+
+    Returns:
+        The text without its reference lists.
+    """
+    kept: list[str] = []
+    skipping_below: int | None = None
+    for line in fulltext.split('\n'):
+        stripped = line.strip()
+        level = _markdown_heading_level(stripped)
+        if skipping_below is not None:
+            if not level or level > skipping_below:
+                continue
+            skipping_below = None
+        if level and _REFERENCES_HEADING_RE.fullmatch(stripped):
+            skipping_below = level
+            continue
+        kept.append(line)
+    return '\n'.join(kept)
 
 
 def _text_or_none(text: str | None) -> str | None:
@@ -2436,8 +2492,11 @@ def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
     """Extract transparency-relevant sections from full-text content.
 
     Scans for common section headers used in biomedical articles and
-    returns the text content following each header until the next
-    recognised section begins.
+    returns the text content following each header until the section
+    ends: at the next recognised header; at a references, bibliography or
+    supplementary line; or at a markdown heading of the same or a higher
+    level -- any markdown heading, when the header was a plain-text one
+    from a PDF. Only the first section found for each key is kept.
 
     Args:
         fulltext: Plain-text (or simple markdown) article content.
@@ -2467,12 +2526,31 @@ def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
             'conflicts? of interests? and sources? of funding',
             'author disclosures?',
             'disclosures?',
+            # Diabetologia's heading for every competing interests statement,
+            # and another journal's; missed, each read as an article that
+            # declares nothing, industry ties and all (#426 review).
+            "authors?['’]? relationships and activities",
+            '(?:financial and non-?financial )?relationships? and activities',
+            'duality of interests?',
+            # The statement's heading in the languages surveyed articles
+            # print it in untyped: French, Spanish, Portuguese, German.
+            "conflits? d['’]int[ée]r[êe]ts?",
+            'conflictos? de intereses?',
+            'conflitos? de interesses?',
+            'interessenkonflikte?',
         ],
         'data_sharing': [
             'data sharing',
             'data availability',
             'data access',
             'availability of data',
+            # BMC's standard "Availability of data and materials", Cell's
+            # "Data and code availability", and Wiley's "Data accessibility"
+            # (#426 review).
+            'availability of (?:the )?data and (?:materials?|code)',
+            'availability of materials? and data',
+            'data and (?:code|materials?|software) availability',
+            'data accessibility',
         ],
         'funding': [
             'funding',
@@ -2847,14 +2925,10 @@ class StudyTransparencyAnalyzer:
         self._fetch_trial_info(report)
 
         # Step 5: Analyze COI statement (full text overrides API data)
-        self._analyze_conflicts(
-            report, fulltext_sections, bool(fulltext), fulltext=fulltext
-        )
+        self._analyze_conflicts(report, fulltext_sections, fulltext)
 
-        # Step 6: Analyze data availability (full text overrides API data)
-        self._analyze_data_availability(
-            report, fulltext_sections, bool(fulltext), fulltext=fulltext
-        )
+        # Step 6: Analyze data availability (full text only)
+        self._analyze_data_availability(report, fulltext_sections, fulltext)
 
         # Step 7: Calculate transparency score
         report.transparency_score = calculate_transparency_score(report)
@@ -3365,7 +3439,6 @@ class StudyTransparencyAnalyzer:
         self,
         report: TransparencyReport,
         fulltext_sections: Optional[Dict[str, str]] = None,
-        fulltext_read: bool = False,
         fulltext: str | None = None,
     ):
         """Analyze conflict of interest disclosures.
@@ -3389,14 +3462,16 @@ class StudyTransparencyAnalyzer:
             fulltext_sections: Optional dict from extract_fulltext_sections().
                 The 'coi' key, if present, takes priority over API data
                 because it contains the complete disclosure text.
-            fulltext_read: Whether the article's own full text was obtained.
-                It is what separates "this article declares no conflicts"
-                from "nobody read the article".
-            fulltext: The full text itself, when there is one. A text that
-                speaks of conflicts of interest outside every section we
-                recognised has a statement we failed to find, so its
-                silence is not charged.
+            fulltext: The article's own full text, or ``None`` when none was
+                read. Whether there is one is what separates "this article
+                declares no conflicts" from "nobody read the article", and a
+                text that uses a statement's wording outside every section
+                we recognised may hold one we failed to find, so its silence
+                is not charged. One argument, not a flag beside the text: a
+                flag saying "read" with no text beside it skipped the
+                wording check and charged the study (#426 review).
         """
+        fulltext = _text_or_none(fulltext)
         # Priority: full-text COI section > PubMed COI statement
         coi_text = None
 
@@ -3408,26 +3483,24 @@ class StudyTransparencyAnalyzer:
 
         if coi_text and coi_text.strip():
             report.coi_info = analyze_coi_statement(coi_text)
-        elif fulltext_read and _mentions(fulltext, _COI_WORDING_RE):
+        elif fulltext and _mentions(fulltext, _COI_WORDING_RE):
             # Recognising more of the end matter (#420) made the charge
             # below reachable for articles whose statement still has no
             # heading we know -- "The authors declared no potential
             # conflicts of interest" as a bare footnote. The words are
-            # there, so the statement is ours to have missed.
+            # there, so the statement may be ours to have missed.
             report.coi_info = ConflictOfInterest.not_assessed()
             report.warnings.append(
                 unassessed_caveat(
-                    "The article's full text mentions conflicts of interest, "
-                    "but no statement of them could be identified in it",
-                    COI_DISCLOSURE_SOUGHT,
+                    COI_WORDING_WITHOUT_STATEMENT, COI_DISCLOSURE_SOUGHT
                 )
             )
-        elif fulltext_read and _end_matter_was_parsed(fulltext_sections):
+        elif fulltext and _end_matter_was_parsed(fulltext_sections):
             # The article itself was read, its end matter was recognised, and
             # no disclosure is among it. That is the study's own answer, and
             # the only one that costs it points.
             report.coi_info = ConflictOfInterest.not_stated()
-        elif fulltext_read:
+        elif fulltext:
             # Full text arrived but not one end-matter section was
             # recognised in it, so the parse -- not the article -- is what
             # came up empty. Unparsed is not absent (#359).
@@ -3462,9 +3535,11 @@ class StudyTransparencyAnalyzer:
     ) -> None:
         """Record an unassessed data availability for a reason of our own.
 
-        The article's full text was never retrieved, or a full text arrived
-        that we could not segment. Both leave exactly the empty statement an
-        article without one leaves, and until #353 both were charged for it.
+        The article's full text was never retrieved; or a full text arrived
+        that we could not segment; or one uses a statement's wording where no
+        statement was recognised. Each leaves exactly the empty statement an
+        article without one leaves, and until #353 the first two were
+        charged for it.
 
         Args:
             report: The report to record it on; its warnings gain the caveat.
@@ -3482,7 +3557,6 @@ class StudyTransparencyAnalyzer:
         self,
         report: TransparencyReport,
         fulltext_sections: Optional[Dict[str, str]] = None,
-        fulltext_read: bool = False,
         fulltext: str | None = None,
     ):
         """Analyze data availability and sharing.
@@ -3498,19 +3572,19 @@ class StudyTransparencyAnalyzer:
             report: TransparencyReport being built.
             fulltext_sections: Optional dict from extract_fulltext_sections().
                 The 'data_sharing' key, if present, is the statement.
-            fulltext_read: Whether the article's own full text was obtained.
-                With ``fulltext_sections``, it is what separates "this
-                article states nothing about its data" from "nobody read the
-                article".
-            fulltext: The full text itself, when there is one. A text that
-                speaks of data availability outside every section we
-                recognised has a statement we failed to find.
+            fulltext: The article's own full text, or ``None`` when none was
+                read. With ``fulltext_sections``, whether there is one is
+                what separates "this article states nothing about its data"
+                from "nobody read the article"; a text that uses a
+                statement's wording outside every section we recognised may
+                hold one we failed to find.
         """
+        fulltext = _text_or_none(fulltext)
         if fulltext_sections and fulltext_sections.get('data_sharing'):
             data_statement = fulltext_sections['data_sharing']
             logger.info("Using data sharing statement from full-text (%d chars)", len(data_statement))
             report.data_availability = analyze_data_availability(data_statement)
-        elif fulltext_read:
+        elif fulltext:
             # The article itself was read. Whether its silence is the
             # article's own depends on whether we segmented it at all: a
             # full text in which not one section was recognised has told us
@@ -3519,9 +3593,7 @@ class StudyTransparencyAnalyzer:
                 # The #420 review's rule, one dimension over: the words are
                 # in the text, so the statement is ours to have missed.
                 self._record_data_availability_unassessed_because(
-                    report,
-                    "The article's full text mentions data availability, but "
-                    "no statement of it could be identified in it",
+                    report, DATA_AVAILABILITY_WORDING_WITHOUT_STATEMENT
                 )
             elif _any_section_was_parsed(fulltext_sections):
                 report.data_availability = analyze_data_availability(None)

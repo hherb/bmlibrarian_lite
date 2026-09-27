@@ -314,9 +314,12 @@ full text was ever read, so a display-time check is needed to keep that
 absence from reading as a finding. Python fixed it earlier, in *scoring*
 (#352, #353, #359): `not_stated` for COI is recorded only from a full text
 that was read and its end matter parsed, and `not_stated` for data
-availability only from a full text that was read and segmented. (A Europe
-PMC XML fallback once charged it from XML read for that one statement; it
-was removed in #421.) Anywhere else, Python
+availability only from a full text that was read and segmented. Since
+#420 neither is recorded from a text that uses the statement's wording
+where no statement was recognised (outside its reference list): the
+statement may be one the parser missed. (A Europe PMC XML fallback once
+charged data availability from XML read for that one statement; it was
+removed in #421.) Anywhere else, Python
 records `not_assessed` / `unknown` — neutral values that score 0 and trigger
 nothing.
 

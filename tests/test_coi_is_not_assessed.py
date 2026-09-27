@@ -175,7 +175,7 @@ class TestWhatTheAnalyserRecords:
         """No full text and no PubMed record establishes nothing."""
         report = TransparencyReport(doi="10.1/x")
 
-        analyzer._analyze_conflicts(report, fulltext_sections={}, fulltext_read=False)
+        analyzer._analyze_conflicts(report, fulltext_sections={})
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_ASSESSED
 
@@ -190,7 +190,7 @@ class TestWhatTheAnalyserRecords:
         """
         report = TransparencyReport(pmid="1", pubmed_record_read=True)
 
-        analyzer._analyze_conflicts(report, fulltext_sections={}, fulltext_read=False)
+        analyzer._analyze_conflicts(report, fulltext_sections={})
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_ASSESSED
 
@@ -207,7 +207,7 @@ class TestWhatTheAnalyserRecords:
         analyzer._analyze_conflicts(
             report,
             fulltext_sections={"methods": "...", "funding": "NIH grant R01."},
-            fulltext_read=True,
+            fulltext="The article's full text.",
         )
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_STATED
@@ -225,7 +225,7 @@ class TestWhatTheAnalyserRecords:
         report = TransparencyReport(pmid="1", pubmed_record_read=True)
 
         analyzer._analyze_conflicts(
-            report, fulltext_sections={"methods": "..."}, fulltext_read=True
+            report, fulltext_sections={"methods": "..."}, fulltext="The article's full text."
         )
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_ASSESSED
@@ -236,7 +236,7 @@ class TestWhatTheAnalyserRecords:
         report = TransparencyReport(pmid="1")
 
         analyzer._analyze_conflicts(
-            report, fulltext_sections={"coi": DISCLOSURE}, fulltext_read=True
+            report, fulltext_sections={"coi": DISCLOSURE}, fulltext="The article's full text."
         )
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.DISCLOSED
@@ -247,7 +247,7 @@ class TestWhatTheAnalyserRecords:
         report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._coi_statement = DISCLOSURE
 
-        analyzer._analyze_conflicts(report, fulltext_sections={}, fulltext_read=False)
+        analyzer._analyze_conflicts(report, fulltext_sections={})
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.DISCLOSED
         assert report.coi_info.statement == DISCLOSURE
@@ -257,7 +257,7 @@ class TestWhatTheAnalyserRecords:
         report = TransparencyReport(pmid="1", pubmed_record_read=True)
         report._coi_statement = "   "
 
-        analyzer._analyze_conflicts(report, fulltext_sections={}, fulltext_read=False)
+        analyzer._analyze_conflicts(report, fulltext_sections={})
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_ASSESSED
 
@@ -265,7 +265,7 @@ class TestWhatTheAnalyserRecords:
         """Logging is not reporting (golden rule 8)."""
         report = TransparencyReport(doi="10.1/x")
 
-        analyzer._analyze_conflicts(report, fulltext_sections={}, fulltext_read=False)
+        analyzer._analyze_conflicts(report, fulltext_sections={})
 
         assert any("not assessed" in w for w in report.warnings)
 
@@ -274,8 +274,8 @@ class TestWhatTheAnalyserRecords:
         asked = TransparencyReport(pmid="1", pubmed_record_read=True)
         unasked = TransparencyReport(doi="10.1/x")
 
-        analyzer._analyze_conflicts(asked, fulltext_sections={}, fulltext_read=False)
-        analyzer._analyze_conflicts(unasked, fulltext_sections={}, fulltext_read=False)
+        analyzer._analyze_conflicts(asked, fulltext_sections={})
+        analyzer._analyze_conflicts(unasked, fulltext_sections={})
 
         assert asked.warnings != unasked.warnings
 
@@ -284,7 +284,7 @@ class TestWhatTheAnalyserRecords:
         report = TransparencyReport(pmid="1", pubmed_record_read=True)
 
         analyzer._analyze_conflicts(
-            report, fulltext_sections={"coi": DISCLOSURE}, fulltext_read=True
+            report, fulltext_sections={"coi": DISCLOSURE}, fulltext="The article's full text."
         )
 
         assert report.warnings == []
@@ -300,7 +300,7 @@ class TestWhatTheAnalyserRecords:
         """
         report = TransparencyReport(doi="10.1/x", industry_funding_detected=True)
 
-        analyzer._analyze_conflicts(report, fulltext_sections={}, fulltext_read=False)
+        analyzer._analyze_conflicts(report, fulltext_sections={})
 
         assert not any("does not mention industry" in w for w in report.warnings)
 
@@ -313,7 +313,7 @@ class TestWhatTheAnalyserRecords:
         analyzer._analyze_conflicts(
             report,
             fulltext_sections={"coi": DISCLOSURE},
-            fulltext_read=True,
+            fulltext="The article's full text.",
         )
 
         assert any("does not mention industry" in w for w in report.warnings)
@@ -332,7 +332,7 @@ class TestTheEuropePMCFetchIsGone:
         """
         report = TransparencyReport(pmid="1", pmcid="PMC1")
 
-        analyzer._analyze_conflicts(report, fulltext_sections={}, fulltext_read=False)
+        analyzer._analyze_conflicts(report, fulltext_sections={})
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_ASSESSED
 
@@ -342,7 +342,7 @@ class TestTheEuropePMCFetchIsGone:
         """``data_sources_used`` is reader-facing provenance."""
         report = TransparencyReport(pmid="1", pmcid="PMC1")
 
-        analyzer._analyze_conflicts(report, fulltext_sections={}, fulltext_read=False)
+        analyzer._analyze_conflicts(report, fulltext_sections={})
 
         assert "Europe PMC" not in report.data_sources_used
 

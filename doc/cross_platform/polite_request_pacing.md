@@ -199,7 +199,7 @@ penalty, because the host is broken rather than busy. What stays with the
 transport is what belongs there: connection and read retries, which are
 transport faults with no status to pace against. A client whose own calling code already retries (PubMed's search
 client), or which makes exactly one request per call and reports the result
-itself (the five transparency clients), mounts with a retry total of zero,
+itself (the four transparency clients), mounts with a retry total of zero,
 so mounting pacing does not multiply that client's request count. Adding
 pacing must never increase the traffic it exists to reduce: the default
 budget would turn one physical request into four on a persistent 503, and
@@ -247,7 +247,7 @@ not add.
 Every client that reaches a third-party host **over `requests`** mounts
 pacing on its `requests.Session` through `mount_politely` at construction,
 rather than pacing itself: `pubmed/search_client.py`, `europepmc.py`,
-`pdf_discovery.py`, and the five clients in
+`pdf_discovery.py`, and the four clients in
 `study_transparency_analyzer/study_transparency_analyzer.py`.
 
 Two named exceptions, so this stays an "every" that is actually true:

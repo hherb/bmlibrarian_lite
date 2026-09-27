@@ -57,6 +57,9 @@ if TYPE_CHECKING:
 
 FUNDING_SOUGHT = "this study's funding in full"
 THROTTLED = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=429)
+#: A full text that was read and uses no statement's wording, so whatever
+#: the analyser concludes rests on the sections alone.
+READ_TEXT = "The article's full text."
 
 
 class TestASkippedLookupIsRecordable:
@@ -555,7 +558,7 @@ class TestDataAvailabilityNeedsSomewhereToHaveLooked:
         )
 
         report = self._report(pmcid=None)
-        self._analyzer()._analyze_data_availability(report, None, False)
+        self._analyzer()._analyze_data_availability(report, None, None)
 
         assert (
             report.data_availability.disclosure_level
@@ -565,7 +568,7 @@ class TestDataAvailabilityNeedsSomewhereToHaveLooked:
     def test_an_article_outside_pmc_tells_the_reader_why(self) -> None:
         """Logging is not reporting (golden rule 8)."""
         report = self._report(pmcid=None)
-        self._analyzer()._analyze_data_availability(report, None, False)
+        self._analyzer()._analyze_data_availability(report, None, None)
 
         assert any("not assessed" in w for w in report.warnings)
 
@@ -576,11 +579,11 @@ class TestDataAvailabilityNeedsSomewhereToHaveLooked:
         )
 
         unassessed = self._report(pmcid=None)
-        self._analyzer()._analyze_data_availability(unassessed, None, False)
+        self._analyzer()._analyze_data_availability(unassessed, None, None)
 
         stated = self._report(pmcid=None)
         self._analyzer()._analyze_data_availability(
-            stated, {"funding": "Funded by X."}, True
+            stated, {"funding": "Funded by X."}, READ_TEXT
         )
 
         assert (
@@ -598,7 +601,7 @@ class TestDataAvailabilityNeedsSomewhereToHaveLooked:
 
         report = self._report(pmcid=None)
         self._analyzer()._analyze_data_availability(
-            report, {"funding": "Funded by X."}, True
+            report, {"funding": "Funded by X."}, READ_TEXT
         )
 
         assert (
@@ -616,7 +619,7 @@ class TestDataAvailabilityNeedsSomewhereToHaveLooked:
         self._analyzer()._analyze_data_availability(
             report,
             {"data_sharing": "All data are available at doi:10.5061/dryad.1"},
-            True,
+            READ_TEXT,
         )
 
         assert (
@@ -631,7 +634,7 @@ class TestDataAvailabilityNeedsSomewhereToHaveLooked:
         )
 
         report = self._report(pmcid=None)
-        self._analyzer()._analyze_data_availability(report, {}, True)
+        self._analyzer()._analyze_data_availability(report, {}, READ_TEXT)
 
         assert (
             report.data_availability.disclosure_level
@@ -642,7 +645,7 @@ class TestDataAvailabilityNeedsSomewhereToHaveLooked:
         """No indicator may stand on a source nobody read (#346)."""
         analyzer = self._analyzer()
         report = self._report(pmcid=None, industry_funding_detected=True)
-        analyzer._analyze_data_availability(report, None, False)
+        analyzer._analyze_data_availability(report, None, None)
         analyzer._identify_risk_indicators(report)
 
         assert not any("data" in i.lower() for i in report.risk_of_bias_indicators)
@@ -1045,7 +1048,7 @@ class TestTheGapsTheMutationSweepFound:
 
         report = self._report(pmcid=None)
         self._analyzer()._analyze_data_availability(
-            report, {"coi": "", "funding": ""}, True
+            report, {"coi": "", "funding": ""}, READ_TEXT
         )
 
         assert (
