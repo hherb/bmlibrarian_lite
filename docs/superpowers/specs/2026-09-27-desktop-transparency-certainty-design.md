@@ -165,6 +165,15 @@ New pure module, `transparency/risk_explanation.py`:
      findings, so the rating probably comes from an earlier version of the
      analysis. Re-analyse the study before relying on it.` This applies when
      the row is HIGH and no trigger matches under the current settings.
+
+     **Superseded by the user's decision of 2026-09-27** (see
+     `.superpowers/sdd/2026-09-27-desktop-transparency-certainty/caveat-change.md`):
+     Swift's sentence names a cause and remedy that do not hold on the
+     desktop, so the desktop now carries its own wording,
+     `UNEXPLAINED_RATING_CAVEAT` in `transparency_terms.py`, and the shared
+     contract's `unexplained_rating_caveat` moved from `strings` to
+     `swift_kotlin_only` (binds Swift and Kotlin only; see the parity
+     README).
   2. The provisional caveat, when `sources_unreachable`.
   3. When the breakdown is wanted but not available: `How the score was
      reached is not available for this analysis; re-analyse the study to see
@@ -172,6 +181,10 @@ New pure module, `transparency/risk_explanation.py`:
      to one whose stored terms could not be read back. In the second case the
      unreadable-column caveat among the other concerns says why. This caveat
      is desktop-only and is not in the contract.
+
+     **Wording also updated by the same 2026-09-27 decision**: see
+     `BREAKDOWN_UNAVAILABLE_CAVEAT` in `transparency_terms.py` for the
+     current text.
 
 ### 3. Surfaces
 

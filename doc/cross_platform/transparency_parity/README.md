@@ -258,28 +258,42 @@ a study was rated high risk (#392).
 
 The file has three parts, with different reach:
 
-- **`strings`** — the certainty note, the badge suffix, the provisional and
-  unexplained-rating caveats, and the high-risk section's heading and labels.
-  Bound on **all three platforms**, string-for-string:
-  `TestTheStringsMatchTheContract` (Python, `tests/test_risk_explanation_contract.py`),
+- **`strings`** — the certainty note, the badge suffix, the provisional
+  caveat, and the high-risk section's heading and labels. Bound on **all
+  three platforms**, string-for-string: `TestTheStringsMatchTheContract`
+  (Python, `tests/test_risk_explanation_contract.py`),
   `testRiskExplanationStringsMatchTheContract` (Swift,
   `TransparencyParityTests`), and the equivalent in Kotlin's
   `RiskExplanationParityTest`
   (`android/…/domain/transparency/RiskExplanationParityTest.kt`).
-- **`swift_kotlin_only`** — the "certainty unknown" note and the "Unassessed"
-  label and note. Bound on **Swift and Android only**, by
+- **`swift_kotlin_only`** — the "certainty unknown" note, the "Unassessed"
+  label and note, and (since the user's 2026-09-27 decision) the
+  unexplained-rating caveat. Bound on **Swift and Android only**, by
   `testRiskExplanationStringsMatchTheContract` and `RiskExplanationParityTest`
-  reading a different key: the desktop makes neither of these states (see
-  below), so Python's copy of the contract does not assert them.
+  reading this key instead of `strings`: the desktop makes neither of the
+  Unassessed states (see below), and the unexplained-rating caveat's Swift
+  wording names a cause and remedy that do not hold on the desktop — an
+  earlier analyser's rows are never shown there (`is_current`), and
+  "Re-analyse" never offers a current row — so Python carries its own
+  wording (`transparency_terms.UNEXPLAINED_RATING_CAVEAT`) instead of
+  asserting this key. Swift's `testUnexplainedRatingCaveatMatchesTheContractString`
+  binds the sentence directly, not just through a case's `expected.caveats`.
 - **`cases`** — worked findings, each scored, rated and explained by every
   platform's own code, asserting the reasons, the score breakdown (when the
-  score is itself a reason) and the caveats. Bound on **all three platforms**:
-  Python's parametrized `test_case` (one case per `contract["cases"]` entry,
-  same file), Swift's `testRiskExplanationCasesMatchTheContract`, and
-  Kotlin's `RiskExplanationParityTest`. Every case has
-  `full_text_searched: true` — the only form in which the desktop can record
-  a missing COI or data statement at all (see below), so it is the only form
-  all three platforms can agree on.
+  score is itself a reason) and the caveats. Every case binds **all three
+  platforms** unless it carries a `binds` list naming which ones it does.
+  One case, `"a stored high rating no current rule explains"`, binds only
+  `swift` and `kotlin` — for the same reason its caveat text is
+  `swift_kotlin_only`. Python's parametrized `test_case`
+  (`tests/test_risk_explanation_contract.py`, `_case_ids`) excludes any case
+  not bound to `"python"` from the parametrization, rather than skipping it
+  from inside the test, and a separate test
+  (`TestTheCaseBoundAwayFromPython`) asserts the desktop's own caveat text
+  for that same case's findings. Swift's `testRiskExplanationCasesMatchTheContract`
+  and Kotlin's `RiskExplanationParityTest` run every case, since both bind
+  it. Every case has `full_text_searched: true` — the only form in which the
+  desktop can record a missing COI or data statement at all (see below), so
+  it is the only form all three platforms can agree on.
 
 ### Why the desktop has no Unassessed rule
 
