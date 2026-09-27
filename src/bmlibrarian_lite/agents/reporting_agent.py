@@ -29,10 +29,16 @@ from ..analysis_failures import (
 )
 from ..data_models import AnalysisShortfall, AnalysisStage, Citation, ReportMetadata
 from ..search_failures import describe_search_shortfalls, with_search_shortfall_notice
-from ..transparency.transparency_models import StoredTransparency, TransparencyResult
+from ..transparency.transparency_models import (
+    StoredTransparency,
+    TransparencyResult,
+    TransparencyRisk,
+)
+from ..transparency_terms import LIMITED_CERTAINTY_NOTE
 from .base import LiteBaseAgent
 from .report_risk_helpers import (
     build_risk_context_for_prompt,
+    format_high_risk_section,
     format_reference_risk_annotation,
     format_reference_withheld_annotation,
     should_warn_for_citation,
@@ -356,6 +362,25 @@ IMPORTANT: Use ONLY the exact Source and Document ID values provided above. Do n
                 citations, risky_doc_results, withheld
             )
             full_report = f"{report}\n\n## References\n\n{references}"
+
+            # Why each cited High is high: every shown row rated High, not
+            # only those past ``report_risk_threshold``, which governs
+            # warnings rather than what a High means (#386)
+            if hasattr(self.config, "transparency"):
+                high_entries: list[tuple[int, str, TransparencyResult]] = []
+                for number, doc_id in enumerate(doc_order, 1):
+                    result = results.get(doc_id)
+                    if (
+                        isinstance(result, TransparencyResult)
+                        and doc_id not in withheld
+                        and result.risk_level is TransparencyRisk.HIGH
+                    ):
+                        high_entries.append((number, doc_to_ref[doc_id], result))
+                section = format_high_risk_section(
+                    high_entries, self.config.transparency
+                )
+                if section:
+                    full_report += "\n\n" + section
 
             # Add methodology section if metadata provided
             if metadata:
@@ -802,6 +827,21 @@ Key passages:
                 f"| Medium     | {metadata.transparency_medium_risk_count}     |"
             )
             lines.append(f"| High       | {metadata.transparency_high_risk_count}     |")
+            if metadata.transparency_limited_count:
+                lines.append("")
+                lines.append(
+                    f"- **Limited certainty:** {metadata.transparency_limited_count} "
+                    f"of {total_analyzed} ratings were made without the full text. "
+                    f"{LIMITED_CERTAINTY_NOTE}."
+                )
+            if metadata.transparency_provisional_count:
+                lines.append("")
+                lines.append(
+                    f"- **Provisional:** {metadata.transparency_provisional_count} "
+                    f"of {total_analyzed} ratings were made while a source the "
+                    "analysis needed could not be read, so each rests on less "
+                    "than the full record. Re-analyse them before relying on them."
+                )
             if metadata.transparency_superseded_count:
                 lines.append("")
                 lines.append(

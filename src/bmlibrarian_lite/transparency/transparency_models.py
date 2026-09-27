@@ -261,6 +261,9 @@ class TransparencyCounts:
         undecodable: Documents whose stored row this build could not decode
             (#374). Not a risk level, and not superseded either: a newer
             build may have written it.
+        limited: Of the assessed, how many were rated without the full text.
+        provisional: Of the assessed, how many were rated while a source
+            could not be read.
     """
 
     low: int = 0
@@ -270,6 +273,8 @@ class TransparencyCounts:
     unknown: int = 0
     not_stored: int = 0
     undecodable: int = 0
+    limited: int = 0
+    provisional: int = 0
 
     def __post_init__(self) -> None:
         """Refuse a count that is not a whole number of documents.
@@ -280,7 +285,10 @@ class TransparencyCounts:
         stands for.
 
         Raises:
-            ValueError: If any bucket is not a non-negative ``int``.
+            ValueError: If any bucket is not a non-negative ``int``, or if
+                ``limited`` or ``provisional`` exceeds ``assessed`` -- both
+                are a share of the assessed documents, never a separate
+                population.
         """
         for bucket in fields(self):
             value = getattr(self, bucket.name)
@@ -288,6 +296,12 @@ class TransparencyCounts:
                 raise ValueError(
                     f"TransparencyCounts.{bucket.name} must be a non-negative "
                     f"int, got {value!r}"
+                )
+        for part in ("limited", "provisional"):
+            if getattr(self, part) > self.assessed:
+                raise ValueError(
+                    f"TransparencyCounts.{part} ({getattr(self, part)}) cannot "
+                    f"exceed the assessed documents ({self.assessed})"
                 )
 
     @property
@@ -349,6 +363,7 @@ def _count_rows(
     superseded = 0
     unknown = 0
     undecodable = 0
+    limited = provisional = 0
     for result in results:
         if isinstance(result, UndecodableTransparencyRow):
             undecodable += 1
@@ -356,6 +371,8 @@ def _count_rows(
             superseded += 1
         elif result.risk_level in counts:
             counts[result.risk_level] += 1
+            limited += not result.full_text_analyzed
+            provisional += result.sources_unreachable
         else:
             unknown += 1
     return TransparencyCounts(
@@ -365,6 +382,8 @@ def _count_rows(
         superseded=superseded,
         unknown=unknown,
         undecodable=undecodable,
+        limited=limited,
+        provisional=provisional,
     )
 
 

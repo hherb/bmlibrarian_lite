@@ -263,6 +263,8 @@ class WorkflowWorker(QThread):
         metadata.transparency_low_risk_count = counts.low
         metadata.transparency_medium_risk_count = counts.medium
         metadata.transparency_high_risk_count = counts.high
+        metadata.transparency_limited_count = counts.limited
+        metadata.transparency_provisional_count = counts.provisional
         metadata.transparency_superseded_count = counts.superseded
         # Whatever is left asked a question that never came back: the
         # analysis failed, the document carried no identifier to look one up
