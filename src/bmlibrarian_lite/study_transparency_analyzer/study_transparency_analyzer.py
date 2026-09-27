@@ -63,6 +63,20 @@ from ..data_models import (
     RequestFailureKind,
 )
 from ..search_failures import request_failure_from_exception
+from ..transparency_terms import (
+    COI_INDUSTRY_TIES_LABEL,
+    COI_MISSING_LABEL,
+    COI_PRESENT_LABEL,
+    DATA_AVAILABILITY_COMPONENT_LABEL,
+    DATA_AVAILABILITY_DISPLAY_NAMES,
+    INDUSTRY_TIES_WITHHELD_DATA_LABEL,
+    OUTCOME_SWITCHING_LABEL,
+    RESULTS_NOT_POSTED_LABEL,
+    RESULTS_POSTED_LABEL,
+    STARTING_SCORE_LABEL,
+    TRIAL_REGISTERED_LABEL,
+    ScoreComponent,
+)
 
 # Each client below owns its own request loop and its own error handling,
 # and made exactly one physical request per call before pacing was mounted.
@@ -2584,8 +2598,34 @@ def check_results_compliance(trial: TrialRegistration, publication_date: Optiona
     return ResultsComplianceStatus.UNKNOWN
 
 
-def calculate_transparency_score(report: TransparencyReport) -> float:
-    """Calculate overall transparency score (0-100).
+BASE_TRANSPARENCY_SCORE = 50
+
+#: Points for each data availability level (+/- 20).
+DATA_AVAILABILITY_POINTS: dict[DataDisclosureLevel, int] = {
+    DataDisclosureLevel.FULL_OPEN: 20,
+    DataDisclosureLevel.AVAILABLE_ON_REQUEST: 5,
+    DataDisclosureLevel.RESTRICTED: -5,
+    DataDisclosureLevel.NOT_AVAILABLE: -15,
+    DataDisclosureLevel.NOT_STATED: -5,
+    DataDisclosureLevel.UNKNOWN: 0,
+}
+COI_STATEMENT_POINTS = 5
+COI_INDUSTRY_TIES_PENALTY = -5
+COI_NOT_STATED_PENALTY = -5
+TRIAL_REGISTRATION_POINTS = 10
+COMPLIANT_RESULTS_POINTS = 5
+MISSING_RESULTS_PENALTY = -10
+OUTCOME_SWITCHING_PENALTY = -15
+INDUSTRY_TIES_WITHHELD_DATA_PENALTY = -10
+
+
+def score_components(report: TransparencyReport) -> list[ScoreComponent]:
+    """Each term of a study's transparency score, in the order it is applied.
+
+    :func:`calculate_transparency_score` is the clamped sum of these, so a
+    report explaining a low score lists the very terms that produced it
+    (#386). Terms worth zero points are omitted, and the base comes first --
+    Swift's ``TransparencyScorer.scoreComponents``, label for label.
 
     Scoring philosophy:
     - Having a COI statement is good (disclosure is valued), but industry
@@ -2593,65 +2633,95 @@ def calculate_transparency_score(report: TransparencyReport) -> float:
       situation carries bias risk regardless of disclosure quality.
     - Effectively unavailable data is worse than restricted access.
     - Industry ties through institutional intermediaries are scored the
-      same as direct ties — the bias risk is the same even if the money
+      same as direct ties -- the bias risk is the same even if the money
       doesn't reach the author's personal bank account.
+
+    Args:
+        report: The analysis whose score is being explained.
+
+    Returns:
+        The base score, then every term that moved it.
     """
-    score = 50.0  # Base score
+    terms: list[ScoreComponent] = []
 
-    # Data availability (+/- 20 points)
-    if report.data_availability:
-        level = report.data_availability.disclosure_level
-        if level == DataDisclosureLevel.FULL_OPEN:
-            score += 20
-        elif level == DataDisclosureLevel.AVAILABLE_ON_REQUEST:
-            score += 5
-        elif level == DataDisclosureLevel.RESTRICTED:
-            score -= 5
-        elif level == DataDisclosureLevel.NOT_AVAILABLE:
-            score -= 15
-        elif level == DataDisclosureLevel.NOT_STATED:
-            score -= 5
+    level = (
+        report.data_availability.disclosure_level
+        if report.data_availability
+        else None
+    )
+    if level is not None:
+        terms.append(
+            ScoreComponent(
+                DATA_AVAILABILITY_COMPONENT_LABEL.format(
+                    level=DATA_AVAILABILITY_DISPLAY_NAMES[level.value].lower()
+                ),
+                DATA_AVAILABILITY_POINTS[level],
+                records_missing_statement=level is DataDisclosureLevel.NOT_STATED,
+            )
+        )
 
-    # COI disclosure (+/- 15 points)
     if report.coi_info:
         coi_level = report.coi_info.disclosure_level
         if coi_level is COIDisclosureLevel.DISCLOSED:
-            score += 5  # Credit for having a statement at all
+            terms.append(ScoreComponent(COI_PRESENT_LABEL, COI_STATEMENT_POINTS))
             if report.coi_info.has_industry_ties:
-                # Disclosed industry ties: credit for transparency,
-                # but the underlying situation carries bias risk
-                score -= 5
+                terms.append(
+                    ScoreComponent(COI_INDUSTRY_TIES_LABEL, COI_INDUSTRY_TIES_PENALTY)
+                )
         elif coi_level is COIDisclosureLevel.NOT_STATED:
-            score -= 5  # The article was read and declares nothing
+            # The article was read and declares nothing
+            terms.append(
+                ScoreComponent(
+                    COI_MISSING_LABEL,
+                    COI_NOT_STATED_PENALTY,
+                    records_missing_statement=True,
+                )
+            )
         # NOT_ASSESSED scores neither way: a study is not charged for a
         # statement nobody looked for (#352).
 
-    # Trial registration (+/- 15 points)
     if report.trial_registrations:
-        score += 10  # Has trial registration
+        terms.append(ScoreComponent(TRIAL_REGISTERED_LABEL, TRIAL_REGISTRATION_POINTS))
         if report.results_compliance == ResultsComplianceStatus.COMPLIANT:
-            score += 5
+            terms.append(ScoreComponent(RESULTS_POSTED_LABEL, COMPLIANT_RESULTS_POINTS))
         elif report.results_compliance == ResultsComplianceStatus.MISSING:
-            score -= 10
+            terms.append(
+                ScoreComponent(RESULTS_NOT_POSTED_LABEL, MISSING_RESULTS_PENALTY)
+            )
 
-    # Outcome switching penalty
     if report.outcome_switching_detected:
-        score -= 15
+        terms.append(ScoreComponent(OUTCOME_SWITCHING_LABEL, OUTCOME_SWITCHING_PENALTY))
 
     # Industry ties combined with restricted data is especially concerning
-    has_industry_ties = (
-        report.industry_funding_detected
-        or (report.coi_info and report.coi_info.has_industry_ties)
+    has_industry_ties = report.industry_funding_detected or (
+        report.coi_info is not None and report.coi_info.has_industry_ties
     )
-    if has_industry_ties:
-        if report.data_availability:
-            if report.data_availability.disclosure_level in (
-                DataDisclosureLevel.NOT_AVAILABLE,
-                DataDisclosureLevel.RESTRICTED,
-            ):
-                score -= 10  # Industry ties + restricted data
+    if has_industry_ties and level in (
+        DataDisclosureLevel.NOT_AVAILABLE,
+        DataDisclosureLevel.RESTRICTED,
+    ):
+        terms.append(
+            ScoreComponent(
+                INDUSTRY_TIES_WITHHELD_DATA_LABEL, INDUSTRY_TIES_WITHHELD_DATA_PENALTY
+            )
+        )
 
-    return max(0, min(100, score))
+    return [ScoreComponent(STARTING_SCORE_LABEL, BASE_TRANSPARENCY_SCORE)] + [
+        term for term in terms if term.points != 0
+    ]
+
+
+def calculate_transparency_score(report: TransparencyReport) -> float:
+    """Calculate overall transparency score (0-100).
+
+    Args:
+        report: The analysis to score.
+
+    Returns:
+        The clamped sum of :func:`score_components`, as a float as before.
+    """
+    total = sum(term.points for term in score_components(report))
+    return float(max(0, min(100, total)))
 
 
 # =============================================================================
