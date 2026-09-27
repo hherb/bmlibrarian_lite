@@ -48,7 +48,6 @@ class TestTheStringsMatchTheContract:
             ("limited_certainty_note", "LIMITED_CERTAINTY_NOTE"),
             ("limited_certainty_badge_suffix", "LIMITED_CERTAINTY_BADGE_SUFFIX"),
             ("provisional_result_caveat", "PROVISIONAL_RESULT_CAVEAT"),
-            ("unexplained_rating_caveat", "UNEXPLAINED_RATING_CAVEAT"),
             ("section_heading", "HIGH_RISK_SECTION_HEADING"),
             ("reasons_label", "REASONS_LABEL"),
             ("score_breakdown_label", "SCORE_BREAKDOWN_LABEL"),
@@ -62,7 +61,15 @@ class TestTheStringsMatchTheContract:
 
     def test_every_shared_string_is_bound(self, contract) -> None:
         """A key added to the contract without a Python binding fails here."""
-        assert len(contract["strings"]) == 9
+        assert len(contract["strings"]) == 8
+
+    def test_unexplained_rating_caveat_is_not_a_shared_string(self, contract) -> None:
+        """It moved to ``swift_kotlin_only``: the desktop's wording differs (#386)."""
+        assert "unexplained_rating_caveat" not in contract["strings"]
+        assert (
+            contract["swift_kotlin_only"]["unexplained_rating_caveat"]
+            != terms.UNEXPLAINED_RATING_CAVEAT
+        )
 
     def test_introduction(self, contract) -> None:
         """Singular and plural forms read as the other platforms write them."""
@@ -119,15 +126,25 @@ class TestConfidencePercent:
 
 
 def _case_ids(contract_path=CONTRACT):
-    """Name every case in the contract, for parametrizing ``test_case``.
+    """Name the cases Python binds, for parametrizing ``test_case``.
+
+    A case that carries a ``binds`` list naming other platforms only (never
+    ``"python"``) is excluded here rather than skipped inside the test: the
+    desktop's own wording would not match the contract's, so running it
+    would either fail for the wrong reason or need a special-cased skip.
+    See ``test_a_case_bound_away_from_python_is_excluded``.
 
     Args:
         contract_path: The contract file to read names from.
 
     Returns:
-        Each case's ``name``, in the file's order.
+        Each Python-bound case's ``name``, in the file's order.
     """
-    return [c["name"] for c in json.loads(contract_path.read_text())["cases"]]
+    return [
+        c["name"]
+        for c in json.loads(contract_path.read_text())["cases"]
+        if "python" in c.get("binds", ("python", "swift", "kotlin"))
+    ]
 
 
 def _coi_info(coi: str) -> ConflictOfInterest:
@@ -211,3 +228,35 @@ def test_case(contract, name) -> None:
         f"{c.label}: {c.signed_points()}" for c in explanation.score_breakdown
     ] == expected["score_breakdown"]
     assert list(explanation.caveats) == expected["caveats"]
+
+
+class TestTheCaseBoundAwayFromPython:
+    """"A stored high rating no current rule explains" binds Swift and Kotlin only.
+
+    Its Swift/Kotlin caveat names a cause and remedy ("an earlier version of
+    the analysis"; "Re-analyse") that do not hold on the desktop: an earlier
+    analyser's rows are never shown, and Re-analyse never offers a current
+    row. The desktop names its own cause and remedy instead (#386).
+    """
+
+    _NAME = "a stored high rating no current rule explains"
+
+    def test_is_excluded_from_pythons_parametrization(self, contract) -> None:
+        """Python runs no case bound away from it."""
+        assert self._NAME not in _case_ids()
+        assert any(c["name"] == self._NAME for c in contract["cases"]), (
+            "the case itself must still exist, for Swift and Kotlin"
+        )
+
+    def test_desktop_names_its_own_cause_and_remedy(self, contract) -> None:
+        """The same findings produce the desktop's caveat, not the shared one."""
+        case = next(c for c in contract["cases"] if c["name"] == self._NAME)
+        settings = get_default_settings()
+        result = build_transparency_result(
+            "doc", _report(case["findings"]), settings, "full text"
+        )
+        result = dataclasses.replace(
+            result, risk_level=TransparencyRisk(case["stored_risk_level"])
+        )
+        explanation = TransparencyRiskExplanation.of(result, settings)
+        assert explanation.caveats == (terms.UNEXPLAINED_RATING_CAVEAT,)

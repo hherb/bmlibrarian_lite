@@ -19,7 +19,6 @@ class RiskExplanationParityTest {
         @SerialName("limited_certainty_note") val limitedCertaintyNote: String,
         @SerialName("limited_certainty_badge_suffix") val limitedCertaintyBadgeSuffix: String,
         @SerialName("provisional_result_caveat") val provisionalResultCaveat: String,
-        @SerialName("unexplained_rating_caveat") val unexplainedRatingCaveat: String,
         @SerialName("section_heading") val sectionHeading: String,
         @SerialName("reasons_label") val reasonsLabel: String,
         @SerialName("score_breakdown_label") val scoreBreakdownLabel: String,
@@ -30,11 +29,17 @@ class RiskExplanationParityTest {
     @Serializable
     private data class Introduction(val count: Int, val text: String)
 
+    // `unexplainedRatingCaveat` lives here, not in [Strings]: the desktop uses its
+    // own wording for this caveat (user decision, 2026-09-27), since an earlier
+    // analyser's rows are never shown there and "Re-analyse" never offers a
+    // current row, so this sentence would name a false cause and an unavailable
+    // remedy on that platform. Text unchanged for Swift and Kotlin.
     @Serializable
     private data class AppOnly(
         @SerialName("unrecorded_certainty_note") val unrecordedCertaintyNote: String,
         @SerialName("unassessed_label") val unassessedLabel: String,
         @SerialName("unassessed_note") val unassessedNote: String,
+        @SerialName("unexplained_rating_caveat") val unexplainedRatingCaveat: String,
     )
 
     @Serializable
@@ -83,7 +88,6 @@ class RiskExplanationParityTest {
         assertEquals(s.limitedCertaintyNote, TransparencyConstants.LIMITED_CERTAINTY_NOTE)
         assertEquals(s.limitedCertaintyBadgeSuffix, TransparencyConstants.LIMITED_CERTAINTY_BADGE_SUFFIX)
         assertEquals(s.provisionalResultCaveat, TransparencyConstants.PROVISIONAL_RESULT_CAVEAT)
-        assertEquals(s.unexplainedRatingCaveat, TransparencyRiskExplanation.UNEXPLAINED_RATING_CAVEAT)
         assertEquals(s.sectionHeading, HighRiskTransparencySection.HEADING)
         assertEquals(s.reasonsLabel, HighRiskTransparencySection.REASONS_LABEL)
         assertEquals(s.scoreBreakdownLabel, HighRiskTransparencySection.SCORE_BREAKDOWN_LABEL)
@@ -97,6 +101,9 @@ class RiskExplanationParityTest {
         assertEquals(contract.swiftKotlinOnly.unrecordedCertaintyNote, TransparencyConstants.UNRECORDED_CERTAINTY_NOTE)
         assertEquals(contract.swiftKotlinOnly.unassessedLabel, TransparencyConstants.UNASSESSED_LABEL)
         assertEquals(contract.swiftKotlinOnly.unassessedNote, TransparencyConstants.UNASSESSED_NOTE)
+        // The desktop uses its own wording for this caveat (user decision, 2026-09-27);
+        // Swift and Kotlin keep the shared sentence, now under swift_kotlin_only.
+        assertEquals(contract.swiftKotlinOnly.unexplainedRatingCaveat, TransparencyRiskExplanation.UNEXPLAINED_RATING_CAVEAT)
     }
 
     @Test

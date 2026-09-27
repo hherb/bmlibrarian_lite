@@ -666,13 +666,12 @@ final class TransparencyParityTests: XCTestCase {
     private struct RiskExplanationContract: Decodable {
         struct Strings: Decodable {
             let limitedCertaintyNote, limitedCertaintyBadgeSuffix, provisionalResultCaveat,
-                unexplainedRatingCaveat, sectionHeading, reasonsLabel, scoreBreakdownLabel,
+                sectionHeading, reasonsLabel, scoreBreakdownLabel,
                 otherConcernsLabel, caveatsLabel: String
             enum CodingKeys: String, CodingKey {
                 case limitedCertaintyNote = "limited_certainty_note"
                 case limitedCertaintyBadgeSuffix = "limited_certainty_badge_suffix"
                 case provisionalResultCaveat = "provisional_result_caveat"
-                case unexplainedRatingCaveat = "unexplained_rating_caveat"
                 case sectionHeading = "section_heading"
                 case reasonsLabel = "reasons_label"
                 case scoreBreakdownLabel = "score_breakdown_label"
@@ -682,11 +681,16 @@ final class TransparencyParityTests: XCTestCase {
         }
         struct Introduction: Decodable { let count: Int; let text: String }
         struct AppOnly: Decodable {
-            let unrecordedCertaintyNote, unassessedLabel, unassessedNote: String
+            // `unexplainedRatingCaveat` moved here from `Strings`: the desktop uses
+            // its own wording for this caveat (user decision, 2026-09-27), so only
+            // Swift and Kotlin are bound to the shared sentence. Text unchanged.
+            let unrecordedCertaintyNote, unassessedLabel, unassessedNote,
+                unexplainedRatingCaveat: String
             enum CodingKeys: String, CodingKey {
                 case unrecordedCertaintyNote = "unrecorded_certainty_note"
                 case unassessedLabel = "unassessed_label"
                 case unassessedNote = "unassessed_note"
+                case unexplainedRatingCaveat = "unexplained_rating_caveat"
             }
         }
         struct Findings: Decodable {
@@ -772,6 +776,12 @@ final class TransparencyParityTests: XCTestCase {
     /// named constant for it (it is inline in `TransparencyRiskExplanation`),
     /// so this binds the case's produced caveat to the contract's own string
     /// directly (#386).
+    ///
+    /// The string lives under `swift_kotlin_only`, not `strings`: the desktop
+    /// uses its own wording for this caveat (user decision, 2026-09-27),
+    /// since an earlier analyser's rows are never shown there and
+    /// "Re-analyse" never offers a current row, so Swift's sentence would
+    /// name a false cause and an unavailable remedy on that platform.
     func testUnexplainedRatingCaveatMatchesTheContractString() throws {
         let contract: RiskExplanationContract = try Self.decodeFixture(Self.riskExplanationFixture)
         guard let c = contract.cases.first(where: { $0.storedRiskLevel != nil }) else {
@@ -779,7 +789,7 @@ final class TransparencyParityTests: XCTestCase {
             return
         }
         let explanation = TransparencyRiskExplanation(result: riskExplanationResult(for: c))
-        XCTAssertEqual(explanation.caveats.first, contract.strings.unexplainedRatingCaveat, c.name)
+        XCTAssertEqual(explanation.caveats.first, contract.swiftKotlinOnly.unexplainedRatingCaveat, c.name)
     }
 
     private func riskExplanationResult(for c: RiskExplanationContract.Case) -> TransparencyResult {

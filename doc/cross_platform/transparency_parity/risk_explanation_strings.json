@@ -1,11 +1,10 @@
 {
   "schema_version": 1,
-  "description": "How a transparency rating is qualified and a high rating explained (#386, after PR #388). 'strings' bind Python, Swift and Kotlin string-for-string; 'swift_kotlin_only' binds the two apps, which show ratings the desktop never makes (Python charges no missing statement it did not read, so it has no 'Unassessed' display and no unrecorded certainty: see README). 'cases' are platform-neutral findings each platform scores, rates and explains with its own code; every case has full_text_searched true, the only form in which the desktop can record a missing statement. score_breakdown lines are '<label>: <signed points>'.",
+  "description": "How a transparency rating is qualified and a high rating explained (#386, after PR #388). 'strings' bind Python, Swift and Kotlin string-for-string; 'swift_kotlin_only' binds the two apps, which show ratings the desktop never makes (Python charges no missing statement it did not read, so it has no 'Unassessed' display and no unrecorded certainty: see README) -- and, since the user's 2026-09-27 decision, the unexplained-rating caveat: on the desktop, rows from an earlier analyser are never shown and 'Re-analyse' does not offer current rows, so Swift's shared sentence would name a false cause and an unavailable remedy, and the desktop uses its own wording (transparency_terms.py) instead. 'cases' are platform-neutral findings each platform scores, rates and explains with its own code; every case binds all three platforms unless it carries a 'binds' list naming which ones it does (the 'a stored high rating no current rule explains' case binds only swift and kotlin, for the same reason). Every case has full_text_searched true, the only form in which the desktop can record a missing statement. score_breakdown lines are '<label>: <signed points>'.",
   "strings": {
     "limited_certainty_note": "Limited certainty because of lack of full text access",
     "limited_certainty_badge_suffix": "· limited",
     "provisional_result_caveat": "A source this analysis needed could not be read, so the rating is provisional: it rests on less than the full record. Re-analyse the study before relying on it.",
-    "unexplained_rating_caveat": "None of the current high-risk rules matches this study's recorded findings, so the rating probably comes from an earlier version of the analysis. Re-analyse the study before relying on it.",
     "section_heading": "Why Studies Were Rated High Transparency Risk",
     "reasons_label": "Rated high risk because",
     "score_breakdown_label": "How the score was reached",
@@ -19,7 +18,8 @@
   "swift_kotlin_only": {
     "unrecorded_certainty_note": "Certainty unknown: this analysis did not record whether the full text was accessed. Re-analyse for a rating of known certainty.",
     "unassessed_label": "Unassessed",
-    "unassessed_note": "Shown as unassessed rather than high risk: every reason for a high rating depends on statements that appear only in the full text, which was not available to search."
+    "unassessed_note": "Shown as unassessed rather than high risk: every reason for a high rating depends on statements that appear only in the full text, which was not available to search.",
+    "unexplained_rating_caveat": "None of the current high-risk rules matches this study's recorded findings, so the rating probably comes from an earlier version of the analysis. Re-analyse the study before relying on it."
   },
   "cases": [
     {
@@ -154,6 +154,7 @@
     },
     {
       "name": "a stored high rating no current rule explains",
+      "binds": ["swift", "kotlin"],
       "findings": {"data_availability": "full_open", "coi": "disclosed", "industry_funding": false, "industry_confidence": 0.0, "trial_registered": false, "results": "unknown", "outcome_switching": false, "sources_unreachable": false},
       "stored_risk_level": "high",
       "expected": {

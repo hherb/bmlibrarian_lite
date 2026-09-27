@@ -45,18 +45,29 @@ PROVISIONAL_RESULT_CAVEAT = (
     "before relying on it."
 )
 
-#: A caveat on a stored High that no rule matches under the current settings.
+#: Desktop only, own wording (user decision, 2026-09-27): a caveat on a
+#: stored High that no rule matches under the current settings. Swift and
+#: Kotlin's shared sentence names a cause ("an earlier version of the
+#: analysis") and a remedy ("Re-analyse the study") that do not hold here --
+#: on the desktop, rows from an earlier analyser are never shown (see
+#: ``is_current``) and "Re-analyse" never offers a current row -- so this
+#: names the real cause (a settings change) and the real state (the stored
+#: rating stands until the study is re-analysed). Bound only for Swift and
+#: Kotlin in the shared contract's ``swift_kotlin_only`` section.
 UNEXPLAINED_RATING_CAVEAT = (
     "None of the current high-risk rules matches this study's recorded "
-    "findings, so the rating probably comes from an earlier version of the "
-    "analysis. Re-analyse the study before relying on it."
+    "findings, so it was probably rated under transparency settings that "
+    "have since changed, or by a newer version of the app; a stored rating "
+    "is not re-rated when the settings change."
 )
 
-#: Desktop only: the score is a reason, but its terms were never recorded
-#: (a row stored before #386) or could not be read back.
+#: Desktop only, and not in the shared contract at all: the score is a
+#: reason, but its terms were never recorded (a row stored before #386) or
+#: could not be read back. Swift and Kotlin always compute the breakdown
+#: fresh, so this state cannot arise for them.
 BREAKDOWN_UNAVAILABLE_CAVEAT = (
-    "How the score was reached is not available for this analysis; "
-    "re-analyse the study to see it."
+    "How the score was reached is not available: this analysis was stored "
+    "before its terms were recorded, or they could not be read."
 )
 
 HIGH_RISK_SECTION_HEADING = "Why Studies Were Rated High Transparency Risk"
