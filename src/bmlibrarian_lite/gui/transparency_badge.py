@@ -39,6 +39,7 @@ from ..transparency import (
     TransparencyRisk,
     TransparencyUnassessed,
 )
+from ..transparency_terms import DATA_AVAILABILITY_DISPLAY_NAMES
 
 #: The label of a badge with no finding behind it. One form, compact or not:
 #: both production badges are compact, so an abbreviation would be the only
@@ -72,15 +73,9 @@ RISK_LABELS_SHORT: Dict[TransparencyRisk, str] = {
     TransparencyRisk.UNKNOWN: "?",
 }
 
-# Data availability level labels for tooltips
-DATA_AVAILABILITY_LABELS: Dict[str, str] = {
-    "full_open": "Fully Open",
-    "on_request": "Available on Request",
-    "restricted": "Restricted",
-    "not_available": "Not Available",
-    "not_stated": "Not Stated",
-    "unknown": "Unknown",
-}
+# Data availability level labels for tooltips: the same names the score
+# breakdown uses, from the one table.
+DATA_AVAILABILITY_LABELS: Dict[str, str] = DATA_AVAILABILITY_DISPLAY_NAMES
 
 # Conflict of interest labels for tooltips. Three entries, not two: a study
 # whose article declares no conflicts and one nobody read are different

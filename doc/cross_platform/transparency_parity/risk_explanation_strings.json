@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "description": "How a transparency rating is qualified and a high rating explained (#386, after PR #388). 'strings' bind Python, Swift and Kotlin string-for-string; 'swift_kotlin_only' binds the two apps, which show ratings the desktop never makes (Python charges no missing statement it did not read, so it has no 'Unassessed' display and no unrecorded certainty: see README). 'cases' are platform-neutral findings each platform scores, rates and explains with its own code; every case has full_text_searched true, the only form in which the desktop can record a missing statement. score_breakdown lines are '<label>: <signed points>'.",
+  "strings": {
+    "limited_certainty_note": "Limited certainty because of lack of full text access",
+    "limited_certainty_badge_suffix": "· limited",
+    "provisional_result_caveat": "A source this analysis needed could not be read, so the rating is provisional: it rests on less than the full record. Re-analyse the study before relying on it.",
+    "unexplained_rating_caveat": "None of the current high-risk rules matches this study's recorded findings, so the rating probably comes from an earlier version of the analysis. Re-analyse the study before relying on it.",
+    "section_heading": "Why Studies Were Rated High Transparency Risk",
+    "reasons_label": "Rated high risk because",
+    "score_breakdown_label": "How the score was reached",
+    "other_concerns_label": "Other concerns recorded",
+    "caveats_label": "Caveats"
+  },
+  "introduction_examples": [
+    {"count": 1, "text": "1 study was rated high transparency risk. Each rule listed below is enough on its own for that rating; the caveats say where a rating rests on less than it appears to."},
+    {"count": 3, "text": "3 studies were rated high transparency risk. Each rule listed below is enough on its own for that rating; the caveats say where a rating rests on less than it appears to."}
+  ],
+  "swift_kotlin_only": {
+    "unrecorded_certainty_note": "Certainty unknown: this analysis did not record whether the full text was accessed. Re-analyse for a rating of known certainty.",
+    "unassessed_label": "Unassessed",
+    "unassessed_note": "Shown as unassessed rather than high risk: every reason for a high rating depends on statements that appear only in the full text, which was not available to search."
+  },
+  "cases": [
+    {
+      "name": "missing COI statement in a full text that was read",
+      "findings": {"data_availability": "full_open", "coi": "not_stated", "industry_funding": false, "industry_confidence": 0.0, "trial_registered": false, "results": "unknown", "outcome_switching": false, "sources_unreachable": false},
+      "stored_risk_level": null,
+      "expected": {
+        "score": 65,
+        "risk_level": "high",
+        "reasons": ["No conflict of interest statement was found in the full text. A missing statement is enough on its own for a high rating."],
+        "score_breakdown": [],
+        "caveats": []
+      }
+    },
+    {
+      "name": "low score, industry funding and unavailable data",
+      "findings": {"data_availability": "not_available", "coi": "disclosed", "industry_funding": true, "industry_confidence": 0.9, "trial_registered": true, "results": "missing", "outcome_switching": true, "sources_unreachable": false},
+      "stored_risk_level": null,
+      "expected": {
+        "score": 15,
+        "risk_level": "high",
+        "reasons": [
+          "Its transparency score of 15/100 is below the high-risk cut-off of 40.",
+          "Industry funding was detected, with 90% confidence, and its data are not available."
+        ],
+        "score_breakdown": [
+          "Starting score: +50",
+          "Data availability: not available: -15",
+          "Conflict of interest statement present: +5",
+          "Trial registered: +10",
+          "Trial results not posted: -10",
+          "Outcome switching detected: -15",
+          "Industry ties with restricted or unavailable data: -10"
+        ],
+        "caveats": []
+      }
+    },
+    {
+      "name": "low score alone",
+      "findings": {"data_availability": "not_available", "coi": "disclosed", "industry_funding": false, "industry_confidence": 0.0, "trial_registered": true, "results": "missing", "outcome_switching": true, "sources_unreachable": false},
+      "stored_risk_level": null,
+      "expected": {
+        "score": 25,
+        "risk_level": "high",
+        "reasons": ["Its transparency score of 25/100 is below the high-risk cut-off of 40."],
+        "score_breakdown": [
+          "Starting score: +50",
+          "Data availability: not available: -15",
+          "Conflict of interest statement present: +5",
+          "Trial registered: +10",
+          "Trial results not posted: -10",
+          "Outcome switching detected: -15"
+        ],
+        "caveats": []
+      }
+    },
+    {
+      "name": "industry funding with restricted data, provisional, confidence on a half",
+      "findings": {"data_availability": "restricted", "coi": "disclosed", "industry_funding": true, "industry_confidence": 0.625, "trial_registered": false, "results": "unknown", "outcome_switching": false, "sources_unreachable": true},
+      "stored_risk_level": null,
+      "expected": {
+        "score": 40,
+        "risk_level": "high",
+        "reasons": ["Industry funding was detected, with 63% confidence, and its data are available only with restrictions."],
+        "score_breakdown": [],
+        "caveats": ["A source this analysis needed could not be read, so the rating is provisional: it rests on less than the full record. Re-analyse the study before relying on it."]
+      }
+    },
+    {
+      "name": "industry funding with no data statement in a full text that was read",
+      "findings": {"data_availability": "not_stated", "coi": "disclosed", "industry_funding": true, "industry_confidence": 0.8, "trial_registered": false, "results": "unknown", "outcome_switching": false, "sources_unreachable": false},
+      "stored_risk_level": null,
+      "expected": {
+        "score": 50,
+        "risk_level": "high",
+        "reasons": ["Industry funding was detected, with 80% confidence, and no data availability statement was found in the full text."],
+        "score_breakdown": [],
+        "caveats": []
+      }
+    },
+    {
+      "name": "a medium rating needs no explanation",
+      "findings": {"data_availability": "on_request", "coi": "disclosed", "industry_funding": false, "industry_confidence": 0.0, "trial_registered": false, "results": "unknown", "outcome_switching": false, "sources_unreachable": false},
+      "stored_risk_level": null,
+      "expected": {"score": 60, "risk_level": "medium", "reasons": [], "score_breakdown": [], "caveats": []}
+    },
+    {
+      "name": "a stored high rating no current rule explains",
+      "findings": {"data_availability": "full_open", "coi": "disclosed", "industry_funding": false, "industry_confidence": 0.0, "trial_registered": false, "results": "unknown", "outcome_switching": false, "sources_unreachable": false},
+      "stored_risk_level": "high",
+      "expected": {
+        "score": 75,
+        "risk_level": "high",
+        "reasons": [],
+        "score_breakdown": [],
+        "caveats": ["None of the current high-risk rules matches this study's recorded findings, so the rating probably comes from an earlier version of the analysis. Re-analyse the study before relying on it."]
+      }
+    }
+  ]
+}
