@@ -32,8 +32,9 @@ class RiskExplanationParityTest {
     // `unexplainedRatingCaveat` lives here, not in [Strings]: the desktop uses its
     // own wording for this caveat (user decision, 2026-09-27), since an earlier
     // analyser's rows are never shown there and "Re-analyse" never offers a
-    // current row, so this sentence would name a false cause and an unavailable
-    // remedy on that platform. Text unchanged for Swift and Kotlin.
+    // current row whose sources were all read, so this sentence would name a
+    // false cause and an unavailable remedy on that platform. Text unchanged
+    // for Swift and Kotlin.
     @Serializable
     private data class AppOnly(
         @SerialName("unrecorded_certainty_note") val unrecordedCertaintyNote: String,
@@ -68,8 +69,12 @@ class RiskExplanationParityTest {
         val name: String,
         val findings: Findings,
         @SerialName("stored_risk_level") val storedRiskLevel: String? = null,
+        // The platforms the case binds; every platform when absent.
+        val binds: List<String>? = null,
         val expected: Expected,
-    )
+    ) {
+        val bindsKotlin: Boolean get() = binds?.contains("kotlin") ?: true
+    }
 
     @Serializable
     private data class Contract(
@@ -109,7 +114,7 @@ class RiskExplanationParityTest {
     @Test
     fun `every case is explained as the contract says`() {
         assertFalse("risk-explanation cases are empty", contract.cases.isEmpty())
-        for (case in contract.cases) {
+        for (case in contract.cases.filter { it.bindsKotlin }) {
             val result = resultFor(case)
             val explanation = TransparencyRiskExplanation.of(result)
             assertEquals(case.name, case.expected.score, result.transparencyScore)

@@ -659,8 +659,10 @@ final class TransparencyParityTests: XCTestCase {
 
     // MARK: - Risk explanation string contract (#386)
 
-    /// How a rating is qualified and a high rating explained (#386);
-    /// binds Python, Swift and Kotlin.
+    /// How a rating is qualified and a high rating explained (#386). Its
+    /// `strings`, `introduction_examples` and cases bind Python, Swift and
+    /// Kotlin, except a case whose `binds` names other platforms only;
+    /// `swift_kotlin_only` binds Swift and Kotlin.
     private static let riskExplanationFixture = "risk_explanation_strings.json"
 
     private struct RiskExplanationContract: Decodable {
@@ -717,11 +719,16 @@ final class TransparencyParityTests: XCTestCase {
             let name: String
             let findings: Findings
             let storedRiskLevel: String?
+            /// The platforms the case binds; every platform when absent.
+            let binds: [String]?
             let expected: Expected
             enum CodingKeys: String, CodingKey {
-                case name, findings, expected
+                case name, findings, expected, binds
                 case storedRiskLevel = "stored_risk_level"
             }
+
+            /// Whether Swift is bound by this case.
+            var bindsSwift: Bool { binds?.contains("swift") ?? true }
         }
         let strings: Strings
         let introductionExamples: [Introduction]
@@ -756,7 +763,7 @@ final class TransparencyParityTests: XCTestCase {
     func testRiskExplanationCasesMatchTheContract() throws {
         let contract: RiskExplanationContract = try Self.decodeFixture(Self.riskExplanationFixture)
         XCTAssertFalse(contract.cases.isEmpty)
-        for c in contract.cases {
+        for c in contract.cases where c.bindsSwift {
             let result = riskExplanationResult(for: c)
             let explanation = TransparencyRiskExplanation(result: result)
             XCTAssertEqual(result.transparencyScore, c.expected.score, c.name)
@@ -770,18 +777,17 @@ final class TransparencyParityTests: XCTestCase {
         }
     }
 
-    /// The unexplained-rating caveat is decoded from the contract but, until
-    /// now, only ever compared indirectly through a case's `expected.caveats`
-    /// -- never against the constant a reader would change. Swift carries no
+    /// Binds the unexplained-rating caveat Swift produces to the contract's own
+    /// string, not only through a case's `expected.caveats`. Swift carries no
     /// named constant for it (it is inline in `TransparencyRiskExplanation`),
-    /// so this binds the case's produced caveat to the contract's own string
-    /// directly (#386).
+    /// so the case's produced caveat is compared directly (#386).
     ///
     /// The string lives under `swift_kotlin_only`, not `strings`: the desktop
     /// uses its own wording for this caveat (user decision, 2026-09-27),
     /// since an earlier analyser's rows are never shown there and
-    /// "Re-analyse" never offers a current row, so Swift's sentence would
-    /// name a false cause and an unavailable remedy on that platform.
+    /// "Re-analyse" never offers a current row whose sources were all read,
+    /// so Swift's sentence would name a false cause and an unavailable
+    /// remedy on that platform.
     func testUnexplainedRatingCaveatMatchesTheContractString() throws {
         let contract: RiskExplanationContract = try Self.decodeFixture(Self.riskExplanationFixture)
         guard let c = contract.cases.first(where: { $0.storedRiskLevel != nil }) else {
@@ -847,7 +853,11 @@ final class TransparencyParityTests: XCTestCase {
         builder.fullTextSearched = true
         builder.dataSourcesUsed = [TransparencyConstants.pubMedSourceName, TransparencyConstants.crossRefSourceName]
         let built = builder.build()
-        guard let stored = c.storedRiskLevel, let level = TransparencyRiskLevel(rawValue: stored) else {
+        guard let stored = c.storedRiskLevel else {
+            return built
+        }
+        guard let level = TransparencyRiskLevel(rawValue: stored) else {
+            XCTFail("\(c.name): unknown stored_risk_level '\(stored)'")
             return built
         }
         return TransparencyResult(
