@@ -30,7 +30,9 @@ from bmlibrarian_lite.transparency import (
     TransparencyResult,
     TransparencyRisk,
     TransparencyUnassessed,
+    get_default_settings,
 )
+from bmlibrarian_lite.transparency.risk_explanation import TransparencyRiskExplanation
 from bmlibrarian_lite.gui.transparency_badge import (
     TransparencyBadge,
     TransparencyBadgeSmall,
@@ -394,3 +396,35 @@ class TestRiskColorsConsistency:
         ]
         for level in expected_levels:
             assert level in DATA_AVAILABILITY_LABELS
+
+
+class TestConfidenceAgreesWithTheReasonSentence:
+    """The tooltip's Funding line and its high-risk reason round alike (#386).
+
+    ``int(c * 100)`` truncates; 0.29 is where float imprecision makes that
+    disagree with ``confidence_percent``'s round-half-away-from-zero:
+    ``0.29 * 100`` is ``28.999999999999996`` in floating point, which
+    truncates to 28 but rounds to 29.
+    """
+
+    def test_funding_line_matches_the_reason_sentence(self, qapp) -> None:
+        """Both surfaces read 29%, not one at 28% and the other at 29%."""
+        result = TransparencyResult(
+            document_id="doc-5",
+            transparency_score=35,
+            risk_level=TransparencyRisk.HIGH,
+            industry_funding_detected=True,
+            industry_funding_confidence=0.29,
+            data_availability_level="restricted",
+            coi_disclosure=COI_DISCLOSED,
+            full_text_analyzed=True,
+        )
+        tooltip = TransparencyBadge(outcome=result).toolTip()
+        assert "Detected (29% confidence)" in tooltip
+        assert "Detected (28% confidence)" not in tooltip
+
+        explanation = TransparencyRiskExplanation.of(result, get_default_settings())
+        assert (
+            "Industry funding was detected, with 29% confidence, and its "
+            "data are available only with restrictions."
+        ) in explanation.reasons

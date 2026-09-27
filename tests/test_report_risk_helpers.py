@@ -13,6 +13,7 @@ from bmlibrarian_lite.agents.report_risk_helpers import (
     select_inline_warning,
     should_warn_for_citation,
 )
+from bmlibrarian_lite.transparency.risk_explanation import TransparencyRiskExplanation
 from bmlibrarian_lite.transparency.transparency_models import (
     COI_DISCLOSED,
     COI_NOT_ASSESSED,
@@ -24,6 +25,7 @@ from bmlibrarian_lite.transparency.transparency_settings import (
     DEFAULT_INLINE_WARNING_TEMPLATES,
     ReportRiskThreshold,
     TransparencySettings,
+    get_default_settings,
 )
 
 
@@ -217,3 +219,35 @@ class TestFormatReferenceRiskAnnotation:
         """Returns empty string for low-risk results."""
         annotation = format_reference_risk_annotation(low_risk_result)
         assert annotation == ""
+
+
+class TestConfidenceAgreesWithTheReasonSentence:
+    """The reference annotation's Funding line rounds as the reason does (#386).
+
+    ``int(c * 100)`` truncates; 0.29 is where float imprecision makes that
+    disagree with ``confidence_percent``'s round-half-away-from-zero:
+    ``0.29 * 100`` is ``28.999999999999996`` in floating point, which
+    truncates to 28 but rounds to 29.
+    """
+
+    def test_annotation_matches_the_reason_sentence(self) -> None:
+        """Both surfaces read 29%, not one at 28% and the other at 29%."""
+        result = TransparencyResult(
+            document_id="doc-confidence",
+            transparency_score=35,
+            risk_level=TransparencyRisk.HIGH,
+            industry_funding_detected=True,
+            industry_funding_confidence=0.29,
+            data_availability_level="restricted",
+            coi_disclosure=COI_DISCLOSED,
+            full_text_analyzed=True,
+        )
+        annotation = format_reference_risk_annotation(result)
+        assert "confidence: 29%" in annotation
+        assert "confidence: 28%" not in annotation
+
+        explanation = TransparencyRiskExplanation.of(result, get_default_settings())
+        assert (
+            "Industry funding was detected, with 29% confidence, and its "
+            "data are available only with restrictions."
+        ) in explanation.reasons

@@ -95,8 +95,12 @@ def build_transparency_result(
         report: What the analyser found.
         settings: The transparency settings the risk level is judged by.
         full_text: The full text the caller handed the analyser, if any.
-            Blank text is ignored by the analyser and so is not counted as
-            analysed.
+            ``full_text_analyzed`` on the result is set when this is
+            non-blank (whitespace-only does not count), or when the
+            analyser discovered full text of its own -- recorded in
+            ``report.data_sources_used`` -- regardless of whether what it
+            found was blank: the analyser's own ``if fulltext:`` check does
+            not strip whitespace before testing it.
 
     Returns:
         The result, stamped with this build's analyser version.

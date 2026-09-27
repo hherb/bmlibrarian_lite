@@ -48,6 +48,7 @@ from ..transparency_terms import (
     PROVISIONAL_RESULT_CAVEAT,
     REASONS_LABEL,
     UNEXPLAINED_RATING_CAVEAT,
+    confidence_percent,
 )
 
 #: The label of a badge with no finding behind it. One form, compact or not:
@@ -259,7 +260,7 @@ class TransparencyBadge(QFrame):
 
         # Funding section
         if r.industry_funding_detected:
-            confidence_pct = int(r.industry_funding_confidence * 100)
+            confidence_pct = confidence_percent(r.industry_funding_confidence)
             lines.append(f"<b>Industry Funding:</b> Detected ({confidence_pct}% confidence)")
         else:
             lines.append("<b>Industry Funding:</b> Not detected")

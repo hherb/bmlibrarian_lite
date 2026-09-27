@@ -78,7 +78,19 @@ def certainty_note(result: TransparencyResult) -> str | None:
 
 
 def _sentence(trigger: HighRiskTrigger, result: TransparencyResult) -> str:
-    """A rule, as a sentence about this study."""
+    """A rule, as a sentence about this study.
+
+    Args:
+        trigger: The high-risk rule that fired.
+        result: The result it fired on, for the fields its sentence quotes
+            (the industry-funding confidence).
+
+    Returns:
+        The reason sentence.
+
+    Raises:
+        TypeError: If ``trigger`` is not one of the known variants.
+    """
     if isinstance(trigger, ScoreBelowThreshold):
         return SCORE_BELOW_THRESHOLD_REASON.format(
             score=trigger.score, threshold=trigger.threshold
@@ -94,7 +106,15 @@ def _sentence(trigger: HighRiskTrigger, result: TransparencyResult) -> str:
 
 
 def _restated(triggers: list[HighRiskTrigger]) -> set[str]:
-    """Indicator strings the stated reasons already say."""
+    """Indicator strings the stated reasons already say.
+
+    Args:
+        triggers: The rules that fired for this result.
+
+    Returns:
+        The analyser indicator strings a reason for one of ``triggers``
+        already states, so they are not repeated among the other concerns.
+    """
     restated: set[str] = set()
     for trigger in triggers:
         if isinstance(trigger, MissingCoiStatement):

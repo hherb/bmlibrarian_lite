@@ -22,6 +22,7 @@ from ..transparency.risk_explanation import TransparencyRiskExplanation, certain
 from ..transparency.transparency_models import (
     COI_NOT_STATED,
     NAMEABLE_RISK_LEVELS,
+    WITHHELD_DATA_LEVELS,
     StoredTransparency,
     TransparencyResult,
     TransparencyRisk,
@@ -35,11 +36,14 @@ from ..transparency.transparency_settings import (
 from ..transparency_terms import (
     HIGH_RISK_SECTION_HEADING,
     PROVISIONAL_RESULT_CAVEAT,
+    confidence_percent,
     high_risk_introduction,
 )
 
-# Data availability levels that indicate risk
-RISKY_DATA_AVAILABILITY_LEVELS = ("not_available", "restricted", "not_stated")
+# Data availability levels that indicate risk. The same three levels
+# ``transparency_models.WITHHELD_DATA_LEVELS`` names for the high-risk rule
+# (#386); aliased rather than redefined so the two lists cannot drift.
+RISKY_DATA_AVAILABILITY_LEVELS = WITHHELD_DATA_LEVELS
 
 
 def select_inline_warning(
@@ -293,7 +297,7 @@ def format_reference_risk_annotation(
         lines.append(f"    - {note}")
 
     if result.industry_funding_detected:
-        confidence_pct = int(result.industry_funding_confidence * 100)
+        confidence_pct = confidence_percent(result.industry_funding_confidence)
         lines.append(f"    - Funding: Industry-funded (confidence: {confidence_pct}%)")
 
     if result.coi_disclosure == COI_NOT_STATED:
