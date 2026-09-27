@@ -94,8 +94,12 @@ class TransparencyManager(QObject):
 
         self._analyzer = create_background_analyzer(email, pubmed_api_key)
 
-        # Thread pool for background analysis
+        # Thread pool for background analysis, and the worker count it was
+        # started with. Kept apart from ``settings``: the settings object is
+        # the live one the whole app shares and is edited in place, so it
+        # cannot also say what the running pool was sized for.
         self._executor: Optional[ThreadPoolExecutor] = None
+        self._executor_workers = 0
         self._pending_futures: dict[str, Future] = {}
         self._lock = Lock()
 
@@ -106,8 +110,9 @@ class TransparencyManager(QObject):
     def start(self) -> None:
         """Start the background executor."""
         if self._executor is None:
+            self._executor_workers = self.settings.max_concurrent_analyses
             self._executor = ThreadPoolExecutor(
-                max_workers=self.settings.max_concurrent_analyses,
+                max_workers=self._executor_workers,
                 thread_name_prefix="transparency-",
             )
 
@@ -344,10 +349,12 @@ class TransparencyManager(QObject):
         Args:
             settings: New transparency settings
         """
-        old_concurrency = self.settings.max_concurrent_analyses
         self.settings = settings
 
-        if settings.max_concurrent_analyses != old_concurrency and self._executor:
+        if (
+            self._executor
+            and settings.max_concurrent_analyses != self._executor_workers
+        ):
             self.stop()
             self.start()
 

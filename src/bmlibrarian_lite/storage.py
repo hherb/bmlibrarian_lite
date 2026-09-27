@@ -87,6 +87,7 @@ if TYPE_CHECKING:
         TransparencyResult,
         TransparencyRisk,
     )
+    from .transparency_terms import ScoreComponent
 
 logger = logging.getLogger(__name__)
 
@@ -112,12 +113,13 @@ def _text_or_bytes(raw: bytes) -> str | bytes:
 
 
 #: The ``transparency_results`` columns read one at a time, each degrading on
-#: its own when it will not read: a list to empty with a caveat saying it was
-#: lost, the COI disclosure to "not assessed". Text in them that is not UTF-8
-#: costs that column, not the row: it once withheld a finding whose risk
-#: level and score read perfectly well.
+#: its own when it will not read: a list to empty, and the COI disclosure to
+#: "not assessed", each with a caveat saying it was lost; the score's terms
+#: to None, which the high-risk section reports as a breakdown that is not
+#: available. Text in them that is not UTF-8 costs that column, not the row:
+#: it once withheld a finding whose risk level and score read perfectly well.
 _TRANSPARENCY_COLUMNS_READ_ALONE = frozenset(
-    {"risk_indicators", "warnings", "coi_disclosure"}
+    {"risk_indicators", "warnings", "coi_disclosure", "score_components"}
 )
 
 
@@ -298,6 +300,7 @@ class LiteStorage:
         """
         self._migrate_transparency_coi_and_warnings()
         self._migrate_transparency_source_reachability()
+        self._migrate_transparency_score_components()
 
     def _migrate_transparency_coi_and_warnings(self) -> None:
         """Replace the always-true coi_disclosed column, and keep the caveats.
@@ -434,7 +437,9 @@ class LiteStorage:
             return [], False
         try:
             value = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
+        except (json.JSONDecodeError, TypeError, RecursionError):
+            # RecursionError: a value nested deeply enough to exhaust the
+            # parser, which would otherwise fail the whole batch
             logger.warning(
                 "Could not read %s for document %s; treating it as empty.",
                 column,
@@ -471,14 +476,18 @@ class LiteStorage:
             "what a previous analysis recorded",
         )
 
-    @staticmethod
-    def _stored_coi_disclosure(raw: str | bytes | None, document_id: str) -> str:
+    @classmethod
+    def _stored_coi_disclosure(
+        cls, raw: str | bytes | None, document_id: str
+    ) -> tuple[str, str | None]:
         """Map a stored COI disclosure to one of the three known states.
 
         A NULL is what the migration leaves on every pre-#352 row and means
         "not assessed". Anything else unrecognised is a value this build does
         not know how to report, and the one thing it must not do is pass it
-        to a badge that would title-case it into a finding.
+        to a badge that would title-case it into a finding. Nor may it pass
+        silently: a High the lost value explained would otherwise be put
+        down to a settings change (#386).
 
         Args:
             raw: The column's stored text, possibly ``None``, or bytes when
@@ -486,20 +495,24 @@ class LiteStorage:
             document_id: Whose row this is, for the log line.
 
         Returns:
-            One of the three ``COI_*`` constants.
+            One of the three ``COI_*`` constants, and the caveat to append
+            when the stored value could not be read.
         """
         from .transparency import COI_DISCLOSED, COI_NOT_ASSESSED, COI_NOT_STATED
 
         if raw in (COI_DISCLOSED, COI_NOT_STATED, COI_NOT_ASSESSED):
-            return str(raw)
-        if raw:
-            logger.warning(
-                "Document %s has an unrecognised coi_disclosure %r; reading "
-                "it as not assessed.",
-                document_id,
-                raw,
-            )
-        return COI_NOT_ASSESSED
+            return str(raw), None
+        if not raw:
+            return COI_NOT_ASSESSED, None
+        logger.warning(
+            "Document %s has an unrecognised coi_disclosure %r; reading "
+            "it as not assessed.",
+            document_id,
+            raw,
+        )
+        return COI_NOT_ASSESSED, cls._unreadable_column_caveat(
+            "conflict of interest disclosure"
+        )
 
     @classmethod
     def _stored_transparency_lists(
@@ -531,6 +544,54 @@ class LiteStorage:
         if not caveats_ok:
             caveats.append(cls._unreadable_column_caveat("analysis caveats"))
         return indicators, caveats
+
+    @staticmethod
+    def _stored_score_components(
+        row: sqlite3.Row,
+    ) -> tuple["ScoreComponent", ...] | None:
+        """Read a row's score terms, as long as they explain its score.
+
+        A breakdown that will not read, that is empty, or that adds up to a
+        different score is ``None`` -- "not recorded" -- and the high-risk
+        section then says the breakdown is not available rather than print
+        a sum the reader can check and find false. That caveat is the whole
+        report of the loss: the breakdown is shown nowhere else.
+
+        Args:
+            row: The ``transparency_results`` row being rebuilt.
+
+        Returns:
+            The terms, or ``None`` when NULL or unusable.
+        """
+        from .transparency_terms import ScoreComponent, components_explain_score
+
+        raw = row["score_components"]
+        if raw is None:
+            return None
+        try:
+            items = json.loads(raw)
+            if not isinstance(items, list):
+                raise ValueError("score_components is not a list")
+            components = tuple(ScoreComponent.from_dict(item) for item in items)
+        except (ValueError, TypeError, RecursionError) as error:
+            # ValueError covers UnicodeDecodeError on non-UTF-8 bytes;
+            # RecursionError a value nested deeply enough to exhaust the parser
+            logger.warning(
+                "Document %s has unreadable score_components (%s); "
+                "showing it without a breakdown.",
+                row["document_id"],
+                type(error).__name__,
+            )
+            return None
+        if not components_explain_score(components, row["transparency_score"]):
+            logger.warning(
+                "Document %s has score_components that do not add up to its "
+                "score of %s; showing it without a breakdown.",
+                row["document_id"],
+                row["transparency_score"],
+            )
+            return None
+        return components
 
     def _migrate_transparency_source_reachability(self) -> None:
         """Record whether an analysis reached its sources, for older rows.
@@ -571,6 +632,33 @@ class LiteStorage:
         except sqlite3.Error as e:
             raise SQLiteError(
                 f"Could not add transparency_results.sources_unreachable: {e}"
+            ) from e
+
+    def _migrate_transparency_score_components(self) -> None:
+        """Give older tables the column a score's terms are stored in (#386).
+
+        Rows written before it read NULL, which is "not recorded": the
+        report then says the breakdown is not available rather than listing
+        none.
+
+        Raises:
+            SQLiteError: If the column cannot be added. Runs from
+                ``_init_sqlite``, so it aborts construction.
+        """
+        try:
+            with self._sqlite_connection() as conn:
+                cursor = conn.execute("PRAGMA table_info(transparency_results)")
+                columns = [row["name"] for row in cursor.fetchall()]
+                if "score_components" not in columns:
+                    conn.execute(
+                        "ALTER TABLE transparency_results "
+                        "ADD COLUMN score_components TEXT"
+                    )
+                    logger.info("Added score_components to transparency_results.")
+                conn.commit()
+        except sqlite3.Error as e:
+            raise SQLiteError(
+                f"Could not add transparency_results.score_components: {e}"
             ) from e
 
     @staticmethod
@@ -978,6 +1066,7 @@ class LiteStorage:
             analyzer_version TEXT DEFAULT '1.0',
             sources_unreachable INTEGER DEFAULT 0,
             full_text_analyzed INTEGER DEFAULT 0,
+            score_components TEXT,  -- JSON array; NULL = not recorded (#386)
             FOREIGN KEY (document_id) REFERENCES documents(id)
         );
 
@@ -3616,6 +3705,11 @@ class LiteStorage:
 
         risk_level, analyzed_at = self._decoded_transparency_keys(row)
         indicators, caveats = self._stored_transparency_lists(row)
+        coi_disclosure, coi_lost = self._stored_coi_disclosure(
+            row["coi_disclosure"], row["document_id"]
+        )
+        if coi_lost:
+            caveats.append(coi_lost)
         return TransparencyResult(
             document_id=row["document_id"],
             transparency_score=row["transparency_score"],
@@ -3623,9 +3717,7 @@ class LiteStorage:
             industry_funding_detected=bool(row["industry_funding_detected"]),
             industry_funding_confidence=row["industry_funding_confidence"],
             data_availability_level=row["data_availability_level"],
-            coi_disclosure=self._stored_coi_disclosure(
-                row["coi_disclosure"], row["document_id"]
-            ),
+            coi_disclosure=coi_disclosure,
             trial_registered=bool(row["trial_registered"]),
             trial_results_compliant=bool(row["trial_results_compliant"]),
             outcome_switching_detected=bool(row["outcome_switching_detected"]),
@@ -3644,6 +3736,7 @@ class LiteStorage:
             ),
             sources_unreachable=bool(row["sources_unreachable"]),
             full_text_analyzed=bool(row["full_text_analyzed"]),
+            score_components=self._stored_score_components(row),
         )
 
     def _stored_transparency_from_row(
@@ -3721,8 +3814,9 @@ class LiteStorage:
                 data_availability_level, coi_disclosure, trial_registered,
                 trial_results_compliant, outcome_switching_detected,
                 risk_indicators, warnings, tier_downgrade_applied, analyzed_at,
-                analyzer_version, sources_unreachable, full_text_analyzed
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                analyzer_version, sources_unreachable, full_text_analyzed,
+                score_components
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         with self._sqlite_connection() as conn:
@@ -3746,6 +3840,9 @@ class LiteStorage:
                     result.analyzer_version,
                     1 if result.sources_unreachable else 0,
                     1 if result.full_text_analyzed else 0,
+                    None
+                    if result.score_components is None
+                    else json.dumps([c.to_dict() for c in result.score_components]),
                 ),
             )
             conn.commit()

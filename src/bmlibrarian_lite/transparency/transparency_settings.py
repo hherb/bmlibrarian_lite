@@ -16,7 +16,7 @@
 
 """User-configurable transparency analysis settings."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from typing import Any
 
@@ -98,6 +98,25 @@ class TransparencySettings:
     inline_warning_templates: dict[str, str] = field(
         default_factory=lambda: DEFAULT_INLINE_WARNING_TEMPLATES.copy()
     )
+
+    def assign_from(self, other: "TransparencySettings") -> None:
+        """Take every value of ``other``, keeping this object's identity.
+
+        The app shares one settings object: the analyses rate by it, and the
+        report and badges explain those ratings by it. Replacing it in one
+        holder left the others explaining a rating by rules it was not made
+        under (#386, #417), so an edit is copied into it instead.
+
+        Args:
+            other: The settings to take the values of.
+        """
+        for settings_field in fields(self):
+            value = getattr(other, settings_field.name)
+            if isinstance(value, dict):
+                # Not aliased: an edit to ``other``'s templates later would
+                # otherwise reach these settings unannounced
+                value = dict(value)
+            setattr(self, settings_field.name, value)
 
     def to_dict(self) -> dict[str, Any]:
         """

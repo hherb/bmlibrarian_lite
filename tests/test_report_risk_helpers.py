@@ -4,15 +4,20 @@
 
 """Tests for report risk warning helper functions."""
 
+import dataclasses
+
 import pytest
 
 from bmlibrarian_lite.agents.report_risk_helpers import (
+    PROMPT_LIMITED_CERTAINTY_QUALIFIER,
+    PROMPT_PROVISIONAL_QUALIFIER,
     build_risk_context_for_prompt,
     format_reference_risk_annotation,
     inject_risk_warnings,
     select_inline_warning,
     should_warn_for_citation,
 )
+from bmlibrarian_lite.transparency.risk_explanation import TransparencyRiskExplanation
 from bmlibrarian_lite.transparency.transparency_models import (
     COI_DISCLOSED,
     COI_NOT_ASSESSED,
@@ -24,7 +29,9 @@ from bmlibrarian_lite.transparency.transparency_settings import (
     DEFAULT_INLINE_WARNING_TEMPLATES,
     ReportRiskThreshold,
     TransparencySettings,
+    get_default_settings,
 )
+from bmlibrarian_lite.transparency_terms import LIMITED_CERTAINTY_NOTE
 
 
 @pytest.fixture
@@ -171,6 +178,29 @@ class TestBuildRiskContextForPrompt:
         context = build_risk_context_for_prompt({})
         assert context == ""
 
+    def test_a_rating_without_full_text_is_qualified(self, high_risk_result):
+        """The narrative must not state it more firmly than every other surface (#386)."""
+        result = dataclasses.replace(high_risk_result, full_text_analyzed=False)
+        context = build_risk_context_for_prompt({1: ("Smith et al., 2023", result)})
+        assert PROMPT_LIMITED_CERTAINTY_QUALIFIER in context
+        assert PROMPT_PROVISIONAL_QUALIFIER not in context
+
+    def test_a_provisional_rating_is_qualified(self, high_risk_result):
+        """A source that could not be read makes the rating provisional."""
+        result = dataclasses.replace(
+            high_risk_result, full_text_analyzed=True, sources_unreachable=True
+        )
+        context = build_risk_context_for_prompt({1: ("Smith et al., 2023", result)})
+        assert PROMPT_PROVISIONAL_QUALIFIER in context
+        assert PROMPT_LIMITED_CERTAINTY_QUALIFIER not in context
+
+    def test_a_settled_rating_is_not_qualified(self, high_risk_result):
+        """The control: qualifying every line would say nothing."""
+        result = dataclasses.replace(high_risk_result, full_text_analyzed=True)
+        context = build_risk_context_for_prompt({1: ("Smith et al., 2023", result)})
+        assert PROMPT_LIMITED_CERTAINTY_QUALIFIER not in context
+        assert PROMPT_PROVISIONAL_QUALIFIER not in context
+
 
 class TestInjectRiskWarnings:
     """Tests for inject_risk_warnings function."""
@@ -213,7 +243,51 @@ class TestFormatReferenceRiskAnnotation:
         annotation = format_reference_risk_annotation(medium_risk_result)
         assert "⚠️ MEDIUM RISK" in annotation
 
-    def test_returns_empty_for_low_risk(self, low_risk_result):
-        """Returns empty string for low-risk results."""
+    def test_a_warned_low_rating_is_annotated(self, low_risk_result):
+        """At a Low report threshold a Low citation is warned about inline.
+
+        Its reference used to carry nothing, so the marker had no
+        explanation and the rating no limited-certainty note (#386).
+        """
         annotation = format_reference_risk_annotation(low_risk_result)
-        assert annotation == ""
+        assert annotation.splitlines() == [
+            "    ⚠️ LOW RISK",
+            f"    - {LIMITED_CERTAINTY_NOTE}",
+        ]
+
+    def test_a_low_rating_from_the_full_text_is_only_its_level(self, low_risk_result):
+        """The control: nothing to qualify, and no risk factor to list."""
+        result = dataclasses.replace(low_risk_result, full_text_analyzed=True)
+        assert format_reference_risk_annotation(result) == "    ⚠️ LOW RISK"
+
+
+class TestConfidenceAgreesWithTheReasonSentence:
+    """The reference annotation's Funding line rounds as the reason does (#386).
+
+    ``int(c * 100)`` truncates; 0.29 is where float imprecision makes that
+    disagree with ``confidence_percent``'s round-half-away-from-zero:
+    ``0.29 * 100`` is ``28.999999999999996`` in floating point, which
+    truncates to 28 but rounds to 29.
+    """
+
+    def test_annotation_matches_the_reason_sentence(self) -> None:
+        """Both surfaces read 29%, not one at 28% and the other at 29%."""
+        result = TransparencyResult(
+            document_id="doc-confidence",
+            transparency_score=35,
+            risk_level=TransparencyRisk.HIGH,
+            industry_funding_detected=True,
+            industry_funding_confidence=0.29,
+            data_availability_level="restricted",
+            coi_disclosure=COI_DISCLOSED,
+            full_text_analyzed=True,
+        )
+        annotation = format_reference_risk_annotation(result)
+        assert "confidence: 29%" in annotation
+        assert "confidence: 28%" not in annotation
+
+        explanation = TransparencyRiskExplanation.of(result, get_default_settings())
+        assert (
+            "Industry funding was detected, with 29% confidence, and its "
+            "data are available only with restrictions."
+        ) in explanation.reasons

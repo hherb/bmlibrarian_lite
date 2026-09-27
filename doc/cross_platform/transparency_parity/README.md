@@ -9,6 +9,7 @@ identical behaviour on Python, Swift and Kotlin (issue #105).
 | `sponsor_patterns.json` | bound | bound | bound |
 | `trial_title_patterns.json` | bound | bound | bound |
 | `funder_names.json` (floors and composition) | bound | bound | bound |
+| `risk_explanation_strings.json` | bound (not `swift_kotlin_only`, nor cases bound away from it) | bound | bound |
 
 ## Why this exists
 
@@ -246,6 +247,103 @@ substring test, which all three used until #385, read "atrial fibrillation",
 "myocardial infarction", "industrial" and "gas phase isomerization" as
 trials. Changing a fragment moves the indicator, so bump every analyser
 version with it.
+
+## The risk-explanation contract
+
+### `risk_explanation_strings.json` — how a rating is qualified and explained
+
+Binds the wording PR #388 (Swift + Android) and #386 (Python) share for
+saying how far a transparency rating can be relied on, and for explaining why
+a study was rated high risk (#392).
+
+The file has four parts, with different reach:
+
+- **`strings`** — the certainty note, the badge suffix, the provisional
+  caveat, and the high-risk section's heading and labels. Bound on **all
+  three platforms**, string-for-string: `TestTheStringsMatchTheContract`
+  (Python, `tests/test_risk_explanation_contract.py`),
+  `testRiskExplanationStringsMatchTheContract` (Swift,
+  `TransparencyParityTests`), and the equivalent in Kotlin's
+  `RiskExplanationParityTest`
+  (`android/…/domain/transparency/RiskExplanationParityTest.kt`).
+- **`introduction_examples`** — the high-risk section's introduction for a
+  given count of studies. Bound on **all three platforms** by the same
+  tests.
+- **`swift_kotlin_only`** — the "certainty unknown" note, the "Unassessed"
+  label and note, and (since the user's 2026-09-27 decision) the
+  unexplained-rating caveat. Bound on **Swift and Android only**, by
+  `testRiskExplanationStringsMatchTheContract` and `RiskExplanationParityTest`
+  reading this key instead of `strings`: the desktop makes neither of the
+  Unassessed states (see below), and the unexplained-rating caveat's Swift
+  wording names a cause and remedy that do not hold on the desktop — an
+  earlier analyser's rows are never shown there (`is_current`), and
+  "Re-analyse" never offers a current row whose sources were all read (a
+  final row) — so Python carries its own
+  wording (`transparency_terms.UNEXPLAINED_RATING_CAVEAT`) instead of
+  asserting this key. Swift's `testUnexplainedRatingCaveatMatchesTheContractString`
+  binds the sentence directly, not just through a case's `expected.caveats`.
+- **`cases`** — worked findings, each scored, rated and explained by every
+  platform's own code, asserting the reasons, the score breakdown (when the
+  score is itself a reason) and the caveats. Every case binds **all three
+  platforms** unless it carries a `binds` list naming which ones it does.
+  One case, `"a stored high rating no current rule explains"`, binds only
+  `swift` and `kotlin` — for the same reason its caveat text is
+  `swift_kotlin_only`. Python's parametrized `test_case`
+  (`tests/test_risk_explanation_contract.py`, `_case_ids`) excludes any case
+  not bound to `"python"` from the parametrization, rather than skipping it
+  from inside the test, and a separate test
+  (`TestTheCaseBoundAwayFromPython`) asserts the desktop's own caveat text
+  for that same case's findings. Swift's `testRiskExplanationCasesMatchTheContract`
+  and Kotlin's `RiskExplanationParityTest` likewise run only the cases whose
+  `binds` names them (all of them, when a case carries no `binds`). Every
+  case is built with its full text searched — each platform's case builder
+  sets it, and the fixture has no key for it. That is the only form in which
+  the desktop can record a missing COI or data statement at all (see below),
+  so it is the only form all three platforms can agree on.
+
+### Why the desktop has no Unassessed rule
+
+Swift and Android show a High as **Unassessed** when every reason for it
+depends on a statement that appears only in full text nobody searched, and
+qualify such a statement "(full text not searched)". Python has neither.
+
+The reason is where each platform fixed the underlying defect. Swift and
+Android fixed it in *display*: their analysers record a COI or data-
+availability statement as missing (`not_stated` / `notStated`) even when no
+full text was ever read, so a display-time check is needed to keep that
+absence from reading as a finding. Python fixed it earlier, in *scoring*
+(#352, #353, #359): `not_stated` for COI is recorded only from a full text
+that was read and its end matter parsed, and `not_stated` for data
+availability only from a full text that was read and segmented, or from
+Europe PMC XML that was read and holds sections. Anywhere else, Python
+records `not_assessed` / `unknown` — neutral values that score 0 and trigger
+nothing.
+
+So **no desktop High can rest on text nobody searched**, by construction of
+the score, and the Unassessed rule would never have anything to catch.
+Porting it would only add a branch that never runs and a "(full text not
+searched)" qualifier that never prints.
+
+`tests/test_no_high_rests_on_unread_text.py` pins the invariant this
+argument depends on: every combination of PubMed read or not with the three
+Europe PMC states in which no text is read (no PMC ID, no open-access copy,
+XML with no sections) charges nothing, plus one control case where full text
+*was* read and is still charged, so the six unread cases are not passing by
+an analyser that charges nothing at all. A third test covers Europe PMC XML
+*with* sections: that is read text, so a data statement missing from it is
+charged, and the rating still carries the limited-certainty note, because
+the fallback reads it for the data statement alone (#421). If the invariant
+ever fails, the desktop's scoring has stopped fixing the defect at its
+source, and needs the Unassessed rule and the "not searched" wording after
+all.
+
+The desktop's certainty note follows the analyser's
+`TransparencyReport.full_text_analyzed`: set only when the article's own
+text was read *and* at least one section of it was recognised
+(`tests/test_full_text_analyzed.py`). Blank text is no text, and a full text
+in which nothing could be recognised — the whole of PLOS ONE, until #420 —
+established nothing, so a rating resting on it says its certainty is
+limited.
 
 ## Changing a pattern
 

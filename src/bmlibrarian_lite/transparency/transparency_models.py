@@ -22,6 +22,8 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Union
 
+from ..transparency_terms import DATA_PHRASES, ScoreComponent
+
 if TYPE_CHECKING:
     from ..data_models import LiteDocument
     from .transparency_settings import TransparencySettings
@@ -106,7 +108,10 @@ class TransparencyUnassessed:
 #: registry record that is not a study, now makes the result provisional --
 #: and a title is a trial's only by whole word, so "atrial fibrillation" is
 #: not).
-TRANSPARENCY_ANALYZER_VERSION = "2.2"
+#: 2.3: #386 (a full text counts as analysed only when a section of it was
+#: recognised, and whitespace is no text -- a rating resting on neither now
+#: says its certainty is limited -- and each score records its terms).
+TRANSPARENCY_ANALYZER_VERSION = "2.3"
 
 #: What every row written before #360 says, whatever analysed it: the field
 #: was never compared to anything, so it never moved off its default.
@@ -259,6 +264,9 @@ class TransparencyCounts:
         undecodable: Documents whose stored row this build could not decode
             (#374). Not a risk level, and not superseded either: a newer
             build may have written it.
+        limited: Of the assessed, how many were rated without the full text.
+        provisional: Of the assessed, how many were rated while a source
+            could not be read.
     """
 
     low: int = 0
@@ -268,6 +276,8 @@ class TransparencyCounts:
     unknown: int = 0
     not_stored: int = 0
     undecodable: int = 0
+    limited: int = 0
+    provisional: int = 0
 
     def __post_init__(self) -> None:
         """Refuse a count that is not a whole number of documents.
@@ -278,7 +288,10 @@ class TransparencyCounts:
         stands for.
 
         Raises:
-            ValueError: If any bucket is not a non-negative ``int``.
+            ValueError: If any bucket is not a non-negative ``int``, or if
+                ``limited`` or ``provisional`` exceeds ``assessed`` -- both
+                are a share of the assessed documents, never a separate
+                population.
         """
         for bucket in fields(self):
             value = getattr(self, bucket.name)
@@ -286,6 +299,12 @@ class TransparencyCounts:
                 raise ValueError(
                     f"TransparencyCounts.{bucket.name} must be a non-negative "
                     f"int, got {value!r}"
+                )
+        for part in ("limited", "provisional"):
+            if getattr(self, part) > self.assessed:
+                raise ValueError(
+                    f"TransparencyCounts.{part} ({getattr(self, part)}) cannot "
+                    f"exceed the assessed documents ({self.assessed})"
                 )
 
     @property
@@ -347,6 +366,7 @@ def _count_rows(
     superseded = 0
     unknown = 0
     undecodable = 0
+    limited = provisional = 0
     for result in results:
         if isinstance(result, UndecodableTransparencyRow):
             undecodable += 1
@@ -354,6 +374,8 @@ def _count_rows(
             superseded += 1
         elif result.risk_level in counts:
             counts[result.risk_level] += 1
+            limited += not result.full_text_analyzed
+            provisional += result.sources_unreachable
         else:
             unknown += 1
     return TransparencyCounts(
@@ -363,6 +385,8 @@ def _count_rows(
         superseded=superseded,
         unknown=unknown,
         undecodable=undecodable,
+        limited=limited,
+        provisional=provisional,
     )
 
 
@@ -614,7 +638,13 @@ class TransparencyResult:
             so it is re-analysed rather than cached as a settled answer, and
             the reference annotation says so rather than printing its risk
             level unqualified (#346, #360).
-        full_text_analyzed: Whether full text was used (future enhancement)
+        full_text_analyzed: Whether the article's own full text was read and
+            at least one section of it recognised -- the analyser's
+            ``TransparencyReport.full_text_analyzed``. False rates it with
+            limited certainty, and every surface says so (#386).
+        score_components: The terms the score was summed from; None when
+            not recorded, or when the stored terms could not be read or did
+            not add up to the score.
     """
 
     document_id: str
@@ -648,8 +678,13 @@ class TransparencyResult:
     # silence, and only the first makes the finding provisional (#346).
     sources_unreachable: bool = False
 
-    # For future full-text enhancement
+    # Whether the rating rests on the article's own text; see the docstring
     full_text_analyzed: bool = False
+
+    # The terms the score was summed from, in order (#386). ``None`` means
+    # not recorded: a row stored before the terms were, or one whose stored
+    # terms could not be read back or did not add up to its score.
+    score_components: tuple[ScoreComponent, ...] | None = None
 
     @property
     def is_current(self) -> bool:
@@ -732,6 +767,11 @@ class TransparencyResult:
             "analyzer_version": self.analyzer_version,
             "sources_unreachable": self.sources_unreachable,
             "full_text_analyzed": self.full_text_analyzed,
+            "score_components": (
+                None
+                if self.score_components is None
+                else [c.to_dict() for c in self.score_components]
+            ),
         }
 
     @classmethod
@@ -773,7 +813,140 @@ class TransparencyResult:
             ),
             sources_unreachable=data.get("sources_unreachable", False),
             full_text_analyzed=data.get("full_text_analyzed", False),
+            score_components=(
+                None
+                if data.get("score_components") is None
+                else tuple(
+                    ScoreComponent.from_dict(item) for item in data["score_components"]
+                )
+            ),
         )
+
+
+#: Data availability levels that, with industry funding, rate a study high.
+#: The levels a reason sentence has words for, so the two cannot drift apart.
+WITHHELD_DATA_LEVELS = tuple(DATA_PHRASES)
+
+
+@dataclass(frozen=True)
+class ScoreBelowThreshold:
+    """The transparency score fell below the high-risk cut-off."""
+
+    score: int
+    threshold: int
+
+    def __post_init__(self) -> None:
+        """Refuse a score that is not below the cut-off.
+
+        Raises:
+            ValueError: If ``score`` is not below ``threshold``.
+        """
+        if self.score >= self.threshold:
+            raise ValueError(
+                f"a score of {self.score} is not below the cut-off of "
+                f"{self.threshold}"
+            )
+
+
+@dataclass(frozen=True)
+class IndustryFundingWithWithheldData:
+    """Industry funding was detected alongside withheld data.
+
+    The data are restricted, unavailable or covered by no statement found
+    in text that was read.
+    """
+
+    data_availability: str
+
+    def __post_init__(self) -> None:
+        """Refuse a level that does not withhold data.
+
+        Raises:
+            ValueError: If ``data_availability`` is not one of
+                ``WITHHELD_DATA_LEVELS``.
+        """
+        if self.data_availability not in WITHHELD_DATA_LEVELS:
+            raise ValueError(
+                f"{self.data_availability!r} is not a withheld data level"
+            )
+
+
+@dataclass(frozen=True)
+class MissingCoiStatement:
+    """The article was read and carries no conflict of interest statement."""
+
+
+#: A rule that, on its own, rates a study high transparency risk. Swift's
+#: ``HighRiskTrigger``; the desktop's rules also honour its settings toggles.
+HighRiskTrigger = (
+    ScoreBelowThreshold | IndustryFundingWithWithheldData | MissingCoiStatement
+)
+
+
+def high_risk_triggers(
+    score: int,
+    industry_funding: bool,
+    data_availability: str,
+    coi_disclosure: str,
+    settings: "TransparencySettings",
+) -> list[HighRiskTrigger]:
+    """Every rule that, on its own, rates a study high risk.
+
+    :func:`calculate_risk_level` rates a study high exactly when this is
+    non-empty, so a report explaining a high rating names the rules that
+    produced it rather than a second reading of them that could drift
+    (#386). All matching rules are returned, in the order they are checked.
+
+    Only ``COI_NOT_STATED`` is a rule: ``COI_NOT_ASSESSED`` is not a finding
+    about the study (#352).
+
+    Args:
+        score: Transparency score (0-100).
+        industry_funding: Whether industry funding was detected.
+        data_availability: Data availability level string.
+        coi_disclosure: One of the three ``COI_*`` constants.
+        settings: Which rules apply, and the score cut-off.
+
+    Returns:
+        The rules that apply; empty when none does.
+    """
+    triggers: list[HighRiskTrigger] = []
+    if score < settings.score_threshold:
+        triggers.append(ScoreBelowThreshold(score, settings.score_threshold))
+    if (
+        settings.industry_funding_triggers_downgrade
+        and industry_funding
+        and data_availability in WITHHELD_DATA_LEVELS
+    ):
+        triggers.append(IndustryFundingWithWithheldData(data_availability))
+    if settings.missing_coi_triggers_downgrade and coi_disclosure == COI_NOT_STATED:
+        triggers.append(MissingCoiStatement())
+    return triggers
+
+
+def high_risk_triggers_for(
+    result: "TransparencyResult", settings: "TransparencySettings"
+) -> list[HighRiskTrigger]:
+    """The high-risk rules a stored row's findings meet under ``settings``.
+
+    A row rated under other settings, or by another analyser, can carry a
+    High none of these explains; callers must say so rather than present an
+    empty list as the reason.
+
+    Args:
+        result: A stored transparency result.
+        settings: The settings to judge it by -- the user's, not defaults.
+
+    Returns:
+        The rules that apply.
+    """
+    return high_risk_triggers(
+        result.transparency_score,
+        result.industry_funding_detected,
+        result.data_availability_level,
+        result.coi_disclosure,
+        settings,
+    )
 
 
 def calculate_risk_level(
@@ -787,8 +960,7 @@ def calculate_risk_level(
     Determine risk level from transparency metrics.
 
     Risk levels:
-    - High Risk: score < threshold OR (industry + restricted data) OR a COI
-      statement the article was read to be missing
+    - High Risk: exactly when :func:`high_risk_triggers` returns any rule
     - Medium Risk: between ``settings.score_threshold`` and
       ``MEDIUM_RISK_SCORE_THRESHOLD`` OR industry with disclosure
     - Low Risk: above ``MEDIUM_RISK_SCORE_THRESHOLD``, transparent
@@ -808,20 +980,9 @@ def calculate_risk_level(
     Returns:
         TransparencyRisk enum value
     """
-    # High risk conditions
-    if score < settings.score_threshold:
-        return TransparencyRisk.HIGH
-
-    if settings.industry_funding_triggers_downgrade:
-        restricted_data = data_availability in (
-            "restricted",
-            "not_available",
-            "not_stated",
-        )
-        if industry_funding and restricted_data:
-            return TransparencyRisk.HIGH
-
-    if settings.missing_coi_triggers_downgrade and coi_disclosure == COI_NOT_STATED:
+    if high_risk_triggers(
+        score, industry_funding, data_availability, coi_disclosure, settings
+    ):
         return TransparencyRisk.HIGH
 
     # Medium risk conditions

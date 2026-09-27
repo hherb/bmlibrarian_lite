@@ -582,7 +582,10 @@ class QualityFilterPanel(QFrame):
             parent=self,
         )
         if dialog.exec():
-            self._transparency_settings = dialog.get_settings()
+            # Copied into the shared object, not swapped for the dialog's:
+            # the analyses, the report and the badges all read that one, and
+            # a replacement reached only the analyses (#386, #417)
+            self._transparency_settings.assign_from(dialog.get_settings())
             # Update checkboxes to reflect any changes
             self._transparency_enabled_cb.setChecked(
                 self._transparency_settings.filtering_enabled
@@ -609,9 +612,11 @@ class QualityFilterPanel(QFrame):
         Set transparency settings.
 
         Args:
-            settings: New TransparencySettings to apply
+            settings: New TransparencySettings to apply. Its values are
+                copied into the shared settings object; see
+                ``_show_advanced_settings``.
         """
-        self._transparency_settings = settings
+        self._transparency_settings.assign_from(settings)
         self._transparency_enabled_cb.setChecked(settings.filtering_enabled)
         self._show_badge_cb.setChecked(settings.show_badge_on_cards)
 

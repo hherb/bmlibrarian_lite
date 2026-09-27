@@ -323,6 +323,9 @@ class TestTheBadgeShowsWhatWasNotAssessed:
                 document_id=DOC,
                 transparency_score=20,
                 risk_level=TransparencyRisk.HIGH,
+                # This is the control for the label-vs-"Not assessed"
+                # distinction, not the certainty note (#386).
+                full_text_analyzed=True,
             )
         )
 

@@ -18,9 +18,11 @@
 
 from collections.abc import Mapping, Sequence
 
+from ..transparency.risk_explanation import TransparencyRiskExplanation, certainty_note
 from ..transparency.transparency_models import (
     COI_NOT_STATED,
     NAMEABLE_RISK_LEVELS,
+    WITHHELD_DATA_LEVELS,
     StoredTransparency,
     TransparencyResult,
     TransparencyRisk,
@@ -31,9 +33,22 @@ from ..transparency.transparency_settings import (
     ReportRiskThreshold,
     TransparencySettings,
 )
+from ..transparency_terms import (
+    HIGH_RISK_SECTION_HEADING,
+    PROVISIONAL_RESULT_CAVEAT,
+    confidence_percent,
+    high_risk_introduction,
+)
 
-# Data availability levels that indicate risk
-RISKY_DATA_AVAILABILITY_LEVELS = ("not_available", "restricted", "not_stated")
+# Data availability levels that indicate risk. The same three levels
+# ``transparency_models.WITHHELD_DATA_LEVELS`` names for the high-risk rule
+# (#386); aliased rather than redefined so the two lists cannot drift.
+RISKY_DATA_AVAILABILITY_LEVELS = WITHHELD_DATA_LEVELS
+
+# How the report prompt qualifies a concern the narrative must not overstate:
+# a rating made without the full text, and one a source was unreadable for.
+PROMPT_LIMITED_CERTAINTY_QUALIFIER = "rated without its full text; limited certainty"
+PROMPT_PROVISIONAL_QUALIFIER = "provisional: a source could not be read"
 
 
 def select_inline_warning(
@@ -144,7 +159,17 @@ def build_risk_context_for_prompt(
             concerns.append(f"Data availability: {result.data_availability_level}")
 
         concerns_str = ", ".join(concerns) if concerns else "Low transparency score"
-        lines.append(f"- [Citation {citation_num}] {author_ref}: {concerns_str}")
+        # The narrative must not present these ratings as more settled than
+        # every other surface does (#386)
+        qualifiers = []
+        if certainty_note(result) is not None:
+            qualifiers.append(PROMPT_LIMITED_CERTAINTY_QUALIFIER)
+        if result.sources_unreachable:
+            qualifiers.append(PROMPT_PROVISIONAL_QUALIFIER)
+        qualifier_str = f" ({'; '.join(qualifiers)})" if qualifiers else ""
+        lines.append(
+            f"- [Citation {citation_num}] {author_ref}: {concerns_str}{qualifier_str}"
+        )
 
     lines.extend([
         "",
@@ -267,23 +292,28 @@ def format_reference_risk_annotation(
 ) -> str:
     """Format risk annotation for reference list entry.
 
-    Creates structured sub-items showing specific risk factors
-    for HIGH and MEDIUM risk citations.
+    Creates structured sub-items showing specific risk factors for a
+    citation the report warns about -- HIGH and MEDIUM ones, and LOW ones
+    too when the user's report threshold is Low. A LOW annotation used to
+    be empty, so such a citation carried an inline warning marker with
+    nothing in the references to say why, nor that its rating's certainty
+    was limited (#386).
 
     Args:
         result: Transparency analysis result
 
     Returns:
-        Formatted annotation string, or empty string for low risk
+        Formatted annotation string
     """
-    if result.risk_level == TransparencyRisk.LOW:
-        return ""
-
     risk_label = result.risk_level.value.upper()
     lines = [f"    ⚠️ {risk_label} RISK"]
 
+    note = certainty_note(result)
+    if note:
+        lines.append(f"    - {note}")
+
     if result.industry_funding_detected:
-        confidence_pct = int(result.industry_funding_confidence * 100)
+        confidence_pct = confidence_percent(result.industry_funding_confidence)
         lines.append(f"    - Funding: Industry-funded (confidence: {confidence_pct}%)")
 
     if result.coi_disclosure == COI_NOT_STATED:
@@ -304,9 +334,34 @@ def format_reference_risk_annotation(
         # never did, so a risk level established while a source was
         # unreadable read here as firmly as one established against every
         # source (#346).
-        lines.append(
-            "    - Assessment is provisional: a source it needed could not "
-            "be read, so this level rests on less than the full record."
-        )
+        lines.append(f"    - {PROVISIONAL_RESULT_CAVEAT}")
 
+    return "\n".join(lines)
+
+
+def format_high_risk_section(
+    entries: Sequence[tuple[int, str, TransparencyResult]],
+    settings: "TransparencySettings",
+) -> str:
+    """The section explaining every cited study rated high risk (#386).
+
+    Args:
+        entries: ``(reference number, author reference, result)`` for each
+            cited study whose shown rating is High, in reference order.
+        settings: The transparency settings its level was judged by.
+
+    Returns:
+        The Markdown section, or ``""`` when there is none to explain.
+    """
+    introduction = high_risk_introduction(len(entries))
+    if introduction is None:
+        return ""
+    lines = [f"## {HIGH_RISK_SECTION_HEADING}", "", introduction]
+    for number, reference, result in entries:
+        explanation = TransparencyRiskExplanation.of(result, settings)
+        lines += ["", f"**{number}. {reference}**", "", f"Transparency score: {explanation.score}/100"]
+        if explanation.certainty_note:
+            lines += ["", f"*{explanation.certainty_note}*"]
+        for label, items in explanation.labelled_lists():
+            lines += ["", f"{label}:", *(f"- {item}" for item in items)]
     return "\n".join(lines)

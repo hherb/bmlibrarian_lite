@@ -416,16 +416,27 @@ class TestWhatAStoredRowIsAllowedToSay:
 
     def test_an_unrecognised_disclosure_reads_as_not_assessed(self) -> None:
         """A typo used to be title-cased into the tooltip as a finding."""
-        assert (
-            self._storage()._stored_coi_disclosure("Not_Stated", "doc")
-            == COI_NOT_ASSESSED
+        disclosure, caveat = self._storage()._stored_coi_disclosure(
+            "Not_Stated", "doc"
         )
+        assert disclosure == COI_NOT_ASSESSED
+        # And the reader is told the value was lost, rather than a High it
+        # explained being put down to a settings change (#386)
+        assert caveat is not None
+        assert "conflict of interest disclosure could not be read" in caveat
 
     def test_a_known_disclosure_is_passed_through(self) -> None:
         """The control: coercing everything would erase the distinction."""
-        assert (
-            self._storage()._stored_coi_disclosure(COI_NOT_STATED, "doc")
-            == COI_NOT_STATED
+        assert self._storage()._stored_coi_disclosure(COI_NOT_STATED, "doc") == (
+            COI_NOT_STATED,
+            None,
+        )
+
+    def test_a_null_is_not_assessed_without_a_caveat(self) -> None:
+        """What the migration leaves on a pre-#352 row is not a lost value."""
+        assert self._storage()._stored_coi_disclosure(None, "doc") == (
+            COI_NOT_ASSESSED,
+            None,
         )
 
     def test_an_unreadable_json_column_does_not_take_down_the_batch(self) -> None:

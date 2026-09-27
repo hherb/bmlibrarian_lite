@@ -656,4 +656,217 @@ final class TransparencyParityTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - Risk explanation string contract (#386)
+
+    /// How a rating is qualified and a high rating explained (#386). Its
+    /// `strings`, `introduction_examples` and cases bind Python, Swift and
+    /// Kotlin, except a case whose `binds` names other platforms only;
+    /// `swift_kotlin_only` binds Swift and Kotlin.
+    private static let riskExplanationFixture = "risk_explanation_strings.json"
+
+    private struct RiskExplanationContract: Decodable {
+        struct Strings: Decodable {
+            let limitedCertaintyNote, limitedCertaintyBadgeSuffix, provisionalResultCaveat,
+                sectionHeading, reasonsLabel, scoreBreakdownLabel,
+                otherConcernsLabel, caveatsLabel: String
+            enum CodingKeys: String, CodingKey {
+                case limitedCertaintyNote = "limited_certainty_note"
+                case limitedCertaintyBadgeSuffix = "limited_certainty_badge_suffix"
+                case provisionalResultCaveat = "provisional_result_caveat"
+                case sectionHeading = "section_heading"
+                case reasonsLabel = "reasons_label"
+                case scoreBreakdownLabel = "score_breakdown_label"
+                case otherConcernsLabel = "other_concerns_label"
+                case caveatsLabel = "caveats_label"
+            }
+        }
+        struct Introduction: Decodable { let count: Int; let text: String }
+        struct AppOnly: Decodable {
+            // `unexplainedRatingCaveat` moved here from `Strings`: the desktop uses
+            // its own wording for this caveat (user decision, 2026-09-27), so only
+            // Swift and Kotlin are bound to the shared sentence. Text unchanged.
+            let unrecordedCertaintyNote, unassessedLabel, unassessedNote,
+                unexplainedRatingCaveat: String
+            enum CodingKeys: String, CodingKey {
+                case unrecordedCertaintyNote = "unrecorded_certainty_note"
+                case unassessedLabel = "unassessed_label"
+                case unassessedNote = "unassessed_note"
+                case unexplainedRatingCaveat = "unexplained_rating_caveat"
+            }
+        }
+        struct Findings: Decodable {
+            let dataAvailability, coi, results: String
+            let industryFunding, trialRegistered, outcomeSwitching, sourcesUnreachable: Bool
+            let industryConfidence: Double
+            enum CodingKeys: String, CodingKey {
+                case dataAvailability = "data_availability", coi, results
+                case industryFunding = "industry_funding", trialRegistered = "trial_registered"
+                case outcomeSwitching = "outcome_switching", sourcesUnreachable = "sources_unreachable"
+                case industryConfidence = "industry_confidence"
+            }
+        }
+        struct Expected: Decodable {
+            let score: Int
+            let riskLevel: String
+            let reasons, scoreBreakdown, caveats: [String]
+            enum CodingKeys: String, CodingKey {
+                case score, reasons, caveats
+                case riskLevel = "risk_level", scoreBreakdown = "score_breakdown"
+            }
+        }
+        struct Case: Decodable {
+            let name: String
+            let findings: Findings
+            let storedRiskLevel: String?
+            /// The platforms the case binds; every platform when absent.
+            let binds: [String]?
+            let expected: Expected
+            enum CodingKeys: String, CodingKey {
+                case name, findings, expected, binds
+                case storedRiskLevel = "stored_risk_level"
+            }
+
+            /// Whether Swift is bound by this case.
+            var bindsSwift: Bool { binds?.contains("swift") ?? true }
+        }
+        let strings: Strings
+        let introductionExamples: [Introduction]
+        let swiftKotlinOnly: AppOnly
+        let cases: [Case]
+        enum CodingKeys: String, CodingKey {
+            case strings, cases
+            case introductionExamples = "introduction_examples"
+            case swiftKotlinOnly = "swift_kotlin_only"
+        }
+    }
+
+    func testRiskExplanationStringsMatchTheContract() throws {
+        let contract: RiskExplanationContract = try Self.decodeFixture(Self.riskExplanationFixture)
+        let s = contract.strings
+        XCTAssertEqual(TransparencyConstants.limitedCertaintyNote, s.limitedCertaintyNote)
+        XCTAssertEqual(TransparencyConstants.limitedCertaintyBadgeSuffix, s.limitedCertaintyBadgeSuffix)
+        XCTAssertEqual(TransparencyConstants.provisionalResultCaveat, s.provisionalResultCaveat)
+        XCTAssertEqual(HighRiskTransparencySection.heading, s.sectionHeading)
+        XCTAssertEqual(HighRiskTransparencySection.reasonsLabel, s.reasonsLabel)
+        XCTAssertEqual(HighRiskTransparencySection.scoreBreakdownLabel, s.scoreBreakdownLabel)
+        XCTAssertEqual(HighRiskTransparencySection.otherConcernsLabel, s.otherConcernsLabel)
+        XCTAssertEqual(HighRiskTransparencySection.caveatsLabel, s.caveatsLabel)
+        for example in contract.introductionExamples {
+            XCTAssertEqual(HighRiskTransparencySection.introduction(count: example.count), example.text)
+        }
+        XCTAssertEqual(TransparencyConstants.unrecordedCertaintyNote, contract.swiftKotlinOnly.unrecordedCertaintyNote)
+        XCTAssertEqual(TransparencyConstants.unassessedLabel, contract.swiftKotlinOnly.unassessedLabel)
+        XCTAssertEqual(TransparencyConstants.unassessedNote, contract.swiftKotlinOnly.unassessedNote)
+    }
+
+    func testRiskExplanationCasesMatchTheContract() throws {
+        let contract: RiskExplanationContract = try Self.decodeFixture(Self.riskExplanationFixture)
+        XCTAssertFalse(contract.cases.isEmpty)
+        for c in contract.cases where c.bindsSwift {
+            let result = riskExplanationResult(for: c)
+            let explanation = TransparencyRiskExplanation(result: result)
+            XCTAssertEqual(result.transparencyScore, c.expected.score, c.name)
+            XCTAssertEqual(result.riskLevel.rawValue, c.expected.riskLevel, c.name)
+            XCTAssertEqual(explanation.reasons, c.expected.reasons, c.name)
+            XCTAssertEqual(
+                explanation.scoreBreakdown.map { "\($0.label): \($0.signedPoints)" },
+                c.expected.scoreBreakdown, c.name
+            )
+            XCTAssertEqual(explanation.caveats, c.expected.caveats, c.name)
+        }
+    }
+
+    /// Binds the unexplained-rating caveat Swift produces to the contract's own
+    /// string, not only through a case's `expected.caveats`. Swift carries no
+    /// named constant for it (it is inline in `TransparencyRiskExplanation`),
+    /// so the case's produced caveat is compared directly (#386).
+    ///
+    /// The string lives under `swift_kotlin_only`, not `strings`: the desktop
+    /// uses its own wording for this caveat (user decision, 2026-09-27),
+    /// since an earlier analyser's rows are never shown there and
+    /// "Re-analyse" never offers a current row whose sources were all read,
+    /// so Swift's sentence would name a false cause and an unavailable
+    /// remedy on that platform.
+    func testUnexplainedRatingCaveatMatchesTheContractString() throws {
+        let contract: RiskExplanationContract = try Self.decodeFixture(Self.riskExplanationFixture)
+        guard let c = contract.cases.first(where: { $0.storedRiskLevel != nil }) else {
+            XCTFail("no case in the contract stores a risk level to exercise the unexplained caveat")
+            return
+        }
+        let explanation = TransparencyRiskExplanation(result: riskExplanationResult(for: c))
+        XCTAssertEqual(explanation.caveats.first, contract.swiftKotlinOnly.unexplainedRatingCaveat, c.name)
+    }
+
+    private func riskExplanationResult(for c: RiskExplanationContract.Case) -> TransparencyResult {
+        let f = c.findings
+        let level: DataDisclosureLevel
+        switch f.dataAvailability {
+        case "full_open": level = .fullOpen
+        case "on_request": level = .availableOnRequest
+        case "restricted": level = .restricted
+        case "not_available": level = .notAvailable
+        case "not_stated": level = .notStated
+        case "unknown": level = .unknown
+        default:
+            XCTFail("\(c.name): unknown data_availability finding '\(f.dataAvailability)'")
+            level = .unknown
+        }
+        let compliance: ResultsComplianceStatus
+        switch f.results {
+        case "compliant": compliance = .compliant
+        case "missing": compliance = .missing
+        case "unknown": compliance = .unknown
+        default:
+            XCTFail("\(c.name): unknown results finding '\(f.results)'")
+            compliance = .unknown
+        }
+        var builder = TransparencyResultBuilder(doi: "10.1000/test", pmid: "123")
+        switch f.coi {
+        case "disclosed":
+            builder.coiAnalysis = COIAnalysisResult(statement: "The authors declare no competing interests.")
+        case "not_stated":
+            builder.coiAnalysis = .notAvailable
+        case "disclosed_with_industry_ties":
+            builder.coiAnalysis = COIAnalysisResult(
+                statement: "Author X has received consulting fees from Acme Pharma.",
+                hasIndustryTies: true,
+                confidence: 1.0
+            )
+        default:
+            XCTFail("\(c.name): unknown coi finding '\(f.coi)'")
+            builder.coiAnalysis = .notAvailable
+        }
+        builder.dataAvailability = DataAvailabilityResult(disclosureLevel: level)
+        builder.industryFundingDetected = f.industryFunding
+        builder.industryFundingConfidence = f.industryConfidence
+        if f.trialRegistered {
+            builder.trialRegistrations = [TrialRegistration(
+                registry: TransparencyConstants.clinicalTrialsRegistryName,
+                registrationId: "NCT00000001",
+                resultsPosted: f.results == "compliant"
+            )]
+        }
+        builder.resultsCompliance = compliance
+        builder.outcomeSwitchingDetected = f.outcomeSwitching
+        builder.sourcesUnreachable = f.sourcesUnreachable
+        builder.fullTextSearched = true
+        builder.dataSourcesUsed = [TransparencyConstants.pubMedSourceName, TransparencyConstants.crossRefSourceName]
+        let built = builder.build()
+        guard let stored = c.storedRiskLevel else {
+            return built
+        }
+        guard let level = TransparencyRiskLevel(rawValue: stored) else {
+            XCTFail("\(c.name): unknown stored_risk_level '\(stored)'")
+            return built
+        }
+        return TransparencyResult(
+            coiAnalysis: built.coiAnalysis,
+            dataAvailability: built.dataAvailability,
+            transparencyScore: built.transparencyScore,
+            riskLevel: level,
+            dataSourcesUsed: built.dataSourcesUsed,
+            fullTextSearched: true
+        )
+    }
 }

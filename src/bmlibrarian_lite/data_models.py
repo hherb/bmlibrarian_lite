@@ -2376,6 +2376,11 @@ class ReportMetadata:
             when it is not known (#372)
         transparency_unassessed_cited_count: Likewise for the unassessed
             documents (#372)
+        transparency_limited_count: Of the assessed documents, how many were
+            rated without the full text (#386)
+        transparency_provisional_count: Of the assessed documents, how many
+            were rated while a source the analysis needed could not be read
+            (#386)
 
         model_configs: LLM configuration for each workflow task
         citations_extracted: Total citation passages extracted
@@ -2418,6 +2423,8 @@ class ReportMetadata:
     transparency_documents_considered: int | None = None
     transparency_superseded_cited_count: int | None = None
     transparency_unassessed_cited_count: int | None = None
+    transparency_limited_count: int = 0
+    transparency_provisional_count: int = 0
 
     # LLM configuration by task
     model_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -2466,6 +2473,8 @@ class ReportMetadata:
             "transparency_unassessed_cited_count": (
                 self.transparency_unassessed_cited_count
             ),
+            "transparency_limited_count": self.transparency_limited_count,
+            "transparency_provisional_count": self.transparency_provisional_count,
             "model_configs": self.model_configs,
             "citations_extracted": self.citations_extracted,
             "unique_sources_cited": self.unique_sources_cited,
@@ -2536,6 +2545,10 @@ class ReportMetadata:
             ),
             transparency_unassessed_cited_count=data.get(
                 "transparency_unassessed_cited_count"
+            ),
+            transparency_limited_count=data.get("transparency_limited_count", 0),
+            transparency_provisional_count=data.get(
+                "transparency_provisional_count", 0
             ),
             model_configs=data.get("model_configs", {}),
             citations_extracted=data.get("citations_extracted", 0),

@@ -30,7 +30,9 @@ from bmlibrarian_lite.transparency import (
     TransparencyResult,
     TransparencyRisk,
     TransparencyUnassessed,
+    get_default_settings,
 )
+from bmlibrarian_lite.transparency.risk_explanation import TransparencyRiskExplanation
 from bmlibrarian_lite.gui.transparency_badge import (
     TransparencyBadge,
     TransparencyBadgeSmall,
@@ -59,7 +61,13 @@ def an_unassessed_outcome() -> TransparencyUnassessed:
 
 @pytest.fixture
 def low_risk_result() -> TransparencyResult:
-    """Create a low risk transparency result."""
+    """Create a low risk transparency result.
+
+    ``full_text_analyzed=True``: these fixtures stand for a completed
+    analysis, and these tests are about the label/tooltip content the level
+    and its fields produce, not the certainty note (#386; that is
+    ``tests/test_badge_certainty.py``).
+    """
     return TransparencyResult(
         document_id="doc-1",
         transparency_score=85,
@@ -67,12 +75,13 @@ def low_risk_result() -> TransparencyResult:
         industry_funding_detected=False,
         data_availability_level="full_open",
         coi_disclosure=COI_DISCLOSED,
+        full_text_analyzed=True,
     )
 
 
 @pytest.fixture
 def medium_risk_result() -> TransparencyResult:
-    """Create a medium risk transparency result."""
+    """Create a medium risk transparency result (full text analysed; #386)."""
     return TransparencyResult(
         document_id="doc-2",
         transparency_score=55,
@@ -81,12 +90,13 @@ def medium_risk_result() -> TransparencyResult:
         industry_funding_confidence=0.75,
         data_availability_level="on_request",
         coi_disclosure=COI_DISCLOSED,
+        full_text_analyzed=True,
     )
 
 
 @pytest.fixture
 def high_risk_result() -> TransparencyResult:
-    """Create a high risk transparency result."""
+    """Create a high risk transparency result (full text analysed; #386)."""
     return TransparencyResult(
         document_id="doc-3",
         transparency_score=25,
@@ -98,6 +108,7 @@ def high_risk_result() -> TransparencyResult:
         outcome_switching_detected=True,
         risk_indicators=["Undisclosed COI", "Outcome switching", "Missing data"],
         tier_downgrade_applied=1,
+        full_text_analyzed=True,
     )
 
 
@@ -136,23 +147,33 @@ class TestTransparencyBadge:
         assert badge.label.text() == "Low"
 
     def test_all_risk_levels_full_labels(self, qapp) -> None:
-        """Test full labels for all risk levels."""
+        """Test full labels for all risk levels.
+
+        ``full_text_analyzed=True``: this is about the level-to-label
+        mapping, not the certainty note (#386).
+        """
         for risk_level, expected_label in RISK_LABELS.items():
             result = TransparencyResult(
                 document_id="test",
                 transparency_score=50,
                 risk_level=risk_level,
+                full_text_analyzed=True,
             )
             badge = TransparencyBadge(outcome=result, compact=False)
             assert badge.label.text() == expected_label
 
     def test_all_risk_levels_short_labels(self, qapp) -> None:
-        """Test short labels for all risk levels in compact mode."""
+        """Test short labels for all risk levels in compact mode.
+
+        ``full_text_analyzed=True``: this is about the level-to-label
+        mapping, not the certainty note (#386).
+        """
         for risk_level, expected_label in RISK_LABELS_SHORT.items():
             result = TransparencyResult(
                 document_id="test",
                 transparency_score=50,
                 risk_level=risk_level,
+                full_text_analyzed=True,
             )
             badge = TransparencyBadge(outcome=result, compact=True)
             assert badge.label.text() == expected_label
@@ -375,3 +396,35 @@ class TestRiskColorsConsistency:
         ]
         for level in expected_levels:
             assert level in DATA_AVAILABILITY_LABELS
+
+
+class TestConfidenceAgreesWithTheReasonSentence:
+    """The tooltip's Funding line and its high-risk reason round alike (#386).
+
+    ``int(c * 100)`` truncates; 0.29 is where float imprecision makes that
+    disagree with ``confidence_percent``'s round-half-away-from-zero:
+    ``0.29 * 100`` is ``28.999999999999996`` in floating point, which
+    truncates to 28 but rounds to 29.
+    """
+
+    def test_funding_line_matches_the_reason_sentence(self, qapp) -> None:
+        """Both surfaces read 29%, not one at 28% and the other at 29%."""
+        result = TransparencyResult(
+            document_id="doc-5",
+            transparency_score=35,
+            risk_level=TransparencyRisk.HIGH,
+            industry_funding_detected=True,
+            industry_funding_confidence=0.29,
+            data_availability_level="restricted",
+            coi_disclosure=COI_DISCLOSED,
+            full_text_analyzed=True,
+        )
+        tooltip = TransparencyBadge(outcome=result).toolTip()
+        assert "Detected (29% confidence)" in tooltip
+        assert "Detected (28% confidence)" not in tooltip
+
+        explanation = TransparencyRiskExplanation.of(result, get_default_settings())
+        assert (
+            "Industry funding was detected, with 29% confidence, and its "
+            "data are available only with restrictions."
+        ) in explanation.reasons

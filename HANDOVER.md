@@ -8,59 +8,49 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#385 — an unreachable source was stored as a finding (Swift + Android), and
-the trial test misfired on all three platforms**, branch
-`fix/unreachable-transparency-sources-385`, **PR #410**. Compress into **Recently landed**
-once merged. PR #388's review commit (`3c71a15`) had already gated the
-missing-registration indicator on Swift and Android and added the CrossRef
-warning; what remained:
+**#386 — desktop transparency certainty and high-risk explanation**, branch
+`feat/desktop-transparency-certainty-386`, **PR #419**. Compress into
+**Recently landed** once merged.
 
-- **Provisional results (Swift + Android).** `TransparencyResult.sourcesUnreachable`
-  (`Bool?`, nil = not recorded, so older JSON still decodes) is set when
-  PubMed, CrossRef or ClinicalTrials.gov fails *or answers unreadably*; a 404
-  is an answer. `isProvisional`, and `needsReanalysis` = stale, or provisional
-  and not written by a newer build (Python's `may_replace_stored`). The iOS
-  `Document.transparencyAnalysisIsStale` became `…NeedsRerun` (workflow filter
-  and both Re-analyze buttons); Android's `needsTransparencyAnalysis` asks
-  `needsReanalysis`. Detail views and the explanation carry
-  `provisionalResultCaveat`. A PubMed failure now warns
-  (`pubMedUnreachableWarning`) instead of only logging.
-- **Python (canonical) had two gaps Swift didn't.** `trial_registration_assessed`
-  meant only "PubMed answered", so a registry outage *and* an ISRCTN/EudraCT
-  registration both raised "Clinical trial without detected registration"
-  beside a warning saying the opposite. Now every cited trial must be
-  answered (`every_trial_answered`); an outage also sets
-  `registry_record_unreachable`, which feeds `sources_unreachable`. A registry
-  with no client is unassessed but *not* provisional (no re-analysis reads it).
-- **Trial titles by whole word, all three** — new shared contract
-  `doc/cross_platform/transparency_parity/trial_title_patterns.json`. The
-  substring test read "atrial fibrillation" (`trial`) and "myocardial
-  infarction" (`rct`) as trials.
-- **Found on the way:** `export_to_csv` raised `ValueError` on every report
-  since #359 (`coi_disclosure_level` missing from `fieldnames`) — fixed; its
-  100-character title cut lodged as **#409**.
-- **Review round (same PR).** Swift: esearch listing the PMID and efetch then
-  failing (or breaking off) returned an empty page with the loss in
-  `shortfalls`, not a throw — now provisional too; and a cancel inside
-  `analyze` is rethrown (`isCancellation`) instead of stored as an outage.
-  Python: every NLM trial registry counts (`PUBMED_TRIAL_REGISTRY_DATABANKS`;
-  ANZCTR, ChiCTR… read as unregistered), a registry body without a
-  `protocolSection` is unreachable (was a registration with an empty ID),
-  and `extract_trial_info` checks every shape. Kotlin folds Unicode
-  whitespace before the trial match (Java's `\s` is ASCII-only; contract
-  gained no-break-space cases). iOS: the workflow gate is
-  `Document.needsTransparencyAnalysis`. Constructors default
-  `sourcesUnreachable` to `false`. Lodged: #411 (provisional shown only in
-  detail views), #412 (newer build's provisional caveat, no button), #413
-  (undecodable newer-build result overwritten), #414 (Swift PMID lookup
-  adopts the first hit), #415 (permanent failures re-analysed forever);
-  malformed CrossRef funders added to #391.
-- Versions: Python `2.2`, Swift and Android `7`. `errors` stays in the Swift
-  and Kotlin models (a required key; dropping it breaks an older synced build)
-  though nothing writes it.
-- Out of scope, still open: #389 (`hasResults`), #390 (NCT IDs from the title
-  only), #391 ("funders not checked" on Low/Medium). "Phase 1/2" digit forms
-  are not trial words; they never were.
+- **What the reader sees.** Every rating made without full text says "Limited
+  certainty because of lack of full text access" (badge `High · limited`),
+  and so does the report prompt's line for it. The badge tooltip names the
+  rules that made a study High. A new report section, "Why Studies Were
+  Rated High Transparency Risk", also gives the score's stored terms when
+  the score was one of them, the other concerns and the caveats. The
+  methodology gains limited and provisional counts.
+- **"Without full text" means nothing was recognised in it.** The analyser's
+  `TransparencyReport.full_text_analyzed` is set only when the article's own
+  text was read *and* a section of it recognised; blank text is no text.
+  PLOS ONE's front-matter statements never reach the markdown, so its
+  articles read as limited until #420. **Analyser version `2.3`**, so stored
+  rows are re-analysed under the new meaning.
+- **One function each.** The score is the clamped sum of
+  `score_components(report)`, and a rating is High iff `high_risk_triggers`
+  is non-empty. The explanation re-reads the triggers under the **user's
+  settings**, which are threaded down to the badge, and which are **one
+  shared object**: the advanced dialog's values are copied into
+  `config.transparency` (`TransparencySettings.assign_from`), so ratings and
+  their explanations cannot use different rules (part 1 of #417).
+  `score_components` is a stored column: NULL means not recorded. A value
+  that will not decode, is empty, or does not add up to the stored score
+  also reads as `None`, and the section then says the breakdown is not
+  available. Neither the analyser nor storage records a breakdown that does
+  not add up.
+- **Contract.** `doc/cross_platform/transparency_parity/risk_explanation_strings.json`
+  is bound by Python, Swift and Kotlin tests: 9 cases, and a `binds` key for
+  platform-specific ones.
+- **No Unassessed rule on the desktop, deliberately.** Python charges a
+  missing statement only against text it read (#352, #353, #359), pinned by
+  `tests/test_no_high_rests_on_unread_text.py`. If that ever fails, the
+  desktop needs Swift's rule and its "(full text not searched)" wording.
+- **User decision (2026-09-27):** the desktop words the "no current rule
+  matches" and breakdown-unavailable caveats itself. On the desktop an
+  earlier analyser's rows are never shown, and Re-analyse offers only
+  missing, provisional or out-of-date rows, so Swift's cause and remedy are
+  false there.
+- Lodged: #416–#418, #420–#422 (see **Potential follow-ups**); a note
+  added to #391, and to #417 on what is left of it.
 
 ## Recently landed (context)
 
@@ -68,51 +58,42 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **An unreachable source is provisional, not a finding; a trial is a whole
+  word** (all three; PR #410, #385; merged 2026-09-27). Swift + Android store
+  `sourcesUnreachable` (`Bool?`) when a source fails *or answers unreadably*
+  (a 404 is an answer); `needsReanalysis` = stale, or provisional and not
+  from a newer build; a cancel is rethrown. Python: **every cited trial must
+  be answered** before "without detected registration" fires; every NLM
+  registry databank counts. Trial titles match by whole word
+  (`trial_title_patterns.json`). Versions: Python `2.2`, Swift/Android `7`.
+  Lodged: #409, #411–#415.
 - **Inline markup and mixed citations keep their text** (PR #397; PR #405,
-  #398; merged 2026-09-26). **Never `findtext` a mixed-content element** —
-  it returns the text before the first child: Python reads the whole element
-  (`_element_text`, `_abstract_text`, `_get_text` for captions), and Swift's
-  `PubMedXMLParser` resets its buffer only at the `textElements` it reads, not
-  at every `<i>`. Swift + Android JATS: every descendant of a `<mixed-citation>`
-  merges into it (`mixedCitationDepth`, an ancestor test — bmlib #146), and
-  `defersToTheDeposit(printedPartCount:)` prints the deposit wherever fewer than
-  two parts would print (bmlib #268); `citationIsDeposit` keeps an
-  `<element-citation>`'s stray text from standing in for a tagged part. The
-  Android JATS parser is JVM-testable now (kxml2, test-only). Stored documents
-  keep their truncated title until searched again. Lodged: #399–#404,
-  #406–#408.
+  #398; merged 2026-09-26). **Never `findtext` a mixed-content element** — it
+  returns the text before the first child. Swift + Android JATS: every
+  descendant of a `<mixed-citation>` merges into it (an ancestor test — bmlib
+  #146), and the deposit prints wherever fewer than two parts would (bmlib
+  #268). The Android JATS parser is JVM-testable (kxml2, test-only).
+  Lodged: #399–#404, #406–#408.
 - **Funders named by brand; back-matter headings; PubMed identifiers**
-  (PR #395 Swift + Android, PR #396 all three, #394; merged 2026-09-24/25).
-  `sponsor_patterns.json` schema 4 adds `industry_brands`: whole-word brands
-  from the curated known-funder list plus Janssen and Genentech; **"Eli Lilly"
-  is the one spelled-out exception** (Lilly Endowment), **UCB is left out**
-  (UC Berkeley), and **a brand beside a foundation word is the charity**.
-  Every brand and foundation word has a probe on every platform. The funder
-  corpus was re-audited (precision 0.958, recall 0.657, floors 0.95 / 0.65)
-  and **now differs from bmlib's copy**. Swift JATS: a container's own
-  heading titles its implicit section (bmlib #231); Swift PubMed reads
-  `ArticleId` / `ELocationID` (a cited reference's are ignored); the Swift and
-  Kotlin extractors accept a trailing "Statement"/"Disclosure"/"Declaration"/
-  "Section" as Python does. Analyzer versions: Python `2.1`, Swift and
-  Android `6`.
+  (PR #395, PR #396, #394; merged 2026-09-24/25). `sponsor_patterns.json`
+  schema 4 adds whole-word `industry_brands`; **"Eli Lilly" is the one
+  spelled-out exception**, **UCB is left out** (UC Berkeley), and **a brand
+  beside a foundation word is the charity**. The funder corpus was re-audited
+  (precision 0.958, recall 0.657, floors 0.95 / 0.65) and **now differs from
+  bmlib's copy**.
 - **Reports explain transparency ratings; Android analyses transparency**
   (Swift + Android; PR #388, #116; merged 2026-09-24). **Rating and
   explanation come from one function** (`highRiskTriggers` /
   `scoreComponents`). **Full text is the gold standard**: every rating made
   without it says "Limited certainty because of lack of full text access",
-  and a High whose every reason rests on unsearched text shows as
-  **Unassessed** — display only, stored ratings unchanged
-  (`TransparencyResult.fullTextSearched`). Android: Kotlin port of the
-  analysers, Room v7 transparency column, an `ANALYZING_TRANSPARENCY` step;
-  every Android rating says "limited" until #384. **The desktop has none of
-  this yet (#386).** Lodged: #384–#387, #389–#392.
+  and on the apps a High whose every reason rests on unsearched text shows
+  as **Unassessed** (display only). Every Android rating says "limited" until
+  #384. The desktop port is PR #419 (#386), in flight above.
 - **Model lists and pricing** (all three; PR #383, merged 2026-09-24). Swift
-  builds every model-list URL from the same `/v1` root as `chat/completions`
-  (`modelListURL(for:baseURL:)`) — it used to request `/v1/v1/models`. **An
-  unlisted Claude ID gets its family's dearest current rate.** Android prices
-  through one `ModelPricing` (`LLMProvider.pricedModel`); a fetched-only model
-  was recorded at $0. Python's `list_models` raises rather than answering
-  with a fallback table. Release **0.5.0 / apps 1.6.0** followed (PR #393).
+  builds every model-list URL from the `/v1` root; **an unlisted Claude ID
+  gets its family's dearest current rate**; Python's `list_models` raises
+  rather than answering with a fallback table. Release **0.5.0 / apps
+  1.6.0** followed (PR #393).
 - **One undecodable transparency row is one row** (Python; #374, PR #379,
   merged 2026-09-23). Readers return `StoredTransparency`
   (`TransparencyResult | UndecodableTransparencyRow`). **Split by version
@@ -256,15 +237,24 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Transparency after PR #388: desktop parity and the ports
 
-- **#386 — the desktop has none of PR #388**: no "Limited certainty" wording,
-  no high-risk explanation section, no Unassessed display. Python is otherwise
-  canonical for transparency, so this is the platform that lags.
-- **#385** in flight above. **#390** Swift + Android look trial registrations up from the title only
+- **#390** Swift + Android look trial registrations up from the title only
   (port Python's PubMed databank-link source); **#389** a missing
   `hasResults` reads as "results not posted"; **#391** unchecked funders are
   not flagged on Low/Medium, and a malformed CrossRef funder array is silent;
-  **#392** document-set parity, a shared explanation fixture, a
-  `StoredTransparency` type.
+  **#392** document-set parity and a `StoredTransparency` type (its shared
+  explanation fixture is PR #419's contract). From PR #410: **#411**
+  provisional shown only in detail views; **#412** a newer build's provisional caveat offers no button;
+  **#413** an undecodable newer-build result is overwritten (Swift + Android);
+  **#414** Swift's PMID lookup adopts the first hit; **#415** permanent
+  lookup failures are re-analysed forever. From PR #419: **#416** the
+  limited-certainty summary is worded differently on Swift and Android;
+  **#417** a replaced `LiteConfig` never reaches the tabs (the dialog half
+  is done); **#418** stored levels are not re-rated when settings change;
+  **#420** PLOS front-matter COI/data statements are dropped from the
+  markdown, and the XML fallback charges `not_stated` beside a `<notes>`
+  statement; **#421** that fallback reads the XML for data availability
+  only, so its note and reason contradict; **#422** Swift detail views
+  truncate the confidence the reason sentence rounds.
 - Android: **#384** analyse full text (every rating is "limited" until then);
   **#387** data-availability parity, DAO/migration tests.
 - **#400** the data-availability heading rule (`'data' in title and ('avail'

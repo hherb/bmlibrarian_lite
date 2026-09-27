@@ -42,6 +42,7 @@ from ..constants import AUDIT_CARD_SPACING, AUDIT_UI_UPDATE_DELAY_MS
 from ..data_models import LiteDocument, ScoredDocument
 from ..quality.data_models import QualityAssessment
 from ..transparency import TransparencyOutcome, TransparencyResult
+from ..transparency.transparency_settings import TransparencySettings
 from .document_card import DocumentCard
 
 logger = logging.getLogger(__name__)
@@ -66,14 +67,22 @@ class AuditLiteratureTab(QWidget):
     document_clicked = Signal(str)  # doc_id
     send_to_interrogator = Signal(str)  # doc_id for interrogation
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        transparency_settings: TransparencySettings | None = None,
+    ) -> None:
         """
         Initialize the literature tab.
 
         Args:
             parent: Parent widget
+            transparency_settings: The settings each card's transparency
+                badge names its high-risk rules under; defaults when
+                omitted.
         """
         super().__init__(parent)
+        self._transparency_settings = transparency_settings
         self._cards_by_doc_id: Dict[str, DocumentCard] = {}
         self._documents: Dict[str, LiteDocument] = {}
         self._scores: Dict[str, int] = {}
@@ -209,6 +218,7 @@ class AuditLiteratureTab(QWidget):
                 score_rationale=score_rationale,
                 quality_assessment=quality,
                 transparency_outcome=transparency,
+                transparency_settings=self._transparency_settings,
             )
             card.clicked.connect(self._on_card_clicked)
             card.send_to_interrogator.connect(self._on_send_to_interrogator)
