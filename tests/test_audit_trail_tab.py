@@ -21,6 +21,8 @@ Tests the audit trail functionality including queries,
 literature, and citations sub-tabs.
 """
 
+import dataclasses
+
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -35,7 +37,13 @@ from bmlibrarian_lite.gui.audit_literature_tab import AuditLiteratureTab
 from bmlibrarian_lite.gui.audit_citations_tab import AuditCitationsTab, CitationCard
 from bmlibrarian_lite.data_models import LiteDocument, ScoredDocument, Citation
 from bmlibrarian_lite.config import LiteConfig
-from bmlibrarian_lite.transparency import get_default_settings
+from bmlibrarian_lite.transparency import (
+    COI_NOT_STATED,
+    TransparencyResult,
+    TransparencyRisk,
+    get_default_settings,
+)
+from bmlibrarian_lite.transparency_terms import UNEXPLAINED_RATING_CAVEAT
 
 
 @pytest.fixture(scope="module")
@@ -397,3 +405,86 @@ class TestAuditTrailTab:
 
         citations = tab.get_citations_for_document(sample_citation.document.id)
         assert len(citations) == 1
+
+
+class TestAuditTrailTabTransparencySettings:
+    """The user's transparency settings reach every badge (#386, review focus 1).
+
+    ``AuditTrailTab`` passes ``config.transparency`` to ``AuditLiteratureTab``,
+    which passes it to every ``DocumentCard`` it builds, which passes it to
+    the ``TransparencyBadge`` it builds. That badge is built at two different
+    hops -- ``DocumentCard.__init__`` when a card is constructed with its
+    transparency outcome already known, and ``set_transparency_outcome``
+    when the outcome arrives later for a card that already exists -- and a
+    settings kwarg dropped at either hop would silently fall back to
+    defaults rather than fail loudly, so both are exercised here rather than
+    trusting that one covers the other.
+    """
+
+    @staticmethod
+    def _non_default_settings():
+        """Settings that turn off the COI trigger a stored High relies on."""
+        return dataclasses.replace(
+            get_default_settings(), missing_coi_triggers_downgrade=False
+        )
+
+    @staticmethod
+    def _high_coi_not_stated_result(doc_id: str) -> TransparencyResult:
+        """A High whose only rule is the COI trigger the test settings disable.
+
+        Under the default settings this is explained ("Rated high risk
+        because... No conflict of interest statement..."); under
+        ``_non_default_settings`` no rule matches, so the badge falls back to
+        ``UNEXPLAINED_RATING_CAVEAT`` -- which only happens if the badge was
+        actually judged under the non-default settings, not the defaults.
+        """
+        return TransparencyResult(
+            document_id=doc_id,
+            transparency_score=65,
+            risk_level=TransparencyRisk.HIGH,
+            coi_disclosure=COI_NOT_STATED,
+            full_text_analyzed=True,
+        )
+
+    def test_construction_path_uses_the_configured_settings(
+        self, qapp, mock_storage, sample_document
+    ) -> None:
+        """A card built with its transparency outcome already known (#386).
+
+        The outcome is delivered before the document, so
+        ``AuditLiteratureTab._add_document_card`` constructs the
+        ``DocumentCard`` with it already in hand, and the badge is built in
+        ``DocumentCard.__init__`` rather than ``set_transparency_outcome``.
+        """
+        config = MagicMock(spec=LiteConfig)
+        config.transparency = self._non_default_settings()
+        tab = AuditTrailTab(config, mock_storage)
+
+        tab.literature_tab.update_transparency(
+            sample_document.id, self._high_coi_not_stated_result(sample_document.id)
+        )
+        tab.literature_tab.add_documents([sample_document])
+
+        card = tab.literature_tab.get_card(sample_document.id)
+        assert UNEXPLAINED_RATING_CAVEAT in card._transparency_badge.toolTip()
+
+    def test_update_path_uses_the_configured_settings(
+        self, qapp, mock_storage, sample_document
+    ) -> None:
+        """A card whose badge is built later, in ``set_transparency_outcome`` (#386).
+
+        The document is added with no transparency outcome yet, so its card
+        starts with no badge; ``update_transparency`` then builds one for
+        the first time.
+        """
+        config = MagicMock(spec=LiteConfig)
+        config.transparency = self._non_default_settings()
+        tab = AuditTrailTab(config, mock_storage)
+
+        tab.literature_tab.add_documents([sample_document])
+        tab.literature_tab.update_transparency(
+            sample_document.id, self._high_coi_not_stated_result(sample_document.id)
+        )
+
+        card = tab.literature_tab.get_card(sample_document.id)
+        assert UNEXPLAINED_RATING_CAVEAT in card._transparency_badge.toolTip()

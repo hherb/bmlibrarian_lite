@@ -33,6 +33,15 @@ def qapp():
 
 
 def _row(**changes) -> TransparencyResult:
+    """Build a High, full-text-analysed result, overridden field by field.
+
+    Args:
+        **changes: Fields to replace on the base result, as accepted by
+            ``dataclasses.replace``.
+
+    Returns:
+        The result, with ``changes`` applied.
+    """
     base = TransparencyResult(
         document_id="d",
         transparency_score=65,
