@@ -766,6 +766,22 @@ final class TransparencyParityTests: XCTestCase {
         }
     }
 
+    /// The unexplained-rating caveat is decoded from the contract but, until
+    /// now, only ever compared indirectly through a case's `expected.caveats`
+    /// -- never against the constant a reader would change. Swift carries no
+    /// named constant for it (it is inline in `TransparencyRiskExplanation`),
+    /// so this binds the case's produced caveat to the contract's own string
+    /// directly (#386).
+    func testUnexplainedRatingCaveatMatchesTheContractString() throws {
+        let contract: RiskExplanationContract = try Self.decodeFixture(Self.riskExplanationFixture)
+        guard let c = contract.cases.first(where: { $0.storedRiskLevel != nil }) else {
+            XCTFail("no case in the contract stores a risk level to exercise the unexplained caveat")
+            return
+        }
+        let explanation = TransparencyRiskExplanation(result: riskExplanationResult(for: c))
+        XCTAssertEqual(explanation.caveats.first, contract.strings.unexplainedRatingCaveat, c.name)
+    }
+
     private func riskExplanationResult(for c: RiskExplanationContract.Case) -> TransparencyResult {
         let f = c.findings
         let level: DataDisclosureLevel
@@ -775,18 +791,36 @@ final class TransparencyParityTests: XCTestCase {
         case "restricted": level = .restricted
         case "not_available": level = .notAvailable
         case "not_stated": level = .notStated
-        default: level = .unknown
+        case "unknown": level = .unknown
+        default:
+            XCTFail("\(c.name): unknown data_availability finding '\(f.dataAvailability)'")
+            level = .unknown
         }
         let compliance: ResultsComplianceStatus
         switch f.results {
         case "compliant": compliance = .compliant
         case "missing": compliance = .missing
-        default: compliance = .unknown
+        case "unknown": compliance = .unknown
+        default:
+            XCTFail("\(c.name): unknown results finding '\(f.results)'")
+            compliance = .unknown
         }
         var builder = TransparencyResultBuilder(doi: "10.1000/test", pmid: "123")
-        builder.coiAnalysis = f.coi == "disclosed"
-            ? COIAnalysisResult(statement: "The authors declare no competing interests.")
-            : .notAvailable
+        switch f.coi {
+        case "disclosed":
+            builder.coiAnalysis = COIAnalysisResult(statement: "The authors declare no competing interests.")
+        case "not_stated":
+            builder.coiAnalysis = .notAvailable
+        case "disclosed_with_industry_ties":
+            builder.coiAnalysis = COIAnalysisResult(
+                statement: "Author X has received consulting fees from Acme Pharma.",
+                hasIndustryTies: true,
+                confidence: 1.0
+            )
+        default:
+            XCTFail("\(c.name): unknown coi finding '\(f.coi)'")
+            builder.coiAnalysis = .notAvailable
+        }
         builder.dataAvailability = DataAvailabilityResult(disclosureLevel: level)
         builder.industryFundingDetected = f.industryFunding
         builder.industryFundingConfidence = f.industryConfidence

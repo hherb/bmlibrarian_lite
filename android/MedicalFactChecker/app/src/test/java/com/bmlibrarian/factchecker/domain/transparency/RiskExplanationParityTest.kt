@@ -133,6 +133,11 @@ class RiskExplanationParityTest {
         builder.coiAnalysis = when (f.coi) {
             "disclosed" -> COIAnalysisResult(statement = "The authors declare no competing interests.")
             "not_stated" -> COIAnalysisResult.NOT_AVAILABLE
+            "disclosed_with_industry_ties" -> COIAnalysisResult(
+                statement = "Author X has received consulting fees from Acme Pharma.",
+                hasIndustryTies = true,
+                confidence = 1.0,
+            )
             else -> error("${case.name}: unknown coi finding '${f.coi}'")
         }
         builder.dataAvailability = DataAvailabilityResult(disclosureLevel = level)

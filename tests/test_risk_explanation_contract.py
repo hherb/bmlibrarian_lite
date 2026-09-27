@@ -119,22 +119,64 @@ class TestConfidencePercent:
 
 
 def _case_ids(contract_path=CONTRACT):
+    """Name every case in the contract, for parametrizing ``test_case``.
+
+    Args:
+        contract_path: The contract file to read names from.
+
+    Returns:
+        Each case's ``name``, in the file's order.
+    """
     return [c["name"] for c in json.loads(contract_path.read_text())["cases"]]
 
 
+def _coi_info(coi: str) -> ConflictOfInterest:
+    """Build the conflict-of-interest finding a case's ``coi`` value names.
+
+    Args:
+        coi: ``"disclosed"``, ``"disclosed_with_industry_ties"`` or
+            ``"not_stated"``.
+
+    Returns:
+        The finding.
+
+    Raises:
+        ValueError: If ``coi`` is none of the recognised values.
+    """
+    if coi == "disclosed":
+        return ConflictOfInterest(
+            statement="The authors declare no competing interests.",
+            disclosure_level=COIDisclosureLevel.DISCLOSED,
+        )
+    if coi == "disclosed_with_industry_ties":
+        return ConflictOfInterest(
+            statement="Author X has received consulting fees from Acme Pharma.",
+            disclosure_level=COIDisclosureLevel.DISCLOSED,
+            has_industry_ties=True,
+            confidence=1.0,
+        )
+    if coi == "not_stated":
+        return ConflictOfInterest.not_stated()
+    raise ValueError(f"unknown coi finding {coi!r}")
+
+
 def _report(findings: dict) -> TransparencyReport:
+    """Build the analyser report a contract case's ``findings`` describe.
+
+    Args:
+        findings: One case's ``findings`` mapping (platform-neutral: data
+            availability, COI, industry funding and its confidence, trial
+            registration, results compliance, outcome switching, and
+            whether a source was unreachable).
+
+    Returns:
+        The report, scored by :func:`calculate_transparency_score`.
+    """
     report = TransparencyReport(doi="10.1000/test", pmid="123")
     report.data_availability = DataAvailabilityInfo(
         disclosure_level=DataDisclosureLevel(findings["data_availability"])
     )
-    report.coi_info = (
-        ConflictOfInterest(
-            statement="The authors declare no competing interests.",
-            disclosure_level=COIDisclosureLevel.DISCLOSED,
-        )
-        if findings["coi"] == "disclosed"
-        else ConflictOfInterest.not_stated()
-    )
+    report.coi_info = _coi_info(findings["coi"])
     report.industry_funding_detected = findings["industry_funding"]
     report.industry_funding_confidence = findings["industry_confidence"]
     if findings["trial_registered"]:
