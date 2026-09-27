@@ -112,6 +112,12 @@ Also not ported:
 
 - Copies the components onto the result.
 - `full_text_supplied` becomes "non-blank", as Swift's is.
+  *Revised after review:* the result copies the analyser's own
+  `TransparencyReport.full_text_analyzed`, set only when the article's text
+  was read and at least one section of it recognised. Blank text is
+  normalised to none inside `analyze()`. Text that arrived but could not be
+  segmented had counted, so a rating resting on metadata alone was shown
+  without its note (PLOS ONE, #420).
 
 `storage.py`:
 
@@ -120,11 +126,16 @@ Also not ported:
 - The column is written by `save_transparency_result` and read by
   `_transparency_result_from_row`.
 - An undecodable value makes the row undecodable, the same as any other
-  column (the #374 path).
+  column (the #374 path). *Revised:* it costs only that column (commit
+  cebc7f7), and after review an empty breakdown, or one that does not add up
+  to the stored score, reads as `None` too, so the section says the
+  breakdown is not available rather than print a false sum.
 
 There is **no analyser version bump**. Scores, levels, indicators and caveats
 are unchanged for the same inputs; the only difference is that new rows record
-their terms.
+their terms. *Revised after review:* the version is bumped to `2.3`, because
+the meaning of `full_text_analyzed` changed and a stored row would otherwise
+keep a "full text" it never read.
 
 ### 2. The explanation
 

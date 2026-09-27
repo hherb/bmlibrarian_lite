@@ -9,7 +9,7 @@ identical behaviour on Python, Swift and Kotlin (issue #105).
 | `sponsor_patterns.json` | bound | bound | bound |
 | `trial_title_patterns.json` | bound | bound | bound |
 | `funder_names.json` (floors and composition) | bound | bound | bound |
-| `risk_explanation_strings.json` | bound | bound | bound |
+| `risk_explanation_strings.json` | bound (not `swift_kotlin_only`, nor cases bound away from it) | bound | bound |
 
 ## Why this exists
 
@@ -256,7 +256,7 @@ Binds the wording PR #388 (Swift + Android) and #386 (Python) share for
 saying how far a transparency rating can be relied on, and for explaining why
 a study was rated high risk (#392).
 
-The file has three parts, with different reach:
+The file has four parts, with different reach:
 
 - **`strings`** — the certainty note, the badge suffix, the provisional
   caveat, and the high-risk section's heading and labels. Bound on **all
@@ -266,6 +266,9 @@ The file has three parts, with different reach:
   `TransparencyParityTests`), and the equivalent in Kotlin's
   `RiskExplanationParityTest`
   (`android/…/domain/transparency/RiskExplanationParityTest.kt`).
+- **`introduction_examples`** — the high-risk section's introduction for a
+  given count of studies. Bound on **all three platforms** by the same
+  tests.
 - **`swift_kotlin_only`** — the "certainty unknown" note, the "Unassessed"
   label and note, and (since the user's 2026-09-27 decision) the
   unexplained-rating caveat. Bound on **Swift and Android only**, by
@@ -274,7 +277,8 @@ The file has three parts, with different reach:
   Unassessed states (see below), and the unexplained-rating caveat's Swift
   wording names a cause and remedy that do not hold on the desktop — an
   earlier analyser's rows are never shown there (`is_current`), and
-  "Re-analyse" never offers a current row — so Python carries its own
+  "Re-analyse" never offers a current row whose sources were all read (a
+  final row) — so Python carries its own
   wording (`transparency_terms.UNEXPLAINED_RATING_CAVEAT`) instead of
   asserting this key. Swift's `testUnexplainedRatingCaveatMatchesTheContractString`
   binds the sentence directly, not just through a case's `expected.caveats`.
@@ -290,10 +294,12 @@ The file has three parts, with different reach:
   from inside the test, and a separate test
   (`TestTheCaseBoundAwayFromPython`) asserts the desktop's own caveat text
   for that same case's findings. Swift's `testRiskExplanationCasesMatchTheContract`
-  and Kotlin's `RiskExplanationParityTest` run every case, since both bind
-  it. Every case has `full_text_searched: true` — the only form in which the
-  desktop can record a missing COI or data statement at all (see below), so
-  it is the only form all three platforms can agree on.
+  and Kotlin's `RiskExplanationParityTest` likewise run only the cases whose
+  `binds` names them (all of them, when a case carries no `binds`). Every
+  case is built with its full text searched — each platform's case builder
+  sets it, and the fixture has no key for it. That is the only form in which
+  the desktop can record a missing COI or data statement at all (see below),
+  so it is the only form all three platforms can agree on.
 
 ### Why the desktop has no Unassessed rule
 
@@ -320,12 +326,24 @@ searched)" qualifier that never prints.
 
 `tests/test_no_high_rests_on_unread_text.py` pins the invariant this
 argument depends on: every combination of PubMed read or not with the three
-states Europe PMC XML can be in (no PMC ID, no open-access copy, XML with no
-sections) charges nothing, plus one control case where full text *was* read
-and is still charged, so the six unread cases are not passing by an analyser
-that charges nothing at all. If it ever fails, the desktop's scoring has
-stopped fixing the defect at its source, and needs the Unassessed rule and
-the "not searched" wording after all.
+Europe PMC states in which no text is read (no PMC ID, no open-access copy,
+XML with no sections) charges nothing, plus one control case where full text
+*was* read and is still charged, so the six unread cases are not passing by
+an analyser that charges nothing at all. A third test covers Europe PMC XML
+*with* sections: that is read text, so a data statement missing from it is
+charged, and the rating still carries the limited-certainty note, because
+the fallback reads it for the data statement alone (#421). If the invariant
+ever fails, the desktop's scoring has stopped fixing the defect at its
+source, and needs the Unassessed rule and the "not searched" wording after
+all.
+
+The desktop's certainty note follows the analyser's
+`TransparencyReport.full_text_analyzed`: set only when the article's own
+text was read *and* at least one section of it was recognised
+(`tests/test_full_text_analyzed.py`). Blank text is no text, and a full text
+in which nothing could be recognised — the whole of PLOS ONE, until #420 —
+established nothing, so a rating resting on it says its certainty is
+limited.
 
 ## Changing a pattern
 

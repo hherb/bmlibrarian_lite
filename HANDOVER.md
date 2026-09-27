@@ -13,18 +13,30 @@ its slice has landed; add a new section when handing off new work.
 **Recently landed** once merged.
 
 - **What the reader sees.** Every rating made without full text says "Limited
-  certainty because of lack of full text access" (badge `High · limited`).
-  Each High is explained in the badge tooltip and in a new report section,
-  "Why Studies Were Rated High Transparency Risk": the rules that fired, the
-  score's stored terms when the score was one of them, other concerns and
-  caveats. The methodology gains limited and provisional counts.
+  certainty because of lack of full text access" (badge `High · limited`),
+  and so does the report prompt's line for it. The badge tooltip names the
+  rules that made a study High. A new report section, "Why Studies Were
+  Rated High Transparency Risk", also gives the score's stored terms when
+  the score was one of them, the other concerns and the caveats. The
+  methodology gains limited and provisional counts.
+- **"Without full text" means nothing was recognised in it.** The analyser's
+  `TransparencyReport.full_text_analyzed` is set only when the article's own
+  text was read *and* a section of it recognised; blank text is no text.
+  PLOS ONE's front-matter statements never reach the markdown, so its
+  articles read as limited until #420. **Analyser version `2.3`**, so stored
+  rows are re-analysed under the new meaning.
 - **One function each.** The score is the clamped sum of
   `score_components(report)`, and a rating is High iff `high_risk_triggers`
   is non-empty. The explanation re-reads the triggers under the **user's
-  settings**, which are threaded down to the badge. `score_components` is a
-  stored column: NULL means not recorded, and a value that will not decode
-  reads as `None` plus the unreadable-column caveat. **No analyser version
-  bump.**
+  settings**, which are threaded down to the badge, and which are **one
+  shared object**: the advanced dialog's values are copied into
+  `config.transparency` (`TransparencySettings.assign_from`), so ratings and
+  their explanations cannot use different rules (part 1 of #417).
+  `score_components` is a stored column: NULL means not recorded. A value
+  that will not decode, is empty, or does not add up to the stored score
+  also reads as `None`, and the section then says the breakdown is not
+  available. Neither the analyser nor storage records a breakdown that does
+  not add up.
 - **Contract.** `doc/cross_platform/transparency_parity/risk_explanation_strings.json`
   is bound by Python, Swift and Kotlin tests: 9 cases, and a `binds` key for
   platform-specific ones.
@@ -37,7 +49,8 @@ its slice has landed; add a new section when handing off new work.
   earlier analyser's rows are never shown, and Re-analyse offers only
   missing, provisional or out-of-date rows, so Swift's cause and remedy are
   false there.
-- Lodged: #416–#418 (see **Potential follow-ups**); a note added to #391.
+- Lodged: #416–#418, #420–#422 (see **Potential follow-ups**); a note
+  added to #391, and to #417 on what is left of it.
 
 ## Recently landed (context)
 
@@ -235,8 +248,13 @@ Open issues by family; each issue carries the detail. None blocks another.
   **#414** Swift's PMID lookup adopts the first hit; **#415** permanent
   lookup failures are re-analysed forever. From PR #419: **#416** the
   limited-certainty summary is worded differently on Swift and Android;
-  **#417** desktop settings changes never reach the badge; **#418** stored
-  levels are not re-rated when settings change.
+  **#417** a replaced `LiteConfig` never reaches the tabs (the dialog half
+  is done); **#418** stored levels are not re-rated when settings change;
+  **#420** PLOS front-matter COI/data statements are dropped from the
+  markdown, and the XML fallback charges `not_stated` beside a `<notes>`
+  statement; **#421** that fallback reads the XML for data availability
+  only, so its note and reason contradict; **#422** Swift detail views
+  truncate the confidence the reason sentence rounds.
 - Android: **#384** analyse full text (every rating is "limited" until then);
   **#387** data-availability parity, DAO/migration tests.
 - **#400** the data-availability heading rule (`'data' in title and ('avail'
