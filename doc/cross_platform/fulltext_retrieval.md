@@ -1128,6 +1128,12 @@ prefix reproduces the narrower half of the same defect (#209).
 - Use `requests` for HTTP
 - Use `pathlib` for file paths
 - Store cache in `~/.bmlibrarian_lite/cache/`
+- `EuropePMCClient.fetch_fulltext_xml` is `fetch_fulltext_xml` above, typed:
+  a `FullTextXmlFetch` that is served, absent (the 404) or unreachable with
+  a `RequestFailure` of its real kind (#429). A blank 200 is incomplete, not
+  absent. Discovery records a 404 on an article the search listed as having
+  XML as a failure (`HTTP 404`), because the two answers contradict each
+  other.
 
 ### Swift (iOS/macOS)
 

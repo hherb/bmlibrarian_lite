@@ -8,62 +8,18 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#428 — charge a missing statement only when every end-matter heading is
-classified** (Python), branch `fix/classify-end-matter-headings-428`, **PR #431**. Compress
-into **Recently landed** once merged.
+**#429 — a typed full-text XML fetch** (Python), branch
+`fix/typed-fulltext-xml-fetch-429`. Compress into **Recently landed** once merged.
 
-- **The converter marks the end matter**: `END_MATTER_MARKER` (an HTML
-  comment; Qt's markdown view hides it) before the back matter and front
-  statements, and in `_render_children` wherever end matter first appears
-  in the body (a haematology journal keeps its footnotes, and its "利益冲突"
-  statement, in a body `<sec>`). An untitled footnote group after a titled
-  section's own text gets its own heading (`_runs_on_after_other_content`).
-  Converter version **5**. The extractor steps over the marker; it neither
-  joins nor ends a section.
-- **`study_transparency_analyzer/statement_headings.py`** (new) holds the
-  statement heading patterns (moved out of `extract_fulltext_sections`) and
-  the classification (`unclassified_headings` has the full rule). Classified:
-  a statement's heading **other than the one sought**; a known neighbour
-  (`KNOWN_NON_STATEMENT_HEADING_PATTERNS`, from the survey); a part of the
-  *other* statement (`STATEMENT_PART_HEADING_PATTERNS`: Cureus's ICMJE
-  parts, and "Code availability" for data); a supplement whose text names
-  no deposit (`DATA_DEPOSIT_RE`); a catch-all ("Author Notes", "Footnotes",
-  "Disclaimer", "Biography", …) or a subsection of a named or catch-all
-  section whose text avoids the statement's vocabulary. A heading with no
-  text is asked about only for the statement its words name
-  (`HEADING_WORDS_BY_STATEMENT`). **The end matter starts at the marker, or
-  at the first top-level statement heading before it**; a statement nested
-  in the body (Lancet's "Role of the funding source") does not move it. Body
-  headings before it whose words name a statement are asked about too. The
-  title is no section's ancestor.
-- **No marker, no charge** (user's call): PDF text, and JATS with no
-  end-matter element at all, are `not_assessed` / `unknown`
-  (`END_MATTER_NOT_SEGMENTED`). `segment_unmarked_end_matter` is the stub
-  where an LLM-based PDF segmentation will plug in (#430).
-- The `_mentions` wording guard stays (gained ARVO's "Commercial
-  relationships: none." and "conflicts of research interest"). Analyser
-  version **2.6**.
-- **Measured**, master → first commit, nothing newly charged, industry ties
-  unchanged. 1,292 local PMC articles: COI charged 23 → 9, data 209 → 133.
-  Held-out 331 (2021–22, `tmp/jats-428-heldout`, mostly Springer): COI
-  34 → 20, data 160 → 108. 10 false charges released (5 × "利益冲突",
-  ARVO's run-in, a catch-all author note, "Author disclosures are available
-  at …", 2 × Springer's "no relevant financial or non-financial interests
-  to disclose"); the rest are the fail-safe price, mostly "Appendix"
-  headings and footnotes using the vocabulary.
-- **PR review round.** The first commit's "every remaining COI charge prints
-  no statement" was wrong: PMC11198077 (JACC, held-out) prints "Financial
-  support and author disclosures" in the body before "Acknowledgments",
-  where the end matter then began, and was charged. Fixed with the rule
-  changes above, the ICMJE phrases in `COI_VOCABULARY_RE`, a KeyError for an
-  unknown statement key, escaped tooltip caveats and a deduplicated caveat
-  list (not capped: golden rule 13). Measured over all 1,623 local articles,
-  first commit → now: one COI charge released (PMC11198077, now read as
-  disclosed with its ties), nothing else moves, nothing newly charged; the
-  converter change alters none of their markdown. Two drafts were measured
-  and dropped: stem-based heading words ("disclosure quality", "board
-  duality") and asking about every empty heading (appendix tables, "LITERATUR")
-  released 35 honest data charges. Every new test fails on the first commit.
+- `fetch_fulltext_xml(pmcid) -> FullTextXmlFetch` (served / absent = 404 /
+  unreachable with its real `RequestFailure`; blank 200 is incomplete; a
+  non-accession is never sent) replaces `get_fulltext_xml`; the caller-less
+  `get_fulltext_markdown` is deleted. Discovery records **a 404 after the
+  search listed XML as `HTTP 404`, not an absence**.
+- The one test that reached the live network (a cached-PDF control) is
+  stubbed; checked by running the suite through a dead `HTTPS_PROXY`.
+- Europe PMC answered 500, not 404, for non-OA PMC IDs on 2026-09-28
+  (#432): safe, but the live PDF-only integration test fails while it lasts.
 
 ## Recently landed (context)
 
@@ -71,6 +27,20 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **A missing statement is charged only when the end matter is known**
+  (Python; PR #431, #428; merged 2026-09-28). The converter writes
+  `END_MATTER_MARKER` (an HTML comment) where end matter begins, including
+  inside the body; converter version **5**. The heading patterns and the
+  classification live in `study_transparency_analyzer/statement_headings.py`
+  (`unclassified_headings` has the full rule): a COI/data charge needs every
+  end-matter heading classified, else it is not charged. **No marker, no
+  charge** (user's call): PDF text and JATS with no end-matter element are
+  `not_assessed` (`END_MATTER_NOT_SEGMENTED`); `segment_unmarked_end_matter`
+  is the stub for #430. The `_mentions` wording guard stays. Analyser version
+  **2.6**. Measured on 1,623 local + 331 held-out articles: nothing newly
+  charged, industry ties unchanged. **Two drafts dropped** because they
+  released honest data charges: stem-based heading words, and asking about
+  every empty heading.
 - **Statements reach the analyser; the XML fallback is gone** (Python;
   PR #426, #420, #421; merged 2026-09-27). **The converter is
   `jats_markdown.py`**: every `<back>` element but the ref-list, plus PLOS's
@@ -152,8 +122,7 @@ the rest.
   - **A source we could not reach is not a finding** (#346, #347, #344,
     PR #349). A typed fetch carries the answer *or* a `RequestFailure`
     (`served()` / `absent()` / `unreachable()`: `RecordFetch`,
-    `ArticleInfoFetch`; `FullTextFetch` went with #421, and
-    `get_fulltext_xml` still needs one, #429); **404 is the one status
+    `ArticleInfoFetch`, `FullTextXmlFetch` (#429)); **404 is the one status
     about the article**; unreadable is not absent either; caveats carry no
     provider text (`RequestFailure.describe()` only). **Always keep a
     control test** — mutating the fetch to `absent()` once passed the suite.
@@ -235,12 +204,15 @@ the rest.
 
 Open issues by family; each issue carries the detail. None blocks another.
 
-### Left by the #420 round (PR #426), Python unless noted
+### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 
-- **#429** `EuropePMCClient.get_fulltext_xml` returns an untyped `None`, so a
-  throttle reads as `INCOMPLETE_RESPONSE`; give it a typed fetch carrying a
-  `RequestFailure` of the real kind (`get_fulltext_markdown` reads the same
-  `None` as absence — delete or type it).
+- **#430** segment PDF-extracted text into body and end matter (LLM-based;
+  plugs into `segment_unmarked_end_matter`), so PDF-only articles can be
+  charged for a missing statement again.
+
+- **#432** Europe PMC answered 500 for PMC IDs without OA XML (maybe
+  transient). `has_fulltext_xml` counts `inPMC` for non-OA articles, so they
+  always fetch XML that cannot be served, and spend the retries doing it.
 - **#427** MCP `get_document_fulltext` and reader-facing discovery callers
   discard a stale cached text when the refresh fails
   (`pdf_utils.read_stale_cached_fulltext` exists); the analyser must never

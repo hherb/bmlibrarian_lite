@@ -36,8 +36,20 @@ from bmlibrarian_lite.fulltext_discovery import (
     FulltextDiscoverer,
     discover_fulltext,
 )
-from bmlibrarian_lite.europepmc import ArticleInfo, ArticleInfoFetch
-from bmlibrarian_lite.constants import SERVICE_CACHED_FULLTEXT
+import requests
+
+from bmlibrarian_lite.data_models import (
+    RequestFailure,
+    RequestFailureKind,
+    SourceLookupFailure,
+)
+from bmlibrarian_lite.europepmc import (
+    ArticleInfo,
+    ArticleInfoFetch,
+    EuropePMCClient,
+    FullTextXmlFetch,
+)
+from bmlibrarian_lite.constants import SERVICE_CACHED_FULLTEXT, SERVICE_EUROPE_PMC
 from bmlibrarian_lite.jats_markdown import JATS_MARKDOWN_CONVERTER_VERSION
 from bmlibrarian_lite.pdf_utils import fulltext_cache_stamp
 
@@ -220,7 +232,7 @@ class TestFulltextDiscovererDiscover:
         client = MagicMock()
         info = ArticleInfo(pmid="12345", pmcid="PMC67890", has_fulltext_xml=True, year=2024)
         client.fetch_article_info.return_value = ArticleInfoFetch.served(info)
-        client.get_fulltext_xml.return_value = "<article>Test</article>"
+        client.fetch_fulltext_xml.return_value = FullTextXmlFetch.served("<article>Test</article>")
         client.xml_to_markdown.return_value = "# Converted Content"
 
         discoverer = FulltextDiscoverer()
@@ -255,7 +267,7 @@ class TestFulltextDiscovererDiscover:
             year=2024,
         )
         mock_client.fetch_article_info.return_value = ArticleInfoFetch.served(mock_info)
-        mock_client.get_fulltext_xml.return_value = "<article>Test</article>"
+        mock_client.fetch_fulltext_xml.return_value = FullTextXmlFetch.served("<article>Test</article>")
         mock_client.xml_to_markdown.return_value = "# Converted Content"
         mock_client_class.return_value = mock_client
 
@@ -384,6 +396,143 @@ class TestFulltextDiscovererDiscover:
 
             # Year should be added to doc_dict
             assert doc_dict.get("year") == 2025
+
+
+def _listed_article() -> ArticleInfo:
+    """An article Europe PMC's search lists as holding full-text XML."""
+    return ArticleInfo(pmid="12345", pmcid="PMC67890", has_fulltext_xml=True)
+
+
+def _discoverer_whose_xml_fetch(answer: object) -> FulltextDiscoverer:
+    """A discoverer whose real client meets ``answer`` at the XML fetch.
+
+    The article lookup is stubbed to list a full text; the XML fetch runs
+    the real client over a session that returns, or raises, ``answer``, so
+    the HTTP outcome travels through both layers to the lookup record.
+
+    Args:
+        answer: A response to return, or an exception to raise.
+
+    Returns:
+        The discoverer.
+    """
+    client = EuropePMCClient()
+    client.fetch_article_info = MagicMock(  # type: ignore[method-assign]
+        return_value=ArticleInfoFetch.served(_listed_article())
+    )
+    session = MagicMock()
+    if isinstance(answer, BaseException):
+        session.get.side_effect = answer
+    else:
+        session.get.return_value = answer
+    client._session = session
+    discoverer = FulltextDiscoverer()
+    discoverer._europepmc = client
+    return discoverer
+
+
+def _http(status: int, text: str = "") -> requests.Response:
+    """A real response with ``status`` and ``text``."""
+    response = requests.Response()
+    response.status_code = status
+    response._content = text.encode("utf-8")
+    response.encoding = "utf-8"
+    response.url = "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC67890/fullTextXML"
+    return response
+
+
+class TestTheXmlFetchFailureReachesTheRecordAsItself:
+    """#429: each way the XML fetch fails is recorded as that way."""
+
+    @pytest.mark.parametrize(
+        ("answer", "failure"),
+        [
+            (_http(429), RequestFailure(RequestFailureKind.HTTP_STATUS, 429)),
+            (_http(503), RequestFailure(RequestFailureKind.HTTP_STATUS, 503)),
+            (_http(500), RequestFailure(RequestFailureKind.HTTP_STATUS, 500)),
+            (requests.exceptions.ReadTimeout("slow"), RequestFailure(RequestFailureKind.TIMEOUT)),
+            (
+                requests.exceptions.ConnectionError("down"),
+                RequestFailure(RequestFailureKind.CONNECTION),
+            ),
+            (_http(200, ""), RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)),
+            # Listed by the search, then 404 at the fetch: the two answers
+            # contradict each other, so the 404 is no established absence.
+            (_http(404), RequestFailure(RequestFailureKind.HTTP_STATUS, 404)),
+        ],
+    )
+    def test_the_lookup_record_names_the_real_kind(
+        self, answer: object, failure: RequestFailure
+    ) -> None:
+        """Before #429 every one of these was recorded as incomplete."""
+        discoverer = _discoverer_whose_xml_fetch(answer)
+
+        result = discoverer._try_europepmc_xml({}, "12345", None, None)
+
+        assert not result.success
+        assert result.source_type is FulltextSourceType.NOT_ASSESSED
+        assert result.lookups.failures == (SourceLookupFailure(SERVICE_EUROPE_PMC, failure),)
+        assert failure.describe() in (result.error or "")
+        assert result.article_info == _listed_article()
+
+    def test_a_throttle_is_not_called_an_incomplete_response(self) -> None:
+        """The reader is told Europe PMC was busy, not that it answered badly."""
+        discoverer = _discoverer_whose_xml_fetch(_http(429))
+
+        result = discoverer._try_europepmc_xml({}, "12345", None, None)
+
+        assert "429" in (result.error or "")
+        assert all(
+            f.failure.kind is not RequestFailureKind.INCOMPLETE_RESPONSE
+            for f in result.lookups.failures
+        )
+
+    def test_a_served_full_text_records_no_failure(self, temp_dir: Path) -> None:
+        """Control: the same path with XML served succeeds, recording nothing."""
+        xml = "<article><body><sec><title>Intro</title><p>Text.</p></sec></body></article>"
+        discoverer = _discoverer_whose_xml_fetch(_http(200, xml))
+
+        with patch(
+            "bmlibrarian_lite.fulltext_discovery.save_fulltext_markdown",
+            return_value=temp_dir / "saved.md",
+        ):
+            result = discoverer._try_europepmc_xml({}, "12345", None, None)
+
+        assert result.success
+        assert result.source_type is FulltextSourceType.EUROPEPMC_XML
+        assert not result.lookups.anything_unasked
+
+    @patch("bmlibrarian_lite.fulltext_discovery.find_existing_pdf", return_value=None)
+    @patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext", return_value=None)
+    def test_a_404_after_the_listing_establishes_no_absence(
+        self, _no_cache: MagicMock, _no_pdf: MagicMock
+    ) -> None:
+        """The whole chain: every PDF source empty still is not "none exists"."""
+        discoverer = _discoverer_whose_xml_fetch(_http(404))
+        none_found = FulltextResult(success=False, source_type=FulltextSourceType.NOT_FOUND)
+
+        with patch.object(discoverer, "_try_pdf_download", return_value=none_found):
+            result = discoverer.discover_fulltext(pmid="12345")
+
+        assert result.source_type is FulltextSourceType.NOT_FOUND
+        assert not result.absence_established
+
+    def test_a_listed_full_text_with_no_pmc_id_is_not_fetched(self) -> None:
+        """Nothing to fetch it by is an incomplete answer, not an absence."""
+        client = MagicMock()
+        info = ArticleInfo(pmid="12345", pmcid=None, has_fulltext_xml=True)
+        client.fetch_article_info.return_value = ArticleInfoFetch.served(info)
+        discoverer = FulltextDiscoverer()
+        discoverer._europepmc = client
+
+        result = discoverer._try_europepmc_xml({}, "12345", None, None)
+
+        client.fetch_fulltext_xml.assert_not_called()
+        assert result.lookups.failures == (
+            SourceLookupFailure(
+                SERVICE_EUROPE_PMC, RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)
+            ),
+        )
 
 
 class TestDiscoverFulltextConvenience:

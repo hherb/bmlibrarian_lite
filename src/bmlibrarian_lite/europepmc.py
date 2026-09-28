@@ -31,12 +31,14 @@ Usage:
 
     # Check if full text is available
     info = client.get_article_info(pmid="39521399")
-    if info and info.has_fulltext_xml:
-        xml = client.get_fulltext_xml(pmcid=info.pmcid)
-        markdown = client.xml_to_markdown(xml)
+    if info and info.has_fulltext_xml and info.pmcid:
+        fetch = client.fetch_fulltext_xml(info.pmcid)
+        if fetch.xml is not None:
+            markdown = client.xml_to_markdown(fetch.xml)
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -56,6 +58,7 @@ from .constants import (
     EUROPEPMC_SORT_ORDER,
     EUROPEPMC_SOURCE_PREPRINT,
     EUROPEPMC_USER_AGENT,
+    HTTP_NOT_FOUND,
 )
 from .data_models import (
     CursorPaginationState,
@@ -221,6 +224,113 @@ class ArticleInfoFetch:
             ``True`` when nothing about the article was established.
         """
         return self.failure is not None
+
+
+@dataclass(frozen=True)
+class FullTextXmlFetch:
+    """What asking Europe PMC for an article's full-text XML produced (#429).
+
+    The sibling of :class:`ArticleInfoFetch`, for the fetch that follows it.
+    ``get_fulltext_xml`` returned ``str | None``, one ``None`` for a 404, a
+    throttle, a 5xx, a timeout and a dropped connection, so its caller could
+    only record every one of them as an incomplete response, and a throttled
+    Europe PMC was reported as having answered badly rather than as busy.
+
+    Attributes:
+        xml: The JATS XML, when Europe PMC served it. Never blank: an empty
+            answer has told us nothing about the article, so that is an
+            incomplete response, not an absence.
+        failure: Why it could not be read, when it could not be. ``None``
+            with no ``xml`` means Europe PMC answered 404: it holds no
+            open-access full text under this PMC ID.
+
+    Raises:
+        ValueError: On construction, if both XML and a failure are given, or
+            if the XML is blank.
+    """
+
+    xml: str | None = None
+    failure: RequestFailure | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse the states that would mean two things at once.
+
+        Raises:
+            ValueError: If both XML and a failure are given, or if the XML is
+                blank.
+        """
+        if self.xml is not None and self.failure is not None:
+            raise ValueError(
+                "A full-text XML fetch is served or unreachable, never both"
+            )
+        if self.xml is not None and not self.xml.strip():
+            raise ValueError(
+                "A blank full text is an incomplete answer, not an absence"
+            )
+
+    @classmethod
+    def served(cls, xml: str) -> "FullTextXmlFetch":
+        """Europe PMC served the full text.
+
+        Args:
+            xml: The JATS XML, not blank.
+
+        Returns:
+            The fetch.
+        """
+        return cls(xml=xml)
+
+    @classmethod
+    def absent(cls) -> "FullTextXmlFetch":
+        """Europe PMC answered 404: no open-access full text under this ID.
+
+        Returns:
+            The fetch. This is the one state that is about the article.
+        """
+        return cls()
+
+    @classmethod
+    def unreachable(cls, failure: RequestFailure) -> "FullTextXmlFetch":
+        """Europe PMC could not be read, or its answer held nothing.
+
+        Args:
+            failure: Why, of its real kind.
+
+        Returns:
+            The fetch.
+        """
+        return cls(failure=failure)
+
+    @property
+    def is_unreachable(self) -> bool:
+        """Whether Europe PMC could not be read.
+
+        Returns:
+            ``True`` when nothing about the article was established.
+        """
+        return self.failure is not None
+
+
+# A PMC accession, with or without its prefix in any case: "PMC123",
+# "pmc123", "123". It goes into a URL path, so nothing else may pass --
+# ASCII digits only, as ``\d`` would also admit "PMC١٢٣".
+_PMC_ACCESSION_RE = re.compile(r"(?:PMC)?([0-9]+)", re.IGNORECASE)
+
+
+def pmc_accession(pmcid: str) -> str | None:
+    """Normalise a PMC ID to the ``PMC<digits>`` form Europe PMC expects.
+
+    Args:
+        pmcid: The identifier, untrusted.
+
+    Returns:
+        For example ``"PMC12101959"``, or ``None`` when ``pmcid`` is not a
+        PMC accession.
+    """
+    match = _PMC_ACCESSION_RE.fullmatch(pmcid.strip())
+    if match is None:
+        return None
+    return f"PMC{match.group(1)}"
 
 
 @dataclass
@@ -740,55 +850,60 @@ class EuropePMCClient:
             logger.warning(f"Failed to parse Europe PMC result: {e}")
             return None
 
-    def get_fulltext_xml(
-        self,
-        pmcid: str | None = None,
-        pmid: str | None = None,
-    ) -> str | None:
-        """Retrieve full-text XML for an article.
+    def fetch_fulltext_xml(self, pmcid: str) -> FullTextXmlFetch:
+        """Ask Europe PMC for an article's full-text XML, and say what we got.
+
+        Takes a PMC ID only: resolving another identifier to one is
+        :meth:`fetch_article_info`'s job, whose answer the caller needs
+        anyway to know whether Europe PMC lists a full text at all.
 
         Args:
-            pmcid: PubMed Central ID (preferred)
-            pmid: PubMed ID (will be converted to PMC ID)
+            pmcid: PubMed Central ID, with or without its ``PMC`` prefix.
 
         Returns:
-            JATS XML string, or None if not available
+            The fetch: the XML; Europe PMC's 404, its answer that it holds no
+            open-access full text under this ID; or why it could not be read,
+            of its real kind -- a 429 stays a 429 (#429). A blank answer is
+            an incomplete response, and an identifier that is not a PMC
+            accession is a request never made (#355), not an absence.
         """
-        # Get PMC ID if not provided
-        if not pmcid and pmid:
-            info = self.get_article_info(pmid=pmid)
-            if info and info.pmcid:
-                pmcid = info.pmcid
-            else:
-                logger.debug(f"No PMC ID found for PMID {pmid}")
-                return None
+        accession = pmc_accession(pmcid)
+        if accession is None:
+            logger.warning(
+                "Not a PMC accession, so Europe PMC was not asked for its "
+                "full text."
+            )
+            return FullTextXmlFetch.unreachable(
+                RequestFailure(RequestFailureKind.REQUEST_FAILED)
+            )
 
-        if not pmcid:
-            return None
-
-        # Normalize PMC ID
-        pmc_num = pmcid.replace("PMC", "")
-        pmcid = f"PMC{pmc_num}"
-
-        url = f"{EUROPEPMC_REST_BASE_URL}/{pmcid}/fullTextXML"
-
+        url = f"{EUROPEPMC_REST_BASE_URL}/{accession}/fullTextXML"
         try:
             response = self._session.get(
                 url,
                 headers={"Accept": "application/xml"},
                 timeout=EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
             )
-
-            if response.status_code == 404:
-                logger.debug(f"Full text XML not available for {pmcid}")
-                return None
-
+            if response.status_code == HTTP_NOT_FOUND:
+                logger.debug(f"Europe PMC holds no full-text XML for {accession}")
+                return FullTextXmlFetch.absent()
             response.raise_for_status()
-            return response.text
-
+            xml = response.text
         except requests.exceptions.RequestException as e:
-            logger.warning(f"Failed to fetch full text XML for {pmcid}: {e}")
-            return None
+            failure = request_failure_from_exception(e)
+            logger.warning(
+                "Europe PMC's full text for %s could not be read (%s).",
+                accession,
+                failure.describe(),
+            )
+            return FullTextXmlFetch.unreachable(failure)
+
+        if not xml.strip():
+            logger.warning(f"Europe PMC served an empty full text for {accession}")
+            return FullTextXmlFetch.unreachable(
+                RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)
+            )
+        return FullTextXmlFetch.served(xml)
 
     def xml_to_markdown(self, xml_content: str) -> str:
         """Convert JATS XML to readable markdown.
@@ -804,38 +919,3 @@ class EuropePMCClient:
             not parse
         """
         return jats_to_markdown(xml_content)
-
-
-def get_fulltext_markdown(
-    pmid: str | None = None,
-    pmcid: str | None = None,
-    doi: str | None = None,
-) -> tuple[str | None, ArticleInfo | None]:
-    """Convenience function to get full-text markdown for an article.
-
-    Args:
-        pmid: PubMed ID
-        pmcid: PubMed Central ID
-        doi: Digital Object Identifier
-
-    Returns:
-        Tuple of (markdown_content, article_info) or (None, None) if not available
-    """
-    client = EuropePMCClient()
-
-    # Get article info
-    info = client.get_article_info(pmid=pmid, pmcid=pmcid, doi=doi)
-    if not info:
-        return None, None
-
-    if not info.has_fulltext_xml:
-        logger.debug("No full-text XML available for article")
-        return None, info
-
-    # Get XML and convert
-    xml = client.get_fulltext_xml(pmcid=info.pmcid)
-    if not xml:
-        return None, info
-
-    markdown = client.xml_to_markdown(xml)
-    return markdown, info

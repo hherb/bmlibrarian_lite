@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from .constants import (
+    HTTP_NOT_FOUND,
     SERVICE_EUROPE_PMC,
     SERVICE_CACHED_FULLTEXT,
     SERVICE_PDF_DOWNLOAD,
@@ -483,34 +484,49 @@ class FulltextDiscoverer:
                     error="Europe PMC holds no full-text XML for this article.",
                 )
 
+            if not info.pmcid:
+                # Europe PMC lists a full text and names no PMC ID to fetch
+                # it by: its answer held less than it said. Not an absence.
+                return _europepmc_unassessed(
+                    info,
+                    "Europe PMC lists a full text for this article but gives "
+                    "no PMC ID to fetch it by.",
+                    RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE),
+                )
+
             # Get full-text XML
             self._emit_progress("download", "fetching_xml")
-            xml_content = self._europepmc.get_fulltext_xml(pmcid=info.pmcid)
+            xml_fetch = self._europepmc.fetch_fulltext_xml(info.pmcid)
 
-            if not xml_content:
-                # Europe PMC said it holds full-text XML and then served
-                # none. Unreadable is not absent (#346): this establishes
-                # nothing about the article.
-                return FulltextResult(
-                    success=False,
-                    source_type=FulltextSourceType.NOT_ASSESSED,
-                    article_info=info,
-                    error="Europe PMC served no full-text XML for this article.",
-                    lookups=LookupRecord(
-                        failures=(
-                            SourceLookupFailure(
-                                SERVICE_EUROPE_PMC,
-                                RequestFailure(
-                                    RequestFailureKind.INCOMPLETE_RESPONSE
-                                ),
-                            ),
-                        )
-                    ),
+            if xml_fetch.failure is not None:
+                # Recorded with its own kind: a throttled Europe PMC was
+                # reported as an incomplete response, so the reader was told
+                # it answered badly rather than that it was busy (#429).
+                return _europepmc_unassessed(
+                    info,
+                    f"Europe PMC's full text for this article could not be "
+                    f"read ({xml_fetch.failure.describe()}).",
+                    xml_fetch.failure,
+                )
+
+            if xml_fetch.xml is None:
+                # Europe PMC's 404, after its own search listed a full text
+                # for this article. Its two answers contradict each other,
+                # so neither is taken as the article's: this establishes
+                # nothing, and the 404 is named as what we got (#346, #429).
+                not_found = RequestFailure(
+                    RequestFailureKind.HTTP_STATUS, HTTP_NOT_FOUND
+                )
+                return _europepmc_unassessed(
+                    info,
+                    f"Europe PMC lists a full text for this article but did "
+                    f"not serve it ({not_found.describe()}).",
+                    not_found,
                 )
 
             # Convert to markdown
             self._emit_progress("download", "converting")
-            markdown_content = self._europepmc.xml_to_markdown(xml_content)
+            markdown_content = self._europepmc.xml_to_markdown(xml_fetch.xml)
 
             if not markdown_content.strip():
                 # The XML arrived and our own conversion produced nothing.
@@ -520,24 +536,11 @@ class FulltextDiscoverer:
                     "Europe PMC's full text for %s could not be converted.",
                     info.pmcid,
                 )
-                return FulltextResult(
-                    success=False,
-                    source_type=FulltextSourceType.NOT_ASSESSED,
-                    article_info=info,
-                    error=(
-                        "Europe PMC's full text for this article could not "
-                        "be converted to text."
-                    ),
-                    lookups=LookupRecord(
-                        failures=(
-                            SourceLookupFailure(
-                                SERVICE_EUROPE_PMC,
-                                RequestFailure(
-                                    RequestFailureKind.MALFORMED_RESPONSE
-                                ),
-                            ),
-                        )
-                    ),
+                return _europepmc_unassessed(
+                    info,
+                    "Europe PMC's full text for this article could not be "
+                    "converted to text.",
+                    RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
                 )
 
             # Save to cache. A failed write loses the cache, not the article:
@@ -883,14 +886,28 @@ def _europepmc_pdf_unassessed(
     Returns:
         A result establishing nothing, naming Europe PMC as unread.
     """
+    return _europepmc_unassessed(article_info, error, RequestFailure(kind))
+
+
+def _europepmc_unassessed(
+    article_info: ArticleInfo, error: str, failure: RequestFailure
+) -> FulltextResult:
+    """Record that a Europe PMC step told us nothing about this article.
+
+    Args:
+        article_info: What Europe PMC said about the article.
+        error: What to tell the reader, ending in a full stop.
+        failure: Why the step failed us, of its real kind.
+
+    Returns:
+        A result establishing nothing, naming Europe PMC as unread.
+    """
     return FulltextResult(
         success=False,
         source_type=FulltextSourceType.NOT_ASSESSED,
         article_info=article_info,
         error=error,
         lookups=LookupRecord(
-            failures=(
-                SourceLookupFailure(SERVICE_EUROPE_PMC, RequestFailure(kind)),
-            )
+            failures=(SourceLookupFailure(SERVICE_EUROPE_PMC, failure),)
         ),
     )

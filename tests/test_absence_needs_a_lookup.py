@@ -1948,10 +1948,18 @@ class TestTheGapsTheReviewFound:
         from unittest.mock import patch
 
         from bmlibrarian_lite import fulltext_discovery as fd
+        from bmlibrarian_lite.europepmc import ArticleInfoFetch
 
         discoverer = fd.FulltextDiscoverer(use_browser_fallback=False)
 
+        # Europe PMC's own "no such record", not the live API: asked for
+        # real, a throttled Europe PMC's 503 put a failure in the record and
+        # failed this control whenever the network misbehaved (#429 session).
         with patch.object(
+            discoverer._europepmc,
+            "fetch_article_info",
+            return_value=ArticleInfoFetch.absent(),
+        ), patch.object(
             fd, "find_existing_fulltext", return_value=None
         ), patch.object(
             fd, "find_existing_pdf", return_value="/tmp/cached.pdf"
