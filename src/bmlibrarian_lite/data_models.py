@@ -199,7 +199,9 @@ class RecordFetch:
     The three states -- served, absent, unreachable -- are reached through
     :meth:`served`, :meth:`absent` and :meth:`unreachable` rather than by
     choosing which fields to pass, because the dangerous one is the claim
-    about the article and it must not be what a caller gets by default.
+    about the article and it must not be what a caller gets by default. So
+    neither field has a default: ``RecordFetch()`` is a ``TypeError``, not
+    an absence.
 
     Attributes:
         record: The record, when one was read. Never empty: a source that
@@ -215,8 +217,8 @@ class RecordFetch:
             given, or if the record is present but empty.
     """
 
-    record: dict[str, Any] | None = None
-    failure: RequestFailure | None = None
+    record: dict[str, Any] | None
+    failure: RequestFailure | None
 
     def __post_init__(self) -> None:
         """Refuse the states that would mean two things at once.
@@ -244,7 +246,7 @@ class RecordFetch:
         Returns:
             The fetch.
         """
-        return cls(record=record)
+        return cls(record=record, failure=None)
 
     @classmethod
     def absent(cls) -> "RecordFetch":
@@ -253,7 +255,7 @@ class RecordFetch:
         Returns:
             The fetch. This is the one state that is about the article.
         """
-        return cls()
+        return cls(record=None, failure=None)
 
     @classmethod
     def unreachable(cls, failure: RequestFailure) -> "RecordFetch":
@@ -265,7 +267,7 @@ class RecordFetch:
         Returns:
             The fetch.
         """
-        return cls(failure=failure)
+        return cls(record=None, failure=failure)
 
     @property
     def is_unreachable(self) -> bool:

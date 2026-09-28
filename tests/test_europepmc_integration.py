@@ -30,7 +30,7 @@ import pytest
 from bmlibrarian_lite.europepmc import (
     ArticleInfo,
     EuropePMCClient,
-    get_fulltext_markdown,
+    FullTextXmlFetch,
 )
 from bmlibrarian_lite.fulltext_discovery import (
     FulltextDiscoverer,
@@ -72,9 +72,9 @@ def downloaded_xml(
 ) -> Tuple[Dict[str, str], str]:
     """Download JATS XML for each test article (cached per module run)."""
     article = request.param
-    xml = europepmc_client.get_fulltext_xml(pmcid=article["pmcid"])
-    assert xml is not None, f"Failed to download XML for {article['pmcid']}"
-    return article, xml
+    fetch = europepmc_client.fetch_fulltext_xml(article["pmcid"])
+    assert fetch.xml is not None, f"Failed to download XML for {article['pmcid']}: {fetch}"
+    return article, fetch.xml
 
 
 @pytest.mark.integration
@@ -199,55 +199,20 @@ class TestGetArticleInfo:
 
 @pytest.mark.integration
 class TestFulltextXMLByIdentifier:
-    """Tests verifying JATS XML can be found regardless of which identifier is used."""
+    """JATS XML can be fetched by PMC ID.
+
+    Other identifiers resolve to one through ``fetch_article_info``; the
+    whole chain from a PMID or DOI is covered by ``TestDiscoverFulltext``.
+    """
 
     @pytest.mark.parametrize("article", TEST_ARTICLES, ids=lambda a: a["label"])
-    def test_get_fulltext_xml_by_pmcid(
+    def test_fetch_fulltext_xml_by_pmcid(
         self, europepmc_client: EuropePMCClient, article: Dict[str, str]
     ) -> None:
         """Full-text XML should be downloadable by PMC ID."""
-        xml = europepmc_client.get_fulltext_xml(pmcid=article["pmcid"])
-        assert xml is not None, f"XML not found for PMC ID {article['pmcid']}"
-        assert "<article" in xml
-
-    @pytest.mark.parametrize("article", TEST_ARTICLES, ids=lambda a: a["label"])
-    def test_get_fulltext_xml_by_pmid(
-        self, europepmc_client: EuropePMCClient, article: Dict[str, str]
-    ) -> None:
-        """Full-text XML should be downloadable by PMID (resolves to PMC ID)."""
-        xml = europepmc_client.get_fulltext_xml(pmid=article["pmid"])
-        assert xml is not None, f"XML not found for PMID {article['pmid']}"
-        assert "<article" in xml
-
-    @pytest.mark.parametrize("article", TEST_ARTICLES, ids=lambda a: a["label"])
-    def test_get_fulltext_markdown_by_pmid(
-        self, europepmc_client: EuropePMCClient, article: Dict[str, str]
-    ) -> None:
-        """Convenience function should find full text when given only PMID."""
-        markdown, info = get_fulltext_markdown(pmid=article["pmid"])
-        assert markdown is not None, f"Markdown not found for PMID {article['pmid']}"
-        assert info is not None
-        assert len(markdown) > 500
-
-    @pytest.mark.parametrize("article", TEST_ARTICLES, ids=lambda a: a["label"])
-    def test_get_fulltext_markdown_by_doi(
-        self, europepmc_client: EuropePMCClient, article: Dict[str, str]
-    ) -> None:
-        """Convenience function should find full text when given only DOI."""
-        markdown, info = get_fulltext_markdown(doi=article["doi"])
-        assert markdown is not None, f"Markdown not found for DOI {article['doi']}"
-        assert info is not None
-        assert len(markdown) > 500
-
-    @pytest.mark.parametrize("article", TEST_ARTICLES, ids=lambda a: a["label"])
-    def test_get_fulltext_markdown_by_pmcid(
-        self, europepmc_client: EuropePMCClient, article: Dict[str, str]
-    ) -> None:
-        """Convenience function should find full text when given only PMC ID."""
-        markdown, info = get_fulltext_markdown(pmcid=article["pmcid"])
-        assert markdown is not None, f"Markdown not found for PMC ID {article['pmcid']}"
-        assert info is not None
-        assert len(markdown) > 500
+        fetch = europepmc_client.fetch_fulltext_xml(article["pmcid"])
+        assert fetch.xml is not None, f"XML not found for PMC ID {article['pmcid']}: {fetch}"
+        assert "<article" in fetch.xml
 
 
 @pytest.mark.integration
@@ -328,10 +293,10 @@ class TestPMCPDFDiscovery:
         self, europepmc_client: EuropePMCClient
     ) -> None:
         """JATS XML should NOT be available for this article."""
-        xml = europepmc_client.get_fulltext_xml(
-            pmcid=PMC_PDF_ONLY_ARTICLE["pmcid"]
-        )
-        assert xml is None
+        fetch = europepmc_client.fetch_fulltext_xml(PMC_PDF_ONLY_ARTICLE["pmcid"])
+        # Europe PMC's own 404, not a failure to reach it. On 2026-09-28
+        # it answered 500 here instead, and this failed (#432).
+        assert fetch == FullTextXmlFetch.absent()
 
     def test_discover_fulltext_finds_pdf_fallback(self) -> None:
         """FulltextDiscoverer should find PDF when XML is unavailable."""

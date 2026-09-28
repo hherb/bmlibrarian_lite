@@ -100,29 +100,48 @@ function has_fulltext_xml(article: Article) -> bool:
 
 ### Retrieval
 
+The fetch has three outcomes, and one `null` for all of them is the defect
+this shape exists to prevent (#429): a 404 is Europe PMC's answer, while a
+throttle, an outage, a timeout or a blank 200 is our failure to get one, and
+the reader is told which.
+
 ```pseudocode
-const EUROPEPMC_FULLTEXT_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/{pmcid}/fullTextXML"
+const EUROPEPMC_FULLTEXT_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/{accession}/fullTextXML"
 
-async function fetch_fulltext_xml(pmc_id: string) -> string | null:
-    # Normalize PMC ID
-    normalized = normalize_pmc_id(pmc_id)
+# SERVED(xml) | ABSENT (the 404) | UNREACHABLE(failure of its real kind)
+type FullTextXmlFetch
 
-    url = EUROPEPMC_FULLTEXT_URL.replace("{pmcid}", normalized)
+async function fetch_fulltext_xml(accession: string) -> FullTextXmlFetch:
+    # "PMC123", "pmc123" and "123" become "PMC123"; a preprint's Europe PMC
+    # record ID "PPR123" (any case) is kept, as preprints have no PMC ID.
+    # ASCII digits only; anything else is refused and never sent -- it goes
+    # into a URL path, and not asking is not an absence (#355).
+    normalized = normalize_fulltext_accession(accession)
+    if normalized is null:
+        return UNREACHABLE(REQUEST_FAILED)
+
+    url = EUROPEPMC_FULLTEXT_URL.replace("{accession}", normalized)
 
     try:
+        # Retries and pacing live in the session; a 429 still throttled
+        # after them is reported as HTTP 429, not as a bad answer.
         response = await http_get(url, headers={"Accept": "application/xml"})
-
         if response.status == 404:
-            return null  # Not available
-
+            return ABSENT
         response.raise_for_status()
-        return response.text
-
     except HttpError as e:
-        if is_retryable(e):
-            return await retry_with_backoff(() => fetch_fulltext_xml(pmc_id))
-        throw e
+        return UNREACHABLE(failure_from(e))   # HTTP 429, 503, timeout, ...
+
+    if response.text.strip() == "":
+        return UNREACHABLE(INCOMPLETE_RESPONSE)   # told us nothing
+    return SERVED(response.text)
 ```
+
+`fullTextXML` serves open-access text only. Europe PMC's search flags
+(`inEPMC`, `inPMC`) say the article is held, not that its text is open, so a
+404 after the search is expected for a non-open-access article (#432). It is
+recorded as what we got -- `HTTP 404 Not Found` against Europe PMC -- and not
+as the article's absence; the chain goes on to the PDF tiers.
 
 ### Parsing
 
@@ -378,11 +397,16 @@ async function fetch_fulltext(
     # had its turn. null when none was seen. See "Abstract Holdback" below.
     held_abstract: FullTextResult | null = null
 
-    # 2. Try Europe PMC XML (best quality)
-    if pmc_id:
-        xml = await fetch_fulltext_xml(pmc_id)
-        if xml:
-            content = parse_fulltext(xml, pmc_id)
+    # 2. Try Europe PMC XML (best quality). A preprint is fetched by its
+    # Europe PMC record ID, having no PMC ID; with neither, the lookup is
+    # recorded as skipped (no identifier), not as Europe PMC failing.
+    accession = pmc_id or preprint_record_id
+    if accession:
+        fetch = await fetch_fulltext_xml(accession)
+        # UNREACHABLE and ABSENT are both recorded against Europe PMC (see
+        # Retrieval above), and the chain continues.
+        if fetch is SERVED:
+            content = parse_fulltext(fetch.xml, accession)
             result = FullTextResult.EuropePMC(
                 html=content.html,
                 markdown=content.markdown,
@@ -1128,6 +1152,12 @@ prefix reproduces the narrower half of the same defect (#209).
 - Use `requests` for HTTP
 - Use `pathlib` for file paths
 - Store cache in `~/.bmlibrarian_lite/cache/`
+- `EuropePMCClient.fetch_fulltext_xml` is `fetch_fulltext_xml` above:
+  `FullTextXmlFetch.served` / `.absent` / `.unreachable(RequestFailure)`
+  (#429). `ArticleInfo.fulltext_accession` picks the PMC ID or, for a
+  preprint, its `PPR` record ID. The sentence the reader sees at the end of
+  the chain names every lookup that went unasked, Europe PMC's included:
+  `PDFDiscoverer.discover_and_download(earlier_lookups=...)`.
 
 ### Swift (iOS/macOS)
 

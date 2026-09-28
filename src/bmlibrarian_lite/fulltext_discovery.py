@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from .constants import (
+    HTTP_NOT_FOUND,
     SERVICE_EUROPE_PMC,
     SERVICE_CACHED_FULLTEXT,
     SERVICE_PDF_DOWNLOAD,
@@ -60,6 +61,7 @@ from .data_models import (
     SourceLookupFailure,
     SourceLookupSkipped,
 )
+from .analysis_failures import with_unestablished_access
 from .europepmc import EuropePMCClient, ArticleInfo
 from .search_failures import request_failure_from_exception
 from .pdf_utils import (
@@ -384,10 +386,12 @@ class FulltextDiscoverer:
                 ),
             )
 
-        # 4. Try PDF download as last resort
+        # 4. Try PDF download as last resort. The record is passed in so the
+        # sentence the reader is shown names what went unasked above too,
+        # and merged here, the one place, so no path below can drop it.
         self._emit_progress("discovery", "downloading_pdf")
         return self._try_pdf_download(
-            doc_dict, pmid, pmcid, doi, title
+            doc_dict, pmid, pmcid, doi, title, earlier_lookups=lookups
         ).with_lookups(lookups)
 
     @staticmethod
@@ -419,6 +423,9 @@ class FulltextDiscoverer:
         doi: Optional[str],
     ) -> FulltextResult:
         """Try to get full-text from Europe PMC XML API."""
+        # Outside the try, so a failure after the lookup keeps what Europe
+        # PMC said: the PDF render step runs only on a result carrying it.
+        info: ArticleInfo | None = None
         try:
             # First check if article is in Europe PMC. The typed fetch, not
             # ``get_article_info``: that answers "not in Europe PMC" and "we
@@ -483,34 +490,74 @@ class FulltextDiscoverer:
                     error="Europe PMC holds no full-text XML for this article.",
                 )
 
-            # Get full-text XML
-            self._emit_progress("download", "fetching_xml")
-            xml_content = self._europepmc.get_fulltext_xml(pmcid=info.pmcid)
-
-            if not xml_content:
-                # Europe PMC said it holds full-text XML and then served
-                # none. Unreadable is not absent (#346): this establishes
-                # nothing about the article.
+            accession = info.fulltext_accession
+            if accession is None:
+                # In Europe PMC, with no PMC ID and no preprint record ID to
+                # ask its full text by. Its answer was complete; the fetch is
+                # the lookup we could not make, so it is recorded as skipped
+                # rather than blamed on Europe PMC (#355). Kept with the
+                # article info, as the PDF render below may still serve it.
+                logger.warning(
+                    "Europe PMC lists this article (source %r) with no "
+                    "accession to fetch its full text by.",
+                    info.source,
+                )
                 return FulltextResult(
                     success=False,
                     source_type=FulltextSourceType.NOT_ASSESSED,
                     article_info=info,
-                    error="Europe PMC served no full-text XML for this article.",
+                    error=(
+                        "Europe PMC holds this article but gives no "
+                        "identifier to fetch its full text by."
+                    ),
                     lookups=LookupRecord(
-                        failures=(
-                            SourceLookupFailure(
+                        skipped=(
+                            SourceLookupSkipped(
                                 SERVICE_EUROPE_PMC,
-                                RequestFailure(
-                                    RequestFailureKind.INCOMPLETE_RESPONSE
-                                ),
+                                LookupSkipReason.NO_IDENTIFIER,
                             ),
                         )
                     ),
                 )
 
+            # Get full-text XML
+            self._emit_progress("download", "fetching_xml")
+            xml_fetch = self._europepmc.fetch_fulltext_xml(accession)
+
+            if xml_fetch.failure is not None:
+                # Recorded as its own kind, so a throttle reads as "busy",
+                # not as a bad answer (#429).
+                return _europepmc_unassessed(
+                    info,
+                    f"Europe PMC's full text for this article could not be "
+                    f"read ({xml_fetch.failure.describe()}).",
+                    xml_fetch.failure,
+                )
+
+            if xml_fetch.xml is None:
+                # Europe PMC's 404 for an article its search says is in PMC
+                # or Europe PMC. ``fullTextXML`` serves open-access text
+                # only, so this may mean "not open access" rather than "no
+                # full text" (#432): recorded as what we got, and not as the
+                # article's absence (#346, #429).
+                not_found = RequestFailure(
+                    RequestFailureKind.HTTP_STATUS, HTTP_NOT_FOUND
+                )
+                logger.warning(
+                    "Europe PMC holds %s but did not serve its full text (%s).",
+                    accession,
+                    not_found.describe(),
+                )
+                return _europepmc_unassessed(
+                    info,
+                    f"Europe PMC holds this article but did not serve its "
+                    f"full text ({not_found.describe()}).",
+                    not_found,
+                )
+
             # Convert to markdown
             self._emit_progress("download", "converting")
-            markdown_content = self._europepmc.xml_to_markdown(xml_content)
+            markdown_content = self._europepmc.xml_to_markdown(xml_fetch.xml)
 
             if not markdown_content.strip():
                 # The XML arrived and our own conversion produced nothing.
@@ -518,26 +565,13 @@ class FulltextDiscoverer:
                 # a full text (#359, one layer down).
                 logger.warning(
                     "Europe PMC's full text for %s could not be converted.",
-                    info.pmcid,
+                    accession,
                 )
-                return FulltextResult(
-                    success=False,
-                    source_type=FulltextSourceType.NOT_ASSESSED,
-                    article_info=info,
-                    error=(
-                        "Europe PMC's full text for this article could not "
-                        "be converted to text."
-                    ),
-                    lookups=LookupRecord(
-                        failures=(
-                            SourceLookupFailure(
-                                SERVICE_EUROPE_PMC,
-                                RequestFailure(
-                                    RequestFailureKind.MALFORMED_RESPONSE
-                                ),
-                            ),
-                        )
-                    ),
+                return _europepmc_unassessed(
+                    info,
+                    "Europe PMC's full text for this article could not be "
+                    "converted to text.",
+                    RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
                 )
 
             # Save to cache. A failed write loses the cache, not the article:
@@ -547,9 +581,9 @@ class FulltextDiscoverer:
             try:
                 cache_path = save_fulltext_markdown(doc_dict, markdown_content)
             except OSError as e:
-                logger.warning("Could not cache the full text of %s: %s", info.pmcid, e)
+                logger.warning("Could not cache the full text of %s: %s", accession, e)
 
-            logger.info(f"Successfully retrieved full-text from Europe PMC: {info.pmcid}")
+            logger.info("Successfully retrieved full-text from Europe PMC: %s", accession)
             return FulltextResult(
                 success=True,
                 source_type=FulltextSourceType.EUROPEPMC_XML,
@@ -566,14 +600,19 @@ class FulltextDiscoverer:
             # move that work into the body without changing the answer
             # (the lesson of PR #349's converter).
             failure = _classify(e)
+            # The exception's type, not its text: the text may name a path
+            # or a URL (#196, #330), but without the type a converter crash
+            # reads in the log as a failed request, and cannot be told apart.
             logger.warning(
-                "Europe PMC could not be read for this article (%s), so "
+                "Europe PMC could not be read for this article (%s: %s), so "
                 "whether it holds a full text is not assessed.",
+                type(e).__name__,
                 failure.describe(),
             )
             return FulltextResult(
                 success=False,
                 source_type=FulltextSourceType.NOT_ASSESSED,
+                article_info=info,
                 error=(
                     f"Europe PMC could not be read ({failure.describe()})."
                 ),
@@ -668,8 +707,23 @@ class FulltextDiscoverer:
         pmcid: Optional[str],
         doi: Optional[str],
         title: Optional[str],
+        earlier_lookups: LookupRecord | None = None,
     ) -> FulltextResult:
-        """Try to download PDF as last resort."""
+        """Try to download PDF as last resort.
+
+        Args:
+            doc_dict: Document dictionary for path generation.
+            pmid: PubMed ID.
+            pmcid: PubMed Central ID.
+            doi: Digital Object Identifier.
+            title: Document title, for verification.
+            earlier_lookups: What went unasked earlier in the chain, named
+                in the result's error. Not added to its record: the caller
+                merges that.
+
+        Returns:
+            The result, with this step's own lookup record.
+        """
         try:
             pdf_path = generate_pdf_path(doc_dict)
 
@@ -688,6 +742,7 @@ class FulltextDiscoverer:
                 pmcid=pmcid,
                 title=title,
                 expected_title=title,
+                earlier_lookups=earlier_lookups,
             )
 
             if pdf_result.success and pdf_result.file_path:
@@ -755,7 +810,10 @@ class FulltextDiscoverer:
             return FulltextResult(
                 success=False,
                 source_type=FulltextSourceType.NOT_ASSESSED,
-                error=f"No PDF could be looked for ({failure.describe()}).",
+                error=with_unestablished_access(
+                    f"No PDF could be looked for ({failure.describe()}).",
+                    earlier_lookups or LookupRecord(),
+                ),
                 lookups=LookupRecord(
                     failures=(
                         SourceLookupFailure(SERVICE_PDF_DOWNLOAD, failure),
@@ -883,14 +941,28 @@ def _europepmc_pdf_unassessed(
     Returns:
         A result establishing nothing, naming Europe PMC as unread.
     """
+    return _europepmc_unassessed(article_info, error, RequestFailure(kind))
+
+
+def _europepmc_unassessed(
+    article_info: ArticleInfo, error: str, failure: RequestFailure
+) -> FulltextResult:
+    """Record that a Europe PMC step told us nothing about this article.
+
+    Args:
+        article_info: What Europe PMC said about the article.
+        error: What to tell the reader, ending in a full stop.
+        failure: Why the step failed us, of its real kind.
+
+    Returns:
+        A result establishing nothing, naming Europe PMC as unread.
+    """
     return FulltextResult(
         success=False,
         source_type=FulltextSourceType.NOT_ASSESSED,
         article_info=article_info,
         error=error,
         lookups=LookupRecord(
-            failures=(
-                SourceLookupFailure(SERVICE_EUROPE_PMC, RequestFailure(kind)),
-            )
+            failures=(SourceLookupFailure(SERVICE_EUROPE_PMC, failure),)
         ),
     )
