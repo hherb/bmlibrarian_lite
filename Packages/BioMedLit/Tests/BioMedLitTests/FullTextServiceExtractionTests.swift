@@ -99,7 +99,11 @@ final class FullTextServiceExtractionTests: XCTestCase {
     /// that runs them otherwise, and once `downloadAndCachePDF` consults the
     /// cache, a leftover entry from an earlier run silently skips the download
     /// a later test is asserting on.
-    private static let cachedPMIDs = [primaryPMID, secondaryPMID]
+    private static let cachedPMIDs = [primaryPMID, secondaryPMID, unassignedPMCID]
+
+    /// A PMC accession no article has yet (the highest were near PMC13000000
+    /// in 2026), for the one test whose primary slot must hold a PMC ID.
+    private static let unassignedPMCID = "PMC99999991"
 
     private static func clearCache() {
         for pmid in cachedPMIDs {
@@ -195,6 +199,26 @@ final class FullTextServiceExtractionTests: XCTestCase {
         XCTAssertEqual(result.source, .unpaywall)
         XCTAssertEqual(result.contentKind, .extracted)
         XCTAssertEqual(result.extractedText, "Recovered prose.")
+    }
+
+    /// A lost identifier search stops mattering once Europe PMC serves the XML
+    /// (#434): the degradation says Europe PMC could not be reached, and here
+    /// it was. The served deposit is body-less, so the chain goes on to a PDF
+    /// tier, and that result must not carry the search's stale degradation.
+    func testAServedXMLClearsALostSearchesDegradation() async throws {
+        stubUnpaywallAndPDF()
+        StubURLProtocol.routes["search"] = (400, Data())
+        StubURLProtocol.routes["fullTextXML"] = (200, Self.bodyless)
+        let extractor = StubExtractor(result: PDFExtractionResult(
+            text: "Recovered prose.", success: true, pageCount: 1, convertedPages: 1, warnings: []
+        ))
+        let result = try await makeService(extractor: extractor).fetchFullText(
+            pmcId: nil, doi: "10.1/x", pmid: Self.unassignedPMCID, primaryKind: .pmc
+        )
+
+        XCTAssertTrue(StubURLProtocol.requested("/\(Self.unassignedPMCID)/fullTextXML"))
+        XCTAssertEqual(result.source, .unpaywall)
+        XCTAssertNil(result.degradation)
     }
 
     /// The flag turns the download off entirely, mirroring bmlib's

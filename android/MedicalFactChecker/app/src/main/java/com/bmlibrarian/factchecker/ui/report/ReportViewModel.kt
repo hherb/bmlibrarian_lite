@@ -480,6 +480,9 @@ class ReportViewModel @Inject constructor(
                                     fullTextFetchedAt = Date()
                                 )
                             }
+                            // Not a fact about the article, so nothing is recorded
+                            // and the fetch stays on offer (#434)
+                            is FullTextService.FullTextResult.NotEstablished -> document
                         }
 
                         documentRepository.updateDocument(updatedDoc)
@@ -495,29 +498,20 @@ class ReportViewModel @Inject constructor(
                             )
                         }
 
-                        val success = fullTextResult !is FullTextService.FullTextResult.Unavailable
-                        if (!success) {
+                        val success = fullTextResult !is FullTextService.FullTextResult.Unavailable &&
+                            fullTextResult !is FullTextService.FullTextResult.NotEstablished
+                        if (fullTextResult is FullTextService.FullTextResult.NotEstablished) {
+                            _events.send(ReportUiEvent.ShowSnackbar(fullTextResult.reason))
+                        } else if (!success) {
                             _events.send(ReportUiEvent.ShowSnackbar("Full text not available"))
                         }
                         Log.d(TAG, "Full text fetch ${if (success) "succeeded" else "unavailable"} for ${document.id}")
                     },
                     onFailure = { error ->
+                        // A failed fetch is not an article without full text, so
+                        // the document is not marked unavailable for good (#434)
                         Log.e(TAG, "Full text fetch failed: ${error.message}")
-                        val updatedDoc = document.copy(
-                            fullTextUnavailable = true,
-                            fullTextFetchedAt = Date()
-                        )
-                        documentRepository.updateDocument(updatedDoc)
-
-                        _uiState.update { state ->
-                            state.copy(
-                                selectedDocument = updatedDoc,
-                                documents = state.documents.map {
-                                    if (it.id == updatedDoc.id) updatedDoc else it
-                                },
-                                isLoadingFullText = false
-                            )
-                        }
+                        _uiState.update { it.copy(isLoadingFullText = false) }
                         _events.send(ReportUiEvent.ShowSnackbar("Failed to fetch full text"))
                     }
                 )

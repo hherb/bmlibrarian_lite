@@ -23,7 +23,6 @@ import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.sendSourceRequest
 import com.bmlibrarian.factchecker.data.remote.unreadableSourceAnswer
 import com.bmlibrarian.factchecker.data.remote.withSourceRetries
-import com.bmlibrarian.factchecker.domain.model.EuropePMCError
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
@@ -31,7 +30,6 @@ import com.bmlibrarian.factchecker.domain.model.SearchPaging
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
 import com.bmlibrarian.factchecker.util.Constants
-import com.bmlibrarian.factchecker.util.NetworkRetry
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -91,29 +89,51 @@ class EuropePMCService @Inject constructor(
     }
 
     /**
-     * Get full text XML for a PMC article.
+     * Ask Europe PMC for an article's full-text XML, and say what we got.
      *
-     * @param pmcId PubMed Central ID (with or without "PMC" prefix)
-     * @return Result containing XML string or error
+     * Mirrors Python's `EuropePMCClient.fetch_fulltext_xml` (#434).
+     *
+     * @param accession A PMC ID, with or without its `PMC` prefix, or a
+     *   preprint's `PPR` record ID
+     * @return The XML; Europe PMC's 404; or why it could not be read, of its real
+     *   kind once the retries are spent (a 429 stays a 429). A blank answer is an
+     *   incomplete response, and an identifier that is not an accession is never
+     *   sent (#355)
+     * @throws kotlin.coroutines.cancellation.CancellationException if the caller
+     *   cancelled, and nothing else: a cancelled fetch is not a dead source
      */
-    suspend fun getFullTextXml(pmcId: String): Result<String> {
-        return try {
-            NetworkRetry.withExponentialBackoff(
-                maxRetries = Constants.NETWORK_MAX_RETRIES,
-                shouldRetry = { e -> shouldRetryError(e) }
-            ) {
-                performGetFullText(pmcId)
-            }
-        } catch (e: EuropePMCError) {
-            Result.failure(e)
-        } catch (e: Exception) {
-            Result.failure(
-                EuropePMCError.NetworkError(
-                    message = "Network error: ${e.message}",
-                    cause = e
-                )
-            )
+    suspend fun fetchFullTextXml(accession: String): FullTextXmlFetch {
+        val normalized = FullTextAccession.normalized(accession)
+        if (normalized == null) {
+            Log.w(TAG, "Not a PMC or preprint accession, so Europe PMC was not asked for its full text")
+            return FullTextXmlFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
         }
+
+        val response = try {
+            withSourceRetries {
+                sendSourceRequest(
+                    SearchProvider.EUROPE_PMC,
+                    TAG,
+                    statusFailure = RequestFailure::forHttpStatus
+                ) { api.getFullTextXml(normalized) }
+            }
+        } catch (e: SourceRequestException) {
+            if (e.failure.kind == RequestFailureKind.HTTP_STATUS && e.failure.statusCode == Constants.HTTP_NOT_FOUND) {
+                Log.d(TAG, "Europe PMC serves no full-text XML for $normalized")
+                return FullTextXmlFetch.Absent
+            }
+            Log.w(TAG, "Europe PMC's full text for $normalized could not be read (${e.failure.describe()})")
+            return FullTextXmlFetch.Unreachable(e.failure)
+        }
+
+        // An empty answer has told us nothing about the article: an incomplete
+        // response, not an absence
+        val xml = response.body()
+        if (xml.isNullOrBlank()) {
+            Log.w(TAG, "Europe PMC served an empty full text for $normalized")
+            return FullTextXmlFetch.Unreachable(RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE))
+        }
+        return FullTextXmlFetch.Served(xml)
     }
 
     /**
@@ -253,47 +273,6 @@ class EuropePMCService @Inject constructor(
         unreadableSourceAnswer(SearchProvider.EUROPE_PMC, TAG, reason)
 
     /**
-     * Perform full text retrieval.
-     */
-    private suspend fun performGetFullText(pmcId: String): Result<String> {
-        // Ensure PMC prefix
-        val normalizedId = if (pmcId.startsWith("PMC")) pmcId else "PMC$pmcId"
-
-        val response = api.getFullTextXml(normalizedId)
-
-        if (!response.isSuccessful) {
-            if (response.code() == 404) {
-                throw EuropePMCError.FullTextUnavailableError(
-                    message = "Full text not available for $normalizedId",
-                    pmcId = normalizedId
-                )
-            }
-            throw EuropePMCError.fromHttpError(
-                response.code(),
-                response.message()
-            )
-        }
-
-        val xml = response.body()
-            ?: throw EuropePMCError.FullTextUnavailableError(
-                message = "Empty full text response for $normalizedId",
-                pmcId = normalizedId
-            )
-
-        return Result.success(xml)
-    }
-
-    /**
-     * Determine if an error should trigger a retry.
-     */
-    private fun shouldRetryError(e: Exception): Boolean {
-        return when (e) {
-            is EuropePMCError -> EuropePMCError.isRetryable(e)
-            else -> NetworkRetry.isRetryableException(e)
-        }
-    }
-
-    /**
      * Extension function to convert EuropePMCArticle to DocumentEntity.
      */
     private fun EuropePMCArticle.toDocumentEntity(
@@ -303,7 +282,7 @@ class EuropePMCService @Inject constructor(
     ): DocumentEntity? {
         if (title.isNullOrBlank()) return null
 
-        val isPreprint = source?.uppercase() in listOf("PPR", "PREPRINT")
+        val isPreprint = source?.uppercase() in Constants.EUROPE_PMC_PREPRINT_SOURCES
         val sourceType = when {
             isPreprint -> Constants.SOURCE_PREPRINT
             else -> Constants.SOURCE_EUROPE_PMC

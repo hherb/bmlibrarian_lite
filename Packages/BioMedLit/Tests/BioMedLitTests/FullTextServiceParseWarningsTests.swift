@@ -21,7 +21,7 @@ import XCTest
 /// exercised without a network.
 ///
 /// `FullTextService` built its own `URLSession` in `init(email:)`, which is why
-/// `fetchEuropePMCXML` had no offline coverage at all — and why both the warnings
+/// the Europe PMC XML fetch had no offline coverage at all — and why both the warnings
 /// channel and the typed parse error would otherwise have shipped untested.
 final class StubURLProtocol: URLProtocol {
     /// The body every intercepted request receives, with its status code.
@@ -186,8 +186,8 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
     /// as one indistinguishable string.
     func testAParseFailureSurfacesTheTypedError() async throws {
         do {
-            _ = try await service(serving: "<article><body></article>")
-                .fetchEuropePMCXML(pmcId: "PMC12759138")
+            _ = try await stubbedService()
+                .renderEuropePMCXML(Data("<article><body></article>".utf8), accession: "PMC12759138")
             XCTFail("malformed XML should not parse")
         } catch let error as FullTextError {
             guard case .jatsParseFailure(let parseError) = error else {

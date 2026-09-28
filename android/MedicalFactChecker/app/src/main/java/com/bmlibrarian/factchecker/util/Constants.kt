@@ -50,6 +50,12 @@ object Constants {
     /** HTTP 403: the request was refused. */
     const val HTTP_FORBIDDEN = 403
 
+    /**
+     * HTTP 404. From Europe PMC's `fullTextXML`, its answer that it serves no
+     * open-access full text under the accession; not the article's absence (#432).
+     */
+    const val HTTP_NOT_FOUND = 404
+
     /** HTTP 429: rate limited. */
     const val HTTP_TOO_MANY_REQUESTS = 429
 
@@ -254,6 +260,9 @@ object Constants {
 
     /** Document source: Preprint server. */
     const val SOURCE_PREPRINT = "preprint"
+
+    /** Europe PMC `source` values, upper-cased, that mark a record as a preprint. */
+    val EUROPE_PMC_PREPRINT_SOURCES = setOf("PPR", "PREPRINT")
 
     // ==================== Full-Text Source Constants ====================
 

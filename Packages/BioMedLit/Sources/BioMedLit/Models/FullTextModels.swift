@@ -86,6 +86,8 @@ public enum FullTextDegradation: String, Sendable, Codable, Equatable {
     /// - a server error that outlasted its retries;
     /// - a transport failure;
     /// - a status we do not model;
+    /// - a blank 200, which told us nothing about the article;
+    /// - an identifier that is not an accession, so nothing was sent;
     /// - an identifier search that threw **and left us without a PMC ID**, no
     ///   later query having matched a record for the article. A search that
     ///   answered — even with a record naming no PMC ID — settles the question,
@@ -94,9 +96,16 @@ public enum FullTextDegradation: String, Sendable, Codable, Equatable {
     /// This list is the canonical one. `FullTextService.fetchFullText` and
     /// `doc/cross_platform/jats_parsing.md` restate it; they must not diverge.
     ///
-    /// It deliberately does not claim the copy exists. `fullTextXML` answers 404
-    /// for abstract-only deposits, so an unreachable endpoint tells us a PMC
-    /// record exists and nothing about whether it has full text.
+    /// It deliberately does not claim the copy exists. A PMC record can hold an
+    /// abstract-only deposit, which `fullTextXML` serves as body-less XML (seen
+    /// live on 2026-09-29: PMC9788864 answers 200 with no `<body>`), and it can
+    /// be a non-open-access article, which `fullTextXML` does not serve at all
+    /// (#432). So an unreachable endpoint tells us a PMC record exists and
+    /// nothing about whether we could have had its full text.
+    ///
+    /// Not raised for `fullTextXML`'s 404: that is Europe PMC's answer, not
+    /// our loss. The chain still refuses to call the article's full text
+    /// absent on it (see ``FullTextError/absenceNotEstablished(_:)``).
     case europePMCUnreachable = "europePMCUnreachable"
 
     /// A better source was lost and this build cannot say why.
@@ -447,6 +456,21 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
     /// document permanently unavailable on it.
     case identifierKindUnresolved(String)
 
+    /// Every source was exhausted, but Europe PMC did not settle the question.
+    ///
+    /// Carries what Europe PMC's side of the chain got instead of an answer.
+    /// That is either an HTTP answer that is not about the article, such as
+    /// `fullTextXML`'s 404 for an article Europe PMC holds but does not serve
+    /// as open access (#432), or a failure to get any answer: a throttle, an
+    /// outage, a timeout, a blank body. Either way the article may have a full
+    /// text we did not reach (#434).
+    ///
+    /// Like ``identifierKindUnresolved(_:)``, a claim about *us*, and callers
+    /// must **not** mark the document permanently unavailable on it: that
+    /// took the retry away from articles whose only fault was a busy Europe
+    /// PMC.
+    case absenceNotEstablished(RequestFailure)
+
     /// PDF download failed.
     case pdfDownloadFailed(String)
 
@@ -482,6 +506,22 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
                 article's PubMed record was not opened. Search PubMed or \
                 Europe PMC for \(identifier).
                 """
+        case .absenceNotEstablished(let failure):
+            // The verb follows #435's decision: an HTTP answer was an answer,
+            // so Europe PMC "did not serve it"; a transport failure means it
+            // "could not be asked".
+            if failure.kind == .httpStatus {
+                return """
+                    No source provided this article's full text. Europe PMC \
+                    (\(failure.describe())) did not serve it, so it may still \
+                    exist. Try again later.
+                    """
+            }
+            return """
+                No source provided this article's full text. Europe PMC could \
+                not be asked (\(failure.describe())), so it may still exist. \
+                Try again later.
+                """
         case .pdfDownloadFailed(let reason):
             return "Failed to download PDF: \(reason)"
         case .jatsParseFailure(let error):
@@ -502,12 +542,14 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
             return true
         case .noIdentifiers, .noFullTextAvailable, .pdfDownloadFailed,
              .jatsParseFailure, .cachingFailed, .invalidResponse,
-             .identifierKindUnresolved:
+             .identifierKindUnresolved, .absenceNotEstablished:
             // A parse failure is deterministic: retrying spends the network
             // budget to reach the same result. So is an unresolved kind — the
             // stored record will not name itself on a second attempt — but
             // unlike the others it must not be recorded as a permanent state of
-            // the article; see the case's own note.
+            // the article; see the case's own note. An unsettled Europe PMC has
+            // already spent its own retries inside the chain; the reader may
+            // try again later, so it is not permanent either.
             return false
         }
     }

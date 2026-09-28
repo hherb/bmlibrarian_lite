@@ -51,7 +51,10 @@ case and checking you got `FULLTEXT` is exactly the direction worth testing.
 ### Deciding "has a body"
 
 Europe PMC serves full JATS XML for records deposited *abstract-only* — a
-`<front>` and a `<back>` with no `<body>` at all — and that XML parses and
+`<front>` and a `<back>` with no `<body>` at all (checked live on 2026-09-29:
+`PMC9788864`, open access, answers 200 with an abstract and no `<body>`; the
+404 some comments once claimed for these is what a *non-open-access* record
+gets, #432) — and that XML parses and
 renders successfully: it has a title and an abstract, so "did parsing produce
 any content" is not the right question. The right one is whether the parse
 found a body:
@@ -142,6 +145,25 @@ async function fetch_fulltext_xml(accession: string) -> FullTextXmlFetch:
 404 after the search is expected for a non-open-access article (#432). It is
 recorded as what we got -- `HTTP 404 Not Found` against Europe PMC -- and not
 as the article's absence; the chain goes on to the PDF tiers.
+
+**The apps (#434).** Swift (`FullTextService.fetchEuropePMCXML(accession:)` →
+`FullTextXmlFetch`) and Android (`EuropePMCService.fetchFullTextXml` →
+`FullTextXmlFetch`) follow the same three outcomes and accession rules
+(`FullTextAccession`), and fetch a preprint by its `PPR` ID: the one the
+identifier search found (Android's search must include preprints, which its
+default filter drops). Swift also reads the document's own primary slot, but
+only when that search *failed*: a search that answered "no such record" is
+not second-guessed with a fetch that can only 404. Where Python keeps a lookup
+record, the apps keep one fact, what Europe PMC's side of the chain got
+instead of an answer (a lost search, a failed fetch, or the 404), cleared when
+a fetch is served. A chain that then finds nothing ends in
+`FullTextError.absenceNotEstablished` (Swift) or
+`FullTextResult.NotEstablished` (Android), never in the "no full text" answer
+the callers record on the document for good. Its sentence uses #435's verbs:
+"Europe PMC (HTTP 404 Not Found) did not serve it" for an HTTP answer, "could
+not be asked (…)" otherwise. On Swift the 404 raises no `FullTextDegradation`
+(Europe PMC answered; see [jats_parsing.md](jats_parsing.md)), and a blank
+200 is `europePMCUnreachable`, no longer a parse failure.
 
 ### Parsing
 

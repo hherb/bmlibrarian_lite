@@ -383,6 +383,13 @@ class FullTextViewModel @Inject constructor(
 
                 _state.value = FullTextState.Unavailable(result.reason)
             }
+
+            is FullTextResult.NotEstablished -> {
+                // Not a fact about the article: nothing is recorded, and the
+                // reader is offered a retry (#434)
+                Log.d(TAG, "Full text not established for ${doc.id}: ${result.failure.describe()}")
+                _state.value = FullTextState.Error(message = result.reason, canRetry = true)
+            }
         }
     }
 

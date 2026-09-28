@@ -373,7 +373,8 @@ public actor EuropePMCService {
             isOpenAccess: result.isOpenAccess == "Y",
             source: .europePMC,
             pdfRenderURL: extractFreePDFURL(from: result),
-            identifierKind: ArticleIdentifierKind(europePMCSource: result.source)
+            identifierKind: ArticleIdentifierKind(europePMCSource: result.source),
+            europePMCRecordID: result.id
         )
     }
 

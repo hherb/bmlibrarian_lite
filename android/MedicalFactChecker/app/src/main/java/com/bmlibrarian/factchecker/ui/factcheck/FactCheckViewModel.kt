@@ -633,23 +633,22 @@ class FactCheckViewModel @Inject constructor(
                                     fullTextFetchedAt = java.util.Date()
                                 )
                             }
+                            // Not a fact about the article, so nothing is recorded
+                            // and the fetch stays on offer (#434)
+                            is FullTextService.FullTextResult.NotEstablished -> document
                         }
 
                         documentRepository.updateDocument(updatedDoc)
 
-                        val success = fullTextResult !is FullTextService.FullTextResult.Unavailable
+                        val success = fullTextResult !is FullTextService.FullTextResult.Unavailable &&
+                            fullTextResult !is FullTextService.FullTextResult.NotEstablished
                         Log.d(TAG, "Full text fetch ${if (success) "succeeded" else "unavailable"} for ${document.id}")
                         onComplete(success)
                     },
                     onFailure = { error ->
+                        // A failed fetch is not an article without full text, so
+                        // the document is not marked unavailable for good (#434)
                         Log.e(TAG, "Full text fetch failed: ${error.message}")
-                        // Mark as unavailable on failure
-                        documentRepository.updateDocument(
-                            document.copy(
-                                fullTextUnavailable = true,
-                                fullTextFetchedAt = java.util.Date()
-                            )
-                        )
                         onComplete(false)
                     }
                 )

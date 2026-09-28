@@ -610,7 +610,7 @@ final class JATSParseGuardTests: RecordingLoggerTestCase {
         try assertReportsZeroAuthors { try $0.parseToArticle() }
     }
 
-    /// `FullTextService.fetchEuropePMCXML` calls this one, and nothing else.
+    /// `FullTextService.renderEuropePMCXML` calls this one, and nothing else.
     func testAnAuthorlessParseIsReportedOnTheMarkdownPath() throws {
         try assertReportsZeroAuthors { try $0.parseToMarkdown() }
     }

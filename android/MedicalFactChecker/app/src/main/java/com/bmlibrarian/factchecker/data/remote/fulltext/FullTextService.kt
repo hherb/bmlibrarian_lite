@@ -20,7 +20,13 @@ package com.bmlibrarian.factchecker.data.remote.fulltext
 
 import android.content.Context
 import android.util.Log
+import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCArticle
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
+import com.bmlibrarian.factchecker.data.remote.europepmc.FullTextAccession
+import com.bmlibrarian.factchecker.data.remote.europepmc.FullTextXmlFetch
+import com.bmlibrarian.factchecker.domain.model.RequestFailure
+import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
+import com.bmlibrarian.factchecker.domain.model.SourceRequestException
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
 import com.bmlibrarian.factchecker.util.jats.JATSParseError
@@ -28,6 +34,7 @@ import com.bmlibrarian.factchecker.util.jats.JATSXMLParser
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.cancellation.CancellationException
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -106,9 +113,104 @@ class FullTextService @Inject constructor(
         /**
          * Full text is unavailable from all sources.
          *
+         * A claim about the article: every source that could be asked was asked
+         * and answered. Callers record it on the document for good.
+         *
          * @param reason Explanation of why retrieval failed.
          */
         data class Unavailable(val reason: String) : FullTextResult()
+
+        /**
+         * No source provided the full text, but Europe PMC did not settle whether
+         * it exists (#434).
+         *
+         * Europe PMC could not be asked (a throttle, an outage, a timeout, a blank
+         * answer, a failed identifier search), or it answered 404 for an article
+         * it holds, which `fullTextXML` does for text that is not open access
+         * (#432). Unlike [Unavailable], a claim about us: callers must not mark
+         * the document unavailable for good on it, or a busy Europe PMC takes the
+         * retry away.
+         *
+         * @param failure What Europe PMC's side of the chain got instead of an answer
+         */
+        data class NotEstablished(val failure: RequestFailure) : FullTextResult() {
+            /** The sentence shown to the reader. */
+            val reason: String
+                get() = absenceNotEstablishedMessage(failure)
+        }
+    }
+
+    /**
+     * What an identifier search learned, including what it could not learn.
+     *
+     * The search used to swallow its failures and answer an empty resolution, so
+     * "Europe PMC holds no record" and "we could not ask Europe PMC" were one
+     * answer, and the chain went on to call the article unavailable for good.
+     *
+     * @property pmcId The PMC ID, when a matched record named one
+     * @property preprintAccession The `PPR` record ID, when a matched record was a
+     *   preprint, which has no PMC ID
+     * @property pdfRenderUrl The free PDF render URL, when a matched record offered one
+     * @property failure Why the first failed search failed, when one did
+     * @property matchedARecord Whether any search matched a record for the article
+     */
+    internal data class PmcResolution(
+        val pmcId: String? = null,
+        val preprintAccession: String? = null,
+        val pdfRenderUrl: String? = null,
+        val failure: RequestFailure? = null,
+        val matchedARecord: Boolean = false
+    ) {
+        /**
+         * Whether a search failed and none answered about the article.
+         *
+         * A search that matched a record settles the question however the others
+         * went, so a failure alone is not enough.
+         */
+        val lostTheSource: Boolean
+            get() = failure != null && !matchedARecord
+
+        /**
+         * This resolution combined with a later search's: every field accumulates,
+         * preferring the earlier answer for the values that can only be answered once.
+         *
+         * @param next What a later search learned
+         * @return The two merged
+         */
+        fun merging(next: PmcResolution): PmcResolution = PmcResolution(
+            pmcId = pmcId ?: next.pmcId,
+            preprintAccession = preprintAccession ?: next.preprintAccession,
+            pdfRenderUrl = pdfRenderUrl ?: next.pdfRenderUrl,
+            failure = failure ?: next.failure,
+            matchedARecord = matchedARecord || next.matchedARecord
+        )
+
+        companion object {
+            /**
+             * What one matched record says about the article.
+             *
+             * The preprint's record ID is taken only in its prefixed form, so an ID
+             * that is not a `PPR` accession is never asked for as one.
+             *
+             * @param article The first record the search matched
+             * @return The resolution it gives
+             */
+            fun fromArticle(article: EuropePMCArticle): PmcResolution {
+                val isPreprint = article.source?.uppercase() in Constants.EUROPE_PMC_PREPRINT_SOURCES
+                return PmcResolution(
+                    pmcId = article.pmcid?.takeIf { it.isNotBlank() },
+                    preprintAccession = if (isPreprint) {
+                        article.id?.let { FullTextAccession.prefixed(it, FullTextAccession.PREPRINT_PREFIX) }
+                    } else {
+                        null
+                    },
+                    pdfRenderUrl = article.fullTextUrlList?.fullTextUrl
+                        ?.firstOrNull { it.documentStyle == "pdf" && it.availability == "Free" }
+                        ?.url,
+                    matchedARecord = true
+                )
+            }
+        }
     }
 
     /**
@@ -126,23 +228,50 @@ class FullTextService @Inject constructor(
         pmid: String?,
         email: String = Constants.UNPAYWALL_DEFAULT_EMAIL
     ): Result<FullTextResult> = withContext(Dispatchers.IO) {
+        // What Europe PMC's side of the chain got instead of an answer about the
+        // article, if anything. Set by a lost identifier search, a failed fetch and
+        // a fullTextXML 404; cleared by a fetch that was served. Read only at the
+        // end: a chain that found nothing must not call the article's full text
+        // absent while this is set (#434)
+        var europePmcShortfall: RequestFailure? = null
+
         // Resolve PMC ID and PDF render URL from PMID or DOI if not already available
         var resolvedPmcId = pmcId
+        var preprintAccession: String? = null
         var pdfRenderUrl: String? = null
-        if (resolvedPmcId.isNullOrEmpty()) {
+        if (resolvedPmcId.isNullOrBlank()) {
             val resolution = resolvePmcIdAndPdfUrl(pmid = pmid, doi = doi)
             resolvedPmcId = resolution.pmcId
+            preprintAccession = resolution.preprintAccession
             pdfRenderUrl = resolution.pdfRenderUrl
+            if (resolution.lostTheSource) {
+                europePmcShortfall = resolution.failure
+            }
         }
 
-        // Try Europe PMC XML first if PMC ID is available (directly or resolved)
-        if (!resolvedPmcId.isNullOrEmpty()) {
-            Log.d(TAG, "Attempting Europe PMC XML for $resolvedPmcId")
-            val xmlResult = tryEuropePmcXml(resolvedPmcId)
-            if (xmlResult.isSuccess) {
-                return@withContext xmlResult
+        // Try Europe PMC XML first. A preprint has no PMC ID and is asked for by
+        // its PPR record ID
+        val accession = resolvedPmcId?.takeIf { it.isNotBlank() } ?: preprintAccession
+        if (accession != null) {
+            Log.d(TAG, "Attempting Europe PMC XML for $accession")
+            when (val fetch = europePmcService.fetchFullTextXml(accession)) {
+                is FullTextXmlFetch.Served -> {
+                    // Europe PMC answered, so a lost identifier search did not cost this source
+                    europePmcShortfall = null
+                    parseEuropePmcXml(fetch.xml, accession)?.let { return@withContext Result.success(it) }
+                }
+                FullTextXmlFetch.Absent -> {
+                    // Europe PMC's own answer, but not the article's absence:
+                    // fullTextXML serves open-access text only, and this accession
+                    // names an article Europe PMC holds (#432)
+                    Log.w(TAG, "Europe PMC did not serve full text for $accession (HTTP 404); trying other sources")
+                    europePmcShortfall = RequestFailure.forHttpStatus(Constants.HTTP_NOT_FOUND)
+                }
+                is FullTextXmlFetch.Unreachable -> {
+                    Log.w(TAG, "Europe PMC XML could not be retrieved for $accession (${fetch.failure.describe()})")
+                    europePmcShortfall = fetch.failure
+                }
             }
-            Log.d(TAG, "Europe PMC XML failed: ${xmlResult.exceptionOrNull()?.message}")
         }
 
         // Try Europe PMC PDF render URL (when XML unavailable but free PDF exists)
@@ -171,60 +300,52 @@ class FullTextService @Inject constructor(
             )
         }
 
+        // Nothing was found, but Europe PMC did not settle the question. The
+        // callers mark Unavailable on the document for good, so saying it here
+        // would take the retry away from an article whose only fault was a busy
+        // or closed Europe PMC (#434)
+        europePmcShortfall?.let { failure ->
+            Log.w(TAG, "No source served full text, and Europe PMC did not settle it (${failure.describe()})")
+            return@withContext Result.success(FullTextResult.NotEstablished(failure))
+        }
+
         // No full text available
         Result.success(
-            FullTextResult.Unavailable(
-                "No full text source available (no PMC ID or DOI)"
-            )
+            FullTextResult.Unavailable("No full text source available")
         )
     }
 
     /**
-     * Try to fetch full text from Europe PMC.
+     * Convert served JATS XML to markdown and HTML.
      *
-     * @param pmcId PubMed Central ID.
-     * @return Result containing parsed XML content or error.
+     * @param xml The XML Europe PMC served.
+     * @param accession The accession it was served under. Passed to the parser for
+     *   figure URLs only when it is a PMC ID: a preprint's figures are not filed
+     *   under its PPR ID.
+     * @return The parsed content, or null when the XML could not be parsed (logged:
+     *   a defect in us, and the chain goes on to the other sources).
      */
-    private suspend fun tryEuropePmcXml(pmcId: String): Result<FullTextResult> {
+    private fun parseEuropePmcXml(xml: String, accession: String): FullTextResult.EuropePmcXml? {
+        val knownPmcId = FullTextAccession.normalized(accession)
+            ?.takeIf { it.startsWith(FullTextAccession.PMC_PREFIX) }
         return try {
-            val xmlResult = europePmcService.getFullTextXml(pmcId)
-
-            xmlResult.fold(
-                onSuccess = { xml ->
-                    // Parse the XML to markdown and HTML
-                    try {
-                        val parser = JATSXMLParser(
-                            xmlData = xml.toByteArray(Charsets.UTF_8),
-                            knownPmcId = pmcId
-                        )
-                        val markdown = parser.parseToMarkdown()
-
-                        // Create a new parser instance for HTML (parsers are single-use)
-                        val htmlParser = JATSXMLParser(
-                            xmlData = xml.toByteArray(Charsets.UTF_8),
-                            knownPmcId = pmcId
-                        )
-                        val html = htmlParser.parseToHTML()
-
-                        Result.success(
-                            FullTextResult.EuropePmcXml(
-                                xml = xml,
-                                markdown = markdown,
-                                html = html
-                            )
-                        )
-                    } catch (e: JATSParseError) {
-                        Log.e(TAG, "JATS parsing failed: ${e.message}")
-                        Result.failure(e)
-                    }
-                },
-                onFailure = { error ->
-                    Result.failure(error)
-                }
+            val parser = JATSXMLParser(
+                xmlData = xml.toByteArray(Charsets.UTF_8),
+                knownPmcId = knownPmcId
             )
-        } catch (e: Exception) {
-            Log.e(TAG, "Europe PMC XML retrieval failed: ${e.message}")
-            Result.failure(e)
+            val markdown = parser.parseToMarkdown()
+
+            // Create a new parser instance for HTML (parsers are single-use)
+            val htmlParser = JATSXMLParser(
+                xmlData = xml.toByteArray(Charsets.UTF_8),
+                knownPmcId = knownPmcId
+            )
+            val html = htmlParser.parseToHTML()
+
+            FullTextResult.EuropePmcXml(xml = xml, markdown = markdown, html = html)
+        } catch (e: JATSParseError) {
+            Log.e(TAG, "Europe PMC XML for $accession was retrieved but could not be parsed: ${e.message}")
+            null
         }
     }
 
@@ -285,67 +406,67 @@ class FullTextService @Inject constructor(
     }
 
     /**
-     * Resolution result containing PMC ID and optional PDF render URL.
-     */
-    private data class PmcResolution(
-        val pmcId: String? = null,
-        val pdfRenderUrl: String? = null
-    )
-
-    /**
-     * Resolve a PMC ID and PDF render URL from a PMID or DOI via Europe PMC search.
+     * Resolve a PMC ID, a preprint's record ID and a PDF render URL from a PMID or
+     * DOI via Europe PMC search.
      *
-     * Tries PMID first (more specific), then DOI. Also extracts the free PDF
-     * render URL from the fullTextUrlList in the search response.
+     * Tries PMID first (more specific), then DOI, stopping once an accession is
+     * found. Written as a fold so a failed first search is not forgotten when the
+     * second answers nothing.
      *
      * @param pmid PubMed ID to resolve.
      * @param doi DOI to resolve.
-     * @return PmcResolution with PMC ID and PDF render URL (both nullable).
+     * @return What every attempted search learned, merged.
      */
     private suspend fun resolvePmcIdAndPdfUrl(pmid: String?, doi: String?): PmcResolution {
-        // Try resolving by PMID first
-        if (!pmid.isNullOrEmpty()) {
-            val query = "ext_id:$pmid src:med"
-            val resolution = searchForPmcIdAndPdfUrl(query)
-            if (resolution.pmcId != null) {
-                Log.d(TAG, "Resolved PMID $pmid to ${resolution.pmcId}")
-                return resolution
+        val queries = listOfNotNull(
+            pmid?.takeIf { it.isNotBlank() }?.let { "ext_id:$it src:med" },
+            doi?.takeIf { it.isNotBlank() }?.let { "DOI:\"$it\"" }
+        )
+        var accumulated = PmcResolution()
+        for (query in queries) {
+            accumulated = accumulated.merging(searchForPmcIdAndPdfUrl(query))
+            if (accumulated.pmcId != null || accumulated.preprintAccession != null) {
+                Log.d(TAG, "Resolved '$query' to ${accumulated.pmcId ?: accumulated.preprintAccession}")
+                return accumulated
             }
         }
-
-        // Try resolving by DOI
-        if (!doi.isNullOrEmpty()) {
-            val query = "DOI:\"$doi\""
-            val resolution = searchForPmcIdAndPdfUrl(query)
-            if (resolution.pmcId != null) {
-                Log.d(TAG, "Resolved DOI $doi to ${resolution.pmcId}")
-                return resolution
-            }
-        }
-
-        return PmcResolution()
+        return accumulated
     }
 
     /**
-     * Search Europe PMC and extract PMC ID and PDF render URL from the first result.
+     * Search Europe PMC and read what the first result says about the article.
+     *
+     * Preprints are included: the default search filters them out, and a DOI is
+     * the only route a preprint document has to its record here.
+     *
+     * @param query The Europe PMC query.
+     * @return What the first result carried; an empty resolution when the search
+     *   matched nothing; the failure when it could not be asked.
+     * @throws CancellationException if the caller cancelled.
      */
     private suspend fun searchForPmcIdAndPdfUrl(query: String): PmcResolution {
-        return try {
-            val result = europePmcService.search(
+        val result = try {
+            europePmcService.search(
                 query = query,
                 batchSize = 1,
+                includePreprints = true,
                 resultsReceived = 0
             )
-            val article = result.getOrNull()?.articles?.firstOrNull()
-            val pmcId = article?.pmcid?.takeIf { it.isNotEmpty() }
-            val pdfRenderUrl = article?.fullTextUrlList?.fullTextUrl
-                ?.firstOrNull { it.documentStyle == "pdf" && it.availability == "Free" }
-                ?.url
-            PmcResolution(pmcId = pmcId, pdfRenderUrl = pdfRenderUrl)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Log.d(TAG, "PMC ID resolution failed for query '$query': ${e.message}")
-            PmcResolution()
+            Result.failure(e)
         }
+        return result.fold(
+            onSuccess = { page ->
+                page.articles.firstOrNull()?.let(PmcResolution::fromArticle) ?: PmcResolution()
+            },
+            onFailure = { error ->
+                val failure = (error as? SourceRequestException)?.failure ?: RequestFailure.fromException(error)
+                Log.w(TAG, "PMC ID resolution failed for query '$query': ${failure.describe()}")
+                PmcResolution(failure = failure)
+            }
+        )
     }
 
     /**
@@ -448,6 +569,7 @@ class FullTextService @Inject constructor(
             is FullTextResult.UnpaywallPdf -> Constants.FULLTEXT_SOURCE_UNPAYWALL
             is FullTextResult.DoiUrl -> Constants.FULLTEXT_SOURCE_DOI
             is FullTextResult.Unavailable -> null
+            is FullTextResult.NotEstablished -> null
         }
     }
 }
@@ -461,3 +583,23 @@ class FullTextUnavailableException(message: String) : Exception(message)
  * Exception indicating a full text retrieval error.
  */
 class FullTextException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
+ * The sentence for a chain that found nothing while Europe PMC did not settle
+ * whether the full text exists (#434).
+ *
+ * The verb follows #435's decision: an HTTP answer was an answer, so Europe PMC
+ * "did not serve it"; any other failure means it "could not be asked". Worded as
+ * the iOS app words `FullTextError.absenceNotEstablished`.
+ *
+ * @param failure What Europe PMC's side of the chain got instead of an answer
+ * @return The sentence
+ */
+fun absenceNotEstablishedMessage(failure: RequestFailure): String =
+    if (failure.kind == RequestFailureKind.HTTP_STATUS) {
+        "No source provided this article's full text. Europe PMC (${failure.describe()}) " +
+            "did not serve it, so it may still exist. Try again later."
+    } else {
+        "No source provided this article's full text. Europe PMC could not be asked " +
+            "(${failure.describe()}), so it may still exist. Try again later."
+    }
