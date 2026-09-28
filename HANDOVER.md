@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#429 — a typed full-text XML fetch** (Python), branch
-`fix/typed-fulltext-xml-fetch-429`. Compress into **Recently landed** once merged.
+`fix/typed-fulltext-xml-fetch-429`, **PR #433**. Compress into **Recently landed** once merged.
 
 - `fetch_fulltext_xml(pmcid) -> FullTextXmlFetch` (served / absent = 404 /
   unreachable with its real `RequestFailure`; blank 200 is incomplete; a
