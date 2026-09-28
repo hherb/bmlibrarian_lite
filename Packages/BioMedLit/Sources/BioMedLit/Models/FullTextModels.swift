@@ -514,10 +514,10 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
                 Europe PMC for \(identifier).
                 """
         case .absenceNotEstablished(let failure):
-            // The verb follows #435's decision: an HTTP status was an answer,
-            // so Europe PMC "did not serve it"; every other kind keeps "could
-            // not be asked".
-            if failure.kind == .httpStatus {
+            // The verb follows #435's decision: an HTTP status other than a
+            // throttle was an answer, so Europe PMC "did not serve it"; a
+            // throttle and every other kind keep "could not be asked".
+            if failure.isAnswer {
                 return """
                     No source provided this article's full text. Europe PMC \
                     (\(failure.describe())) did not serve it, so it may still \

@@ -25,7 +25,6 @@ import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
 import com.bmlibrarian.factchecker.data.remote.europepmc.FullTextAccession
 import com.bmlibrarian.factchecker.data.remote.europepmc.FullTextXmlFetch
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
-import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
@@ -609,15 +608,16 @@ class FullTextException(message: String, cause: Throwable? = null) : Exception(m
  * The sentence for a chain that found nothing while Europe PMC did not settle
  * whether the full text exists (#434).
  *
- * The verb follows #435's decision: an HTTP status was an answer, so Europe PMC
- * "did not serve it"; any other failure means it "could not be asked". Worded as
+ * The verb follows #435's decision: an HTTP status other than a throttle was an
+ * answer, so Europe PMC "did not serve it"; a throttle or any other failure means
+ * it "could not be asked" ([RequestFailure.isAnswer]). Worded as
  * BioMedLit's `FullTextError.absenceNotEstablished` (iOS and macOS).
  *
  * @param failure What Europe PMC's side of the chain got instead of an answer
  * @return The sentence
  */
 fun absenceNotEstablishedMessage(failure: RequestFailure): String =
-    if (failure.kind == RequestFailureKind.HTTP_STATUS) {
+    if (failure.isAnswer) {
         "No source provided this article's full text. Europe PMC (${failure.describe()}) " +
             "did not serve it, so it may still exist. Try again later."
     } else {

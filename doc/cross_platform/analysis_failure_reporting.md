@@ -211,6 +211,17 @@ logged **and reported**).
     second is the reader's to act on: an unconfigured Unpaywall earns a
     sentence of advice, a throttled one does not (#355). Advice the reader
     cannot act on reads as confidently as advice they can (#335).
+  - **A source that answered was asked.** Every sentence built from a
+    `LookupRecord` names its sources through one clause,
+    `unsettled_lookups_clause`, which gives each its own verb (#435): one
+    whose failure `is_answer` (an HTTP status other than a throttle, see
+    [search_failure_reporting.md](search_failure_reporting.md)) "did not
+    serve it", the rest "could not be asked" -- "doi.org (the request timed
+    out) could not be asked, and Europe PMC (HTTP 404 Not Found) did not
+    serve it, so …". The case that forced it: Europe PMC's 404 for an
+    article its search holds, recorded since #429 as a failure rather than
+    an absence (#432), read "Europe PMC (HTTP 404 Not Found) could not be
+    asked".
   - **`NOT_FOUND` is a claim about the article, so only the end of the
     chain may reach it.** Every per-source "this one holds nothing" is
     `NOT_ASSESSED`, because the sources after it have not been asked yet. `FulltextDiscoverer` mapped every failure, every cancel and every

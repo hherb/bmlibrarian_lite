@@ -27,6 +27,7 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
+import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.jats.JATSXMLParser
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -261,6 +262,27 @@ class FullTextServiceEuropePmcTest {
 
         val unasked = absenceNotEstablishedMessage(RequestFailure(RequestFailureKind.TIMEOUT))
         assertTrue(unasked, unasked.contains("Europe PMC could not be asked (the request timed out)"))
+
+        val throttled = absenceNotEstablishedMessage(RequestFailure(RequestFailureKind.HTTP_STATUS, 429))
+        assertTrue(throttled, throttled.contains("Europe PMC could not be asked (HTTP 429 Too Many Requests)"))
+        assertFalse(throttled, throttled.contains("did not serve it"))
+    }
+
+    /** The predicate the verb is chosen by, Python's `RequestFailure.is_answer`. */
+    @Test
+    fun `an HTTP status other than a throttle is an answer`() {
+        for (status in listOf(400, 401, 403, 404, 410, 500, 502, 504)) {
+            assertTrue("$status", RequestFailure(RequestFailureKind.HTTP_STATUS, status).isAnswer)
+        }
+        assertEquals(setOf(429, 503), Constants.THROTTLE_STATUS_CODES)
+        for (status in Constants.THROTTLE_STATUS_CODES) {
+            assertFalse("$status", RequestFailure(RequestFailureKind.HTTP_STATUS, status).isAnswer)
+        }
+        // A status this build could not keep was still answered.
+        assertTrue(RequestFailure(RequestFailureKind.HTTP_STATUS).isAnswer)
+        for (kind in RequestFailureKind.entries.filter { it != RequestFailureKind.HTTP_STATUS }) {
+            assertFalse("$kind", RequestFailure(kind).isAnswer)
+        }
     }
 }
 

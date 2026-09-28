@@ -192,6 +192,18 @@ The last two apply only to [alternative queries](#alternative-queries-smart-sear
 | `incomplete_response` | `"the response was incomplete"` |
 | `request_failed` | `"the request failed"` |
 
+**An answer is not a failure to ask (#435).** A sentence that names a source
+beside its `{reason}` chooses its verb by one predicate, `RequestFailure.is_answer`
+(Python) / `isAnswer` (Swift, Kotlin): true for `http_status` with any status
+but a throttle (**429 and 503**: Python's `POLITE_THROTTLE_STATUSES`,
+`BioMedLitConstants.throttleStatusCodes`, `Constants.THROTTLE_STATUS_CODES`),
+including an unknown status. Such a source was asked and answered, so it
+"did not serve it" -- `"Europe PMC (HTTP 404 Not Found) did not serve it"`;
+every other kind, and a throttle, "could not be asked". A throttle says only
+"not now", a refused redirect is our own refusal, and a blank or garbled 200
+says nothing about the article. The search clauses above are unaffected:
+"could not be searched" is true of an answered error too.
+
 The phrases are fixed here (RFC 9110 wording), not taken from a platform
 library, whose phrases differ (Python 3.13 renamed 413, 414 and 422; Swift's
 are lowercase and localised):

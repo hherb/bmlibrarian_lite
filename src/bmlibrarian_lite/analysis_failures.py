@@ -44,8 +44,10 @@ here turn either record into what a reader sees.
   cancelling is not failing, but a failure is never hidden (golden rule 8).
 - :func:`unreachable_source_caveat` says a source could not be read, so what
   it would have told us is not assessed rather than absent (#346).
-  :func:`unasked_lookups_clause` names every source that went unasked, failed
-  or skipped, each once; :func:`no_pdf_sources_message`,
+  :func:`unsettled_lookups_clause` names every source that left access open,
+  failed or skipped, each once, with the verb its answer earns (#435):
+  "did not serve it" for an HTTP answer, "could not be asked" for anything
+  else; :func:`no_pdf_sources_message`,
   :func:`paywall_message` and :func:`with_unestablished_access` are the three
   sentences that carry it to the reader, and none of them claims a licence
   that the lookup we could not make was the one to establish (#347, #355).
@@ -758,32 +760,51 @@ def unreachable_lookups_clause(failures: Sequence[SourceLookupFailure]) -> str:
     return _joined(_named(failures))
 
 
-def unasked_lookups_clause(record: LookupRecord) -> str:
-    """Name every source that went unasked, whether it failed or was skipped.
+def unsettled_lookups_clause(record: LookupRecord) -> str:
+    """Name every lookup that left access open, each with what became of it.
 
     A skipped lookup leaves exactly the empty result a failed one does, so
     naming only the failures understates what the search missed by as much
     as naming neither did before #347. The two are told apart by the
     parenthetical, not by being in different sentences: the reader wants one
-    list of what was not asked, and then one piece of advice.
+    list of what went unsettled, and then one piece of advice.
 
-    A service that both failed and was skipped is named once, by its
-    failure -- it was reached at least once, so "not configured" would be
-    false of it.
+    The verb is the source's own (#435). A source that answered -- Europe
+    PMC's 404 for an article it holds but will not serve (#432) -- "did not
+    serve it"; one that was throttled, unreachable or skipped "could not be
+    asked". :attr:`~bmlibrarian_lite.data_models.RequestFailure.is_answer`
+    decides, and the apps' sentences ask the same predicate.
+
+    A service is named once, by its first failure; one that both failed and
+    was skipped is named by its failure -- it was reached at least once, so
+    "not configured" would be false of it.
 
     Args:
-        record: What went unasked; may be empty.
+        record: What went unsettled; may be empty.
 
     Returns:
-        For example ``"doi.org (HTTP 429 Too Many Requests) and Unpaywall
-        (not configured)"`` -- failures are named before skips, because the
-        failures are what seed the mapping. Empty when every lookup was made
-        and answered.
+        A clause for "…, so", for example ``"doi.org (the request timed out)
+        and Unpaywall (not configured) could not be asked, and Europe PMC
+        (HTTP 404 Not Found) did not serve it"``. The unasked are named
+        first, failures before skips. Empty when every lookup was made and
+        served.
     """
-    named = _named(record.failures)
+    unasked: dict[str, str] = {}
+    answered: dict[str, str] = {}
+    for failure in record.failures:
+        if failure.service in unasked or failure.service in answered:
+            continue
+        named = answered if failure.failure.is_answer else unasked
+        named[failure.service] = failure.failure.describe()
     for skip in record.skipped:
-        named.setdefault(skip.service, skip.describe())
-    return _joined(named)
+        if skip.service not in answered:
+            unasked.setdefault(skip.service, skip.describe())
+    clauses = []
+    if unasked:
+        clauses.append(f"{_joined(unasked)} could not be asked")
+    if answered:
+        clauses.append(f"{_joined(answered)} did not serve it")
+    return ", and ".join(clauses)
 
 
 def _named(failures: Sequence[SourceLookupFailure]) -> dict[str, str]:
@@ -913,7 +934,7 @@ def unestablished_access_clause(record: LookupRecord) -> str:
     if not record.anything_unasked:
         return ""
     return _with_nudge(
-        f"{unasked_lookups_clause(record)} could not be asked, "
+        f"{unsettled_lookups_clause(record)}, "
         f"{_ACCESS_NOT_ESTABLISHED}",
         record,
     )
@@ -976,7 +997,7 @@ def paywall_message(claim: str, record: LookupRecord) -> str:
         return claim
     return _with_nudge(
         f"A source refused access, but "
-        f"{unasked_lookups_clause(record)} could not be asked, "
+        f"{unsettled_lookups_clause(record)}, "
         f"{_ACCESS_NOT_ESTABLISHED}",
         record,
     )
@@ -1005,7 +1026,7 @@ def no_pdf_sources_message(record: LookupRecord) -> str:
         )
     return _with_nudge(
         f"No PDF sources found, but "
-        f"{unasked_lookups_clause(record)} could not be asked, "
+        f"{unsettled_lookups_clause(record)}, "
         f"{_ACCESS_NOT_ESTABLISHED}",
         record,
     )

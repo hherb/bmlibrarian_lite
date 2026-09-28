@@ -31,7 +31,12 @@ from enum import Enum
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Optional, TypeGuard
 
-from .constants import HTTP_STATUS_CODE_MAX, HTTP_STATUS_CODE_MIN, MAX_PUBMED_SEARCH_OFFSET
+from .constants import (
+    HTTP_STATUS_CODE_MAX,
+    HTTP_STATUS_CODE_MIN,
+    MAX_PUBMED_SEARCH_OFFSET,
+    POLITE_THROTTLE_STATUSES,
+)
 
 if TYPE_CHECKING:
     from .quality.data_models import QualityAssessment
@@ -149,6 +154,27 @@ class RequestFailure:
             status = "" if self.status_code is None else f" (HTTP {self.status_code})"
             return f"a redirect{status} was refused"
         return _REQUEST_FAILURE_REASONS[self.kind]
+
+    @property
+    def is_answer(self) -> bool:
+        """Whether the source was asked and answered, just not with the article.
+
+        Chooses the reader's verb (#435): an answer "did not serve it", any
+        other failure "could not be asked". An HTTP status is the source's
+        answer -- Europe PMC's 404 for an article it holds but will not serve
+        (#432) -- except a throttle, which says only "not now". Every other
+        kind is not: a refused redirect is our own refusal, and a blank or
+        garbled 200 says nothing about the article.
+
+        Returns:
+            ``True`` for ``HTTP_STATUS`` with a status other than
+            :data:`~bmlibrarian_lite.constants.POLITE_THROTTLE_STATUSES`,
+            including an unknown one.
+        """
+        return (
+            self.kind is RequestFailureKind.HTTP_STATUS
+            and self.status_code not in POLITE_THROTTLE_STATUSES
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-safe dictionary."""
@@ -295,10 +321,10 @@ class SourceLookupFailure:
     :mod:`~bmlibrarian_lite.constants`.
 
     Attributes:
-        service: The source that could not be asked, named as the reader
+        service: The source whose lookup failed, named as the reader
             knows it, for example ``"Unpaywall"``. Stripped on construction,
             because equality of this string is the grouping contract:
-            :func:`~bmlibrarian_lite.analysis_failures.unasked_lookups_clause`
+            :func:`~bmlibrarian_lite.analysis_failures.unsettled_lookups_clause`
             names each service once -- and names a service that both failed
             and was skipped by its failure -- so a stray space would make
             one throttled host read to the reader as two.

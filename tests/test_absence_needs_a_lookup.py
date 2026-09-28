@@ -30,7 +30,7 @@ import pytest
 from bmlibrarian_lite.analysis_failures import (
     configuration_nudge,
     no_pdf_sources_message,
-    unasked_lookups_clause,
+    unsettled_lookups_clause,
 )
 from bmlibrarian_lite.constants import (
     SERVICE_CROSSREF,
@@ -154,7 +154,7 @@ class TestTheReaderIsToldWhatWasNotAsked:
                 ),
             )
         )
-        assert SERVICE_UNPAYWALL in unasked_lookups_clause(record)
+        assert SERVICE_UNPAYWALL in unsettled_lookups_clause(record)
 
     def test_a_failure_and_a_skip_are_both_named(self) -> None:
         """Naming one and dropping the other understates what was missed."""
@@ -166,7 +166,7 @@ class TestTheReaderIsToldWhatWasNotAsked:
                 ),
             ),
         )
-        clause = unasked_lookups_clause(record)
+        clause = unsettled_lookups_clause(record)
         assert SERVICE_UNPAYWALL in clause
         assert SERVICE_PMC_ID_CONVERTER in clause
 

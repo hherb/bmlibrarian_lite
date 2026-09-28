@@ -452,7 +452,7 @@ final class FullTextChainEuropePMCTests: XCTestCase {
     }
 
     /// The reader's sentence follows #435's decision: an HTTP answer "did not
-    /// serve it", a transport failure "could not be asked".
+    /// serve it", a throttle or a transport failure "could not be asked".
     func testTheSentenceNamesWhatEuropePMCDid() {
         let answered = FullTextError.absenceNotEstablished(.httpStatus(404)).errorDescription ?? ""
         XCTAssertTrue(answered.contains("Europe PMC (HTTP 404 Not Found) did not serve it"), answered)
@@ -463,6 +463,32 @@ final class FullTextChainEuropePMCTests: XCTestCase {
             unasked.contains("Europe PMC could not be asked (the request timed out)"), unasked
         )
         XCTAssertFalse(FullTextError.absenceNotEstablished(.timeout).isRetryable)
+
+        let throttled = FullTextError.absenceNotEstablished(.httpStatus(429)).errorDescription ?? ""
+        XCTAssertTrue(
+            throttled.contains("Europe PMC could not be asked (HTTP 429 Too Many Requests)"), throttled
+        )
+        XCTAssertFalse(throttled.contains("did not serve it"), throttled)
+    }
+
+    /// The predicate the verb is chosen by, Python's `RequestFailure.is_answer`.
+    func testAnHTTPStatusOtherThanAThrottleIsAnAnswer() {
+        for status in [400, 401, 403, 404, 410, 500, 502, 504] {
+            XCTAssertTrue(RequestFailure.httpStatus(status).isAnswer, "\(status)")
+        }
+        XCTAssertEqual(BioMedLitConstants.throttleStatusCodes, [429, 503])
+        for status in BioMedLitConstants.throttleStatusCodes {
+            XCTAssertFalse(RequestFailure.httpStatus(status).isAnswer, "\(status)")
+        }
+        // A status this build could not keep was still answered.
+        XCTAssertTrue(RequestFailure.httpStatus(1000).isAnswer)
+        let others: [RequestFailure] = [
+            .timeout, .connection, .serviceError, .malformedResponse,
+            .incompleteResponse, .requestFailed, .redirectRefused(statusCode: 307),
+        ]
+        for failure in others {
+            XCTAssertFalse(failure.isAnswer, failure.describe())
+        }
     }
 
     // MARK: Degradation
