@@ -21,6 +21,7 @@ Displays a color-coded badge indicating transparency risk level.
 Provides tooltip with detailed transparency assessment information.
 """
 
+from html import escape
 from typing import Dict, Optional, Tuple
 
 from PySide6.QtCore import Qt
@@ -255,7 +256,7 @@ class TransparencyBadge(QFrame):
                 lines.append("")
                 lines.append(f"<b>{REASONS_LABEL}:</b>")
                 for reason in explanation.reasons:
-                    lines.append(f"  • {reason}")
+                    lines.append(f"  • {escape(reason, quote=False)}")
             if UNEXPLAINED_RATING_CAVEAT in explanation.caveats:
                 # Not listed as a reason: it says there is none to give
                 lines.append("")
@@ -298,7 +299,7 @@ class TransparencyBadge(QFrame):
             lines.append("")
             lines.append("<b>Risk Indicators:</b>")
             for indicator in r.risk_indicators[:MAX_TOOLTIP_RISK_INDICATORS]:
-                lines.append(f"  • {indicator}")
+                lines.append(f"  • {escape(indicator, quote=False)}")
             if len(r.risk_indicators) > MAX_TOOLTIP_RISK_INDICATORS:
                 extra = len(r.risk_indicators) - MAX_TOOLTIP_RISK_INDICATORS
                 lines.append(f"  ... and {extra} more")
@@ -306,12 +307,15 @@ class TransparencyBadge(QFrame):
         # Analysis caveats. Rendered separately from the risk indicators above:
         # these qualify how far the result can be trusted rather than describing
         # the study, and an unrecognised funder is common enough that letting it
-        # pass silently would overstate the analysis.
+        # pass silently would overstate the analysis. The tooltip is rich text,
+        # and these quote the article's own headings and funders' names: a
+        # heading such as "Patients aged <65 years" would otherwise be markup
+        # (review of #428).
         if r.warnings:
             lines.append("")
             lines.append("<b>Analysis Caveats:</b>")
             for warning in r.warnings:
-                lines.append(f"  • {warning}")
+                lines.append(f"  • {escape(warning, quote=False)}")
 
         # Tier adjustment
         if r.tier_downgrade_applied > 0:

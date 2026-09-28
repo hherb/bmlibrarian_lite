@@ -575,21 +575,44 @@ list; a text that does may hold a statement we failed to find, so it is
 The charge also needs **every heading of the end matter classified** (#428,
 `statement_headings.py`). The converter opens the end matter with
 `END_MATTER_MARKER` (an HTML comment, wherever end matter first appears,
-body included). Each heading after it that holds text must be a statement's
-heading, a known neighbour's (`KNOWN_NON_STATEMENT_HEADING_PATTERNS`:
-"Publisher's note", "Ethics statement", "Abbreviations", ...), a part of the
-*other* statement (Cureus's ICMJE parts), or -- for a catch-all such as
-"Author Notes", "Footnotes" or "Disclaimer", and for a subsection of a classified section
--- text that avoids the statement's vocabulary (`COI_VOCABULARY_RE`,
-`DATA_VOCABULARY_RE`). Anything else makes the result `not_assessed` /
-`unknown`, with a caveat naming the headings. The end matter starts at the
-marker, or at the first statement heading when one comes before it (a
-statement printed as a body section); text after the marker with no heading
-of its own continues the section the marker fell in. A text without the
-marker -- text extracted from a PDF, or a converted article with no
-end-matter element at all -- is never charged; `segment_unmarked_end_matter` is the stub where a
-segmentation of such text will go. The neighbour list fails safe: a heading
-missing from it costs a charge, never makes one.
+body included). A heading after it is classified when it is:
+
+- a statement's heading other than the one sought -- the sought one's own
+  heading never is, since the extractor read nothing from it;
+- a known neighbour's (`KNOWN_NON_STATEMENT_HEADING_PATTERNS`: "Publisher's
+  note", "Ethics statement", "Abbreviations", ...);
+- a part of the *other* statement (Cureus's ICMJE parts; "Code
+  availability", which can hold the data statement);
+- a supplement's, whose text does not say where data are deposited
+  (`DATA_DEPOSIT_RE`) when the data statement is sought; or
+- a catch-all ("Author Notes", "Footnotes", "Disclaimer", ...) or a
+  subsection of a named or catch-all section, whose text avoids the
+  statement's vocabulary (`COI_VOCABULARY_RE`, `DATA_VOCABULARY_RE`).
+
+A heading with no text -- a "Declarations" wrapper, or one the converter
+emitted over a table it could not render -- is asked about only for the
+statement its own words name (`HEADING_WORDS_BY_STATEMENT`). Anything else
+makes the result `not_assessed` / `unknown`, with a caveat naming the
+headings.
+
+The end matter starts at the marker, or at the first *top-level* statement
+heading when one comes before it (a statement printed as a body section). A
+statement heading nested deeper -- Lancet's "Role of the funding source" in
+its Methods -- does not move the start, so Results and Discussion are not
+taken for end matter. A body heading before the start whose words name a
+statement ("Financial support and author disclosures") is asked about too.
+Text after the marker with no heading of its own continues the section the
+marker fell in; the converter gives a heading of its own to an untitled
+footnote group that follows a section's own text, so that it is judged by
+its text rather than by its parent's name. The title is no section's
+ancestor. A text without the marker -- text extracted from a PDF, or a
+converted article with no end-matter element at all -- is never charged;
+`segment_unmarked_end_matter` is the stub where a segmentation of such text
+will go. The neighbour list fails safe: a heading missing from it can only
+stop a charge, never cause one. The vocabularies and heading words are the
+other side of that bargain: a disclosure they miss in a section known only
+by its text is still charged, so they are measured against the corpus both
+ways before they change.
 
 ### Priority Order
 

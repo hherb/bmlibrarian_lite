@@ -914,5 +914,9 @@ class TestTheGuardsWording:
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_ASSESSED
 
     def test_the_analyser_version_moved(self) -> None:
-        """Stored rows are offered for re-analysis only if the version moves (#428)."""
-        assert TRANSPARENCY_ANALYZER_VERSION == "2.5"
+        """Stored rows are offered for re-analysis only if the version moves.
+
+        2.6, not 2.5: the review of #428 changed what is charged, and a row a
+        pre-review build of the branch stored must not be trusted.
+        """
+        assert TRANSPARENCY_ANALYZER_VERSION == "2.6"

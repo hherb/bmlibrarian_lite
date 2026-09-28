@@ -81,6 +81,7 @@ from .statement_headings import (
     HEADING_QUALIFIER,
     MAX_HEADING_LINE_CHARS,
     STATEMENT_HEADING_PATTERNS,
+    UNHEADED,
     end_matter_sections,
     is_end_matter_marker,
     markdown_heading_level,
@@ -2215,8 +2216,9 @@ def _any_section_was_parsed(fulltext_sections: Optional[Dict[str, str]]) -> bool
 #: as a bare "None declared." footnote.
 _COI_WORDING_RE = re.compile(
     rf'{COI_WORDING_PATTERN}|none declared|nothing to (?:declare|disclose)'
-    # ARVO's "Commercial relationships: none." and "no conflicts of research
-    # interest", both charged as absent statements (#428 survey).
+    # ARVO words its statement "Commercial relationships: none."; an author
+    # note reads "no conflicts of research interest" (PMC12805416) (#428
+    # survey).
     r'|commercial relationships?|conflicts? of \w+ interests?'
     r"|conflits? d['’]int[ée]r[êe]ts?|conflictos? de intereses?"
     r'|conflitos? de interesses?|interessenkonflikt',
@@ -2314,24 +2316,28 @@ END_MATTER_NOT_SEGMENTED = (
 
 
 def end_matter_unrecognised_clause(headings: tuple[str, ...]) -> str:
-    """Why a statement missing from a full text was not charged: headings.
+    """Why a statement missing from a full text was not charged: the sections.
 
-    A journal may print its statement under a heading of its own, and one
-    the analyser does not know is exactly where a statement it failed to
-    find would be (#428).
+    A journal may print its statement under a heading of its own, and a
+    section the analyser cannot classify is exactly where a statement it
+    failed to find would be (#428).
 
     Args:
-        headings: The end-matter headings neither a statement's nor a known
-            neighbour's; at least one.
+        headings: The unclassified end-matter headings, from
+            :func:`~.statement_headings.unclassified_headings`; at least
+            one. :data:`~.statement_headings.UNHEADED` is named as such,
+            not quoted as if the article printed it.
 
     Returns:
         A capitalised clause naming each heading, in quotes.
     """
-    quoted = ", ".join(f'"{heading}"' for heading in headings)
+    quoted = ", ".join(
+        heading if heading == UNHEADED else f'"{heading}"' for heading in headings
+    )
     sections = "a section" if len(headings) == 1 else "sections"
     return (
-        f"The article's end matter holds {sections} this analysis does not "
-        f"recognise ({quoted})"
+        f"The article's end matter holds {sections} whose content this "
+        f"analysis could not classify ({quoted})"
     )
 
 
@@ -2339,9 +2345,8 @@ def _why_silence_is_not_the_articles(fulltext: str, sought: str) -> str | None:
     """Why a full text's silence about a statement is not the article's own.
 
     A statement is charged as missing only once every heading of the end
-    matter, where statements are printed, has been recognised: as a
-    statement's, as a known neighbour's, or as a catch-all ("Author Notes")
-    whose text does not use the statement's vocabulary. Anything else may
+    matter, where statements are printed, has been classified
+    (:func:`~.statement_headings.unclassified_headings`). Anything else may
     be the statement under a journal's own name (#428).
 
     Args:

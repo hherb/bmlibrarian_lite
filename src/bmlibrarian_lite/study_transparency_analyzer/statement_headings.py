@@ -16,31 +16,31 @@
 
 """The headings a transparency statement is known by, and the end matter's.
 
-The analyser recognises a statement only by its heading. Once end matter was
-recognised, a statement it did not find used to be charged as missing: -5 and
-a risk indicator. But a heading it does not know may be exactly that
-statement under a journal's own name -- Diabetologia's "Authors'
-relationships and activities" was one such, charged although it listed
-pharmaceutical ties (#426 review). Adding each name as it is found leaves
-the next journal in the same hole.
+The analyser recognises a statement only by its heading, and a heading it
+does not know may be exactly that statement under a journal's own name:
+Diabetologia's "Authors' relationships and activities" lists pharmaceutical
+ties. Adding each name as it is found leaves the next journal in the same
+hole.
 
-So a missing statement is charged only when every heading in the article's
-end matter is one this module knows: a statement, or a known neighbour of
-one ("Publisher's note", "Abbreviations", ...). A heading it does not know
-makes the result "not assessed" instead (#428). The list of neighbours
-fails safe: a heading missing from it costs a charge, never makes one.
+So a missing statement is charged (-5 and a risk indicator) only when every
+heading in the article's end matter is one this module knows: a statement,
+or a known neighbour of one ("Publisher's note", "Abbreviations", ...). A
+heading it does not know makes the result "not assessed" instead (#428). The
+list of neighbours fails safe: a heading missing from it can only stop a
+charge, never cause one.
 
 Knowing the end matter's headings needs to know where the end matter is.
 The JATS converter marks its start (``END_MATTER_MARKER``). Text extracted
 from a PDF carries no such mark and no marked headings at all, so its end
-matter cannot be told from its body; :func:`end_matter_sections` then
+matter cannot be told from its body; there is no segmenter for such text
+yet (:func:`segment_unmarked_end_matter`), so :func:`end_matter_sections`
 answers ``None`` and nothing is charged.
 """
 
 import re
 from dataclasses import dataclass
 
-from ..jats_markdown import END_MATTER_MARKER
+from ..jats_markdown import END_MATTER_MARKER, SECTION_HEADING_LEVEL
 
 #: A statement heading longer than this is taken for prose. Headings in
 #: surveyed articles are far shorter; a PDF line this long is a sentence.
@@ -58,7 +58,9 @@ HEADING_QUALIFIER = r'(?:\s+(?:statements?|disclosures?|declarations?|section))?
 
 #: The headings each statement is recognised by, as regular expressions
 #: matched against a whole lower-cased heading line, keyed by the section
-#: the analyser files it under.
+#: the analyser files it under. Every pattern here and in the lists below is
+#: spliced into one anchored expression (:func:`_matches_heading`), so any
+#: alternation in one must sit inside a group.
 STATEMENT_HEADING_PATTERNS: dict[str, tuple[str, ...]] = {
     'coi': (
         # "Declaration of Competing Interest" is Elsevier's standard heading
@@ -83,6 +85,10 @@ STATEMENT_HEADING_PATTERNS: dict[str, tuple[str, ...]] = {
         "authors?['’]? relationships and activities",
         '(?:financial and non-?financial )?relationships? and activities',
         'duality of interests?',
+        # JACC's heading for its funding and competing interests statements
+        # together, listing industry ties (PMC11198077, held-out survey,
+        # review of #428).
+        '(?:funding|financial) support and author disclosures?',
         # The statement's heading in the languages surveyed articles print
         # it in untyped: French, Spanish, Portuguese, German.
         "conflits? d['’]int[ée]r[êe]ts?",
@@ -102,15 +108,17 @@ STATEMENT_HEADING_PATTERNS: dict[str, tuple[str, ...]] = {
         'availability of materials? and data',
         'data and (?:code|materials?|software) availability',
         'data accessibility',
+        # Found by the #428 survey, as below.
         '(?:research )?data transparency and availability',
     ),
     'funding': (
         'funding',
+        # "Financial support & sponsorship" and the rest below were found
+        # by the #428 survey, which needs every end-matter heading
+        # classified: missed, each made its article "not assessed".
         'financial support(?: (?:&|and) sponsorship)?',
         'grant support',
         'sources? of (?:support|funding)',
-        # Found by the #428 survey, which needs every end-matter heading
-        # classified: missed, each made its article "not assessed".
         'funding (?:sources?|information)',
         'funding/support',
         'declarations? of sources? of funding',
@@ -119,6 +127,7 @@ STATEMENT_HEADING_PATTERNS: dict[str, tuple[str, ...]] = {
         'role of the funding source',
         'role of the funder',
         'role of the sponsor',
+        # JAMA's heading (#428 survey).
         'role of the funder/sponsor',
         'funder role',
     ),
@@ -131,6 +140,7 @@ STATEMENT_HEADING_PATTERNS: dict[str, tuple[str, ...]] = {
     'contributors': (
         'contributors?',
         'author contributions?',
+        # BMC's heading (#428 survey).
         "authors['’] contributions?",
     ),
 }
@@ -144,8 +154,9 @@ STATEMENT_HEADING_PATTERNS: dict[str, tuple[str, ...]] = {
 #: "Declarations" are left out on purpose: either can hold a statement.
 KNOWN_NON_STATEMENT_HEADING_PATTERNS: tuple[str, ...] = (
     # The reference list, the converter's own and the one BMJ puts among
-    # its back matter.
-    'references?', 'bibliography',
+    # its back matter, and its names in the survey's other languages.
+    'references?', 'bibliography', 'further reading', 'literature cited',
+    'literatur', 'bibliograf[íi]a',
     # Frontiers and MDPI print one after every competing interests statement.
     "(?:disclaimer/)?publisher['’]?s note",
     # Ethics, consent and registration.
@@ -173,17 +184,23 @@ KNOWN_NON_STATEMENT_HEADING_PATTERNS: tuple[str, ...] = (
     '(?:open )?peer[- ]review(?: information)?',
     '(?:handling|associated?|scientific|section) editor', 'edited by',
     'reviewed by',
-    # Supplementary material and figure descriptions.
-    'supplementary (?:materials?|data|information)',
-    'supplemental (?:materials?|information)',
-    'supporting information(?: available)?',
+    # Figure descriptions. The supplements are listed apart
+    # (:data:`SUPPLEMENT_HEADING_PATTERNS`).
     '(?:the|this) pdf file includes', 'long descriptions?',
     # About the article and its authors.
     'how to cite', 'correction note', 'change history',
     'contributor information', 'citation diversity statement',
     'tweetable summary',
-    # A statement of its own, but neither of the two this rule is about.
-    'code availability',
+)
+
+#: Supplementary material's headings. No place for a competing interests
+#: statement, but one may say where the raw data are deposited, so when the
+#: data availability statement is sought a supplement is known only by what
+#: it holds (:data:`SUPPLEMENT_WORDING_BY_STATEMENT`).
+SUPPLEMENT_HEADING_PATTERNS: tuple[str, ...] = (
+    'supplementary (?:materials?|data|information)',
+    'supplemental (?:materials?|information)',
+    'supporting information(?: available)?',
 )
 
 #: Headings of a part of one statement, by the statement's key. Cureus heads
@@ -196,16 +213,22 @@ STATEMENT_PART_HEADING_PATTERNS: dict[str, tuple[str, ...]] = {
         'payment/services info', 'financial relationships',
         'other relationships',
     ),
+    # A statement of its own, and the data statement's neighbour: "All code
+    # and the underlying datasets are deposited at Zenodo" is both (review
+    # of #428).
+    'data_sharing': ('code availability',),
 }
 
-#: The headings the JATS converter gives end matter that had none of its own
-#: (``DEFAULT_HEADING_BY_OWNER``, ``DEFAULT_HEADING``,
-#: ``AUTHOR_NOTES_HEADING``, and "Endnotes" as publishers print it). Their
-#: name says nothing of what they hold, and a statement can sit under one:
-#: "The author discloses no conflicts of research interest." as an author
-#: note (PMC12805416). So such a section is known only by what it holds --
-#: one whose text uses none of a statement's vocabulary
-#: (:data:`COI_VOCABULARY_RE`, :data:`DATA_VOCABULARY_RE`) holds no statement.
+#: Headings that say nothing reliable of what they hold, so a section under
+#: one is judged by its text: one whose text uses none of a statement's
+#: vocabulary (:data:`COI_VOCABULARY_RE`, :data:`DATA_VOCABULARY_RE`) holds
+#: no statement. They are the converter's fallbacks for untitled end matter
+#: ("Footnotes" from ``DEFAULT_HEADING_BY_OWNER``, ``DEFAULT_HEADING``,
+#: ``AUTHOR_NOTES_HEADING``), "Endnotes" as publishers print it, and named
+#: headings that can still hold a disclosure (below). A statement can sit
+#: under any of them: "The author discloses no conflicts of research
+#: interest." as an author note (PMC12805416). The converter's other
+#: fallbacks, "Acknowledgments" and "Glossary", are classified by name.
 CATCH_ALL_HEADING_PATTERNS: tuple[str, ...] = (
     "authors?['’]? notes?", '(?:foot|end)?notes?',
     # Named, but what they hold can be a disclosure: "The authors have no
@@ -220,17 +243,22 @@ CATCH_ALL_HEADING_PATTERNS: tuple[str, ...] = (
 UNHEADED = "text without a heading"
 
 #: Words any competing interests statement is likely to use, in any of the
-#: languages surveyed articles print one in. Broad: a word here in a
-#: catch-all section costs a charge, never makes one. But in its disclosure
-#: forms only -- "financial interests", not "financ"; "stock options", not
-#: "stock" -- or every economics paper's footnotes on interest rates and
-#: stock returns go unassessed (#428 held-out survey).
+#: languages surveyed articles print one in. Broad: a word here found in a
+#: catch-all section can only stop a charge, never cause one. But in its
+#: disclosure forms only -- "financial interests", not "financ"; "stock
+#: options", not "stock" -- or every economics paper's footnotes on interest
+#: rates and stock returns go unassessed (#428 held-out survey). The ICMJE
+#: form's own phrases ("personal fees from ..., outside the submitted work")
+#: are listed too (review of #428).
 COI_VOCABULARY_RE = re.compile(
     r'disclos|conflict|conflit|competing|\bdeclar(?:e|es|ed|ing|ation)\b'
     r'|honorari|consult(?:ant|anc|ing)|speaker|advisory|royalt|patents?\b'
     r'|stock options?|shareholder|equity (?:interest|holder|stake)'
+    r'|(?:holds?|holding|owns?|owned) (?:\w+ )?shares\b'
     r'|employee of|employed by|financial (?:interest|relationship|support|tie)'
     r'|relationships? (?:with|to) (?:industry|compan)|\bgrants?\b|funded|funding'
+    r'|personal fees|lecture fees|\bfees? from|outside the submitted work'
+    r'|travel (?:support|grants?|expenses|reimbursements?)|\bcois?\b'
     r'|sponsor|\bnone\b|\bnil\b|nothing to|interessenkonflikt|利益',
     re.IGNORECASE,
 )
@@ -248,22 +276,73 @@ VOCABULARY_BY_STATEMENT: dict[str, "re.Pattern[str]"] = {
     'data_sharing': DATA_VOCABULARY_RE,
 }
 
+#: What betrays a data availability statement in a supplement's text: where
+#: the data are deposited, or who holds them. Narrower than
+#: :data:`DATA_VOCABULARY_RE`, since every supplement speaks of its "data"
+#: ("Supplementary data to this article can be found online").
+DATA_DEPOSIT_RE = re.compile(
+    r'repositor|deposit|accession|osf\.io|github|gitlab|zenodo|figshare|dryad'
+    r'|(?:up)?on (?:reasonable )?request'
+    r'|data(?:sets?)? (?:are|is|will be) (?:publicly |freely |openly )?'
+    r'(?:available|accessible|shared)',
+    re.IGNORECASE,
+)
+
+#: The statements a supplement can hold, and the wording that shows it does.
+SUPPLEMENT_WORDING_BY_STATEMENT: dict[str, "re.Pattern[str]"] = {
+    'data_sharing': DATA_DEPOSIT_RE,
+}
+
+#: Words in a heading that say one statement may be under it, by the
+#: statement's key; matched against the heading's words anywhere, not as a
+#: whole. Phrases, not stems: "disclosure quality", "board duality" and "an
+#: armed conflict" head economics and politics sections. A section known
+#: only by its heading (:attr:`EndMatterSection.known_by_its_heading`) is
+#: asked about for the statements its heading names this way.
+HEADING_WORDS_BY_STATEMENT: dict[str, "re.Pattern[str]"] = {
+    'coi': re.compile(
+        r"conflicts? of (?:\w+ )?interests?|competing (?:financial )?interests?"
+        r"|(?:authors?['’]?|financial|industry|conflicts?)\b[\w’'/ -]{0,25}"
+        r"disclosures?|^disclosures?\b|duality of interests?"
+        r"|relationships? (?:and|with|to) (?:activities|industry)"
+        r"|financial[\w’'/ -]{0,25}(?:interests?|relationships?|ties)"
+        r"|interessenkonflikt|conflits? d|conflictos? de|conflitos? de|利益冲突",
+        re.IGNORECASE,
+    ),
+    'data_sharing': re.compile(
+        r"data (?:and \w+ )?(?:availability|sharing|accessibility|access|deposition)"
+        r"|availability of (?:the )?(?:data|materials?)"
+        r"|(?:materials?|code|software) availability|数据",
+        re.IGNORECASE,
+    ),
+}
+
 
 @dataclass(frozen=True)
 class EndMatterSection:
     """A heading of the end matter and the text it holds of its own.
 
     Attributes:
-        heading: The heading line, stripped, ``#`` marks and all.
-        text: The lines under it before the next heading of any level,
-            joined by newlines; never empty.
-        ancestors: The headings of the end-matter sections it is a
-            subsection of, outermost first.
+        heading: The heading line, stripped, ``#`` marks and all; the
+            heading of the section an end-matter marker fell in, for the
+            text after it; or :data:`UNHEADED` for text before any heading.
+        text: Its non-blank lines, stripped, up to the next heading of any
+            level (for the section a marker fell in, only those after the
+            marker), joined by newlines; may be empty.
+        ancestors: The headings of the sections it is a subsection of,
+            outermost first; never the article's title.
+        known_by_its_heading: Whether it is asked about only for the
+            statement its heading's words name
+            (:data:`HEADING_WORDS_BY_STATEMENT`): a body section before the
+            end matter opens, or a heading with no text. The converter
+            emits a heading alone over content it could not render --
+            mostly an appendix table, but an ICMJE form is one too.
     """
 
     heading: str
     text: str
     ancestors: tuple[str, ...] = ()
+    known_by_its_heading: bool = False
 
     @property
     def words(self) -> str:
@@ -351,7 +430,8 @@ def is_catch_all_heading(line: str) -> bool:
         line: A heading line, with or without its ``#`` marks.
 
     Returns:
-        True if it matches :data:`CATCH_ALL_HEADING_PATTERNS`.
+        True if it is :data:`UNHEADED` or matches
+        :data:`CATCH_ALL_HEADING_PATTERNS`.
     """
     return line == UNHEADED or _matches_any(line, CATCH_ALL_HEADING_PATTERNS)
 
@@ -369,33 +449,67 @@ def is_end_matter_marker(line: str) -> bool:
     return line.strip() == END_MATTER_MARKER
 
 
+def _opens_the_end_matter(line: str) -> bool:
+    """Whether a body line is a statement printed as a top-level section.
+
+    Such a section opens the end matter even before the marker. A statement
+    heading nested deeper does not: Lancet's "Role of the funding source"
+    closes its Methods, and Cell's "Data and code availability" sits in its
+    STAR Methods, with Results and Discussion still to come (review of
+    #428). The extractor reads such a statement wherever it stands.
+
+    Args:
+        line: A stripped line of full text.
+
+    Returns:
+        True for a top-level markdown heading that names a statement.
+    """
+    return (
+        markdown_heading_level(line) == SECTION_HEADING_LEVEL
+        and statement_key_of_heading(line) is not None
+    )
+
+
+def _names_a_statement(words: str) -> bool:
+    """Whether a heading's words name either statement a charge is about.
+
+    Args:
+        words: A heading's words, without ``#`` marks.
+
+    Returns:
+        True if any of :data:`HEADING_WORDS_BY_STATEMENT` matches.
+    """
+    return any(pattern.search(words) for pattern in HEADING_WORDS_BY_STATEMENT.values())
+
+
 def end_matter_sections(fulltext: str) -> tuple[EndMatterSection, ...] | None:
     """The headed sections of a full text's end matter.
 
-    The end matter opens at the first end-matter marker -- the converter
-    marks end matter wherever it begins, and one journal keeps its
-    footnotes, its competing interests statement among them, in the body --
-    or at the first statement heading, when one comes before it: an article
-    may print its statements as ordinary sections of its body and still have
-    back matter the marker opens (review of #428). It runs to the end of the
-    text.
+    The end matter opens at the earlier of the first end-matter marker (the
+    converter marks end matter in the body too) and the first top-level
+    statement heading before it (:func:`_opens_the_end_matter`); it runs to
+    the end of the text. Every later body section is then end matter and is
+    classified like any other heading.
 
-    Text after the marker but before any heading is the continuation of the
-    section the marker fell in: an untitled footnote group inside a titled
-    body section. With no heading before it at all, it is filed under
-    :data:`UNHEADED`.
+    A body heading before that whose words name a statement
+    (:data:`HEADING_WORDS_BY_STATEMENT`) is listed too, known only by its
+    heading: JACC prints "Financial support and author disclosures" among
+    its closing body sections, and one under a name the lists do not know
+    would otherwise never be looked at (review of #428).
+
+    Text after the marker but before any heading continues the section the
+    marker fell in: an untitled footnote group inside a titled body section.
+    With no heading before it at all, it is filed under :data:`UNHEADED`.
 
     Args:
         fulltext: The article's full text.
 
     Returns:
-        Every heading from the start of the end matter that holds text of its
-        own before the next heading, in order -- empty when there is none. A
-        heading holding none, such as a "Declarations" wrapper whose
-        subsections follow at once, cannot hide a statement; its subsections
-        are listed instead. ``None`` when the text carries no marker, so that
-        its end matter cannot be told from its body: text extracted from a
-        PDF, or converted before the marker existed.
+        Every heading of the end matter, in order, with the text it holds of
+        its own. Without a marker, whatever
+        :func:`segment_unmarked_end_matter` makes of the text: today always
+        ``None``, since the end matter of PDF text, or of a converted
+        article with no end-matter element, cannot be told from its body.
     """
     lines = [line.strip() for line in fulltext.split('\n')]
     marker = next(
@@ -405,15 +519,10 @@ def end_matter_sections(fulltext: str) -> tuple[EndMatterSection, ...] | None:
     if marker is None:
         return segment_unmarked_end_matter(fulltext)
     start = next(
-        (
-            index
-            for index, line in enumerate(lines[:marker])
-            if markdown_heading_level(line)
-            and statement_key_of_heading(line) is not None
-        ),
+        (index for index, line in enumerate(lines[:marker]) if _opens_the_end_matter(line)),
         marker,
     )
-    headed: list[tuple[str, tuple[str, ...], list[str]]] = []
+    headed: list[tuple[str, tuple[str, ...], list[str], bool]] = []
     enclosing: list[tuple[int, str]] = []
     open_text: list[str] | None = None
     for index, line in enumerate(lines):
@@ -422,11 +531,14 @@ def end_matter_sections(fulltext: str) -> tuple[EndMatterSection, ...] | None:
             while enclosing and enclosing[-1][0] >= level:
                 enclosing.pop()
             ancestors = tuple(heading for _, heading in enclosing)
-            enclosing.append((level, line))
+            # The article's title encloses everything and names nothing.
+            if level >= SECTION_HEADING_LEVEL:
+                enclosing.append((level, line))
             open_text = None
-            if index >= start:
+            before = index < start
+            if not before or _names_a_statement(line.lstrip('#').strip()):
                 open_text = []
-                headed.append((line, ancestors, open_text))
+                headed.append((line, ancestors, open_text, before))
         elif index > start and line and not is_end_matter_marker(line):
             if open_text is None:
                 # The marker fell inside a section: this is its text.
@@ -436,25 +548,28 @@ def end_matter_sections(fulltext: str) -> tuple[EndMatterSection, ...] | None:
                     if enclosing
                     else (UNHEADED, ())
                 )
-                headed.append((heading, ancestors, open_text))
+                headed.append((heading, ancestors, open_text, False))
+            open_text.append(line)
+        elif open_text is not None and line and not is_end_matter_marker(line):
             open_text.append(line)
     return tuple(
-        EndMatterSection(heading, '\n'.join(text), ancestors)
-        for heading, ancestors, text in headed
-        if text
+        EndMatterSection(
+            heading, '\n'.join(text), ancestors,
+            known_by_its_heading=before or not text,
+        )
+        for heading, ancestors, text, before in headed
     )
 
 
 def segment_unmarked_end_matter(fulltext: str) -> tuple[EndMatterSection, ...] | None:
-    """The end matter of a text no converter marked. Not yet possible.
+    """Segment end matter the converter did not mark: a stub (#430).
 
     A PDF's extracted text marks neither its headings nor where its end
     matter begins, so nothing here can tell a statement's heading from a
     line of prose. This is where a segmentation of such text belongs --
     for example a model reading the PDF into sections as the JATS converter
     does -- once one exists. Until then every such text answers ``None``,
-    and a statement not found in it is not assessed rather than charged
-    (#430).
+    and a statement not found in it is not assessed rather than charged.
 
     Args:
         fulltext: A full text without the end-matter marker.
@@ -472,15 +587,23 @@ def unclassified_headings(
 ) -> tuple[str, ...]:
     """The headings under which the statement sought could stand unrecognised.
 
-    A heading is classified when it is a statement's, a known neighbour's,
-    or a part of a statement other than the one sought.
-    Two kinds are known only by what they hold, and are classified when
-    their text uses none of the statement's vocabulary: a catch-all, and a
-    subsection of a named section or a catch-all (Springer heads each
-    author's biography with the author's name) -- Cureus heads each part of its
-    competing interests statement ("Financial relationships") and each
-    author's role, and what the extractor reads as part of a statement could
-    as well hide another.
+    A section known only by its heading
+    (:attr:`EndMatterSection.known_by_its_heading`) is unclassified when
+    its heading is the sought statement's, or its words name that statement
+    (:data:`HEADING_WORDS_BY_STATEMENT`). Any other is classified when it:
+
+    - names a statement other than the one sought, or a known neighbour;
+    - names a part of a statement other than the one sought (Cureus's ICMJE
+      parts, when data availability is sought);
+    - names a supplement, and its text does not say where data are
+      deposited when data availability is sought; or
+    - is known only by what it holds -- a catch-all, or a subsection of a
+      named or catch-all section (Springer's per-author biographies,
+      Cureus's per-author roles under "Author Contributions") -- and its
+      text uses none of the sought statement's vocabulary.
+
+    The sought statement's own heading is never classified: the extractor
+    read nothing from it, or the analyser would not be asking.
 
     Args:
         sections: The end matter, from :func:`end_matter_sections`.
@@ -488,53 +611,69 @@ def unclassified_headings(
             :data:`VOCABULARY_BY_STATEMENT`.
 
     Returns:
-        Each unclassified heading's words, without ``#`` marks, in order.
+        Each unclassified heading's words, without ``#`` marks, once each,
+        in order.
+
+    Raises:
+        KeyError: When ``sought`` is no statement a missing one can be
+            charged for, whatever the sections.
     """
-    return tuple(
+    vocabulary = VOCABULARY_BY_STATEMENT[sought]
+    return tuple(dict.fromkeys(
         section.words
         for section in sections
-        if not _is_classified(section, sought)
-    )
+        if not _is_classified(section, sought, vocabulary)
+    ))
 
 
 def _is_named(heading: str) -> bool:
-    """Whether a heading names a statement or a known neighbour of one.
+    """Whether a heading names a statement, a known neighbour or a supplement.
 
     Args:
         heading: A heading line.
 
     Returns:
-        True if it matches either list.
+        True if it matches any of those lists.
     """
     return (
         statement_key_of_heading(heading) is not None
         or is_known_non_statement_heading(heading)
+        or _matches_any(heading, SUPPLEMENT_HEADING_PATTERNS)
     )
 
 
-def _is_classified(section: EndMatterSection, sought: str) -> bool:
+def _is_classified(
+    section: EndMatterSection, sought: str, vocabulary: "re.Pattern[str]"
+) -> bool:
     """Whether a section of the end matter cannot hold the statement sought.
 
     Args:
         section: The section.
         sought: The key of the statement sought.
+        vocabulary: That statement's vocabulary.
 
     Returns:
-        True if its heading is named or a part of another statement, or if it
-        is known only by what it holds and its text avoids the statement's
-        vocabulary.
+        True if it is classified as :func:`unclassified_headings` describes.
     """
-    if _is_named(section.heading):
+    heading, text = section.heading, section.text
+    key = statement_key_of_heading(heading)
+    if key is not None:
+        return key != sought
+    if section.known_by_its_heading:
+        return HEADING_WORDS_BY_STATEMENT[sought].search(section.words) is None
+    if is_known_non_statement_heading(heading):
         return True
     if any(
-        _matches_any(section.heading, patterns)
+        _matches_any(heading, patterns)
         for statement, patterns in STATEMENT_PART_HEADING_PATTERNS.items()
         if statement != sought
     ):
         return True
-    vocabulary = VOCABULARY_BY_STATEMENT[sought]
-    known_by_its_text = is_catch_all_heading(section.heading) or any(
+    if _matches_any(heading, SUPPLEMENT_HEADING_PATTERNS):
+        wording = SUPPLEMENT_WORDING_BY_STATEMENT.get(sought)
+        return wording is None or wording.search(text) is None
+    known_by_its_text = is_catch_all_heading(heading) or any(
         _is_named(ancestor) or is_catch_all_heading(ancestor)
         for ancestor in section.ancestors
     )
-    return known_by_its_text and vocabulary.search(section.text) is None
+    return known_by_its_text and vocabulary.search(text) is None

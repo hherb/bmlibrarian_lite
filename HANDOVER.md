@@ -16,39 +16,54 @@ into **Recently landed** once merged.
   comment; Qt's markdown view hides it) before the back matter and front
   statements, and in `_render_children` wherever end matter first appears
   in the body (a haematology journal keeps its footnotes, and its "利益冲突"
-  statement, in a body `<sec>`). Converter version **4**. The extractor steps
-  over the marker; it neither joins nor ends a section.
+  statement, in a body `<sec>`). An untitled footnote group after a titled
+  section's own text gets its own heading (`_runs_on_after_other_content`).
+  Converter version **5**. The extractor steps over the marker; it neither
+  joins nor ends a section.
 - **`study_transparency_analyzer/statement_headings.py`** (new) holds the
   statement heading patterns (moved out of `extract_fulltext_sections`) and
-  the classification. Classified: a statement's heading; a known neighbour
+  the classification (`unclassified_headings` has the full rule). Classified:
+  a statement's heading **other than the one sought**; a known neighbour
   (`KNOWN_NON_STATEMENT_HEADING_PATTERNS`, from the survey); a part of the
-  *other* statement (`STATEMENT_PART_HEADING_PATTERNS`, Cureus's ICMJE
-  parts); a catch-all ("Author Notes", "Footnotes", "Note(s)", "Endnotes",
-  "Disclaimer", "Biography") or a subsection of a named section whose text
-  avoids the statement's vocabulary (`COI_VOCABULARY_RE` /
-  `DATA_VOCABULARY_RE`). A heading with no text of its own (a "Declarations"
-  wrapper) is not asked about. **The end matter starts at the marker, or at
-  the first statement heading if one comes before it** (statements printed as
-  body sections); text after the marker with no heading continues the
-  section the marker fell in (both from the review).
-- **No marker, no charge** (user's call): PDF text, and JATS whose
-  statements are body sections, are `not_assessed` / `unknown`
+  *other* statement (`STATEMENT_PART_HEADING_PATTERNS`: Cureus's ICMJE
+  parts, and "Code availability" for data); a supplement whose text names
+  no deposit (`DATA_DEPOSIT_RE`); a catch-all ("Author Notes", "Footnotes",
+  "Disclaimer", "Biography", …) or a subsection of a named or catch-all
+  section whose text avoids the statement's vocabulary. A heading with no
+  text is asked about only for the statement its words name
+  (`HEADING_WORDS_BY_STATEMENT`). **The end matter starts at the marker, or
+  at the first top-level statement heading before it**; a statement nested
+  in the body (Lancet's "Role of the funding source") does not move it. Body
+  headings before it whose words name a statement are asked about too. The
+  title is no section's ancestor.
+- **No marker, no charge** (user's call): PDF text, and JATS with no
+  end-matter element at all, are `not_assessed` / `unknown`
   (`END_MATTER_NOT_SEGMENTED`). `segment_unmarked_end_matter` is the stub
   where an LLM-based PDF segmentation will plug in (#430).
 - The `_mentions` wording guard stays (gained ARVO's "Commercial
   relationships: none." and "conflicts of research interest"). Analyser
-  version **2.5**.
-- **Measured**, master → branch, nothing newly charged, industry ties
+  version **2.6**.
+- **Measured**, master → first commit, nothing newly charged, industry ties
   unchanged. 1,292 local PMC articles: COI charged 23 → 9, data 209 → 133.
   Held-out 331 (2021–22, `tmp/jats-428-heldout`, mostly Springer): COI
-  34 → 20, data 160 → 108. Every remaining COI charge read against its XML:
-  none prints a statement. 10 false charges released (5 × "利益冲突",
+  34 → 20, data 160 → 108. 10 false charges released (5 × "利益冲突",
   ARVO's run-in, a catch-all author note, "Author disclosures are available
   at …", 2 × Springer's "no relevant financial or non-financial interests
   to disclose"); the rest are the fail-safe price, mostly "Appendix"
-  headings and footnotes using the vocabulary. The COI vocabulary is in
-  disclosure forms only ("financial interest", not "financ") after the
-  held-out run. 20 mutants, all caught.
+  headings and footnotes using the vocabulary.
+- **PR review round.** The first commit's "every remaining COI charge prints
+  no statement" was wrong: PMC11198077 (JACC, held-out) prints "Financial
+  support and author disclosures" in the body before "Acknowledgments",
+  where the end matter then began, and was charged. Fixed with the rule
+  changes above, the ICMJE phrases in `COI_VOCABULARY_RE`, a KeyError for an
+  unknown statement key, escaped tooltip caveats and a deduplicated caveat
+  list (not capped: golden rule 13). Measured over all 1,623 local articles,
+  first commit → now: one COI charge released (PMC11198077, now read as
+  disclosed with its ties), nothing else moves, nothing newly charged; the
+  converter change alters none of their markdown. Two drafts were measured
+  and dropped: stem-based heading words ("disclosure quality", "board
+  duality") and asking about every empty heading (appendix tables, "LITERATUR")
+  released 35 honest data charges. Every new test fails on the first commit.
 
 ## Recently landed (context)
 
@@ -251,8 +266,9 @@ Open issues by family; each issue carries the detail. None blocks another.
   limited-certainty summary is worded differently on Swift and Android;
   **#417** a replaced `LiteConfig` never reaches the tabs (the dialog half
   is done); **#418** stored levels are not re-rated when settings change;
-  **#422** Swift detail views truncate the confidence the reason sentence
-  rounds. The #420 round's leftovers are listed above.
+  **#422** Swift detail views truncate the industry-funding confidence
+  that the reason sentence rounds. The #420 round's leftovers are listed
+  above.
 - Android: **#384** analyse full text (every rating is "limited" until then);
   **#387** data-availability parity, DAO/migration tests.
 - **#400** the data-availability heading rule (`'data' in title and ('avail'

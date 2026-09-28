@@ -38,6 +38,12 @@ from bmlibrarian_lite.jats_markdown import (
 from bmlibrarian_lite.study_transparency_analyzer.statement_headings import (
     COI_VOCABULARY_RE,
     DATA_VOCABULARY_RE,
+    HEADING_WORDS_BY_STATEMENT,
+    STATEMENT_HEADING_PATTERNS,
+    STATEMENT_PART_HEADING_PATTERNS,
+    SUPPLEMENT_WORDING_BY_STATEMENT,
+    UNHEADED,
+    VOCABULARY_BY_STATEMENT,
     EndMatterSection,
     end_matter_sections,
     segment_unmarked_end_matter,
@@ -145,7 +151,7 @@ class TestTheConverterMarksTheEndMatter:
 
     def test_the_converter_version_moved(self) -> None:
         """A cached conversion without the mark must be converted again."""
-        assert JATS_MARKDOWN_CONVERTER_VERSION == 4
+        assert JATS_MARKDOWN_CONVERTER_VERSION == 5
 
 
 class TestTheMarkIsNoPartOfAStatement:
@@ -180,17 +186,19 @@ class TestEndMatterSections:
         """Where a model-based segmentation of PDF text will go; until then, unknown."""
         assert segment_unmarked_end_matter("Funding\nNIH.\nNotes\nText.") is None
 
-    def test_a_heading_holding_no_text_is_not_asked_about(self) -> None:
-        """BMC's "Declarations" wrapper holds only its subsections."""
+    def test_a_heading_holding_no_text_is_known_by_its_heading(self) -> None:
+        """BMC's "Declarations" wrapper holds only its subsections: nothing to ask."""
         text = _marked("## Declarations\n\n### Funding\n\nNIH.\n\n### Ethics approval\n\nGiven.")
         sections = end_matter_sections(text)
-        assert [section.words for section in sections] == ["Funding", "Ethics approval"]
+        assert [section.words for section in sections] == ["Declarations", "Funding", "Ethics approval"]
+        assert sections[0].known_by_its_heading
+        assert unclassified_headings(sections, "coi") == ()
+        assert unclassified_headings(sections, "data_sharing") == ()
 
     def test_a_subsection_knows_its_ancestors(self) -> None:
         """Cureus heads each author role under "Author Contributions"."""
         text = _marked("## Author Contributions\n\n### Supervision\n\nAB")
-        (section,) = end_matter_sections(text)
-        assert section.ancestors == ("## Author Contributions",)
+        assert end_matter_sections(text)[-1].ancestors == ("## Author Contributions",)
 
     def test_the_first_mark_opens_the_end_matter(self) -> None:
         """End matter in the body is marked, and so is the back matter after it."""
@@ -218,7 +226,8 @@ class TestWhichHeadingsAreClassified:
         "Ethics statement", "Generative AI statement", "Abbreviations",
         "Supplementary Material", "ORCID iDs", "Correspondence",
         "Contributor Information", "References", "Clinical trial registration",
-        "Patient consent statement", "List of acronyms",
+        "Patient consent statement", "List of acronyms", "LITERATUR",
+        "Bibliografía", "Further reading",
         "Use of artificial intelligence (AI)-assisted technology for manuscript preparation",
     ])
     def test_a_known_neighbour_is_classified(self, heading: str) -> None:
@@ -493,8 +502,8 @@ class TestTheCaveatNamesTheHeadings:
     def test_one_heading(self) -> None:
         """Singular, quoted."""
         assert end_matter_unrecognised_clause(("Appendix A",)) == (
-            'The article\'s end matter holds a section this analysis does not '
-            'recognise ("Appendix A")'
+            'The article\'s end matter holds a section whose content this '
+            'analysis could not classify ("Appendix A")'
         )
 
     def test_several_headings(self) -> None:
@@ -510,3 +519,281 @@ class TestTheCaveatNamesTheHeadings:
 def test_an_end_matter_section_names_its_words() -> None:
     """The caveat quotes a heading without its ``#`` marks."""
     assert EndMatterSection("### Supervision", "AB").words == "Supervision"
+
+
+# ---------------------------------------------------------------------------
+# The review of PR #431: ways the rule still charged a printed statement
+# ---------------------------------------------------------------------------
+
+
+class TestWhatComesBeforeTheEndMatter:
+    """Body sections before the end matter opens, and where it opens."""
+
+    #: Back matter the converter marks, so that the article is read as marked.
+    BACK = "<ack><title>Acknowledgments</title><p>We thank all.</p></ack>" + REFS
+
+    def test_jaccs_heading_is_a_competing_interests_heading(
+        self, analyzer: StudyTransparencyAnalyzer
+    ) -> None:
+        """PMC11198077 (held-out survey): charged although it listed industry ties."""
+        assert statement_key_of_heading("## Financial support and author disclosures") == "coi"
+        body = """<body><sec><title>Methods</title><p>Methods prose.</p></sec>
+          <sec><title>Financial support and author disclosures</title><p>Dr A has
+          received consulting fees from Boston Scientific.</p></sec></body>"""
+        report = analyzer.analyze(pmid="1", fulltext=jats_to_markdown(_article(self.BACK, body=body)))
+        assert report.coi_info.disclosure_level is COIDisclosureLevel.DISCLOSED
+
+    def test_an_unknown_disclosure_before_the_first_statement_is_asked_about(
+        self, analyzer: StudyTransparencyAnalyzer
+    ) -> None:
+        """Before, the end matter opened at "Funding" and the disclosure was never read."""
+        body = """<body><sec><title>Methods</title><p>Methods prose.</p></sec>
+          <sec><title>Authors' financial disclosures</title><p>Dr A reports personal
+          fees from Pfizer.</p></sec>
+          <sec><title>Funding</title><p>NIH.</p></sec></body>"""
+        report = analyzer.analyze(pmid="1", fulltext=jats_to_markdown(_article(self.BACK, body=body)))
+        assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_ASSESSED
+        assert any('"Authors\' financial disclosures"' in w for w in report.warnings)
+        # It names no data statement, so it costs that charge nothing.
+        assert report.data_availability.disclosure_level is DataDisclosureLevel.NOT_STATED
+
+    def test_a_body_heading_naming_no_statement_is_not_asked_about(
+        self, analyzer: StudyTransparencyAnalyzer
+    ) -> None:
+        """Control: an ordinary body section before "Funding" leaves the charge standing."""
+        body = """<body><sec><title>Methods</title><p>Methods prose.</p></sec>
+          <sec><title>Limitations</title><p>Few patients.</p></sec>
+          <sec><title>Funding</title><p>NIH.</p></sec></body>"""
+        report = analyzer.analyze(pmid="1", fulltext=jats_to_markdown(_article(self.BACK, body=body)))
+        assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_STATED
+
+    def test_a_statement_nested_in_the_methods_does_not_open_the_end_matter(
+        self, analyzer: StudyTransparencyAnalyzer
+    ) -> None:
+        """Lancet's "Role of the funding source" closes its Methods; Results follow.
+
+        It used to make Results and Discussion "end matter" the analysis did
+        not recognise, and the caveat said so.
+        """
+        body = """<body><sec><title>Methods</title><p>Methods prose.</p>
+          <sec><title>Role of the funding source</title><p>The funder had no role.</p></sec></sec>
+          <sec><title>Results</title><p>Findings.</p></sec>
+          <sec><title>Discussion</title><p>Meaning.</p></sec></body>"""
+        text = jats_to_markdown(_article(self.BACK, body=body))
+        assert "Results" not in [s.words for s in end_matter_sections(text)]
+        report = analyzer.analyze(pmid="1", fulltext=text)
+        assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_STATED
+        assert not any("Results" in w for w in report.warnings)
+
+    def test_only_a_markdown_heading_opens_the_end_matter(self) -> None:
+        """A plain line reading "Funding" is prose, not a section."""
+        text = (f"Funding\n\nprose\n\n## Results\n\nx\n\n{END_MATTER_MARKER}\n\n"
+                "## Funding\n\nNIH.")
+        assert [s.words for s in end_matter_sections(text)] == ["Funding"]
+
+    @pytest.mark.parametrize("heading", [
+        "Board duality", "Corporate social responsibility disclosure quality",
+        "Autonomy versus availability", "Barriers to competing in golf tournaments",
+        "Period 2: Early phase of Russo-Ukraine conflict", "Sub-theme: sharing facilitation",
+    ])
+    def test_prose_headings_name_no_statement(self, heading: str) -> None:
+        """Held-out survey: economics and politics headings that stems matched."""
+        assert not any(p.search(heading) for p in HEADING_WORDS_BY_STATEMENT.values())
+
+    @pytest.mark.parametrize("heading, key", [
+        ("Authors' financial disclosures", "coi"),
+        ("Financial/non-financial interests", "coi"),
+        ("Potential conflicts of research interest", "coi"),
+        ("Data and resource availability", "data_sharing"),
+        ("Availability of materials", "data_sharing"),
+    ])
+    def test_statement_headings_name_their_statement(self, heading: str, key: str) -> None:
+        """And only their own."""
+        assert [k for k, p in HEADING_WORDS_BY_STATEMENT.items() if p.search(heading)] == [key]
+
+
+class TestWhatAHeadingSaysOfItsContent:
+    """A heading vouches for its text only where it is that text's own."""
+
+    #: Back matter the converter marks, so that the article is read as marked.
+    BACK = "<ack><title>Acknowledgments</title><p>We thank all.</p></ack>" + REFS
+
+    def test_a_footnote_after_a_sections_own_text_gets_its_own_heading(
+        self, analyzer: StudyTransparencyAnalyzer
+    ) -> None:
+        """Nested in "Funding" after its paragraph, it read as the funding statement."""
+        back = self.BACK + """<sec><title>Funding</title><p>NIH grant 1.</p><fn-group><fn>
+          <p>Dr A is a paid consultant to Pfizer.</p></fn></fn-group></sec>"""
+        text = jats_to_markdown(_article(back))
+        assert text.index("## Funding") < text.index("### Footnotes") < text.index("Dr A is")
+        report = analyzer.analyze(pmid="1", fulltext=text)
+        assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_ASSESSED
+
+    def test_an_innocent_footnote_after_a_sections_text_is_still_charged(
+        self, analyzer: StudyTransparencyAnalyzer
+    ) -> None:
+        """Control: under its own "Footnotes" heading it is judged by its text."""
+        back = self.BACK + """<sec><title>Funding</title><p>NIH grant 1.</p><fn-group><fn>
+          <p>Presented in Freiburg.</p></fn></fn-group></sec>"""
+        report = analyzer.analyze(pmid="1", fulltext=jats_to_markdown(_article(back)))
+        assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_STATED
+
+    def test_a_body_footnote_after_a_sections_text_gets_its_own_heading(
+        self, analyzer: StudyTransparencyAnalyzer
+    ) -> None:
+        """The same in a body section, where the marker falls inside it."""
+        body = """<body><sec><title>Methods</title><p>Methods prose.</p></sec>
+          <sec><title>Ethics statement</title><p>Approved.</p><fn-group><fn><p>Dr A has
+          received honoraria from Pfizer.</p></fn></fn-group></sec></body>"""
+        report = analyzer.analyze(pmid="1", fulltext=jats_to_markdown(_article(self.BACK, body=body)))
+        assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_ASSESSED
+
+    def test_a_footnote_that_is_all_a_section_holds_is_its_own(self) -> None:
+        """Control: an untitled footnote as a statement's whole content stays unheaded."""
+        back = """<sec><title>Competing interests</title><fn-group><fn><p>None
+          declared.</p></fn></fn-group></sec>""" + REFS
+        text = jats_to_markdown(_article(back))
+        assert "Footnotes" not in text
+        assert extract_fulltext_sections(text)["coi"] == "None declared."
+
+    def test_the_sought_statements_own_heading_is_not_classified(
+        self, analyzer: StudyTransparencyAnalyzer
+    ) -> None:
+        """The extractor stops at "Supplementary"; the heading still says what is there."""
+        text = _marked("## Funding\n\nNIH.\n\n## Disclosures\n\nSupplementary Appendix 2 "
+                       "holds each author's ICMJE form.")
+        assert "coi" not in extract_fulltext_sections(text)
+        sections = end_matter_sections(text)
+        assert unclassified_headings(sections, "coi") == ("Disclosures",)
+        assert unclassified_headings(sections, "data_sharing") == ()
+        report = analyzer.analyze(pmid="1", fulltext=text)
+        assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_ASSESSED
+
+    def test_the_title_is_no_ancestor(self) -> None:
+        """A title that happens to be a neighbour's name vouches for nothing."""
+        text = (f"# Correspondence\n\n## Methods\n\nx\n\n{END_MATTER_MARKER}\n\n"
+                "## Authors' ties\n\nDr A: Pfizer (paid lectures).")
+        (section,) = end_matter_sections(text)
+        assert section.ancestors == ()
+        assert unclassified_headings((section,), "coi") == ("Authors' ties",)
+
+    def test_an_empty_heading_is_asked_about_for_the_statement_it_names(self) -> None:
+        """The converter dropped what it held -- a table of each author's ties."""
+        sections = end_matter_sections(_marked("## Authors' Financial Relationships\n\n"
+                                               "## Funding\n\nNIH."))
+        assert unclassified_headings(sections, "coi") == ("Authors' Financial Relationships",)
+        assert unclassified_headings(sections, "data_sharing") == ()
+
+    def test_an_empty_heading_naming_no_statement_is_classified(self) -> None:
+        """Control: an appendix whose table was dropped (held-out survey)."""
+        sections = end_matter_sections(_marked("## Appendix\n\n## Funding\n\nNIH."))
+        assert unclassified_headings(sections, "coi") == ()
+        assert unclassified_headings(sections, "data_sharing") == ()
+
+
+class TestNeighboursThatCanHoldTheDataStatement:
+    """Two neighbours are trusted by name only for the competing interests statement."""
+
+    @staticmethod
+    def _unclassified(markdown: str, sought: str) -> tuple[str, ...]:
+        """The unclassified headings of a marked end matter."""
+        return unclassified_headings(end_matter_sections(_marked(markdown)), sought)
+
+    def test_code_availability_can_hold_the_data_statement(self) -> None:
+        """"All code and the underlying measurements are deposited at GitHub."."""
+        markdown = "## Code availability\n\nAll code and the underlying measurements are at GitHub."
+        assert self._unclassified(markdown, "data_sharing") == ("Code availability",)
+        assert self._unclassified(markdown, "coi") == ()
+
+    def test_a_supplement_saying_where_data_are_deposited(self) -> None:
+        """"Raw datasets are deposited in Dryad" is a data statement."""
+        markdown = "## Supplementary data\n\nRaw datasets are deposited in Dryad."
+        assert self._unclassified(markdown, "data_sharing") == ("Supplementary data",)
+        assert self._unclassified(markdown, "coi") == ()
+
+    def test_an_ordinary_supplement_is_classified(self) -> None:
+        """Control: Elsevier's line speaks of "data" and says nothing of a deposit."""
+        markdown = "## Supplementary data\n\nSupplementary data to this article can be found online."
+        assert self._unclassified(markdown, "data_sharing") == ()
+
+    def test_a_supplements_subsection_is_known_by_its_text(self) -> None:
+        """PMC13054899's "Additional analyses" under its supplementary material."""
+        markdown = ("## Supplementary material\n\nSee online.\n\n### Additional analyses\n\n"
+                    "We re-ran the models.")
+        assert self._unclassified(markdown, "coi") == ()
+
+
+class TestTheVocabularyStillCatchesADisclosure:
+    """Each disclosure form the vocabulary was narrowed to still counts."""
+
+    @pytest.mark.parametrize("sentence", [
+        "CD is an employee of Novartis.",
+        "AB is employed by Roche.",
+        "AB holds stock options in Pfizer.",
+        "EF is a shareholder of Merck.",
+        "GH has an equity stake in a startup.",
+        "AB has financial ties to Bayer.",
+        "Nil.",
+        "None.",
+        "Dr Smith reports personal fees from Pfizer and Merck, outside the submitted work.",
+        "AB received lecture fees from Novartis.",
+        "AB received travel support from Novartis.",
+        "AB owns shares in Roche.",
+        "The authors have no COI to report.",
+    ])
+    def test_a_disclosure_in_a_catch_all_stops_the_charge(self, sentence: str) -> None:
+        """Under "Footnotes", each is enough to leave the statement unassessed."""
+        sections = end_matter_sections(_marked(f"## Footnotes\n\n{sentence}"))
+        assert unclassified_headings(sections, "coi") == ("Footnotes",)
+
+    def test_data_alone_is_data_vocabulary(self) -> None:
+        """Not only "available": "data" by itself may be the statement."""
+        sentence = "The raw data were collected at two sites."
+        assert DATA_VOCABULARY_RE.search(sentence)
+        sections = end_matter_sections(_marked(f"## Footnotes\n\n{sentence}"))
+        assert unclassified_headings(sections, "data_sharing") == ("Footnotes",)
+
+    def test_a_catch_alls_subsection_is_known_by_its_text(self) -> None:
+        """Springer heads each author's biography with the author's name."""
+        innocent = "## Biographies\n\n### John Smith\n\nProfessor of medicine."
+        disclosing = innocent + "\n\n### Jane Doe\n\nJane serves on advisory boards."
+        assert unclassified_headings(end_matter_sections(_marked(innocent)), "coi") == ()
+        assert unclassified_headings(end_matter_sections(_marked(disclosing)), "coi") == (
+            "Jane Doe",
+        )
+
+
+class TestTheTablesAgree:
+    """The statement keys are plain strings; a typo must fail, not charge."""
+
+    def test_an_unknown_statement_is_an_error_even_with_nothing_to_classify(self) -> None:
+        """'data_availability' is the analyser's field, not a statement key."""
+        with pytest.raises(KeyError):
+            unclassified_headings((), "data_availability")
+
+    def test_every_table_is_keyed_by_statements(self) -> None:
+        """No table names a statement the headings do not."""
+        statements = set(STATEMENT_HEADING_PATTERNS)
+        assert set(STATEMENT_PART_HEADING_PATTERNS) <= statements
+        assert set(VOCABULARY_BY_STATEMENT) <= statements
+        assert set(SUPPLEMENT_WORDING_BY_STATEMENT) <= statements
+        assert set(HEADING_WORDS_BY_STATEMENT) == set(VOCABULARY_BY_STATEMENT)
+
+    def test_a_heading_is_listed_once(self) -> None:
+        """Two sections under one unknown heading make one name in the caveat."""
+        sections = (EndMatterSection("## Odd", "AB reports fees."),
+                    EndMatterSection("## Odd", "CD reports fees."))
+        assert unclassified_headings(sections, "coi") == ("Odd",)
+
+    def test_text_without_a_heading_is_not_quoted_as_one(self) -> None:
+        """The article printed no heading "text without a heading"."""
+        clause = end_matter_unrecognised_clause(("Odd", UNHEADED))
+        assert clause.endswith(f'("Odd", {UNHEADED})')
+
+
+def test_a_front_statement_repeated_in_the_back_is_printed_once() -> None:
+    """The front-matter copy is dropped when the back matter already holds it."""
+    statement = "The authors declare no competing interests."
+    front = f"""<author-notes><fn fn-type="COI-statement"><p>{statement}</p></fn></author-notes>"""
+    back = f"""<fn-group><fn fn-type="COI-statement"><p>{statement}</p></fn></fn-group>""" + REFS
+    assert jats_to_markdown(_article(back, front_extra=front)).count(statement) == 1
