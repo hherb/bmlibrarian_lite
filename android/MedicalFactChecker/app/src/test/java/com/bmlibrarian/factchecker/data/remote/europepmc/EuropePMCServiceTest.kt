@@ -18,7 +18,6 @@
 
 package com.bmlibrarian.factchecker.data.remote.europepmc
 
-import com.bmlibrarian.factchecker.domain.model.EuropePMCError
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
@@ -36,6 +35,8 @@ import org.junit.Before
 import org.junit.Test
 import retrofit2.Response
 import java.io.IOException
+import java.net.SocketTimeoutException
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Unit tests for EuropePMCService.
@@ -457,114 +458,141 @@ class EuropePMCServiceTest {
         assertEquals(2, callCount)
     }
 
-    // ==================== Full Text Retrieval Tests ====================
+    // ==================== Full Text Retrieval Tests (#434) ====================
 
     @Test
-    fun `getFullTextXml returns XML on success`() = runTest {
-        // Arrange
-        val xmlContent = """
-            <article>
-                <body>Full text content here</body>
-            </article>
-        """.trimIndent()
+    fun `fetchFullTextXml serves the XML`() = runTest {
+        val xml = "<article><body><p>Full text</p></body></article>"
+        coEvery { api.getFullTextXml("PMC12345") } returns Response.success(xml)
 
-        coEvery {
-            api.getFullTextXml("PMC12345")
-        } returns Response.success(xmlContent)
-
-        // Act
-        val result = service.getFullTextXml("PMC12345")
-
-        // Assert
-        assertTrue(result.isSuccess)
-        assertEquals(xmlContent, result.getOrNull())
+        assertEquals(FullTextXmlFetch.Served(xml), service.fetchFullTextXml("PMC12345"))
     }
 
     @Test
-    fun `getFullTextXml normalizes PMC prefix`() = runTest {
-        // Arrange
-        coEvery {
-            api.getFullTextXml("PMC12345")
-        } returns Response.success("<article/>")
+    fun `fetchFullTextXml normalizes a PMC ID whatever its prefix case`() = runTest {
+        coEvery { api.getFullTextXml("PMC12345") } returns Response.success("<article/>")
 
-        // Act - Pass ID without PMC prefix
-        service.getFullTextXml("12345")
+        // pmc12345 used to become PMCpmc12345, which Europe PMC answers 404
+        for (identifier in listOf("12345", "PMC12345", "pmc12345", " PMC12345 ")) {
+            service.fetchFullTextXml(identifier)
+        }
 
-        // Assert - Should be normalized to include PMC prefix
-        coVerify {
-            api.getFullTextXml("PMC12345")
+        coVerify(exactly = 4) { api.getFullTextXml("PMC12345") }
+    }
+
+    @Test
+    fun `fetchFullTextXml asks for a preprint by its record ID`() = runTest {
+        coEvery { api.getFullTextXml("PPR1316954") } returns Response.success("<article/>")
+
+        service.fetchFullTextXml("ppr1316954")
+
+        coVerify { api.getFullTextXml("PPR1316954") }
+    }
+
+    @Test
+    fun `fetchFullTextXml never sends an identifier that is not an accession`() = runTest {
+        val fetch = service.fetchFullTextXml("10.1234/example")
+
+        assertEquals(
+            FullTextXmlFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED)),
+            fetch
+        )
+        coVerify(exactly = 0) { api.getFullTextXml(any()) }
+    }
+
+    @Test
+    fun `fetchFullTextXml reads a 404 as absent`() = runTest {
+        coEvery { api.getFullTextXml(any()) } returns Response.error(404, "Not found".toResponseBody(null))
+
+        assertEquals(FullTextXmlFetch.Absent, service.fetchFullTextXml("PMC99999"))
+    }
+
+    @Test
+    fun `fetchFullTextXml reads a blank body as an incomplete response, not an absence`() = runTest {
+        val incomplete = FullTextXmlFetch.Unreachable(RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE))
+        for (body in listOf(null, "", "  \n\t ")) {
+            coEvery { api.getFullTextXml(any()) } returns Response.success(body)
+            assertEquals("body ${body?.length}", incomplete, service.fetchFullTextXml("PMC12345"))
         }
     }
 
     @Test
-    fun `getFullTextXml handles ID with existing PMC prefix`() = runTest {
-        // Arrange
-        coEvery {
-            api.getFullTextXml("PMC67890")
-        } returns Response.success("<article/>")
-
-        // Act
-        service.getFullTextXml("PMC67890")
-
-        // Assert
-        coVerify {
-            api.getFullTextXml("PMC67890")
-        }
-    }
-
-    @Test
-    fun `getFullTextXml returns error when not found`() = runTest {
-        // Arrange
-        coEvery {
-            api.getFullTextXml(any())
-        } returns Response.error(404, "Not found".toResponseBody(null))
-
-        // Act
-        val result = service.getFullTextXml("PMC99999")
-
-        // Assert
-        assertTrue(result.isFailure)
-        val error = result.exceptionOrNull()
-        assertTrue(error is EuropePMCError.FullTextUnavailableError)
-        assertEquals("PMC99999", (error as EuropePMCError.FullTextUnavailableError).pmcId)
-    }
-
-    @Test
-    fun `getFullTextXml returns error when response is empty`() = runTest {
-        // Arrange
-        coEvery {
-            api.getFullTextXml(any())
-        } returns Response.success(null)
-
-        // Act
-        val result = service.getFullTextXml("PMC12345")
-
-        // Assert
-        assertTrue(result.isFailure)
-        val error = result.exceptionOrNull()
-        assertTrue(error is EuropePMCError.FullTextUnavailableError)
-    }
-
-    @Test
-    fun `getFullTextXml retries on network failure`() = runTest {
-        // Arrange
+    fun `fetchFullTextXml keeps a throttle that outlasts its retries as a 429`() = runTest {
         var callCount = 0
-        coEvery {
-            api.getFullTextXml(any())
-        } answers {
+        coEvery { api.getFullTextXml(any()) } answers {
             callCount++
-            if (callCount < 2) {
-                throw IOException("Network error")
-            }
+            Response.error(429, "".toResponseBody(null))
+        }
+
+        val fetch = service.fetchFullTextXml("PMC12345")
+
+        assertEquals(FullTextXmlFetch.Unreachable(RequestFailure(RequestFailureKind.HTTP_STATUS, 429)), fetch)
+        assertEquals("retried before giving up", Constants.NETWORK_MAX_RETRIES + 1, callCount)
+    }
+
+    @Test
+    fun `fetchFullTextXml reads a server error as unreachable, not absent`() = runTest {
+        // What Europe PMC answered for non-open-access PMC IDs on 2026-09-28 (#432)
+        coEvery { api.getFullTextXml(any()) } returns Response.error(500, "".toResponseBody(null))
+
+        assertEquals(
+            FullTextXmlFetch.Unreachable(RequestFailure(RequestFailureKind.HTTP_STATUS, 500)),
+            service.fetchFullTextXml("PMC12345")
+        )
+    }
+
+    @Test
+    fun `fetchFullTextXml keeps a connection failure's kind`() = runTest {
+        coEvery { api.getFullTextXml(any()) } throws IOException("Network error")
+
+        assertEquals(
+            FullTextXmlFetch.Unreachable(RequestFailure(RequestFailureKind.CONNECTION)),
+            service.fetchFullTextXml("PMC12345")
+        )
+    }
+
+    @Test
+    fun `fetchFullTextXml retries a network failure`() = runTest {
+        var callCount = 0
+        coEvery { api.getFullTextXml(any()) } answers {
+            callCount++
+            if (callCount < 2) throw IOException("Network error")
             Response.success("<article>Content</article>")
         }
 
-        // Act
-        val result = service.getFullTextXml("PMC12345")
-
-        // Assert
-        assertTrue(result.isSuccess)
+        assertEquals(FullTextXmlFetch.Served("<article>Content</article>"), service.fetchFullTextXml("PMC12345"))
         assertEquals(2, callCount)
+    }
+
+    @Test
+    fun `fetchFullTextXml keeps a timeout's kind`() = runTest {
+        coEvery { api.getFullTextXml(any()) } throws SocketTimeoutException("timed out")
+
+        assertEquals(
+            FullTextXmlFetch.Unreachable(RequestFailure(RequestFailureKind.TIMEOUT)),
+            service.fetchFullTextXml("PMC12345")
+        )
+    }
+
+    @Test
+    fun `fetchFullTextXml does not retry a status it does not model`() = runTest {
+        coEvery { api.getFullTextXml(any()) } returns Response.error(403, "".toResponseBody(null))
+
+        assertEquals(
+            FullTextXmlFetch.Unreachable(RequestFailure(RequestFailureKind.HTTP_STATUS, 403)),
+            service.fetchFullTextXml("PMC12345")
+        )
+        coVerify(exactly = 1) { api.getFullTextXml(any()) }
+    }
+
+    /** A cancelled fetch is not a dead source: it must not become an Unreachable. */
+    @Test
+    fun `fetchFullTextXml lets a cancellation through`() = runTest {
+        coEvery { api.getFullTextXml(any()) } throws CancellationException("cancelled")
+
+        val thrown = runCatching { service.fetchFullTextXml("PMC12345") }.exceptionOrNull()
+
+        assertTrue("$thrown", thrown is CancellationException)
     }
 
     // ==================== Document Entity Conversion Tests ====================

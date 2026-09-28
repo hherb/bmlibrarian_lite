@@ -109,6 +109,14 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
     /// ``ArticleIdentifierKind/inferred(from:)``.
     public let identifierKind: ArticleIdentifierKind?
 
+    /// Europe PMC's own ID for the record (its `id` field), when it gave one.
+    ///
+    /// Not always what ``pmid`` holds: that slot prefers a record's PubMed ID,
+    /// so a preprint indexed in PubMed fills it with the PubMed ID, and its
+    /// `PPR` record ID, the one `fullTextXML` serves it under, lives only here
+    /// (#434).
+    public let europePMCRecordID: String?
+
     public init(
         pmid: String,
         pmcId: String? = nil,
@@ -123,7 +131,8 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
         isOpenAccess: Bool = false,
         source: SearchProvider,
         pdfRenderURL: String? = nil,
-        identifierKind: ArticleIdentifierKind? = nil
+        identifierKind: ArticleIdentifierKind? = nil,
+        europePMCRecordID: String? = nil
     ) {
         self.id = pmid
         self.pmid = pmid
@@ -140,6 +149,7 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
         self.source = source
         self.pdfRenderURL = pdfRenderURL
         self.identifierKind = identifierKind
+        self.europePMCRecordID = europePMCRecordID
     }
 }
 

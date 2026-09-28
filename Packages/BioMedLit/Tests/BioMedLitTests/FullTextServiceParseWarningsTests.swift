@@ -21,7 +21,7 @@ import XCTest
 /// exercised without a network.
 ///
 /// `FullTextService` built its own `URLSession` in `init(email:)`, which is why
-/// `fetchEuropePMCXML` had no offline coverage at all — and why both the warnings
+/// the Europe PMC XML fetch had no offline coverage at all — and why both the warnings
 /// channel and the typed parse error would otherwise have shipped untested.
 final class StubURLProtocol: URLProtocol {
     /// The body every intercepted request receives, with its status code.
@@ -117,12 +117,15 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
     /// own session, so leaving it on the default sent any test that omits a PMC
     /// ID to the live network — which is both slow and a test that passes or
     /// fails on someone else's uptime.
-    private func stubbedService() -> FullTextService {
+    private func stubbedService(
+        europePMCRetry: RetryConfiguration = .serverError
+    ) -> FullTextService {
         let session = URLSession(configuration: Self.stubbedConfiguration)
         return FullTextService(
             email: "test@example.com",
             session: session,
-            europePMCService: EuropePMCService(session: session)
+            europePMCService: EuropePMCService(session: session),
+            europePMCRetry: europePMCRetry
         )
     }
 
@@ -186,8 +189,8 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
     /// as one indistinguishable string.
     func testAParseFailureSurfacesTheTypedError() async throws {
         do {
-            _ = try await service(serving: "<article><body></article>")
-                .fetchEuropePMCXML(pmcId: "PMC12759138")
+            _ = try await stubbedService()
+                .renderEuropePMCXML(Data("<article><body></article>".utf8), accession: "PMC12759138")
             XCTFail("malformed XML should not parse")
         } catch let error as FullTextError {
             guard case .jatsParseFailure(let parseError) = error else {
@@ -427,23 +430,26 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
     }
 
     /// An endpoint that answered with a status we cannot use is not an absent
-    /// source.
+    /// source: the 503 the issue names, which is retried first, and a 400,
+    /// which is not.
     ///
-    /// HTTP 400 rather than the 503 the issue names, deliberately: a 503 is
-    /// retryable, and `fetchEuropePMCWithRetry` runs `RetryConfiguration.serverError`
-    /// — five attempts from a five-second delay — so the honest version of that
-    /// test costs about seventy-five seconds of real time. Both statuses reach
-    /// the same `else` branch.
+    /// The retry is injected so the 503 costs milliseconds rather than
+    /// `RetryConfiguration.serverError`'s seventy-five seconds.
     func testAnUnusableEuropePMCStatusIsReportedAsUnreachable() async throws {
-        StubURLProtocol.routes = [
-            "fullTextXML": (400, Data()),
-            "unpaywall": (404, Data()),
-        ]
+        let fastRetry = RetryConfiguration(
+            maxAttempts: 2, initialDelay: 0.01, maxDelay: 0.01, backoffMultiplier: 1, jitterFactor: 0
+        )
+        for status in [503, 400] {
+            StubURLProtocol.routes = [
+                "fullTextXML": (status, Data()),
+                "unpaywall": (404, Data()),
+            ]
 
-        let result = try await stubbedService()
-            .fetchFullText(pmcId: "PMC12759138", doi: "10.1234/example", pmid: "1")
+            let result = try await stubbedService(europePMCRetry: fastRetry)
+                .fetchFullText(pmcId: "PMC12759138", doi: "10.1234/example", pmid: "1")
 
-        XCTAssertEqual(result.degradation, .europePMCUnreachable)
+            XCTAssertEqual(result.degradation, .europePMCUnreachable, "HTTP \(status)")
+        }
     }
 
     /// The transport failing outright, which reaches the same branch by a
@@ -525,7 +531,7 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
     /// The success path builds its result without a degradation at all — a parse
     /// that worked cannot be a degradation from itself, and the initialiser
     /// asserts as much — so a version of this test whose XML parse succeeds
-    /// passes just as happily with the rule weakened to `searchFailed` alone.
+    /// passes just as happily with the rule weakened to "a search failed" alone.
     /// Here the XML is absent (404), the chain falls through to a publisher
     /// link, and a degradation raised during resolution would ride out on it.
     ///
@@ -580,7 +586,7 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
     ///
     /// The companion to the test above, and the one that pins the accumulation
     /// rather than the consumer's rule. With the fold written as an assignment
-    /// instead of an OR, the DOI attempt's clean `searchFailed == false`
+    /// instead of keeping the first, the DOI attempt's clean `failure == nil`
     /// overwrites the PMID attempt's failure and the degradation disappears —
     /// which is #186 restored, one line inside the fix for it. The DOI query is
     /// answered with an empty result list, so nothing later in the chain can
@@ -669,7 +675,7 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
     /// one fails.
     ///
     /// The order-mirror of the test above. `matchedARecord` has to accumulate
-    /// for the same reason `searchFailed` does: written as an assignment it
+    /// for the same reason `failure` does: written as an assignment it
     /// carries only the last attempt's answer, and the article Europe PMC has
     /// already told us about reverts to an outage.
     func testARecordMatchedBeforeALaterSearchFailedStillAnswers() async throws {

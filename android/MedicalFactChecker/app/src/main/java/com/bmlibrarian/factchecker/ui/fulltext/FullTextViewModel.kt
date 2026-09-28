@@ -29,6 +29,7 @@ import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService.FullText
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.util.Constants
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -213,6 +214,9 @@ class FullTextViewModel @Inject constructor(
                 // Fetch new full text
                 fetchFullText(doc)
 
+            } catch (e: CancellationException) {
+                // The screen went away: not an error to show
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Error loading document: ${e.message}")
                 _state.value = FullTextState.Error(
@@ -251,6 +255,8 @@ class FullTextViewModel @Inject constructor(
                     )
                 }
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Full-text fetch error: ${e.message}")
             _state.value = FullTextState.Error(
@@ -382,6 +388,13 @@ class FullTextViewModel @Inject constructor(
                 )
 
                 _state.value = FullTextState.Unavailable(result.reason)
+            }
+
+            is FullTextResult.NotEstablished -> {
+                // Not a fact about the article: nothing is recorded, and the
+                // reader is offered a retry (#434)
+                Log.d(TAG, "Full text not established for ${doc.id}: ${result.failure.describe()}")
+                _state.value = FullTextState.Error(message = result.reason, canRetry = true)
             }
         }
     }

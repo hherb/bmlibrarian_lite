@@ -75,6 +75,13 @@ public actor FullTextService {
     /// prose and loses the figures, tables and layout.
     private let extractPDFText: Bool
 
+    /// How the Europe PMC full-text XML fetch retries a transient failure.
+    ///
+    /// Injectable so a test can pin what a throttle that outlasts its retries
+    /// becomes: ``RetryConfiguration/serverError`` waits about seventy-five
+    /// seconds (5 + 10 + 20 + 40) before giving up.
+    private let europePMCRetry: RetryConfiguration
+
     /// Characters safe to leave unescaped inside a query-string *value*.
     ///
     /// `.urlQueryAllowed` describes a whole query, so of the characters removed
@@ -111,23 +118,27 @@ public actor FullTextService {
     ///     tiers without a real file.
     ///   - extractPDFText: Whether a PDF tier downloads, caches and extracts.
     ///     Defaults to `true`. Mirrors bmlib's `convert_pdfs`.
+    ///   - europePMCRetry: How the full-text XML fetch retries a transient
+    ///     failure. Defaults to ``RetryConfiguration/serverError``.
     public init(
         email: String,
         session: URLSession = FullTextService.makeSession(),
         europePMCService: EuropePMCService = EuropePMCService(),
         extractor: PDFTextExtracting = PDFKitTextExtractor(),
-        extractPDFText: Bool = true
+        extractPDFText: Bool = true,
+        europePMCRetry: RetryConfiguration = .serverError
     ) {
         self.email = email
         self.europePMCService = europePMCService
         self.session = session
         self.extractor = extractor
         self.extractPDFText = extractPDFText
+        self.europePMCRetry = europePMCRetry
     }
 
     /// The transport production uses.
     ///
-    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:)``
+    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:)``
     /// so a test can
     /// substitute a stubbed `URLSession` without reproducing these timeouts.
     ///
@@ -163,8 +174,13 @@ public actor FullTextService {
     ///   (#181), and — when Europe PMC served XML this parser could not read, or
     ///   could not be reached at all — why this is not the best source that
     ///   existed (#183, #186).
-    /// - Throws: `FullTextError` if all sources fail, or `CancellationError` if
-    ///   the caller cancelled. Cancellation propagates rather than falling
+    /// - Throws: When every source is exhausted, `FullTextError`:
+    ///   `noFullTextAvailable` when every source answered without it (callers
+    ///   record this on the document); `absenceNotEstablished` when Europe PMC
+    ///   did not settle it; `identifierKindUnresolved` when the PubMed last
+    ///   resort could not be authorised. Neither of the last two may be
+    ///   recorded. `CancellationError` if the caller cancelled: it propagates
+    ///   rather than falling
     ///   through, so a link is never cached as this article's full text just
     ///   because the caller went away.
     public func fetchFullText(
@@ -214,8 +230,17 @@ public actor FullTextService {
         // better. See `pdfTierResult`.
         var pdfLinkFallback: FullTextResult?
 
+        // What Europe PMC's side of the chain got instead of an answer about the
+        // article, if anything. Set by a lost identifier search, a fetch that
+        // failed and a `fullTextXML` 404; cleared by a fetch that was served.
+        // Read only at the very end: a chain that found nothing must not call
+        // the article's full text absent while this is set (#434).
+        var europePMCShortfall: RequestFailure?
+
         // Resolve PMC ID and PDF render URL from PMID or DOI if not already available
         var resolvedPmcId = pmcId
+        var resolvedPreprintAccession: String?
+        var searchLostTheSource = false
         var pdfRenderURL: String?
         var identifiersResolved = false
         if resolvedPmcId == nil || resolvedPmcId?.isEmpty == true {
@@ -224,96 +249,107 @@ public actor FullTextService {
             )
             identifiersResolved = true
             resolvedPmcId = resolved.pmcId
+            resolvedPreprintAccession = resolved.preprintAccession
             pdfRenderURL = resolved.pdfRenderURL
             // Only when the failure actually cost us the source. A failed PMID
             // search that the DOI search then recovered from cost the reader
             // nothing, and neither does one where a later query answered that
             // this article has no PMC record at all. The XML branch's own
             // outcome decides from here.
-            if resolved.lostTheSource {
+            if let lostTo = resolved.sourceLostTo {
+                searchLostTheSource = true
                 degradation = .europePMCUnreachable
+                europePMCShortfall = lostTo
             }
         }
 
-        // Try Europe PMC first (best quality - machine readable XML)
-        if let pmcId = resolvedPmcId, !pmcId.isEmpty {
-            do {
-                let content = try await fetchEuropePMCWithRetry(pmcId: pmcId)
-                BioMedLitLib.logger?.info(
-                    "Successfully retrieved Europe PMC full text for \(pmcId)",
-                    category: .fullText
-                )
-                let parsed = FullTextResult(
-                    content: .europePMC(html: content.html, markdown: content.markdown),
-                    warnings: content.warnings,
-                    contentKind: content.contentKind
-                )
-                // A body-less deposit is not an article. Returning it here — as
-                // this did — made it beat every remaining tier, so an
-                // open-access PDF of the same paper was unreachable, and the
-                // abstract was cached and scored as an article body. Held back
-                // instead, and returned at the end only if nothing better
-                // arrives, mirroring bmlib's `_with_abstract_fallback`.
-                if content.contentKind == .abstract {
+        // Try Europe PMC first (best quality - machine readable XML). A
+        // preprint has no PMC ID and is asked for by its `PPR` record ID.
+        if let accession = Self.fullTextAccession(
+            pmcId: resolvedPmcId,
+            resolvedPreprintAccession: resolvedPreprintAccession,
+            pmid: pmid,
+            primaryKind: primaryKind,
+            searchLostTheSource: searchLostTheSource
+        ) {
+            switch try await fetchEuropePMCXML(accession: accession) {
+            case .served(let xml):
+                // Europe PMC answered, so whatever the identifier search lost,
+                // it did not cost the reader this source.
+                degradation = nil
+                europePMCShortfall = nil
+                do {
+                    let content = try renderEuropePMCXML(xml.data, accession: accession)
                     BioMedLitLib.logger?.info(
-                        "Europe PMC served an abstract-only deposit for \(pmcId); "
-                            + "holding it back in case a PDF tier does better",
+                        "Successfully retrieved Europe PMC full text for \(accession)",
                         category: .fullText
                     )
-                    abstractOnly = parsed
-                } else {
-                    return parsed
-                }
-            } catch where error.isCancellation {
-                // A cancelled fetch is not a dead source. Falling through would
-                // hand back a doi.org link as though Europe PMC had nothing,
-                // and cache that as the article's full text.
-                //
-                // Tested by fact rather than by type: the transport reports
-                // cancellation as `URLError.cancelled`, and only the retry
-                // backoff raises `CancellationError` — see ``isCancellation``.
-                throw CancellationError()
-            } catch {
-                // Deliberately swallowed: the remaining sources are the reason
-                // this method is a chain, and a reader who can be given the
-                // publisher's PDF should get it rather than an error.
-                //
-                // Logged at error rather than warning when the XML was there and
-                // this parser could not read it — that is a defect in us, not an
-                // absent source, and the two read identically in a log otherwise.
-                if case FullTextError.jatsParseFailure(let parseError) = error {
-                    // Recorded on every result the chain goes on to return, so
-                    // the reader is told that a better source existed and we
-                    // could not use it — the half of #183 the log cannot do.
+                    let parsed = FullTextResult(
+                        content: .europePMC(html: content.html, markdown: content.markdown),
+                        warnings: content.warnings,
+                        contentKind: content.contentKind
+                    )
+                    // A body-less deposit is not an article. Returning it here —
+                    // as this did — made it beat every remaining tier, so an
+                    // open-access PDF of the same paper was unreachable, and the
+                    // abstract was cached and scored as an article body. Held
+                    // back instead, and returned at the end only if nothing
+                    // better arrives, mirroring bmlib's `_with_abstract_fallback`.
+                    if content.contentKind == .abstract {
+                        BioMedLitLib.logger?.info(
+                            "Europe PMC served an abstract-only deposit for \(accession); "
+                                + "holding it back in case a PDF tier does better",
+                            category: .fullText
+                        )
+                        abstractOnly = parsed
+                    } else {
+                        return parsed
+                    }
+                } catch FullTextError.jatsParseFailure(let parseError) {
+                    // Deliberately not thrown: the remaining sources are the
+                    // reason this method is a chain, and a reader who can be
+                    // given the publisher's PDF should get it rather than an
+                    // error. Recorded on every result the chain goes on to
+                    // return, so the reader is told that a better source existed
+                    // and we could not use it — the half of #183 the log cannot
+                    // do. Logged at error: a defect in us, not an absent source.
                     degradation = .jatsParseFailed
                     BioMedLitLib.logger?.error(
-                        "Europe PMC XML for \(pmcId) was retrieved but could not be parsed "
+                        "Europe PMC XML for \(accession) was retrieved but could not be parsed "
                             + "(\(parseError)); falling back to a PDF or publisher link",
                         category: .fullText
                     )
-                } else if case FullTextError.noFullTextAvailable = error {
-                    // The source answered and had nothing. Never a degradation:
-                    // a note that fires on every article never deposited as
-                    // full text is worthless on the ones where it is true.
-                    BioMedLitLib.logger?.warning(
-                        "Europe PMC has no machine-readable text for \(pmcId)",
-                        category: .fullText
-                    )
-                } else {
-                    // Everything else — a server error that outlasted its
-                    // retries, a transport failure, a status we do not model —
-                    // means we could not reach the source, not that it was
-                    // empty. Those are opposite answers, and collapsing them
-                    // tells the reader the evidence base is thin when the
-                    // shortfall is ours (#186).
-                    degradation = .europePMCUnreachable
-                    BioMedLitLib.logger?.warning(
-                        "Europe PMC XML could not be retrieved for \(pmcId): "
-                            + "\(error.localizedDescription); falling back to a PDF "
-                            + "or publisher link",
-                        category: .fullText
-                    )
                 }
+
+            case .absent:
+                // Europe PMC's own answer, so never a degradation: a note that
+                // fires on every article not deposited as open access is
+                // worthless on the ones where it is true. But not the
+                // article's absence either. `fullTextXML` serves open-access
+                // text only, and a PMC or PPR accession names a record Europe
+                // PMC mirrors, so the 404 may mean "not open access" (#432).
+                degradation = nil
+                europePMCShortfall = .httpStatus(BioMedLitConstants.httpStatusNotFound)
+                BioMedLitLib.logger?.warning(
+                    "Europe PMC did not serve full text for \(accession) (HTTP 404); "
+                        + "trying the PDF tiers",
+                    category: .fullText
+                )
+
+            case .unreachable(let failure):
+                // We could not get Europe PMC's answer — a throttle or server
+                // error that outlasted its retries, a transport failure, a
+                // status we do not model, a blank body, or an identifier that
+                // is not an accession. The source may well have had the text,
+                // and the reader is looking at a substitute because of us
+                // (#186).
+                degradation = .europePMCUnreachable
+                europePMCShortfall = failure
+                BioMedLitLib.logger?.warning(
+                    "Europe PMC XML could not be retrieved for \(accession) "
+                        + "(\(failure.describe())); falling back to a PDF or publisher link",
+                    category: .fullText
+                )
             }
         }
 
@@ -330,7 +366,7 @@ public actor FullTextService {
         // extra request.
         //
         // Only `pdfRenderURL` is taken from the resolution here. Its
-        // `lostTheSource` flag is deliberately ignored: the XML tier above has
+        // `sourceLostTo` is deliberately ignored: the XML tier above has
         // already run and recorded its own outcome, and letting a failed
         // *render-URL* lookup set `.europePMCUnreachable` would overwrite the
         // more specific reason with a vaguer one.
@@ -476,11 +512,12 @@ public actor FullTextService {
         // PubMed record they can see in a browser is simply false.
         //
         // Only when the kind is genuinely *unresolved*. A stated preprint whose
-        // sources are exhausted is the honest `noFullTextAvailable`: we know
-        // exactly what the identifier is, it simply has no PubMed record and
-        // nothing else answered. The refusal this case describes is narrower —
+        // sources are exhausted is not this case: we know exactly what the
+        // identifier is, it simply has no PubMed record. It ends in
+        // `noFullTextAvailable`, or in `absenceNotEstablished` below when
+        // Europe PMC did not settle it. The refusal this case describes is narrower —
         // nobody said, the shape does not settle it, and no provider vouched.
-        let unclassified = (pmid ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let unclassified = pmid.trimmingCharacters(in: .whitespacesAndNewlines)
         if !unclassified.isEmpty,
            ArticleIdentifierKind.resolved(declared: primaryKind, accession: unclassified) == .unknown {
             BioMedLitLib.logger?.error(
@@ -494,85 +531,210 @@ public actor FullTextService {
             throw FullTextError.identifierKindUnresolved(unclassified)
         }
 
+        // Nothing was found, but Europe PMC did not settle the question: it
+        // could not be asked, or it answered 404 for an article it holds. The
+        // callers mark `noFullTextAvailable` on the document for good, so
+        // saying it here would take the retry away from an article whose only
+        // fault was a busy or closed Europe PMC (#434).
+        if let europePMCShortfall {
+            BioMedLitLib.logger?.warning(
+                "No source served full text for \(articleName), and Europe PMC did not "
+                    + "settle it (\(europePMCShortfall.describe()))",
+                category: .fullText
+            )
+            throw FullTextError.absenceNotEstablished(europePMCShortfall)
+        }
+
         BioMedLitLib.logger?.error("No full text available for \(articleName)", category: .fullText)
         throw FullTextError.noFullTextAvailable
     }
 
     // MARK: - Europe PMC
 
-    /// Fetch full-text XML from Europe PMC with retry logic.
-    private func fetchEuropePMCWithRetry(
-        pmcId: String
-    ) async throws -> (
+    /// The HTML and markdown renderings of a served JATS document, what the
+    /// parse lost, and whether it had a body.
+    typealias EuropePMCRendering = (
         html: String, markdown: String, warnings: JATSParseWarnings, contentKind: FullTextContentKind
-    ) {
-        try await RetryHelper.retry(
-            config: .serverError,
-            shouldRetry: RetryHelper.retryOnlyTransient
-        ) {
-            try await self.fetchEuropePMCXML(pmcId: pmcId)
+    )
+
+    /// The accession to ask `fullTextXML` by, if the article has one.
+    ///
+    /// The PMC ID first. A preprint has none, so its `PPR` record ID is next,
+    /// as the identifier search found it.
+    ///
+    /// Only when that search *failed* is the document's own primary slot read
+    /// instead, when it is stated (or shaped) as a preprint or a PMC record, so
+    /// a throttled search does not cost the article its XML. A search that
+    /// answered "no such record" is not second-guessed: asking `fullTextXML`
+    /// about an article Europe PMC does not hold only adds a 404. A slot value
+    /// is taken only with its prefix: a bare number there may be a PubMed ID,
+    /// and `FullTextAccession.normalized` would read it as a PMC ID.
+    ///
+    /// Internal rather than private so the routing can be tested directly.
+    ///
+    /// - Parameters:
+    ///   - pmcId: The PMC ID the document carries or the search resolved.
+    ///   - resolvedPreprintAccession: The `PPR` ID the search resolved.
+    ///   - pmid: The document's primary identifier slot.
+    ///   - primaryKind: What the record said that slot holds, when it said.
+    ///   - searchLostTheSource: Whether the identifier search failed without
+    ///     matching a record, the one case the slot is read in.
+    /// - Returns: The identifier to fetch by, not yet normalised (the fetch
+    ///   does that, and records a refusal), or `nil` when there is none.
+    static func fullTextAccession(
+        pmcId: String?,
+        resolvedPreprintAccession: String?,
+        pmid: String?,
+        primaryKind: ArticleIdentifierKind?,
+        searchLostTheSource: Bool
+    ) -> String? {
+        if let pmcId = trimmed(pmcId) {
+            return pmcId
+        }
+        if let preprint = trimmed(resolvedPreprintAccession) {
+            return preprint
+        }
+        guard searchLostTheSource, let slot = trimmed(pmid) else { return nil }
+        switch ArticleIdentifierKind.resolved(declared: primaryKind, accession: slot) {
+        case .preprint:
+            return FullTextAccession.prefixed(
+                slot, as: BioMedLitConstants.europePMCPreprintAccessionPrefix
+            )
+        case .pmc:
+            return FullTextAccession.prefixed(slot, as: BioMedLitConstants.pmcAccessionPrefix)
+        case .pubmed, .europePMCSource, .unknown:
+            return nil
         }
     }
 
-    /// Fetch full-text XML from Europe PMC and convert to HTML and markdown.
+    /// Ask Europe PMC for an article's full-text XML, and say what we got.
     ///
-    /// Internal rather than private so the parse-to-caller channel can be tested
-    /// directly: `fetchFullText` catches everything this throws and falls through
-    /// to the PDF and DOI sources, so a parse failure never reaches a caller
-    /// through it.
+    /// Internal rather than private so each outcome can be tested on its own.
+    /// Mirrors Python's `EuropePMCClient.fetch_fulltext_xml`.
     ///
-    /// - Parameter pmcId: PubMed Central ID (with or without "PMC" prefix).
-    /// - Returns: The HTML and markdown renderings, and what the parse lost.
-    /// - Throws: `FullTextError` on failure.
-    func fetchEuropePMCXML(
-        pmcId: String
-    ) async throws -> (
-        html: String, markdown: String, warnings: JATSParseWarnings, contentKind: FullTextContentKind
-    ) {
-        // Normalize PMC ID (ensure it has the PMC prefix)
-        let normalizedId = pmcId.hasPrefix("PMC") ? pmcId : "PMC\(pmcId)"
-
-        guard let url = URL(string: "\(BioMedLitConstants.europePMCBaseURL)/\(normalizedId)/fullTextXML") else {
-            throw FullTextError.invalidResponse("Invalid PMC ID format")
+    /// - Parameter accession: A PMC ID, with or without its `PMC` prefix, or a
+    ///   preprint's `PPR` record ID.
+    /// - Returns: The XML; Europe PMC's 404; or why it could not be read, of its
+    ///   real kind once the retries are spent — a 429 stays a 429 (#434). A
+    ///   blank answer is ``RequestFailure/incompleteResponse``, and an
+    ///   identifier that is not an accession is never sent
+    ///   (``RequestFailure/requestFailed``, #355).
+    /// - Throws: `CancellationError` if the caller cancelled, and nothing else:
+    ///   a cancelled fetch is not a dead source.
+    func fetchEuropePMCXML(accession: String) async throws -> FullTextXmlFetch {
+        guard let normalized = FullTextAccession.normalized(accession),
+              let url = URL(
+                string: "\(BioMedLitConstants.europePMCBaseURL)/\(normalized)/fullTextXML"
+              )
+        else {
+            BioMedLitLib.logger?.warning(
+                "Not a PMC or preprint accession, so Europe PMC was not asked for its "
+                    + "full text: '\(accession)'",
+                category: .fullText
+            )
+            return .unreachable(.requestFailed)
         }
 
         BioMedLitLib.logger?.debug("Fetching Europe PMC XML from: \(url.absoluteString)", category: .fullText)
 
+        let status: Int
+        let body: Data
+        do {
+            (status, body) = try await RetryHelper.retry(
+                config: europePMCRetry,
+                shouldRetry: RetryHelper.retryOnlyTransient
+            ) {
+                try await self.requestEuropePMCXML(url)
+            }
+        } catch where error.isCancellation {
+            throw CancellationError()
+        } catch FullTextError.serverError(let statusCode) {
+            // A throttle or server error that outlasted its retries.
+            return .unreachable(.httpStatus(statusCode))
+        } catch FullTextError.invalidResponse {
+            return .unreachable(.malformedResponse)
+        } catch {
+            return .unreachable(SearchTransport.failure(for: error))
+        }
+
+        switch status {
+        case BioMedLitConstants.httpStatusOK:
+            // An empty answer has told us nothing about the article, so it is
+            // an incomplete response, not an absence. It used to be parsed,
+            // and reported to the reader as a parse failure.
+            guard let served = ServedXML(body) else {
+                BioMedLitLib.logger?.warning(
+                    "Europe PMC served an empty full text for \(normalized)",
+                    category: .fullText
+                )
+                return .unreachable(.incompleteResponse)
+            }
+            return .served(served)
+        case BioMedLitConstants.httpStatusNotFound:
+            BioMedLitLib.logger?.debug(
+                "Europe PMC serves no full-text XML for \(normalized)", category: .fullText
+            )
+            return .absent
+        default:
+            return .unreachable(.forHTTPStatus(status))
+        }
+    }
+
+    /// One request for full-text XML, throwing only what is worth retrying.
+    ///
+    /// - Parameter url: The `fullTextXML` URL.
+    /// - Returns: The status and body of any answer the retry policy does not
+    ///   treat as transient.
+    /// - Throws: `FullTextError.serverError` for a status in
+    ///   `BioMedLitConstants.retryableStatusCodes` (429, 500, 502–504),
+    ///   `FullTextError.invalidResponse` when the answer is not HTTP, and the
+    ///   transport's own error otherwise.
+    private func requestEuropePMCXML(_ url: URL) async throws -> (status: Int, body: Data) {
         var request = URLRequest(url: url)
         request.setValue("application/xml", forHTTPHeaderField: "Accept")
         request.timeoutInterval = BioMedLitConstants.defaultRequestTimeout
 
         let (data, response) = try await session.data(for: request)
-
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw FullTextError.networkError("Invalid server response")
+            throw FullTextError.invalidResponse("Not an HTTP response")
         }
 
-        BioMedLitLib.logger?.debug("Europe PMC response status: \(httpResponse.statusCode)", category: .fullText)
-
         let statusCode = httpResponse.statusCode
-        switch statusCode {
-        case BioMedLitConstants.httpStatusOK:
-            break  // Success, continue to parse
-        case BioMedLitConstants.httpStatusNotFound:
-            throw FullTextError.noFullTextAvailable
-        case _ where BioMedLitConstants.retryableStatusCodes.contains(statusCode):
-            // Server errors and rate limiting - retryable
+        BioMedLitLib.logger?.debug("Europe PMC response status: \(statusCode)", category: .fullText)
+        if BioMedLitConstants.retryableStatusCodes.contains(statusCode) {
             BioMedLitLib.logger?.warning(
                 "Europe PMC server error (\(statusCode)), will retry with backoff",
                 category: .fullText
             )
             throw FullTextError.serverError(statusCode: statusCode)
-        default:
-            throw FullTextError.invalidResponse("HTTP \(statusCode)")
         }
+        return (statusCode, data)
+    }
 
-        // Parse JATS XML to both HTML and markdown, passing the known PMC ID for figure URLs
-        let parser = JATSXMLParser(data: data, knownPMCId: normalizedId)
+    /// Convert served JATS XML to HTML and markdown.
+    ///
+    /// Separate from the fetch so a parse failure — a defect in us — can never
+    /// be mistaken for the source's answer, and so it can be tested directly:
+    /// `fetchFullText` catches the parse failure and falls through to the PDF
+    /// and DOI sources, so it never reaches a caller through it.
+    ///
+    /// - Parameters:
+    ///   - xml: The JATS XML Europe PMC served.
+    ///   - accession: The accession it was served under. Passed to the parser
+    ///     for figure URLs only when it is a PMC ID: a preprint's figures are
+    ///     not filed under its `PPR` ID.
+    /// - Returns: The renderings, and what the parse lost.
+    /// - Throws: `FullTextError.jatsParseFailure`, with the parser's own error.
+    func renderEuropePMCXML(_ xml: Data, accession: String) throws -> EuropePMCRendering {
+        let normalized = FullTextAccession.normalized(accession)
+        let knownPMCId = normalized.flatMap {
+            $0.hasPrefix(BioMedLitConstants.pmcAccessionPrefix) ? $0 : nil
+        }
         do {
+            let parser = JATSXMLParser(data: xml, knownPMCId: knownPMCId)
             let html = try parser.parseToHTML()
             // Create a second parser for markdown (XML parser is consumed after first parse)
-            let markdownParser = JATSXMLParser(data: data, knownPMCId: normalizedId)
+            let markdownParser = JATSXMLParser(data: xml, knownPMCId: knownPMCId)
             let markdown = try markdownParser.parseToMarkdown()
             // Both parsers read the same bytes and so produce the same warnings
             // and the same content kind. The HTML parser's are taken for both
@@ -587,25 +749,9 @@ public actor FullTextService {
         } catch let parseError as JATSParseError {
             // Kept typed. Flattening it to a string left `.noContent`,
             // `.alreadyParsed` and `.parsingFailed` indistinguishable to every
-            // caller and to the log.
+            // caller and to the log. Any other error travels as itself: it
+            // must not be relabelled as malformed publisher XML.
             throw FullTextError.jatsParseFailure(parseError)
-        } catch {
-            // Unreachable today: the `do` block wraps only the two synchronous
-            // parse calls, and `JATSParseError` is the only thing they throw.
-            // Kept against an edit that makes this block asynchronous, where an
-            // unrelated failure — a cancelled task, say — must not be relabelled
-            // as malformed publisher XML.
-            //
-            // Which means rethrowing it, not naming it. Wrapping it in
-            // `xmlParseError` did the relabelling this clause exists to prevent:
-            // a cancelled task would have surfaced as "Failed to parse XML:
-            // cancelled" and been marked non-retryable. An error we cannot
-            // classify travels as itself.
-            BioMedLitLib.logger?.error(
-                "Unexpected non-JATS error parsing \(normalizedId): \(error)",
-                category: .parsing
-            )
-            throw error
         }
     }
 
@@ -627,14 +773,25 @@ public actor FullTextService {
         /// The PMC ID, when one was found.
         let pmcId: String?
 
+        /// The preprint's `PPR` record ID, when a matched record was a preprint.
+        ///
+        /// A preprint has no PMC ID, so without this the XML tier had nothing
+        /// to ask by, and a preprint Europe PMC serves in full reached only its
+        /// PDF, or nothing (#434).
+        let preprintAccession: String?
+
         /// The free PDF render URL from the search result, when one was offered.
         let pdfRenderURL: String?
 
-        /// Whether any attempted search threw rather than answering.
+        /// Why the first failed search failed, or `nil` when every attempted
+        /// search answered.
         ///
-        /// OR-ed across every attempt: one failing leaves us unable to say, on
-        /// that attempt's evidence, that the article has no PMC record.
-        let searchFailed: Bool
+        /// Kept across every attempt: one failing leaves us unable to say, on
+        /// that attempt's evidence, that the article has no PMC record. Carried
+        /// so a chain that ends without full text can say why Europe PMC did
+        /// not settle it, rather than only that it did not. The only record of
+        /// a failed search, so "a search failed" and "why" cannot disagree.
+        let failure: RequestFailure?
 
         /// Whether any attempted search matched a record for this article.
         ///
@@ -647,26 +804,28 @@ public actor FullTextService {
         /// this whole channel exists to prevent, inverted (#186).
         let matchedARecord: Bool
 
-        /// Whether the machine-readable source was lost because we could not ask.
+        /// Why the machine-readable source was lost because we could not ask,
+        /// or `nil` when it was not.
         ///
         /// The rule the degradation is raised on, kept here rather than at the
         /// call site so the facts that decide it cannot be recombined
         /// differently by a second consumer.
         ///
-        /// Both conjuncts are load-bearing: a search that never failed has
+        /// Both conditions are load-bearing: a search that never failed has
         /// nothing to report, and a record that was matched answers the question
-        /// outright. `pmcId == nil` is deliberately *not* a third conjunct —
+        /// outright. `pmcId == nil` is deliberately *not* a third condition —
         /// only a matched record can carry an ID, so a non-nil `pmcId` already
         /// implies `matchedARecord`. Spelling it out anyway would add a check no
         /// test could ever fail, which is how a predicate starts to look
         /// defensive and stops being read.
-        var lostTheSource: Bool {
-            searchFailed && !matchedARecord
+        var sourceLostTo: RequestFailure? {
+            matchedARecord ? nil : failure
         }
 
         /// The starting value of a resolution: nothing attempted, nothing learned.
         static let nothingAttempted = PMCResolution(
-            pmcId: nil, pdfRenderURL: nil, searchFailed: false, matchedARecord: false
+            pmcId: nil, preprintAccession: nil, pdfRenderURL: nil,
+            failure: nil, matchedARecord: false
         )
 
         /// The answer when a search completed and matched nothing.
@@ -678,15 +837,21 @@ public actor FullTextService {
         static let noMatch = nothingAttempted
 
         /// The answer when a search threw.
-        static let failed = PMCResolution(
-            pmcId: nil, pdfRenderURL: nil, searchFailed: true, matchedARecord: false
-        )
+        ///
+        /// - Parameter failure: Why it threw, by kind.
+        /// - Returns: A resolution that learned nothing but the failure.
+        static func failed(_ failure: RequestFailure) -> PMCResolution {
+            PMCResolution(
+                pmcId: nil, preprintAccession: nil, pdfRenderURL: nil,
+                failure: failure, matchedARecord: false
+            )
+        }
 
         /// This resolution combined with a later attempt's.
         ///
         /// Every field accumulates, which is the whole point: returning the
         /// attempt that happened to succeed would drop what the earlier ones
-        /// learned, and then `searchFailed` would silently mean "the last search
+        /// learned, and then `failure` would silently mean "the last search
         /// failed" rather than "a search failed". The two differ exactly when one
         /// query fails and a later one recovers — and a free PDF URL offered by a
         /// query that found no PMC ID is worth just as much as one offered by the
@@ -698,8 +863,9 @@ public actor FullTextService {
         func merging(_ next: PMCResolution) -> PMCResolution {
             PMCResolution(
                 pmcId: pmcId ?? next.pmcId,
+                preprintAccession: preprintAccession ?? next.preprintAccession,
                 pdfRenderURL: pdfRenderURL ?? next.pdfRenderURL,
-                searchFailed: searchFailed || next.searchFailed,
+                failure: failure ?? next.failure,
                 matchedARecord: matchedARecord || next.matchedARecord
             )
         }
@@ -740,7 +906,7 @@ public actor FullTextService {
     ///     render URL this method also collects.
     ///   - doi: DOI to resolve.
     /// - Returns: What every attempted query learned, merged. A resolution that
-    ///   merely matched nothing reports `searchFailed == false`.
+    ///   merely matched nothing reports no `failure`.
     /// - Throws: `CancellationError` if the caller cancelled. Only cancellation
     ///   propagates, so the chain never reads "the caller stopped us" as "this
     ///   article has no PMC record".
@@ -954,12 +1120,23 @@ public actor FullTextService {
             let records = try await europePMCService.lookup(query: query, pageSize: 1)
             if let firstArticle = records.first {
                 let pmcId = firstArticle.pmcId?.isEmpty == false ? firstArticle.pmcId : nil
+                // The record's own ID, not the primary slot: a preprint that also
+                // has a PubMed ID fills the slot with that. Taken only in its
+                // prefixed form, so nothing else is asked for as a preprint.
+                let preprintAccession = firstArticle.identifierKind == .preprint
+                    ? firstArticle.europePMCRecordID.flatMap {
+                        FullTextAccession.prefixed(
+                            $0, as: BioMedLitConstants.europePMCPreprintAccessionPrefix
+                        )
+                    }
+                    : nil
                 // `matchedARecord` regardless of whether it named a PMC ID: the
                 // record is Europe PMC's answer about this article either way.
                 return PMCResolution(
                     pmcId: pmcId,
+                    preprintAccession: preprintAccession,
                     pdfRenderURL: firstArticle.pdfRenderURL,
-                    searchFailed: false,
+                    failure: nil,
                     matchedARecord: true
                 )
             }
@@ -977,7 +1154,9 @@ public actor FullTextService {
                 "PMC ID resolution failed for query '\(query)': \(error.localizedDescription)",
                 category: .fullText
             )
-            return .failed
+            return .failed(
+                (error as? SourceRequestError)?.failure ?? SearchTransport.failure(for: error)
+            )
         }
 
         // Names the query that matched nothing. A zero-hit search is the one
