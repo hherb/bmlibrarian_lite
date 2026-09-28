@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#428 — charge a missing statement only when every end-matter heading is
-classified** (Python), branch `fix/classify-end-matter-headings-428`. Compress
+classified** (Python), branch `fix/classify-end-matter-headings-428`, **PR #431**. Compress
 into **Recently landed** once merged.
 
 - **The converter marks the end matter**: `END_MATTER_MARKER` (an HTML
