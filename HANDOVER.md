@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#435 — an answered lookup "did not serve it"** (all three), branch
-`fix/answered-404-verb-435`, PR pending review. Compress into **Recently
+`fix/answered-404-verb-435`, **PR #444**. Compress into **Recently
 landed** once merged.
 
 - **Rule (user, 2026-09-29):** an `HTTP_STATUS` failure reads "… Europe PMC
