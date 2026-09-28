@@ -20,9 +20,10 @@ import Foundation
 ///
 /// Three outcomes, because they tell the reader three different things. A 404
 /// is Europe PMC's own answer. A throttle, an outage, a timeout or a blank
-/// 200 is our failure to get one. Folding them into one thrown "unavailable"
-/// made a throttled Europe PMC read as an article with no full text, and the
-/// apps then marked that article unavailable for good.
+/// 200 is our failure to get one. The chain used to end in the same
+/// `noFullTextAvailable` whichever of these happened, and a blank 200 was parsed
+/// and reported as a parse failure, so a throttled Europe PMC read as an article
+/// with no full text and the apps marked that article unavailable for good.
 ///
 /// The type says what happened, not what it means. Whether a 404 settles the
 /// article is the caller's call: `fullTextXML` serves open-access text only, so
@@ -32,9 +33,10 @@ import Foundation
 /// Mirrors Python's `FullTextXmlFetch` in `europepmc.py`, the reference; the
 /// contract is the "Retrieval" section of `doc/cross_platform/fulltext_retrieval.md`.
 public enum FullTextXmlFetch: Sendable, Equatable {
-    /// Europe PMC served the JATS XML. Never blank: the fetch reports a blank
-    /// answer as ``unreachable(_:)`` with ``RequestFailure/incompleteResponse``.
-    case served(Data)
+    /// Europe PMC served the JATS XML. Never blank: ``ServedXML`` cannot hold a
+    /// blank answer, and the fetch reports one as ``unreachable(_:)`` with
+    /// ``RequestFailure/incompleteResponse``.
+    case served(ServedXML)
 
     /// Europe PMC answered 404 for this accession.
     case absent
@@ -43,6 +45,28 @@ public enum FullTextXmlFetch: Sendable, Equatable {
     /// read, it held nothing, or it was never asked because the identifier was
     /// not an accession (``RequestFailure/requestFailed``).
     case unreachable(RequestFailure)
+}
+
+/// The XML Europe PMC served, known not to be blank.
+///
+/// A blank answer told us nothing about the article, so it is not a served
+/// full text: holding it here would let it be parsed and reported as a parse
+/// failure, which is what it used to be (#434). Enforced at construction, as
+/// Python's `FullTextXmlFetch.__post_init__` and Android's `Served` do.
+public struct ServedXML: Sendable, Equatable {
+    /// The XML as served.
+    public let data: Data
+
+    /// Wrap served XML, refusing a blank answer.
+    ///
+    /// - Parameter data: The body Europe PMC sent.
+    /// - Returns: `nil` when the body is empty or only whitespace once decoded
+    ///   as UTF-8.
+    public init?(_ data: Data) {
+        let text = String(decoding: data, as: UTF8.self)
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        self.data = data
+    }
 }
 
 /// Turns an identifier into one `fullTextXML` can be asked about.

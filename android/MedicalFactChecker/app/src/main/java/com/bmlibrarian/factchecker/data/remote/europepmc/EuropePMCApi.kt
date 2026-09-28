@@ -58,9 +58,12 @@ interface EuropePMCApi {
     ): Response<EuropePMCSearchResponse>
 
     /**
-     * Get full text XML for a PMC article.
+     * Get the full-text XML Europe PMC serves under an accession.
      *
-     * @param pmcId PubMed Central ID (with or without "PMC" prefix)
+     * Nothing is normalised here: callers go through `EuropePMCService.fetchFullTextXml`.
+     *
+     * @param pmcId A normalised accession, `PMC123` or a preprint's `PPR123`; see
+     *   [FullTextAccession.normalized]
      * @return Full text XML as string
      */
     @GET("{pmcId}/fullTextXML")

@@ -96,7 +96,15 @@ final class EuropePMCFullTextFetchTests: XCTestCase {
     func testServedXMLIsReturned() async throws {
         StubURLProtocol.routes = ["fullTextXML": (200, Self.article)]
         let fetch = try await service().fetchEuropePMCXML(accession: "PMC123")
-        XCTAssertEqual(fetch, .served(Self.article))
+        XCTAssertEqual(fetch, ServedXML(Self.article).map { .served($0) })
+    }
+
+    /// Python's `test_blank_xml_cannot_be_served`: a blank answer is not a
+    /// served full text, so it cannot be built as one.
+    func testBlankXMLCannotBeServed() {
+        XCTAssertNil(ServedXML(Data()))
+        XCTAssertNil(ServedXML(Data(" \n\t".utf8)))
+        XCTAssertNotNil(ServedXML(Self.article))
     }
 
     func testA404IsAbsent() async throws {
@@ -129,6 +137,7 @@ final class EuropePMCFullTextFetchTests: XCTestCase {
         StubURLProtocol.routes = ["fullTextXML": (500, Data())]
         let fetch = try await service().fetchEuropePMCXML(accession: "PMC123")
         XCTAssertEqual(fetch, .unreachable(.httpStatus(500)))
+        XCTAssertEqual(fullTextRequests().count, Self.fastRetry.maxAttempts)
     }
 
     func testAStatusWeDoNotModelIsUnreachableAndNotRetried() async throws {
@@ -236,7 +245,8 @@ final class FullTextChainEuropePMCTests: XCTestCase {
 
     // MARK: The preprint route
 
-    /// A preprint document carries its `PPR` ID in the primary slot.
+    /// A preprint's search returns its record, and the XML is fetched by that
+    /// record's `PPR` ID.
     func testAPreprintIsFetchedByItsRecordID() async throws {
         StubURLProtocol.routes = [
             "search": (200, Self.searchAnswer(Self.preprintRecord)),
@@ -317,10 +327,72 @@ final class FullTextChainEuropePMCTests: XCTestCase {
         }
     }
 
+    /// A lost search reads the slot, but a bare number there may be a PubMed
+    /// ID, and asking for `PMC12345` would fetch a different article and serve
+    /// it as this one's full text. `fullTextXML` answers with an article here,
+    /// so a wrong request would change the outcome and not only the log.
+    func testALostSearchNeverFetchesABareSlotAsAPMCID() async throws {
+        let kinds: [ArticleIdentifierKind?] = [nil, .pubmed, .preprint, .unknown]
+        for kind in kinds {
+            StubURLProtocol.reset()
+            StubURLProtocol.routes = [
+                "search": (400, Data()),
+                "fullTextXML": (200, Self.article),
+            ]
+            let result = try? await service().fetchFullText(
+                pmcId: nil, doi: nil, pmid: "12345", primaryKind: kind
+            )
+            XCTAssertFalse(
+                StubURLProtocol.requested("fullTextXML"),
+                "kind \(String(describing: kind)): \(StubURLProtocol.requestedURLs)"
+            )
+            if let result, case .europePMC = result.content {
+                XCTFail("kind \(String(describing: kind)): served another article's text")
+            }
+        }
+    }
+
+    /// The routing on its own, as a table: the slot is read only after a lost
+    /// search, and only in its prefixed form.
+    func testFullTextAccessionRouting() {
+        typealias Row = (
+            pmcId: String?, preprint: String?, slot: String?,
+            kind: ArticleIdentifierKind?, lost: Bool, expected: String?
+        )
+        let rows: [Row] = [
+            ("PMC1", "PPR2", "PPR3", .preprint, true, "PMC1"),
+            (nil, "PPR2", "PPR3", .preprint, true, "PPR2"),
+            (nil, nil, "PPR3", .preprint, true, "PPR3"),
+            (nil, nil, "ppr3", nil, true, "PPR3"),
+            (nil, nil, "PMC4", .pmc, true, "PMC4"),
+            (nil, nil, "PPR3", .preprint, false, nil),
+            (nil, nil, "12345", nil, true, nil),
+            (nil, nil, "12345", .pubmed, true, nil),
+            (nil, nil, "12345", .preprint, true, nil),
+            (nil, nil, "12345", .pmc, true, nil),
+            (nil, nil, "ETH12345", .europePMCSource("eth"), true, nil),
+            (nil, nil, "  ", nil, true, nil),
+        ]
+        for row in rows {
+            XCTAssertEqual(
+                FullTextService.fullTextAccession(
+                    pmcId: row.pmcId,
+                    resolvedPreprintAccession: row.preprint,
+                    pmid: row.slot,
+                    primaryKind: row.kind,
+                    searchLostTheSource: row.lost
+                ),
+                row.expected,
+                "\(row)"
+            )
+        }
+    }
+
     // MARK: What a chain that found nothing may say
 
     /// Europe PMC's 404 for an article it holds is not the article's absence
-    /// (#432): the callers mark `noFullTextAvailable` for good.
+    /// (#432), so the chain must not throw `noFullTextAvailable`, which callers
+    /// record on the document for good.
     func testA404DoesNotEstablishTheArticleHasNoFullText() async throws {
         StubURLProtocol.routes = [
             "search": (200, Self.searchAnswer(Self.preprintRecord)),

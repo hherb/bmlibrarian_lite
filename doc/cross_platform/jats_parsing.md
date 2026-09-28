@@ -1333,11 +1333,12 @@ reader misinformed (#186):
    record the article as having none (see
    [fulltext_retrieval.md](fulltext_retrieval.md), "Retrieval").
 2. **we had it and could not read it** — our parser failed on text we held.
-3. **we could not reach it** — a server error that outlasted its retries, a
-   transport failure, a status we do not model, a blank 200, an identifier
-   that is not an accession (never sent), or an identifier *search* that
-   threw. Distinct from (1): the source may well have had the text, and the
-   reader is looking at a substitute because of us.
+3. **we could not reach it** — a throttle or server error that outlasted its
+   retries, a transport failure, a status we do not model, a blank 200, an
+   identifier that is not an accession (never sent), or an identifier *search*
+   that threw, unless a fetch by the document's own accession then got the
+   source's answer. Distinct from (1): the source may well have had the text,
+   and the reader is looking at a substitute because of us.
 
 State (3) has a trap one layer down. An identifier resolution that answers
 "nothing" both when no record exists and when the search failed collapses (3)
@@ -1367,8 +1368,8 @@ the identifier alone drops it before the PDF branch can see it.
 Its sentence must not claim the machine-readable copy exists — a record may be
 an abstract-only deposit (Europe PMC serves those as body-less XML, checked live
 on PMC9788864) or not open access (which `fullTextXML` does not serve), so an
-unreachable endpoint tells you a record exists and nothing about whether you
-could have had its full text. Say that
+unreachable endpoint tells you at most that a record exists, and nothing about
+whether you could have had its full text. Say that
 the source could not be reached, and invite a retry, which is the one thing that
 separates it from the other two: a parse failure on the same bytes is
 deterministic and will fail again. Note the invitation is about the *sentence*;

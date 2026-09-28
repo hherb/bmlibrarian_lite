@@ -27,14 +27,19 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
+import com.bmlibrarian.factchecker.util.jats.JATSXMLParser
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkConstructor
+import io.mockk.unmockkAll
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 
@@ -56,6 +61,11 @@ class FullTextServiceEuropePmcTest {
             unpaywallApi = mockk<UnpaywallApi>(),
             httpClient = mockk(relaxed = true)
         )
+    }
+
+    @After
+    fun tearDown() {
+        unmockkAll()
     }
 
     private val article = """
@@ -143,6 +153,53 @@ class FullTextServiceEuropePmcTest {
         assertEquals(FullTextService.FullTextResult.NotEstablished(outage), result)
     }
 
+    /**
+     * A shortfall is read only at the end: a later source still gets its turn.
+     *
+     * Unpaywall is a strict mock, so its lookup fails and the chain reaches the
+     * DOI link, which a shortfall read any earlier would pre-empt.
+     */
+    @Test
+    fun `a 404 or an unreachable Europe PMC does not pre-empt a later source`() = runTest {
+        for (fetch in listOf(
+            FullTextXmlFetch.Absent,
+            FullTextXmlFetch.Unreachable(RequestFailure(RequestFailureKind.HTTP_STATUS, 429))
+        )) {
+            coEvery { europePmc.fetchFullTextXml("PMC1") } returns fetch
+
+            val result = service.fetchFullText(pmcId = "PMC1", doi = "10.1234/x", pmid = null).getOrThrow()
+
+            assertEquals("$fetch", FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1234/x"), result)
+        }
+    }
+
+    /**
+     * Only `parse()` wraps its errors as `JATSParseError`. A crash while building
+     * the markdown is as much a defect in us, and must not end the chain before
+     * the PDF, Unpaywall and DOI sources.
+     */
+    @Test
+    fun `a crash while converting served XML falls through to the next source`() = runTest {
+        mockkConstructor(JATSXMLParser::class)
+        every { anyConstructed<JATSXMLParser>().parseToMarkdown() } throws IndexOutOfBoundsException("3")
+        coEvery { europePmc.fetchFullTextXml("PMC1") } returns FullTextXmlFetch.Served(article)
+
+        val result = service.fetchFullText(pmcId = "PMC1", doi = "10.1234/x", pmid = null)
+
+        assertEquals(FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1234/x"), result.getOrThrow())
+    }
+
+    @Test
+    fun `only results that give the reader something have content`() {
+        val failure = RequestFailure(RequestFailureKind.TIMEOUT)
+        assertTrue(FullTextService.FullTextResult.EuropePmcXml("x", "m", "h").hasContent)
+        assertTrue(FullTextService.FullTextResult.EuropePmcPdf("u").hasContent)
+        assertTrue(FullTextService.FullTextResult.UnpaywallPdf("u").hasContent)
+        assertTrue(FullTextService.FullTextResult.DoiUrl("u").hasContent)
+        assertFalse(FullTextService.FullTextResult.Unavailable("r").hasContent)
+        assertFalse(FullTextService.FullTextResult.NotEstablished(failure).hasContent)
+    }
+
     /** The control: without it the three above pass against a chain that never says Unavailable. */
     @Test
     fun `a search that answered with no record still says unavailable`() = runTest {
@@ -195,7 +252,7 @@ class FullTextServiceEuropePmcTest {
 
     // ==================== The reader's sentence ====================
 
-    /** The verb follows #435's decision, worded as the iOS app words it. */
+    /** The verb follows #435's decision, worded as BioMedLit words it. */
     @Test
     fun `the sentence names what Europe PMC did`() {
         val answered = absenceNotEstablishedMessage(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))

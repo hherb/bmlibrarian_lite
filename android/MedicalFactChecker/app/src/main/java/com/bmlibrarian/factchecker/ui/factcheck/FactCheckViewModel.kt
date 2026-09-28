@@ -37,6 +37,7 @@ import com.bmlibrarian.factchecker.domain.workflow.WorkflowProgress
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowState
 import com.bmlibrarian.factchecker.util.Constants
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -640,9 +641,8 @@ class FactCheckViewModel @Inject constructor(
 
                         documentRepository.updateDocument(updatedDoc)
 
-                        val success = fullTextResult !is FullTextService.FullTextResult.Unavailable &&
-                            fullTextResult !is FullTextService.FullTextResult.NotEstablished
-                        Log.d(TAG, "Full text fetch ${if (success) "succeeded" else "unavailable"} for ${document.id}")
+                        val success = fullTextResult.hasContent
+                        Log.d(TAG, "Full text fetch for ${document.id}: ${fullTextResult::class.simpleName}")
                         onComplete(success)
                     },
                     onFailure = { error ->
@@ -652,6 +652,9 @@ class FactCheckViewModel @Inject constructor(
                         onComplete(false)
                     }
                 )
+            } catch (e: CancellationException) {
+                // The caller went away: not a failed fetch to report
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Full text fetch error: ${e.message}")
                 onComplete(false)

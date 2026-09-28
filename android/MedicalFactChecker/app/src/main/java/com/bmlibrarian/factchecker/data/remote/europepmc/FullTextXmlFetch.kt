@@ -25,8 +25,9 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailure
  *
  * Three outcomes, because they tell the reader three different things. A 404 is
  * Europe PMC's own answer. A throttle, an outage, a timeout or a blank 200 is our
- * failure to get one. All of these used to fail as one `FullTextUnavailableError`,
- * and the chain then marked the article unavailable for good.
+ * failure to get one. The chain used to treat all of these the same way, as a
+ * failed XML source, and a chain that then found nothing marked the article
+ * unavailable for good.
  *
  * The type says what happened, not what it means: `fullTextXML` serves
  * open-access text only, so for an article Europe PMC holds, a 404 may mean "not

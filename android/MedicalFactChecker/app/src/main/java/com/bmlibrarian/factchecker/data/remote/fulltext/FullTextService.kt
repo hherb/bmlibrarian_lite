@@ -47,8 +47,9 @@ import javax.inject.Singleton
  *
  * Implements a fallback chain:
  * 1. Europe PMC XML (JATS format) - preferred, machine-readable
- * 2. Unpaywall PDF - open access PDFs
- * 3. DOI Resolution - link to publisher website
+ * 2. Europe PMC PDF render - a free PDF Europe PMC offers
+ * 3. Unpaywall PDF - open access PDFs
+ * 4. DOI Resolution - link to publisher website
  *
  * Full-text content is cached locally after first retrieval.
  */
@@ -66,8 +67,12 @@ class FullTextService @Inject constructor(
 
     /**
      * Result of a full-text retrieval attempt.
+     *
+     * @property hasContent Whether the result gives the reader the article or a
+     *   link to it. Declared by every subtype rather than worked out by excluding
+     *   the ones without, so a new subtype cannot count as a success by omission
      */
-    sealed class FullTextResult {
+    sealed class FullTextResult(val hasContent: Boolean) {
         /**
          * Full text retrieved from Europe PMC as JATS XML.
          *
@@ -79,7 +84,7 @@ class FullTextService @Inject constructor(
             val xml: String,
             val markdown: String,
             val html: String
-        ) : FullTextResult()
+        ) : FullTextResult(hasContent = true)
 
         /**
          * PDF available from Europe PMC render URL (when XML is unavailable).
@@ -90,7 +95,7 @@ class FullTextService @Inject constructor(
         data class EuropePmcPdf(
             val pdfUrl: String,
             val localPath: String? = null
-        ) : FullTextResult()
+        ) : FullTextResult(hasContent = true)
 
         /**
          * Full text available as PDF from Unpaywall.
@@ -101,39 +106,44 @@ class FullTextService @Inject constructor(
         data class UnpaywallPdf(
             val pdfUrl: String,
             val localPath: String? = null
-        ) : FullTextResult()
+        ) : FullTextResult(hasContent = true)
 
         /**
          * Fall back to DOI/publisher URL.
          *
          * @param url URL to the publisher page.
          */
-        data class DoiUrl(val url: String) : FullTextResult()
+        data class DoiUrl(val url: String) : FullTextResult(hasContent = true)
 
         /**
          * Full text is unavailable from all sources.
          *
          * A claim about the article: every source that could be asked was asked
-         * and answered. Callers record it on the document for good.
+         * and answered. Callers record it on the document for good. Not yet true
+         * after a JATS parse failure, which still ends here when no later source
+         * serves anything (#436).
          *
          * @param reason Explanation of why retrieval failed.
          */
-        data class Unavailable(val reason: String) : FullTextResult()
+        data class Unavailable(val reason: String) : FullTextResult(hasContent = false)
 
         /**
          * No source provided the full text, but Europe PMC did not settle whether
          * it exists (#434).
          *
-         * Europe PMC could not be asked (a throttle, an outage, a timeout, a blank
-         * answer, a failed identifier search), or it answered 404 for an article
-         * it holds, which `fullTextXML` does for text that is not open access
-         * (#432). Unlike [Unavailable], a claim about us: callers must not mark
+         * Europe PMC answered with an HTTP status that is not about the article
+         * (`fullTextXML`'s 404 for text that is not open access (#432), or a 429
+         * or 5xx that outlasted its retries, from the fetch or the identifier
+         * search), or gave no usable answer at all (a timeout, a dropped
+         * connection, a blank body, an identifier never sent). The reader's
+         * sentence follows the same split: see [absenceNotEstablishedMessage].
+         * Unlike [Unavailable], a claim about us: callers must not mark
          * the document unavailable for good on it, or a busy Europe PMC takes the
          * retry away.
          *
          * @param failure What Europe PMC's side of the chain got instead of an answer
          */
-        data class NotEstablished(val failure: RequestFailure) : FullTextResult() {
+        data class NotEstablished(val failure: RequestFailure) : FullTextResult(hasContent = false) {
             /** The sentence shown to the reader. */
             val reason: String
                 get() = absenceNotEstablishedMessage(failure)
@@ -220,7 +230,11 @@ class FullTextService @Inject constructor(
      * @param doi Digital Object Identifier (if available).
      * @param pmid PubMed ID (if available, used for caching).
      * @param email Email for Unpaywall API (required for Unpaywall lookup).
-     * @return Result containing the full text or error.
+     * @return The full text or a link to it; [FullTextResult.Unavailable] when every
+     *   source answered without it (callers record this); or
+     *   [FullTextResult.NotEstablished] when Europe PMC did not settle it (never
+     *   recorded). No path here returns a failed [Result].
+     * @throws CancellationException if the caller cancelled.
      */
     suspend fun fetchFullText(
         pmcId: String?,
@@ -262,8 +276,8 @@ class FullTextService @Inject constructor(
                 }
                 FullTextXmlFetch.Absent -> {
                     // Europe PMC's own answer, but not the article's absence:
-                    // fullTextXML serves open-access text only, and this accession
-                    // names an article Europe PMC holds (#432)
+                    // fullTextXML serves open-access text only, and a PMC or PPR
+                    // accession names a record Europe PMC mirrors (#432)
                     Log.w(TAG, "Europe PMC did not serve full text for $accession (HTTP 404); trying other sources")
                     europePmcShortfall = RequestFailure.forHttpStatus(Constants.HTTP_NOT_FOUND)
                 }
@@ -345,6 +359,13 @@ class FullTextService @Inject constructor(
             FullTextResult.EuropePmcXml(xml = xml, markdown = markdown, html = html)
         } catch (e: JATSParseError) {
             Log.e(TAG, "Europe PMC XML for $accession was retrieved but could not be parsed: ${e.message}")
+            null
+        } catch (e: Exception) {
+            // Only parse() wraps its errors as JATSParseError; buildMarkdown() and
+            // buildHTML() run outside it. A crash there is as much a defect in us
+            // as a parse failure, and must not skip the PDF, Unpaywall and DOI
+            // sources. Nothing here suspends, so there is no cancellation to catch
+            Log.e(TAG, "Converting Europe PMC XML for $accession failed (a defect): $e")
             null
         }
     }
@@ -588,9 +609,9 @@ class FullTextException(message: String, cause: Throwable? = null) : Exception(m
  * The sentence for a chain that found nothing while Europe PMC did not settle
  * whether the full text exists (#434).
  *
- * The verb follows #435's decision: an HTTP answer was an answer, so Europe PMC
+ * The verb follows #435's decision: an HTTP status was an answer, so Europe PMC
  * "did not serve it"; any other failure means it "could not be asked". Worded as
- * the iOS app words `FullTextError.absenceNotEstablished`.
+ * BioMedLit's `FullTextError.absenceNotEstablished` (iOS and macOS).
  *
  * @param failure What Europe PMC's side of the chain got instead of an answer
  * @return The sentence

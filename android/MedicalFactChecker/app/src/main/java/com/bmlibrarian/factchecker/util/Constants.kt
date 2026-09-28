@@ -51,8 +51,8 @@ object Constants {
     const val HTTP_FORBIDDEN = 403
 
     /**
-     * HTTP 404. From Europe PMC's `fullTextXML`, its answer that it serves no
-     * open-access full text under the accession; not the article's absence (#432).
+     * HTTP 404: not found. From Europe PMC's `fullTextXML` it means no open-access
+     * text under the accession, not that the article has none (#432).
      */
     const val HTTP_NOT_FOUND = 404
 

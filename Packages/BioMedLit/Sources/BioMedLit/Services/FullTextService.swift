@@ -79,7 +79,7 @@ public actor FullTextService {
     ///
     /// Injectable so a test can pin what a throttle that outlasts its retries
     /// becomes: ``RetryConfiguration/serverError`` waits about seventy-five
-    /// seconds before giving up, which is why no test pinned a 429 before.
+    /// seconds (5 + 10 + 20 + 40) before giving up.
     private let europePMCRetry: RetryConfiguration
 
     /// Characters safe to leave unescaped inside a query-string *value*.
@@ -174,8 +174,13 @@ public actor FullTextService {
     ///   (#181), and — when Europe PMC served XML this parser could not read, or
     ///   could not be reached at all — why this is not the best source that
     ///   existed (#183, #186).
-    /// - Throws: `FullTextError` if all sources fail, or `CancellationError` if
-    ///   the caller cancelled. Cancellation propagates rather than falling
+    /// - Throws: When every source is exhausted, `FullTextError`:
+    ///   `noFullTextAvailable` when every source answered without it (callers
+    ///   record this on the document); `absenceNotEstablished` when Europe PMC
+    ///   did not settle it; `identifierKindUnresolved` when the PubMed last
+    ///   resort could not be authorised. Neither of the last two may be
+    ///   recorded. `CancellationError` if the caller cancelled: it propagates
+    ///   rather than falling
     ///   through, so a link is never cached as this article's full text just
     ///   because the caller went away.
     public func fetchFullText(
@@ -251,10 +256,10 @@ public actor FullTextService {
             // nothing, and neither does one where a later query answered that
             // this article has no PMC record at all. The XML branch's own
             // outcome decides from here.
-            if resolved.lostTheSource {
+            if let lostTo = resolved.sourceLostTo {
                 searchLostTheSource = true
                 degradation = .europePMCUnreachable
-                europePMCShortfall = resolved.failure ?? .requestFailed
+                europePMCShortfall = lostTo
             }
         }
 
@@ -274,7 +279,7 @@ public actor FullTextService {
                 degradation = nil
                 europePMCShortfall = nil
                 do {
-                    let content = try renderEuropePMCXML(xml, accession: accession)
+                    let content = try renderEuropePMCXML(xml.data, accession: accession)
                     BioMedLitLib.logger?.info(
                         "Successfully retrieved Europe PMC full text for \(accession)",
                         category: .fullText
@@ -321,8 +326,8 @@ public actor FullTextService {
                 // fires on every article not deposited as open access is
                 // worthless on the ones where it is true. But not the
                 // article's absence either. `fullTextXML` serves open-access
-                // text only, and this accession came from a record Europe PMC
-                // holds, so the 404 may mean "not open access" (#432).
+                // text only, and a PMC or PPR accession names a record Europe
+                // PMC mirrors, so the 404 may mean "not open access" (#432).
                 degradation = nil
                 europePMCShortfall = .httpStatus(BioMedLitConstants.httpStatusNotFound)
                 BioMedLitLib.logger?.warning(
@@ -361,7 +366,7 @@ public actor FullTextService {
         // extra request.
         //
         // Only `pdfRenderURL` is taken from the resolution here. Its
-        // `lostTheSource` flag is deliberately ignored: the XML tier above has
+        // `sourceLostTo` is deliberately ignored: the XML tier above has
         // already run and recorded its own outcome, and letting a failed
         // *render-URL* lookup set `.europePMCUnreachable` would overwrite the
         // more specific reason with a vaguer one.
@@ -507,9 +512,10 @@ public actor FullTextService {
         // PubMed record they can see in a browser is simply false.
         //
         // Only when the kind is genuinely *unresolved*. A stated preprint whose
-        // sources are exhausted is the honest `noFullTextAvailable`: we know
-        // exactly what the identifier is, it simply has no PubMed record and
-        // nothing else answered. The refusal this case describes is narrower —
+        // sources are exhausted is not this case: we know exactly what the
+        // identifier is, it simply has no PubMed record. It ends in
+        // `noFullTextAvailable`, or in `absenceNotEstablished` below when
+        // Europe PMC did not settle it. The refusal this case describes is narrower —
         // nobody said, the shape does not settle it, and no provider vouched.
         let unclassified = pmid.trimmingCharacters(in: .whitespacesAndNewlines)
         if !unclassified.isEmpty,
@@ -656,15 +662,14 @@ public actor FullTextService {
             // An empty answer has told us nothing about the article, so it is
             // an incomplete response, not an absence. It used to be parsed,
             // and reported to the reader as a parse failure.
-            let text = String(decoding: body, as: UTF8.self)
-            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            guard let served = ServedXML(body) else {
                 BioMedLitLib.logger?.warning(
                     "Europe PMC served an empty full text for \(normalized)",
                     category: .fullText
                 )
                 return .unreachable(.incompleteResponse)
             }
-            return .served(body)
+            return .served(served)
         case BioMedLitConstants.httpStatusNotFound:
             BioMedLitLib.logger?.debug(
                 "Europe PMC serves no full-text XML for \(normalized)", category: .fullText
@@ -680,7 +685,8 @@ public actor FullTextService {
     /// - Parameter url: The `fullTextXML` URL.
     /// - Returns: The status and body of any answer the retry policy does not
     ///   treat as transient.
-    /// - Throws: `FullTextError.serverError` for a retryable status (429, 5xx),
+    /// - Throws: `FullTextError.serverError` for a status in
+    ///   `BioMedLitConstants.retryableStatusCodes` (429, 500, 502–504),
     ///   `FullTextError.invalidResponse` when the answer is not HTTP, and the
     ///   transport's own error otherwise.
     private func requestEuropePMCXML(_ url: URL) async throws -> (status: Int, body: Data) {
@@ -777,16 +783,14 @@ public actor FullTextService {
         /// The free PDF render URL from the search result, when one was offered.
         let pdfRenderURL: String?
 
-        /// Whether any attempted search threw rather than answering.
+        /// Why the first failed search failed, or `nil` when every attempted
+        /// search answered.
         ///
-        /// OR-ed across every attempt: one failing leaves us unable to say, on
-        /// that attempt's evidence, that the article has no PMC record.
-        let searchFailed: Bool
-
-        /// Why the first failed search failed, when one did.
-        ///
-        /// Carried so a chain that ends without full text can say why Europe
-        /// PMC did not settle it, rather than only that it did not.
+        /// Kept across every attempt: one failing leaves us unable to say, on
+        /// that attempt's evidence, that the article has no PMC record. Carried
+        /// so a chain that ends without full text can say why Europe PMC did
+        /// not settle it, rather than only that it did not. The only record of
+        /// a failed search, so "a search failed" and "why" cannot disagree.
         let failure: RequestFailure?
 
         /// Whether any attempted search matched a record for this article.
@@ -800,27 +804,28 @@ public actor FullTextService {
         /// this whole channel exists to prevent, inverted (#186).
         let matchedARecord: Bool
 
-        /// Whether the machine-readable source was lost because we could not ask.
+        /// Why the machine-readable source was lost because we could not ask,
+        /// or `nil` when it was not.
         ///
         /// The rule the degradation is raised on, kept here rather than at the
         /// call site so the facts that decide it cannot be recombined
         /// differently by a second consumer.
         ///
-        /// Both conjuncts are load-bearing: a search that never failed has
+        /// Both conditions are load-bearing: a search that never failed has
         /// nothing to report, and a record that was matched answers the question
-        /// outright. `pmcId == nil` is deliberately *not* a third conjunct —
+        /// outright. `pmcId == nil` is deliberately *not* a third condition —
         /// only a matched record can carry an ID, so a non-nil `pmcId` already
         /// implies `matchedARecord`. Spelling it out anyway would add a check no
         /// test could ever fail, which is how a predicate starts to look
         /// defensive and stops being read.
-        var lostTheSource: Bool {
-            searchFailed && !matchedARecord
+        var sourceLostTo: RequestFailure? {
+            matchedARecord ? nil : failure
         }
 
         /// The starting value of a resolution: nothing attempted, nothing learned.
         static let nothingAttempted = PMCResolution(
             pmcId: nil, preprintAccession: nil, pdfRenderURL: nil,
-            searchFailed: false, failure: nil, matchedARecord: false
+            failure: nil, matchedARecord: false
         )
 
         /// The answer when a search completed and matched nothing.
@@ -838,7 +843,7 @@ public actor FullTextService {
         static func failed(_ failure: RequestFailure) -> PMCResolution {
             PMCResolution(
                 pmcId: nil, preprintAccession: nil, pdfRenderURL: nil,
-                searchFailed: true, failure: failure, matchedARecord: false
+                failure: failure, matchedARecord: false
             )
         }
 
@@ -846,7 +851,7 @@ public actor FullTextService {
         ///
         /// Every field accumulates, which is the whole point: returning the
         /// attempt that happened to succeed would drop what the earlier ones
-        /// learned, and then `searchFailed` would silently mean "the last search
+        /// learned, and then `failure` would silently mean "the last search
         /// failed" rather than "a search failed". The two differ exactly when one
         /// query fails and a later one recovers — and a free PDF URL offered by a
         /// query that found no PMC ID is worth just as much as one offered by the
@@ -860,7 +865,6 @@ public actor FullTextService {
                 pmcId: pmcId ?? next.pmcId,
                 preprintAccession: preprintAccession ?? next.preprintAccession,
                 pdfRenderURL: pdfRenderURL ?? next.pdfRenderURL,
-                searchFailed: searchFailed || next.searchFailed,
                 failure: failure ?? next.failure,
                 matchedARecord: matchedARecord || next.matchedARecord
             )
@@ -902,7 +906,7 @@ public actor FullTextService {
     ///     render URL this method also collects.
     ///   - doi: DOI to resolve.
     /// - Returns: What every attempted query learned, merged. A resolution that
-    ///   merely matched nothing reports `searchFailed == false`.
+    ///   merely matched nothing reports no `failure`.
     /// - Throws: `CancellationError` if the caller cancelled. Only cancellation
     ///   propagates, so the chain never reads "the caller stopped us" as "this
     ///   article has no PMC record".
@@ -1132,7 +1136,6 @@ public actor FullTextService {
                     pmcId: pmcId,
                     preprintAccession: preprintAccession,
                     pdfRenderURL: firstArticle.pdfRenderURL,
-                    searchFailed: false,
                     failure: nil,
                     matchedARecord: true
                 )

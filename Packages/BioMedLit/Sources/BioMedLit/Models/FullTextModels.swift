@@ -83,7 +83,7 @@ public enum FullTextDegradation: String, Sendable, Codable, Equatable {
     /// have been there, and the reader is looking at a substitute because of us
     /// rather than because of the evidence base (#186):
     ///
-    /// - a server error that outlasted its retries;
+    /// - a throttle or server error that outlasted its retries;
     /// - a transport failure;
     /// - a status we do not model;
     /// - a blank 200, which told us nothing about the article;
@@ -91,7 +91,9 @@ public enum FullTextDegradation: String, Sendable, Codable, Equatable {
     /// - an identifier search that threw **and left us without a PMC ID**, no
     ///   later query having matched a record for the article. A search that
     ///   answered — even with a record naming no PMC ID — settles the question,
-    ///   and a query a later one recovered from cost the reader nothing.
+    ///   and a query a later one recovered from cost the reader nothing. So does
+    ///   a fetch by the document's own accession that then got Europe PMC's
+    ///   answer (served, or 404).
     ///
     /// This list is the canonical one. `FullTextService.fetchFullText` and
     /// `doc/cross_platform/jats_parsing.md` restate it; they must not diverge.
@@ -100,8 +102,8 @@ public enum FullTextDegradation: String, Sendable, Codable, Equatable {
     /// abstract-only deposit, which `fullTextXML` serves as body-less XML (seen
     /// live on 2026-09-29: PMC9788864 answers 200 with no `<body>`), and it can
     /// be a non-open-access article, which `fullTextXML` does not serve at all
-    /// (#432). So an unreachable endpoint tells us a PMC record exists and
-    /// nothing about whether we could have had its full text.
+    /// (#432). So an unreachable endpoint tells us at most that Europe PMC holds
+    /// a record, and nothing about whether we could have had its full text.
     ///
     /// Not raised for `fullTextXML`'s 404: that is Europe PMC's answer, not
     /// our loss. The chain still refuses to call the article's full text
@@ -437,6 +439,9 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
     /// A claim about the world: every rung was tried and the article genuinely
     /// has nothing to show. Distinct from ``identifierKindUnresolved(_:)``,
     /// which is a claim about *us*.
+    ///
+    /// Not yet true after a JATS parse failure, which still ends here when no
+    /// later rung serves anything (#436).
     case noFullTextAvailable
 
     /// Every source was exhausted and the primary identifier's kind was never
@@ -458,12 +463,14 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
 
     /// Every source was exhausted, but Europe PMC did not settle the question.
     ///
-    /// Carries what Europe PMC's side of the chain got instead of an answer.
-    /// That is either an HTTP answer that is not about the article, such as
-    /// `fullTextXML`'s 404 for an article Europe PMC holds but does not serve
-    /// as open access (#432), or a failure to get any answer: a throttle, an
-    /// outage, a timeout, a blank body. Either way the article may have a full
-    /// text we did not reach (#434).
+    /// Carries what Europe PMC's side of the chain got instead of an answer
+    /// about the article. That is either an HTTP status — `fullTextXML`'s 404
+    /// for an article Europe PMC holds but does not serve as open access
+    /// (#432), or a 429 or 5xx that outlasted its retries, from the fetch or
+    /// the identifier search — or no usable answer at all: a timeout, a
+    /// dropped connection, a blank body, an identifier never sent. Either way
+    /// the article may have a full text we did not reach (#434). The reader's
+    /// sentence follows the same split (see `errorDescription`).
     ///
     /// Like ``identifierKindUnresolved(_:)``, a claim about *us*, and callers
     /// must **not** mark the document permanently unavailable on it: that
@@ -507,9 +514,9 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
                 Europe PMC for \(identifier).
                 """
         case .absenceNotEstablished(let failure):
-            // The verb follows #435's decision: an HTTP answer was an answer,
-            // so Europe PMC "did not serve it"; a transport failure means it
-            // "could not be asked".
+            // The verb follows #435's decision: an HTTP status was an answer,
+            // so Europe PMC "did not serve it"; every other kind keeps "could
+            // not be asked".
             if failure.kind == .httpStatus {
                 return """
                     No source provided this article's full text. Europe PMC \

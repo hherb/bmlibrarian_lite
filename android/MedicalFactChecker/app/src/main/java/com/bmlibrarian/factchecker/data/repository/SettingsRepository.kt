@@ -116,13 +116,6 @@ class SettingsRepository @Inject constructor(
     // ==================== Settings State Management ====================
 
     /**
-     * Get current settings (cached).
-     *
-     * @return Current AppSettings instance
-     */
-    fun getSettings(): AppSettings = _settings.value
-
-    /**
      * Load settings from SharedPreferences.
      *
      * @return AppSettings populated from stored values

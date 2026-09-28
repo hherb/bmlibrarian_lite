@@ -52,9 +52,8 @@ case and checking you got `FULLTEXT` is exactly the direction worth testing.
 
 Europe PMC serves full JATS XML for records deposited *abstract-only* — a
 `<front>` and a `<back>` with no `<body>` at all (checked live on 2026-09-29:
-`PMC9788864`, open access, answers 200 with an abstract and no `<body>`; the
-404 some comments once claimed for these is what a *non-open-access* record
-gets, #432) — and that XML parses and
+`PMC9788864`, open access, answers 200 with an abstract and no `<body>`; a
+*non-open-access* record gets a 404 instead, #432) — and that XML parses and
 renders successfully: it has a title and an abstract, so "did parsing produce
 any content" is not the right question. The right one is whether the parse
 found a body:
@@ -153,7 +152,7 @@ as the article's absence; the chain goes on to the PDF tiers.
 identifier search found (Android's search must include preprints, which its
 default filter drops). Swift also reads the document's own primary slot, but
 only when that search *failed*: a search that answered "no such record" is
-not second-guessed with a fetch that can only 404. Where Python keeps a lookup
+not second-guessed with a fetch that would almost certainly 404. Where Python keeps a lookup
 record, the apps keep one fact, what Europe PMC's side of the chain got
 instead of an answer (a lost search, a failed fetch, or the 404), cleared when
 a fetch is served. A chain that then finds nothing ends in
@@ -387,7 +386,10 @@ enum FullTextResult:
         extraction_coverage: (converted_pages, page_count) | null)
     DOI(web_url: string)
     Cached(file_path: string)
+    # Callers record this on the document for good.
     Unavailable
+    # (apps) Nothing was found, but Europe PMC did not settle it: never recorded.
+    NotEstablished(failure: RequestFailure)
 
 async function fetch_fulltext(
     pmc_id: string | null,
@@ -428,6 +430,8 @@ async function fetch_fulltext(
         # UNREACHABLE and ABSENT are both recorded against Europe PMC (see
         # Retrieval above), and the chain continues.
         if fetch is SERVED:
+            # Pass the accession as known_pmc_id only when it is a PMC ID: a
+            # preprint's figures are not filed under its PPR ID.
             content = parse_fulltext(fetch.xml, accession)
             result = FullTextResult.EuropePMC(
                 html=content.html,
@@ -497,6 +501,13 @@ async function fetch_fulltext(
         web_url = get_doi_url(doi)
         if web_url:
             return FullTextResult.DOI(web_url)
+
+    # 6b. (apps) Europe PMC's side recorded a lost search, a failed fetch or a
+    #     404, and no later fetch was served: the absence is not established,
+    #     and callers persist Unavailable (#434). A JATS parse failure does not
+    #     yet count here (#436).
+    if europe_pmc_shortfall != null:
+        return FullTextResult.NotEstablished(europe_pmc_shortfall)
 
     # 7. No full text available
     return FullTextResult.Unavailable

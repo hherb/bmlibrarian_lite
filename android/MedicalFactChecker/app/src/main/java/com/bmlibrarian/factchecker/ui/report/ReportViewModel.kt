@@ -32,6 +32,7 @@ import com.bmlibrarian.factchecker.ui.report.components.ReferenceInfo
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.PdfExporter
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -498,14 +499,12 @@ class ReportViewModel @Inject constructor(
                             )
                         }
 
-                        val success = fullTextResult !is FullTextService.FullTextResult.Unavailable &&
-                            fullTextResult !is FullTextService.FullTextResult.NotEstablished
                         if (fullTextResult is FullTextService.FullTextResult.NotEstablished) {
                             _events.send(ReportUiEvent.ShowSnackbar(fullTextResult.reason))
-                        } else if (!success) {
+                        } else if (!fullTextResult.hasContent) {
                             _events.send(ReportUiEvent.ShowSnackbar("Full text not available"))
                         }
-                        Log.d(TAG, "Full text fetch ${if (success) "succeeded" else "unavailable"} for ${document.id}")
+                        Log.d(TAG, "Full text fetch for ${document.id}: ${fullTextResult::class.simpleName}")
                     },
                     onFailure = { error ->
                         // A failed fetch is not an article without full text, so
@@ -515,6 +514,10 @@ class ReportViewModel @Inject constructor(
                         _events.send(ReportUiEvent.ShowSnackbar("Failed to fetch full text"))
                     }
                 )
+            } catch (e: CancellationException) {
+                // The caller went away: not a failed fetch to report
+                _uiState.update { it.copy(isLoadingFullText = false) }
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Full text fetch error: ${e.message}")
                 _uiState.update { it.copy(isLoadingFullText = false) }

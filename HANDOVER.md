@@ -9,8 +9,8 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#434 — the typed full-text XML fetch, ported to Swift + Android**, branch
-`fix/port-typed-fulltext-xml-fetch-434`. Compress into **Recently landed**
-once merged.
+`fix/port-typed-fulltext-xml-fetch-434`, **PR #438**. Compress into **Recently
+landed** once merged.
 
 - Both apps: `FullTextXmlFetch` (served / absent = 404 / unreachable with a
   `RequestFailure` of its real kind; a blank 200 is `incompleteResponse`; a
@@ -25,16 +25,26 @@ once merged.
   PMC was unreachable or answered 404**: Swift `FullTextError.absenceNotEstablished`,
   Android `FullTextResult.NotEstablished`. Neither is recorded on the document,
   and both use #435's verbs. Android's `onFailure` paths no longer mark the
-  document unavailable either. Swift: a served fetch clears a lost search's
-  degradation; a 404 stays no degradation; a blank body is
-  `europePMCUnreachable`, no longer a parse failure. Android's dead
-  `EuropePMCError` (404 → "Article not found") is deleted.
+  document unavailable either. Swift: a served fetch or a 404 clears a lost
+  search's degradation (Europe PMC answered); a blank body is
+  `europePMCUnreachable`, no longer a parse failure, and Swift's `ServedXML`
+  cannot hold one. Android's `EuropePMCError` (whose unreachable 404 branch
+  read "Article not found") is deleted.
 - Doc conflict settled live: `fullTextXML` answers **200 with body-less XML**
   for OA abstract-only deposits (PMC9788864). The Swift comment claiming 404 was
   wrong and is corrected; `jats_parsing.md` restates the degradation list.
-- Checked: BioMedLit `swift test` (1331, 0 failures), app `swift test` (394),
-  macOS `xcodebuild` OK, `./gradlew test` OK, `pytest` 5754. Mutation-checked
-  six Swift and five Android edits, all caught (one survivor fixed with a test).
+- Review round: Android's XML step catches a crash while *building* the
+  markdown/HTML again (only `parse()` wraps its errors as `JATSParseError`;
+  narrowing the old catch-all had let it end the chain). `FullTextResult.hasContent`
+  replaces the view models' success-by-exclusion; their full-text handlers
+  rethrow cancellation. Swift `PMCResolution` keeps only `failure`
+  (`sourceLostTo`). New tests: a lost search never fetches a bare slot as
+  `PMC…`; the view models record nothing on `NotEstablished`. Dead
+  `SettingsRepository.getSettings()` removed: it shared the JVM name of the
+  `settings` getter, so MockK could not stub `settings`.
+- Checked: BioMedLit `swift test` (1334, 0 failures), `./gradlew test` (1226,
+  0 failures); first round also app `swift test` (394), macOS `xcodebuild`,
+  `pytest` 5754. Mutation-checked the new tests (4 Android, 2 Swift), all caught.
 
 ## Recently landed (context)
 
@@ -42,6 +52,17 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **Typed full-text XML fetch** (Python; PR #433, #429; merged 2026-09-29).
+  `fetch_fulltext_xml(accession) -> FullTextXmlFetch` (served / absent = 404 /
+  unreachable of its real kind; blank 200 is incomplete; a non-accession is
+  never sent). A 404 after the search is recorded as `HTTP 404 Not Found`, not
+  an absence (`inPMC` is not open access, #432). **Preprints are fetched by
+  their `PPR` ID** (`ArticleInfo.fulltext_accession`); a record with no
+  accession is a *skipped* lookup (`NO_IDENTIFIER`) and keeps `article_info`,
+  so step 2b (PDF render) still runs. `discover_and_download(earlier_lookups=...)`
+  words Europe PMC into the reader's sentence; the record is merged once, in
+  `discover_fulltext`. No test reaches the live network outside
+  `-m integration`.
 - **A missing statement is charged only when the end matter is known**
   (Python; PR #431, #428; merged 2026-09-28). The converter writes
   `END_MATTER_MARKER` (an HTML comment) where end matter begins, including
@@ -58,7 +79,8 @@ the rest.
   every empty heading.
 - **Statements reach the analyser** (Python; PR #426, #420, #421). **The
   converter is `jats_markdown.py`**: every `<back>` element but the ref-list,
-  plus PLOS's front statements, each under a heading, after the body. **In the
+  plus PLOS's front statements, each under a heading, after the body;
+  `<sub-article>`s are ignored. **In the
   end matter no piece goes without a heading once a sibling has one**.
   **Recognising more end matter creates charges** (the #359 trap; `_mentions`
   and #428's heading rule guard it). **Bump
@@ -69,14 +91,18 @@ the rest.
 - **Desktop certainty and high-risk explanation** (Python; PR #419, #386).
   Every no-full-text rating says "Limited certainty because of lack of full
   text access"; badge tooltip and report name the rules that made a study
-  High. **Score = clamped sum of `score_components`; High iff
+  High. **"Without full text" means nothing in it was recognised**; analyser
+  **2.3**. **Score = clamped sum of `score_components`; High iff
   `high_risk_triggers` is non-empty**, under the **user's settings, one shared
-  object**. Contract: `transparency_parity/risk_explanation_strings.json`.
+  object**; a stored breakdown that will not decode, is empty or does not sum
+  to the score reads as `None`. Contract: `transparency_parity/risk_explanation_strings.json`.
   **No Unassessed rule on the desktop** (user's call), pinned by
   `test_no_high_rests_on_unread_text.py`.
 - **An unreachable source is provisional; a trial is a whole word** (all
   three; PR #410, #385). Swift + Android store `sourcesUnreachable` when a
-  source fails *or answers unreadably* (a 404 is an answer). Python: **every
+  source fails *or answers unreadably* (a 404 is an answer); `needsReanalysis`
+  = stale, or provisional and not from a newer build; a cancel is rethrown.
+  Python: **every
   cited trial must be answered** before "without detected registration" fires.
   Trial titles match by whole word (`trial_title_patterns.json`).
 - **Mixed content** (PR #397, #405): **never `findtext` a mixed-content
@@ -210,12 +236,18 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **#435** the reader's "… could not be asked" is wrong for an answered 404.
   **Decided (user, 2026-09-29): change the verb for `HTTP_STATUS` failures
   only**, "… Europe PMC (HTTP 404 Not Found) did not serve it, so …";
-  transport failures keep "could not be asked". The apps' new #434 sentence
+  every other kind keeps "could not be asked" (a blank 200 included). The apps' new #434 sentence
   already follows it; Python's clauses and the shared fixtures do not yet.
 - **#436** Swift + Android: a JATS parse failure at the end of the chain is
   still recorded as "no full text available" for good.
 - **#437** Android stores no Europe PMC record ID for a preprint, so one with
   no DOI never reaches its full text (Room migration).
+- From PR #438's review: **#439** Swift, a lost search followed by an
+  answered slot fetch silently skips the Europe PMC PDF render tier; **#440**
+  both apps read a matched but unreadable record as "no match"; **#441** "Try
+  again later" where a retry cannot help; **#442** Android fact-check fetches
+  twice after `NotEstablished`; **#443** a preprint record with no usable
+  accession ends as a permanent absence without a lookup.
 - **#432** Europe PMC answered 500 for PMC IDs without OA XML, still so two
   hours later (re-probe on another day before deciding). `has_fulltext_xml` counts `inPMC` for non-OA articles, so they
   always fetch XML that cannot be served, and spend the retries doing it.

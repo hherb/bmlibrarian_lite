@@ -35,6 +35,8 @@ import org.junit.Before
 import org.junit.Test
 import retrofit2.Response
 import java.io.IOException
+import java.net.SocketTimeoutException
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Unit tests for EuropePMCService.
@@ -560,6 +562,37 @@ class EuropePMCServiceTest {
 
         assertEquals(FullTextXmlFetch.Served("<article>Content</article>"), service.fetchFullTextXml("PMC12345"))
         assertEquals(2, callCount)
+    }
+
+    @Test
+    fun `fetchFullTextXml keeps a timeout's kind`() = runTest {
+        coEvery { api.getFullTextXml(any()) } throws SocketTimeoutException("timed out")
+
+        assertEquals(
+            FullTextXmlFetch.Unreachable(RequestFailure(RequestFailureKind.TIMEOUT)),
+            service.fetchFullTextXml("PMC12345")
+        )
+    }
+
+    @Test
+    fun `fetchFullTextXml does not retry a status it does not model`() = runTest {
+        coEvery { api.getFullTextXml(any()) } returns Response.error(403, "".toResponseBody(null))
+
+        assertEquals(
+            FullTextXmlFetch.Unreachable(RequestFailure(RequestFailureKind.HTTP_STATUS, 403)),
+            service.fetchFullTextXml("PMC12345")
+        )
+        coVerify(exactly = 1) { api.getFullTextXml(any()) }
+    }
+
+    /** A cancelled fetch is not a dead source: it must not become an Unreachable. */
+    @Test
+    fun `fetchFullTextXml lets a cancellation through`() = runTest {
+        coEvery { api.getFullTextXml(any()) } throws CancellationException("cancelled")
+
+        val thrown = runCatching { service.fetchFullTextXml("PMC12345") }.exceptionOrNull()
+
+        assertTrue("$thrown", thrown is CancellationException)
     }
 
     // ==================== Document Entity Conversion Tests ====================
