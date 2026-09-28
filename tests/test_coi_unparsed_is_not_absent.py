@@ -38,6 +38,7 @@ from datetime import datetime
 
 import pytest
 
+from bmlibrarian_lite.jats_markdown import END_MATTER_MARKER
 from bmlibrarian_lite.storage import LiteStorage
 from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
     RISK_INDICATOR_MISSING_COI_STATEMENT,
@@ -72,6 +73,13 @@ REAL_COI_HEADINGS = (
 )
 
 DISCLOSURE = "Dr X reports personal fees from Pfizer and Novartis."
+
+
+#: A read full text whose end matter the converter marked, every heading of
+#: which is known, so that a missing statement is the article's own (#428).
+READ_WITH_END_MATTER = (
+    f"The article's full text.\n\n{END_MATTER_MARKER}\n\n## Funding\n\nNIH grant R01."
+)
 
 
 def _article(heading: str) -> str:
@@ -165,7 +173,7 @@ class TestWhatAnUnsegmentedFullTextRecords:
         analyzer._analyze_conflicts(
             report,
             fulltext_sections={"funding": "NIH grant R01."},
-            fulltext="The article's full text.",
+            fulltext=READ_WITH_END_MATTER,
         )
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_STATED

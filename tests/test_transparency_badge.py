@@ -428,3 +428,18 @@ class TestConfidenceAgreesWithTheReasonSentence:
             "Industry funding was detected, with 29% confidence, and its "
             "data are available only with restrictions."
         ) in explanation.reasons
+
+
+def test_the_tooltip_escapes_the_articles_own_words(qapp, low_risk_result) -> None:
+    """A caveat quoting an article's heading is text, not markup (review of #428).
+
+    The tooltip is rich text, and a heading such as "Patients aged <65 years"
+    would otherwise open a tag and swallow the rest of the caveat.
+    """
+    low_risk_result.warnings = [
+        'The article\'s end matter holds a section whose content this analysis '
+        'could not classify ("Patients aged <65 years & older")'
+    ]
+    tooltip = TransparencyBadge(outcome=low_risk_result).toolTip()
+    assert "Patients aged &lt;65 years &amp; older" in tooltip
+    assert "<65" not in tooltip

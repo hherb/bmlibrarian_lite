@@ -48,6 +48,7 @@ from bmlibrarian_lite.data_models import (
     SourceLookupFailure,
     SourceLookupSkipped,
 )
+from bmlibrarian_lite.jats_markdown import END_MATTER_MARKER
 
 if TYPE_CHECKING:
     from bmlibrarian_lite.fulltext_discovery import FulltextResult
@@ -59,7 +60,9 @@ FUNDING_SOUGHT = "this study's funding in full"
 THROTTLED = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=429)
 #: A full text that was read and uses no statement's wording, so whatever
 #: the analyser concludes rests on the sections alone.
-READ_TEXT = "The article's full text."
+#: A read full text whose end matter the converter marked, every heading of
+#: which is known, so that a missing statement is the article's own (#428).
+READ_TEXT = f"The article's full text.\n\n{END_MATTER_MARKER}\n\n## Funding\n\nFunded by X."
 
 
 class TestASkippedLookupIsRecordable:

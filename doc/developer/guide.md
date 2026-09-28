@@ -521,8 +521,21 @@ Rules from the review of PR #426, each a real misreading:
 **Recognising more end matter makes a missed statement cost the study
 points** (a recognised funding section enables the COI `NOT_STATED` charge).
 So the analyser charges a missing COI or data statement only when the text
-does not use its wording outside its reference list (`_mentions`); otherwise
-it is not assessed. Measure outcomes, not just recognised sections, before
+does not use its wording outside its reference list (`_mentions`), **and**
+every heading of the end matter is classified (#428,
+`study_transparency_analyzer/statement_headings.py`); otherwise it is not
+assessed. The converter opens the end matter with `END_MATTER_MARKER`, where
+end matter first appears (one journal keeps its footnotes, and its
+competing interests statement, in the body); a text without it (including
+all PDF text) is never charged. A new end-matter element or default heading
+needs a place in that module's lists, or its articles stop being charged.
+The classification fails safe only where it asks: a section it vouches for
+by name (a known neighbour, a statement heading other than the one sought)
+or by vocabulary (a catch-all whose text avoids the statement's words) is
+never read further, so a disclosure hiding there is still charged. Any
+change to the neighbour lists, the vocabularies or the heading words
+(`HEADING_WORDS_BY_STATEMENT`) is measured on the local PMC corpus and a
+held-out fetch, both ways. Measure outcomes, not just recognised sections, before
 and after any change here -- in both directions: new charges, and industry
 ties that appear *or disappear*. A check that uses the guard's own wording
 cannot find the guard's blind spots; read the end-matter headings of every

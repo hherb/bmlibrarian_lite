@@ -121,7 +121,22 @@ class TransparencyUnassessed:
 #: text that still uses a statement's wording outside its references is
 #: not charged for missing it; and data availability is no longer read from
 #: Europe PMC's XML when no full text was).
-TRANSPARENCY_ANALYZER_VERSION = "2.4"
+#: 2.5: #428 (a missing competing interests or data availability statement
+#: is charged only when every heading of the end matter is classified -- a
+#: statement's, a known neighbour's, part of the other statement, or a
+#: catch-all or subsection whose text avoids the statement's vocabulary; a
+#: text with no end-matter marker, including all PDF text, is not charged;
+#: the wording guard also accepts "commercial relationships" and "conflicts
+#: of X interest"; more funding, funding-role, contribution and data
+#: availability headings are recognised).
+#: 2.6: review of #428, bumped before release as the converter was (the
+#: sought statement's own heading is never classified; body headings naming
+#: a statement are asked about, and a statement nested in the body no longer
+#: opens the end matter; an empty heading is asked about for the statement
+#: it names; "Code availability" and supplements can hold the data
+#: statement; the title vouches for no section; ICMJE wording is disclosure
+#: vocabulary; JACC's combined heading is recognised).
+TRANSPARENCY_ANALYZER_VERSION = "2.6"
 
 #: What every row written before #360 says, whatever analysed it: the field
 #: was never compared to anything, so it never moved off its default.

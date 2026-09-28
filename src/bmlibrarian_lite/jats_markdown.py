@@ -45,6 +45,12 @@ without a heading once a sibling has had one: an untitled abbreviation list
 or disclaimer printed after a competing interests statement would otherwise
 be read as part of it, and a vaccine maker it names as an industry tie
 (#426 review).
+
+The end matter opens with :data:`END_MATTER_MARKER`, wherever it first
+appears. The analyser charges a missing statement only when it knows every
+heading after the marker (#428), so a heading this module emits there is
+one ``study_transparency_analyzer.statement_headings`` must classify, or
+every article that carries it goes unassessed.
 """
 
 import copy
@@ -69,7 +75,20 @@ logger = logging.getLogger(__name__)
 #: headings merged, body run-ins kept inline, sub-articles ignored. Bumped
 #: before release, so no file a pre-review build of the branch cached is
 #: trusted.
-JATS_MARKDOWN_CONVERTER_VERSION = 3
+#: 4: #428 -- :data:`END_MATTER_MARKER` opens the end matter.
+#: 5: review of #428 -- an untitled footnote group after a titled end-matter
+#: section's own text gets a heading of its own. Bumped before release, as
+#: 3 was.
+JATS_MARKDOWN_CONVERTER_VERSION = 5
+
+#: The line that opens end matter: before the back matter and the
+#: front-matter statements, and inside the body wherever a body section
+#: holds end matter (footnotes a journal keeps in a ``<sec>``). A text can
+#: hold several; the analyser takes everything after the first as end
+#: matter, and charges a missing statement only when it knows every heading
+#: there (#428). An HTML comment, so that rendered markdown (Qt's
+#: ``setMarkdown``) does not show it.
+END_MATTER_MARKER = "<!-- bmlibrarian-lite end-matter -->"
 
 #: The heading a statement gets from its type when the article gives it no
 #: heading of its own. Read from ``fn-type``, ``notes-type`` and ``sec-type``:
@@ -99,7 +118,8 @@ _TYPE_ATTRIBUTES = ("fn-type", "notes-type", "sec-type")
 #: The heading an end-matter piece without one is emitted under, by the tag
 #: of the element that holds it. Given only where the piece would otherwise
 #: run on into a heading that is not its own: at the top of the end matter,
-#: or after a sibling that had a heading. An ``<ack>`` some publishers wrap
+#: after a sibling that had a heading, or nested after its titled parent's
+#: own text. An ``<ack>`` some publishers wrap
 #: their declarations in gets none, since each of its sections has its own.
 DEFAULT_HEADING_BY_OWNER: dict[str, str] = {
     "ack": "Acknowledgments",
@@ -152,7 +172,8 @@ MAX_HEADING_LEVEL = 6
 
 #: The longest bold run that is read as a heading. A footnote whose whole
 #: first sentence is bold is emphasis, not a heading, and the analyser
-#: ignores heading lines longer than 120 characters anyway.
+#: ignores heading lines longer than ``MAX_HEADING_LINE_CHARS`` anyway
+#: (``study_transparency_analyzer.statement_headings``).
 MAX_RUN_IN_HEADING_CHARS = 80
 
 #: A label names its element only when it holds a word. Markers -- ``*``,
@@ -204,9 +225,10 @@ def jats_to_markdown(xml_content: str) -> str:
 
     Returns:
         The markdown: title, authors, journal line and abstract; the body;
-        the back matter and the front-matter statements, each under its own
-        heading; then the references. An empty string when the XML does not
-        parse.
+        :data:`END_MATTER_MARKER`, then the back matter and the front-matter
+        statements, each under its own heading; then the references. The
+        marker is left out when there is no end matter. An empty string when
+        the XML does not parse.
     """
     try:
         root = ET.fromstring(xml_content)
@@ -229,13 +251,19 @@ def jats_to_markdown(xml_content: str) -> str:
     if body is not None:
         parts.append(_body(body))
 
+    end_matter: list[str] = []
     back = article.find("back")
     if back is not None:
-        parts.append(_back_matter(back))
+        end_matter.append(_back_matter(back))
 
     if front is not None:
-        already = "\n\n".join(parts)
-        parts.extend(_front_statements(front, already))
+        already = "\n\n".join(parts + end_matter)
+        end_matter.extend(_front_statements(front, already))
+
+    end_matter = [part for part in end_matter if part]
+    if end_matter:
+        parts.append(END_MATTER_MARKER)
+        parts.extend(end_matter)
 
     if back is not None:
         parts.append(_references(back))
@@ -612,9 +640,10 @@ def _render_children(
 
     In the end matter a piece without a heading of its own gets one when it
     would otherwise fall under a heading that is not its own -- at the top,
-    or after a sibling that had one (:data:`DEFAULT_HEADING_BY_OWNER`). A
-    piece after a run-in in the same holder is taken as the run-in's own
-    continuation.
+    after a sibling that had one, or from an untitled block after the
+    parent's own content (:func:`_runs_on_after_other_content`;
+    :data:`DEFAULT_HEADING_BY_OWNER`). A piece after a run-in in the same
+    holder is taken as the run-in's own continuation.
 
     Args:
         parent: The element whose children are rendered.
@@ -631,9 +660,14 @@ def _render_children(
     pieces = _pieces(parent, end_matter)
     sibling_level = run_in_level or level
     parts = []
+    # End matter inside the body -- a journal that keeps its footnotes, and
+    # the competing interests statement among them, in a <sec> of the body
+    # -- is marked where it begins, as the back matter is (#428).
+    marked = end_matter
     current = in_force
     heading_holder: ET.Element | None = None
     headed_here = False
+    last_holder: ET.Element | None = None
     for index, piece in enumerate(pieces):
         child, holder = piece.element, piece.holder
         if child.tag == "p":
@@ -643,8 +677,12 @@ def _render_children(
             ):
                 rest = text_of(_paragraph_without_run_in(child))
                 heading_line = _heading_line(run_in, sibling_level)
+                if piece.end_matter and not marked:
+                    parts.append(END_MATTER_MARKER)
+                    marked = True
                 parts.append(f"{heading_line}\n\n{rest}" if rest else heading_line)
                 current, heading_holder, headed_here = run_in, holder, True
+                last_holder = holder
                 continue
 
         found = _piece_heading(child)
@@ -655,14 +693,49 @@ def _render_children(
             if not _same_heading(found.heading, current):
                 current, heading_holder, headed_here = found.heading, child, True
         elif piece.end_matter and (
-            current is None or (headed_here and heading_holder is not holder)
+            current is None
+            or (headed_here and heading_holder is not holder)
+            or _runs_on_after_other_content(holder, parent, last_holder, headed_here)
         ):
             default = DEFAULT_HEADING_BY_OWNER.get(holder.tag, DEFAULT_HEADING)
             if not _same_heading(default, current):
                 rendered = f"{_heading_line(default, sibling_level)}\n\n{rendered}"
             current, heading_holder, headed_here = default, holder, True
+        if piece.end_matter and not marked:
+            parts.append(END_MATTER_MARKER)
+            marked = True
         parts.append(rendered)
+        last_holder = holder
     return "\n\n".join(parts)
+
+
+def _runs_on_after_other_content(
+    holder: ET.Element,
+    parent: ET.Element,
+    last_holder: ET.Element | None,
+    headed_here: bool,
+) -> bool:
+    """Whether an end-matter piece would run on into its parent's own content.
+
+    An untitled footnote group inside a titled "Funding" section, after the
+    section's own paragraph, would read as part of the funding statement,
+    and its disclosure be classified by the section's name (review of
+    #428). As the first thing under the heading -- an untitled ``<ack>`` in
+    a titled "Acknowledgments" -- it is the section's own content.
+
+    Args:
+        holder: The element holding the piece.
+        parent: The element whose children are being rendered, whose
+            heading is in force.
+        last_holder: The holder of the piece rendered before it, if any.
+            Pieces of the parent's own are held by the parent.
+        headed_here: Whether a heading was emitted among the children.
+
+    Returns:
+        True when the piece comes from an untitled block nested in the
+        parent, after content the parent itself held.
+    """
+    return not headed_here and holder is not parent and last_holder is parent
 
 
 @dataclass(frozen=True)

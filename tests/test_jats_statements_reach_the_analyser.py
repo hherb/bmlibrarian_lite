@@ -29,6 +29,7 @@ from bmlibrarian_lite.jats_markdown import (
     COI_HEADING,
     DEFAULT_HEADING,
     DEFAULT_HEADING_BY_OWNER,
+    END_MATTER_MARKER,
     FUNDING_STATEMENT_HEADING,
     JATS_MARKDOWN_CONVERTER_VERSION,
     STATEMENT_HEADING_BY_TYPE,
@@ -500,7 +501,7 @@ class TestTheAnalyserChargesOnlyASilentText:
     """The analyser's own guard, for the shapes no converter rule can head."""
 
     #: A text whose end matter is recognised, so a charge is reachable.
-    READ = "## Methods\n\nWe did things.\n\n## Funding\n\nNIH grant R01.\n\n"
+    READ = f"## Methods\n\nWe did things.\n\n{END_MATTER_MARKER}\n\n## Funding\n\nNIH grant R01.\n\n"
 
     def test_a_bare_none_declared_is_not_charged(self, analyzer: StudyTransparencyAnalyzer) -> None:
         """BMJ (PMC13536077): "Competing interests: None declared." deposited headless."""
@@ -913,5 +914,9 @@ class TestTheGuardsWording:
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_ASSESSED
 
     def test_the_analyser_version_moved(self) -> None:
-        """Stored rows are offered for re-analysis only if the version moves (#420)."""
-        assert TRANSPARENCY_ANALYZER_VERSION == "2.4"
+        """Stored rows are offered for re-analysis only if the version moves.
+
+        2.6, not 2.5: the review of #428 changed what is charged, and a row a
+        pre-review build of the branch stored must not be trusted.
+        """
+        assert TRANSPARENCY_ANALYZER_VERSION == "2.6"
