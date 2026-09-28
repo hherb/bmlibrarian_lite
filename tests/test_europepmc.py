@@ -20,30 +20,35 @@ Unit tests for Europe PMC API client.
 Tests cover:
 - ArticleInfo dataclass
 - EuropePMCClient session creation
-- get_article_info() with various identifiers
+- get_article_info() / fetch_article_info() with various identifiers
 - fetch_fulltext_xml() retrieval and its three states
+- pmc_accession() and fulltext_accession(), which admit only accessions
+- FullTextXmlFetch, which refuses the states that mean two things
 - xml_to_markdown() conversion
 - Error handling and edge cases
 """
 
 import pytest
-from unittest.mock import MagicMock, patch, Mock
+from unittest.mock import MagicMock, patch
 from typing import Dict, Any
 
 import requests
 
-from bmlibrarian_lite.data_models import RequestFailure, RequestFailureKind
+from bmlibrarian_lite.data_models import RecordFetch, RequestFailure, RequestFailureKind
 from bmlibrarian_lite.europepmc import (
     ArticleInfo,
+    ArticleInfoFetch,
     EuropePMCClient,
     FullTextXmlFetch,
+    fulltext_accession,
     pmc_accession,
 )
 from bmlibrarian_lite.constants import (
-    EUROPEPMC_SEARCH_URL,
     EUROPEPMC_REST_BASE_URL,
     EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
 )
+
+from tests.http_responses import http_response as _response, session_answering
 
 
 class TestArticleInfo:
@@ -238,24 +243,6 @@ class TestGetArticleInfo:
         assert info is None
 
 
-def _response(status: int, text: str = "") -> requests.Response:
-    """A real response, so ``raise_for_status`` behaves as it does live.
-
-    Args:
-        status: The HTTP status.
-        text: The body.
-
-    Returns:
-        The response.
-    """
-    response = requests.Response()
-    response.status_code = status
-    response._content = text.encode("utf-8")
-    response.encoding = "utf-8"
-    response.url = f"{EUROPEPMC_REST_BASE_URL}/PMC1/fullTextXML"
-    return response
-
-
 def _client_answering(answer: object) -> tuple[EuropePMCClient, MagicMock]:
     """A client whose session returns, or raises, ``answer``.
 
@@ -266,11 +253,7 @@ def _client_answering(answer: object) -> tuple[EuropePMCClient, MagicMock]:
         The client and its mocked session.
     """
     client = EuropePMCClient()
-    session = MagicMock()
-    if isinstance(answer, BaseException):
-        session.get.side_effect = answer
-    else:
-        session.get.return_value = answer
+    session = session_answering(answer)
     client._session = session
     return client, session
 
@@ -295,6 +278,26 @@ class TestFetchFulltextXML:
         client.fetch_fulltext_xml(pmcid)
 
         assert "/PMC12101959/fullTextXML" in str(session.get.call_args)
+
+    @pytest.mark.parametrize("accession", ["PPR1316954", "ppr1316954"])
+    def test_a_preprint_is_fetched_by_its_record_id(self, accession: str) -> None:
+        """A preprint has no PMC ID; Europe PMC serves it under its PPR ID."""
+        client, session = _client_answering(_response(200, "<article/>"))
+
+        fetch = client.fetch_fulltext_xml(accession)
+
+        assert fetch == FullTextXmlFetch.served("<article/>")
+        assert session.get.call_args.args[0] == (
+            f"{EUROPEPMC_REST_BASE_URL}/PPR1316954/fullTextXML"
+        )
+
+    def test_the_request_has_a_timeout(self) -> None:
+        """Without one, a stalled Europe PMC holds discovery indefinitely."""
+        client, session = _client_answering(_response(200, "<article/>"))
+
+        client.fetch_fulltext_xml("PMC1")
+
+        assert session.get.call_args.kwargs["timeout"] == EUROPEPMC_REQUEST_TIMEOUT_SECONDS
 
     def test_a_404_is_europe_pmcs_own_answer(self) -> None:
         """Control: the one status about the article stays an absence."""
@@ -380,6 +383,103 @@ class TestPmcAccession:
         assert pmc_accession(pmcid) == expected
 
 
+class TestFulltextAccession:
+    """fulltext_accession() admits what fullTextXML is served under."""
+
+    @pytest.mark.parametrize(
+        ("identifier", "expected"),
+        [
+            ("PMC123", "PMC123"),
+            ("123", "PMC123"),
+            ("pmc123", "PMC123"),
+            ("PPR1316954", "PPR1316954"),
+            (" ppr1316954\n", "PPR1316954"),
+            ("PPR", None),
+            ("PPR12a", None),
+            ("PPR١٢", None),
+            ("MED39521399", None),
+            ("PPR12/../search", None),
+        ],
+    )
+    def test_normalises_or_refuses(self, identifier: str, expected: str | None) -> None:
+        """A PMC ID or a preprint record ID, normalised; nothing else."""
+        assert fulltext_accession(identifier) == expected
+
+
+class TestArticleInfoFulltextAccession:
+    """ArticleInfo.fulltext_accession names what to fetch the full text by."""
+
+    def test_the_pmc_id_comes_first(self) -> None:
+        """An article with a PMC ID is fetched by it."""
+        info = ArticleInfo(pmcid="PMC1", is_preprint=True, europepmc_id="PPR2")
+        assert info.fulltext_accession == "PMC1"
+
+    def test_a_preprint_is_fetched_by_its_record_id(self) -> None:
+        """A preprint has no PMC ID, and is served under its own."""
+        info = ArticleInfo(is_preprint=True, europepmc_id="PPR1316954")
+        assert info.fulltext_accession == "PPR1316954"
+
+    def test_a_med_record_id_is_not_an_accession(self) -> None:
+        """A MED record's ID is its PMID, which fullTextXML does not take."""
+        info = ArticleInfo(pmid="39521399", source="MED", europepmc_id="39521399")
+        assert info.fulltext_accession is None
+
+
+class TestFetchArticleInfoIdentifiers:
+    """fetch_article_info() asks by an accession, and keeps a preprint's ID."""
+
+    @staticmethod
+    def _search_answering(results: list[dict[str, Any]]) -> tuple[EuropePMCClient, MagicMock]:
+        """A client whose search answers with ``results``.
+
+        Args:
+            results: The ``resultList.result`` entries.
+
+        Returns:
+            The client and its mocked session.
+        """
+        response = MagicMock()
+        response.json.return_value = {"resultList": {"result": results}}
+        return _client_answering(response)
+
+    def test_a_preprint_keeps_what_its_full_text_is_fetched_by(self) -> None:
+        """Looked up by DOI, a preprint's source and record ID survive."""
+        client, _ = self._search_answering([{
+            "id": "PPR1316954",
+            "source": "PPR",
+            "doi": "10.64898/2026.09.08.26362323",
+            "inEPMC": "Y",
+            "inPMC": "N",
+        }])
+
+        info = client.fetch_article_info(doi="10.64898/2026.09.08.26362323").info
+
+        assert info is not None
+        assert info.is_preprint
+        assert info.source == "PPR"
+        assert info.fulltext_accession == "PPR1316954"
+
+    def test_a_lower_case_pmc_id_is_asked_about_as_itself(self) -> None:
+        """"pmc123" became "PMCID:PMCpmc123", matched nothing, read absent."""
+        client, session = self._search_answering([{"pmcid": "PMC123"}])
+
+        client.fetch_article_info(pmcid="pmc123")
+
+        assert session.get.call_args.kwargs["params"]["query"] == "PMCID:PMC123"
+
+    @pytest.mark.parametrize("pmcid", ["PMC", "PMC12a", 'PMC1" OR "x'])
+    def test_a_non_accession_is_never_asked_about(self, pmcid: str) -> None:
+        """Not asking is not Europe PMC answering "no such record" (#355)."""
+        client, session = self._search_answering([])
+
+        fetch = client.fetch_article_info(pmcid=pmcid)
+
+        assert fetch == ArticleInfoFetch.unreachable(
+            RequestFailure(RequestFailureKind.REQUEST_FAILED)
+        )
+        session.get.assert_not_called()
+
+
 class TestFullTextXmlFetchRefusesTheAmbiguity:
     """The fetch cannot be built in a state that means two things."""
 
@@ -397,8 +497,17 @@ class TestFullTextXmlFetchRefusesTheAmbiguity:
         with pytest.raises(ValueError):
             FullTextXmlFetch.served(xml)
 
+    @pytest.mark.parametrize("fetch_type", [FullTextXmlFetch, ArticleInfoFetch, RecordFetch])
+    def test_a_bare_construction_is_no_absence(self, fetch_type: type) -> None:
+        """A slip must not make the absence, the one claim about the article.
+
+        Every fetch type is built through its named states.
+        """
+        with pytest.raises(TypeError):
+            fetch_type()
+
     def test_only_a_failure_is_unreachable(self) -> None:
-        """The absence is the one state about the article."""
+        """A 404 is an answer, not a failure to get one."""
         failure = RequestFailure(RequestFailureKind.HTTP_STATUS, 429)
         assert FullTextXmlFetch.unreachable(failure).is_unreachable
         assert not FullTextXmlFetch.absent().is_unreachable

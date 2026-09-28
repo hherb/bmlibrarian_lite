@@ -243,7 +243,11 @@ class TestDiscoveryRecordsTheLookupItSkipped:
 
     @staticmethod
     def _discoverer(unpaywall_email=None):
-        """Build a discoverer that will not open a browser.
+        """Build a discoverer that will not open a browser or the network.
+
+        Unpaywall and doi.org answer "found nothing": these tests are about
+        which lookups were skipped, and asking the live services made them
+        slow and dependent on the network, while passing either way.
 
         Args:
             unpaywall_email: The address to configure, or ``None``.
@@ -251,11 +255,16 @@ class TestDiscoveryRecordsTheLookupItSkipped:
         Returns:
             The discoverer.
         """
+        from unittest.mock import MagicMock
+
         from bmlibrarian_lite.pdf_discovery import PDFDiscoverer
 
-        return PDFDiscoverer(
+        discoverer = PDFDiscoverer(
             unpaywall_email=unpaywall_email, use_browser_fallback=False
         )
+        discoverer._discover_unpaywall = MagicMock(return_value=([], None))
+        discoverer._discover_doi_direct = MagicMock(return_value=([], None))
+        return discoverer
 
     def test_an_unconfigured_unpaywall_is_recorded(self) -> None:
         """The lookup that would have found the free copy was never made."""
@@ -1954,7 +1963,8 @@ class TestTheGapsTheReviewFound:
 
         # Europe PMC's own "no such record", not the live API: asked for
         # real, a throttled Europe PMC's 503 put a failure in the record and
-        # failed this control whenever the network misbehaved (#429 session).
+        # failed this control whenever the network misbehaved (found
+        # while working on #429).
         with patch.object(
             discoverer._europepmc,
             "fetch_article_info",

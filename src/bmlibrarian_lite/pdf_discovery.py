@@ -477,6 +477,7 @@ class PDFDiscoverer:
         pmcid: Optional[str] = None,
         title: Optional[str] = None,
         expected_title: Optional[str] = None,
+        earlier_lookups: LookupRecord | None = None,
     ) -> DiscoveryResult:
         """
         Discover and download PDF for a document.
@@ -493,6 +494,12 @@ class PDFDiscoverer:
             pmcid: PubMed Central ID
             title: Document title (for verification)
             expected_title: Expected title for content verification
+            earlier_lookups: What went unasked before this step, such as a
+                throttled Europe PMC. Named in every sentence this builds
+                for the reader, but not added to the result's record, which
+                the caller holds and merges: without it the record named
+                Europe PMC and the sentence said only "No PDF sources found.
+                The document may require institutional access."
 
         Returns:
             DiscoveryResult with success status and details
@@ -502,6 +509,8 @@ class PDFDiscoverer:
 
         # Find all available PDF sources, and what could not be asked at all
         sources, lookups = self._discover_sources(doi, pmid, pmcid)
+        # What the reader is told about: everything unasked so far.
+        told = (earlier_lookups or LookupRecord()).merged(lookups)
 
         if self._cancelled:
             return DiscoveryResult(
@@ -517,7 +526,7 @@ class PDFDiscoverer:
                 # A lookup we did not make says nothing about the licence,
                 # so the paywall claim is withheld whenever one went unasked
                 # -- skipped as well as failed (#347, #355).
-                error=no_pdf_sources_message(lookups),
+                error=no_pdf_sources_message(told),
                 lookups=lookups,
             )
 
@@ -563,7 +572,7 @@ class PDFDiscoverer:
                     return replace(
                         result.with_lookups(lookups),
                         error=paywall_message(
-                            result.error or "", lookups
+                            result.error or "", told
                         ),
                     )
 
@@ -589,7 +598,7 @@ class PDFDiscoverer:
             return replace(
                 last_paywall_result.with_lookups(lookups),
                 error=paywall_message(
-                    last_paywall_result.error or "", lookups
+                    last_paywall_result.error or "", told
                 ),
             )
 
@@ -599,7 +608,7 @@ class PDFDiscoverer:
             # cannot falsify -- so it is qualified rather than withheld.
             error=with_unestablished_access(
                 "Failed to download PDF from any available source.",
-                lookups,
+                told,
             ),
             lookups=lookups,
         )

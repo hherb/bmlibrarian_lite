@@ -11,13 +11,28 @@ its slice has landed; add a new section when handing off new work.
 **#429 — a typed full-text XML fetch** (Python), branch
 `fix/typed-fulltext-xml-fetch-429`, **PR #433**. Compress into **Recently landed** once merged.
 
-- `fetch_fulltext_xml(pmcid) -> FullTextXmlFetch` (served / absent = 404 /
-  unreachable with its real `RequestFailure`; blank 200 is incomplete; a
-  non-accession is never sent) replaces `get_fulltext_xml`; the caller-less
-  `get_fulltext_markdown` is deleted. Discovery records **a 404 after the
-  search listed XML as `HTTP 404`, not an absence**.
-- The one test that reached the live network (a cached-PDF control) is
-  stubbed; checked by running the suite through a dead `HTTPS_PROXY`.
+- `fetch_fulltext_xml(accession) -> FullTextXmlFetch` (served / absent =
+  404 / unreachable with its real `RequestFailure`; blank 200 is incomplete;
+  a non-accession is never sent) replaces `get_fulltext_xml`; the
+  caller-less `get_fulltext_markdown` is deleted. Discovery records **a 404
+  after the search as `HTTP 404 Not Found`, not an absence**: `inPMC` is
+  not "open access" (#432).
+- **Preprints are fetched by their `PPR` record ID**
+  (`ArticleInfo.fulltext_accession`; `europepmc_id` is now parsed, and
+  `fetch_article_info` reads results through the same parser as search, so
+  `source`/`is_preprint` are set). Checked live: PPR1316954 by DOI → 44 KB.
+  A record with no accession at all is a *skipped* lookup (`NO_IDENTIFIER`),
+  keeping `article_info` so step 2b (PDF render) still runs.
+- **The reader's sentence names Europe PMC.** It was built by the PDF step
+  from its own record only, so a throttled Europe PMC read "No PDF sources
+  found. The document may require institutional access."
+  `discover_and_download(earlier_lookups=...)` words them in; the record is
+  still merged once, in `discover_fulltext`.
+- `fetch_article_info` normalises with `pmc_accession` (`pmc123` was
+  `PMCID:PMCpmc123` → a false absence). The three `*Fetch` types have no
+  field defaults: a bare `Foo()` is a `TypeError`, not an absence.
+- No test reaches the live network outside `-m integration` (checked
+  through a dead `HTTPS_PROXY`).
 - Europe PMC answered 500, not 404, for non-OA PMC IDs on 2026-09-28
   (#432): safe, but the live PDF-only integration test fails while it lasts.
 
@@ -122,8 +137,11 @@ the rest.
   - **A source we could not reach is not a finding** (#346, #347, #344,
     PR #349). A typed fetch carries the answer *or* a `RequestFailure`
     (`served()` / `absent()` / `unreachable()`: `RecordFetch`,
-    `ArticleInfoFetch`, `FullTextXmlFetch` (#429)); **404 is the one status
-    about the article**; unreadable is not absent either; caveats carry no
+    `ArticleInfoFetch`, `FullTextXmlFetch` (#429); no field defaults, so
+    `absent()` is never a slip); **404 is the one status about the
+    article** -- except where the caller knows better (`fullTextXML` 404s
+    for non-OA articles the search holds, #432); unreadable is not absent
+    either; caveats carry no
     provider text (`RequestFailure.describe()` only). **Always keep a
     control test** — mutating the fetch to `absent()` once passed the suite.
   - **Every outbound request is paced, per host** (#341, PR #345) —
@@ -210,6 +228,12 @@ Open issues by family; each issue carries the detail. None blocks another.
   plugs into `segment_unmarked_end_matter`), so PDF-only articles can be
   charged for a missing statement again.
 
+- **#434** Swift + Android: the full-text XML fetch still gives one
+  "unavailable" for a 404, a throttle and a blank body, normalises `pmc123`
+  wrongly, and fetches no preprint by its `PPR` ID. Also: two docs disagree
+  on whether `fullTextXML` serves abstract-only deposits.
+- **#435** the reader's "… could not be asked" is wrong for an answered 404
+  (a cross-platform sentence contract).
 - **#432** Europe PMC answered 500 for PMC IDs without OA XML (maybe
   transient). `has_fulltext_xml` counts `inPMC` for non-OA articles, so they
   always fetch XML that cannot be served, and spend the retries doing it.

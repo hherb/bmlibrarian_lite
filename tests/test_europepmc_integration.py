@@ -199,7 +199,11 @@ class TestGetArticleInfo:
 
 @pytest.mark.integration
 class TestFulltextXMLByIdentifier:
-    """Tests verifying JATS XML can be found regardless of which identifier is used."""
+    """JATS XML can be fetched by PMC ID.
+
+    Other identifiers resolve to one through ``fetch_article_info``; the
+    whole chain from a PMID or DOI is covered by ``TestDiscoverFulltext``.
+    """
 
     @pytest.mark.parametrize("article", TEST_ARTICLES, ids=lambda a: a["label"])
     def test_fetch_fulltext_xml_by_pmcid(
@@ -290,7 +294,8 @@ class TestPMCPDFDiscovery:
     ) -> None:
         """JATS XML should NOT be available for this article."""
         fetch = europepmc_client.fetch_fulltext_xml(PMC_PDF_ONLY_ARTICLE["pmcid"])
-        # Europe PMC's own 404, not a failure to reach it.
+        # Europe PMC's own 404, not a failure to reach it. On 2026-09-28
+        # it answered 500 here instead, and this failed (#432).
         assert fetch == FullTextXmlFetch.absent()
 
     def test_discover_fulltext_finds_pdf_fallback(self) -> None:

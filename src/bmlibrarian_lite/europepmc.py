@@ -29,11 +29,15 @@ Usage:
 
     client = EuropePMCClient()
 
-    # Check if full text is available
-    info = client.get_article_info(pmid="39521399")
-    if info and info.has_fulltext_xml and info.pmcid:
-        fetch = client.fetch_fulltext_xml(info.pmcid)
-        if fetch.xml is not None:
+    # Ask what Europe PMC holds: in PMC or Europe PMC is not yet "has an
+    # open-access full text", which only the fetch can say
+    info = client.fetch_article_info(pmid="39521399").info
+    accession = info.fulltext_accession if info else None
+    if info and info.has_fulltext_xml and accession:
+        fetch = client.fetch_fulltext_xml(accession)
+        if fetch.failure is not None:
+            ...  # not read: says nothing about the article
+        elif fetch.xml is not None:
             markdown = client.xml_to_markdown(fetch.xml)
 """
 
@@ -169,8 +173,10 @@ class ArticleInfoFetch:
             given.
     """
 
-    info: "ArticleInfo | None" = None
-    failure: RequestFailure | None = None
+    # No defaults: a bare ``ArticleInfoFetch()`` would be the absence, the
+    # one claim about the article, and must not be what a slip produces.
+    info: "ArticleInfo | None"
+    failure: RequestFailure | None
 
     def __post_init__(self) -> None:
         """Refuse the state that would mean two things at once.
@@ -193,7 +199,7 @@ class ArticleInfoFetch:
         Returns:
             The fetch.
         """
-        return cls(info=info)
+        return cls(info=info, failure=None)
 
     @classmethod
     def absent(cls) -> "ArticleInfoFetch":
@@ -202,7 +208,7 @@ class ArticleInfoFetch:
         Returns:
             The fetch. This is the one state that is about the article.
         """
-        return cls()
+        return cls(info=None, failure=None)
 
     @classmethod
     def unreachable(cls, failure: RequestFailure) -> "ArticleInfoFetch":
@@ -214,7 +220,7 @@ class ArticleInfoFetch:
         Returns:
             The fetch.
         """
-        return cls(failure=failure)
+        return cls(info=None, failure=failure)
 
     @property
     def is_unreachable(self) -> bool:
@@ -231,26 +237,30 @@ class FullTextXmlFetch:
     """What asking Europe PMC for an article's full-text XML produced (#429).
 
     The sibling of :class:`ArticleInfoFetch`, for the fetch that follows it.
-    ``get_fulltext_xml`` returned ``str | None``, one ``None`` for a 404, a
-    throttle, a 5xx, a timeout and a dropped connection, so its caller could
-    only record every one of them as an incomplete response, and a throttled
-    Europe PMC was reported as having answered badly rather than as busy.
+    A 404, a throttle, a 5xx, a timeout and a dropped connection each tell
+    the reader something different -- that Europe PMC answered, that it was
+    busy, that it was down -- and one ``None`` cannot carry which.
+
+    The type says what happened, not what it means: whether a 404 settles
+    the article is the caller's decision (see
+    :class:`~bmlibrarian_lite.fulltext_discovery.FulltextDiscoverer`).
 
     Attributes:
         xml: The JATS XML, when Europe PMC served it. Never blank: an empty
             answer has told us nothing about the article, so that is an
             incomplete response, not an absence.
-        failure: Why it could not be read, when it could not be. ``None``
-            with no ``xml`` means Europe PMC answered 404: it holds no
-            open-access full text under this PMC ID.
+        failure: Why it could not be read, or why it was never asked -- the
+            identifier was not an accession (#355). ``None`` with no ``xml``
+            means Europe PMC answered 404.
 
     Raises:
         ValueError: On construction, if both XML and a failure are given, or
             if the XML is blank.
     """
 
-    xml: str | None = None
-    failure: RequestFailure | None = None
+    # No defaults, as for ArticleInfoFetch: a slip must not build a 404.
+    xml: str | None
+    failure: RequestFailure | None
 
     def __post_init__(self) -> None:
         """Refuse the states that would mean two things at once.
@@ -278,20 +288,28 @@ class FullTextXmlFetch:
         Returns:
             The fetch.
         """
-        return cls(xml=xml)
+        return cls(xml=xml, failure=None)
 
     @classmethod
     def absent(cls) -> "FullTextXmlFetch":
-        """Europe PMC answered 404: no open-access full text under this ID.
+        """Europe PMC answered 404 for this accession.
+
+        Its own answer, unlike a failure; but whether it settles the
+        article is the caller's call. ``fullTextXML`` serves open-access
+        text only, so after a search that says the article is in PMC it
+        may mean "not open access" rather than "no full text" (#432).
 
         Returns:
-            The fetch. This is the one state that is about the article.
+            The fetch.
         """
-        return cls()
+        return cls(xml=None, failure=None)
 
     @classmethod
     def unreachable(cls, failure: RequestFailure) -> "FullTextXmlFetch":
-        """Europe PMC could not be read, or its answer held nothing.
+        """Europe PMC's answer is missing.
+
+        It could not be read, its answer held nothing, or it was never asked
+        because the identifier was not an accession.
 
         Args:
             failure: Why, of its real kind.
@@ -299,14 +317,14 @@ class FullTextXmlFetch:
         Returns:
             The fetch.
         """
-        return cls(failure=failure)
+        return cls(xml=None, failure=failure)
 
     @property
     def is_unreachable(self) -> bool:
-        """Whether Europe PMC could not be read.
+        """Whether Europe PMC's answer is missing.
 
         Returns:
-            ``True`` when nothing about the article was established.
+            ``True`` when it could not be read or was never asked.
         """
         return self.failure is not None
 
@@ -333,6 +351,34 @@ def pmc_accession(pmcid: str) -> str | None:
     return f"PMC{match.group(1)}"
 
 
+# A Europe PMC preprint record ID, "PPR1316954", in any case. Its prefix is
+# required: bare digits are a PMC accession. ASCII digits only, as above.
+_PREPRINT_ACCESSION_RE = re.compile(r"PPR([0-9]+)", re.IGNORECASE)
+
+
+def fulltext_accession(identifier: str) -> str | None:
+    """Normalise an identifier ``fullTextXML`` can be asked about.
+
+    Europe PMC serves full text under a PMC accession, and a preprint's
+    under its own ``PPR`` record ID: a preprint has no PMC ID, and refusing
+    it left every preprint's full text unfetched.
+
+    Args:
+        identifier: The identifier, untrusted.
+
+    Returns:
+        For example ``"PMC12101959"`` or ``"PPR1316954"``, or ``None`` when
+        ``identifier`` is neither.
+    """
+    accession = pmc_accession(identifier)
+    if accession is not None:
+        return accession
+    match = _PREPRINT_ACCESSION_RE.fullmatch(identifier.strip())
+    if match is None:
+        return None
+    return f"PPR{match.group(1)}"
+
+
 @dataclass
 class ArticleInfo:
     """Information about an article from Europe PMC.
@@ -347,11 +393,15 @@ class ArticleInfo:
         year: Publication year
         abstract: Article abstract
         is_open_access: Whether the article is open access
-        has_fulltext_xml: Whether JATS XML full text is available
+        has_fulltext_xml: Whether Europe PMC says the article is in PMC or
+            Europe PMC. Not whether it will serve the full text: that is
+            open-access text only, and a 404 can follow (#432).
         has_pdf: Whether PDF is available
         is_preprint: Whether this is a preprint (from PPR source)
         source: Europe PMC source code (MED, PMC, PPR, etc.)
         pdf_render_url: Free PDF URL from Europe PMC fullTextUrlList
+        europepmc_id: Europe PMC's own record ID: the PMID for a MED
+            record, ``PPR1316954`` for a preprint.
     """
 
     pmid: str | None = None
@@ -368,6 +418,70 @@ class ArticleInfo:
     is_preprint: bool = False
     source: str = ""
     pdf_render_url: str | None = None
+    europepmc_id: str | None = None
+
+    @property
+    def fulltext_accession(self) -> str | None:
+        """The identifier to ask ``fullTextXML`` by, if there is one.
+
+        Returns:
+            The PMC ID; for a preprint, which has none, its ``PPR`` record
+            ID; otherwise ``None``. Only a preprint's record ID is served
+            under: a MED record's is its PMID, which ``fullTextXML`` does
+            not take.
+        """
+        if self.pmcid:
+            return self.pmcid
+        if self.is_preprint and self.europepmc_id:
+            return self.europepmc_id
+        return None
+
+
+def _article_info_from_result(result: dict[str, Any]) -> ArticleInfo:
+    """Read one Europe PMC search result.
+
+    Args:
+        result: One entry of ``resultList.result``, untrusted.
+
+    Returns:
+        What it says about the article.
+
+    Raises:
+        AttributeError: If a nested field is not the object it should be.
+        TypeError: If an author entry cannot be indexed.
+    """
+    authors = [
+        author["fullName"]
+        for author in result.get("authorList", {}).get("author", [])
+        if author.get("fullName")
+    ]
+
+    year = None
+    pub_year = result.get("pubYear")
+    if pub_year:
+        try:
+            year = int(pub_year)
+        except ValueError:
+            pass
+
+    source = result.get("source", "")
+    return ArticleInfo(
+        pmid=result.get("pmid"),
+        pmcid=result.get("pmcid"),
+        doi=result.get("doi"),
+        title=result.get("title", ""),
+        authors=authors,
+        journal=result.get("journalTitle", ""),
+        year=year,
+        abstract=result.get("abstractText", ""),
+        is_open_access=result.get("isOpenAccess") == "Y",
+        has_fulltext_xml=result.get("inEPMC") == "Y" or result.get("inPMC") == "Y",
+        has_pdf=result.get("hasPDF") == "Y",
+        is_preprint=source == EUROPEPMC_SOURCE_PREPRINT,
+        source=source,
+        pdf_render_url=_extract_free_pdf_url(result),
+        europepmc_id=result.get("id"),
+    )
 
 
 class EuropePMCClient:
@@ -455,9 +569,21 @@ class EuropePMCClient:
         """
         # Build search query
         if pmcid:
-            # Normalize PMC ID
-            pmc_num = pmcid.replace("PMC", "")
-            query = f"PMCID:PMC{pmc_num}"
+            accession = pmc_accession(pmcid)
+            if accession is None:
+                # Garbled into a query, it matched nothing, and that empty
+                # list was returned as Europe PMC holding no such record --
+                # an absence from a question it was never put ("pmc123"
+                # became "PMCID:PMCpmc123"). Not asking is not absent (#355).
+                logger.warning(
+                    "Not a PMC accession, so Europe PMC was not asked about "
+                    "it: %r",
+                    pmcid,
+                )
+                return ArticleInfoFetch.unreachable(
+                    RequestFailure(RequestFailureKind.REQUEST_FAILED)
+                )
+            query = f"PMCID:{accession}"
         elif pmid:
             query = f"ext_id:{pmid} src:med"
         elif doi:
@@ -490,39 +616,10 @@ class EuropePMCClient:
                 logger.debug(f"No results found for query: {query}")
                 return ArticleInfoFetch.absent()
 
-            result = results[0]
-
-            # Extract authors
-            authors = []
-            author_list = result.get("authorList", {}).get("author", [])
-            for author in author_list:
-                full_name = author.get("fullName", "")
-                if full_name:
-                    authors.append(full_name)
-
-            # Extract year
-            year = None
-            pub_year = result.get("pubYear")
-            if pub_year:
-                try:
-                    year = int(pub_year)
-                except ValueError:
-                    pass
-
-            return ArticleInfoFetch.served(ArticleInfo(
-                pmid=result.get("pmid"),
-                pmcid=result.get("pmcid"),
-                doi=result.get("doi"),
-                title=result.get("title", ""),
-                authors=authors,
-                journal=result.get("journalTitle", ""),
-                year=year,
-                abstract=result.get("abstractText", ""),
-                is_open_access=result.get("isOpenAccess") == "Y",
-                has_fulltext_xml=result.get("inEPMC") == "Y" or result.get("inPMC") == "Y",
-                has_pdf=result.get("hasPDF") == "Y",
-                pdf_render_url=_extract_free_pdf_url(result),
-            ))
+            # The same reading as a search result's, so a preprint looked up
+            # by DOI keeps the source and record ID its full text is fetched
+            # by: this path left them unset, and the preprint unfetchable.
+            return ArticleInfoFetch.served(_article_info_from_result(results[0]))
 
         except requests.exceptions.RequestException as e:
             # Never an absence: a throttled or unreachable Europe PMC has
@@ -808,74 +905,41 @@ class EuropePMCClient:
             ArticleInfo object or None if parsing fails
         """
         try:
-            # Extract authors
-            authors = []
-            author_list = result.get("authorList", {}).get("author", [])
-            for author in author_list:
-                full_name = author.get("fullName", "")
-                if full_name:
-                    authors.append(full_name)
-
-            # Extract year
-            year = None
-            pub_year = result.get("pubYear")
-            if pub_year:
-                try:
-                    year = int(pub_year)
-                except ValueError:
-                    pass
-
-            # Check if this is a preprint
-            source = result.get("source", "")
-            is_preprint = source == EUROPEPMC_SOURCE_PREPRINT
-
-            return ArticleInfo(
-                pmid=result.get("pmid"),
-                pmcid=result.get("pmcid"),
-                doi=result.get("doi"),
-                title=result.get("title", ""),
-                authors=authors,
-                journal=result.get("journalTitle", ""),
-                year=year,
-                abstract=result.get("abstractText", ""),
-                is_open_access=result.get("isOpenAccess") == "Y",
-                has_fulltext_xml=result.get("inEPMC") == "Y" or result.get("inPMC") == "Y",
-                has_pdf=result.get("hasPDF") == "Y",
-                is_preprint=is_preprint,
-                source=source,
-                pdf_render_url=_extract_free_pdf_url(result),
-            )
-
+            return _article_info_from_result(result)
         except Exception as e:
             logger.warning(f"Failed to parse Europe PMC result: {e}")
             return None
 
-    def fetch_fulltext_xml(self, pmcid: str) -> FullTextXmlFetch:
+    def fetch_fulltext_xml(self, accession: str) -> FullTextXmlFetch:
         """Ask Europe PMC for an article's full-text XML, and say what we got.
 
-        Takes a PMC ID only: resolving another identifier to one is
+        Takes an accession only: resolving another identifier to one is
         :meth:`fetch_article_info`'s job, whose answer the caller needs
-        anyway to know whether Europe PMC lists a full text at all.
+        anyway (see :attr:`ArticleInfo.fulltext_accession`).
 
         Args:
-            pmcid: PubMed Central ID, with or without its ``PMC`` prefix.
+            accession: A PMC ID, with or without its ``PMC`` prefix, or a
+                preprint's ``PPR`` record ID.
 
         Returns:
-            The fetch: the XML; Europe PMC's 404, its answer that it holds no
-            open-access full text under this ID; or why it could not be read,
-            of its real kind -- a 429 stays a 429 (#429). A blank answer is
-            an incomplete response, and an identifier that is not a PMC
-            accession is a request never made (#355), not an absence.
+            The fetch: the XML; Europe PMC's 404, its answer that it serves
+            no open-access full text under this ID; or why it could not be
+            read, of its real kind once the session's retries are spent --
+            a 429 stays a 429 (#429). A blank answer is an incomplete
+            response, and an identifier that is not an accession is a
+            request never made (#355), not an absence.
         """
-        accession = pmc_accession(pmcid)
-        if accession is None:
+        normalised = fulltext_accession(accession)
+        if normalised is None:
             logger.warning(
-                "Not a PMC accession, so Europe PMC was not asked for its "
-                "full text."
+                "Not a PMC or preprint accession, so Europe PMC was not "
+                "asked for its full text: %r",
+                accession,
             )
             return FullTextXmlFetch.unreachable(
                 RequestFailure(RequestFailureKind.REQUEST_FAILED)
             )
+        accession = normalised
 
         url = f"{EUROPEPMC_REST_BASE_URL}/{accession}/fullTextXML"
         try:
@@ -885,7 +949,7 @@ class EuropePMCClient:
                 timeout=EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
             )
             if response.status_code == HTTP_NOT_FOUND:
-                logger.debug(f"Europe PMC holds no full-text XML for {accession}")
+                logger.debug("Europe PMC serves no full-text XML for %s", accession)
                 return FullTextXmlFetch.absent()
             response.raise_for_status()
             xml = response.text
@@ -899,7 +963,7 @@ class EuropePMCClient:
             return FullTextXmlFetch.unreachable(failure)
 
         if not xml.strip():
-            logger.warning(f"Europe PMC served an empty full text for {accession}")
+            logger.warning("Europe PMC served an empty full text for %s", accession)
             return FullTextXmlFetch.unreachable(
                 RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)
             )
