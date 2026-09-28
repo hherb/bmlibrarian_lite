@@ -39,12 +39,19 @@ from bmlibrarian_lite.data_models import (
     RequestFailureKind,
     SourceLookupFailure,
 )
+from bmlibrarian_lite.jats_markdown import END_MATTER_MARKER
 from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
     DataAvailabilityInfo,
     DataDisclosureLevel,
     StudyTransparencyAnalyzer,
     TransparencyReport,
     calculate_transparency_score,
+)
+
+#: A read full text whose end matter the converter marked, every heading of
+#: which is known, so that a missing statement is the article's own (#428).
+READ_WITH_END_MATTER = (
+    f"The article's full text.\n\n{END_MATTER_MARKER}\n\n## Funding\n\nNIH grant R01."
 )
 
 
@@ -167,7 +174,7 @@ class TestDataAvailabilityWithNoTextRead:
         analyzer._analyze_data_availability(
             report,
             fulltext_sections={"funding": "NIH grant R01."},
-            fulltext="The article's full text.",
+            fulltext=READ_WITH_END_MATTER,
         )
 
         assert (

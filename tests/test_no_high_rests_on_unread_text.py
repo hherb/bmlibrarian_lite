@@ -12,6 +12,7 @@ import itertools
 import pytest
 import requests
 
+from bmlibrarian_lite.jats_markdown import END_MATTER_MARKER
 from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
     StudyTransparencyAnalyzer,
     TransparencyReport,
@@ -24,6 +25,12 @@ from bmlibrarian_lite.transparency import (
     high_risk_triggers_for,
 )
 from bmlibrarian_lite.transparency.assessment import build_transparency_result
+
+#: A read full text whose end matter the converter marked, every heading of
+#: which is known, so that a missing statement is the article's own (#428).
+READ_WITH_END_MATTER = (
+    f"The article's full text.\n\n{END_MATTER_MARKER}\n\n## Funding\n\nNIH grant R01."
+)
 
 
 @pytest.fixture
@@ -79,8 +86,8 @@ class TestNoMissingStatementIsChargedAgainstTextNobodyRead:
         report = TransparencyReport(doi="10.1/x", pmid="1", pubmed_record_read=True)
         report.industry_funding_detected = True
         sections = {"methods": "...", "funding": "NIH grant R01."}
-        analyzer._analyze_conflicts(report, fulltext_sections=sections, fulltext="The article's full text.")
-        analyzer._analyze_data_availability(report, fulltext_sections=sections, fulltext="The article's full text.")
+        analyzer._analyze_conflicts(report, fulltext_sections=sections, fulltext=READ_WITH_END_MATTER)
+        analyzer._analyze_data_availability(report, fulltext_sections=sections, fulltext=READ_WITH_END_MATTER)
         report.transparency_score = calculate_transparency_score(report)
         result = build_transparency_result("d", report, get_default_settings())
 

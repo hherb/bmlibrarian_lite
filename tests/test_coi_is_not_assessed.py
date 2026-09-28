@@ -48,6 +48,7 @@ from bmlibrarian_lite.analysis_failures import (
     unassessed_caveat,
 )
 from bmlibrarian_lite.data_models import RecordFetch
+from bmlibrarian_lite.jats_markdown import END_MATTER_MARKER
 from bmlibrarian_lite.study_transparency_analyzer import (
     study_transparency_analyzer as analyzer_module,
 )
@@ -71,6 +72,13 @@ from bmlibrarian_lite.transparency import (
 )
 
 DISCLOSURE = "The authors declare no competing interests."
+
+
+#: A read full text whose end matter the converter marked, every heading of
+#: which is known, so that a missing statement is the article's own (#428).
+READ_WITH_END_MATTER = (
+    f"The article's full text.\n\n{END_MATTER_MARKER}\n\n## Funding\n\nNIH grant R01."
+)
 
 
 @pytest.fixture
@@ -207,7 +215,7 @@ class TestWhatTheAnalyserRecords:
         analyzer._analyze_conflicts(
             report,
             fulltext_sections={"methods": "...", "funding": "NIH grant R01."},
-            fulltext="The article's full text.",
+            fulltext=READ_WITH_END_MATTER,
         )
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_STATED
@@ -831,7 +839,10 @@ class TestTheWiringItself:
 
         report = analyzer.analyze(
             doi="10.1/x",
-            fulltext="# Methods\n\nWe did things.\n\n# Funding\n\nNIH grant R01.",
+            fulltext=(
+                f"# Methods\n\nWe did things.\n\n{END_MATTER_MARKER}\n\n"
+                "# Funding\n\nNIH grant R01."
+            ),
         )
 
         assert report.coi_info.disclosure_level is COIDisclosureLevel.NOT_STATED

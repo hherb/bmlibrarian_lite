@@ -317,7 +317,10 @@ that was read and its end matter parsed, and `not_stated` for data
 availability only from a full text that was read and segmented. Since
 #420 neither is recorded from a text that uses the statement's wording
 where no statement was recognised (outside its reference list): the
-statement may be one the parser missed. (A Europe PMC XML fallback once
+statement may be one the parser missed. Since #428 neither is recorded
+unless every heading of the end matter, which the JATS converter marks, is
+classified; a text with no marked end matter, text from a PDF among it, is
+never charged. (A Europe PMC XML fallback once
 charged data availability from XML read for that one statement; it was
 removed in #421.) Anywhere else, Python
 records `not_assessed` / `unknown` — neutral values that score 0 and trigger

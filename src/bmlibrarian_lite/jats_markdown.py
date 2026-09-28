@@ -45,6 +45,11 @@ without a heading once a sibling has had one: an untitled abbreviation list
 or disclaimer printed after a competing interests statement would otherwise
 be read as part of it, and a vaccine maker it names as an industry tie
 (#426 review).
+
+The end matter opens with :data:`END_MATTER_MARKER`, wherever it first
+appears. The analyser charges a missing statement only when it knows every
+heading after the marker (#428), so a heading this module emits there is
+one ``study_transparency_analyzer.statement_headings`` must classify.
 """
 
 import copy
@@ -69,7 +74,16 @@ logger = logging.getLogger(__name__)
 #: headings merged, body run-ins kept inline, sub-articles ignored. Bumped
 #: before release, so no file a pre-review build of the branch cached is
 #: trusted.
-JATS_MARKDOWN_CONVERTER_VERSION = 3
+#: 4: #428 -- :data:`END_MATTER_MARKER` opens the end matter.
+JATS_MARKDOWN_CONVERTER_VERSION = 4
+
+#: The line that opens the end matter: the back matter and the front-matter
+#: statements, after the body. Everything after it is end matter. It tells
+#: the transparency analyser which headings are the article's statements and
+#: their neighbours, so that a missing statement is charged only when every
+#: one of them is a heading it knows (#428). An HTML comment, so that no
+#: markdown view shows it.
+END_MATTER_MARKER = "<!-- bmlibrarian-lite end-matter -->"
 
 #: The heading a statement gets from its type when the article gives it no
 #: heading of its own. Read from ``fn-type``, ``notes-type`` and ``sec-type``:
@@ -204,9 +218,10 @@ def jats_to_markdown(xml_content: str) -> str:
 
     Returns:
         The markdown: title, authors, journal line and abstract; the body;
-        the back matter and the front-matter statements, each under its own
-        heading; then the references. An empty string when the XML does not
-        parse.
+        :data:`END_MATTER_MARKER`, then the back matter and the front-matter
+        statements, each under its own heading; then the references. The
+        marker is left out when there is no end matter. An empty string when
+        the XML does not parse.
     """
     try:
         root = ET.fromstring(xml_content)
@@ -229,13 +244,19 @@ def jats_to_markdown(xml_content: str) -> str:
     if body is not None:
         parts.append(_body(body))
 
+    end_matter: list[str] = []
     back = article.find("back")
     if back is not None:
-        parts.append(_back_matter(back))
+        end_matter.append(_back_matter(back))
 
     if front is not None:
-        already = "\n\n".join(parts)
-        parts.extend(_front_statements(front, already))
+        already = "\n\n".join(parts + end_matter)
+        end_matter.extend(_front_statements(front, already))
+
+    end_matter = [part for part in end_matter if part]
+    if end_matter:
+        parts.append(END_MATTER_MARKER)
+        parts.extend(end_matter)
 
     if back is not None:
         parts.append(_references(back))
@@ -631,6 +652,10 @@ def _render_children(
     pieces = _pieces(parent, end_matter)
     sibling_level = run_in_level or level
     parts = []
+    # End matter inside the body -- a journal that keeps its footnotes, and
+    # the competing interests statement among them, in a <sec> of the body
+    # -- is marked where it begins, as the back matter is (#428).
+    marked = end_matter
     current = in_force
     heading_holder: ET.Element | None = None
     headed_here = False
@@ -643,6 +668,9 @@ def _render_children(
             ):
                 rest = text_of(_paragraph_without_run_in(child))
                 heading_line = _heading_line(run_in, sibling_level)
+                if piece.end_matter and not marked:
+                    parts.append(END_MATTER_MARKER)
+                    marked = True
                 parts.append(f"{heading_line}\n\n{rest}" if rest else heading_line)
                 current, heading_holder, headed_here = run_in, holder, True
                 continue
@@ -661,6 +689,9 @@ def _render_children(
             if not _same_heading(default, current):
                 rendered = f"{_heading_line(default, sibling_level)}\n\n{rendered}"
             current, heading_holder, headed_here = default, holder, True
+        if piece.end_matter and not marked:
+            parts.append(END_MATTER_MARKER)
+            marked = True
         parts.append(rendered)
     return "\n\n".join(parts)
 

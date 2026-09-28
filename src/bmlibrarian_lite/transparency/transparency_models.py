@@ -121,7 +121,13 @@ class TransparencyUnassessed:
 #: text that still uses a statement's wording outside its references is
 #: not charged for missing it; and data availability is no longer read from
 #: Europe PMC's XML when no full text was).
-TRANSPARENCY_ANALYZER_VERSION = "2.4"
+#: 2.5: #428 (a missing competing interests or data availability statement
+#: is charged only when every heading of the end matter is classified -- a
+#: statement's, a known neighbour's, or a catch-all or subsection whose text
+#: avoids the statement's vocabulary; a text whose end matter is not marked,
+#: text from a PDF among it, is not charged; more funding and contribution
+#: headings are recognised).
+TRANSPARENCY_ANALYZER_VERSION = "2.5"
 
 #: What every row written before #360 says, whatever analysed it: the field
 #: was never compared to anything, so it never moved off its default.

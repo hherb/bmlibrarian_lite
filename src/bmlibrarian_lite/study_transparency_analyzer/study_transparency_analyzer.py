@@ -77,6 +77,15 @@ from ..transparency_terms import (
     ScoreComponent,
     clamped_score,
 )
+from .statement_headings import (
+    HEADING_QUALIFIER,
+    MAX_HEADING_LINE_CHARS,
+    STATEMENT_HEADING_PATTERNS,
+    end_matter_sections,
+    is_end_matter_marker,
+    markdown_heading_level,
+    unclassified_headings,
+)
 
 # Each client below owns its own request loop and its own error handling,
 # and made exactly one physical request per call before pacing was mounted.
@@ -2206,6 +2215,9 @@ def _any_section_was_parsed(fulltext_sections: Optional[Dict[str, str]]) -> bool
 #: as a bare "None declared." footnote.
 _COI_WORDING_RE = re.compile(
     rf'{COI_WORDING_PATTERN}|none declared|nothing to (?:declare|disclose)'
+    # ARVO's "Commercial relationships: none." and "no conflicts of research
+    # interest", both charged as absent statements (#428 survey).
+    r'|commercial relationships?|conflicts? of \w+ interests?'
     r"|conflits? d['’]int[ée]r[êe]ts?|conflictos? de intereses?"
     r'|conflitos? de interesses?|interessenkonflikt',
     re.IGNORECASE,
@@ -2279,7 +2291,7 @@ def _without_reference_lists(fulltext: str) -> str:
     skipping_below: int | None = None
     for line in fulltext.split('\n'):
         stripped = line.strip()
-        level = _markdown_heading_level(stripped)
+        level = markdown_heading_level(stripped)
         if skipping_below is not None:
             if not level or level > skipping_below:
                 continue
@@ -2289,6 +2301,64 @@ def _without_reference_lists(fulltext: str) -> str:
             continue
         kept.append(line)
     return '\n'.join(kept)
+
+
+#: Why a statement missing from a full text was not charged when the text
+#: does not say where its end matter begins, so a heading the analyser does
+#: not know cannot be looked for (#428). Text extracted from a PDF never
+#: says; nor does a converted article with no end-matter element at all.
+END_MATTER_NOT_SEGMENTED = (
+    "The article's end matter, where such statements are printed, could "
+    "not be told apart from the rest of its full text"
+)
+
+
+def end_matter_unrecognised_clause(headings: tuple[str, ...]) -> str:
+    """Why a statement missing from a full text was not charged: headings.
+
+    A journal may print its statement under a heading of its own, and one
+    the analyser does not know is exactly where a statement it failed to
+    find would be (#428).
+
+    Args:
+        headings: The end-matter headings neither a statement's nor a known
+            neighbour's; at least one.
+
+    Returns:
+        A capitalised clause naming each heading, in quotes.
+    """
+    quoted = ", ".join(f'"{heading}"' for heading in headings)
+    sections = "a section" if len(headings) == 1 else "sections"
+    return (
+        f"The article's end matter holds {sections} this analysis does not "
+        f"recognise ({quoted})"
+    )
+
+
+def _why_silence_is_not_the_articles(fulltext: str, sought: str) -> str | None:
+    """Why a full text's silence about a statement is not the article's own.
+
+    A statement is charged as missing only once every heading of the end
+    matter, where statements are printed, has been recognised: as a
+    statement's, as a known neighbour's, or as a catch-all ("Author Notes")
+    whose text does not use the statement's vocabulary. Anything else may
+    be the statement under a journal's own name (#428).
+
+    Args:
+        fulltext: The full text, in which no statement was found.
+        sought: The statement's key: ``'coi'`` or ``'data_sharing'``.
+
+    Returns:
+        ``None`` when the silence is the article's; otherwise why it is not,
+        as a capitalised clause for :func:`unassessed_caveat`.
+    """
+    sections = end_matter_sections(fulltext)
+    if sections is None:
+        return END_MATTER_NOT_SEGMENTED
+    unrecognised = unclassified_headings(sections, sought)
+    if unrecognised:
+        return end_matter_unrecognised_clause(unrecognised)
+    return None
 
 
 def _text_or_none(text: str | None) -> str | None:
@@ -2468,26 +2538,6 @@ def analyze_data_availability(text: Optional[str]) -> DataAvailabilityInfo:
     )
 
 
-#: A markdown heading line: one to six ``#`` then a space. Converted JATS
-#: marks every heading this way; extracted PDF text marks none, and a line
-#: of it that happens to open "# " only ends a section early.
-_MARKDOWN_HEADING_RE = re.compile(r'(#{1,6})\s')
-
-
-def _markdown_heading_level(line: str) -> int:
-    """The level of a markdown heading line.
-
-    Args:
-        line: A stripped line of full text.
-
-    Returns:
-        The number of ``#`` marks opening it, or 0 when it is not a
-        markdown heading -- a plain-text heading from a PDF, or prose.
-    """
-    match = _MARKDOWN_HEADING_RE.match(line)
-    return len(match.group(1)) if match else 0
-
-
 def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
     """Extract transparency-relevant sections from full-text content.
 
@@ -2506,78 +2556,10 @@ def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
         Keys may include: 'coi', 'data_sharing', 'funding',
         'funding_role', 'acknowledgments', 'contributors'.
     """
-    # Map of canonical key -> list of header patterns (case-insensitive)
-    section_headers: Dict[str, List[str]] = {
-        'coi': [
-            # "Declaration of Competing Interest" is Elsevier's standard
-            # heading and "Conflict of Interest Statement" the standard
-            # PMC/JATS one; both missed the anchored match until the
-            # ``competing`` infix and the trailing qualifier below existed.
-            # A heading we fail to recognise used to be recorded as the
-            # article declaring no conflicts (#359).
-            'coi',
-            'conflicts? of interests?',
-            'conflict[-‐-―\\s]of[-‐-―\\s]interests?',
-            'potential conflicts? of interests?',
-            'declarations? of (?:competing |conflicting |conflicts? of )?interests?',
-            '(?:potential )?competing (?:financial )?interests?',
-            # One heading for two statements; the funding half is still
-            # found by the funder lookups (#420).
-            'conflicts? of interests? and sources? of funding',
-            'author disclosures?',
-            'disclosures?',
-            # Diabetologia's heading for every competing interests statement,
-            # and another journal's; missed, each read as an article that
-            # declares nothing, industry ties and all (#426 review).
-            "authors?['’]? relationships and activities",
-            '(?:financial and non-?financial )?relationships? and activities',
-            'duality of interests?',
-            # The statement's heading in the languages surveyed articles
-            # print it in untyped: French, Spanish, Portuguese, German.
-            "conflits? d['’]int[ée]r[êe]ts?",
-            'conflictos? de intereses?',
-            'conflitos? de interesses?',
-            'interessenkonflikte?',
-        ],
-        'data_sharing': [
-            'data sharing',
-            'data availability',
-            'data access',
-            'availability of data',
-            # BMC's standard "Availability of data and materials", Cell's
-            # "Data and code availability", and Wiley's "Data accessibility"
-            # (#426 review).
-            'availability of (?:the )?data and (?:materials?|code)',
-            'availability of materials? and data',
-            'data and (?:code|materials?|software) availability',
-            'data accessibility',
-        ],
-        'funding': [
-            'funding',
-            'financial support',
-            'grant support',
-            'sources? of (?:support|funding)',
-        ],
-        'funding_role': [
-            'role of the funding source',
-            'role of the funder',
-            'role of the sponsor',
-            'funder role',
-        ],
-        'acknowledgments': [
-            # "Acknowledgements", the British spelling, heads a third of the
-            # surveyed <ack> elements; ``acknowledgm?ents?`` matched only the
-            # American one (#420).
-            'acknowledge?ments?',
-        ],
-        'contributors': [
-            'contributors?',
-            'author contributions?',
-        ],
-    }
+    section_headers = STATEMENT_HEADING_PATTERNS
 
     # All possible headers as a flat list (for detecting section boundaries)
-    all_header_patterns = []
+    all_header_patterns: list[str] = []
     for patterns in section_headers.values():
         all_header_patterns.extend(patterns)
 
@@ -2586,7 +2568,7 @@ def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
 
     for i, line in enumerate(lines):
         stripped = line.strip()
-        if not stripped or len(stripped) > 120:
+        if not stripped or len(stripped) > MAX_HEADING_LINE_CHARS:
             continue
 
         stripped_lower = stripped.lower()
@@ -2597,23 +2579,25 @@ def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
 
             for pattern in patterns:
                 # The optional trailing qualifier matters as much as the
-                # patterns themselves: "Conflict of Interest Statement" and
-                # "Data Availability Statement" are the commonest spellings
-                # of both sections, and a fully anchored match rejected
-                # every one of them (#359).
+                # patterns themselves (see HEADING_QUALIFIER, #359).
                 if re.search(
-                    rf'^(?:#*\s*)?{pattern}'
-                    rf'(?:\s+(?:statements?|disclosures?|declarations?|section))?'
-                    rf'\s*:?\s*$',
+                    rf'^(?:#*\s*)?{pattern}{HEADING_QUALIFIER}\s*:?\s*$',
                     stripped_lower,
                 ):
                     # Found a header — collect content until next section
-                    header_level = _markdown_heading_level(stripped)
+                    header_level = markdown_heading_level(stripped)
                     content_lines = []
                     for j in range(i + 1, len(lines)):
                         next_stripped = lines[j].strip()
                         if not next_stripped:
                             content_lines.append('')
+                            continue
+
+                        # The end matter's mark is no part of any statement
+                        # (#428). It does not end one either: in the body it
+                        # can fall inside a section, before the untitled
+                        # <ack> of a titled "Acknowledgments".
+                        if is_end_matter_marker(next_stripped):
                             continue
 
                         # A markdown heading at this section's level or
@@ -2623,14 +2607,14 @@ def extract_fulltext_sections(fulltext: str) -> Dict[str, str]:
                         # Frontiers "Publisher's note" read as part of the
                         # competing interests statement, and its
                         # "manufacturer" as an industry tie (#420).
-                        next_level = _markdown_heading_level(next_stripped)
+                        next_level = markdown_heading_level(next_stripped)
                         if next_level and (
                             not header_level or next_level <= header_level
                         ):
                             break
 
                         # Stop at next recognised section header
-                        if len(next_stripped) <= 120:
+                        if len(next_stripped) <= MAX_HEADING_LINE_CHARS:
                             next_lower = next_stripped.lower()
                             is_next_header = False
                             for hp in all_header_patterns:
@@ -3496,10 +3480,18 @@ class StudyTransparencyAnalyzer:
                 )
             )
         elif fulltext and _end_matter_was_parsed(fulltext_sections):
-            # The article itself was read, its end matter was recognised, and
-            # no disclosure is among it. That is the study's own answer, and
-            # the only one that costs it points.
-            report.coi_info = ConflictOfInterest.not_stated()
+            # The article itself was read and its end matter was recognised.
+            # No disclosure among it is the study's own answer -- the only
+            # one that costs it points -- once every heading there is one we
+            # know (#428).
+            because = _why_silence_is_not_the_articles(fulltext, 'coi')
+            if because is None:
+                report.coi_info = ConflictOfInterest.not_stated()
+            else:
+                report.coi_info = ConflictOfInterest.not_assessed()
+                report.warnings.append(
+                    unassessed_caveat(because, COI_DISCLOSURE_SOUGHT)
+                )
         elif fulltext:
             # Full text arrived but not one end-matter section was
             # recognised in it, so the parse -- not the article -- is what
@@ -3596,7 +3588,16 @@ class StudyTransparencyAnalyzer:
                     report, DATA_AVAILABILITY_WORDING_WITHOUT_STATEMENT
                 )
             elif _any_section_was_parsed(fulltext_sections):
-                report.data_availability = analyze_data_availability(None)
+                # The #428 rule, as for the competing interests statement.
+                because = _why_silence_is_not_the_articles(
+                    fulltext, 'data_sharing'
+                )
+                if because is None:
+                    report.data_availability = analyze_data_availability(None)
+                else:
+                    self._record_data_availability_unassessed_because(
+                        report, because
+                    )
             else:
                 self._record_data_availability_unassessed_because(
                     report,

@@ -572,6 +572,25 @@ the text read does not use the statement's wording outside its reference
 list; a text that does may hold a statement we failed to find, so it is
 `not_assessed` / `unknown` with a caveat.
 
+The charge also needs **every heading of the end matter classified** (#428,
+`statement_headings.py`). The converter opens the end matter with
+`END_MATTER_MARKER` (an HTML comment, wherever end matter first appears,
+body included). Each heading after it that holds text must be a statement's
+heading, a known neighbour's (`KNOWN_NON_STATEMENT_HEADING_PATTERNS`:
+"Publisher's note", "Ethics statement", "Abbreviations", ...), a part of the
+*other* statement (Cureus's ICMJE parts), or -- for a catch-all such as
+"Author Notes", "Footnotes" or "Disclaimer", and for a subsection of a classified section
+-- text that avoids the statement's vocabulary (`COI_VOCABULARY_RE`,
+`DATA_VOCABULARY_RE`). Anything else makes the result `not_assessed` /
+`unknown`, with a caveat naming the headings. The end matter starts at the
+marker, or at the first statement heading when one comes before it (a
+statement printed as a body section); text after the marker with no heading
+of its own continues the section the marker fell in. A text without the
+marker -- text extracted from a PDF, or a converted article with no
+end-matter element at all -- is never charged; `segment_unmarked_end_matter` is the stub where a
+segmentation of such text will go. The neighbour list fails safe: a heading
+missing from it costs a charge, never makes one.
+
 ### Priority Order
 
 Full-text sections take priority over API-sourced data:

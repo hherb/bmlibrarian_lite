@@ -8,78 +8,72 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#420 + #421 — statements reach the analyser; the XML fallback is gone**
-(Python), branch `fix/plos-front-matter-statements-420`, **PR #426**. Compress into
-**Recently landed** once merged.
+**#428 — charge a missing statement only when every end-matter heading is
+classified** (Python), branch `fix/classify-end-matter-headings-428`. Compress
+into **Recently landed** once merged.
 
-- **The converter is `jats_markdown.py`** (`EuropePMCClient` delegates):
-  every `<back>` element but the ref-list, and PLOS's front statements
-  (`<author-notes>` fn, titled `<notes>`, `<funding-statement>`), each under
-  a heading, after the body, before the references. Body walked in order.
-  `<award-group>` alone is **not** a funding statement; `custom-meta` data
-  availability is skipped (duplicates the front `<notes>`).
-- **Review round (the #359 trap again):** recognising a funding section made
-  every *missed* COI statement a −5 charge. Fixed five ways: a stated type
-  (`COI-statement` …) names the heading on leaf elements, printed heading
-  kept in bold; every "**X:**" paragraph is its own heading; a bare footnote
-  about conflicts is headed; headless author notes are kept ("Author
-  Notes" — BMJ's bare "None declared."); and **the analyser charges a
-  missing COI/data statement only if the text never uses its wording**
-  (`_mentions`). Dedupe compares heading + body, never body alone ("None").
-  Measured on 997 articles, HEAD → branch: COI read 420→891, charged
-  152→24 (none mentions COI), data read 419→720.
-- **The extractor ends a section at a markdown heading of the same level or
-  above** (not at a subsection's: Cureus nests its COI run-in), keeping
-  Frontiers' "Publisher's note" ("manufacturer") out of the COI text. New:
-  "Acknowledgements" (British spelling; `acknowledgm?ents?` never matched
-  it), "Declaration of Conflicts of Interest", "Potential Competing
-  Interests", "Conflicts of interest and source of funding".
-- **Cache stamp.** Cached markdown opens with
-  `<!-- bmlibrarian-lite jats-markdown vN -->`; `read_cached_fulltext`
-  returns `None` for any other stamp, so the article is converted again.
-  **Bump `JATS_MARKDOWN_CONVERTER_VERSION`** whenever the same XML converts
-  differently (now **3**: the second review round changed the output).
-  Analyser version **`2.4`**.
-- **#421 (user's call): the fallback is removed**, with the analyser's
-  `EuropePMCClient` and `FullTextFetch`. Without a full text, data
-  availability is `unknown` (`DATA_AVAILABILITY_NOWHERE_TO_LOOK`), and no
-  request is made, also under `auto_discover_fulltext=False`.
-- PLOS ONE COI 0→150/150 (`tmp/jats-*`, gitignored); every newly flagged
-  industry tie read by hand: genuine. Lodged: #423 (the apps' front-matter
-  gap), #424 ("within the manuscript" → `UNKNOWN`), #425 (headings missed).
-- **Second review round (PR #426).** The emitted back matter let text with
-  no heading run on into a statement, and headed each footnote of a group
-  anew so only the first was read. Now:
-  - In the end matter no piece goes without a heading once a sibling has
-    one (`DEFAULT_HEADING_BY_OWNER`), and a list's `<title>` heads it
-    (JMIR's abbreviations had become industry ties).
-  - A heading the same as the one in force is merged (eLife's per-author
-    COI footnotes).
-  - A block's later run-ins are its siblings. In the body a run-in heads
-    only if no plain paragraph follows.
-  - `<fn>`/`<fn-group>`/`<notes>`/`<ack>`/`<glossary>` are end matter
-    anywhere (SAGE ships articles with no `<back>`).
-  - `<sub-article>`s are ignored.
-  - More headings: Diabetologia's "Authors' relationships and activities",
-    "Duality of interest", FR/ES/PT/DE COI headings, BMC/Cell/Wiley data
-    headings.
-  - The guard ignores the reference list's own section (BMJ puts one above
-    its author notes).
-  - `fulltext_read` is gone: the text is the flag.
-  - The cache write is atomic, a stamp with no body is stale, and an
-    unreadable cache is recorded. The interrogation tab shows a stale cache,
-    labelled, when the refresh fails.
-  - 410 local articles, PR head → now: COI charged 12→5, all five print no
-    statement. All 82 ties lost since master were run-on text (Frontiers'
-    Publisher's note, whole STAR Methods). Lodged: #427 (stale fallback for
-    MCP/discovery), #428 (charge only when every end-matter heading is
-    classified), #429 (typed `get_fulltext_xml`).
+- **The converter marks the end matter**: `END_MATTER_MARKER` (an HTML
+  comment; Qt's markdown view hides it) before the back matter and front
+  statements, and in `_render_children` wherever end matter first appears
+  in the body (a haematology journal keeps its footnotes, and its "利益冲突"
+  statement, in a body `<sec>`). Converter version **4**. The extractor steps
+  over the marker; it neither joins nor ends a section.
+- **`study_transparency_analyzer/statement_headings.py`** (new) holds the
+  statement heading patterns (moved out of `extract_fulltext_sections`) and
+  the classification. Classified: a statement's heading; a known neighbour
+  (`KNOWN_NON_STATEMENT_HEADING_PATTERNS`, from the survey); a part of the
+  *other* statement (`STATEMENT_PART_HEADING_PATTERNS`, Cureus's ICMJE
+  parts); a catch-all ("Author Notes", "Footnotes", "Note(s)", "Endnotes",
+  "Disclaimer", "Biography") or a subsection of a named section whose text
+  avoids the statement's vocabulary (`COI_VOCABULARY_RE` /
+  `DATA_VOCABULARY_RE`). A heading with no text of its own (a "Declarations"
+  wrapper) is not asked about. **The end matter starts at the marker, or at
+  the first statement heading if one comes before it** (statements printed as
+  body sections); text after the marker with no heading continues the
+  section the marker fell in (both from the review).
+- **No marker, no charge** (user's call): PDF text, and JATS whose
+  statements are body sections, are `not_assessed` / `unknown`
+  (`END_MATTER_NOT_SEGMENTED`). `segment_unmarked_end_matter` is the stub
+  where an LLM-based PDF segmentation will plug in (#430).
+- The `_mentions` wording guard stays (gained ARVO's "Commercial
+  relationships: none." and "conflicts of research interest"). Analyser
+  version **2.5**.
+- **Measured**, master → branch, nothing newly charged, industry ties
+  unchanged. 1,292 local PMC articles: COI charged 23 → 9, data 209 → 133.
+  Held-out 331 (2021–22, `tmp/jats-428-heldout`, mostly Springer): COI
+  34 → 20, data 160 → 108. Every remaining COI charge read against its XML:
+  none prints a statement. 10 false charges released (5 × "利益冲突",
+  ARVO's run-in, a catch-all author note, "Author disclosures are available
+  at …", 2 × Springer's "no relevant financial or non-financial interests
+  to disclose"); the rest are the fail-safe price, mostly "Appendix"
+  headings and footnotes using the vocabulary. The COI vocabulary is in
+  disclosure forms only ("financial interest", not "financ") after the
+  held-out run. 20 mutants, all caught.
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
+
+- **Statements reach the analyser; the XML fallback is gone** (Python;
+  PR #426, #420, #421; merged 2026-09-27). **The converter is
+  `jats_markdown.py`**: every `<back>` element but the ref-list, plus PLOS's
+  front statements (`<author-notes>` fn, titled `<notes>`,
+  `<funding-statement>`), each under a heading, after the body, before the
+  references; `<fn>`/`<fn-group>`/`<notes>`/`<ack>`/`<glossary>` are end
+  matter anywhere; `<sub-article>`s are ignored. **In the end matter no piece
+  goes without a heading once a sibling has one** — run-on text turned
+  Frontiers' "Publisher's note" and JMIR's abbreviations into industry ties.
+  **Recognising more end matter creates charges** (the #359 trap): the
+  analyser charges a missing COI/data statement only if the text never uses
+  its wording (`_mentions`; #428 adds the heading rule). The extractor ends a
+  section at a heading of the same level or above. **Cache stamp**: cached
+  markdown opens with `<!-- bmlibrarian-lite jats-markdown vN -->`, any
+  other stamp is stale and reconverted — **bump
+  `JATS_MARKDOWN_CONVERTER_VERSION`** whenever the same XML converts
+  differently. **No full text, no data-availability request** (#421, user's
+  call). Survey scratch lives in `tmp/jats-*` (gitignored).
 
 - **Desktop certainty and high-risk explanation** (Python; PR #419, #386;
   merged 2026-09-27). Every no-full-text rating says "Limited certainty
@@ -106,33 +100,20 @@ the rest.
   registry databank counts. Trial titles match by whole word
   (`trial_title_patterns.json`). Versions: Python `2.2`, Swift/Android `7`.
   Lodged: #409, #411–#415.
-- **Inline markup and mixed citations keep their text** (PR #397; PR #405,
-  #398; merged 2026-09-26). **Never `findtext` a mixed-content element** — it
-  returns the text before the first child. Swift + Android JATS: every
-  descendant of a `<mixed-citation>` merges into it (an ancestor test — bmlib
-  #146), and the deposit prints wherever fewer than two parts would (bmlib
-  #268). The Android JATS parser is JVM-testable (kxml2, test-only).
-  Lodged: #399–#404, #406–#408.
-- **Funders named by brand; back-matter headings; PubMed identifiers**
-  (PR #395, PR #396, #394; merged 2026-09-24/25). `sponsor_patterns.json`
-  schema 4 adds whole-word `industry_brands`; **"Eli Lilly" is the one
-  spelled-out exception**, **UCB is left out** (UC Berkeley), and **a brand
-  beside a foundation word is the charity**. The funder corpus was re-audited
-  (precision 0.958, recall 0.657, floors 0.95 / 0.65) and **now differs from
-  bmlib's copy**.
-- **Reports explain transparency ratings; Android analyses transparency**
-  (Swift + Android; PR #388, #116; merged 2026-09-24). **Rating and
-  explanation come from one function** (`highRiskTriggers` /
-  `scoreComponents`). **Full text is the gold standard**: every rating made
-  without it says "Limited certainty because of lack of full text access",
-  and on the apps a High whose every reason rests on unsearched text shows
-  as **Unassessed** (display only). Every Android rating says "limited" until
-  #384. The desktop port landed as PR #419.
-- **Model lists and pricing** (all three; PR #383, merged 2026-09-24). Swift
-  builds every model-list URL from the `/v1` root; **an unlisted Claude ID
-  gets its family's dearest current rate**; Python's `list_models` raises
-  rather than answering with a fallback table. Release **0.5.0 / apps
-  1.6.0** followed (PR #393).
+- **Mixed content** (PR #397, #405): **never `findtext` a mixed-content
+  element** — it returns the text before the first child. The Android JATS
+  parser is JVM-testable (kxml2, test-only).
+- **Funders by brand** (PR #395/#396): `sponsor_patterns.json` schema 4
+  whole-word `industry_brands`; "Eli Lilly" the one spelled-out exception,
+  UCB left out (UC Berkeley), a brand beside a foundation word is the
+  charity. The funder corpus **differs from bmlib's copy**.
+- **Reports explain ratings** (Swift + Android, PR #388): rating and
+  explanation come from one function; on the apps a High resting only on
+  unsearched text shows as **Unassessed**; every Android rating says
+  "limited" until #384.
+- **Models and pricing** (PR #383): an unlisted Claude ID gets its family's
+  dearest rate; `list_models` raises rather than falling back. Release
+  0.5.0 / apps 1.6.0 (PR #393).
 - **Stored transparency rows** (Python; #374, #360, PRs #379, #366, #375).
   Readers return `StoredTransparency`; a row **strictly newer** than this
   build is never overwritten (`may_replace_stored`), any other undecodable
@@ -187,31 +168,20 @@ the rest.
     never states a PubMed ID** (thesis `889149` is also a 1977 mouse paper)
     and one predicate authorises every PubMed URL and `PMID:` line; an
     article is named by a *ladder* (primary slot, PMC ID, DOI).
-  - **A downloaded PDF contributes its text** (PR #198): an abstract-only
-    deposit is held back rather than returned, coverage travels with the
-    text, and a PDF tier's outcome has four states, not two.
-  - **A guard must name its own cause** (PR #195): `--json` printed
-    `<redacted>`, a *truthy string* that saved back would go to NCBI as a
-    credential. **Prefix-anchor a publisher branch, and check its
-    neighbours** — PeerJ's `doi.split(".")[-1]` dropped the series.
+  - **A downloaded PDF contributes its text** (PR #198); an abstract-only
+    deposit is held back.
+  - **A guard must name its own cause** (PR #195); **prefix-anchor a
+    publisher branch** (PeerJ).
   - **A reader-facing payload must not be rendered English** (#184/#183):
     `JATSParseWarnings` carries typed losses and `diagnostics` is *derived*.
     **A tagged union's persisted form needs named keys and a
     `schemaVersion`** — synthesised `Codable` emits `{"_0":2}` (#163).
     **A view's private computed state cannot be tested.**
-  - **The clamp erased the evidence** (#180/#181): counters decremented as
-    `max(0, n - 1)` and the audit only tested `> 0`, so it **certified a
-    defective parse as clean**. **Logging is not reporting.** **A refactor
-    onto a shared writer is only safe where every caller wanted everything
-    that writer does.** **A pbxproj UUID collision silently drops a file.**
+  - **The clamp erased the evidence** (#180/#181). **Logging is not
+    reporting.** **A pbxproj UUID collision silently drops a file.**
   - **Route markup on the owning element, not on ambient parser state**
-    (#170/#173/#175, #156/#157/#161, #167/#169) — eight defects, one
-    mistake. **Read `elementStack`**; every exhibit flag derives from one
-    shared `ExhibitCollector` and is never stored. **Fix every site the
-    predicate is asked at.** **A safety net installed where production
-    never runs is not installed.** **`<graphic>` deposits are ranked, not
-    positional.** **bmlib is ahead of Swift — port from it**; Kotlin has
-    none (#165).
+    (#156–#175): read `elementStack`; exhibit flags derive from one
+    `ExhibitCollector`. **bmlib is ahead of Swift — port from it** (#165).
   - **Measure prevalence from the XML, never through the parser** (#164):
     `scripts/jats_survey.py`. Asking the parser would agree with its own
     bugs, which is how #161/#162 survived a green suite.
@@ -223,23 +193,17 @@ the rest.
     validates a branch against the main checkout's fixtures and passes; and
     **a test only hears what the logger records** — the recorder ignored
     `debug`, so the corpus dropped 21 of 62 captions under a green test.
-  - **Funder classification and sponsor tiers, Python↔Swift**
-    (#143/#147/#152). `sponsor_patterns.json` (schema_version 3) is the
-    contract, asserted from both sides, and `confidence_probes` are checked
-    *behaviourally*. **Never merge the funder lists into
-    `INDUSTRY_KEYWORDS`**, which is COI *prose*, where corporate suffixes
-    match far too freely. **A stem and a whole word are different kinds of
-    thing**, and the failure is *silent*. **`NONPROFIT` means "not
-    recognised"**, the modal outcome at 325/417 corpus names.
+  - **Funder classification** (#143/#147/#152): `sponsor_patterns.json` is
+    the contract, `confidence_probes` checked *behaviourally*. **Never merge
+    the funder lists into `INDUSTRY_KEYWORDS`** (COI prose). **`NONPROFIT`
+    means "not recognised"**.
   - **CI on all three platforms** (#129). **No job may gain a `paths:`
     filter** (the parity fixtures live outside `src/` and `tests/`). **A Qt
     preflight constructs a `QApplication` before pytest**, or a broken Qt
     install skips ~100 `importorskip` tests green. **`lint_delta.py`** diffs
     against the merge base in a throwaway worktree; **ruff config stays in
     `[tool.ruff.lint]`**, or head and base shrink together.
-  - **Model fetch failures are errors, not fallbacks** (PR #135):
-    `ModelFetchService.fetchModels` *throws*; a hardcoded fallback hid the
-    DeepSeek V3 retirement.
+  - **Model fetch failures are errors, not fallbacks** (PR #135).
   - **Cross-platform parity drift guard** (#105, #101–#125). Python
     `study_transparency_analyzer.py` is canonical; Swift and Android mirror
     the data-availability and funder-name classifiers byte-for-byte, *not*
@@ -255,6 +219,22 @@ the rest.
 ## Potential follow-ups
 
 Open issues by family; each issue carries the detail. None blocks another.
+
+### Left by the #420 round (PR #426), Python unless noted
+
+- **#429** `EuropePMCClient.get_fulltext_xml` returns an untyped `None`, so a
+  throttle reads as `INCOMPLETE_RESPONSE`; give it a typed fetch carrying a
+  `RequestFailure` of the real kind (`get_fulltext_markdown` reads the same
+  `None` as absence — delete or type it).
+- **#427** MCP `get_document_fulltext` and reader-facing discovery callers
+  discard a stale cached text when the refresh fails
+  (`pdf_utils.read_stale_cached_fulltext` exists); the analyser must never
+  get it.
+- **#425** headings still missed: non-English typed statements, plain-text
+  and stacked run-ins (coverage gaps; none charged).
+- **#424** "data within the manuscript" classifies `UNKNOWN` (maintainer
+  decision; a parity-contract change on all three). **#423** Swift + Android
+  drop front-matter statements.
 
 ### Transparency after PR #388: desktop parity and the ports
 
@@ -272,11 +252,7 @@ Open issues by family; each issue carries the detail. None blocks another.
   **#417** a replaced `LiteConfig` never reaches the tabs (the dialog half
   is done); **#418** stored levels are not re-rated when settings change;
   **#422** Swift detail views truncate the confidence the reason sentence
-  rounds. From the #420 round: **#423** Swift + Android drop front-matter
-  statements (PLOS COI footnote, front `<notes>`, `<funding-statement>`);
-  **#424** "data within the manuscript" classifies `UNKNOWN` (a
-  parity-contract change); **#425** headings still missed (non-English
-  typed, plain-text run-ins).
+  rounds. The #420 round's leftovers are listed above.
 - Android: **#384** analyse full text (every rating is "limited" until then);
   **#387** data-availability parity, DAO/migration tests.
 - **#400** the data-availability heading rule (`'data' in title and ('avail'
