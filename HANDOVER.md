@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#447 + #445 — one verb contract, and a 5xx is not an answer** (all three),
-branch `fix/is-answer-contract-447-445`. Compress into **Recently landed**
+branch `fix/is-answer-contract-447-445`, **PR #449**. Compress into **Recently landed**
 once merged.
 
 - **#447:** `doc/cross_platform/request_failure_parity/answered_lookup_verb.json`
