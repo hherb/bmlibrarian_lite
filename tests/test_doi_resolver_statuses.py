@@ -512,11 +512,29 @@ class TestTheReaderIsTold:
             f"not be asked" in result.error
         )
 
-    def test_a_publishers_server_error_did_not_serve_it(
+    @pytest.mark.parametrize(
+        ("status", "label"),
+        [(500, "HTTP 500 Internal Server Error"), (502, "HTTP 502 Bad Gateway"),
+         (522, "HTTP 522")],
+    )
+    def test_a_publishers_server_error_could_not_be_asked(
+        self, discoverer: PDFDiscoverer, tmp_path: Path, status: int, label: str
+    ) -> None:
+        """A 5xx says nothing about the article (#445), retried or not."""
+        _script(discoverer, publisher=status)
+
+        result = discoverer.discover_and_download(
+            output_path=tmp_path / "out.pdf", doi=DOI
+        )
+
+        assert "institutional access" not in result.error
+        assert f"{SERVICE_DOI_PUBLISHER} ({label}) could not be asked" in result.error
+
+    def test_a_publishers_recorded_4xx_did_not_serve_it(
         self, discoverer: PDFDiscoverer, tmp_path: Path
     ) -> None:
-        """A 500 is an answer (#435); only a throttle "could not be asked"."""
-        _script(discoverer, publisher=500)
+        """The control: a 408 is recorded and, being a 4xx, is an answer."""
+        _script(discoverer, publisher=408)
 
         result = discoverer.discover_and_download(
             output_path=tmp_path / "out.pdf", doi=DOI
@@ -524,8 +542,8 @@ class TestTheReaderIsTold:
 
         assert "institutional access" not in result.error
         assert (
-            f"{SERVICE_DOI_PUBLISHER} (HTTP 500 Internal Server Error) did "
-            f"not serve it" in result.error
+            f"{SERVICE_DOI_PUBLISHER} (HTTP 408 Request Timeout) did not serve it"
+            in result.error
         )
 
     def test_the_publishers_name_starts_its_sentence_capitalised(

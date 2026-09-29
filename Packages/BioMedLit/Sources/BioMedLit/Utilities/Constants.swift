@@ -188,10 +188,16 @@ public enum BioMedLitConstants {
 
     /// The HTTP statuses that are not the source's answer about the article,
     /// so a lookup that ended on one "could not be asked" rather than "did
-    /// not serve it" (``RequestFailure/isAnswer``, #435). Python's
-    /// `UNANSWERED_HTTP_STATUSES`; all three platforms are pinned to
+    /// not serve it" (``RequestFailure/isAnswer``, #435): a throttle (429),
+    /// and every server fault (#445), which says nothing about the article —
+    /// a gateway's 502, 504 or Cloudflare 52x never heard from its origin.
+    /// Python's `UNANSWERED_HTTP_STATUSES`; all three platforms are pinned to
     /// `doc/cross_platform/request_failure_parity/answered_lookup_verb.json`.
-    public static let unansweredStatusCodes: Set<Int> = [429, 503]
+    public static let unansweredStatusCodes: Set<Int> = Set([httpStatusRateLimited])
+        .union(httpServerErrorStatusCodes)
+
+    /// HTTP server error status codes (5xx).
+    public static let httpServerErrorStatusCodes: ClosedRange<Int> = 500...599
 
     /// HTTP redirection status codes (3xx).
     public static let httpRedirectStatusCodes: ClosedRange<Int> = 300...399

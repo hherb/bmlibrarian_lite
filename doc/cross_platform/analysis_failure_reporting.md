@@ -214,8 +214,8 @@ logged **and reported**).
   - **A source that answered was asked.** Every sentence built from a
     `LookupRecord` names its sources through one clause,
     `unsettled_lookups_clause`, which gives each its own verb (#435): one
-    whose failure `is_answer` (an HTTP status other than a throttle, see
-    [search_failure_reporting.md](search_failure_reporting.md)) "did not
+    whose failure `is_answer` (an HTTP status other than a throttle or a
+    5xx, see [search_failure_reporting.md](search_failure_reporting.md)) "did not
     serve it", the rest "could not be asked" -- "doi.org (the request timed
     out) could not be asked, and Europe PMC (HTTP 404 Not Found) did not
     serve it, so …". The case that forced it: Europe PMC's 404 for an
@@ -238,10 +238,10 @@ logged **and reported**).
     failed status (≥400) is a failure of `doi.org`. From any other host it
     is the publisher's: a throttle, any 5xx, a 408 or a 425 is a failure of
     "the publisher's site the DOI resolves to" -- read as "could not be
-    asked" for a throttle and "did not serve it" for the rest, as #435 has
-    it. Any other 4xx (the bot wall 9 of 20 surveyed DOIs ended in, a 404, a
-    405 to the HEAD) answers that content negotiation serves no PDF, and is
-    not caveated. A failure with no status is recorded wherever it happens,
+    asked" for a throttle or a 5xx (#445) and "did not serve it" for a 408
+    or 425, as `is_answer` has it. Any other 4xx (the bot wall 9 of 20
+    surveyed DOIs ended in, a 404, a 405 to the HEAD) answers that content
+    negotiation serves no PDF, and is not caveated. A failure with no status is recorded wherever it happens,
     a redirect loop included: unlike the bot wall, it leaves nothing to
     read. One that names no request (a redirect to `ftp:`, or a `Location`
     that will not parse) is named by the hop that sent us there. A clause

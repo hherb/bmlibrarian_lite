@@ -40,10 +40,16 @@ class AnsweredLookupVerbContractTest {
 
     @Serializable
     private data class Contract(
-        @SerialName("unanswered_statuses") val unansweredStatuses: List<Int>,
+        @SerialName("unanswered_statuses") val unansweredStatuses: UnansweredStatuses,
         val predicate: List<PredicateRow>,
         @SerialName("absence_not_established") val absenceNotEstablished: List<SentenceRow>
     )
+
+    /** The statuses that are not an answer: each one listed, and a range. */
+    @Serializable
+    private data class UnansweredStatuses(val listed: List<Int>, val from: Int, val through: Int) {
+        val all: Set<Int> get() = listed.toSet() + (from..through)
+    }
 
     /** One (kind, status) and whether it is an answer. */
     @Serializable
@@ -99,7 +105,7 @@ class AnsweredLookupVerbContractTest {
     /** Python and Swift name the same statuses. */
     @Test
     fun `the unanswered statuses are the contract's`() {
-        assertEquals(contract.unansweredStatuses.toSet(), Constants.UNANSWERED_STATUS_CODES)
+        assertEquals(contract.unansweredStatuses.all, Constants.UNANSWERED_STATUS_CODES)
     }
 
     /** A kind added later cannot inherit a verb nobody chose for it. */

@@ -131,10 +131,10 @@ class FullTextService @Inject constructor(
          * it exists (#434).
          *
          * Europe PMC answered without serving the article (an HTTP status such
-         * as `fullTextXML`'s 404 for text that is not open access (#432), or a
-         * 5xx other than 503 that outlasted its retries, from the fetch or the
-         * identifier search), or gave no answer at all (a throttle (429, 503), a
-         * timeout, a dropped connection, a blank body, an identifier never sent).
+         * as `fullTextXML`'s 404 for text that is not open access (#432), from
+         * the fetch or the identifier search), or gave no answer at all (a
+         * throttle (429), a 5xx that outlasted its retries (#445), a timeout, a
+         * dropped connection, a blank body, an identifier never sent).
          * The reader's sentence follows the same split, by
          * [RequestFailure.isAnswer]: see [absenceNotEstablishedMessage].
          * Unlike [Unavailable], a claim about us: callers must not mark
@@ -609,9 +609,9 @@ class FullTextException(message: String, cause: Throwable? = null) : Exception(m
  * The sentence for a chain that found nothing while Europe PMC did not settle
  * whether the full text exists (#434).
  *
- * The verb follows #435's decision: an HTTP status other than a throttle was an
- * answer, so Europe PMC "did not serve it"; a throttle or any other failure means
- * it "could not be asked" ([RequestFailure.isAnswer]). Worded as
+ * The verb follows #435's decision: an HTTP status other than a throttle or a 5xx
+ * (#445) was an answer, so Europe PMC "did not serve it"; those and any other
+ * failure mean it "could not be asked" ([RequestFailure.isAnswer]). Worded as
  * BioMedLit's `FullTextError.absenceNotEstablished` (iOS and macOS).
  *
  * @param failure What Europe PMC's side of the chain got instead of the article's text

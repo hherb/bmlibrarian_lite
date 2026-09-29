@@ -26,7 +26,7 @@ final class AnsweredLookupVerbContractTests: XCTestCase {
 
     /// The contract file, decoded.
     private struct Contract: Decodable {
-        let unansweredStatuses: [Int]
+        let unansweredStatuses: UnansweredStatuses
         let predicate: [PredicateRow]
         let absenceNotEstablished: [SentenceRow]
 
@@ -35,6 +35,15 @@ final class AnsweredLookupVerbContractTests: XCTestCase {
             case predicate
             case absenceNotEstablished = "absence_not_established"
         }
+    }
+
+    /// The statuses that are not an answer: each one listed, and a range.
+    private struct UnansweredStatuses: Decodable {
+        let listed: [Int]
+        let from: Int
+        let through: Int
+
+        var all: Set<Int> { Set(listed).union(from...through) }
     }
 
     /// One (kind, status) and whether it is an answer.
@@ -116,7 +125,7 @@ final class AnsweredLookupVerbContractTests: XCTestCase {
     /// Python and Android name the same statuses.
     func testTheUnansweredStatusesAreTheContracts() throws {
         let contract = try loadContract()
-        XCTAssertEqual(BioMedLitConstants.unansweredStatusCodes, Set(contract.unansweredStatuses))
+        XCTAssertEqual(BioMedLitConstants.unansweredStatusCodes, contract.unansweredStatuses.all)
     }
 
     /// A kind added later cannot inherit a verb nobody chose for it.

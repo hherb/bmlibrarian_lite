@@ -162,12 +162,12 @@ class RequestFailure:
         Chooses the reader's verb (#435): an answer "did not serve it", any
         other failure "could not be asked". An HTTP status is the source's
         answer -- Europe PMC's 404 for an article it holds but will not serve
-        (#432) -- except 429 and 503, which heard no question: a throttle
-        says only "not now", and some hosts' 503 is an outage. That other
-        5xx statuses are answers is the maintainer's decision (#435), not a
-        law of HTTP. Every other kind is not an answer: a refused redirect
-        is our own refusal, and a blank or garbled 200 says nothing about
-        the article.
+        (#432) -- except a throttle (429) and any 5xx, which say nothing
+        about the article: "not now", a server that failed, or a gateway
+        that never heard from its origin (#445). That the 4xx refusals are
+        answers is the maintainer's decision, not a law of HTTP. Every other
+        kind is not an answer: a refused redirect is our own refusal, and a
+        blank or garbled 200 says nothing about the article.
 
         Returns:
             ``True`` for ``HTTP_STATUS`` with a status other than

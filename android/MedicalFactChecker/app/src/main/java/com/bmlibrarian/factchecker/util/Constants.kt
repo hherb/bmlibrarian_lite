@@ -41,15 +41,6 @@ object Constants {
     /** HTTP redirection status codes (3xx). */
     val HTTP_REDIRECT_STATUS_CODES = 300..399
 
-    /**
-     * The HTTP statuses that are not the source's answer about the article, so a
-     * lookup that ended on one "could not be asked" rather than "did not serve it"
-     * ([com.bmlibrarian.factchecker.domain.model.RequestFailure.isAnswer], #435).
-     * Python's `UNANSWERED_HTTP_STATUSES`; all three platforms are pinned to
-     * `doc/cross_platform/request_failure_parity/answered_lookup_verb.json`.
-     */
-    val UNANSWERED_STATUS_CODES: Set<Int> = setOf(429, 503)
-
     /** HTTP 400: a malformed request, or for NCBI a rejected API key. */
     const val HTTP_BAD_REQUEST = 400
 
@@ -70,6 +61,19 @@ object Constants {
 
     /** HTTP server error status codes (5xx). */
     val HTTP_SERVER_ERROR_STATUS_CODES = 500..599
+
+    /**
+     * The HTTP statuses that are not the source's answer about the article, so a
+     * lookup that ended on one "could not be asked" rather than "did not serve it"
+     * ([com.bmlibrarian.factchecker.domain.model.RequestFailure.isAnswer], #435):
+     * a throttle (429), and every server fault (#445), which says nothing about
+     * the article — a gateway's 502, 504 or Cloudflare 52x never heard from its
+     * origin. Python's `UNANSWERED_HTTP_STATUSES`; all three platforms are
+     * pinned to `doc/cross_platform/request_failure_parity/answered_lookup_verb.json`.
+     * Declared after the constants it reads: a `val` in an object is initialised
+     * in declaration order, so one declared later would still be null here.
+     */
+    val UNANSWERED_STATUS_CODES: Set<Int> = setOf(HTTP_TOO_MANY_REQUESTS) + HTTP_SERVER_ERROR_STATUS_CODES
 
     /** Maximum number of retry attempts for failed network requests. */
     const val NETWORK_MAX_RETRIES = 4
