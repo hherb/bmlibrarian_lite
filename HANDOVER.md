@@ -9,8 +9,8 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#446 — doi.org's HEAD status is read** (Python only; the apps only link
-to doi.org), branch `fix/doi-head-status-446`. Compress into **Recently
-landed** once merged.
+to doi.org), branch `fix/doi-head-status-446`, **PR #448**. Compress into
+**Recently landed** once merged.
 
 - **Rule (user, 2026-09-29), from a live survey of 20 DOIs** (9 ended in a
   publisher's 403 bot wall after the redirect; none of the other 11
