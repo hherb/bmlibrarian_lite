@@ -41,8 +41,8 @@ the rest.
   (`polite_request_pacing.md` rule 6).
 - **An answered lookup "did not serve it"** (all three; PR #444, #435). An
   `HTTP_STATUS` failure reads "… Europe PMC (HTTP 404 Not Found) did not
-  serve it" **except a throttle or a 5xx** (#445, in flight), which "could not
-  be asked" with every other kind. One predicate: `RequestFailure.is_answer` /
+  serve it" **except a throttle or a 5xx** (#445), which "could not be asked"
+  with every other kind. One predicate: `RequestFailure.is_answer` /
   `isAnswer`, pinned by one shared fixture (#447).
   **The rest of the sentence follows the verb**: only an unasked source earns
   "a freely available copy may exist". Python builds every such sentence with
@@ -217,8 +217,9 @@ Open issues by family; each issue carries the detail. None blocks another.
   accession ends as a permanent absence without a lookup.
 - **#432** Europe PMC answered 500 for PMC IDs without OA XML, still so two
   hours later (re-probe on another day before deciding). Since #445 that 500
-  reads "could not be asked", so a freely available copy may exist. `has_fulltext_xml` counts `inPMC` for non-OA articles, so they
-  always fetch XML that cannot be served, and spend the retries doing it.
+  reads "could not be asked", so a freely available copy may exist.
+  `has_fulltext_xml` counts `inPMC` for non-OA articles, so they always fetch
+  XML that cannot be served, and spend the retries doing it.
 - **#427** MCP `get_document_fulltext` and reader-facing discovery callers
   discard a stale cached text when the refresh fails
   (`pdf_utils.read_stale_cached_fulltext` exists); the analyser must never

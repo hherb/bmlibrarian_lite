@@ -98,7 +98,7 @@ UNPAYWALL_NUDGE = (
 SERVICE_UNAVAILABLE = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=503)
 
 #: Europe PMC answered, doi.org was throttled with a 503, Unpaywall is not
-#: configured: every group and both throttle statuses' verb in one record.
+#: configured: every group and both verbs in one record.
 MIXED = LookupRecord(
     failures=(
         SourceLookupFailure(SERVICE_EUROPE_PMC, NOT_FOUND),
@@ -241,6 +241,19 @@ class TestTheClauseChoosesTheVerb:
         )
         assert unsettled_lookups_clause(record) == (
             "Europe PMC (the request timed out) could not be asked"
+        )
+
+    def test_a_later_server_error_outranks_an_answer(self) -> None:
+        """The XML 404, then a 500 on the PDF render: a 5xx is unasked (#445)."""
+        server_error = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=500)
+        record = LookupRecord(
+            failures=(
+                SourceLookupFailure(SERVICE_EUROPE_PMC, NOT_FOUND),
+                SourceLookupFailure(SERVICE_EUROPE_PMC, server_error),
+            ),
+        )
+        assert unsettled_lookups_clause(record) == (
+            "Europe PMC (HTTP 500 Internal Server Error) could not be asked"
         )
 
     def test_an_answer_does_not_outrank_an_earlier_unasked_lookup(self) -> None:

@@ -517,7 +517,7 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
         case .absenceNotEstablished(let failure):
             // The verb follows #435's decision: an HTTP status other than a
             // throttle or a 5xx (#445) was an answer, so Europe PMC "did not
-            // serve it"; those and every other kind keep "could not be asked".
+            // serve it"; those and every other kind read "could not be asked".
             if failure.isAnswer {
                 return """
                     No source provided this article's full text. Europe PMC \

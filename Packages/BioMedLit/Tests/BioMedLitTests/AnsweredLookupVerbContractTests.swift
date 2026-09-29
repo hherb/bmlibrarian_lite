@@ -141,7 +141,7 @@ final class AnsweredLookupVerbContractTests: XCTestCase {
         XCTAssertFalse(contract.absenceNotEstablished.isEmpty)
         for row in contract.absenceNotEstablished {
             let error = FullTextError.absenceNotEstablished(failure(row.kind, row.statusCode))
-            XCTAssertEqual(error.errorDescription, row.sentence)
+            XCTAssertEqual(error.errorDescription, row.sentence, "\(row)")
         }
     }
 }

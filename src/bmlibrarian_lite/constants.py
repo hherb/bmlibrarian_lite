@@ -994,6 +994,9 @@ HTTP_ERROR_STATUS_MIN = 400
 HTTP_SERVER_ERROR_MIN = 500
 HTTP_SERVER_ERROR_MAX = 599
 
+# 429 Too Many Requests: a throttle.
+HTTP_TOO_MANY_REQUESTS = 429
+
 # The HTTP statuses that are not the source's answer about the article, so a
 # lookup that ended on one "could not be asked" rather than "did not serve
 # it" (``RequestFailure.is_answer``, #435): a throttle (429), and every
@@ -1006,7 +1009,7 @@ HTTP_SERVER_ERROR_MAX = 599
 # ``UNANSWERED_STATUS_CODES``; all three are pinned to
 # ``doc/cross_platform/request_failure_parity/answered_lookup_verb.json``.
 UNANSWERED_HTTP_STATUSES = frozenset(
-    {429, *range(HTTP_SERVER_ERROR_MIN, HTTP_SERVER_ERROR_MAX + 1)}
+    {HTTP_TOO_MANY_REQUESTS, *range(HTTP_SERVER_ERROR_MIN, HTTP_SERVER_ERROR_MAX + 1)}
 )
 
 # The client-error statuses that say "not now" rather than "no": 408 Request
