@@ -14,21 +14,40 @@ to doi.org), branch `fix/doi-head-status-446`, **PR #448**. Compress into
 
 - **Rule (user, 2026-09-29), from a live survey of 20 DOIs** (9 ended in a
   publisher's 403 bot wall after the redirect; none of the other 11
-  content-negotiated to a PDF): before a redirect the status is doi.org's
-  (404 = unregistered DOI, an absence; any other ≥400 a `doi.org`
-  failure); after it, the publisher's: a throttle or any 5xx (Cloudflare's
-  522 included, retried or not) is a failure of `SERVICE_DOI_PUBLISHER`
-  ("the publisher's site the DOI resolves to"), any other 4xx stays "no
-  PDF" uncaveated. Exceptions
-  are named by the request they failed on. Pure rule:
-  `doi_resolution_failure` / `doi_lookup_service` in `pdf_discovery.py`.
+  content-negotiated to a PDF). Who answered is decided by host
+  (`DOI_RESOLVER_HOSTS`: `doi.org`, `dx.doi.org`, `www.doi.org`):
+  - **doi.org's** 400 (not a DOI) and 404 (not registered) are absences
+    (`DOI_RESOLVER_ABSENCE_STATUSES`, both checked live); any other ≥400 is
+    a `doi.org` failure.
+  - **The publisher's** throttle, any 5xx (Cloudflare's 522 included,
+    retried or not), 408 or 425 (`HTTP_UNSETTLED_CLIENT_STATUSES`) is a
+    failure of `SERVICE_DOI_PUBLISHER` ("the publisher's site the DOI
+    resolves to"). **A 5xx is the publisher's answer** (user, review of
+    #448): it reads "did not serve it" per #435, only a throttle "could not
+    be asked". Any other 4xx (bot wall, 404, 405) stays "no PDF"
+    uncaveated.
+  - Exceptions are named by the request they failed on; one with no request
+    (`InvalidSchema` on a redirect to `ftp:`, the bare `ValueError` an
+    unparseable `Location` raises) by the last hop that answered (a
+    `response` hook). A redirect loop is recorded, unlike the bot wall.
+  - Pure rule: `doi_resolution_failure` / `doi_lookup_service` in
+    `pdf_discovery.py`. `_clean_doi` strips `www.doi.org` too.
+- **`mount_politely` turns off urllib3's `respect_retry_after_header`.**
+  Pre-existing, found in review: a 413/429/503 carrying `Retry-After` was
+  re-sent by urllib3 inside every adapter attempt, below the limiter and
+  uncapped (16 requests where 4 were configured; up to 6 h of uncancellable
+  sleep). Contract: `polite_request_pacing.md` rule 6.
 - `unestablished_access_clause` capitalises a leading "the" (it opens a
   sentence; "the PDF download" already read "Claim. the PDF download …").
 - `RETRYABLE_HTTP_STATUSES` replaces the forcelists in `europepmc.py` and
-  `pdf_discovery.py`.
+  `pdf_discovery.py`; `test_polite_clients.py` pins both.
 - Tests: `tests/test_doi_resolver_statuses.py` drives the real `head`
-  through the mounted `PoliteAdapter` (retries included), socket scripted.
-  `pytest` 5855 passed; lint delta 0 new; 13 mutations, all caught.
+  through the mounted `PoliteAdapter` (retries and redirects included),
+  with `HTTPAdapter.send` scripted -- so it cannot see urllib3; the
+  `Retry-After` fix is tested against a loopback server in
+  `test_polite_session.py` (`ScriptedAnswer` now takes `headers`).
+  `pytest` 5881 passed; lint delta 0 new; review-round mutation sweep 11 of
+  11 caught.
 
 ## Recently landed (context)
 

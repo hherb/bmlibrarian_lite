@@ -1024,10 +1024,10 @@ def unestablished_access_clause(record: LookupRecord) -> str:
 def _sentence_start(text: str) -> str:
     """Capitalise a leading "the", for a clause that begins a sentence.
 
-    A service named as a phrase -- "the PDF download", the publisher's site
-    (#446) -- is lowercase to read mid-sentence, and began one as "the …"
-    after a claim. Only the article changes: a name such as "doi.org" keeps
-    its own case.
+    A service named as a phrase ("the PDF download", "the publisher's site
+    the DOI resolves to", #446) is lowercase so it reads mid-sentence; at
+    the start of a sentence after a claim it read "Claim. the …". Only the
+    article changes: a name such as "doi.org" keeps its own case.
 
     Args:
         text: The clause, beginning with a service name.

@@ -31,11 +31,12 @@ XML_CONTENT_TYPE = "text/xml"
 
 
 class ScriptedAnswer(NamedTuple):
-    """One answer: a status, a body and its content type."""
+    """One answer: a status, a body, its content type and any other headers."""
 
     status: HTTPStatus
     body: bytes = b""
     content_type: str = JSON_CONTENT_TYPE
+    headers: tuple[tuple[str, str], ...] = ()
 
 
 class ReceivedRequest(NamedTuple):
@@ -147,6 +148,8 @@ class _ScriptedHandler(BaseHTTPRequestHandler):
         self.send_response(answer.status)
         self.send_header("Content-Type", answer.content_type)
         self.send_header("Content-Length", str(len(answer.body)))
+        for name, value in answer.headers:
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(answer.body)
 

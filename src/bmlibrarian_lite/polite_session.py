@@ -257,7 +257,12 @@ def mount_politely(
             two requests in the same millisecond) and the two budgets
             multiplied. What stays with urllib3 is what belongs there:
             connection and read retries, which are transport faults with no
-            status to pace against.
+            status to pace against. Its ``Retry-After`` handling goes too:
+            left on, urllib3 re-sent a 413, 429 or 503 carrying the header
+            inside every adapter attempt, below the limiter, sleeping
+            whatever the header asked (up to six hours, uncancellable) --
+            sixteen requests where four were configured (#446). The
+            adapter reads the header itself, and caps it.
         api_key: Raises the ceiling where the service offers one.
 
     Returns:
@@ -273,7 +278,7 @@ def mount_politely(
         )
         if retry.total is not None:
             max_throttle_retries = retry.total
-        retry = retry.new(status_forcelist=[])
+        retry = retry.new(status_forcelist=[], respect_retry_after_header=False)
     adapter = PoliteAdapter(
         max_retries=retry or 0,
         api_key=api_key,

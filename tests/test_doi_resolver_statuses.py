@@ -5,28 +5,33 @@
 """The doi.org tier reads the status it is handed (#446).
 
 ``PoliteAdapter`` does not raise when its retries run out: it hands back the
-last 429, 503 or 5xx. ``_discover_doi_direct`` never looked at the status,
-so an exhausted throttle read as "no PDF sources found. The document may
-require institutional access." -- the #347 harm, on the one tier its own
-docstring promised it for.
+last 429 or 5xx. ``_discover_doi_direct`` never looked at the status, so an
+exhausted throttle read as "No PDF sources found. The document may require
+institutional access." -- the #347 harm, on the one tier its own docstring
+promised to prevent it on.
 
 The HEAD follows redirects, so the status is not always doi.org's. A live
 survey of 20 DOIs (2026-09-29): 9 ended in a publisher's 403 bot wall after
 doi.org's redirect, and none of the rest content-negotiated to a PDF. The
 rule, the maintainer's call:
 
-* doi.org's own status: a 404 is an unregistered DOI, an absence; any other
-  failure is doi.org's;
-* the publisher's status: an exhausted throttle or server fault is the
-  publisher's failure, named as the publisher's rather than doi.org's; a 4xx
-  (the bot wall, 404, 405) is an answer that no PDF is served by content
-  negotiation, as before, so half of all DOIs are not caveated for it.
+* doi.org's own status: a 400 (not a DOI) or 404 (not registered) is about
+  the identifier, an absence; any other failure is doi.org's;
+* the publisher's status: an exhausted throttle, a server fault, a 408 or a
+  425 is the publisher's failure, named as the publisher's rather than
+  doi.org's; any other 4xx (the bot wall, 404, 405) is an answer that no PDF
+  is served by content negotiation, as before, so nearly half of all DOIs
+  are not caveated for it.
 
 These tests drive the real ``head`` through the mounted ``PoliteAdapter``,
-its retries included, with only the socket replaced: the one earlier test of
-doi.org as a service built its failure by hand and never ran this path.
+its retries and requests' redirect handling included, with
+``HTTPAdapter.send`` -- urllib3 and the socket -- replaced. urllib3's own
+retries are therefore not exercised here; ``tests/test_polite_session.py``
+runs them against a loopback server. The one earlier test of doi.org as a
+service built its failure by hand and never ran this path.
 """
 
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -53,6 +58,7 @@ from bmlibrarian_lite.data_models import (
 )
 from bmlibrarian_lite.pdf_discovery import (
     PDFDiscoverer,
+    PDFSource,
     PDFSourceType,
     doi_lookup_service,
     doi_resolution_failure,
@@ -127,7 +133,8 @@ class ScriptedHosts:
     """Answers each request by host: a status, a redirect, or an exception.
 
     Installed as the mounted adapter's ``_send_once``, below the adapter's
-    pacing and retries, so everything above the socket is the real thing.
+    pacing and retries, so those and requests' redirect handling are the
+    real thing; ``HTTPAdapter.send`` (urllib3 and the socket) is not.
     """
 
     def __init__(self, **by_host: Any) -> None:
@@ -223,7 +230,7 @@ class TestDoiOrgsOwnStatus:
     def test_an_exhausted_throttle_or_fault_is_doi_orgs_failure(
         self, discoverer: PDFDiscoverer, status: int
     ) -> None:
-        """The reviewer's stub: a 429 and a 504 both returned ``([], None)``."""
+        """An exhausted 429 or 5xx from doi.org was read as no PDF (#446)."""
         hosts = _script(discoverer, doi=status)
 
         sources, failure = discoverer._discover_doi_direct(DOI)
@@ -233,23 +240,45 @@ class TestDoiOrgsOwnStatus:
         # Handed back only once the retries ran out: the real adapter ran.
         assert hosts.sent == {"doi.org": ATTEMPTS}
 
-    def test_an_unregistered_doi_is_an_absence(
-        self, discoverer: PDFDiscoverer
+    @pytest.mark.parametrize("status", [400, 404])
+    def test_a_doi_nobody_registered_is_an_absence(
+        self, discoverer: PDFDiscoverer, status: int
     ) -> None:
-        """doi.org's 404 is about the DOI, so it must not be caveated."""
-        _script(discoverer, doi=404)
+        """doi.org's 400 (not a DOI) and 404 (not registered) are absences.
+
+        They are about the identifier, so they must not be caveated: a bad
+        DOI field would caveat every run, and no retry would ever settle it.
+        """
+        _script(discoverer, doi=status)
 
         assert discoverer._discover_doi_direct(DOI) == ([], None)
 
+    @pytest.mark.parametrize("status", [403, 408, 410, 499])
     def test_any_other_refusal_is_doi_orgs_failure(
-        self, discoverer: PDFDiscoverer
+        self, discoverer: PDFDiscoverer, status: int
     ) -> None:
         """doi.org refusing our request is not the article having no copy."""
-        _script(discoverer, doi=400)
+        _script(discoverer, doi=status)
 
         _sources, failure = discoverer._discover_doi_direct(DOI)
 
-        assert failure == _failure(SERVICE_DOI_RESOLVER, 400)
+        assert failure == _failure(SERVICE_DOI_RESOLVER, status)
+
+    def test_a_record_pointing_nowhere_sendable_is_doi_orgs(
+        self, discoverer: PDFDiscoverer
+    ) -> None:
+        """``InvalidSchema`` carries no request: the hop that sent us is named."""
+        _script(discoverer, doi=(302, {"Location": "ftp://files.example/x"}))
+
+        _sources, failure = discoverer._discover_doi_direct(DOI)
+
+        assert failure == SourceLookupFailure(
+            SERVICE_DOI_RESOLVER, RequestFailure(RequestFailureKind.REQUEST_FAILED)
+        )
+
+    def test_a_www_resolver_url_is_cleaned(self, discoverer: PDFDiscoverer) -> None:
+        """Left on, ``https://www.doi.org/`` made doi.org answer 400."""
+        assert discoverer._clean_doi(f"https://www.doi.org/{DOI}") == DOI
 
     def test_an_unreachable_doi_org_is_still_doi_orgs(
         self, discoverer: PDFDiscoverer
@@ -284,9 +313,9 @@ class TestThePublishersStatus:
     def test_a_server_fault_not_retried_is_still_the_publishers_failure(
         self, discoverer: PDFDiscoverer, status: int
     ) -> None:
-        """Cloudflare's 522 and 524 are an origin that timed out.
+        """Any 5xx, retried or not, is the publisher's failure.
 
-        Raised by our own socket, the same timeout is recorded; handed back
+        Cloudflare's 522 and 524 are an origin that timed out. Raised by our own socket, the same timeout is recorded; handed back
         as a status it must be too, though nothing retries it.
         """
         hosts = _script(discoverer, publisher=status)
@@ -295,6 +324,20 @@ class TestThePublishersStatus:
 
         assert failure == _failure(SERVICE_DOI_PUBLISHER, status)
         assert hosts.sent == {"doi.org": 1, PUBLISHER_HOST: 1}
+
+    @pytest.mark.parametrize("status", [408, 425])
+    def test_a_not_now_is_the_publishers_failure(
+        self, discoverer: PDFDiscoverer, status: int
+    ) -> None:
+        """408 is the publisher timing out on us; 425 asks us to come back.
+
+        Neither is the bot wall's "no".
+        """
+        _script(discoverer, publisher=status)
+
+        _sources, failure = discoverer._discover_doi_direct(DOI)
+
+        assert failure == _failure(SERVICE_DOI_PUBLISHER, status)
 
     @pytest.mark.parametrize("status", [401, 403, 404, 405, 499])
     def test_a_refusal_is_no_pdf_by_this_route(
@@ -309,12 +352,13 @@ class TestThePublishersStatus:
 
         assert discoverer._discover_doi_direct(DOI) == ([], None)
 
+    @pytest.mark.parametrize("status", [400, 403])
     def test_a_refusal_labelled_pdf_is_not_a_source(
-        self, discoverer: PDFDiscoverer
+        self, discoverer: PDFDiscoverer, status: int
     ) -> None:
         """An error page is not the article, whatever its header claims."""
         _script(
-            discoverer, publisher=(403, {"Content-Type": "application/pdf"})
+            discoverer, publisher=(status, {"Content-Type": "application/pdf"})
         )
 
         assert discoverer._discover_doi_direct(DOI) == ([], None)
@@ -329,6 +373,54 @@ class TestThePublishersStatus:
 
         assert failure == SourceLookupFailure(
             SERVICE_DOI_PUBLISHER, RequestFailure(RequestFailureKind.CONNECTION)
+        )
+
+    def test_a_redirect_loop_at_the_publisher_is_the_publishers(
+        self, discoverer: PDFDiscoverer
+    ) -> None:
+        """``TooManyRedirects`` names the last hop, which is the publisher's.
+
+        Recorded, unlike the bot wall's 403: a loop leaves no status to read,
+        so what it would have answered is unknown.
+        """
+        _script(discoverer, publisher=(302, {"Location": PUBLISHER_URL}))
+
+        _sources, failure = discoverer._discover_doi_direct(DOI)
+
+        assert failure == SourceLookupFailure(
+            SERVICE_DOI_PUBLISHER, RequestFailure(RequestFailureKind.REQUEST_FAILED)
+        )
+
+    def test_a_redirect_nowhere_sendable_is_the_publishers(
+        self, discoverer: PDFDiscoverer
+    ) -> None:
+        """``InvalidSchema`` has no request; the publisher sent us there."""
+        _script(discoverer, publisher=(302, {"Location": "ftp://files.example/x"}))
+
+        _sources, failure = discoverer._discover_doi_direct(DOI)
+
+        assert failure == SourceLookupFailure(
+            SERVICE_DOI_PUBLISHER, RequestFailure(RequestFailureKind.REQUEST_FAILED)
+        )
+
+    @pytest.mark.parametrize(
+        ("by_host", "service"),
+        [
+            ({"publisher": (302, {"Location": "http://[bad/x"})}, SERVICE_DOI_PUBLISHER),
+            ({"doi": (302, {"Location": "http://[bad/x"})}, SERVICE_DOI_RESOLVER),
+        ],
+        ids=["publisher", "doi.org"],
+    )
+    def test_an_unparseable_redirect_is_recorded_not_raised(
+        self, discoverer: PDFDiscoverer, by_host: dict[str, Any], service: str
+    ) -> None:
+        """A bare ``ValueError`` from inside requests, which escaped."""
+        _script(discoverer, **by_host)
+
+        _sources, failure = discoverer._discover_doi_direct(DOI)
+
+        assert failure == SourceLookupFailure(
+            service, RequestFailure(RequestFailureKind.REQUEST_FAILED)
         )
 
     def test_a_negotiated_pdf_is_a_source(
@@ -365,10 +457,16 @@ class TestTheRuleIsAPureFunction:
         assert doi_resolution_failure(status, PUBLISHER_URL) is None
 
     @pytest.mark.parametrize(
-        "url", [RESOLVER_URL, f"https://dx.doi.org/{DOI}", f"http://doi.org/{DOI}"]
+        "url",
+        [
+            RESOLVER_URL,
+            f"https://dx.doi.org/{DOI}",
+            f"https://www.doi.org/{DOI}",
+            f"http://doi.org/{DOI}",
+        ],
     )
     def test_every_resolver_host_is_doi_org(self, url: str) -> None:
-        """``dx.doi.org`` is the same resolver, under its older name."""
+        """``dx.doi.org`` and ``www.doi.org`` are the same resolver."""
         assert doi_resolution_failure(503, url) == _failure(
             SERVICE_DOI_RESOLVER, 503
         )
@@ -430,16 +528,65 @@ class TestTheReaderIsTold:
             f"not serve it" in result.error
         )
 
-    def test_a_redirect_loop_at_the_publisher_is_the_publishers(
-        self, discoverer: PDFDiscoverer
+    def test_the_publishers_name_starts_its_sentence_capitalised(
+        self,
+        discoverer: PDFDiscoverer,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """``TooManyRedirects`` names the last hop, which is the publisher's."""
-        _script(discoverer, publisher=(302, {"Location": PUBLISHER_URL}))
+        """After "Failed to download…", the phrase begins a sentence."""
+        found = PDFSource(
+            url=f"https://{PUBLISHER_HOST}/article.pdf",
+            source_type=PDFSourceType.UNPAYWALL_OA,
+            is_open_access=True,
+        )
+        monkeypatch.setattr(
+            PDFDiscoverer, "_discover_unpaywall", lambda *_a, **_k: ([found], None)
+        )
+        _script(discoverer, publisher=503)
 
-        _sources, failure = discoverer._discover_doi_direct(DOI)
+        result = discoverer.discover_and_download(
+            output_path=tmp_path / "out.pdf", doi=DOI
+        )
 
-        assert failure is not None
-        assert failure.service == SERVICE_DOI_PUBLISHER
+        assert not result.success
+        assert (
+            f"source. The {SERVICE_DOI_PUBLISHER[len('the '):]} (HTTP 503"
+            in result.error
+        )
+
+    def test_an_unparseable_redirect_keeps_what_other_tiers_found(
+        self, discoverer: PDFDiscoverer, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The ``ValueError`` escaped the whole discovery, found source and all."""
+        found = PDFSource(
+            url="https://repository.example/article.pdf",
+            source_type=PDFSourceType.UNPAYWALL_OA,
+            is_open_access=True,
+        )
+        monkeypatch.setattr(
+            PDFDiscoverer, "_discover_unpaywall", lambda *_a, **_k: ([found], None)
+        )
+        _script(discoverer, publisher=(302, {"Location": "http://[bad/x"}))
+
+        sources, record = discoverer._discover_sources(DOI, None, None)
+
+        assert found in sources
+        assert [f.service for f in record.failures] == [SERVICE_DOI_PUBLISHER]
+
+    @pytest.mark.parametrize("status", [400, 404])
+    def test_a_doi_nobody_registered_keeps_todays_wording(
+        self, discoverer: PDFDiscoverer, tmp_path: Path, status: int
+    ) -> None:
+        """The control for doi.org's own answers about the identifier."""
+        _script(discoverer, doi=status)
+
+        result = discoverer.discover_and_download(
+            output_path=tmp_path / "out.pdf", doi=DOI
+        )
+
+        assert result.lookups == LookupRecord()
+        assert "institutional access" in result.error
 
     def test_a_bot_wall_keeps_todays_wording(
         self, discoverer: PDFDiscoverer, tmp_path: Path
@@ -495,6 +642,43 @@ class TestALowercaseServiceStartsASentenceCapitalised:
             "Claim. doi.org (HTTP 503"
         )
 
+    def test_a_name_merely_beginning_the_is_left_alone(self) -> None:
+        """The control for the space: "thesaurus" is not "the saurus"."""
+        record = LookupRecord(failures=(_failure("thesaurus.example", 503),))
+
+        assert with_unestablished_access("Claim.", record).startswith(
+            "Claim. thesaurus.example (HTTP 503"
+        )
+
+
+class TestTheLogSaysWhoLeftItOpen:
+    """An unsettled lookup is logged at WARNING, where INFO still shows it."""
+
+    @pytest.mark.parametrize(
+        ("by_host", "service"),
+        [
+            ({"publisher": 503}, SERVICE_DOI_PUBLISHER),
+            ({"publisher": requests.exceptions.ConnectionError}, SERVICE_DOI_PUBLISHER),
+            ({"doi": 503}, SERVICE_DOI_RESOLVER),
+        ],
+        ids=["publisher-status", "publisher-exception", "doi.org-status"],
+    )
+    def test_the_warning_names_the_doi_and_who(
+        self,
+        discoverer: PDFDiscoverer,
+        caplog: pytest.LogCaptureFixture,
+        by_host: dict[str, Any],
+        service: str,
+    ) -> None:
+        """Both paths log: the status handed back and the exception raised."""
+        _script(discoverer, **by_host)
+
+        with caplog.at_level(logging.WARNING, logger="bmlibrarian_lite.pdf_discovery"):
+            discoverer._discover_doi_direct(DOI)
+
+        warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+        assert any(DOI in m and f"at {service} (" in m for m in warnings), warnings
+
 
 class TestWhoAnswered:
     """``doi_lookup_service`` reads the URL as ``requests`` holds it."""
@@ -504,6 +688,6 @@ class TestWhoAnswered:
         assert doi_lookup_service(PUBLISHER_URL.encode()) == SERVICE_DOI_PUBLISHER
         assert doi_lookup_service(RESOLVER_URL.encode()) == SERVICE_DOI_RESOLVER
 
-    def test_no_request_is_the_first_one(self) -> None:
-        """An exception with no request failed before any redirect."""
+    def test_no_url_is_doi_orgs(self) -> None:
+        """Nothing was sent or answered, so nothing got past doi.org."""
         assert doi_lookup_service(None) == SERVICE_DOI_RESOLVER

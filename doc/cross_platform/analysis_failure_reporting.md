@@ -230,15 +230,27 @@ logged **and reported**).
     not be asked outranks an earlier answer: Europe PMC's XML 404 followed
     by a timed-out PDF render is named by the timeout.
   - **A status handed back is read, and named by who sent it** (#446,
-    Python; the apps only link to doi.org). The polite adapter hands back an
-    exhausted 429 or 5xx rather than raising, so the doi.org tier reads the
-    status. Before a redirect it is doi.org's: its 404 is an unregistered
-    DOI (an absence), anything else a failure of `doi.org`. After the
-    redirect it is the publisher's: a throttle or any 5xx is a failure of
-    "the publisher's site the DOI resolves to"; any other 4xx (the bot
-    wall 9 of 20 surveyed DOIs ended in) answers that
-    content negotiation serves no PDF, and is not caveated. A clause
+    Python; the apps only link to doi.org). The polite adapter hands back a
+    429 or 5xx (once any retries are exhausted) rather than raising, so the
+    doi.org tier reads the status. From a resolver host (`doi.org`,
+    `dx.doi.org`, `www.doi.org`) it is doi.org's: its 400 (not a DOI) and
+    404 (not registered) are about the identifier, an absence; any other
+    failed status (≥400) is a failure of `doi.org`. From any other host it
+    is the publisher's: a throttle, any 5xx, a 408 or a 425 is a failure of
+    "the publisher's site the DOI resolves to" -- read as "could not be
+    asked" for a throttle and "did not serve it" for the rest, as #435 has
+    it. Any other 4xx (the bot wall 9 of 20 surveyed DOIs ended in, a 404, a
+    405 to the HEAD) answers that content negotiation serves no PDF, and is
+    not caveated. A failure with no status is recorded wherever it happens,
+    a redirect loop included: unlike the bot wall, it leaves nothing to
+    read. One that names no request (a redirect to `ftp:`, or a `Location`
+    that will not parse) is named by the hop that sent us there. A clause
     beginning a sentence capitalises such a phrase's leading "the".
+  - **urllib3 does not honour `Retry-After` beneath the polite adapter**
+    (#446). Left on, it re-sent a 413, 429 or 503 carrying the header
+    inside every adapter attempt, below the limiter and uncapped: sixteen
+    requests where four were configured. The adapter reads the header
+    itself and caps it (`POLITE_MAX_PENALTY_SECONDS`).
   - **`NOT_FOUND` is a claim about the article, so only the end of the
     chain may reach it.** Every per-source "this one holds nothing" is
     `NOT_ASSESSED`, because the sources after it have not been asked yet. `FulltextDiscoverer` mapped every failure, every cancel and every

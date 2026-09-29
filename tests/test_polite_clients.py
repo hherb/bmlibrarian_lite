@@ -13,6 +13,7 @@ gained a ``_session`` attribute of its own.
 
 import pytest
 
+from bmlibrarian_lite.constants import RETRYABLE_HTTP_STATUSES
 from bmlibrarian_lite.europepmc import EuropePMCClient
 from bmlibrarian_lite.exceptions import SourceRequestError
 from bmlibrarian_lite.pdf_discovery import PDFDiscoverer
@@ -44,6 +45,23 @@ CLIENTS = [
     pytest.param(lambda: PDFDiscoverer()._session, id="pdf_discovery"),
     pytest.param(lambda: PubMedSearchClient()._session, id="pubmed"),
 ]
+
+
+@pytest.mark.parametrize("build", CLIENTS[:2])
+class TestTheSharedRetriedStatuses:
+    """Europe PMC and PDF discovery retry :data:`RETRYABLE_HTTP_STATUSES`.
+
+    The list moved onto one constant (#446); emptied at either call site,
+    nothing else noticed.
+    """
+
+    def test_every_retryable_status_is_retried(self, build: object) -> None:
+        """Retried by the adapter, through the pacing."""
+        session = build()
+
+        for adapter in adapters(session):
+            assert isinstance(adapter, PoliteAdapter)
+            assert set(adapter._retry_statuses) == set(RETRYABLE_HTTP_STATUSES)
 
 
 @pytest.mark.parametrize("build", CLIENTS)
