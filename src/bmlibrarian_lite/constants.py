@@ -976,10 +976,40 @@ POLITE_THROTTLE_STATUSES = (429, 503)
 # the status is handed back to the caller.
 POLITE_MAX_THROTTLE_RETRIES = 3
 
+# The statuses the Europe PMC and PDF discovery sessions retry: the throttles
+# and the server faults. One that outlasts the retries is handed back, not
+# raised -- ``mount_politely`` moves them off urllib3 into ``PoliteAdapter``,
+# which returns the last response -- so a caller reads the status that
+# outlasted them. Swift's ``retryableStatusCodes`` names the same five;
+# Android's ``NetworkRetry`` also retries 408.
+RETRYABLE_HTTP_STATUSES = (429, 500, 502, 503, 504)
+
 # The lowest status that means the request did not succeed. Only a status
 # below this earns rate back: a host streaming 500/502/504 is failing, and
 # must not be credited with recovery for doing so.
 HTTP_ERROR_STATUS_MIN = 400
+
+# The lowest status that is the server's own fault rather than a refusal of
+# the request. A publisher reached through doi.org that answers one of these
+# left the lookup unsettled, whether or not it was retried. It is still the
+# publisher's answer, read as "did not serve it" (#435), not "could not be
+# asked" (#446).
+HTTP_SERVER_ERROR_MIN = 500
+
+# The client-error statuses that say "not now" rather than "no": 408 Request
+# Timeout (the server gave up waiting for us) and 425 Too Early. From a
+# publisher they leave the lookup unsettled like a server fault, unlike the
+# bot wall's 403 or a 404 (#446).
+HTTP_UNSETTLED_CLIENT_STATUSES = (408, 425)
+
+# The hosts that are doi.org itself, as opposed to where it redirects: a
+# status from one of these is the resolver's own, not the publisher's (#446).
+DOI_RESOLVER_HOSTS = ("doi.org", "dx.doi.org", "www.doi.org")
+
+# doi.org's answers about the identifier rather than failures of its own:
+# 400 for a string that is not a DOI, 404 for one nobody registered (both
+# checked live, 2026-09-29). Either is an absence, not an unsettled lookup.
+DOI_RESOLVER_ABSENCE_STATUSES = (400, 404)
 
 # The one failed status that is about the resource rather than the service:
 # Europe PMC answers 404 for a PMC ID it holds no open-access full text for,
@@ -992,6 +1022,9 @@ HTTP_NOT_FOUND = 404
 # and into a SourceLookupFailure, whose callers group by it (#347).
 SERVICE_UNPAYWALL = "Unpaywall"
 SERVICE_DOI_RESOLVER = "doi.org"
+# Where doi.org redirected to. Its throttle or outage is not doi.org's, and
+# naming doi.org for it would send the reader to the wrong server (#446).
+SERVICE_DOI_PUBLISHER = "the publisher's site the DOI resolves to"
 SERVICE_PMC_ID_CONVERTER = "PubMed Central's ID converter"
 SERVICE_EUROPE_PMC = "Europe PMC"
 

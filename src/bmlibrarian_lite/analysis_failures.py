@@ -1018,7 +1018,27 @@ def unestablished_access_clause(record: LookupRecord) -> str:
     """
     if not record.anything_unsettled:
         return ""
-    return _with_nudge(_access_left_open(record), record)
+    return _with_nudge(_sentence_start(_access_left_open(record)), record)
+
+
+def _sentence_start(text: str) -> str:
+    """Capitalise a leading "the", for a clause that begins a sentence.
+
+    A service named as a phrase ("the PDF download", "the publisher's site
+    the DOI resolves to", #446) is lowercase so it reads mid-sentence; at
+    the start of a sentence after a claim it read "Claim. the …". Only the
+    article changes: a name such as "doi.org" keeps its own case.
+
+    Args:
+        text: The clause, beginning with a service name.
+
+    Returns:
+        ``text``, with a leading "the " as "The ".
+    """
+    article = "the "
+    if text.startswith(article):
+        return f"The {text[len(article):]}"
+    return text
 
 
 def _with_nudge(sentences: str, record: LookupRecord) -> str:

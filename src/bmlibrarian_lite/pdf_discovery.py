@@ -49,11 +49,17 @@ import requests
 from urllib3.util.retry import Retry
 
 from .constants import (
+    DOI_RESOLVER_ABSENCE_STATUSES,
+    DOI_RESOLVER_HOSTS,
     FALLBACK_CONTACT_EMAIL,
     HTTP_ERROR_STATUS_MIN,
     HTTP_NOT_FOUND,
+    HTTP_SERVER_ERROR_MIN,
+    HTTP_UNSETTLED_CLIENT_STATUSES,
     PAYWALL_HTTP_STATUSES,
     POLITE_MAX_THROTTLE_RETRIES,
+    RETRYABLE_HTTP_STATUSES,
+    SERVICE_DOI_PUBLISHER,
     SERVICE_DOI_RESOLVER,
     SERVICE_PMC_ID_CONVERTER,
     SERVICE_UNPAYWALL,
@@ -94,6 +100,75 @@ _ID_CONVERTER_ERROR_STATUS = "error"
 # ``verification_warning`` fields. Those URLs are publisher and PMC ones
 # rather than the credential-bearing lookups, so no secret leaks today, but
 # the migration is unfinished: see #350 before adding another handler there.
+
+def doi_lookup_service(url: str | bytes | None) -> str:
+    """Name who answered a request made through doi.org.
+
+    The HEAD follows redirects, so a URL is doi.org's while its host is one
+    of :data:`DOI_RESOLVER_HOSTS`; any other host is the publisher's (#446).
+
+    Args:
+        url: The URL answered or failed on, as ``requests`` holds it (a
+            request's may be bytes); ``None`` when nothing names one --
+            the lookup failed before any request was sent or answered.
+            That one is named doi.org's.
+
+    Returns:
+        :data:`SERVICE_DOI_RESOLVER` or :data:`SERVICE_DOI_PUBLISHER`.
+    """
+    if url is None:
+        return SERVICE_DOI_RESOLVER
+    if isinstance(url, bytes):
+        url = url.decode("utf-8", errors="replace")
+    host = urlparse(url).hostname or ""
+    return (
+        SERVICE_DOI_RESOLVER if host in DOI_RESOLVER_HOSTS else SERVICE_DOI_PUBLISHER
+    )
+
+
+def doi_resolution_failure(status_code: int, url: str) -> SourceLookupFailure | None:
+    """Decide whether the status a DOI lookup ended on left it unsettled.
+
+    ``PoliteAdapter`` hands back the last status once its retries run out,
+    rather than raising, so an exhausted throttle arrives here as a status
+    (#446). Who answered decides what it means:
+
+    * doi.org's 400 (not a DOI) and 404 (not registered) are about the
+      identifier, so an absence. Any other failure of doi.org's left the
+      question open.
+    * The publisher's throttle, server fault, 408 or 425 left it open too,
+      retried or not: Cloudflare's 522 is an origin that timed out, and a
+      timeout we raise ourselves is recorded. Only a throttle reads as
+      "could not be asked"; the rest are the publisher's answer, "did not
+      serve it" (#435). Any other 4xx -- the bot wall that 9 of 20 surveyed
+      DOIs ended in, a 404, a 405 to the HEAD -- answers that content
+      negotiation serves no PDF, as all 11 other surveyed DOIs did, with
+      HTML. Recording it would caveat nearly half of all DOIs for a route
+      that served nothing to the rest (the maintainer's call, #446).
+
+    Args:
+        status_code: The status the lookup ended on.
+        url: Where that status came from.
+
+    Returns:
+        The failure, or ``None`` when the lookup was answered.
+    """
+    if status_code < HTTP_ERROR_STATUS_MIN:
+        return None
+    service = doi_lookup_service(url)
+    if service == SERVICE_DOI_RESOLVER:
+        if status_code in DOI_RESOLVER_ABSENCE_STATUSES:
+            return None
+    elif (
+        status_code < HTTP_SERVER_ERROR_MIN
+        and status_code not in RETRYABLE_HTTP_STATUSES
+        and status_code not in HTTP_UNSETTLED_CLIENT_STATUSES
+    ):
+        return None
+    return SourceLookupFailure(
+        service, RequestFailure(RequestFailureKind.HTTP_STATUS, status_code)
+    )
+
 
 # Global browser session manager (singleton, persists across downloads)
 _browser_session: Optional["BrowserSession"] = None
@@ -479,7 +554,7 @@ class PDFDiscoverer:
         retry_strategy = Retry(
             total=POLITE_MAX_THROTTLE_RETRIES,
             backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
+            status_forcelist=list(RETRYABLE_HTTP_STATUSES),
             allowed_methods=["HEAD", "GET"],
         )
         # Unpaywall, doi.org and publisher web servers, none of them ours
@@ -1166,13 +1241,26 @@ class PDFDiscoverer:
             doi: The article's DOI.
 
         Returns:
-            Whatever ``doi.org`` resolved to, and the failure that stopped it
-            being asked. ``doi.org`` is paced at one request a second, so a
+            Whatever ``doi.org`` resolved to, and the failure that left it
+            unsettled. ``doi.org`` is paced at one request a second, so a
             batch will meet this, and an exhausted throttle must not read as
-            an article with no copy (#347).
+            an article with no copy (#347) -- whether it is raised or, as the
+            polite adapter does once its retries run out, handed back as a
+            status (#446). A failure after the redirect is named as the
+            publisher's; see :func:`doi_resolution_failure`.
         """
         sources: List[PDFSource] = []
+        # Every URL that answered, redirects included: an exception that
+        # names no request is named by the hop that sent us where we could
+        # not follow.
+        answered: list[str] = []
 
+        def note_hop(hop: requests.Response, **_kwargs: Any) -> None:
+            """Record a hop's URL; ``requests`` calls this for each one."""
+            answered.append(hop.url)
+
+        failed_on: str | bytes | None = None
+        failure: RequestFailure | None = None
         try:
             doi = self._clean_doi(doi)
             doi_url = f"https://doi.org/{doi}"
@@ -1188,41 +1276,80 @@ class PDFDiscoverer:
                 headers=headers,
                 allow_redirects=True,
                 timeout=REQUEST_TIMEOUT,
+                hooks={"response": note_hop},
             )
-
-            # Check if we got a PDF response
-            content_type = response.headers.get("Content-Type", "")
-            if "pdf" in content_type.lower():
-                sources.append(PDFSource(
-                    url=response.url,
-                    source_type=PDFSourceType.DOI_DIRECT,
-                    is_open_access=False,  # May or may not be OA
-                    host_type="publisher",
-                    version="publishedVersion",
-                ))
-
         except requests.exceptions.RequestException as e:
-            # At debug, a throttled doi.org left no trace at all under the
-            # default INFO configuration: the reader saw "no full text" and
-            # the log said nothing had happened.
+            # The exception names the request it failed on, which after a
+            # redirect is the publisher's, not doi.org's.
+            if e.request is not None:
+                failed_on = e.request.url
             failure = request_failure_from_exception(e)
-            logger.warning(
-                f"doi.org could not be asked about DOI {doi} "
-                f"({failure.describe()}), so any copy it resolves to is not "
-                f"assessed."
+        except ValueError:
+            # A redirect whose Location will not parse ("http://[bad/x")
+            # raises a bare ValueError from inside requests. Escaping, it
+            # threw away the sources the earlier tiers had found.
+            failure = RequestFailure(RequestFailureKind.REQUEST_FAILED)
+        if failure is not None:
+            if failed_on is None and answered:
+                failed_on = answered[-1]
+            lookup_failure = SourceLookupFailure(
+                doi_lookup_service(failed_on), failure
             )
-            return sources, SourceLookupFailure(SERVICE_DOI_RESOLVER, failure)
+            self._log_doi_lookup_failure(doi, lookup_failure)
+            return sources, lookup_failure
+
+        status_failure = doi_resolution_failure(response.status_code, response.url)
+        if status_failure is not None:
+            self._log_doi_lookup_failure(doi, status_failure)
+            return sources, status_failure
+        if response.status_code >= HTTP_ERROR_STATUS_MIN:
+            logger.debug(
+                f"DOI {doi} resolved to HTTP {response.status_code} from "
+                f"{doi_lookup_service(response.url)}; no PDF by content "
+                f"negotiation"
+            )
+            return sources, None
+
+        # Check if we got a PDF response
+        content_type = response.headers.get("Content-Type", "")
+        if "pdf" in content_type.lower():
+            sources.append(PDFSource(
+                url=response.url,
+                source_type=PDFSourceType.DOI_DIRECT,
+                is_open_access=False,  # May or may not be OA
+                host_type="publisher",
+                version="publishedVersion",
+            ))
 
         return sources, None
+
+    @staticmethod
+    def _log_doi_lookup_failure(doi: str, failure: SourceLookupFailure) -> None:
+        """Log a DOI lookup that left the question open.
+
+        At warning: at debug, a throttled doi.org left no trace at all under
+        the default INFO configuration -- the reader saw "no full text" and
+        the log said nothing had happened.
+
+        Args:
+            doi: The DOI asked about.
+            failure: What stopped it being answered.
+        """
+        logger.warning(
+            f"The lookup of DOI {doi} went unsettled at {failure.service} "
+            f"({failure.failure.describe()}), so any copy it resolves to is "
+            f"not assessed."
+        )
 
     def _clean_doi(self, doi: str) -> str:
         """Clean and normalize a DOI to its bare ``10.x/...`` form.
 
-        Accepts the resolver forms that turn up in real metadata: ``doi.org``
-        and ``dx.doi.org`` URLs over either scheme, a ``doi:``/``DOI:`` prefix,
-        and surrounding whitespace. Anything else is returned as given --
-        publisher matching is prefix-anchored, so an unrecognised form simply
-        matches no branch rather than being coerced into one.
+        Accepts the resolver forms that turn up in real metadata:
+        ``doi.org``, ``www.doi.org`` and ``dx.doi.org`` URLs over either
+        scheme, a ``doi:``/``DOI:`` prefix, and surrounding whitespace.
+        Anything else is returned as given -- publisher matching is
+        prefix-anchored, so an unrecognised form simply matches no branch
+        rather than being coerced into one.
 
         Args:
             doi: DOI in any of the above forms
@@ -1235,6 +1362,8 @@ class PDFDiscoverer:
         prefixes = [
             "https://doi.org/",
             "http://doi.org/",
+            "https://www.doi.org/",
+            "http://www.doi.org/",
             "https://dx.doi.org/",
             "http://dx.doi.org/",
             "doi:",

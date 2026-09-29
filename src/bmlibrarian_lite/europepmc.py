@@ -63,6 +63,7 @@ from .constants import (
     EUROPEPMC_SOURCE_PREPRINT,
     EUROPEPMC_USER_AGENT,
     HTTP_NOT_FOUND,
+    RETRYABLE_HTTP_STATUSES,
 )
 from .data_models import (
     CursorPaginationState,
@@ -512,7 +513,7 @@ class EuropePMCClient:
         retry_strategy = Retry(
             total=EUROPEPMC_MAX_RETRIES,
             backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
+            status_forcelist=list(RETRYABLE_HTTP_STATUSES),
             allowed_methods=["HEAD", "GET"],
             raise_on_status=False,
         )

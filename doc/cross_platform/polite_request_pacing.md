@@ -205,10 +205,18 @@ pacing must never increase the traffic it exists to reduce: the default
 budget would turn one physical request into four on a persistent 503, and
 those extra requests are charged to a budget other call sites share.
 
+The transport's own honouring of `Retry-After` goes with them (#446).
+urllib3 re-sends a 413, 429 or 503 that carries the header whatever its
+retry-on-status list says, sleeping what the header asks with no cap of
+ours: left on, one logical request cost sixteen physical ones where four
+were configured, all below the limiter. The pacing layer reads the header
+itself (rule 3).
+
 Python: `polite_session.mount_politely` clears the passed-in `Retry`'s
-status forcelist, passing those statuses to `PoliteAdapter` as
-`fault_statuses` and its `total` as `max_throttle_retries`;
-`PoliteAdapter.send` runs the acquire/send/penalise loop.
+status forcelist and turns off its `respect_retry_after_header`, passing
+those statuses to `PoliteAdapter` as `fault_statuses` and its `total` as
+`max_throttle_retries`; `PoliteAdapter.send` runs the
+acquire/send/penalise loop.
 
 **7. Pacing never invents a failure, and never re-classifies one.**
 `acquire()` only delays; it never raises and never turns a request into an

@@ -14,6 +14,7 @@ rather than letting ``limiter_for`` create ones that would really sleep
 during the 503-retry tests.
 """
 
+from http import HTTPStatus
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -39,6 +40,7 @@ from bmlibrarian_lite.rate_limit import (
     policy_for_host,
     reset_limiters,
 )
+from tests.scripted_http_server import ScriptedAnswer, running
 
 #: Hosts the adapter tests exercise, seeded into the registry so their
 #: limiters never invoke the real ``time.sleep``.
@@ -553,3 +555,44 @@ class TestRetryAfter:
         assert retry_after_seconds(
             response_with(503, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"})
         ) is None
+
+
+class TestRetryAfterIsTheAdaptersAlone:
+    """urllib3 must not re-send a throttle that carries ``Retry-After`` (#446).
+
+    Its ``respect_retry_after_header`` re-sent a 413, 429 or 503 carrying the
+    header inside every adapter attempt, below the limiter, sleeping whatever
+    the header asked: sixteen requests where four were configured. These run
+    the real ``HTTPAdapter.send`` against a loopback server, which the
+    ``_send_once`` stand-ins above replace.
+    """
+
+    def test_urllib3_is_told_to_ignore_it(self) -> None:
+        """The adapter reads the header itself, and caps it."""
+        session = mount_politely(
+            requests.Session(), retry=Retry(total=3, status_forcelist=[503])
+        )
+
+        mounted_retry = mounted_adapter(session).max_retries
+        assert isinstance(mounted_retry, Retry)
+        assert mounted_retry.respect_retry_after_header is False
+
+    @pytest.mark.parametrize(
+        "status", [HTTPStatus.TOO_MANY_REQUESTS, HTTPStatus.SERVICE_UNAVAILABLE]
+    )
+    def test_a_throttle_asking_to_wait_costs_the_configured_attempts(
+        self, status: HTTPStatus
+    ) -> None:
+        """Each logical request costs ``retry.total`` extra attempts, no more."""
+        total = 3
+        session = mount_politely(
+            requests.Session(),
+            retry=Retry(total=total, backoff_factor=0, status_forcelist=[429, 503]),
+        )
+        throttle = ScriptedAnswer(status, headers=(("Retry-After", "0"),))
+
+        with running({"/x": [throttle]}) as server:
+            response = session.get(f"{server.url}/x", timeout=5)
+
+        assert response.status_code == status
+        assert len(server.requests_to("/x")) == total + 1
