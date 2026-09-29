@@ -229,6 +229,16 @@ logged **and reported**).
     access was not established." Within one service, a failure that could
     not be asked outranks an earlier answer: Europe PMC's XML 404 followed
     by a timed-out PDF render is named by the timeout.
+  - **A status handed back is read, and named by who sent it** (#446,
+    Python; the apps only link to doi.org). The polite adapter hands back an
+    exhausted 429 or 5xx rather than raising, so the doi.org tier reads the
+    status. Before a redirect it is doi.org's: its 404 is an unregistered
+    DOI (an absence), anything else a failure of `doi.org`. After the
+    redirect it is the publisher's: a throttle or any 5xx is a failure of
+    "the publisher's site the DOI resolves to"; any other 4xx (the bot
+    wall 9 of 20 surveyed DOIs ended in) answers that
+    content negotiation serves no PDF, and is not caveated. A clause
+    beginning a sentence capitalises such a phrase's leading "the".
   - **`NOT_FOUND` is a claim about the article, so only the end of the
     chain may reach it.** Every per-source "this one holds nothing" is
     `NOT_ASSESSED`, because the sources after it have not been asked yet. `FulltextDiscoverer` mapped every failure, every cancel and every

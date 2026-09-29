@@ -49,11 +49,15 @@ import requests
 from urllib3.util.retry import Retry
 
 from .constants import (
+    DOI_RESOLVER_HOSTS,
     FALLBACK_CONTACT_EMAIL,
     HTTP_ERROR_STATUS_MIN,
     HTTP_NOT_FOUND,
+    HTTP_SERVER_ERROR_MIN,
     PAYWALL_HTTP_STATUSES,
     POLITE_MAX_THROTTLE_RETRIES,
+    RETRYABLE_HTTP_STATUSES,
+    SERVICE_DOI_PUBLISHER,
     SERVICE_DOI_RESOLVER,
     SERVICE_PMC_ID_CONVERTER,
     SERVICE_UNPAYWALL,
@@ -94,6 +98,73 @@ _ID_CONVERTER_ERROR_STATUS = "error"
 # ``verification_warning`` fields. Those URLs are publisher and PMC ones
 # rather than the credential-bearing lookups, so no secret leaks today, but
 # the migration is unfinished: see #350 before adding another handler there.
+
+def doi_lookup_service(url: str | bytes | None) -> str:
+    """Name who answered a request made through doi.org.
+
+    The HEAD follows redirects, so the response, or the request an exception
+    names, is doi.org's only until it redirects; after that it is the
+    publisher's (#446).
+
+    Args:
+        url: The URL answered or failed on, as ``requests`` holds it (a
+            request's may be bytes); ``None`` when an exception carried no
+            request. That one is named doi.org's: it either failed before
+            any request was sent, or was redirected by doi.org's record to a
+            URL no adapter can send (``InvalidSchema``).
+
+    Returns:
+        :data:`SERVICE_DOI_RESOLVER` or :data:`SERVICE_DOI_PUBLISHER`.
+    """
+    if url is None:
+        return SERVICE_DOI_RESOLVER
+    if isinstance(url, bytes):
+        url = url.decode("utf-8", errors="replace")
+    host = urlparse(url).hostname or ""
+    return (
+        SERVICE_DOI_RESOLVER if host in DOI_RESOLVER_HOSTS else SERVICE_DOI_PUBLISHER
+    )
+
+
+def doi_resolution_failure(status_code: int, url: str) -> SourceLookupFailure | None:
+    """Decide whether the status a DOI lookup ended on left it unsettled.
+
+    ``PoliteAdapter`` hands back the last status once its retries run out,
+    rather than raising, so an exhausted throttle arrives here as a status
+    (#446). Who answered decides what it means:
+
+    * doi.org's 404 is an unregistered DOI -- about the DOI, so an absence.
+      Any other failure of doi.org's left the question open.
+    * The publisher's throttle or server fault left it open too, retried or
+      not: Cloudflare's 522 is an origin that timed out, and a timeout we
+      raise ourselves is recorded. Any other 4xx -- the bot wall that 9 of
+      20 surveyed DOIs ended in, a 404, a 405 to the HEAD -- answers that content negotiation serves no PDF,
+      which is what 11 of the 11 other surveyed DOIs answered with HTML.
+      Recording it would caveat half of all DOIs for a route that served
+      nothing to the rest (the maintainer's call, #446).
+
+    Args:
+        status_code: The status the lookup ended on.
+        url: Where that status came from.
+
+    Returns:
+        The failure, or ``None`` when the lookup was answered.
+    """
+    if status_code < HTTP_ERROR_STATUS_MIN:
+        return None
+    service = doi_lookup_service(url)
+    if service == SERVICE_DOI_RESOLVER:
+        if status_code == HTTP_NOT_FOUND:
+            return None
+    elif (
+        status_code < HTTP_SERVER_ERROR_MIN
+        and status_code not in RETRYABLE_HTTP_STATUSES
+    ):
+        return None
+    return SourceLookupFailure(
+        service, RequestFailure(RequestFailureKind.HTTP_STATUS, status_code)
+    )
+
 
 # Global browser session manager (singleton, persists across downloads)
 _browser_session: Optional["BrowserSession"] = None
@@ -479,7 +550,7 @@ class PDFDiscoverer:
         retry_strategy = Retry(
             total=POLITE_MAX_THROTTLE_RETRIES,
             backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
+            status_forcelist=list(RETRYABLE_HTTP_STATUSES),
             allowed_methods=["HEAD", "GET"],
         )
         # Unpaywall, doi.org and publisher web servers, none of them ours
@@ -1169,7 +1240,10 @@ class PDFDiscoverer:
             Whatever ``doi.org`` resolved to, and the failure that stopped it
             being asked. ``doi.org`` is paced at one request a second, so a
             batch will meet this, and an exhausted throttle must not read as
-            an article with no copy (#347).
+            an article with no copy (#347) -- whether it is raised or, as the
+            polite adapter does once its retries run out, handed back as a
+            status (#446). A failure after the redirect is named as the
+            publisher's; see :func:`doi_resolution_failure`.
         """
         sources: List[PDFSource] = []
 
@@ -1189,31 +1263,57 @@ class PDFDiscoverer:
                 allow_redirects=True,
                 timeout=REQUEST_TIMEOUT,
             )
-
-            # Check if we got a PDF response
-            content_type = response.headers.get("Content-Type", "")
-            if "pdf" in content_type.lower():
-                sources.append(PDFSource(
-                    url=response.url,
-                    source_type=PDFSourceType.DOI_DIRECT,
-                    is_open_access=False,  # May or may not be OA
-                    host_type="publisher",
-                    version="publishedVersion",
-                ))
-
         except requests.exceptions.RequestException as e:
             # At debug, a throttled doi.org left no trace at all under the
             # default INFO configuration: the reader saw "no full text" and
-            # the log said nothing had happened.
-            failure = request_failure_from_exception(e)
-            logger.warning(
-                f"doi.org could not be asked about DOI {doi} "
-                f"({failure.describe()}), so any copy it resolves to is not "
-                f"assessed."
+            # the log said nothing had happened. The exception names the
+            # request it failed on, which after a redirect is the
+            # publisher's, not doi.org's.
+            failed_on = e.request.url if e.request is not None else None
+            lookup_failure = SourceLookupFailure(
+                doi_lookup_service(failed_on), request_failure_from_exception(e)
             )
-            return sources, SourceLookupFailure(SERVICE_DOI_RESOLVER, failure)
+            self._log_doi_lookup_failure(doi, lookup_failure)
+            return sources, lookup_failure
+
+        status_failure = doi_resolution_failure(response.status_code, response.url)
+        if status_failure is not None:
+            self._log_doi_lookup_failure(doi, status_failure)
+            return sources, status_failure
+        if response.status_code >= HTTP_ERROR_STATUS_MIN:
+            logger.debug(
+                f"DOI {doi} resolved to HTTP {response.status_code} from "
+                f"{doi_lookup_service(response.url)}; no PDF by content "
+                f"negotiation"
+            )
+            return sources, None
+
+        # Check if we got a PDF response
+        content_type = response.headers.get("Content-Type", "")
+        if "pdf" in content_type.lower():
+            sources.append(PDFSource(
+                url=response.url,
+                source_type=PDFSourceType.DOI_DIRECT,
+                is_open_access=False,  # May or may not be OA
+                host_type="publisher",
+                version="publishedVersion",
+            ))
 
         return sources, None
+
+    @staticmethod
+    def _log_doi_lookup_failure(doi: str, failure: SourceLookupFailure) -> None:
+        """Log a DOI lookup that left the question open.
+
+        Args:
+            doi: The DOI asked about.
+            failure: What stopped it being answered.
+        """
+        logger.warning(
+            f"The lookup of DOI {doi} went unsettled at {failure.service} "
+            f"({failure.failure.describe()}), so any copy it resolves to is "
+            f"not assessed."
+        )
 
     def _clean_doi(self, doi: str) -> str:
         """Clean and normalize a DOI to its bare ``10.x/...`` form.

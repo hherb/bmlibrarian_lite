@@ -976,10 +976,27 @@ POLITE_THROTTLE_STATUSES = (429, 503)
 # the status is handed back to the caller.
 POLITE_MAX_THROTTLE_RETRIES = 3
 
+# The statuses a client session retries: the throttles and the server faults.
+# One that outlasts the retries is handed back, not raised, so a caller that
+# reads it is reading an exhausted retry, never an answer made at leisure.
+# Swift's ``retryableStatusCodes`` names the same five; Android's
+# ``NetworkRetry`` also retries 408.
+RETRYABLE_HTTP_STATUSES = (429, 500, 502, 503, 504)
+
 # The lowest status that means the request did not succeed. Only a status
 # below this earns rate back: a host streaming 500/502/504 is failing, and
 # must not be credited with recovery for doing so.
 HTTP_ERROR_STATUS_MIN = 400
+
+# The lowest status that is the server's own fault rather than a refusal of
+# the request. A publisher reached through doi.org that answers one of these
+# was not asked, whether or not it was retried (Cloudflare's 522 is an origin
+# that timed out) (#446).
+HTTP_SERVER_ERROR_MIN = 500
+
+# The hosts that are doi.org itself, as opposed to where it redirects: a
+# status from one of these is the resolver's answer about the DOI (#446).
+DOI_RESOLVER_HOSTS = ("doi.org", "dx.doi.org")
 
 # The one failed status that is about the resource rather than the service:
 # Europe PMC answers 404 for a PMC ID it holds no open-access full text for,
@@ -992,6 +1009,9 @@ HTTP_NOT_FOUND = 404
 # and into a SourceLookupFailure, whose callers group by it (#347).
 SERVICE_UNPAYWALL = "Unpaywall"
 SERVICE_DOI_RESOLVER = "doi.org"
+# Where doi.org redirected to. Its throttle or outage is not doi.org's, and
+# naming doi.org for it would send the reader to the wrong server (#446).
+SERVICE_DOI_PUBLISHER = "the publisher's site the DOI resolves to"
 SERVICE_PMC_ID_CONVERTER = "PubMed Central's ID converter"
 SERVICE_EUROPE_PMC = "Europe PMC"
 

@@ -8,46 +8,27 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#435 — an answered lookup "did not serve it"** (all three), branch
-`fix/answered-404-verb-435`, **PR #444**. Compress into **Recently
+**#446 — doi.org's HEAD status is read** (Python only; the apps only link
+to doi.org), branch `fix/doi-head-status-446`. Compress into **Recently
 landed** once merged.
 
-- **Rule (user, 2026-09-29):** an `HTTP_STATUS` failure reads "… Europe PMC
-  (HTTP 404 Not Found) did not serve it, so …" **except a throttle** (429,
-  503), which keeps "could not be asked" with every other kind (a blank 200
-  and a refused redirect included). One predicate on all three:
-  `RequestFailure.is_answer` / `isAnswer`, over `POLITE_THROTTLE_STATUSES` /
-  `BioMedLitConstants.throttleStatusCodes` / `Constants.THROTTLE_STATUS_CODES`.
-  Contract: `doc/cross_platform/search_failure_reporting.md` (after the
-  `{reason}` table).
-- Python: `unasked_lookups_clause` is replaced by `unsettled_lookups_clause`,
-  which carries the verbs ("A (…) could not be asked, and B (…) did not serve
-  it"); all five sentences use it (`unestablished_access_clause`,
-  `paywall_message`, `no_pdf_sources_message`, the analyser's full-text
-  caveat and paywall warning). Apps: `absenceNotEstablished`'s sentence now
-  asks `isAnswer`, so a 429 reads "could not be asked" again.
-- **Review fixes (same PR):**
-  - The rest of the sentence follows the verb. Only an unasked source earns
-    "so a freely available copy may exist" and "but". A record holding
-    answers alone reads "No PDF sources found for this document, and
-    Europe PMC (HTTP 404 Not Found) did not serve it, so whether this
-    document is open access was not established."
-  - The analyser's paywall warning is now `refused_access_sentence`, the
-    same wording as `paywall_message`.
-  - The analyser caveat introduces its reasons with a colon.
-  - Within one service, a failure that could not be asked outranks an
-    earlier answer (`_unsettled`).
-  - `LookupRecord.anything_unasked` is renamed `anything_unsettled`.
-  - Unpaywall is never asked with `FALLBACK_CONTACT_EMAIL`
-    (`usable_unpaywall_email`; it answered 422 for every article). The
-    transparency analysis now reads `discovery.unpaywall_email`
-    (`unpaywall_contact_email`).
-- Lodged for the maintainer, all open: #445 (which statuses are answers:
-  5xx, configuration 4xx, no status), #446 (doi.org's unchecked HEAD
-  status), #447 (a shared is-answer/sentence fixture).
-- Checked: `pytest` 5811, BioMedLit `swift test` 1335, app `swift test`
-  394, `./gradlew test` 1228, all 0 failures; lint delta 0 new.
-  Eight Python mutations of the review fixes, all caught.
+- **Rule (user, 2026-09-29), from a live survey of 20 DOIs** (9 ended in a
+  publisher's 403 bot wall after the redirect; none of the other 11
+  content-negotiated to a PDF): before a redirect the status is doi.org's
+  (404 = unregistered DOI, an absence; any other ≥400 a `doi.org`
+  failure); after it, the publisher's: a throttle or any 5xx (Cloudflare's
+  522 included, retried or not) is a failure of `SERVICE_DOI_PUBLISHER`
+  ("the publisher's site the DOI resolves to"), any other 4xx stays "no
+  PDF" uncaveated. Exceptions
+  are named by the request they failed on. Pure rule:
+  `doi_resolution_failure` / `doi_lookup_service` in `pdf_discovery.py`.
+- `unestablished_access_clause` capitalises a leading "the" (it opens a
+  sentence; "the PDF download" already read "Claim. the PDF download …").
+- `RETRYABLE_HTTP_STATUSES` replaces the forcelists in `europepmc.py` and
+  `pdf_discovery.py`.
+- Tests: `tests/test_doi_resolver_statuses.py` drives the real `head`
+  through the mounted `PoliteAdapter` (retries included), socket scripted.
+  `pytest` 5855 passed; lint delta 0 new; 13 mutations, all caught.
 
 ## Recently landed (context)
 
@@ -55,6 +36,15 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **An answered lookup "did not serve it"** (all three; PR #444, #435). An
+  `HTTP_STATUS` failure reads "… Europe PMC (HTTP 404 Not Found) did not
+  serve it" **except a throttle** (429, 503), which "could not be asked" with
+  every other kind. One predicate: `RequestFailure.is_answer` / `isAnswer`.
+  **The rest of the sentence follows the verb**: only an unasked source earns
+  "a freely available copy may exist". Python builds every such sentence with
+  `unsettled_lookups_clause`; within one service an unasked failure outranks
+  an earlier answer. **Unpaywall is never asked with `FALLBACK_CONTACT_EMAIL`**
+  (it answers 422). Contract: `search_failure_reporting.md`.
 - **Typed full-text XML fetch, all three** (PRs #433, #438; #429, #434).
   Served / absent (404) / unreachable of its real kind; a blank 200 is
   incomplete; a non-accession is never sent; **preprints are fetched by their
@@ -94,37 +84,23 @@ the rest.
   to the score reads as `None`. Contract: `transparency_parity/risk_explanation_strings.json`.
   **No Unassessed rule on the desktop** (user's call), pinned by
   `test_no_high_rests_on_unread_text.py`.
-- **An unreachable source is provisional; a trial is a whole word** (all
-  three; PR #410, #385). Swift + Android store `sourcesUnreachable` when a
-  source fails *or answers unreadably* (a 404 is an answer); `needsReanalysis`
-  = stale, or provisional and not from a newer build; a cancel is rethrown.
-  Python: **every
-  cited trial must be answered** before "without detected registration" fires.
-  Trial titles match by whole word (`trial_title_patterns.json`).
-- **Mixed content** (PR #397, #405): **never `findtext` a mixed-content
-  element** — it returns the text before the first child. The Android JATS
-  parser is JVM-testable (kxml2, test-only).
-- **Funders by brand** (PR #395/#396): `sponsor_patterns.json` schema 4
-  whole-word `industry_brands`; "Eli Lilly" the one spelled-out exception,
-  UCB left out (UC Berkeley), a brand beside a foundation word is the
-  charity. The funder corpus **differs from bmlib's copy**.
-- **Reports explain ratings** (Swift + Android, PR #388): rating and
-  explanation come from one function; on the apps a High resting only on
-  unsearched text shows as **Unassessed**; every Android rating says
-  "limited" until #384.
-- **Models and pricing** (PR #383): an unlisted Claude ID gets its family's
-  dearest rate; `list_models` raises rather than falling back. Release
-  0.5.0 / apps 1.6.0 (PR #393).
-- **Stored transparency rows** (Python; #374, #360, PRs #379, #366, #375).
-  Readers return `StoredTransparency`; a row **strictly newer** than this
-  build is never overwritten (`may_replace_stored`), any other undecodable
-  row is damaged and re-analysed. **Bump `TRANSPARENCY_ANALYZER_VERSION`**
-  whenever the same inputs could move a score, level, indicator or caveat;
-  the comparison is an ordering (`analyzer_version_ordinal`). **Every surface
-  reading a stored row is gated**, a withheld row reads "Not assessed", and
-  re-analysis is an explicit, question-scoped pass with one analysis body
-  (`transparency/assessment.py`). Contract:
-  `doc/cross_platform/analysis_failure_reporting.md`.
+- **An unreachable source is provisional** (all three; PR #410, #385): the
+  apps store `sourcesUnreachable` when a source fails *or answers
+  unreadably*; Python needs **every cited trial answered** before "without
+  detected registration". Trial titles match by whole word.
+- **Never `findtext` a mixed-content element** (PR #397, #405). **Funders by
+  brand** (PR #395/#396): `sponsor_patterns.json` schema 4, whole-word
+  `industry_brands`; the funder corpus **differs from bmlib's copy**.
+- **Reports explain ratings** (apps, PR #388): an app High resting only on
+  unsearched text shows as **Unassessed**. **Pricing** (PR #383): an
+  unlisted Claude ID gets its family's dearest rate. Release 0.5.0 / apps
+  1.6.0 (PR #393).
+- **Stored transparency rows** (Python; PRs #379, #366, #375). A row
+  **strictly newer** than this build is never overwritten
+  (`may_replace_stored`); **bump `TRANSPARENCY_ANALYZER_VERSION`** whenever
+  the same inputs could move a score, level, indicator or caveat. **Every
+  surface reading a stored row is gated**; one analysis body
+  (`transparency/assessment.py`). Contract: `analysis_failure_reporting.md`.
 - **A source nobody asked is not a source that answered "nothing"** (Python;
   PRs #358, #365). Only a text we read and segmented can produce
   `NOT_STATED`; a skip is a third state (`SourceLookupSkipped`); a
@@ -171,17 +147,14 @@ the rest.
     never states a PubMed ID** (thesis `889149` is also a 1977 mouse paper)
     and one predicate authorises every PubMed URL and `PMID:` line; an
     article is named by a *ladder* (primary slot, PMC ID, DOI).
-  - **A downloaded PDF contributes its text** (PR #198); an abstract-only
-    deposit is held back.
-  - **A guard must name its own cause** (PR #195); **prefix-anchor a
-    publisher branch** (PeerJ).
+  - **A downloaded PDF contributes its text** (PR #198); **a guard must
+    name its own cause** (PR #195).
   - **A reader-facing payload must not be rendered English** (#184/#183):
     `JATSParseWarnings` carries typed losses and `diagnostics` is *derived*.
     **A tagged union's persisted form needs named keys and a
     `schemaVersion`** — synthesised `Codable` emits `{"_0":2}` (#163).
     **A view's private computed state cannot be tested.**
-  - **The clamp erased the evidence** (#180/#181). **Logging is not
-    reporting.** **A pbxproj UUID collision silently drops a file.**
+  - **Logging is not reporting** (#180/#181).
   - **Route markup on the owning element, not on ambient parser state**
     (#156–#175): read `elementStack`; exhibit flags derive from one
     `ExhibitCollector`. **bmlib is ahead of Swift — port from it** (#165).
@@ -206,7 +179,6 @@ the rest.
     install skips ~100 `importorskip` tests green. **`lint_delta.py`** diffs
     against the merge base in a throwaway worktree; **ruff config stays in
     `[tool.ruff.lint]`**, or head and base shrink together.
-  - **Model fetch failures are errors, not fallbacks** (PR #135).
   - **Cross-platform parity drift guard** (#105, #101–#125). Python
     `study_transparency_analyzer.py` is canonical; Swift and Android mirror
     the data-availability and funder-name classifiers byte-for-byte, *not*
@@ -222,6 +194,12 @@ the rest.
 ## Potential follow-ups
 
 Open issues by family; each issue carries the detail. None blocks another.
+
+### Left by the #435 round (PR #444)
+
+- **#445** which statuses are answers: 5xx, configuration 4xx (400/401/403/
+  422) and a missing status (maintainer decision; all three platforms).
+- **#447** a shared JSON fixture for `is_answer` and the apps' sentence.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 
