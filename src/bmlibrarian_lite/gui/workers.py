@@ -1451,10 +1451,13 @@ class TransparencyReanalysisWorker(SingleOutcome, QThread):
                 assess_document,
                 contact_email,
                 create_background_analyzer,
+                unpaywall_contact_email,
             )
 
             analyzer = create_background_analyzer(
-                contact_email(self.config), self.config.pubmed.api_key
+                contact_email(self.config),
+                self.config.pubmed.api_key,
+                unpaywall_email=unpaywall_contact_email(self.config),
             )
 
             for i, doc in enumerate(self.documents):

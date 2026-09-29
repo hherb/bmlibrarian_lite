@@ -92,7 +92,11 @@ class TransparencyManager(QObject):
         self.config = config
         self.settings = config.transparency
 
-        self._analyzer = create_background_analyzer(email, pubmed_api_key)
+        self._analyzer = create_background_analyzer(
+            email,
+            pubmed_api_key,
+            unpaywall_email=config.discovery.unpaywall_email or None,
+        )
 
         # Thread pool for background analysis, and the worker count it was
         # started with. Kept apart from ``settings``: the settings object is

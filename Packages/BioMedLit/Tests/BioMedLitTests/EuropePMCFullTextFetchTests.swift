@@ -452,17 +452,48 @@ final class FullTextChainEuropePMCTests: XCTestCase {
     }
 
     /// The reader's sentence follows #435's decision: an HTTP answer "did not
-    /// serve it", a transport failure "could not be asked".
+    /// serve it", a throttle or a transport failure "could not be asked".
+    /// Asserted whole, so the tail cannot drift from Android's.
     func testTheSentenceNamesWhatEuropePMCDid() {
-        let answered = FullTextError.absenceNotEstablished(.httpStatus(404)).errorDescription ?? ""
-        XCTAssertTrue(answered.contains("Europe PMC (HTTP 404 Not Found) did not serve it"), answered)
-        XCTAssertFalse(answered.contains("could not be asked"), answered)
-
-        let unasked = FullTextError.absenceNotEstablished(.timeout).errorDescription ?? ""
-        XCTAssertTrue(
-            unasked.contains("Europe PMC could not be asked (the request timed out)"), unasked
+        XCTAssertEqual(
+            FullTextError.absenceNotEstablished(.httpStatus(404)).errorDescription,
+            "No source provided this article's full text. Europe PMC (HTTP 404 Not Found) "
+                + "did not serve it, so it may still exist. Try again later."
+        )
+        XCTAssertEqual(
+            FullTextError.absenceNotEstablished(.timeout).errorDescription,
+            "No source provided this article's full text. Europe PMC could not be asked "
+                + "(the request timed out), so it may still exist. Try again later."
         )
         XCTAssertFalse(FullTextError.absenceNotEstablished(.timeout).isRetryable)
+        for status in BioMedLitConstants.throttleStatusCodes.sorted() {
+            let failure = RequestFailure.httpStatus(status)
+            XCTAssertEqual(
+                FullTextError.absenceNotEstablished(failure).errorDescription,
+                "No source provided this article's full text. Europe PMC could not be asked "
+                    + "(\(failure.describe())), so it may still exist. Try again later."
+            )
+        }
+    }
+
+    /// The predicate the verb is chosen by, Python's `RequestFailure.is_answer`.
+    func testAnHTTPStatusOtherThanAThrottleIsAnAnswer() {
+        for status in [400, 401, 403, 404, 410, 500, 502, 504] {
+            XCTAssertTrue(RequestFailure.httpStatus(status).isAnswer, "\(status)")
+        }
+        XCTAssertEqual(BioMedLitConstants.throttleStatusCodes, [429, 503])
+        for status in BioMedLitConstants.throttleStatusCodes {
+            XCTAssertFalse(RequestFailure.httpStatus(status).isAnswer, "\(status)")
+        }
+        // A status this build could not keep was still answered.
+        XCTAssertTrue(RequestFailure.httpStatus(1000).isAnswer)
+        // Every other kind, including one added later, is not an answer.
+        for kind in RequestFailureKind.allCases where kind != .httpStatus {
+            for statusCode in [nil, 307] as [Int?] {
+                let failure = RequestFailure.restored(kind: kind, statusCode: statusCode)
+                XCTAssertFalse(failure.isAnswer, failure.describe())
+            }
+        }
     }
 
     // MARK: Degradation

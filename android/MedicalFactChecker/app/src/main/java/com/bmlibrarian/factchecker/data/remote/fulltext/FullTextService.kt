@@ -25,7 +25,6 @@ import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
 import com.bmlibrarian.factchecker.data.remote.europepmc.FullTextAccession
 import com.bmlibrarian.factchecker.data.remote.europepmc.FullTextXmlFetch
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
-import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
@@ -131,17 +130,18 @@ class FullTextService @Inject constructor(
          * No source provided the full text, but Europe PMC did not settle whether
          * it exists (#434).
          *
-         * Europe PMC answered with an HTTP status that is not about the article
-         * (`fullTextXML`'s 404 for text that is not open access (#432), or a 429
-         * or 5xx that outlasted its retries, from the fetch or the identifier
-         * search), or gave no usable answer at all (a timeout, a dropped
-         * connection, a blank body, an identifier never sent). The reader's
-         * sentence follows the same split: see [absenceNotEstablishedMessage].
+         * Europe PMC answered without serving the article (an HTTP status such
+         * as `fullTextXML`'s 404 for text that is not open access (#432), or a
+         * 5xx other than 503 that outlasted its retries, from the fetch or the
+         * identifier search), or gave no answer at all (a throttle (429, 503), a
+         * timeout, a dropped connection, a blank body, an identifier never sent).
+         * The reader's sentence follows the same split, by
+         * [RequestFailure.isAnswer]: see [absenceNotEstablishedMessage].
          * Unlike [Unavailable], a claim about us: callers must not mark
          * the document unavailable for good on it, or a busy Europe PMC takes the
          * retry away.
          *
-         * @param failure What Europe PMC's side of the chain got instead of an answer
+         * @param failure What Europe PMC's side of the chain got instead of the article's text
          */
         data class NotEstablished(val failure: RequestFailure) : FullTextResult(hasContent = false) {
             /** The sentence shown to the reader. */
@@ -242,8 +242,8 @@ class FullTextService @Inject constructor(
         pmid: String?,
         email: String = Constants.UNPAYWALL_DEFAULT_EMAIL
     ): Result<FullTextResult> = withContext(Dispatchers.IO) {
-        // What Europe PMC's side of the chain got instead of an answer about the
-        // article, if anything. Set by a lost identifier search, a failed fetch and
+        // What Europe PMC's side of the chain got instead of the article's text,
+        // if anything. Set by a lost identifier search, a failed fetch and
         // a fullTextXML 404; cleared by a fetch that was served. Read only at the
         // end: a chain that found nothing must not call the article's full text
         // absent while this is set (#434)
@@ -609,15 +609,16 @@ class FullTextException(message: String, cause: Throwable? = null) : Exception(m
  * The sentence for a chain that found nothing while Europe PMC did not settle
  * whether the full text exists (#434).
  *
- * The verb follows #435's decision: an HTTP status was an answer, so Europe PMC
- * "did not serve it"; any other failure means it "could not be asked". Worded as
+ * The verb follows #435's decision: an HTTP status other than a throttle was an
+ * answer, so Europe PMC "did not serve it"; a throttle or any other failure means
+ * it "could not be asked" ([RequestFailure.isAnswer]). Worded as
  * BioMedLit's `FullTextError.absenceNotEstablished` (iOS and macOS).
  *
- * @param failure What Europe PMC's side of the chain got instead of an answer
+ * @param failure What Europe PMC's side of the chain got instead of the article's text
  * @return The sentence
  */
 fun absenceNotEstablishedMessage(failure: RequestFailure): String =
-    if (failure.kind == RequestFailureKind.HTTP_STATUS) {
+    if (failure.isAnswer) {
         "No source provided this article's full text. Europe PMC (${failure.describe()}) " +
             "did not serve it, so it may still exist. Try again later."
     } else {

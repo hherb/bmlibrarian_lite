@@ -967,7 +967,9 @@ POLITE_RECOVERY_SUCCESSES = 10
 POLITE_SLOW_WAIT_LOG_SECONDS = 1.0
 
 # The statuses that mean "you are asking too fast", as opposed to a genuine
-# server fault.
+# server fault. Also the statuses that are not an answer about the article
+# (``RequestFailure.is_answer``, #435); the Swift and Android ports name the
+# same two, as ``throttleStatusCodes`` and ``THROTTLE_STATUS_CODES``.
 POLITE_THROTTLE_STATUSES = (429, 503)
 
 # How many times a throttled request is retried through the pacing before

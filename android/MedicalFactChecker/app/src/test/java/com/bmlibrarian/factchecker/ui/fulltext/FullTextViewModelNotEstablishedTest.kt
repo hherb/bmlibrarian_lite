@@ -91,8 +91,26 @@ class FullTextViewModelNotEstablishedTest {
 
         assertEquals(
             FullTextViewModel.FullTextState.Error(
-                message = "No source provided this article's full text. Europe PMC " +
-                    "(HTTP 429 Too Many Requests) did not serve it, so it may still exist. Try again later.",
+                message = "No source provided this article's full text. Europe PMC could not be " +
+                    "asked (HTTP 429 Too Many Requests), so it may still exist. Try again later.",
+                canRetry = true
+            ),
+            viewModel.state.value
+        )
+        coVerify(exactly = 0) { documentDao.update(any()) }
+    }
+
+    /** An answer that did not serve the article is not the article's absence either (#435). */
+    @Test
+    fun `a 404 for a held article offers a retry and records nothing`() {
+        val viewModel = open(
+            FullTextService.FullTextResult.NotEstablished(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
+        )
+
+        assertEquals(
+            FullTextViewModel.FullTextState.Error(
+                message = "No source provided this article's full text. Europe PMC (HTTP 404 Not " +
+                    "Found) did not serve it, so it may still exist. Try again later.",
                 canRetry = true
             ),
             viewModel.state.value

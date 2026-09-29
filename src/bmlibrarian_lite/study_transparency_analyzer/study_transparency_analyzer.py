@@ -42,7 +42,8 @@ from ..analysis_failures import (
     COI_DISCLOSURE_SOUGHT,
     coi_not_assessed_caveat,
     configuration_nudge,
-    unasked_lookups_clause,
+    refused_access_sentence,
+    unsettled_lookups_clause,
     unassessed_caveat,
     unread_records_clause,
     unreachable_source_caveat,
@@ -2164,10 +2165,11 @@ def _full_text_unassessed_caveat(lookups: LookupRecord) -> str:
         Two or three sentences ending in a full stop, the third being the
         configuration advice when there is any to give.
     """
-    clause = unasked_lookups_clause(lookups)
+    clause = unsettled_lookups_clause(lookups)
+    # A colon, not "and": the clause may hold two groups joined by ", and"
+    # already, and a third "and" ran the reasons together (#435).
     because = (
-        f"The article's full text was not retrieved, and {clause} could not "
-        "be asked"
+        f"The article's full text was not retrieved: {clause}"
         if clause
         else "The article's full text was not retrieved"
     )
@@ -3010,11 +3012,9 @@ class StudyTransparencyAnalyzer:
                 paywalled = "Full text behind paywall" + (
                     f": {result.paywall_url}" if result.paywall_url else ""
                 )
-                if result.lookups.anything_unasked:
+                if result.lookups.anything_unsettled:
                     report.warnings.append(
-                        f"A source refused access, but "
-                        f"{unasked_lookups_clause(result.lookups)} could not "
-                        f"be asked, so a freely available copy may exist."
+                        refused_access_sentence(result.lookups)
                     )
                     nudge = configuration_nudge(result.lookups)
                     if nudge:

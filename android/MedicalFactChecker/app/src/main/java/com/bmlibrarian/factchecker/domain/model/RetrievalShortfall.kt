@@ -149,6 +149,19 @@ data class RequestFailure(
             (kind == RequestFailureKind.HTTP_STATUS && statusCode != null && NetworkRetry.isRetryableStatusCode(statusCode))
 
     /**
+     * Whether the source was asked and answered, just not with the article.
+     *
+     * Chooses the reader's verb (#435): an answer "did not serve it", any other
+     * failure "could not be asked". An HTTP status is the source's answer --
+     * Europe PMC's 404 for an article it holds but will not serve (#432) --
+     * except a throttle, which says only "not now". Every other kind is not: a
+     * refused redirect is our own refusal, and a blank or garbled 200 says
+     * nothing about the article. Python's `RequestFailure.is_answer`.
+     */
+    val isAnswer: Boolean
+        get() = kind == RequestFailureKind.HTTP_STATUS && statusCode !in Constants.THROTTLE_STATUS_CODES
+
+    /**
      * Describe the failure as a clause for a sentence shown to the user.
      *
      * @return For example "HTTP 429 Too Many Requests" or "the request timed out"

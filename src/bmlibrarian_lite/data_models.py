@@ -31,7 +31,12 @@ from enum import Enum
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Optional, TypeGuard
 
-from .constants import HTTP_STATUS_CODE_MAX, HTTP_STATUS_CODE_MIN, MAX_PUBMED_SEARCH_OFFSET
+from .constants import (
+    HTTP_STATUS_CODE_MAX,
+    HTTP_STATUS_CODE_MIN,
+    MAX_PUBMED_SEARCH_OFFSET,
+    POLITE_THROTTLE_STATUSES,
+)
 
 if TYPE_CHECKING:
     from .quality.data_models import QualityAssessment
@@ -149,6 +154,30 @@ class RequestFailure:
             status = "" if self.status_code is None else f" (HTTP {self.status_code})"
             return f"a redirect{status} was refused"
         return _REQUEST_FAILURE_REASONS[self.kind]
+
+    @property
+    def is_answer(self) -> bool:
+        """Whether the source was asked and answered, just not with the article.
+
+        Chooses the reader's verb (#435): an answer "did not serve it", any
+        other failure "could not be asked". An HTTP status is the source's
+        answer -- Europe PMC's 404 for an article it holds but will not serve
+        (#432) -- except 429 and 503, which heard no question: a throttle
+        says only "not now", and some hosts' 503 is an outage. That other
+        5xx statuses are answers is the maintainer's decision (#435), not a
+        law of HTTP. Every other kind is not an answer: a refused redirect
+        is our own refusal, and a blank or garbled 200 says nothing about
+        the article.
+
+        Returns:
+            ``True`` for ``HTTP_STATUS`` with a status other than
+            :data:`~bmlibrarian_lite.constants.POLITE_THROTTLE_STATUSES`,
+            including an unknown one.
+        """
+        return (
+            self.kind is RequestFailureKind.HTTP_STATUS
+            and self.status_code not in POLITE_THROTTLE_STATUSES
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-safe dictionary."""
@@ -281,7 +310,10 @@ class RecordFetch:
 
 @dataclass(frozen=True)
 class SourceLookupFailure:
-    """A full-text lookup that could not be made at all (#347).
+    """A full-text lookup that failed, unmade or unserved (#347, #435).
+
+    Either it could not be made at all, or its answer did not serve the
+    article.
 
     An empty list of PDF sources meant two things at once: this article has
     no open-access copy, or we could not ask. The reader was told the first
@@ -295,10 +327,10 @@ class SourceLookupFailure:
     :mod:`~bmlibrarian_lite.constants`.
 
     Attributes:
-        service: The source that could not be asked, named as the reader
+        service: The source whose lookup failed, named as the reader
             knows it, for example ``"Unpaywall"``. Stripped on construction,
             because equality of this string is the grouping contract:
-            :func:`~bmlibrarian_lite.analysis_failures.unasked_lookups_clause`
+            :func:`~bmlibrarian_lite.analysis_failures.unsettled_lookups_clause`
             names each service once -- and names a service that both failed
             and was skipped by its failure -- so a stray space would make
             one throttled host read to the reader as two.
@@ -410,7 +442,7 @@ class SourceLookupSkipped:
 
 @dataclass(frozen=True)
 class LookupRecord:
-    """Which full-text lookups went unanswered, and why (#354, #355).
+    """Which full-text lookups went unsettled, and why (#354, #355, #435).
 
     One value rather than two parallel tuples, because it travels: PDF
     discovery builds it, full-text discovery carries it, and the
@@ -419,7 +451,9 @@ class LookupRecord:
     reproduces the defect it was added to fix (#349).
 
     An empty record is the ordinary case -- every lookup was made and
-    answered -- and says nothing to the reader.
+    served -- and says nothing to the reader. A lookup that was answered
+    without being served, such as Europe PMC's 404 for an article it holds
+    (#432), is in the record: it settled nothing about the article.
 
     Attributes:
         failures: Lookups that were attempted and failed.
@@ -430,12 +464,13 @@ class LookupRecord:
     skipped: tuple[SourceLookupSkipped, ...] = ()
 
     @property
-    def anything_unasked(self) -> bool:
-        """Whether any lookup went unanswered, for either reason.
+    def anything_unsettled(self) -> bool:
+        """Whether any lookup left the article's access open.
 
         Returns:
-            ``True`` when at least one source was not asked or did not
-            answer, so no claim about this article's access can be made.
+            ``True`` when at least one source was not asked, did not
+            answer, or answered without serving the article, so no claim
+            about this article's access can be made.
         """
         return bool(self.failures) or bool(self.skipped)
 

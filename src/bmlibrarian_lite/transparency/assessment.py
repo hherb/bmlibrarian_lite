@@ -61,9 +61,27 @@ def contact_email(config: "LiteConfig") -> str:
     return config.pubmed.email or FALLBACK_CONTACT_EMAIL
 
 
+def unpaywall_contact_email(config: "LiteConfig") -> str:
+    """The email to ask Unpaywall with: its own setting, else the contact.
+
+    The Unpaywall setting is the one the configuration advice sends the
+    reader to, so it must be the one read; before #435 the transparency
+    analysis read only the PubMed email.
+
+    Args:
+        config: Application configuration.
+
+    Returns:
+        The configured Unpaywall email, else :func:`contact_email` -- which
+        may be the placeholder, and PDF discovery treats that as none.
+    """
+    return config.discovery.unpaywall_email or contact_email(config)
+
+
 def create_background_analyzer(
     email: str,
     pubmed_api_key: str | None = None,
+    unpaywall_email: str | None = None,
 ) -> StudyTransparencyAnalyzer:
     """Build the analyser a background analysis runs.
 
@@ -73,6 +91,7 @@ def create_background_analyzer(
     Args:
         email: Contact email for the literature sources.
         pubmed_api_key: Optional NCBI API key for higher rate limits.
+        unpaywall_email: Email for Unpaywall; ``email`` when not given.
 
     Returns:
         The analyser, with full-text discovery enabled.
@@ -80,7 +99,7 @@ def create_background_analyzer(
     return StudyTransparencyAnalyzer(
         email=email,
         pubmed_api_key=pubmed_api_key,
-        unpaywall_email=email,
+        unpaywall_email=unpaywall_email or email,
         use_browser_fallback=False,
         auto_discover_fulltext=True,
     )

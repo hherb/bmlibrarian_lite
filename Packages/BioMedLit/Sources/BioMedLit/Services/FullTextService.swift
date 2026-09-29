@@ -230,8 +230,8 @@ public actor FullTextService {
         // better. See `pdfTierResult`.
         var pdfLinkFallback: FullTextResult?
 
-        // What Europe PMC's side of the chain got instead of an answer about the
-        // article, if anything. Set by a lost identifier search, a fetch that
+        // What Europe PMC's side of the chain got instead of the article's text,
+        // if anything. Set by a lost identifier search, a fetch that
         // failed and a `fullTextXML` 404; cleared by a fetch that was served.
         // Read only at the very end: a chain that found nothing must not call
         // the article's full text absent while this is set (#434).

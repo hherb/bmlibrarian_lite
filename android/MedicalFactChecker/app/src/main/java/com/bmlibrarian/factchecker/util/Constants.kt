@@ -41,6 +41,13 @@ object Constants {
     /** HTTP redirection status codes (3xx). */
     val HTTP_REDIRECT_STATUS_CODES = 300..399
 
+    /**
+     * The statuses that mean "you are asking too fast", as opposed to an answer:
+     * a throttled source was never asked about the article (#435). Python's
+     * `POLITE_THROTTLE_STATUSES`.
+     */
+    val THROTTLE_STATUS_CODES: Set<Int> = setOf(429, 503)
+
     /** HTTP 400: a malformed request, or for NCBI a rejected API key. */
     const val HTTP_BAD_REQUEST = 400
 

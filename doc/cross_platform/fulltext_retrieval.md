@@ -154,13 +154,14 @@ default filter drops). Swift also reads the document's own primary slot, but
 only when that search *failed*: a search that answered "no such record" is
 not second-guessed with a fetch that would almost certainly 404. Where Python keeps a lookup
 record, the apps keep one fact, what Europe PMC's side of the chain got
-instead of an answer (a lost search, a failed fetch, or the 404), cleared when
+instead of the article's text (a lost search, a failed fetch, or the 404), cleared when
 a fetch is served. A chain that then finds nothing ends in
 `FullTextError.absenceNotEstablished` (Swift) or
 `FullTextResult.NotEstablished` (Android), never in the "no full text" answer
 the callers record on the document for good. Its sentence uses #435's verbs:
 "Europe PMC (HTTP 404 Not Found) did not serve it" for an HTTP answer, "could
-not be asked (…)" otherwise. On Swift the 404 raises no `FullTextDegradation`
+not be asked (…)" for a throttle (429, 503) and every other kind; see
+[search_failure_reporting.md](search_failure_reporting.md) for the predicate. On Swift the 404 raises no `FullTextDegradation`
 (Europe PMC answered; see [jats_parsing.md](jats_parsing.md)), and a blank
 200 is `europePMCUnreachable`, no longer a parse failure.
 
