@@ -216,8 +216,11 @@ became of a *full-text lookup* -- Python's lookup-record sentences
 (`analysis_failures.py`) and the apps' `absenceNotEstablished` -- chooses its
 verb by one predicate, `RequestFailure.is_answer` (Python) / `isAnswer`
 (Swift, Kotlin): true for `http_status` with any status but **429 and 503**
-(Python's `POLITE_THROTTLE_STATUSES`, `BioMedLitConstants.throttleStatusCodes`,
-`Constants.THROTTLE_STATUS_CODES`), including an unknown status. Such a source
+(Python's `UNANSWERED_HTTP_STATUSES`, `BioMedLitConstants.unansweredStatusCodes`,
+`Constants.UNANSWERED_STATUS_CODES`), including an unknown status. The rows,
+the set and the apps' sentence are one shared contract,
+`request_failure_parity/answered_lookup_verb.json`, which all three suites read
+(#447): change it and the three platforms together. Such a source
 was asked and answered, so it "did not serve it" --
 `"Europe PMC (HTTP 404 Not Found) did not serve it"`; every other kind, and
 429 or 503, "could not be asked". A throttle says only "not now" (and some

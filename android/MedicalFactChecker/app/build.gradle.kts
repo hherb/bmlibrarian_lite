@@ -80,6 +80,11 @@ android {
 val transparencyParityFixtures: File =
     rootProject.file("../../doc/cross_platform/transparency_parity")
 
+// The answered-lookup verb contract (#447), read the same way and for the same
+// reason: an edit to the contract alone must re-run the Android half.
+val requestFailureParityFixtures: File =
+    rootProject.file("../../doc/cross_platform/request_failure_parity")
+
 tasks.withType<Test>().configureEach {
     // Absent in a partial checkout of android/ alone; the test itself fails with
     // a clear message in that case, so do not break configuration over it.
@@ -87,6 +92,11 @@ tasks.withType<Test>().configureEach {
         inputs.dir(transparencyParityFixtures)
             .withPathSensitivity(PathSensitivity.RELATIVE)
             .withPropertyName("transparencyParityFixtures")
+    }
+    if (requestFailureParityFixtures.isDirectory) {
+        inputs.dir(requestFailureParityFixtures)
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+            .withPropertyName("requestFailureParityFixtures")
     }
 }
 

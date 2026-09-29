@@ -159,7 +159,7 @@ data class RequestFailure(
      * nothing about the article. Python's `RequestFailure.is_answer`.
      */
     val isAnswer: Boolean
-        get() = kind == RequestFailureKind.HTTP_STATUS && statusCode !in Constants.THROTTLE_STATUS_CODES
+        get() = kind == RequestFailureKind.HTTP_STATUS && statusCode !in Constants.UNANSWERED_STATUS_CODES
 
     /**
      * Describe the failure as a clause for a sentence shown to the user.

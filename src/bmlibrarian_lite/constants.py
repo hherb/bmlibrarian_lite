@@ -967,10 +967,16 @@ POLITE_RECOVERY_SUCCESSES = 10
 POLITE_SLOW_WAIT_LOG_SECONDS = 1.0
 
 # The statuses that mean "you are asking too fast", as opposed to a genuine
-# server fault. Also the statuses that are not an answer about the article
-# (``RequestFailure.is_answer``, #435); the Swift and Android ports name the
-# same two, as ``throttleStatusCodes`` and ``THROTTLE_STATUS_CODES``.
+# server fault.
 POLITE_THROTTLE_STATUSES = (429, 503)
+
+# The HTTP statuses that are not the source's answer about the article, so a
+# lookup that ended on one "could not be asked" rather than "did not serve
+# it" (``RequestFailure.is_answer``, #435). The Swift and Android ports name
+# the same set, as ``unansweredStatusCodes`` and ``UNANSWERED_STATUS_CODES``;
+# all three are pinned to
+# ``doc/cross_platform/request_failure_parity/answered_lookup_verb.json``.
+UNANSWERED_HTTP_STATUSES = (429, 503)
 
 # How many times a throttled request is retried through the pacing before
 # the status is handed back to the caller.

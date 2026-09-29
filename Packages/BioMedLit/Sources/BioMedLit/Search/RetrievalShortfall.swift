@@ -204,7 +204,7 @@ public struct RequestFailure: Sendable, Equatable, Hashable {
     public var isAnswer: Bool {
         guard kind == .httpStatus else { return false }
         guard let statusCode else { return true }
-        return !BioMedLitConstants.throttleStatusCodes.contains(statusCode)
+        return !BioMedLitConstants.unansweredStatusCodes.contains(statusCode)
     }
 
     /// Describe the failure as a clause for a sentence shown to the user.

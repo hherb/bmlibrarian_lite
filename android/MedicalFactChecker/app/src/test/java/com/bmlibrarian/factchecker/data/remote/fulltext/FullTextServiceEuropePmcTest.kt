@@ -27,7 +27,6 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
-import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.jats.JATSXMLParser
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -251,47 +250,8 @@ class FullTextServiceEuropePmcTest {
         assertNull(FullTextService.PmcResolution.fromArticle(preprintRecord.copy(source = "MED")).preprintAccession)
     }
 
-    // ==================== The reader's sentence ====================
-
-    /** The verb follows #435's decision, worded as BioMedLit words it: asserted whole. */
-    @Test
-    fun `the sentence names what Europe PMC did`() {
-        assertEquals(
-            "No source provided this article's full text. Europe PMC (HTTP 404 Not Found) " +
-                "did not serve it, so it may still exist. Try again later.",
-            absenceNotEstablishedMessage(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
-        )
-        assertEquals(
-            "No source provided this article's full text. Europe PMC could not be asked " +
-                "(the request timed out), so it may still exist. Try again later.",
-            absenceNotEstablishedMessage(RequestFailure(RequestFailureKind.TIMEOUT))
-        )
-        for (status in Constants.THROTTLE_STATUS_CODES) {
-            val failure = RequestFailure(RequestFailureKind.HTTP_STATUS, status)
-            assertEquals(
-                "No source provided this article's full text. Europe PMC could not be asked " +
-                    "(${failure.describe()}), so it may still exist. Try again later.",
-                absenceNotEstablishedMessage(failure)
-            )
-        }
-    }
-
-    /** The predicate the verb is chosen by, Python's `RequestFailure.is_answer`. */
-    @Test
-    fun `an HTTP status other than a throttle is an answer`() {
-        for (status in listOf(400, 401, 403, 404, 410, 500, 502, 504)) {
-            assertTrue("$status", RequestFailure(RequestFailureKind.HTTP_STATUS, status).isAnswer)
-        }
-        assertEquals(setOf(429, 503), Constants.THROTTLE_STATUS_CODES)
-        for (status in Constants.THROTTLE_STATUS_CODES) {
-            assertFalse("$status", RequestFailure(RequestFailureKind.HTTP_STATUS, status).isAnswer)
-        }
-        // A status this build could not keep was still answered.
-        assertTrue(RequestFailure(RequestFailureKind.HTTP_STATUS).isAnswer)
-        for (kind in RequestFailureKind.entries.filter { it != RequestFailureKind.HTTP_STATUS }) {
-            assertFalse("$kind", RequestFailure(kind).isAnswer)
-        }
-    }
+    // The reader's sentence, and the predicate it asks, are pinned by the shared
+    // contract in AnsweredLookupVerbContractTest (#447).
 }
 
 /** The accession rules `fullTextXML` is asked by (#434), mirroring Python's `fulltext_accession`. */

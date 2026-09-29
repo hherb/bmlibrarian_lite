@@ -186,10 +186,12 @@ public enum BioMedLitConstants {
     /// Retryable HTTP status codes.
     public static let retryableStatusCodes: Set<Int> = [429, 500, 502, 503, 504]
 
-    /// The statuses that mean "you are asking too fast", as opposed to an
-    /// answer: a throttled source was never asked about the article (#435).
-    /// Python's `POLITE_THROTTLE_STATUSES`.
-    public static let throttleStatusCodes: Set<Int> = [429, 503]
+    /// The HTTP statuses that are not the source's answer about the article,
+    /// so a lookup that ended on one "could not be asked" rather than "did
+    /// not serve it" (``RequestFailure/isAnswer``, #435). Python's
+    /// `UNANSWERED_HTTP_STATUSES`; all three platforms are pinned to
+    /// `doc/cross_platform/request_failure_parity/answered_lookup_verb.json`.
+    public static let unansweredStatusCodes: Set<Int> = [429, 503]
 
     /// HTTP redirection status codes (3xx).
     public static let httpRedirectStatusCodes: ClosedRange<Int> = 300...399

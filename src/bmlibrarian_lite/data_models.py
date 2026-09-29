@@ -35,7 +35,7 @@ from .constants import (
     HTTP_STATUS_CODE_MAX,
     HTTP_STATUS_CODE_MIN,
     MAX_PUBMED_SEARCH_OFFSET,
-    POLITE_THROTTLE_STATUSES,
+    UNANSWERED_HTTP_STATUSES,
 )
 
 if TYPE_CHECKING:
@@ -171,12 +171,12 @@ class RequestFailure:
 
         Returns:
             ``True`` for ``HTTP_STATUS`` with a status other than
-            :data:`~bmlibrarian_lite.constants.POLITE_THROTTLE_STATUSES`,
+            :data:`~bmlibrarian_lite.constants.UNANSWERED_HTTP_STATUSES`,
             including an unknown one.
         """
         return (
             self.kind is RequestFailureKind.HTTP_STATUS
-            and self.status_code not in POLITE_THROTTLE_STATUSES
+            and self.status_code not in UNANSWERED_HTTP_STATUSES
         )
 
     def to_dict(self) -> dict[str, Any]:

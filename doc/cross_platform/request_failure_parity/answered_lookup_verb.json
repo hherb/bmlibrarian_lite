@@ -1,0 +1,69 @@
+{
+  "_readme": [
+    "Which failed lookups were answered, and the apps' sentence for each (#435, #447).",
+    "Read by tests/test_answered_lookup_verb.py (Python), EuropePMCFullTextFetchTests.swift",
+    "(BioMedLit) and FullTextServiceEuropePmcTest.kt (Android). Python has no",
+    "absence_not_established sentence and checks only the first two keys.",
+    "unanswered_statuses: the HTTP statuses that are not an answer; each platform's",
+    "constant must equal it. predicate: every row's kind and status, and whether",
+    "RequestFailure.is_answer / isAnswer is true. Every kind each platform knows must",
+    "appear at least once, so a new kind cannot inherit a verb unexamined.",
+    "absence_not_established: the whole sentence Swift's FullTextError.absenceNotEstablished",
+    "and Kotlin's absenceNotEstablishedMessage give for that failure.",
+    "Change a row here and all three platforms together, never one alone. The rule",
+    "is doc/cross_platform/search_failure_reporting.md, 'An answer is not a failure to ask'."
+  ],
+  "unanswered_statuses": [429, 503],
+  "predicate": [
+    {"kind": "http_status", "status_code": 400, "is_answer": true},
+    {"kind": "http_status", "status_code": 401, "is_answer": true},
+    {"kind": "http_status", "status_code": 403, "is_answer": true},
+    {"kind": "http_status", "status_code": 404, "is_answer": true},
+    {"kind": "http_status", "status_code": 408, "is_answer": true},
+    {"kind": "http_status", "status_code": 410, "is_answer": true},
+    {"kind": "http_status", "status_code": 422, "is_answer": true},
+    {"kind": "http_status", "status_code": 429, "is_answer": false},
+    {"kind": "http_status", "status_code": 500, "is_answer": true},
+    {"kind": "http_status", "status_code": 501, "is_answer": true},
+    {"kind": "http_status", "status_code": 502, "is_answer": true},
+    {"kind": "http_status", "status_code": 503, "is_answer": false},
+    {"kind": "http_status", "status_code": 504, "is_answer": true},
+    {"kind": "http_status", "status_code": 522, "is_answer": true},
+    {"kind": "http_status", "status_code": null, "is_answer": true},
+    {"kind": "redirect_refused", "status_code": 307, "is_answer": false},
+    {"kind": "redirect_refused", "status_code": null, "is_answer": false},
+    {"kind": "timeout", "status_code": null, "is_answer": false},
+    {"kind": "connection", "status_code": null, "is_answer": false},
+    {"kind": "service_error", "status_code": null, "is_answer": false},
+    {"kind": "malformed_response", "status_code": null, "is_answer": false},
+    {"kind": "incomplete_response", "status_code": null, "is_answer": false},
+    {"kind": "request_failed", "status_code": null, "is_answer": false}
+  ],
+  "absence_not_established": [
+    {
+      "kind": "http_status",
+      "status_code": 404,
+      "sentence": "No source provided this article's full text. Europe PMC (HTTP 404 Not Found) did not serve it, so it may still exist. Try again later."
+    },
+    {
+      "kind": "http_status",
+      "status_code": 500,
+      "sentence": "No source provided this article's full text. Europe PMC (HTTP 500 Internal Server Error) did not serve it, so it may still exist. Try again later."
+    },
+    {
+      "kind": "http_status",
+      "status_code": 429,
+      "sentence": "No source provided this article's full text. Europe PMC could not be asked (HTTP 429 Too Many Requests), so it may still exist. Try again later."
+    },
+    {
+      "kind": "http_status",
+      "status_code": 503,
+      "sentence": "No source provided this article's full text. Europe PMC could not be asked (HTTP 503 Service Unavailable), so it may still exist. Try again later."
+    },
+    {
+      "kind": "timeout",
+      "status_code": null,
+      "sentence": "No source provided this article's full text. Europe PMC could not be asked (the request timed out), so it may still exist. Try again later."
+    }
+  ]
+}
