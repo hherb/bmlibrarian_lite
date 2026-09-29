@@ -253,19 +253,27 @@ class FullTextServiceEuropePmcTest {
 
     // ==================== The reader's sentence ====================
 
-    /** The verb follows #435's decision, worded as BioMedLit words it. */
+    /** The verb follows #435's decision, worded as BioMedLit words it: asserted whole. */
     @Test
     fun `the sentence names what Europe PMC did`() {
-        val answered = absenceNotEstablishedMessage(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
-        assertTrue(answered, answered.contains("Europe PMC (HTTP 404 Not Found) did not serve it"))
-        assertFalse(answered, answered.contains("could not be asked"))
-
-        val unasked = absenceNotEstablishedMessage(RequestFailure(RequestFailureKind.TIMEOUT))
-        assertTrue(unasked, unasked.contains("Europe PMC could not be asked (the request timed out)"))
-
-        val throttled = absenceNotEstablishedMessage(RequestFailure(RequestFailureKind.HTTP_STATUS, 429))
-        assertTrue(throttled, throttled.contains("Europe PMC could not be asked (HTTP 429 Too Many Requests)"))
-        assertFalse(throttled, throttled.contains("did not serve it"))
+        assertEquals(
+            "No source provided this article's full text. Europe PMC (HTTP 404 Not Found) " +
+                "did not serve it, so it may still exist. Try again later.",
+            absenceNotEstablishedMessage(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
+        )
+        assertEquals(
+            "No source provided this article's full text. Europe PMC could not be asked " +
+                "(the request timed out), so it may still exist. Try again later.",
+            absenceNotEstablishedMessage(RequestFailure(RequestFailureKind.TIMEOUT))
+        )
+        for (status in Constants.THROTTLE_STATUS_CODES) {
+            val failure = RequestFailure(RequestFailureKind.HTTP_STATUS, status)
+            assertEquals(
+                "No source provided this article's full text. Europe PMC could not be asked " +
+                    "(${failure.describe()}), so it may still exist. Try again later.",
+                absenceNotEstablishedMessage(failure)
+            )
+        }
     }
 
     /** The predicate the verb is chosen by, Python's `RequestFailure.is_answer`. */

@@ -46,14 +46,18 @@ here turn either record into what a reader sees.
   it would have told us is not assessed rather than absent (#346).
   :func:`unsettled_lookups_clause` names every source that left access open,
   failed or skipped, each once, with the verb its answer earns (#435):
-  "did not serve it" for an HTTP answer, "could not be asked" for anything
-  else; :func:`no_pdf_sources_message`,
-  :func:`paywall_message` and :func:`with_unestablished_access` are the three
+  "did not serve it" for an HTTP status other than a throttle (429, 503;
+  :attr:`~bmlibrarian_lite.data_models.RequestFailure.is_answer`), "could
+  not be asked" for anything else; :func:`no_pdf_sources_message`,
+  :func:`paywall_message` (and :func:`refused_access_sentence`, its wording
+  without the advice) and :func:`with_unestablished_access` are the three
   sentences that carry it to the reader, and none of them claims a licence
   that the lookup we could not make was the one to establish (#347, #355).
-  :func:`configuration_nudge` adds the remedy, but only where the reader has
-  one to act on (#335). :func:`unreachable_lookups_clause` is the failures-only
-  spelling, kept for callers that hold no skips.
+  Only an unasked source earns "a freely available copy may exist"; one that
+  answered leaves access merely not established. :func:`configuration_nudge`
+  adds the remedy, but only where the reader has one to act on (#335).
+  :func:`unreachable_lookups_clause` is the failures-only spelling, with no
+  verb, kept for callers that hold no skips.
 - :func:`unread_records_clause` does the same for the metadata sources behind
   funding, naming a source that *answered* "no such record" for what it said
   rather than calling it unread (#356).
@@ -736,9 +740,22 @@ _ACCESS_NOT_ESTABLISHED = (
     "access was not established."
 )
 
+#: What a source that answered without serving the article leaves open,
+#: when no source went unasked. Not "a freely available copy may exist":
+#: a source declining to serve is no reason to think one does (#435) --
+#: only that the question it would have settled is still open.
+_ANSWERED_ACCESS_NOT_ESTABLISHED = (
+    "so whether this document is open access was not established."
+)
+
 
 def unreachable_lookups_clause(failures: Sequence[SourceLookupFailure]) -> str:
-    """Name the sources that could not be reached, each once.
+    """Name the sources whose lookup failed, each once, with no verb.
+
+    The clause carries no verb, and must not be followed by a fixed "could
+    not be asked": a failure may be the source's answer, which "did not
+    serve it" (#435). A sentence that says what became of each lookup is
+    built from :func:`unsettled_lookups_clause` instead.
 
     Two lookups against one throttled host are one thing to tell the reader.
     No caller records more than one failure per service today, so the
@@ -771,13 +788,13 @@ def unsettled_lookups_clause(record: LookupRecord) -> str:
 
     The verb is the source's own (#435). A source that answered -- Europe
     PMC's 404 for an article it holds but will not serve (#432) -- "did not
-    serve it"; one that was throttled, unreachable or skipped "could not be
-    asked". :attr:`~bmlibrarian_lite.data_models.RequestFailure.is_answer`
-    decides, and the apps' sentences ask the same predicate.
+    serve it"; one that was throttled, unreachable, skipped, or answered
+    nothing about the article "could not be asked".
+    :attr:`~bmlibrarian_lite.data_models.RequestFailure.is_answer` decides,
+    and the apps' sentences ask the same predicate.
 
-    A service is named once, by its first failure; one that both failed and
-    was skipped is named by its failure -- it was reached at least once, so
-    "not configured" would be false of it.
+    A service is named once; see :func:`_unsettled` for which of its
+    failures names it.
 
     Args:
         record: What went unsettled; may be empty.
@@ -789,22 +806,90 @@ def unsettled_lookups_clause(record: LookupRecord) -> str:
         first, failures before skips. Empty when every lookup was made and
         served.
     """
-    unasked: dict[str, str] = {}
-    answered: dict[str, str] = {}
-    for failure in record.failures:
-        if failure.service in unasked or failure.service in answered:
-            continue
-        named = answered if failure.failure.is_answer else unasked
-        named[failure.service] = failure.failure.describe()
-    for skip in record.skipped:
-        if skip.service not in answered:
-            unasked.setdefault(skip.service, skip.describe())
+    unasked, answered = _unsettled(record)
     clauses = []
     if unasked:
         clauses.append(f"{_joined(unasked)} could not be asked")
     if answered:
         clauses.append(f"{_joined(answered)} did not serve it")
     return ", and ".join(clauses)
+
+
+def _unsettled(record: LookupRecord) -> tuple[dict[str, str], dict[str, str]]:
+    """Sort each service in a record by the verb its lookup earns.
+
+    A service is named once. Its first failure names it, unless a later one
+    could not be asked: then that one does, because it is the lookup that
+    left the question open. Europe PMC answering 404 for its XML and then
+    timing out on the PDF it said it holds was not settled by the 404, and
+    "did not serve it" would tell the reader the most promising route was
+    tried. A service that both failed and was skipped is named by its
+    failure -- it was reached at least once, so "not configured" would be
+    false of it.
+
+    Args:
+        record: What went unsettled; may be empty.
+
+    Returns:
+        The services that could not be asked and those that answered
+        without serving the article, each mapped to its described reason,
+        in the order they are to be named.
+    """
+    unasked: dict[str, str] = {}
+    answered: dict[str, str] = {}
+    for failure in record.failures:
+        service = failure.service
+        if service in unasked:
+            continue
+        if failure.failure.is_answer:
+            answered.setdefault(service, failure.failure.describe())
+        else:
+            answered.pop(service, None)
+            unasked[service] = failure.failure.describe()
+    for skip in record.skipped:
+        if skip.service not in answered:
+            unasked.setdefault(skip.service, skip.describe())
+    return unasked, answered
+
+
+def _access_left_open(record: LookupRecord) -> str:
+    """Say what went unsettled, and what that leaves open about access.
+
+    The ending follows the verbs. A source that could not be asked may hold
+    a free copy, and the reader is told so; a source that answered without
+    serving the article is no reason to think one exists, so a record of
+    answers alone says only that access was not established (#435).
+
+    Args:
+        record: What went unsettled; not empty.
+
+    Returns:
+        A clause and its ending, for example ``"Europe PMC (HTTP 404 Not
+        Found) did not serve it, so whether this document is open access was
+        not established."``
+    """
+    unasked, _answered = _unsettled(record)
+    ending = (
+        _ACCESS_NOT_ESTABLISHED if unasked else _ANSWERED_ACCESS_NOT_ESTABLISHED
+    )
+    return f"{unsettled_lookups_clause(record)}, {ending}"
+
+
+def _set_against(record: LookupRecord) -> str:
+    """The conjunction that joins a finding to what went unsettled.
+
+    "But" where a source could not be asked: it is the contrast, a finding
+    made without it. A source that answered without serving the article
+    points the same way as the finding, so it is joined by "and".
+
+    Args:
+        record: What went unsettled; not empty.
+
+    Returns:
+        ``", but "`` or ``", and "``.
+    """
+    unasked, _answered = _unsettled(record)
+    return ", but " if unasked else ", and "
 
 
 def _named(failures: Sequence[SourceLookupFailure]) -> dict[str, str]:
@@ -826,11 +911,11 @@ def _joined(named: dict[str, str]) -> str:
     """Render one clause naming each service and its reason.
 
     Args:
-        named: Service name to the reason it went unasked.
+        named: Service name to the reason its lookup went unsettled.
 
     Returns:
         ``"A (x)"``, ``"A (x) and B (y)"``, ``"A (x), B (y) and C (z)"``, or
-        ``""`` when nothing went unasked.
+        ``""`` when ``named`` is empty.
     """
     clauses = [f"{service} ({reason})" for service, reason in named.items()]
     if not clauses:
@@ -851,7 +936,7 @@ def configuration_nudge(record: LookupRecord) -> str:
     (#335).
 
     Args:
-        record: What went unasked; may be empty.
+        record: What went unsettled; may be empty.
 
     Returns:
         One sentence ending in a full stop, or ``""`` when nothing was
@@ -920,24 +1005,20 @@ def unread_records_clause(
 
 
 def unestablished_access_clause(record: LookupRecord) -> str:
-    """Say which sources were never asked, and what that leaves open.
+    """Say which lookups went unsettled, and what that leaves open.
 
     Args:
-        record: What went unasked; may be empty.
+        record: What went unsettled; may be empty.
 
     Returns:
-        Two or three sentences ending in a full stop, or empty when every
-        lookup was made. Never the bare denial "this is not evidence the
-        document requires access": read on its own, that repeats the claim
-        it means to withdraw.
+        One to three sentences ending in a full stop, or empty when every
+        lookup was made and served. Never the bare denial "this is not
+        evidence the document requires access": read on its own, that
+        repeats the claim it means to withdraw.
     """
-    if not record.anything_unasked:
+    if not record.anything_unsettled:
         return ""
-    return _with_nudge(
-        f"{unsettled_lookups_clause(record)}, "
-        f"{_ACCESS_NOT_ESTABLISHED}",
-        record,
-    )
+    return _with_nudge(_access_left_open(record), record)
 
 
 def _with_nudge(sentences: str, record: LookupRecord) -> str:
@@ -945,7 +1026,7 @@ def _with_nudge(sentences: str, record: LookupRecord) -> str:
 
     Args:
         sentences: What the reader is told, ending in a full stop.
-        record: What went unasked.
+        record: What went unsettled.
 
     Returns:
         ``sentences``, followed by :func:`configuration_nudge` if non-empty.
@@ -955,23 +1036,45 @@ def _with_nudge(sentences: str, record: LookupRecord) -> str:
 
 
 def with_unestablished_access(claim: str, record: LookupRecord) -> str:
-    """Add what was never asked to a claim that does not depend on it.
+    """Add what went unsettled to a claim that does not depend on it.
 
     For a claim about *our* attempts -- that no source we reached served a
-    PDF -- which stays true whatever the unasked sources would have said.
+    PDF -- which stays true whatever the unsettled sources would have said.
     A claim about the document's access is not of that kind; see
     :func:`paywall_message`.
 
     Args:
         claim: The sentence to qualify, ending in a full stop.
-        record: What went unasked; may be empty.
+        record: What went unsettled; may be empty.
 
     Returns:
-        ``claim`` when every lookup was made, else ``claim`` followed by
-        :func:`unestablished_access_clause`.
+        ``claim`` when every lookup was made and served, else ``claim``
+        followed by :func:`unestablished_access_clause`.
     """
     clause = unestablished_access_clause(record)
     return f"{claim} {clause}" if clause else claim
+
+
+def refused_access_sentence(record: LookupRecord) -> str:
+    """Say a source refused access, withholding the paywall claim.
+
+    The sentence :func:`paywall_message` gives the reader, without the
+    configuration advice, for a caller that shows the advice on its own
+    line. One wording, so the analyser's copy cannot drift from it (#435).
+
+    Args:
+        record: What went unsettled; not empty.
+
+    Returns:
+        One or two sentences ending in a full stop, for example ``"A source
+        refused access to this document, and Europe PMC (HTTP 404 Not Found)
+        did not serve it, so whether this document is open access was not
+        established."``
+    """
+    return (
+        f"A source refused access to this document{_set_against(record)}"
+        f"{_access_left_open(record)}"
+    )
 
 
 def paywall_message(claim: str, record: LookupRecord) -> str:
@@ -980,27 +1083,22 @@ def paywall_message(claim: str, record: LookupRecord) -> str:
     A source that answers 401 or 403 establishes that *that* source wants
     payment, not that the document has no free copy elsewhere -- and the
     lookup we could not make is exactly the one that would have found it.
-    So where a lookup went unasked the claim is withheld rather than stated
-    and then retracted (#347).
+    So where a lookup went unsettled the claim is withheld rather than
+    stated and then retracted (#347).
 
     Args:
-        claim: What to say when nothing went unasked: the wording of the
-            source that refused, ending in a full stop. It is deliberately
-            unused otherwise, because a claim about this document's access
-            is precisely what cannot be stood behind then.
-        record: What went unasked; may be empty.
+        claim: What to say when every lookup was made and served: the
+            wording of the source that refused, ending in a full stop. It
+            is deliberately unused otherwise, because a claim about this
+            document's access is precisely what cannot be stood behind then.
+        record: What went unsettled; may be empty.
 
     Returns:
         One to three sentences for the reader, ending in a full stop.
     """
-    if not record.anything_unasked:
+    if not record.anything_unsettled:
         return claim
-    return _with_nudge(
-        f"A source refused access, but "
-        f"{unsettled_lookups_clause(record)}, "
-        f"{_ACCESS_NOT_ESTABLISHED}",
-        record,
-    )
+    return _with_nudge(refused_access_sentence(record), record)
 
 
 def no_pdf_sources_message(record: LookupRecord) -> str:
@@ -1008,26 +1106,25 @@ def no_pdf_sources_message(record: LookupRecord) -> str:
 
     A lookup we did not make and an article with no open-access copy are
     opposite answers, and only the second is a fact about the article. Where
-    a lookup went unasked, the sentence says so and stops short of the
+    a lookup went unsettled, the sentence says so and stops short of the
     paywall claim, because an Unpaywall that was throttled -- or never
-    configured -- knows nothing about the licence.
+    configured -- knows nothing about the licence, and a Europe PMC that
+    declined to serve the article has not said no one else will (#435).
 
     Args:
-        record: What went unasked; may be empty.
+        record: What went unsettled; may be empty.
 
     Returns:
         Two or three sentences for the reader, ending in a full stop: the
         third is the configuration advice, when there is any to give.
     """
-    if not record.anything_unasked:
+    if not record.anything_unsettled:
         return (
             "No PDF sources found. The document may require institutional "
             "access."
         )
     return _with_nudge(
-        f"No PDF sources found, but "
-        f"{unsettled_lookups_clause(record)}, "
-        f"{_ACCESS_NOT_ESTABLISHED}",
+        f"No PDF sources found for this document{_set_against(record)}"
+        f"{_access_left_open(record)}",
         record,
     )
-

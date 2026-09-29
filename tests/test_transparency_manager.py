@@ -55,6 +55,7 @@ def mock_config():
     """Create a mock config object with transparency settings."""
     config = MagicMock()
     config.transparency = TransparencySettings()
+    config.discovery.unpaywall_email = ""
     return config
 
 
@@ -120,6 +121,21 @@ class TestTransparencyManagerInit:
                 use_browser_fallback=False,
                 auto_discover_fulltext=True,
             )
+            manager.stop()
+
+    def test_init_gives_unpaywall_its_own_setting(self, mock_storage, mock_config):
+        """The setting the configuration advice names is the one read (#435)."""
+        mock_config.discovery.unpaywall_email = "me@uni.edu"
+        with patch(
+            "bmlibrarian_lite.transparency.assessment.StudyTransparencyAnalyzer"
+        ) as mock_cls:
+            manager = TransparencyManager(
+                storage=mock_storage,
+                config=mock_config,
+                email="test@example.com",
+                pubmed_api_key="test_key",
+            )
+            assert mock_cls.call_args.kwargs["unpaywall_email"] == "me@uni.edu"
             manager.stop()
 
     def test_init_sets_settings_from_config(self, mock_storage, mock_config):

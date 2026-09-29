@@ -140,8 +140,9 @@ class FulltextResult:
         """Whether this article was shown to have no retrievable full text.
 
         Three conditions, because any one alone lies. A ``NOT_FOUND``
-        resting on a lookup that was never made or never answered is our
-        silence, not the article's; a lookup record is only meaningful once
+        resting on a lookup that was never made, never answered, or answered
+        without serving the article (#432) is our silence, not the
+        article's; a lookup record is only meaningful once
         the chain has finished answering; and a result that *served* a full
         text has plainly not established that there is none -- ``success``
         and ``source_type`` are set by hand at every construction site, so
@@ -149,12 +150,12 @@ class FulltextResult:
 
         Returns:
             ``True`` only when every lookup that could be made was made and
-            answered, and none of them holds a full text.
+            served, and none of them holds a full text.
         """
         return (
             not self.success
             and self.source_type is FulltextSourceType.NOT_FOUND
-            and not self.lookups.anything_unasked
+            and not self.lookups.anything_unsettled
         )
 
     def with_lookups(self, record: "LookupRecord") -> "FulltextResult":

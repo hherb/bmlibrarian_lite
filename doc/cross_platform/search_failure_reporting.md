@@ -192,18 +192,6 @@ The last two apply only to [alternative queries](#alternative-queries-smart-sear
 | `incomplete_response` | `"the response was incomplete"` |
 | `request_failed` | `"the request failed"` |
 
-**An answer is not a failure to ask (#435).** A sentence that names a source
-beside its `{reason}` chooses its verb by one predicate, `RequestFailure.is_answer`
-(Python) / `isAnswer` (Swift, Kotlin): true for `http_status` with any status
-but a throttle (**429 and 503**: Python's `POLITE_THROTTLE_STATUSES`,
-`BioMedLitConstants.throttleStatusCodes`, `Constants.THROTTLE_STATUS_CODES`),
-including an unknown status. Such a source was asked and answered, so it
-"did not serve it" -- `"Europe PMC (HTTP 404 Not Found) did not serve it"`;
-every other kind, and a throttle, "could not be asked". A throttle says only
-"not now", a refused redirect is our own refusal, and a blank or garbled 200
-says nothing about the article. The search clauses above are unaffected:
-"could not be searched" is true of an answered error too.
-
 The phrases are fixed here (RFC 9110 wording), not taken from a platform
 library, whose phrases differ (Python 3.13 renamed 413, 414 and 422; Swift's
 are lowercase and localised):
@@ -222,6 +210,30 @@ are lowercase and localised):
 | 502 | `Bad Gateway` |
 | 503 | `Service Unavailable` |
 | 504 | `Gateway Timeout` |
+
+**An answer is not a failure to ask (#435).** A sentence that says what
+became of a *full-text lookup* -- Python's lookup-record sentences
+(`analysis_failures.py`) and the apps' `absenceNotEstablished` -- chooses its
+verb by one predicate, `RequestFailure.is_answer` (Python) / `isAnswer`
+(Swift, Kotlin): true for `http_status` with any status but **429 and 503**
+(Python's `POLITE_THROTTLE_STATUSES`, `BioMedLitConstants.throttleStatusCodes`,
+`Constants.THROTTLE_STATUS_CODES`), including an unknown status. Such a source
+was asked and answered, so it "did not serve it" --
+`"Europe PMC (HTTP 404 Not Found) did not serve it"`; every other kind, and
+429 or 503, "could not be asked". A throttle says only "not now" (and some
+hosts' 503 is an outage), a refused redirect is our own refusal, and a blank or
+garbled 200 says nothing about the article. That the other 5xx statuses are
+answers is a decision, not a law of HTTP. The search clauses above are
+unaffected: "could not be searched" is true of an answered error too.
+
+What the sentence goes on to say follows the verb. Only a source that could
+not be asked earns "so a freely available copy may exist"; a source that
+answered without serving the article is no reason to think one does, so a
+record holding answers alone ends "so whether this document is open access was
+not established". A finding is set against an unasked source with "but" and
+joined to an answered one with "and". Within one service, a failure that could
+not be asked outranks an earlier answer: it is the lookup that left the
+question open.
 
 Several shortfalls join with `"; "`. Where they reach the reader:
 

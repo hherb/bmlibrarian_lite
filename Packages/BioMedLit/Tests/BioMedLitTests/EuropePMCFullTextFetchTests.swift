@@ -453,22 +453,27 @@ final class FullTextChainEuropePMCTests: XCTestCase {
 
     /// The reader's sentence follows #435's decision: an HTTP answer "did not
     /// serve it", a throttle or a transport failure "could not be asked".
+    /// Asserted whole, so the tail cannot drift from Android's.
     func testTheSentenceNamesWhatEuropePMCDid() {
-        let answered = FullTextError.absenceNotEstablished(.httpStatus(404)).errorDescription ?? ""
-        XCTAssertTrue(answered.contains("Europe PMC (HTTP 404 Not Found) did not serve it"), answered)
-        XCTAssertFalse(answered.contains("could not be asked"), answered)
-
-        let unasked = FullTextError.absenceNotEstablished(.timeout).errorDescription ?? ""
-        XCTAssertTrue(
-            unasked.contains("Europe PMC could not be asked (the request timed out)"), unasked
+        XCTAssertEqual(
+            FullTextError.absenceNotEstablished(.httpStatus(404)).errorDescription,
+            "No source provided this article's full text. Europe PMC (HTTP 404 Not Found) "
+                + "did not serve it, so it may still exist. Try again later."
+        )
+        XCTAssertEqual(
+            FullTextError.absenceNotEstablished(.timeout).errorDescription,
+            "No source provided this article's full text. Europe PMC could not be asked "
+                + "(the request timed out), so it may still exist. Try again later."
         )
         XCTAssertFalse(FullTextError.absenceNotEstablished(.timeout).isRetryable)
-
-        let throttled = FullTextError.absenceNotEstablished(.httpStatus(429)).errorDescription ?? ""
-        XCTAssertTrue(
-            throttled.contains("Europe PMC could not be asked (HTTP 429 Too Many Requests)"), throttled
-        )
-        XCTAssertFalse(throttled.contains("did not serve it"), throttled)
+        for status in BioMedLitConstants.throttleStatusCodes.sorted() {
+            let failure = RequestFailure.httpStatus(status)
+            XCTAssertEqual(
+                FullTextError.absenceNotEstablished(failure).errorDescription,
+                "No source provided this article's full text. Europe PMC could not be asked "
+                    + "(\(failure.describe())), so it may still exist. Try again later."
+            )
+        }
     }
 
     /// The predicate the verb is chosen by, Python's `RequestFailure.is_answer`.
@@ -482,12 +487,12 @@ final class FullTextChainEuropePMCTests: XCTestCase {
         }
         // A status this build could not keep was still answered.
         XCTAssertTrue(RequestFailure.httpStatus(1000).isAnswer)
-        let others: [RequestFailure] = [
-            .timeout, .connection, .serviceError, .malformedResponse,
-            .incompleteResponse, .requestFailed, .redirectRefused(statusCode: 307),
-        ]
-        for failure in others {
-            XCTAssertFalse(failure.isAnswer, failure.describe())
+        // Every other kind, including one added later, is not an answer.
+        for kind in RequestFailureKind.allCases where kind != .httpStatus {
+            for statusCode in [nil, 307] as [Int?] {
+                let failure = RequestFailure.restored(kind: kind, statusCode: statusCode)
+                XCTAssertFalse(failure.isAnswer, failure.describe())
+            }
         }
     }
 

@@ -486,7 +486,7 @@ class TestTheXmlFetchFailureReachesTheRecordAsItself:
 
         assert result.success
         assert result.source_type is FulltextSourceType.EUROPEPMC_XML
-        assert not result.lookups.anything_unasked
+        assert not result.lookups.anything_unsettled
 
     @patch("bmlibrarian_lite.fulltext_discovery.find_existing_pdf", return_value=None)
     @patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext", return_value=None)

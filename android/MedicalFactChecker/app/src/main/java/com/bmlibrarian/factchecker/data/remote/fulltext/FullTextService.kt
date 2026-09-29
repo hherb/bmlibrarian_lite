@@ -130,17 +130,18 @@ class FullTextService @Inject constructor(
          * No source provided the full text, but Europe PMC did not settle whether
          * it exists (#434).
          *
-         * Europe PMC answered with an HTTP status that is not about the article
-         * (`fullTextXML`'s 404 for text that is not open access (#432), or a 429
-         * or 5xx that outlasted its retries, from the fetch or the identifier
-         * search), or gave no usable answer at all (a timeout, a dropped
-         * connection, a blank body, an identifier never sent). The reader's
-         * sentence follows the same split: see [absenceNotEstablishedMessage].
+         * Europe PMC answered without serving the article (an HTTP status such
+         * as `fullTextXML`'s 404 for text that is not open access (#432), or a
+         * 5xx other than 503 that outlasted its retries, from the fetch or the
+         * identifier search), or gave no answer at all (a throttle (429, 503), a
+         * timeout, a dropped connection, a blank body, an identifier never sent).
+         * The reader's sentence follows the same split, by
+         * [RequestFailure.isAnswer]: see [absenceNotEstablishedMessage].
          * Unlike [Unavailable], a claim about us: callers must not mark
          * the document unavailable for good on it, or a busy Europe PMC takes the
          * retry away.
          *
-         * @param failure What Europe PMC's side of the chain got instead of an answer
+         * @param failure What Europe PMC's side of the chain got instead of the article's text
          */
         data class NotEstablished(val failure: RequestFailure) : FullTextResult(hasContent = false) {
             /** The sentence shown to the reader. */
@@ -241,8 +242,8 @@ class FullTextService @Inject constructor(
         pmid: String?,
         email: String = Constants.UNPAYWALL_DEFAULT_EMAIL
     ): Result<FullTextResult> = withContext(Dispatchers.IO) {
-        // What Europe PMC's side of the chain got instead of an answer about the
-        // article, if anything. Set by a lost identifier search, a failed fetch and
+        // What Europe PMC's side of the chain got instead of the article's text,
+        // if anything. Set by a lost identifier search, a failed fetch and
         // a fullTextXML 404; cleared by a fetch that was served. Read only at the
         // end: a chain that found nothing must not call the article's full text
         // absent while this is set (#434)
@@ -613,7 +614,7 @@ class FullTextException(message: String, cause: Throwable? = null) : Exception(m
  * it "could not be asked" ([RequestFailure.isAnswer]). Worded as
  * BioMedLit's `FullTextError.absenceNotEstablished` (iOS and macOS).
  *
- * @param failure What Europe PMC's side of the chain got instead of an answer
+ * @param failure What Europe PMC's side of the chain got instead of the article's text
  * @return The sentence
  */
 fun absenceNotEstablishedMessage(failure: RequestFailure): String =

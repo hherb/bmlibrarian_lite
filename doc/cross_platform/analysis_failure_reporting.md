@@ -152,8 +152,8 @@ logged **and reported**).
   client is not one, since no re-analysis would ever read it.
 - **Withhold the claim, do not merely deny it.** The discovery sentence used
   to read "The document may require institutional access." When a lookup
-  failed, the replacement says a freely available copy may exist and that open
-  access *was not established* — it does not repeat the paywall claim in order
+  failed, the replacement says a freely available copy may exist (where a
+  source could not be asked) and that open access *was not established* — it does not repeat the paywall claim in order
   to negate it, because that phrase read in isolation is the harm.
 - **Unreadable is not absent either.** A source that answers `2xx` with an
   empty body, or XML that does not parse, has told us nothing about the
@@ -221,14 +221,21 @@ logged **and reported**).
     serve it, so …". The case that forced it: Europe PMC's 404 for an
     article its search holds, recorded since #429 as a failure rather than
     an absence (#432), read "Europe PMC (HTTP 404 Not Found) could not be
-    asked".
+    asked". The rest of the sentence follows the verb: only an unasked
+    source earns "a freely available copy may exist" and is set against the
+    finding with "but"; answers alone leave access "not established", joined
+    with "and" -- "No PDF sources found for this document, and Europe PMC
+    (HTTP 404 Not Found) did not serve it, so whether this document is open
+    access was not established." Within one service, a failure that could
+    not be asked outranks an earlier answer: Europe PMC's XML 404 followed
+    by a timed-out PDF render is named by the timeout.
   - **`NOT_FOUND` is a claim about the article, so only the end of the
     chain may reach it.** Every per-source "this one holds nothing" is
     `NOT_ASSESSED`, because the sources after it have not been asked yet. `FulltextDiscoverer` mapped every failure, every cancel and every
     skipped download to it, erasing #347's distinction one layer up (#354).
     Whether an absence was established is now derived --
     `FulltextResult.absence_established` is true only when the source type
-    is `NOT_FOUND` *and* nothing went unasked -- because either condition
+    is `NOT_FOUND` *and* nothing went unsettled -- because either condition
     alone lies.
   - **Only report a skip where it changes what can be claimed.** With no
     PMID the PMC path is not consulted, but Unpaywall is what establishes

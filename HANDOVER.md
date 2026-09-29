@@ -26,9 +26,28 @@ landed** once merged.
   `paywall_message`, `no_pdf_sources_message`, the analyser's full-text
   caveat and paywall warning). Apps: `absenceNotEstablished`'s sentence now
   asks `isAnswer`, so a 429 reads "could not be asked" again.
-- Checked: `pytest` 5787, BioMedLit `swift test` 1335, app `swift test` 394,
-  `./gradlew test` 1227, all 0 failures; lint delta 0 new. Seven Python
-  mutations of the predicate, clause and analyser site, all caught.
+- **Review fixes (same PR):**
+  - The rest of the sentence follows the verb. Only an unasked source earns
+    "so a freely available copy may exist" and "but". A record holding
+    answers alone reads "No PDF sources found for this document, and
+    Europe PMC (HTTP 404 Not Found) did not serve it, so whether this
+    document is open access was not established."
+  - The analyser's paywall warning is now `refused_access_sentence`, the
+    same wording as `paywall_message`.
+  - The analyser caveat introduces its reasons with a colon.
+  - Within one service, a failure that could not be asked outranks an
+    earlier answer (`_unsettled`).
+  - `LookupRecord.anything_unasked` is renamed `anything_unsettled`.
+  - Unpaywall is never asked with `FALLBACK_CONTACT_EMAIL`
+    (`usable_unpaywall_email`; it answered 422 for every article). The
+    transparency analysis now reads `discovery.unpaywall_email`
+    (`unpaywall_contact_email`).
+- Lodged for the maintainer, all open: #445 (which statuses are answers:
+  5xx, configuration 4xx, no status), #446 (doi.org's unchecked HEAD
+  status), #447 (a shared is-answer/sentence fixture).
+- Checked: `pytest` 5811, BioMedLit `swift test` 1335, app `swift test`
+  394, `./gradlew test` 1228, all 0 failures; lint delta 0 new.
+  Eight Python mutations of the review fixes, all caught.
 
 ## Recently landed (context)
 
@@ -40,7 +59,8 @@ the rest.
   Served / absent (404) / unreachable of its real kind; a blank 200 is
   incomplete; a non-accession is never sent; **preprints are fetched by their
   `PPR` ID**. A 404 after the search is a failure, not an absence (#432). A
-  chain ending with nothing while Europe PMC did not answer is **not** "no full
+  chain ending with nothing while Europe PMC did not settle it (unreachable,
+  throttled, or a 404 for a held article) is **not** "no full
   text" (Swift `absenceNotEstablished`, Android `NotEstablished`, never
   recorded on the document). `fullTextXML` answers 200 with body-less XML for
   OA abstract-only deposits. Contract: `fulltext_retrieval.md`.

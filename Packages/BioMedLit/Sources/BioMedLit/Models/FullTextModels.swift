@@ -463,14 +463,15 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
 
     /// Every source was exhausted, but Europe PMC did not settle the question.
     ///
-    /// Carries what Europe PMC's side of the chain got instead of an answer
-    /// about the article. That is either an HTTP status — `fullTextXML`'s 404
-    /// for an article Europe PMC holds but does not serve as open access
-    /// (#432), or a 429 or 5xx that outlasted its retries, from the fetch or
-    /// the identifier search — or no usable answer at all: a timeout, a
-    /// dropped connection, a blank body, an identifier never sent. Either way
-    /// the article may have a full text we did not reach (#434). The reader's
-    /// sentence follows the same split (see `errorDescription`).
+    /// Carries what Europe PMC's side of the chain got instead of the
+    /// article's text. That is either an answer — an HTTP status such as
+    /// `fullTextXML`'s 404 for an article Europe PMC holds but does not serve
+    /// as open access (#432), or a 5xx other than 503 that outlasted its
+    /// retries, from the fetch or the identifier search — or no answer at
+    /// all: a throttle (429, 503), a timeout, a dropped connection, a blank
+    /// body, an identifier never sent. Either way the article may have a full
+    /// text we did not reach (#434). The reader's sentence follows the same
+    /// split, by ``RequestFailure/isAnswer`` (see `errorDescription`).
     ///
     /// Like ``identifierKindUnresolved(_:)``, a claim about *us*, and callers
     /// must **not** mark the document permanently unavailable on it: that

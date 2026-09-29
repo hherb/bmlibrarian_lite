@@ -154,7 +154,7 @@ default filter drops). Swift also reads the document's own primary slot, but
 only when that search *failed*: a search that answered "no such record" is
 not second-guessed with a fetch that would almost certainly 404. Where Python keeps a lookup
 record, the apps keep one fact, what Europe PMC's side of the chain got
-instead of an answer (a lost search, a failed fetch, or the 404), cleared when
+instead of the article's text (a lost search, a failed fetch, or the 404), cleared when
 a fetch is served. A chain that then finds nothing ends in
 `FullTextError.absenceNotEstablished` (Swift) or
 `FullTextResult.NotEstablished` (Android), never in the "no full text" answer

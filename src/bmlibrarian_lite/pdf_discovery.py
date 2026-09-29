@@ -49,6 +49,7 @@ import requests
 from urllib3.util.retry import Retry
 
 from .constants import (
+    FALLBACK_CONTACT_EMAIL,
     HTTP_ERROR_STATUS_MIN,
     HTTP_NOT_FOUND,
     PAYWALL_HTTP_STATUSES,
@@ -405,6 +406,29 @@ class DiscoveryResult:
         return replace(self, lookups=self.lookups.merged(record))
 
 
+def usable_unpaywall_email(email: str | None) -> str | None:
+    """The email to ask Unpaywall with, or ``None`` when there is none to use.
+
+    The application's own placeholder is not the user's address. Unpaywall
+    answers it with HTTP 422 for every article, which read to the reader as
+    "Unpaywall did not serve it" -- blaming the article for our
+    configuration -- and gave them no advice. Treated as no email, it is a
+    ``NOT_CONFIGURED`` skip, which earns the configuration sentence (#435).
+
+    Args:
+        email: The configured email, a placeholder, blank, or ``None``.
+
+    Returns:
+        ``email`` stripped, or ``None`` when it is blank or the placeholder.
+    """
+    if email is None:
+        return None
+    stripped = email.strip()
+    if not stripped or stripped == FALLBACK_CONTACT_EMAIL:
+        return None
+    return stripped
+
+
 class PDFDiscoverer:
     """
     Discovers and downloads PDF files from various sources.
@@ -429,13 +453,14 @@ class PDFDiscoverer:
         Initialize PDF discoverer.
 
         Args:
-            unpaywall_email: Email for Unpaywall API (required for Unpaywall)
+            unpaywall_email: Email for Unpaywall API (required for Unpaywall;
+                the application's placeholder counts as none)
             openathens_url: OpenAthens institution URL for authenticated access
             progress_callback: Callback for progress updates (stage, status)
             use_browser_fallback: If True, use browser for bot-protected downloads
             browser_headless: If True, run browser without visible window
         """
-        self.unpaywall_email = unpaywall_email
+        self.unpaywall_email = usable_unpaywall_email(unpaywall_email)
         self.openathens_url = openathens_url
         self.progress_callback = progress_callback
         self.use_browser_fallback = use_browser_fallback

@@ -105,14 +105,14 @@ class TestALookupRecordCarriesBothKinds:
 
     def test_an_empty_record_asked_everything(self) -> None:
         """Nothing unasked is the ordinary case and must stay silent."""
-        assert not LookupRecord().anything_unasked
+        assert not LookupRecord().anything_unsettled
 
     def test_a_record_with_a_failure_has_something_unasked(self) -> None:
         """A failed lookup is a lookup that was not answered."""
         record = LookupRecord(
             failures=(SourceLookupFailure(SERVICE_UNPAYWALL, THROTTLED),)
         )
-        assert record.anything_unasked
+        assert record.anything_unsettled
 
     def test_a_record_with_only_a_skip_has_something_unasked(self) -> None:
         """A skipped lookup is unasked too, though nothing went wrong."""
@@ -123,7 +123,7 @@ class TestALookupRecordCarriesBothKinds:
                 ),
             )
         )
-        assert record.anything_unasked
+        assert record.anything_unsettled
 
     def test_merging_keeps_both_sides(self) -> None:
         """A record travels through layers that each add to it."""
@@ -1608,9 +1608,12 @@ class TestTheGapsTheReviewFound:
             ),
         )
 
-        joined = " ".join(report.warnings)
-        assert "could not be asked" in joined
-        assert configuration_nudge(record) in joined
+        assert report.warnings == [
+            "A source refused access to this document, but Unpaywall (not "
+            "configured) could not be asked, so a freely available copy may "
+            "exist. Whether this document is open access was not established.",
+            configuration_nudge(record),
+        ]
 
     def test_a_paywall_with_every_lookup_answered_says_so_plainly(
         self,
@@ -1949,7 +1952,7 @@ class TestTheGapsTheReviewFound:
         ):
             result = discoverer.discover_fulltext(doi="10.1/abc")
 
-        assert result.lookups.anything_unasked
+        assert result.lookups.anything_unsettled
         assert not result.absence_established
 
     def test_a_readable_cached_pdf_records_nothing_unasked(self) -> None:
@@ -1979,7 +1982,7 @@ class TestTheGapsTheReviewFound:
             result = discoverer.discover_fulltext(doi="10.1/abc")
 
         assert result.success
-        assert not result.lookups.anything_unasked
+        assert not result.lookups.anything_unsettled
 
     # ---- the skip-reason wording map ------------------------------------
 
