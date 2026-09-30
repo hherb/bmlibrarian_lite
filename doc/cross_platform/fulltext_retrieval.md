@@ -53,7 +53,7 @@ case and checking you got `FULLTEXT` is exactly the direction worth testing.
 Europe PMC serves full JATS XML for records deposited *abstract-only* — a
 `<front>` and a `<back>` with no `<body>` at all (checked live on 2026-09-29:
 `PMC9788864`, open access, answers 200 with an abstract and no `<body>`; a
-*non-open-access* record gets a 404 instead, #432) — and that XML parses and
+*non-open-access* record gets a 500 instead, #432) — and that XML parses and
 renders successfully: it has a title and an abstract, so "did parsing produce
 any content" is not the right question. The right one is whether the parse
 found a body:
@@ -91,19 +91,24 @@ a `<body>` element. That is deliberate, not an oversight — this kind answers
 Check if an article has full text in Europe PMC:
 
 ```pseudocode
+# Python only until #450: Swift and Android still ask for every accession.
 function has_fulltext_xml(article: Article) -> bool:
-    # From search results
-    return article.in_pmc == "Y" or article.in_epmc == "Y"
-
-    # Or check via API
-    info = europepmc.get_article_info(pmid=article.pmid)
-    return info and info.has_fulltext_xml
+    # From search results. Held is not enough: fullTextXML answers 500 for a
+    # held but closed-access article (#432). Only a stated "N" is an answer,
+    # for either question: a missing or unreadable flag asks.
+    stated_not_held = article.in_pmc == "N" and article.in_epmc == "N"
+    return not stated_not_held and article.is_open_access != "N"
 ```
+
+Without a search record in hand, `europepmc.get_article_info(...)` returns
+one whose `has_fulltext_xml` applies the same rule.
 
 ### Retrieval
 
 The fetch has three outcomes, and one `null` for all of them is the defect
-this shape exists to prevent (#429): a 404 is Europe PMC's answer, while a
+this shape exists to prevent (#429): a 404 is Europe PMC's answer (in
+practice rare: text it will not serve and an ID it does not hold both answer
+500, see below), while a
 throttle, an outage, a timeout or a blank 200 is our failure to get one, and
 the reader is told which.
 
@@ -139,11 +144,36 @@ async function fetch_fulltext_xml(accession: string) -> FullTextXmlFetch:
     return SERVED(response.text)
 ```
 
-`fullTextXML` serves open-access text only. Europe PMC's search flags
-(`inEPMC`, `inPMC`) say the article is held, not that its text is open, so a
-404 after the search is expected for a non-open-access article (#432). It is
-recorded as what we got -- `HTTP 404 Not Found` against Europe PMC -- and not
-as the article's absence; the chain goes on to the PDF tiers.
+`fullTextXML` serves open-access text only, and answers **HTTP 500** -- not
+404 -- for an article Europe PMC holds but marks `isOpenAccess=N` (#432,
+measured on 761 records; `doc/developer/europepmc_and_pubmed.md` has the
+table). Europe PMC's search flags (`inEPMC`, `inPMC`) say the article is held,
+not that its text is open. So:
+
+- **Ask unless the record states that Europe PMC does not hold the article
+  (`inPMC=N` and `inEPMC=N`) or that it is closed access (`isOpenAccess=N`)**
+  (Python `offers_fulltext_xml`). A missing or unreadable flag is not a
+  stated no, and the fetch is made. Preprints are held to the same rule at
+  no cost: none published since 2024 is marked closed access, and in the
+  years some are (2019–23), open-access preprints answer 500 as well (#451).
+- **A record that states closed access is Europe PMC's answer about its own
+  service** (maintainer's decision, 2026-09-30), as "not held" already was:
+  no failure is recorded, the chain goes on to the PDF tiers (the Europe PMC
+  PDF render first), and if every tier answers, the absence is established.
+  The record can be wrong: 1 of 320 closed-access records was served anyway
+  (`PMC9391270`), and a fresh preprint can be served before its record says
+  it is held (`PPR1051747`, #454). Both fall to the PDF tiers, so if those
+  answer without a copy the chain establishes an absence Europe PMC could
+  have filled.
+- **A 404 or 500 for an article the record called servable** is recorded as
+  what we got, against Europe PMC, and not as the article's absence.
+
+The apps do not read the record's flags yet: they ask for every accession,
+and a 500 leaves Europe PMC's side unsettled (#450). So in the apps a
+closed-access article spends every retry and can never reach an established
+absence, where Python settles it once the PDF tiers answer. Preprints whose
+text arrived before 2026 also answer a steady 500 and spend every retry, on
+all three platforms (#451).
 
 **The apps (#434).** Swift (`FullTextService.fetchEuropePMCXML(accession:)` →
 `FullTextXmlFetch`) and Android (`EuropePMCService.fetchFullTextXml` →
@@ -152,7 +182,8 @@ as the article's absence; the chain goes on to the PDF tiers.
 identifier search found (Android's search must include preprints, which its
 default filter drops). Swift also reads the document's own primary slot, but
 only when that search *failed*: a search that answered "no such record" is
-not second-guessed with a fetch that would almost certainly 404. Where Python keeps a lookup
+not second-guessed with a fetch that would almost certainly fail (Europe PMC
+answers 500 for an ID it does not hold). Where Python keeps a lookup
 record, the apps keep one fact, what Europe PMC's side of the chain got
 instead of the article's text (a lost search, a failed fetch, or the 404), cleared when
 a fetch is served. A chain that then finds nothing ends in

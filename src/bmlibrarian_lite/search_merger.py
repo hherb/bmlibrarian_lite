@@ -72,7 +72,9 @@ class MergedArticle:
         url: URL to article
         sources: Set of sources where this article was found
         is_preprint: Whether this is a preprint
-        has_fulltext_xml: Whether JATS XML full text is available
+        has_fulltext_xml: Whether Europe PMC offers JATS XML full text: its
+            record does not state that it lacks the text or holds it closed
+            access (see ``europepmc.offers_fulltext_xml``)
     """
 
     pmid: str | None = None

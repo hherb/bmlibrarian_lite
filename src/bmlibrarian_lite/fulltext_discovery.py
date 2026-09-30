@@ -482,13 +482,23 @@ class FulltextDiscoverer:
                 # about the article: the PDF paths below have not been asked
                 # yet. NOT_FOUND is reserved for the end of the chain, so
                 # that no intermediate can be mistaken for an established
-                # absence if it ever escapes (#354).
-                logger.debug(f"No full-text XML available for {info.pmcid or info.pmid}")
+                # absence if it ever escapes (#354). Europe PMC's record
+                # answers here, whether it states that it does not hold the
+                # text or that it holds it closed access: ``fullTextXML``
+                # does not serve closed-access text (1 of 320 was, in the
+                # #432 survey), and asking would answer a 500 that spends
+                # every retry. The maintainer ruled that the record is an
+                # answer, not a lookup left unmade (#432).
+                logger.debug(
+                    "No full-text XML offered for %s (open access: %s)",
+                    info.pmcid or info.pmid,
+                    info.is_open_access,
+                )
                 return FulltextResult(
                     success=False,
                     source_type=FulltextSourceType.NOT_ASSESSED,
                     article_info=info,
-                    error="Europe PMC holds no full-text XML for this article.",
+                    error="Europe PMC serves no full-text XML for this article.",
                 )
 
             accession = info.fulltext_accession
@@ -536,11 +546,10 @@ class FulltextDiscoverer:
                 )
 
             if xml_fetch.xml is None:
-                # Europe PMC's 404 for an article its search says is in PMC
-                # or Europe PMC. ``fullTextXML`` serves open-access text
-                # only, so this may mean "not open access" rather than "no
-                # full text" (#432): recorded as what we got, and not as the
-                # article's absence (#346, #429).
+                # Europe PMC's 404 for an article its search says it holds
+                # and has not marked closed access: its two answers disagree,
+                # so this is recorded as what we got, and not as the
+                # article's absence (#346, #429, #432).
                 not_found = RequestFailure(
                     RequestFailureKind.HTTP_STATUS, HTTP_NOT_FOUND
                 )

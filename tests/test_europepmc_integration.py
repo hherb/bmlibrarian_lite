@@ -23,10 +23,13 @@ These tests hit the real Europe PMC API. Run with:
 These are excluded from default test runs.
 """
 
+from pathlib import Path
 from typing import Dict, Tuple
+from unittest.mock import patch
 
 import pytest
 
+from bmlibrarian_lite.data_models import RequestFailure, RequestFailureKind
 from bmlibrarian_lite.europepmc import (
     ArticleInfo,
     EuropePMCClient,
@@ -273,8 +276,8 @@ PMC_PDF_ONLY_ARTICLE = {
 class TestPMCPDFDiscovery:
     """Tests for PMC PDF fallback when JATS XML is unavailable.
 
-    Uses PMC7339914 which has a free PDF via Europe PMC but the JATS XML
-    endpoint returns 404.
+    Uses PMC7339914, an NIH author manuscript with a free PDF via Europe
+    PMC, whose JATS XML Europe PMC holds closed access and does not serve.
     """
 
     def test_article_info_has_pdf_render_url(
@@ -289,32 +292,55 @@ class TestPMCPDFDiscovery:
         assert info.pdf_render_url is not None
         assert "pdf=render" in info.pdf_render_url
 
+    def test_the_search_record_says_xml_is_not_served(
+        self, europepmc_client: EuropePMCClient
+    ) -> None:
+        """Held but closed access, so discovery does not ask (#432)."""
+        info = europepmc_client.get_article_info(pmcid=PMC_PDF_ONLY_ARTICLE["pmcid"])
+        assert info is not None
+        assert info.is_open_access is False
+        assert info.has_fulltext_xml is False
+
     def test_xml_not_available_for_pdf_only_article(
         self, europepmc_client: EuropePMCClient
     ) -> None:
-        """JATS XML should NOT be available for this article."""
+        """JATS XML is not served for this article, which is what the record says."""
         fetch = europepmc_client.fetch_fulltext_xml(PMC_PDF_ONLY_ARTICLE["pmcid"])
-        # Europe PMC's own 404, not a failure to reach it. On 2026-09-28
-        # it answered 500 here instead, and this failed (#432).
-        assert fetch == FullTextXmlFetch.absent()
-
-    def test_discover_fulltext_finds_pdf_fallback(self) -> None:
-        """FulltextDiscoverer should find PDF when XML is unavailable."""
-        discoverer = FulltextDiscoverer()
-        result = discoverer.discover_fulltext(
-            pmcid=PMC_PDF_ONLY_ARTICLE["pmcid"],
-            doi=PMC_PDF_ONLY_ARTICLE["doi"],
+        # Europe PMC answers 500 for closed-access text (#432); a 404 would
+        # say the same. Anything else -- a timeout, a throttle, no network --
+        # is not Europe PMC's answer, and must fail here rather than pass.
+        assert fetch == FullTextXmlFetch.absent() or fetch.failure == RequestFailure(
+            RequestFailureKind.HTTP_STATUS, 500
         )
-        assert result.success, f"Should find full text: {result.error}"
-        # Accept cached results from previous runs too
-        acceptable = {
+
+    def test_discover_fulltext_finds_pdf_fallback(self, tmp_path: Path) -> None:
+        """Skipped at the XML tier, the article reaches the PDF tiers.
+
+        The caches are bypassed, so a warm cache cannot answer instead of
+        the path under test. Europe PMC's render answered 403 to every
+        non-browser client on 2026-10-01 (#453); while it does, the chain
+        must say so rather than settle an absence.
+        """
+        discoverer = FulltextDiscoverer()
+        with (
+            patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext", return_value=None),
+            patch("bmlibrarian_lite.fulltext_discovery.find_existing_pdf", return_value=None),
+            patch(
+                "bmlibrarian_lite.fulltext_discovery.generate_pdf_path",
+                return_value=tmp_path / "article.pdf",
+            ),
+        ):
+            result = discoverer.discover_fulltext(
+                pmcid=PMC_PDF_ONLY_ARTICLE["pmcid"],
+                doi=PMC_PDF_ONLY_ARTICLE["doi"],
+            )
+        if not result.success:
+            assert not result.absence_established, result.error
+            assert result.lookups.failures, result.error
+            return
+        assert result.source_type in {
             FulltextSourceType.EUROPEPMC_PDF,
-            FulltextSourceType.CACHED_PDF,
-            FulltextSourceType.CACHED_FULLTEXT,
             FulltextSourceType.DOWNLOADED_PDF,
         }
-        assert result.source_type in acceptable, (
-            f"Expected one of {acceptable}, got {result.source_type}"
-        )
         assert result.markdown_content is not None
         assert len(result.markdown_content) > 100

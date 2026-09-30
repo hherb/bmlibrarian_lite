@@ -206,7 +206,7 @@ class TestGetArticleInfo:
         """Test when no results are found."""
         mock_session = MagicMock()
         mock_response = MagicMock()
-        mock_response.json.return_value = {"resultList": {"result": []}}
+        mock_response.json.return_value = {"hitCount": 0, "resultList": {"result": []}}
         mock_response.raise_for_status = MagicMock()
         mock_session.get.return_value = mock_response
         mock_session_class.return_value = mock_session
@@ -439,7 +439,10 @@ class TestFetchArticleInfoIdentifiers:
             The client and its mocked session.
         """
         response = MagicMock()
-        response.json.return_value = {"resultList": {"result": results}}
+        response.json.return_value = {
+            "hitCount": len(results),
+            "resultList": {"result": results},
+        }
         return _client_answering(response)
 
     def test_a_preprint_keeps_what_its_full_text_is_fetched_by(self) -> None:
@@ -478,6 +481,150 @@ class TestFetchArticleInfoIdentifiers:
             RequestFailure(RequestFailureKind.REQUEST_FAILED)
         )
         session.get.assert_not_called()
+
+
+class TestHasFulltextXmlFollowsWhatFullTextXmlServes:
+    """``has_fulltext_xml`` is whether ``fullTextXML`` is worth asking (#432).
+
+    Being in PMC is not enough: Europe PMC answered 500 for 319 of 320
+    articles it holds but marks ``isOpenAccess=N`` (two samples, 2019–22),
+    and served all 160 it marks open access.
+    """
+
+    @staticmethod
+    def _info_from(result: dict[str, Any]) -> ArticleInfo:
+        """What the client reads from a search answering ``result``.
+
+        Args:
+            result: One ``resultList.result`` entry.
+
+        Returns:
+            The parsed article.
+        """
+        response = MagicMock()
+        response.json.return_value = {"hitCount": 1, "resultList": {"result": [result]}}
+        client, _ = _client_answering(response)
+        info = client.fetch_article_info(pmcid="PMC7339914").info
+        assert info is not None
+        return info
+
+    @pytest.mark.parametrize(
+        ("flags", "expected"),
+        [
+            # Open access, in PMC: served.
+            ({"isOpenAccess": "Y", "inEPMC": "Y", "inPMC": "Y"}, True),
+            # #432's own article, an NIH author manuscript: held, not served.
+            (
+                {"isOpenAccess": "N", "inEPMC": "Y", "inPMC": "Y", "authMan": "Y"},
+                False,
+            ),
+            # A publisher deposit that is free to read but not open access.
+            ({"isOpenAccess": "N", "inEPMC": "Y", "inPMC": "Y"}, False),
+            # A preprint marked open access, as every one published since
+            # 2024 is: recent ones are served, so it is still asked.
+            ({"isOpenAccess": "Y", "inEPMC": "Y", "inPMC": "N", "source": "PPR"}, True),
+            # A preprint marked closed: all from 2019–23, none served.
+            ({"isOpenAccess": "N", "inEPMC": "Y", "inPMC": "N", "source": "PPR"}, False),
+            # In PMC but not Europe PMC's own index: held either way.
+            ({"isOpenAccess": "Y", "inEPMC": "N", "inPMC": "Y"}, True),
+            ({"isOpenAccess": "N", "inEPMC": "N", "inPMC": "Y"}, False),
+            # Stated not held at all.
+            ({"isOpenAccess": "Y", "inEPMC": "N", "inPMC": "N"}, False),
+            ({"isOpenAccess": "N", "inEPMC": "N", "inPMC": "N"}, False),
+            ({"inEPMC": "N", "inPMC": "N"}, False),
+        ],
+    )
+    def test_the_flags_decide(self, flags: dict[str, str], expected: bool) -> None:
+        """Held and not stated closed is worth asking."""
+        info = self._info_from({"pmcid": "PMC7339914", **flags})
+
+        assert info.has_fulltext_xml is expected
+
+    @pytest.mark.parametrize("stated", [None, "", "yes", 1])
+    def test_only_a_stated_no_is_an_answer(self, stated: object) -> None:
+        """A missing or unreadable flag says nothing, so the fetch is made."""
+        result: dict[str, Any] = {"pmcid": "PMC7339914", "inPMC": "Y"}
+        if stated is not None:
+            result["isOpenAccess"] = stated
+
+        assert self._info_from(result).has_fulltext_xml is True
+
+    @pytest.mark.parametrize(
+        "held",
+        [
+            {},
+            {"inEPMC": "N"},
+            {"inPMC": "N"},
+            {"inEPMC": "", "inPMC": "N"},
+            {"inEPMC": None, "inPMC": "N"},
+            {"inEPMC": "n", "inPMC": "n"},
+        ],
+    )
+    def test_only_a_stated_no_says_not_held(self, held: dict[str, object]) -> None:
+        """Both held flags must state ``N``: one missing or unreadable says nothing."""
+        result: dict[str, Any] = {"pmcid": "PMC7339914", "isOpenAccess": "Y", **held}
+
+        assert self._info_from(result).has_fulltext_xml is True
+
+
+class TestArticleInfoAnswerIsRead:
+    """An unread 200 is not Europe PMC saying it holds no record (#432 review)."""
+
+    @staticmethod
+    def _fetch(answer: object) -> ArticleInfoFetch:
+        """Look an article up against a search answering ``answer``.
+
+        Args:
+            answer: The decoded JSON body of a 200.
+
+        Returns:
+            The fetch.
+        """
+        response = MagicMock()
+        response.json.return_value = answer
+        client, _ = _client_answering(response)
+        return client.fetch_article_info(pmid="31996627")
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            # What Europe PMC answers some failures with (#247).
+            {"version": "6.9"},
+            [],
+            "busy",
+            {"hitCount": 0},
+            {"hitCount": 0, "resultList": {}},
+            {"hitCount": 0, "resultList": {"result": None}},
+            {"resultList": {"result": []}},
+            {"hitCount": "0", "resultList": {"result": []}},
+            {"hitCount": True, "resultList": {"result": []}},
+            # Counted matches it does not list.
+            {"hitCount": 2, "resultList": {"result": []}},
+            # A result that is not a record.
+            {"hitCount": 1, "resultList": {"result": ["PMC1"]}},
+        ],
+    )
+    def test_an_unreadable_answer_is_not_an_absence(self, answer: object) -> None:
+        """Not read, so nothing is established about the article."""
+        fetch = self._fetch(answer)
+
+        assert fetch.info is None
+        assert fetch.failure == RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+
+    def test_control_no_match_is_an_absence(self) -> None:
+        """Europe PMC's own "no such record" stays an absence."""
+        fetch = self._fetch({"hitCount": 0, "resultList": {"result": []}})
+
+        assert fetch == ArticleInfoFetch.absent()
+
+    def test_control_a_record_is_served(self) -> None:
+        """A readable record reaches the caller."""
+        fetch = self._fetch(
+            {"hitCount": 1, "resultList": {"result": [{"pmid": "31996627", "title": "T"}]}}
+        )
+
+        assert fetch.info is not None
+        assert fetch.info.title == "T"
 
 
 class TestFullTextXmlFetchRefusesTheAmbiguity:
