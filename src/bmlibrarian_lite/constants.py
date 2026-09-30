@@ -1028,9 +1028,11 @@ DOI_RESOLVER_HOSTS = ("doi.org", "dx.doi.org", "www.doi.org")
 DOI_RESOLVER_ABSENCE_STATUSES = (400, 404)
 
 # The one failed status that is about the resource rather than the service:
-# Europe PMC answers 404 for a PMC ID it holds no open-access full text for,
-# and Unpaywall for a DOI it has no record of. Every other failure leaves the
-# question unassessed rather than answered "no" (#346).
+# Unpaywall answers 404 for a DOI it has no record of. Europe PMC's
+# fullTextXML answers 500, not 404, for an article it holds closed access, so
+# that case is decided from the search record before asking (#432). Every
+# other failure leaves the question unassessed rather than answered "no"
+# (#346).
 HTTP_NOT_FOUND = 404
 
 # The sources a full-text lookup can fail against, named as the reader knows

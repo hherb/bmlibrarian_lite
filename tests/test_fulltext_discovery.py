@@ -25,6 +25,8 @@ Tests cover:
 - Error handling and edge cases
 """
 
+import json
+
 import pytest
 from pathlib import Path
 from typing import Dict, Any
@@ -592,6 +594,136 @@ class TestTheXmlFetchFailureReachesTheRecordAsItself:
             ),
         )
         assert result.article_info == _listed_article()
+
+
+def _discoverer_searching(record: dict[str, Any], xml_answer: object) -> FulltextDiscoverer:
+    """A discoverer whose real client finds ``record``, then meets ``xml_answer``.
+
+    Args:
+        record: The one search result Europe PMC answers with.
+        xml_answer: What the XML fetch returns, or raises, if it is made.
+
+    Returns:
+        The discoverer; its client's ``fetch_fulltext_xml`` is a spy.
+    """
+    client = EuropePMCClient()
+    client._session = session_answering(
+        _http(200, json.dumps({"resultList": {"result": [record]}}))
+    )
+    xml_session = session_answering(xml_answer)
+    real_fetch = client.fetch_fulltext_xml
+
+    def fetch_over_xml_session(accession: str) -> FullTextXmlFetch:
+        client._session = xml_session
+        return real_fetch(accession)
+
+    client.fetch_fulltext_xml = MagicMock(  # type: ignore[method-assign]
+        side_effect=fetch_over_xml_session
+    )
+    discoverer = FulltextDiscoverer()
+    discoverer._europepmc = client
+    return discoverer
+
+
+# #432's own article: an NIH author manuscript Europe PMC holds and does not
+# serve, answering 500 at fullTextXML (steady, 2026-09-28 and -30).
+_HELD_NOT_OPEN_ACCESS = {
+    "id": "31996627",
+    "source": "MED",
+    "pmid": "31996627",
+    "pmcid": "PMC7339914",
+    "isOpenAccess": "N",
+    "inEPMC": "Y",
+    "inPMC": "Y",
+    "authMan": "Y",
+}
+
+
+@patch("bmlibrarian_lite.fulltext_discovery.find_existing_pdf", return_value=None)
+@patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext", return_value=None)
+class TestANotOpenAccessArticleIsNotAskedForXml:
+    """#432: Europe PMC's own record says it will not serve the text.
+
+    Asking anyway spent every retry on a 500 and left Europe PMC's side
+    unsettled for good. The record is Europe PMC's answer (maintainer's
+    decision, 2026-09-30), as it already was for an article not in PMC.
+    """
+
+    def test_the_fetch_is_not_made(self, _no_cache: MagicMock, _no_pdf: MagicMock) -> None:
+        """No request is spent on text Europe PMC does not serve."""
+        discoverer = _discoverer_searching(_HELD_NOT_OPEN_ACCESS, _http(500))
+
+        result = discoverer._try_europepmc_xml({}, "31996627", None, None)
+
+        discoverer._europepmc.fetch_fulltext_xml.assert_not_called()
+        assert result.lookups == LookupRecord()
+        # Kept, so the Europe PMC PDF render tier can still serve it.
+        assert result.article_info is not None
+        assert result.article_info.pmcid == "PMC7339914"
+
+    def test_the_europe_pmc_pdf_render_is_still_tried(
+        self, _no_cache: MagicMock, _no_pdf: MagicMock
+    ) -> None:
+        """The free PDF Europe PMC lists is the next tier, and it is asked."""
+        render_url = "https://europepmc.org/articles/PMC7339914?pdf=render"
+        record = {
+            **_HELD_NOT_OPEN_ACCESS,
+            "hasPDF": "Y",
+            "fullTextUrlList": {"fullTextUrl": [
+                {"documentStyle": "pdf", "availability": "Free", "url": render_url},
+            ]},
+        }
+        discoverer = _discoverer_searching(record, _http(500))
+        rendered = FulltextResult(
+            success=True,
+            source_type=FulltextSourceType.EUROPEPMC_PDF,
+            markdown_content="Rendered text.",
+        )
+        with patch.object(discoverer, "_try_europepmc_pdf", return_value=rendered) as render:
+            result = discoverer.discover_fulltext(pmid="31996627")
+
+        discoverer._europepmc.fetch_fulltext_xml.assert_not_called()
+        assert render.call_args.args[1].pdf_render_url == render_url
+        assert result.source_type is FulltextSourceType.EUROPEPMC_PDF
+
+    def test_the_chain_can_settle_an_absence(
+        self, _no_cache: MagicMock, _no_pdf: MagicMock
+    ) -> None:
+        """Every source answered and none served: the absence is established."""
+        discoverer = _discoverer_searching(_HELD_NOT_OPEN_ACCESS, _http(500))
+        none_found = FulltextResult(success=False, source_type=FulltextSourceType.NOT_FOUND)
+        with patch.object(discoverer, "_try_pdf_download", return_value=none_found):
+            result = discoverer.discover_fulltext(pmid="31996627")
+
+        assert result.absence_established
+
+    def test_control_an_open_access_article_is_still_asked(
+        self, _no_cache: MagicMock, _no_pdf: MagicMock
+    ) -> None:
+        """The same record marked open access is fetched, and its 500 unsettles."""
+        record = {**_HELD_NOT_OPEN_ACCESS, "isOpenAccess": "Y", "authMan": "N"}
+        discoverer = _discoverer_searching(record, _http(500))
+        none_found = FulltextResult(success=False, source_type=FulltextSourceType.NOT_FOUND)
+        with patch.object(discoverer, "_try_pdf_download", return_value=none_found):
+            result = discoverer.discover_fulltext(pmid="31996627")
+
+        discoverer._europepmc.fetch_fulltext_xml.assert_called_once_with("PMC7339914")
+        assert not result.absence_established
+        assert SourceLookupFailure(
+            SERVICE_EUROPE_PMC, RequestFailure(RequestFailureKind.HTTP_STATUS, 500)
+        ) in result.lookups.failures
+
+    def test_control_an_open_access_article_is_served(
+        self, _no_cache: MagicMock, _no_pdf: MagicMock
+    ) -> None:
+        """And served, when Europe PMC serves it."""
+        record = {**_HELD_NOT_OPEN_ACCESS, "isOpenAccess": "Y", "authMan": "N"}
+        discoverer = _discoverer_searching(record, _http(200, _A_FULL_TEXT))
+        with patch("bmlibrarian_lite.fulltext_discovery.save_fulltext_markdown"):
+            result = discoverer.discover_fulltext(pmid="31996627")
+
+        assert result.success
+        assert result.source_type is FulltextSourceType.EUROPEPMC_XML
 
 
 @patch("bmlibrarian_lite.fulltext_discovery.find_existing_pdf", return_value=None)

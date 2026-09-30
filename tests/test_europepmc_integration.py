@@ -30,7 +30,6 @@ import pytest
 from bmlibrarian_lite.europepmc import (
     ArticleInfo,
     EuropePMCClient,
-    FullTextXmlFetch,
 )
 from bmlibrarian_lite.fulltext_discovery import (
     FulltextDiscoverer,
@@ -289,14 +288,23 @@ class TestPMCPDFDiscovery:
         assert info.pdf_render_url is not None
         assert "pdf=render" in info.pdf_render_url
 
+    def test_the_search_record_says_xml_is_not_served(
+        self, europepmc_client: EuropePMCClient
+    ) -> None:
+        """Held but closed access, so discovery does not ask (#432)."""
+        info = europepmc_client.get_article_info(pmcid=PMC_PDF_ONLY_ARTICLE["pmcid"])
+        assert info is not None
+        assert info.is_open_access is False
+        assert info.has_fulltext_xml is False
+
     def test_xml_not_available_for_pdf_only_article(
         self, europepmc_client: EuropePMCClient
     ) -> None:
-        """JATS XML should NOT be available for this article."""
+        """JATS XML is not served for this article, which is what the record says."""
         fetch = europepmc_client.fetch_fulltext_xml(PMC_PDF_ONLY_ARTICLE["pmcid"])
-        # Europe PMC's own 404, not a failure to reach it. On 2026-09-28
-        # it answered 500 here instead, and this failed (#432).
-        assert fetch == FullTextXmlFetch.absent()
+        # Europe PMC answers 500 here, not the 404 once expected: steady on
+        # 2026-09-28 and 2026-09-30 (#432). Either way nothing is served.
+        assert fetch.xml is None
 
     def test_discover_fulltext_finds_pdf_fallback(self) -> None:
         """FulltextDiscoverer should find PDF when XML is unavailable."""

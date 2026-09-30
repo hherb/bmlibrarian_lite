@@ -53,7 +53,7 @@ case and checking you got `FULLTEXT` is exactly the direction worth testing.
 Europe PMC serves full JATS XML for records deposited *abstract-only* — a
 `<front>` and a `<back>` with no `<body>` at all (checked live on 2026-09-29:
 `PMC9788864`, open access, answers 200 with an abstract and no `<body>`; a
-*non-open-access* record gets a 404 instead, #432) — and that XML parses and
+*non-open-access* record gets a 500 instead, #432) — and that XML parses and
 renders successfully: it has a title and an abstract, so "did parsing produce
 any content" is not the right question. The right one is whether the parse
 found a body:
@@ -92,8 +92,10 @@ Check if an article has full text in Europe PMC:
 
 ```pseudocode
 function has_fulltext_xml(article: Article) -> bool:
-    # From search results
-    return article.in_pmc == "Y" or article.in_epmc == "Y"
+    # From search results. Held is not enough: fullTextXML answers 500 for a
+    # held but closed-access article, and only a stated "N" is closed (#432)
+    held = article.in_pmc == "Y" or article.in_epmc == "Y"
+    return held and article.is_open_access != "N"
 
     # Or check via API
     info = europepmc.get_article_info(pmid=article.pmid)
@@ -139,11 +141,29 @@ async function fetch_fulltext_xml(accession: string) -> FullTextXmlFetch:
     return SERVED(response.text)
 ```
 
-`fullTextXML` serves open-access text only. Europe PMC's search flags
-(`inEPMC`, `inPMC`) say the article is held, not that its text is open, so a
-404 after the search is expected for a non-open-access article (#432). It is
-recorded as what we got -- `HTTP 404 Not Found` against Europe PMC -- and not
-as the article's absence; the chain goes on to the PDF tiers.
+`fullTextXML` serves open-access text only, and answers **HTTP 500** -- not
+404 -- for an article Europe PMC holds but marks `isOpenAccess=N` (#432,
+measured on 761 records; `doc/developer/europepmc_and_pubmed.md` has the
+table). Europe PMC's search flags (`inEPMC`, `inPMC`) say the article is held,
+not that its text is open. So:
+
+- **Ask only when the record is held and does not state `isOpenAccess=N`**
+  (Python `offers_fulltext_xml`). A missing or unreadable flag is not a
+  stated no, and the fetch is made. Preprints follow the same rule: 273 of
+  280 sampled were marked open access, and recent ones are served, so they
+  are still asked (the 7 marked closed all answered 500).
+- **A record that states closed access is Europe PMC's answer about its own
+  service** (maintainer's decision, 2026-09-30), as "not held" already was:
+  no failure is recorded, the chain goes on to the PDF tiers (the Europe PMC
+  PDF render first), and if every tier answers, the absence is established.
+  1 of 320 closed-access records was served anyway (`PMC9391270`); it falls
+  to the PDF tiers.
+- **A 404 or 500 for an article the record called servable** is recorded as
+  what we got, against Europe PMC, and not as the article's absence.
+
+The apps do not read the record's flags yet: they ask for every accession,
+and a 500 leaves Europe PMC's side unsettled (#450). Older preprints also
+answer a steady 500 and spend every retry (#451).
 
 **The apps (#434).** Swift (`FullTextService.fetchEuropePMCXML(accession:)` →
 `FullTextXmlFetch`) and Android (`EuropePMCService.fetchFullTextXml` →

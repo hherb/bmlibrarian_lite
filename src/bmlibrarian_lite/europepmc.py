@@ -29,8 +29,9 @@ Usage:
 
     client = EuropePMCClient()
 
-    # Ask what Europe PMC holds: in PMC or Europe PMC is not yet "has an
-    # open-access full text", which only the fetch can say
+    # Ask what Europe PMC holds: has_fulltext_xml says the fetch is worth
+    # making (held, and not stated closed access); only the fetch can say
+    # whether it serves
     info = client.fetch_article_info(pmid="39521399").info
     accession = info.fulltext_accession if info else None
     if info and info.has_fulltext_xml and accession:
@@ -394,9 +395,9 @@ class ArticleInfo:
         year: Publication year
         abstract: Article abstract
         is_open_access: Whether the article is open access
-        has_fulltext_xml: Whether Europe PMC says the article is in PMC or
-            Europe PMC. Not whether it will serve the full text: that is
-            open-access text only, and a 404 can follow (#432).
+        has_fulltext_xml: Whether ``fullTextXML`` is worth asking: Europe
+            PMC holds the article and has not marked it closed access. See
+            :func:`offers_fulltext_xml`; a failure can still follow.
         has_pdf: Whether PDF is available
         is_preprint: Whether this is a preprint (from PPR source)
         source: Europe PMC source code (MED, PMC, PPR, etc.)
@@ -438,6 +439,33 @@ class ArticleInfo:
         return None
 
 
+def offers_fulltext_xml(result: dict[str, Any]) -> bool:
+    """Whether Europe PMC's search result says ``fullTextXML`` may serve it.
+
+    Held (``inEPMC`` or ``inPMC``) is not enough: ``fullTextXML`` serves
+    open-access text only, and answers **HTTP 500** -- not the 404 its
+    documentation implies -- for an article held but marked
+    ``isOpenAccess=N``. Measured with ``scripts/europepmc_xml_survey.py``
+    (#432, 2026-09-30): in PMC, 160 of 160 open-access records were served
+    and 319 of 320 closed ones answered 500, in two samples (2019–20 and a
+    held-out 2021–22); licence and the URL list's ``OA`` code both
+    misclassify. Preprints follow the same rule: 273 of 280 sampled were
+    marked open access and recent ones are served, so they are still asked;
+    the 7 marked closed all answered 500.
+
+    Only a stated ``N`` is an answer: a missing or unreadable flag says
+    nothing about the article, so the fetch is made.
+
+    Args:
+        result: One ``resultList.result`` entry, untrusted.
+
+    Returns:
+        ``True`` when the article is held and not stated closed access.
+    """
+    held = result.get("inEPMC") == "Y" or result.get("inPMC") == "Y"
+    return held and result.get("isOpenAccess") != "N"
+
+
 def _article_info_from_result(result: dict[str, Any]) -> ArticleInfo:
     """Read one Europe PMC search result.
 
@@ -476,7 +504,7 @@ def _article_info_from_result(result: dict[str, Any]) -> ArticleInfo:
         year=year,
         abstract=result.get("abstractText", ""),
         is_open_access=result.get("isOpenAccess") == "Y",
-        has_fulltext_xml=result.get("inEPMC") == "Y" or result.get("inPMC") == "Y",
+        has_fulltext_xml=offers_fulltext_xml(result),
         has_pdf=result.get("hasPDF") == "Y",
         is_preprint=source == EUROPEPMC_SOURCE_PREPRINT,
         source=source,
@@ -924,9 +952,11 @@ class EuropePMCClient:
 
         Returns:
             The fetch: the XML; Europe PMC's 404, its answer that it serves
-            no open-access full text under this ID; or why it could not be
-            read, of its real kind once the session's retries are spent --
-            a 429 stays a 429 (#429). A blank answer is an incomplete
+            nothing under this ID; or why it could not be read, of its real
+            kind once the session's retries are spent -- a 429 stays a 429
+            (#429), and the 500 Europe PMC answers for a closed-access
+            article stays a 500 (#432; ``ArticleInfo.has_fulltext_xml``
+            avoids asking). A blank answer is an incomplete
             response, and an identifier that is not an accession is a
             request never made (#355), not an absence.
         """

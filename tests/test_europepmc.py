@@ -480,6 +480,67 @@ class TestFetchArticleInfoIdentifiers:
         session.get.assert_not_called()
 
 
+class TestHasFulltextXmlFollowsWhatFullTextXmlServes:
+    """``has_fulltext_xml`` is whether ``fullTextXML`` will serve (#432).
+
+    Being in PMC is not enough: Europe PMC answers 500 for every article it
+    holds but marks ``isOpenAccess=N`` (319 of 320 in two samples, 2019–22),
+    and serves every one it marks open access (160 of 160).
+    """
+
+    @staticmethod
+    def _info_from(result: dict[str, Any]) -> ArticleInfo:
+        """What the client reads from a search answering ``result``.
+
+        Args:
+            result: One ``resultList.result`` entry.
+
+        Returns:
+            The parsed article.
+        """
+        response = MagicMock()
+        response.json.return_value = {"resultList": {"result": [result]}}
+        client, _ = _client_answering(response)
+        info = client.fetch_article_info(pmcid="PMC7339914").info
+        assert info is not None
+        return info
+
+    @pytest.mark.parametrize(
+        ("flags", "expected"),
+        [
+            # Open access, in PMC: served.
+            ({"isOpenAccess": "Y", "inEPMC": "Y", "inPMC": "Y"}, True),
+            # #432's own article, an NIH author manuscript: held, not served.
+            (
+                {"isOpenAccess": "N", "inEPMC": "Y", "inPMC": "Y", "authMan": "Y"},
+                False,
+            ),
+            # A publisher deposit that is free to read but not open access.
+            ({"isOpenAccess": "N", "inEPMC": "Y", "inPMC": "Y"}, False),
+            # A preprint marked open access, as 273 of 280 sampled were:
+            # recent ones are served, so it is still asked.
+            ({"isOpenAccess": "Y", "inEPMC": "Y", "inPMC": "N", "source": "PPR"}, True),
+            # Not held at all.
+            ({"isOpenAccess": "Y", "inEPMC": "N", "inPMC": "N"}, False),
+            ({"isOpenAccess": "N", "inEPMC": "N", "inPMC": "N"}, False),
+        ],
+    )
+    def test_the_flags_decide(self, flags: dict[str, str], expected: bool) -> None:
+        """Held and not stated closed is what fullTextXML serves."""
+        info = self._info_from({"pmcid": "PMC7339914", **flags})
+
+        assert info.has_fulltext_xml is expected
+
+    @pytest.mark.parametrize("stated", [None, "", "yes", 1])
+    def test_only_a_stated_no_is_an_answer(self, stated: object) -> None:
+        """A missing or unreadable flag says nothing, so the fetch is made."""
+        result: dict[str, Any] = {"pmcid": "PMC7339914", "inPMC": "Y"}
+        if stated is not None:
+            result["isOpenAccess"] = stated
+
+        assert self._info_from(result).has_fulltext_xml is True
+
+
 class TestFullTextXmlFetchRefusesTheAmbiguity:
     """The fetch cannot be built in a state that means two things."""
 

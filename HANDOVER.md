@@ -8,25 +8,25 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#447 + #445 — one verb contract, and a 5xx is not an answer** (all three),
-branch `fix/is-answer-contract-447-445`, **PR #449**. Compress into **Recently landed**
+**#432 — ask `fullTextXML` only when Europe PMC's record allows it** (Python),
+branch `fix/europepmc-xml-predictor-432`. Compress into **Recently landed**
 once merged.
 
-- **#447:** `doc/cross_platform/request_failure_parity/answered_lookup_verb.json`
-  holds the unanswered statuses, a row per (kind, status) with every kind, and
-  the apps' whole `absenceNotEstablished` sentence. Read by
-  `tests/test_answered_lookup_verb.py`, BioMedLit's
-  `AnsweredLookupVerbContractTests` and Android's
-  `AnsweredLookupVerbContractTest`; Gradle declares the directory a test input.
-  The set is its own constant (`UNANSWERED_HTTP_STATUSES` /
-  `unansweredStatusCodes` / `UNANSWERED_STATUS_CODES`), not the pacing
-  throttle list.
-- **#445 (user, 2026-09-30):** a 429 **and every 5xx** (500–599, Cloudflare's
-  52x included) "could not be asked". The 4xx refusals (400, 401, 403, 408,
-  422) and a missing status stay answers: configuration advice for a refused
-  key or email was **not** chosen. The doi.org publisher's 5xx now reads
-  "could not be asked"; its recorded 408/425 still "did not serve it".
-- Each suite was run red against the new rows before the predicates changed.
+- **Measured, not guessed:** `scripts/europepmc_xml_survey.py`, 761 records
+  kept in `doc/developer/europepmc_xml_survey/` (re-analyse those; a re-fetch
+  draws different records). `fullTextXML` answers **500, not 404**, for a
+  held but closed-access article: PMC open access 160/160 served, closed
+  1/320; preprints 2019–22 0/160, 2025–26 79/120.
+- **Rule:** `europepmc.offers_fulltext_xml` = held (`inEPMC`/`inPMC`) and not
+  a stated `isOpenAccess=N`; a missing or unreadable flag still asks. It sets
+  `ArticleInfo.has_fulltext_xml`. The survey scores the shipped function
+  itself.
+- **User's call (2026-09-30):** a stated closed-access record is Europe PMC's
+  answer, as "not held" already was. No failure is recorded, so the chain can
+  establish an absence. The alternatives (a new skip reason; one request
+  with no retries) were not chosen.
+- Deferred: #450 (the apps' port), #451 (older preprints' steady 500 spends
+  every retry).
 
 ## Recently landed (context)
 
@@ -39,11 +39,14 @@ the rest.
   (`doi_resolution_failure`). **`mount_politely` turns off urllib3's
   `respect_retry_after_header`**, or a throttle is re-sent below the limiter
   (`polite_request_pacing.md` rule 6).
-- **An answered lookup "did not serve it"** (all three; PR #444, #435). An
-  `HTTP_STATUS` failure reads "… Europe PMC (HTTP 404 Not Found) did not
-  serve it" **except a throttle or a 5xx** (#445), which "could not be asked"
-  with every other kind. One predicate: `RequestFailure.is_answer` /
-  `isAnswer`, pinned by one shared fixture (#447).
+- **An answered lookup "did not serve it"** (all three; PRs #444, #449;
+  #435, #445, #447). An `HTTP_STATUS` failure reads "… Europe PMC (HTTP 404
+  Not Found) did not serve it" **except a 429 or any 5xx** (500–599), which
+  "could not be asked" with every other kind; the 4xx refusals and a missing
+  status stay answers (user's call: no configuration advice). One predicate,
+  `RequestFailure.is_answer` / `isAnswer`, over its own constant (not the
+  pacing throttle list), pinned with the apps' whole sentence by
+  `request_failure_parity/answered_lookup_verb.json`: every kind needs a row.
   **The rest of the sentence follows the verb**: only an unasked source earns
   "a freely available copy may exist". Python builds every such sentence with
   `unsettled_lookups_clause`; within one service an unasked failure outranks
@@ -92,19 +95,16 @@ the rest.
   apps store `sourcesUnreachable` when a source fails *or answers
   unreadably*; Python needs **every cited trial answered** before "without
   detected registration". Trial titles match by whole word.
-- **Never `findtext` a mixed-content element** (PR #397, #405). **Funders by
-  brand** (PR #395/#396): `sponsor_patterns.json` schema 4, whole-word
-  `industry_brands`; the funder corpus **differs from bmlib's copy**.
-- **Reports explain ratings** (apps, PR #388): an app High resting only on
-  unsearched text shows as **Unassessed**. **Pricing** (PR #383): an
-  unlisted Claude ID gets its family's dearest rate. Release 0.5.0 / apps
-  1.6.0 (PR #393).
+- **Never `findtext` a mixed-content element** (#405). **Funders by brand**
+  (PR #395): `sponsor_patterns.json` schema 4; the funder corpus **differs
+  from bmlib's copy**. Apps: a High resting only on unsearched text shows
+  **Unassessed** (PR #388). An unlisted Claude ID gets its family's dearest
+  rate (PR #383). Release 0.5.0 / apps 1.6.0 (PR #393).
 - **Stored transparency rows** (Python; PRs #379, #366, #375). A row
-  **strictly newer** than this build is never overwritten
-  (`may_replace_stored`); **bump `TRANSPARENCY_ANALYZER_VERSION`** whenever
-  the same inputs could move a score, level, indicator or caveat. **Every
-  surface reading a stored row is gated**; one analysis body
-  (`transparency/assessment.py`). Contract: `analysis_failure_reporting.md`.
+  **strictly newer** than this build is never overwritten; **bump
+  `TRANSPARENCY_ANALYZER_VERSION`** whenever the same inputs could move a
+  score, level, indicator or caveat; every surface reading a stored row is
+  gated. Contract: `analysis_failure_reporting.md`.
 - **A source nobody asked is not a source that answered "nothing"** (Python;
   PRs #358, #365). Only a text we read and segmented can produce
   `NOT_STATED`; a skip is a third state (`SourceLookupSkipped`); a
@@ -152,13 +152,12 @@ the rest.
     and one predicate authorises every PubMed URL and `PMID:` line; an
     article is named by a *ladder* (primary slot, PMC ID, DOI).
   - **A downloaded PDF contributes its text** (PR #198); **a guard must
-    name its own cause** (PR #195).
+    name its own cause** (PR #195). **Logging is not reporting** (#180/#181).
   - **A reader-facing payload must not be rendered English** (#184/#183):
     `JATSParseWarnings` carries typed losses and `diagnostics` is *derived*.
     **A tagged union's persisted form needs named keys and a
     `schemaVersion`** — synthesised `Codable` emits `{"_0":2}` (#163).
     **A view's private computed state cannot be tested.**
-  - **Logging is not reporting** (#180/#181).
   - **Route markup on the owning element, not on ambient parser state**
     (#156–#175): read `elementStack`; exhibit flags derive from one
     `ExhibitCollector`. **bmlib is ahead of Swift — port from it** (#165).
@@ -215,20 +214,18 @@ Open issues by family; each issue carries the detail. None blocks another.
   again later" where a retry cannot help; **#442** Android fact-check fetches
   twice after `NotEstablished`; **#443** a preprint record with no usable
   accession ends as a permanent absence without a lookup.
-- **#432** Europe PMC answered 500 for PMC IDs without OA XML, still so two
-  hours later (re-probe on another day before deciding). Since #445 that 500
-  reads "could not be asked", so a freely available copy may exist.
-  `has_fulltext_xml` counts `inPMC` for non-OA articles, so they always fetch
-  XML that cannot be served, and spend the retries doing it.
+- **#450** Swift + Android ask `fullTextXML` for every accession: port #432's
+  `isOpenAccess` rule (needs the record's flag at the fetch; the apps often
+  start from a stored PMC ID). **#451** older preprints answer a steady 500
+  and spend every retry (all three).
 - **#427** MCP `get_document_fulltext` and reader-facing discovery callers
   discard a stale cached text when the refresh fails
   (`pdf_utils.read_stale_cached_fulltext` exists); the analyser must never
   get it.
-- **#425** headings still missed: non-English typed statements, plain-text
-  and stacked run-ins (coverage gaps; none charged).
-- **#424** "data within the manuscript" classifies `UNKNOWN` (maintainer
-  decision; a parity-contract change on all three). **#423** Swift + Android
-  drop front-matter statements.
+- **#425** headings still missed (non-English, plain-text and stacked
+  run-ins; none charged). **#424** "data within the manuscript" classifies
+  `UNKNOWN` (maintainer decision, all three). **#423** the apps drop
+  front-matter statements.
 
 ### Transparency after PR #388: desktop parity and the ports
 
