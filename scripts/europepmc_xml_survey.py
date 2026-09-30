@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 r"""Which Europe PMC search fields predict that ``fullTextXML`` will serve (#432).
 
-``ArticleInfo.has_fulltext_xml`` reads ``inEPMC`` or ``inPMC``. Europe PMC
-holds the text of many such articles without serving it: ``fullTextXML``
-answers **HTTP 500** (not 404) for a non-open-access PMC article and for most
-older preprints, steadily (probed 2026-09-28 and 2026-09-30). Since #445 a 500
-"could not be asked", so the chain can never settle an absence for these
-articles, and every fetch spends the session's retries first.
+Before #432, ``ArticleInfo.has_fulltext_xml`` read ``inEPMC`` or ``inPMC``
+only. Europe PMC holds the text of many such articles without serving it:
+``fullTextXML`` answers **HTTP 500** (not 404) for a closed-access PMC article
+and for most preprints whose text arrived before 2026, steadily (probed
+2026-09-28 and 2026-09-30). Since #445 a 500 "could not be asked", so the
+chain could never settle an absence for these articles, and every fetch spent
+the session's retries first. ``europepmc.offers_fulltext_xml`` is the rule
+this survey chose, and it still scores the shipped function itself.
 
 This script measures instead of guessing. It samples search records by
 stratum, keeps every availability flag the ``core`` result carries, asks
@@ -30,11 +32,17 @@ Usage:
     # Analyse one or more samples. "shipped" scores the code's own rule.
     python scripts/europepmc_xml_survey.py analyse tmp/epmc-xml-432/*.jsonl
 
-The 2026-09-30 run (80 per stratum; 761 records) found: PMC open access
-160/160 served, PMC closed access 1/320, preprints 2019–22 0/160, preprints
-2025–26 79/120. The ``pmc-not-epmc`` stratum is rare (one record found). Its
-rows are kept in ``doc/developer/europepmc_xml_survey/``: re-analyse those
-rather than re-fetch to check a figure, since the index moves.
+The 2026-09-30 runs (80 per stratum for 2019–20 and 2021–22, 120 recent
+preprints; 761 records) found: PMC open access 160/160 served, PMC closed
+access 1/320, preprints 2019–22 0/160, preprints 2025–26 79/120 (every one
+whose text arrived in 2026, 15 of 56 from 2025). The ``pmc-not-epmc`` stratum
+is rare (one record found). The rows are kept in
+``doc/developer/europepmc_xml_survey/``: re-analyse those rather than
+re-fetch to check a figure, since the index moves.
+
+A probe that got no answer from Europe PMC (a transport error, a throttle, a
+server fault other than the steady 500) says nothing about the article, so
+it is left out of every count and reported as unanswered.
 """
 
 from __future__ import annotations
@@ -43,7 +51,6 @@ import argparse
 import json
 import random
 import sys
-import threading
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
@@ -52,20 +59,38 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
+from bmlibrarian_lite.constants import (
+    EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
+    EUROPEPMC_REST_BASE_URL,
+    EUROPEPMC_SEARCH_URL,
+    EUROPEPMC_SOURCE_PREPRINT,
+    EUROPEPMC_USER_AGENT,
+    HTTP_UNSETTLED_CLIENT_STATUSES,
+    POLITE_THROTTLE_STATUSES,
+    UNANSWERED_HTTP_STATUSES,
+)
 from bmlibrarian_lite.europepmc import offers_fulltext_xml
+from bmlibrarian_lite.polite_session import retry_after_seconds
+from bmlibrarian_lite.rate_limit import RateLimiter, limiter_for
 
-_REST_BASE = "https://www.ebi.ac.uk/europepmc/webservices/rest"
-_SEARCH_URL = f"{_REST_BASE}/search"
-_FULLTEXT_URL = _REST_BASE + "/{accession}/fullTextXML"
+_FULLTEXT_URL = EUROPEPMC_REST_BASE_URL + "/{accession}/fullTextXML"
+_HEADERS = {"User-Agent": EUROPEPMC_USER_AGENT}
 
-# Europe PMC asks for courtesy rather than enforcing a rate: requests start at
-# most three a second, whatever the number of workers.
-_MIN_START_INTERVAL_SECONDS = 0.34
+# Requests are paced by the application's own limiter for Europe PMC's host,
+# so the survey is no less polite than the app; workers only overlap the
+# waits for answers (a 500 takes ~1.5 s).
 _WORKERS = 3
-_REQUEST_TIMEOUT_SECONDS = 30
 _RECORDS_PER_DAY = 10
+# Some days hold fewer than _RECORDS_PER_DAY matches, so fetch draws this
+# many times the days a full sample needs, plus a few for tiny samples.
+_DAY_DRAW_FACTOR = 4
+_SPARE_DAYS = 4
 _HTTP_OK = 200
+# ``fullTextXML``'s steady answer for text it holds and will not serve: the
+# signal the survey measures, so an answer here, unlike every other 5xx.
+_HTTP_STEADY_REFUSAL = 500
 # Leading bytes read to tell a JATS article with a <body> from a body-less one.
 _BODY_MARKER = b"<body"
 
@@ -97,28 +122,19 @@ STRATA: dict[str, str] = {
 }
 
 
-class _Pacer:
-    """Spaces request starts across threads by a minimum interval."""
+def _limiter() -> RateLimiter:
+    """The application's shared limiter for Europe PMC's host.
 
-    def __init__(self, interval: float) -> None:
-        """Create a pacer.
+    Returns:
+        The limiter every survey request waits on.
 
-        Args:
-            interval: Seconds that must pass between two request starts.
-        """
-        self._interval = interval
-        self._lock = threading.Lock()
-        self._next_start = 0.0
-
-    def wait(self) -> None:
-        """Block until this thread may start a request."""
-        with self._lock:
-            now = time.monotonic()
-            start = max(now, self._next_start)
-            self._next_start = start + self._interval
-        delay = start - time.monotonic()
-        if delay > 0:
-            time.sleep(delay)
+    Raises:
+        RuntimeError: If the configured base URL names no host.
+    """
+    host = urlparse(EUROPEPMC_REST_BASE_URL).hostname
+    if not host:
+        raise RuntimeError(f"no host in {EUROPEPMC_REST_BASE_URL!r}")
+    return limiter_for(host)
 
 
 def _requests() -> Any:
@@ -153,7 +169,11 @@ def fulltext_accession(result: dict[str, Any]) -> str | None:
     if isinstance(pmcid, str) and pmcid:
         return pmcid
     record_id = result.get("id")
-    if result.get("source") == "PPR" and isinstance(record_id, str) and record_id:
+    if (
+        result.get("source") == EUROPEPMC_SOURCE_PREPRINT
+        and isinstance(record_id, str)
+        and record_id
+    ):
         return record_id
     return None
 
@@ -222,7 +242,11 @@ def _random_days(years: tuple[int, int], count: int, rng: random.Random) -> list
 
 
 def sample_stratum(
-    query: str, years: tuple[int, int], limit: int, rng: random.Random, pacer: _Pacer
+    query: str,
+    years: tuple[int, int],
+    limit: int,
+    rng: random.Random,
+    limiter: RateLimiter,
 ) -> list[dict[str, Any]]:
     """Draw up to ``limit`` records matching ``query``, a few per random day.
 
@@ -231,31 +255,36 @@ def sample_stratum(
         years: First and last publication year to draw days from.
         limit: How many records to return at most.
         rng: The seeded source of randomness.
-        pacer: The shared request pacer.
+        limiter: The shared request limiter.
 
     Returns:
         ``core`` search results with an accession to fetch by.
+
+    Raises:
+        requests.HTTPError: If a search fails; a sample with a day missing
+            would not be the sample asked for.
     """
     requests = _requests()
     found: list[dict[str, Any]] = []
     seen: set[str] = set()
-    # Some days hold fewer than _RECORDS_PER_DAY matches; draw spares.
-    for day in _random_days(years, 4 * limit // _RECORDS_PER_DAY + 4, rng):
+    days = _DAY_DRAW_FACTOR * limit // _RECORDS_PER_DAY + _SPARE_DAYS
+    for day in _random_days(years, days, rng):
         if len(found) >= limit:
             break
-        pacer.wait()
+        limiter.acquire()
         response = requests.get(
-            _SEARCH_URL,
+            EUROPEPMC_SEARCH_URL,
             params={
                 "query": f"({query}) AND FIRST_PDATE:{day.isoformat()}",
                 "format": "json",
                 "resultType": "core",
                 "pageSize": _RECORDS_PER_DAY,
             },
-            timeout=_REQUEST_TIMEOUT_SECONDS,
+            headers=_HEADERS,
+            timeout=EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
-        for result in response.json().get("resultList", {}).get("result", []):
+        for result in _search_results(response.json()):
             accession = fulltext_accession(result)
             if accession and accession not in seen and len(found) < limit:
                 seen.add(accession)
@@ -263,23 +292,44 @@ def sample_stratum(
     return found
 
 
-def probe(accession: str, pacer: _Pacer) -> dict[str, Any]:
+def _search_results(data: object) -> list[dict[str, Any]]:
+    """The records of a search answer, ignoring anything that is not one.
+
+    Args:
+        data: The decoded JSON answer, untrusted.
+
+    Returns:
+        The result entries that are objects; empty when there is no list.
+    """
+    result_list = data.get("resultList") if isinstance(data, dict) else None
+    results = result_list.get("result") if isinstance(result_list, dict) else None
+    if not isinstance(results, list):
+        return []
+    return [result for result in results if isinstance(result, dict)]
+
+
+def probe(accession: str, limiter: RateLimiter) -> dict[str, Any]:
     """Ask ``fullTextXML`` once, without retries, and describe the answer.
+
+    A throttle is not retried, since the survey records what one request
+    got, but it slows every later request down as the app would.
 
     Args:
         accession: A PMC ID or preprint record ID.
-        pacer: The shared request pacer.
+        limiter: The shared request limiter.
 
     Returns:
         ``status`` (``None`` when no answer came), ``hasBody`` for a 200 whose
         XML has a ``<body>``, ``seconds`` and, on a transport error, ``error``.
     """
     requests = _requests()
-    pacer.wait()
+    limiter.acquire()
     started = time.monotonic()
     try:
         response = requests.get(
-            _FULLTEXT_URL.format(accession=accession), timeout=_REQUEST_TIMEOUT_SECONDS
+            _FULLTEXT_URL.format(accession=accession),
+            headers=_HEADERS,
+            timeout=EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
         )
     except requests.RequestException as error:
         return {
@@ -288,6 +338,8 @@ def probe(accession: str, pacer: _Pacer) -> dict[str, Any]:
             "seconds": round(time.monotonic() - started, 2),
             "error": type(error).__name__,
         }
+    if response.status_code in POLITE_THROTTLE_STATUSES:
+        limiter.penalise(retry_after_seconds(response))
     return {
         "status": response.status_code,
         "hasBody": response.status_code == _HTTP_OK and _BODY_MARKER in response.content,
@@ -304,6 +356,10 @@ def fetch_sample(
 ) -> None:
     """Sample the chosen strata, probe each record, and write JSON lines.
 
+    The rows go to a ``.partial`` file beside ``out``, which replaces
+    ``out`` only once every stratum is written: a run that stops half way
+    leaves an existing sample (such as a committed one) as it was.
+
     Args:
         years: First and last publication year.
         per_stratum: Records to draw per stratum.
@@ -312,18 +368,20 @@ def fetch_sample(
         strata: Names from ``STRATA`` to sample.
     """
     rng = random.Random(seed)
-    pacer = _Pacer(_MIN_START_INTERVAL_SECONDS)
+    limiter = _limiter()
     out.parent.mkdir(parents=True, exist_ok=True)
-    with out.open("w", encoding="utf-8") as sink, ThreadPoolExecutor(_WORKERS) as pool:
+    partial = out.with_name(out.name + ".partial")
+    with partial.open("w", encoding="utf-8") as sink, ThreadPoolExecutor(_WORKERS) as pool:
         for stratum in strata:
             query = STRATA[stratum]
-            results = sample_stratum(query, years, per_stratum, rng, pacer)
+            results = sample_stratum(query, years, per_stratum, rng, limiter)
             features = [record_features(result) for result in results]
-            answers = pool.map(lambda f: probe(f["accession"], pacer), features)
+            answers = pool.map(lambda f: probe(f["accession"], limiter), features)
             for feature, answer in zip(features, answers, strict=True):
                 row = {"stratum": stratum, "years": list(years), **feature, **answer}
                 sink.write(json.dumps(row) + "\n")
             print(f"  {stratum}: {len(features)} records", file=sys.stderr)
+    partial.replace(out)
 
 
 def load_rows(paths: Sequence[Path]) -> list[dict[str, Any]]:
@@ -399,6 +457,28 @@ FIELDS: dict[str, FieldReader] = {
 }
 
 
+def answered(row: dict[str, Any]) -> bool:
+    """Whether ``fullTextXML`` gave a row an answer about the article.
+
+    No status, a throttle or a server fault is the service failing, not
+    Europe PMC saying whether it serves the text; counted as "not served",
+    it would credit a rule for skipping it. The steady 500 is the exception,
+    being what the survey measures.
+
+    Args:
+        row: A sample row.
+
+    Returns:
+        ``True`` when the status is Europe PMC's answer.
+    """
+    status = row.get("status")
+    if not isinstance(status, int) or isinstance(status, bool):
+        return False
+    if status == _HTTP_STEADY_REFUSAL:
+        return True
+    return status not in UNANSWERED_HTTP_STATUSES and status not in HTTP_UNSETTLED_CLIENT_STATUSES
+
+
 def served(row: dict[str, Any]) -> bool:
     """Whether ``fullTextXML`` answered 200 for a row, with or without a body.
 
@@ -420,12 +500,14 @@ class RuleScore:
         ask_miss: Asked, and not served: requests and retries spent.
         skip_hit: Not asked, though it would have been served: text lost.
         skip_miss: Not asked, and would not have been served.
+        unanswered: Rows whose probe got no answer, in no other count.
     """
 
     ask_hit: int
     ask_miss: int
     skip_hit: int
     skip_miss: int
+    unanswered: int = 0
 
 
 def score_rule(rows: Sequence[dict[str, Any]], rule: Rule) -> RuleScore:
@@ -436,24 +518,26 @@ def score_rule(rows: Sequence[dict[str, Any]], rule: Rule) -> RuleScore:
         rule: Whether to ask, per row.
 
     Returns:
-        The four counts.
+        The four counts over the answered rows, and how many were not.
     """
-    cells: Counter[tuple[bool, bool]] = Counter((rule(row), served(row)) for row in rows)
+    scored = [row for row in rows if answered(row)]
+    cells: Counter[tuple[bool, bool]] = Counter((rule(row), served(row)) for row in scored)
     return RuleScore(
         ask_hit=cells[(True, True)],
         ask_miss=cells[(True, False)],
         skip_hit=cells[(False, True)],
         skip_miss=cells[(False, False)],
+        unanswered=len(rows) - len(scored),
     )
 
 
 def served_by_value(
     rows: Sequence[dict[str, Any]], read: FieldReader
 ) -> dict[str, tuple[int, int]]:
-    """Split rows by one field, counting how many of each value were served.
+    """Split answered rows by one field, counting how many of each value were served.
 
     Args:
-        rows: Sample rows.
+        rows: Sample rows; unanswered ones are left out.
         read: The field to split on.
 
     Returns:
@@ -461,6 +545,8 @@ def served_by_value(
     """
     counts: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     for row in rows:
+        if not answered(row):
+            continue
         cell = counts[read(row)]
         cell[0] += served(row)
         cell[1] += 1
@@ -497,7 +583,14 @@ def analyse(rows: Sequence[dict[str, Any]]) -> str:
     for row in rows:
         by_stratum[str(row.get("stratum"))].append(row)
 
-    lines: list[str] = [f"{len(rows)} records", "\n== Outcome by stratum"]
+    unanswered = sum(not answered(row) for row in rows)
+    lines: list[str] = [f"{len(rows)} records"]
+    if unanswered:
+        lines.append(
+            f"!! {unanswered} got no answer from Europe PMC: left out of every"
+            " count below; re-probe them before trusting a rule's score"
+        )
+    lines.append("\n== Outcome by stratum")
     for stratum, members in by_stratum.items():
         outcomes = Counter(outcome(row) for row in members)
         lines.append(f"  {stratum:12s} {dict(outcomes.most_common())}")

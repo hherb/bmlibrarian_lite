@@ -219,22 +219,45 @@ let url = "https://www.ebi.ac.uk/europepmc/webservices/rest/\(normalizedId)/full
 
 **Only open-access text is served, and a closed-access article is a 500, not
 a 404** (#432; steady on 2026-09-28 and 2026-09-30). Being held (`inPMC` or
-`inEPMC` in the search result) is not enough. Ask only when the search record
+`inEPMC` in the search result) is not enough. Ask only when the record does
+not state that Europe PMC lacks the article (`inPMC=N` and `inEPMC=N`) and
 does not state `isOpenAccess=N` (Python: `europepmc.offers_fulltext_xml`).
+A missing or unreadable flag is not a stated no, so the fetch is made.
+
+**Swift and Android do not apply this rule yet: they ask `fullTextXML` for
+every accession (#450).** In the apps a closed-access article therefore
+spends every retry on the 500 and can never reach an established absence.
+
 Measured with `scripts/europepmc_xml_survey.py` over 761 records, kept in
-`doc/developer/europepmc_xml_survey/` so the figures can be re-derived (apps:
-#450; preprint retries: #451):
+`doc/developer/europepmc_xml_survey/` so the figures can be re-derived (the
+survey's `analyse` prints them; `tests/test_europepmc_xml_survey.py` pins
+the rule's score):
 
 | Records | Served (200) |
 |---------|--------------|
 | PMC, `isOpenAccess=Y` | 160 of 160 (one without a `<body>`) |
-| PMC, `isOpenAccess=N` (publisher deposits and author manuscripts) | 1 of 320 |
+| PMC, `isOpenAccess=N` (publisher deposits and author manuscripts) | 1 of 320 (`PMC9391270`) |
 | Preprints published 2019–2022 (153 marked open access) | 0 of 160 |
-| Preprints published 2025–2026 | 79 of 120 (all 64 whose text arrived in 2026) |
+| Preprints published 2025–2026 | 79 of 120: all 64 whose text arrived in 2026, 15 of 56 from 2025 |
 
-The licence and the URL list's `OA` availability code both misclassify, and
-no search field separates a served preprint from a 500: preprints marked open
-access (273 of 280) are still asked; the 7 marked closed all answered 500. A nonexistent ID is also a 500 (`PMC99999999`).
+Plus one PMC record outside Europe PMC's own index (`PMC7617708`, open access,
+served), the only one the `pmc-not-epmc` stratum found.
+
+- **The rule loses two texts** in the sample: `PMC9391270`, marked closed
+  access and served anyway, and `PPR1051747`, a preprint served before its
+  record said Europe PMC holds it (#454). Both fall to the PDF tiers.
+- **Preprints are held to the same rule at no cost.** No preprint published
+  since 2024 is marked closed access (0, against 9,665 open, on 2026-10-01).
+  The 1,090 that are were published 2019–23, when open-access preprints answer
+  500 as well (15 of 15 each way for 2023, probed live 2026-10-01).
+- **No search field cleanly separates a served preprint from a 500.** The date
+  its text arrived comes closest: every preprint whose text arrived in 2026
+  was served and none from before 2025, but 41 of 56 from 2025 answered 500.
+  All 194 records the rule still asks in vain are preprints (#451).
+- **The licence and the URL list's `OA` availability code both misclassify**
+  (10 and 4 served texts skipped).
+- **A nonexistent ID is also a 500** (`PMC99999999`, `PPR99999999`, probed
+  live 2026-10-01), so a 404 from `fullTextXML` is rare in practice.
 
 ### Fallback Chain
 
@@ -869,7 +892,7 @@ Implement exponential backoff with retry for these HTTP status codes:
 | Code | Meaning | Action |
 |------|---------|--------|
 | 400 | Bad Request | Fix query, don't retry |
-| 404 | Not Found | Nothing under this ID (`fullTextXML` answers 500 for closed access, see above) |
+| 404 | Not Found | The resource is not there. For `fullTextXML`, rarely seen: closed access and a nonexistent ID both answer 500 (see above) |
 | 401/403 | Unauthorized | Check credentials |
 
 ### Retry Configuration

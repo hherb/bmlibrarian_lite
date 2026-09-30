@@ -1493,7 +1493,9 @@ class TestTheGapsTheReviewFound:
         from bmlibrarian_lite.europepmc import EuropePMCClient
 
         client = EuropePMCClient()
-        client._session = _AnsweringSession({"resultList": {"result": []}})
+        client._session = _AnsweringSession(
+            {"hitCount": 0, "resultList": {"result": []}}
+        )
 
         fetch = client.fetch_article_info(pmid="1")
 
@@ -1506,7 +1508,7 @@ class TestTheGapsTheReviewFound:
 
         client = EuropePMCClient()
         client._session = _AnsweringSession(
-            {"resultList": {"result": [{"pmid": "1", "title": "A study"}]}}
+            {"hitCount": 1, "resultList": {"result": [{"pmid": "1", "title": "A study"}]}}
         )
 
         fetch = client.fetch_article_info(pmid="1")

@@ -26,7 +26,6 @@ import argparse
 import importlib.util
 import random
 import sys
-import time
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -35,9 +34,13 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 
+from bmlibrarian_lite.constants import POLITE_RATE_CEILINGS
 from bmlibrarian_lite.europepmc import offers_fulltext_xml
+from bmlibrarian_lite.rate_limit import HostPolicy, RateLimiter
 
-SCRIPT_PATH = Path(__file__).resolve().parent.parent / "scripts" / "europepmc_xml_survey.py"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SCRIPT_PATH = REPO_ROOT / "scripts" / "europepmc_xml_survey.py"
+COMMITTED_SAMPLES = sorted((REPO_ROOT / "doc/developer/europepmc_xml_survey").glob("*.jsonl"))
 
 
 def _load_script() -> ModuleType:
@@ -69,6 +72,15 @@ def _row(status: int | None, has_body: bool = False, **fields: Any) -> dict[str,
         The row.
     """
     return {"stratum": "s", "status": status, "hasBody": has_body, **fields}
+
+
+def _unpaced() -> RateLimiter:
+    """A limiter that never waits, so tests do not sleep.
+
+    Returns:
+        The limiter.
+    """
+    return RateLimiter(HostPolicy(1.0), sleep=lambda _seconds: None)
 
 
 class TestFulltextAccession:
@@ -173,6 +185,34 @@ class TestScoring:
         assert survey.served(_row(200, has_body=False))
         assert not survey.served(_row(None))
 
+    @pytest.mark.parametrize("status", [None, 429, 502, 503, 504, 408, "500", True])
+    def test_no_answer_falls_in_no_cell(self, status: object) -> None:
+        """A failed probe says nothing, so it cannot credit a rule's skip."""
+        rows = [_row(status, isOpenAccess="N"), _row(500, isOpenAccess="N")]  # type: ignore[arg-type]
+
+        score = survey.score_rule(rows, lambda r: r["isOpenAccess"] == "Y")
+
+        assert score == survey.RuleScore(
+            ask_hit=0, ask_miss=0, skip_hit=0, skip_miss=1, unanswered=1
+        )
+
+    @pytest.mark.parametrize("status", [200, 404, 500])
+    def test_the_answers(self, status: int) -> None:
+        """A 200, Europe PMC's 404, and the steady 500 being measured."""
+        assert survey.answered(_row(status))
+
+    def test_served_by_value_leaves_out_no_answer(self) -> None:
+        """An unanswered row does not dilute a value's served share."""
+        rows = [_row(200, license="cc by"), _row(None, license="cc by"), _row(503, license="cc by")]
+
+        assert survey.served_by_value(rows, survey.FIELDS["license"]) == {"cc by": (1, 1)}
+
+    def test_the_report_warns_of_no_answer(self) -> None:
+        """Left out silently, a throttled re-run would look like a clean one."""
+        rows = [{**_row(None), "availabilityCodes": []}, {**_row(500), "availabilityCodes": []}]
+
+        assert "1 got no answer" in survey.analyse(rows)
+
     def test_served_by_value_splits_and_sorts(self) -> None:
         """Every value keeps its served and total counts."""
         rows = [_row(200, license="cc by"), _row(500, license="cc by"), _row(500)]
@@ -203,8 +243,52 @@ class TestScoring:
         report = survey.analyse(rows)
 
         assert "pmc-oa" in report and "preprint" in report
+        assert "no answer" not in report
         for name in survey.RULES:
             assert name in report
+
+
+class TestTheCommittedEvidence:
+    """The rows behind the figures in the docs, scored by the code as shipped.
+
+    A later change to ``offers_fulltext_xml`` shows here what it costs in
+    text lost (``skip_hit``) and requests spent (``ask_miss``), and the
+    figures quoted in the docs cannot drift from the rows.
+    """
+
+    @pytest.fixture(scope="class")
+    def rows(self) -> list[dict[str, Any]]:
+        """Every committed row.
+
+        Returns:
+            The rows of the three committed samples.
+        """
+        assert len(COMMITTED_SAMPLES) == 3
+        return survey.load_rows(COMMITTED_SAMPLES)
+
+    def test_every_row_was_answered(self, rows: list[dict[str, Any]]) -> None:
+        """761 records, each with Europe PMC's own answer."""
+        assert len(rows) == 761
+        assert all(survey.answered(row) for row in rows)
+
+    def test_the_shipped_rule(self, rows: list[dict[str, Any]]) -> None:
+        """Two texts lost (PMC9391270, PPR1051747); 326 futile requests saved."""
+        assert survey.score_rule(rows, offers_fulltext_xml) == survey.RuleScore(
+            ask_hit=239, ask_miss=194, skip_hit=2, skip_miss=326
+        )
+        lost = sorted(
+            str(row["accession"])
+            for row in rows
+            if survey.served(row) and not offers_fulltext_xml(row)
+        )
+        assert lost == ["PMC9391270", "PPR1051747"]
+
+    def test_the_rule_before_it(self, rows: list[dict[str, Any]]) -> None:
+        """Held alone asked 520 times for text that was not served."""
+        before = survey.RULES["before #432: inEPMC or inPMC"]
+        assert survey.score_rule(rows, before) == survey.RuleScore(
+            ask_hit=240, ask_miss=520, skip_hit=1, skip_miss=0
+        )
 
 
 class TestProbe:
@@ -239,8 +323,9 @@ class TestProbe:
         """
         fake = self._requests_answering(answer)
         monkeypatch.setattr(survey, "_requests", lambda: fake)
-        result: dict[str, Any] = survey.probe("PMC1", survey._Pacer(0.0))
+        result: dict[str, Any] = survey.probe("PMC1", _unpaced())
         assert fake.get.call_count == 1
+        assert fake.get.call_args.kwargs["headers"] == survey._HEADERS
         return result
 
     def test_a_body_is_seen(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -267,6 +352,34 @@ class TestProbe:
 
         assert result["status"] is None
         assert result["error"] == "ReadTimeout"
+        assert not survey.answered(result)
+
+    @pytest.mark.parametrize("status", [429, 503])
+    def test_a_throttle_slows_every_later_request(
+        self, monkeypatch: pytest.MonkeyPatch, status: int
+    ) -> None:
+        """Not retried, but yielded to, as the app would."""
+        response = SimpleNamespace(status_code=status, content=b"", headers={"Retry-After": "7"})
+        fake = self._requests_answering(response)
+        monkeypatch.setattr(survey, "_requests", lambda: fake)
+        limiter = _unpaced()
+        before = limiter.interval
+
+        survey.probe("PMC1", limiter)
+
+        assert limiter.interval > before
+
+    def test_control_a_500_is_not_a_throttle(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The steady refusal being measured does not slow the survey."""
+        response = SimpleNamespace(status_code=500, content=b"", headers={})
+        fake = self._requests_answering(response)
+        monkeypatch.setattr(survey, "_requests", lambda: fake)
+        limiter = _unpaced()
+        before = limiter.interval
+
+        survey.probe("PMC1", limiter)
+
+        assert limiter.interval == before
 
 
 class TestSampling:
@@ -298,14 +411,67 @@ class TestSampling:
             survey._year_range(text)
 
 
-class TestPacer:
-    """Requests start no faster than the courtesy interval, across threads."""
+class TestPoliteness:
+    """The survey asks Europe PMC no faster than the app does, and says who it is."""
 
-    def test_starts_are_spaced(self) -> None:
-        """Three waits take at least two intervals."""
-        pacer = survey._Pacer(0.02)
-        started = time.monotonic()
-        for _ in range(3):
-            pacer.wait()
+    def test_requests_wait_on_the_apps_europe_pmc_limiter(self) -> None:
+        """The shared limiter for the host, at the host's ceiling."""
+        limiter = survey._limiter()
 
-        assert time.monotonic() - started >= 0.04
+        assert limiter.host == "www.ebi.ac.uk"
+        assert limiter.interval >= 1.0 / POLITE_RATE_CEILINGS["www.ebi.ac.uk"]
+
+    def test_the_search_pages_are_read_tolerantly(self) -> None:
+        """An unreadable answer or entry yields no record rather than a crash."""
+        assert survey._search_results({"version": "6.9"}) == []
+        assert survey._search_results([]) == []
+        assert survey._search_results({"resultList": {"result": ["x", {"id": "1"}]}}) == [
+            {"id": "1"}
+        ]
+
+
+class TestTheOutputIsWrittenWhole:
+    """A run that stops half way leaves the sample it would replace."""
+
+    def test_a_failed_run_keeps_the_existing_sample(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The committed rows survive a search that fails mid-run."""
+        out = tmp_path / "sample.jsonl"
+        out.write_text('{"kept": true}\n', encoding="utf-8")
+
+        def failing_sample(*_args: object) -> list[dict[str, Any]]:
+            """A search that fails, as a throttled one would.
+
+            Args:
+                *_args: ``sample_stratum``'s arguments, unused.
+
+            Raises:
+                requests.HTTPError: Always.
+            """
+            raise requests.HTTPError("503 Service Unavailable")
+
+        monkeypatch.setattr(survey, "sample_stratum", failing_sample)
+        monkeypatch.setattr(survey, "_limiter", _unpaced)
+        with pytest.raises(requests.HTTPError):
+            survey.fetch_sample((2020, 2020), 1, 1, out, ["pmc-oa"])
+
+        assert out.read_text(encoding="utf-8") == '{"kept": true}\n'
+
+    def test_a_finished_run_replaces_it(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Once every stratum is written, the new sample takes its place."""
+        out = tmp_path / "sample.jsonl"
+        out.write_text('{"old": true}\n', encoding="utf-8")
+        monkeypatch.setattr(
+            survey, "sample_stratum", lambda *_args: [{"pmcid": "PMC1", "isOpenAccess": "Y"}]
+        )
+        monkeypatch.setattr(survey, "probe", lambda *_args: {"status": 200, "hasBody": True})
+        monkeypatch.setattr(survey, "_limiter", _unpaced)
+
+        survey.fetch_sample((2020, 2020), 1, 1, out, ["pmc-oa"])
+
+        rows = survey.load_rows([out])
+        assert [row["accession"] for row in rows] == ["PMC1"]
+        assert not list(tmp_path.glob("*.partial"))

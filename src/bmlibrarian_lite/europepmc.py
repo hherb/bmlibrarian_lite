@@ -30,8 +30,8 @@ Usage:
     client = EuropePMCClient()
 
     # Ask what Europe PMC holds: has_fulltext_xml says the fetch is worth
-    # making (held, and not stated closed access); only the fetch can say
-    # whether it serves
+    # making (the record states neither that Europe PMC lacks the article
+    # nor that it is closed access); only the fetch can say whether it serves
     info = client.fetch_article_info(pmid="39521399").info
     accession = info.fulltext_accession if info else None
     if info and info.has_fulltext_xml and accession:
@@ -396,8 +396,9 @@ class ArticleInfo:
         abstract: Article abstract
         is_open_access: Whether the article is open access
         has_fulltext_xml: Whether ``fullTextXML`` is worth asking: Europe
-            PMC holds the article and has not marked it closed access. See
-            :func:`offers_fulltext_xml`; a failure can still follow.
+            PMC's record does not state that it lacks the article or holds
+            it closed access. See :func:`offers_fulltext_xml`; a failure can
+            still follow.
         has_pdf: Whether PDF is available
         is_preprint: Whether this is a preprint (from PPR source)
         source: Europe PMC source code (MED, PMC, PPR, etc.)
@@ -442,28 +443,81 @@ class ArticleInfo:
 def offers_fulltext_xml(result: dict[str, Any]) -> bool:
     """Whether Europe PMC's search result says ``fullTextXML`` may serve it.
 
-    Held (``inEPMC`` or ``inPMC``) is not enough: ``fullTextXML`` serves
-    open-access text only, and answers **HTTP 500** -- not the 404 its
-    documentation implies -- for an article held but marked
-    ``isOpenAccess=N``. Measured with ``scripts/europepmc_xml_survey.py``
-    (#432, 2026-09-30): in PMC, 160 of 160 open-access records were served
-    and 319 of 320 closed ones answered 500, in two samples (2019–20 and a
-    held-out 2021–22); licence and the URL list's ``OA`` code both
-    misclassify. Preprints follow the same rule: 273 of 280 sampled were
-    marked open access and recent ones are served, so they are still asked;
-    the 7 marked closed all answered 500.
+    Held is not enough: ``fullTextXML`` serves open-access text only, and
+    answers **HTTP 500** -- not the 404 its documentation implies -- for an
+    article held but marked ``isOpenAccess=N``. Measured on PMC records with
+    ``scripts/europepmc_xml_survey.py`` (#432): open access was served 160 of
+    160, closed access 1 of 320, in two samples (2019–20 and a held-out
+    2021–22). Preprints are held to the same rule at no cost: Europe PMC
+    marks no preprint published since 2024 closed access, and in the years
+    it does (2019–23), open-access preprints answer 500 as well (#451).
+    Figures and the rows behind them: ``doc/developer/europepmc_and_pubmed.md``.
 
-    Only a stated ``N`` is an answer: a missing or unreadable flag says
-    nothing about the article, so the fetch is made.
+    Only a stated ``N`` is an answer, for either question: a missing or
+    unreadable flag says nothing about the article, so the fetch is made.
+    The record can still be wrong: ``PMC9391270`` is marked closed access
+    and served, and a fresh preprint can be served before its record says it
+    is held (``PPR1051747``).
 
     Args:
         result: One ``resultList.result`` entry, untrusted.
 
     Returns:
-        ``True`` when the article is held and not stated closed access.
+        ``False`` when the record states that Europe PMC does not hold the
+        article, or that it is closed access; ``True`` otherwise.
     """
-    held = result.get("inEPMC") == "Y" or result.get("inPMC") == "Y"
-    return held and result.get("isOpenAccess") != "N"
+    stated_not_held = result.get("inEPMC") == "N" and result.get("inPMC") == "N"
+    return not stated_not_held and result.get("isOpenAccess") != "N"
+
+
+def _article_info_fetch_from_answer(data: object, query: str) -> ArticleInfoFetch:
+    """Read Europe PMC's answer to a one-article search.
+
+    Validated as a search page is, because Europe PMC answers some failures
+    with HTTP 200 and a body holding only a ``version`` field (#247): read as
+    an empty result list, that was Europe PMC saying it holds no such record,
+    and the chain went on to establish the article's absence from an answer
+    it never read.
+
+    Args:
+        data: The decoded JSON answer, untrusted.
+        query: The query asked, for the log only.
+
+    Returns:
+        The first record; Europe PMC's answer that it holds none, when it
+        says it matched nothing; or a malformed-response failure when the
+        answer cannot be read, or claims matches it does not list.
+    """
+    malformed = ArticleInfoFetch.unreachable(
+        RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+    )
+    try:
+        page = _validated_search_page(data)
+    except SourceRequestError:
+        return malformed
+
+    results = page["resultList"]["result"]
+    if not results:
+        if page["hitCount"] != 0:
+            logger.error(
+                "Europe PMC counted %d matches but listed none for: %s",
+                page["hitCount"],
+                query,
+            )
+            return malformed
+        # Europe PMC answered, with an empty result list. That is its own
+        # statement that it holds no such record.
+        logger.debug(f"No results found for query: {query}")
+        return ArticleInfoFetch.absent()
+
+    first = results[0]
+    if not isinstance(first, dict):
+        logger.error("Unreadable Europe PMC search answer: a result is not an object")
+        return malformed
+    # The same reading as a search result's, so a preprint looked up by DOI
+    # keeps the source and record ID its full text is fetched by: this path
+    # left them unset, and the preprint unfetchable.
+    return ArticleInfoFetch.served(_article_info_from_result(first))
 
 
 def _article_info_from_result(result: dict[str, Any]) -> ArticleInfo:
@@ -592,9 +646,10 @@ class EuropePMCClient:
         Returns:
             The fetch: what Europe PMC said, its answer that it holds no
             such record, or why it could not be read. An empty result list
-            is Europe PMC's own answer and stays an absence; a transport
-            failure does not, because a throttled search establishes nothing
-            about the article (#346, #363).
+            with a zero ``hitCount`` is Europe PMC's own answer and stays an
+            absence; a transport failure or an answer that cannot be read
+            does not, because neither establishes anything about the
+            article (#346, #363).
         """
         # Build search query
         if pmcid:
@@ -637,19 +692,6 @@ class EuropePMCClient:
             )
             response.raise_for_status()
             data = response.json()
-
-            results = data.get("resultList", {}).get("result", [])
-            if not results:
-                # Europe PMC answered, with an empty result list. That is
-                # its own statement that it holds no such record.
-                logger.debug(f"No results found for query: {query}")
-                return ArticleInfoFetch.absent()
-
-            # The same reading as a search result's, so a preprint looked up
-            # by DOI keeps the source and record ID its full text is fetched
-            # by: this path left them unset, and the preprint unfetchable.
-            return ArticleInfoFetch.served(_article_info_from_result(results[0]))
-
         except requests.exceptions.RequestException as e:
             # Never an absence: a throttled or unreachable Europe PMC has
             # said nothing about this article, and a caller that read this
@@ -662,6 +704,8 @@ class EuropePMCClient:
                 failure.describe(),
             )
             return ArticleInfoFetch.unreachable(failure)
+
+        return _article_info_fetch_from_answer(data, query)
 
     def _get_search_page(self, params: dict[str, Any]) -> dict[str, Any]:
         """Request one page of search results.
@@ -951,14 +995,16 @@ class EuropePMCClient:
                 preprint's ``PPR`` record ID.
 
         Returns:
-            The fetch: the XML; Europe PMC's 404, its answer that it serves
-            nothing under this ID; or why it could not be read, of its real
-            kind once the session's retries are spent -- a 429 stays a 429
-            (#429), and the 500 Europe PMC answers for a closed-access
-            article stays a 500 (#432; ``ArticleInfo.has_fulltext_xml``
-            avoids asking). A blank answer is an incomplete
-            response, and an identifier that is not an accession is a
-            request never made (#355), not an absence.
+            The fetch: the XML; a 404, read as Europe PMC's answer that it
+            serves nothing under this ID; or why it could not be read, of
+            its real kind once the session's retries are spent -- a 429
+            stays a 429 (#429). In practice Europe PMC rarely answers 404
+            here: text it will not serve (closed access, older preprints)
+            and an ID it does not hold both answer 500, which stays a 500
+            (#432). Callers that check ``ArticleInfo.has_fulltext_xml``
+            first do not ask for closed-access text. A blank answer is an
+            incomplete response, and an identifier that is not an accession
+            is a request never made (#355), not an absence.
         """
         normalised = fulltext_accession(accession)
         if normalised is None:

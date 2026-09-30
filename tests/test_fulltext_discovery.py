@@ -54,7 +54,11 @@ from bmlibrarian_lite.europepmc import (
     EuropePMCClient,
     FullTextXmlFetch,
 )
-from bmlibrarian_lite.constants import SERVICE_CACHED_FULLTEXT, SERVICE_EUROPE_PMC
+from bmlibrarian_lite.constants import (
+    EUROPEPMC_REST_BASE_URL,
+    SERVICE_CACHED_FULLTEXT,
+    SERVICE_EUROPE_PMC,
+)
 from bmlibrarian_lite.jats_markdown import JATS_MARKDOWN_CONVERTER_VERSION
 from bmlibrarian_lite.pdf_discovery import PDFDiscoverer
 from bmlibrarian_lite.pdf_utils import fulltext_cache_stamp
@@ -596,33 +600,87 @@ class TestTheXmlFetchFailureReachesTheRecordAsItself:
         assert result.article_info == _listed_article()
 
 
-def _discoverer_searching(record: dict[str, Any], xml_answer: object) -> FulltextDiscoverer:
-    """A discoverer whose real client finds ``record``, then meets ``xml_answer``.
+_RENDER_URL = "https://europepmc.org/articles/PMC7339914?pdf=render"
+
+
+def _discoverer_searching(
+    record: dict[str, Any], xml_answer: object, render_answer: object = None
+) -> FulltextDiscoverer:
+    """A discoverer whose real client meets Europe PMC answering by URL.
+
+    One session for every request, routed by what is asked, so a test sees
+    which requests were made rather than which method was called.
 
     Args:
         record: The one search result Europe PMC answers with.
-        xml_answer: What the XML fetch returns, or raises, if it is made.
+        xml_answer: What ``fullTextXML`` returns, or raises, if it is asked.
+        render_answer: What the PDF render returns, or raises, if it is
+            asked; ``None`` fails the test if it is.
 
     Returns:
-        The discoverer; its client's ``fetch_fulltext_xml`` is a spy.
+        The discoverer; ``_requested(discoverer)`` lists the URLs asked.
     """
+    search_answer = _http(
+        200, json.dumps({"hitCount": 1, "resultList": {"result": [record]}})
+    )
+
+    def get(url: str, **_kwargs: Any) -> requests.Response:
+        """Answer one request by what it asks for.
+
+        Args:
+            url: The requested URL.
+            **_kwargs: The session's other arguments, unused.
+
+        Returns:
+            The answer for that endpoint.
+
+        Raises:
+            AssertionError: For a request no answer was given for.
+        """
+        if "/fullTextXML" in url:
+            answer = xml_answer
+        elif "pdf=render" in url and render_answer is not None:
+            answer = render_answer
+        elif url.endswith("/search"):
+            answer = search_answer
+        else:
+            raise AssertionError(f"unexpected request: {url}")
+        if isinstance(answer, BaseException):
+            raise answer
+        assert isinstance(answer, requests.Response)
+        return answer
+
     client = EuropePMCClient()
-    client._session = session_answering(
-        _http(200, json.dumps({"resultList": {"result": [record]}}))
-    )
-    xml_session = session_answering(xml_answer)
-    real_fetch = client.fetch_fulltext_xml
-
-    def fetch_over_xml_session(accession: str) -> FullTextXmlFetch:
-        client._session = xml_session
-        return real_fetch(accession)
-
-    client.fetch_fulltext_xml = MagicMock(  # type: ignore[method-assign]
-        side_effect=fetch_over_xml_session
-    )
+    client._session = MagicMock()
+    client._session.get.side_effect = get
     discoverer = FulltextDiscoverer()
     discoverer._europepmc = client
     return discoverer
+
+
+def _requested(discoverer: FulltextDiscoverer) -> list[str]:
+    """The URLs the discoverer's Europe PMC session was asked for.
+
+    Args:
+        discoverer: One built by ``_discoverer_searching``.
+
+    Returns:
+        The URLs, in order.
+    """
+    session = discoverer._europepmc._session
+    return [str(call.args[0]) for call in session.get.call_args_list]
+
+
+def _asked_for_xml(discoverer: FulltextDiscoverer) -> bool:
+    """Whether ``fullTextXML`` was asked.
+
+    Args:
+        discoverer: One built by ``_discoverer_searching``.
+
+    Returns:
+        ``True`` if any request went to it.
+    """
+    return any("/fullTextXML" in url for url in _requested(discoverer))
 
 
 # #432's own article: an NIH author manuscript Europe PMC holds and does not
@@ -638,13 +696,22 @@ _HELD_NOT_OPEN_ACCESS = {
     "authMan": "Y",
 }
 
+# The same, with the free PDF Europe PMC lists for it.
+_HELD_NOT_OPEN_ACCESS_WITH_PDF = {
+    **_HELD_NOT_OPEN_ACCESS,
+    "hasPDF": "Y",
+    "fullTextUrlList": {"fullTextUrl": [
+        {"documentStyle": "pdf", "availability": "Free", "url": _RENDER_URL},
+    ]},
+}
+
 
 @patch("bmlibrarian_lite.fulltext_discovery.find_existing_pdf", return_value=None)
 @patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext", return_value=None)
 class TestANotOpenAccessArticleIsNotAskedForXml:
     """#432: Europe PMC's own record says it will not serve the text.
 
-    Asking anyway spent every retry on a 500 and left Europe PMC's side
+    Asking would spend every retry on a 500 and leave Europe PMC's side
     unsettled for good. The record is Europe PMC's answer (maintainer's
     decision, 2026-09-30), as it already was for an article not in PMC.
     """
@@ -655,7 +722,10 @@ class TestANotOpenAccessArticleIsNotAskedForXml:
 
         result = discoverer._try_europepmc_xml({}, "31996627", None, None)
 
-        discoverer._europepmc.fetch_fulltext_xml.assert_not_called()
+        assert len(_requested(discoverer)) == 1
+        assert not _asked_for_xml(discoverer)
+        assert not result.success
+        assert result.source_type is FulltextSourceType.NOT_ASSESSED
         assert result.lookups == LookupRecord()
         # Kept, so the Europe PMC PDF render tier can still serve it.
         assert result.article_info is not None
@@ -665,15 +735,7 @@ class TestANotOpenAccessArticleIsNotAskedForXml:
         self, _no_cache: MagicMock, _no_pdf: MagicMock
     ) -> None:
         """The free PDF Europe PMC lists is the next tier, and it is asked."""
-        render_url = "https://europepmc.org/articles/PMC7339914?pdf=render"
-        record = {
-            **_HELD_NOT_OPEN_ACCESS,
-            "hasPDF": "Y",
-            "fullTextUrlList": {"fullTextUrl": [
-                {"documentStyle": "pdf", "availability": "Free", "url": render_url},
-            ]},
-        }
-        discoverer = _discoverer_searching(record, _http(500))
+        discoverer = _discoverer_searching(_HELD_NOT_OPEN_ACCESS_WITH_PDF, _http(500))
         rendered = FulltextResult(
             success=True,
             source_type=FulltextSourceType.EUROPEPMC_PDF,
@@ -682,9 +744,45 @@ class TestANotOpenAccessArticleIsNotAskedForXml:
         with patch.object(discoverer, "_try_europepmc_pdf", return_value=rendered) as render:
             result = discoverer.discover_fulltext(pmid="31996627")
 
-        discoverer._europepmc.fetch_fulltext_xml.assert_not_called()
-        assert render.call_args.args[1].pdf_render_url == render_url
+        assert not _asked_for_xml(discoverer)
+        assert render.call_args.args[1].pdf_render_url == _RENDER_URL
         assert result.source_type is FulltextSourceType.EUROPEPMC_PDF
+
+    @pytest.mark.parametrize(
+        "render_answer",
+        [_http(503), requests.exceptions.ReadTimeout("slow"), _http(404)],
+        ids=["busy", "timeout", "not-found"],
+    )
+    def test_a_failed_render_keeps_the_absence_unsettled(
+        self,
+        _no_cache: MagicMock,
+        _no_pdf: MagicMock,
+        render_answer: object,
+        tmp_path: Path,
+    ) -> None:
+        """With no XML failure left to record, the render's own must be.
+
+        Before #432 the XML tier's 500 was always recorded for these
+        articles; now the render tier's failure is all that stands between
+        a busy europepmc.org and "no full text" for an article it holds.
+        """
+        discoverer = _discoverer_searching(
+            _HELD_NOT_OPEN_ACCESS_WITH_PDF, _http(500), render_answer
+        )
+        none_found = FulltextResult(success=False, source_type=FulltextSourceType.NOT_FOUND)
+        with (
+            patch(
+                "bmlibrarian_lite.fulltext_discovery.generate_pdf_path",
+                return_value=tmp_path / "PMC7339914.pdf",
+            ),
+            patch.object(discoverer, "_try_pdf_download", return_value=none_found),
+        ):
+            result = discoverer.discover_fulltext(pmid="31996627")
+
+        assert _RENDER_URL in _requested(discoverer)
+        assert not _asked_for_xml(discoverer)
+        assert not result.absence_established
+        assert [f.service for f in result.lookups.failures] == [SERVICE_EUROPE_PMC]
 
     def test_the_chain_can_settle_an_absence(
         self, _no_cache: MagicMock, _no_pdf: MagicMock
@@ -695,7 +793,38 @@ class TestANotOpenAccessArticleIsNotAskedForXml:
         with patch.object(discoverer, "_try_pdf_download", return_value=none_found):
             result = discoverer.discover_fulltext(pmid="31996627")
 
+        assert not _asked_for_xml(discoverer)
         assert result.absence_established
+
+    def test_a_closed_record_without_an_accession_is_an_answer(
+        self, _no_cache: MagicMock, _no_pdf: MagicMock
+    ) -> None:
+        """Stated closed access decides before the missing accession is noticed."""
+        record = {**_HELD_NOT_OPEN_ACCESS, "pmcid": None, "inPMC": "N"}
+        discoverer = _discoverer_searching(record, _http(500))
+
+        result = discoverer._try_europepmc_xml({}, "31996627", None, None)
+
+        assert len(_requested(discoverer)) == 1
+        assert result.lookups == LookupRecord()
+
+    def test_control_an_open_record_without_an_accession_is_a_skip(
+        self, _no_cache: MagicMock, _no_pdf: MagicMock
+    ) -> None:
+        """Marked open access, the fetch is one we could not make: recorded."""
+        record = {
+            **_HELD_NOT_OPEN_ACCESS,
+            "pmcid": None,
+            "inPMC": "N",
+            "isOpenAccess": "Y",
+        }
+        discoverer = _discoverer_searching(record, _http(500))
+
+        result = discoverer._try_europepmc_xml({}, "31996627", None, None)
+
+        assert result.lookups.skipped == (
+            SourceLookupSkipped(SERVICE_EUROPE_PMC, LookupSkipReason.NO_IDENTIFIER),
+        )
 
     def test_control_an_open_access_article_is_still_asked(
         self, _no_cache: MagicMock, _no_pdf: MagicMock
@@ -707,7 +836,9 @@ class TestANotOpenAccessArticleIsNotAskedForXml:
         with patch.object(discoverer, "_try_pdf_download", return_value=none_found):
             result = discoverer.discover_fulltext(pmid="31996627")
 
-        discoverer._europepmc.fetch_fulltext_xml.assert_called_once_with("PMC7339914")
+        assert [url for url in _requested(discoverer) if "/fullTextXML" in url] == [
+            f"{EUROPEPMC_REST_BASE_URL}/PMC7339914/fullTextXML"
+        ]
         assert not result.absence_established
         assert SourceLookupFailure(
             SERVICE_EUROPE_PMC, RequestFailure(RequestFailureKind.HTTP_STATUS, 500)

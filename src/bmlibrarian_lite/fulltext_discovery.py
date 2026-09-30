@@ -483,11 +483,17 @@ class FulltextDiscoverer:
                 # yet. NOT_FOUND is reserved for the end of the chain, so
                 # that no intermediate can be mistaken for an established
                 # absence if it ever escapes (#354). Europe PMC's record
-                # answers here whether it holds no text or holds it closed
-                # access: ``fullTextXML`` serves neither, and asking spent
-                # every retry on a 500 (#432; the maintainer's call that the
-                # record is an answer, not a lookup left unmade).
-                logger.debug(f"No full-text XML served for {info.pmcid or info.pmid}")
+                # answers here, whether it states that it does not hold the
+                # text or that it holds it closed access: ``fullTextXML``
+                # does not serve closed-access text (1 of 320 was, in the
+                # #432 survey), and asking would answer a 500 that spends
+                # every retry. The maintainer ruled that the record is an
+                # answer, not a lookup left unmade (#432).
+                logger.debug(
+                    "No full-text XML offered for %s (open access: %s)",
+                    info.pmcid or info.pmid,
+                    info.is_open_access,
+                )
                 return FulltextResult(
                     success=False,
                     source_type=FulltextSourceType.NOT_ASSESSED,

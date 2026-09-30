@@ -1027,12 +1027,12 @@ DOI_RESOLVER_HOSTS = ("doi.org", "dx.doi.org", "www.doi.org")
 # checked live, 2026-09-29). Either is an absence, not an unsettled lookup.
 DOI_RESOLVER_ABSENCE_STATUSES = (400, 404)
 
-# The one failed status that is about the resource rather than the service:
-# Unpaywall answers 404 for a DOI it has no record of. Europe PMC's
-# fullTextXML answers 500, not 404, for an article it holds closed access, so
-# that case is decided from the search record before asking (#432). Every
+# The one failed status that can be about the resource rather than the
+# service. Each caller decides whether its source's 404 is an absence
+# (Unpaywall, CrossRef, ClinicalTrials.gov, Europe PMC's fullTextXML). Every
 # other failure leaves the question unassessed rather than answered "no"
-# (#346).
+# (#346). Europe PMC's fullTextXML answers 500, not 404, for closed-access
+# text; see ``europepmc.offers_fulltext_xml``.
 HTTP_NOT_FOUND = 404
 
 # The sources a full-text lookup can fail against, named as the reader knows

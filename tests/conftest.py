@@ -70,6 +70,7 @@ def sample_doc_dict_no_pmc() -> Dict[str, Any]:
 def sample_europepmc_search_response() -> Dict[str, Any]:
     """Sample Europe PMC search API response."""
     return {
+        "hitCount": 1,
         "resultList": {
             "result": [
                 {

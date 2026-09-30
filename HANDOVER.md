@@ -17,16 +17,27 @@ once merged.
   draws different records). `fullTextXML` answers **500, not 404**, for a
   held but closed-access article: PMC open access 160/160 served, closed
   1/320; preprints 2019–22 0/160, 2025–26 79/120.
-- **Rule:** `europepmc.offers_fulltext_xml` = held (`inEPMC`/`inPMC`) and not
-  a stated `isOpenAccess=N`; a missing or unreadable flag still asks. It sets
-  `ArticleInfo.has_fulltext_xml`. The survey scores the shipped function
-  itself.
+- **Rule:** `europepmc.offers_fulltext_xml` asks unless the record *states*
+  `inEPMC=N` and `inPMC=N`, or `isOpenAccess=N`; a missing or unreadable flag
+  on either question still asks. It sets `ArticleInfo.has_fulltext_xml`. The
+  survey scores the shipped function itself, and
+  `tests/test_europepmc_xml_survey.py` pins its score on the committed rows
+  (239/194/2/326; the two texts lost are `PMC9391270` and `PPR1051747`).
 - **User's call (2026-09-30):** a stated closed-access record is Europe PMC's
   answer, as "not held" already was. No failure is recorded, so the chain can
   establish an absence. The alternatives (a new skip reason; one request
-  with no retries) were not chosen.
-- Deferred: #450 (the apps' port), #451 (older preprints' steady 500 spends
-  every retry).
+  with no retries) were not chosen. Preprints lose nothing by it: none
+  published since 2024 is marked closed access.
+- **From the review:** a 200 whose search answer cannot be read (no
+  `resultList.result` list, no integer `hitCount`, matches counted but not
+  listed, a non-object result) is now `MALFORMED_RESPONSE` in
+  `fetch_article_info`, not "Europe PMC holds no record". The PDF render
+  tier's failure is now what keeps a closed-access article unsettled, and is
+  pinned. The survey leaves unanswered probes out of every count, paces on
+  the app's Europe PMC limiter, and writes via a `.partial` file.
+- Deferred: #450 (the apps' port), #451 (preprints whose text arrived before
+  2026 answer a steady 500), #453 (the render answers 403 to non-browsers),
+  #454 (a fresh preprint served while its record says `inEPMC=N`).
 
 ## Recently landed (context)
 
@@ -216,8 +227,12 @@ Open issues by family; each issue carries the detail. None blocks another.
   accession ends as a permanent absence without a lookup.
 - **#450** Swift + Android ask `fullTextXML` for every accession: port #432's
   `isOpenAccess` rule (needs the record's flag at the fetch; the apps often
-  start from a stored PMC ID). **#451** older preprints answer a steady 500
-  and spend every retry (all three).
+  start from a stored PMC ID). **#451** preprints whose text arrived before
+  2026 answer a steady 500 and spend every retry: four requests paced 1/s,
+  48 s for one article on 2026-10-01 (all three). **#453** Europe PMC's
+  `?pdf=render` answers 403 to every non-browser client, so the render tier
+  serves nothing (all three). **#454** a fresh preprint can be served while
+  its record says `inEPMC=N`, and every rule skips it.
 - **#427** MCP `get_document_fulltext` and reader-facing discovery callers
   discard a stale cached text when the refresh fails
   (`pdf_utils.read_stale_cached_fulltext` exists); the analyser must never
