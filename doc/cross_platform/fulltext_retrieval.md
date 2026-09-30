@@ -160,7 +160,7 @@ a fetch is served. A chain that then finds nothing ends in
 `FullTextResult.NotEstablished` (Android), never in the "no full text" answer
 the callers record on the document for good. Its sentence uses #435's verbs:
 "Europe PMC (HTTP 404 Not Found) did not serve it" for an HTTP answer, "could
-not be asked (…)" for a throttle (429, 503) and every other kind; see
+not be asked (…)" for a throttle (429), any 5xx (#445) and every other kind; see
 [search_failure_reporting.md](search_failure_reporting.md) for the predicate. On Swift the 404 raises no `FullTextDegradation`
 (Europe PMC answered; see [jats_parsing.md](jats_parsing.md)), and a blank
 200 is `europePMCUnreachable`, no longer a parse failure.

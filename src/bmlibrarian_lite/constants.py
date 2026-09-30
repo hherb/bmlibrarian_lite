@@ -967,9 +967,7 @@ POLITE_RECOVERY_SUCCESSES = 10
 POLITE_SLOW_WAIT_LOG_SECONDS = 1.0
 
 # The statuses that mean "you are asking too fast", as opposed to a genuine
-# server fault. Also the statuses that are not an answer about the article
-# (``RequestFailure.is_answer``, #435); the Swift and Android ports name the
-# same two, as ``throttleStatusCodes`` and ``THROTTLE_STATUS_CODES``.
+# server fault.
 POLITE_THROTTLE_STATUSES = (429, 503)
 
 # How many times a throttled request is retried through the pacing before
@@ -989,12 +987,30 @@ RETRYABLE_HTTP_STATUSES = (429, 500, 502, 503, 504)
 # must not be credited with recovery for doing so.
 HTTP_ERROR_STATUS_MIN = 400
 
-# The lowest status that is the server's own fault rather than a refusal of
-# the request. A publisher reached through doi.org that answers one of these
-# left the lookup unsettled, whether or not it was retried. It is still the
-# publisher's answer, read as "did not serve it" (#435), not "could not be
-# asked" (#446).
+# The lowest and highest statuses that are the server's own fault rather than
+# a refusal of the request. A publisher reached through doi.org that answers
+# one of these left the lookup unsettled, whether or not it was retried
+# (#446), and like every server fault it "could not be asked" (#445).
 HTTP_SERVER_ERROR_MIN = 500
+HTTP_SERVER_ERROR_MAX = 599
+
+# 429 Too Many Requests: a throttle.
+HTTP_TOO_MANY_REQUESTS = 429
+
+# The HTTP statuses that are not the source's answer about the article, so a
+# lookup that ended on one "could not be asked" rather than "did not serve
+# it" (``RequestFailure.is_answer``, #435): a throttle (429), and every
+# server fault (#445). A 5xx says nothing about the article: the server
+# failed, or a gateway (502, 504, Cloudflare's 52x) never heard from its
+# origin; some hosts' 503 is a throttle. Every other status, a missing one
+# and the 4xx refusals (400, 401, 403, 408, 422) included, is the source's
+# answer: the maintainer's decision, not a law of HTTP. The Swift and
+# Android ports name the same set, as ``unansweredStatusCodes`` and
+# ``UNANSWERED_STATUS_CODES``; all three are pinned to
+# ``doc/cross_platform/request_failure_parity/answered_lookup_verb.json``.
+UNANSWERED_HTTP_STATUSES = frozenset(
+    {HTTP_TOO_MANY_REQUESTS, *range(HTTP_SERVER_ERROR_MIN, HTTP_SERVER_ERROR_MAX + 1)}
+)
 
 # The client-error statuses that say "not now" rather than "no": 408 Request
 # Timeout (the server gave up waiting for us) and 425 Too Early. From a

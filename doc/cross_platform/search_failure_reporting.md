@@ -215,16 +215,21 @@ are lowercase and localised):
 became of a *full-text lookup* -- Python's lookup-record sentences
 (`analysis_failures.py`) and the apps' `absenceNotEstablished` -- chooses its
 verb by one predicate, `RequestFailure.is_answer` (Python) / `isAnswer`
-(Swift, Kotlin): true for `http_status` with any status but **429 and 503**
-(Python's `POLITE_THROTTLE_STATUSES`, `BioMedLitConstants.throttleStatusCodes`,
-`Constants.THROTTLE_STATUS_CODES`), including an unknown status. Such a source
-was asked and answered, so it "did not serve it" --
-`"Europe PMC (HTTP 404 Not Found) did not serve it"`; every other kind, and
-429 or 503, "could not be asked". A throttle says only "not now" (and some
-hosts' 503 is an outage), a refused redirect is our own refusal, and a blank or
-garbled 200 says nothing about the article. That the other 5xx statuses are
-answers is a decision, not a law of HTTP. The search clauses above are
-unaffected: "could not be searched" is true of an answered error too.
+(Swift, Kotlin): true for `http_status` with any status but **429 and
+500–599** (Python's `UNANSWERED_HTTP_STATUSES`,
+`BioMedLitConstants.unansweredStatusCodes`, `Constants.UNANSWERED_STATUS_CODES`),
+including an unknown status. The rows, the set and the apps' sentence are one
+shared contract, `request_failure_parity/answered_lookup_verb.json`, which all
+three suites read (#447): change it and the three platforms together. Such a
+source was asked and answered, so it "did not serve it" --
+`"Europe PMC (HTTP 404 Not Found) did not serve it"`; every other kind, a 429
+and any 5xx "could not be asked". A throttle says only "not now"; a 5xx says
+nothing about the article either -- the server failed, or a gateway (502, 504,
+Cloudflare's 52x) never heard from its origin (#445). A refused redirect is our
+own refusal, and a blank or garbled 200 says nothing about the article. That the
+4xx refusals (400, 401, 403, 408, 422) and a missing status are answers is a
+decision (#445), not a law of HTTP. The search clauses above are unaffected:
+"could not be searched" is true of an answered error too.
 
 What the sentence goes on to say follows the verb. Only a source that could
 not be asked earns "so a freely available copy may exist"; a source that

@@ -8,46 +8,25 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#446 — doi.org's HEAD status is read** (Python only; the apps only link
-to doi.org), branch `fix/doi-head-status-446`, **PR #448**. Compress into
-**Recently landed** once merged.
+**#447 + #445 — one verb contract, and a 5xx is not an answer** (all three),
+branch `fix/is-answer-contract-447-445`, **PR #449**. Compress into **Recently landed**
+once merged.
 
-- **Rule (user, 2026-09-29), from a live survey of 20 DOIs** (9 ended in a
-  publisher's 403 bot wall after the redirect; none of the other 11
-  content-negotiated to a PDF). Who answered is decided by host
-  (`DOI_RESOLVER_HOSTS`: `doi.org`, `dx.doi.org`, `www.doi.org`):
-  - **doi.org's** 400 (not a DOI) and 404 (not registered) are absences
-    (`DOI_RESOLVER_ABSENCE_STATUSES`, both checked live); any other ≥400 is
-    a `doi.org` failure.
-  - **The publisher's** throttle, any 5xx (Cloudflare's 522 included,
-    retried or not), 408 or 425 (`HTTP_UNSETTLED_CLIENT_STATUSES`) is a
-    failure of `SERVICE_DOI_PUBLISHER` ("the publisher's site the DOI
-    resolves to"). **A 5xx is the publisher's answer** (user, review of
-    #448): it reads "did not serve it" per #435, only a throttle "could not
-    be asked". Any other 4xx (bot wall, 404, 405) stays "no PDF"
-    uncaveated.
-  - Exceptions are named by the request they failed on; one with no request
-    (`InvalidSchema` on a redirect to `ftp:`, the bare `ValueError` an
-    unparseable `Location` raises) by the last hop that answered (a
-    `response` hook). A redirect loop is recorded, unlike the bot wall.
-  - Pure rule: `doi_resolution_failure` / `doi_lookup_service` in
-    `pdf_discovery.py`. `_clean_doi` strips `www.doi.org` too.
-- **`mount_politely` turns off urllib3's `respect_retry_after_header`.**
-  Pre-existing, found in review: a 413/429/503 carrying `Retry-After` was
-  re-sent by urllib3 inside every adapter attempt, below the limiter and
-  uncapped (16 requests where 4 were configured; up to 6 h of uncancellable
-  sleep). Contract: `polite_request_pacing.md` rule 6.
-- `unestablished_access_clause` capitalises a leading "the" (it opens a
-  sentence; "the PDF download" already read "Claim. the PDF download …").
-- `RETRYABLE_HTTP_STATUSES` replaces the forcelists in `europepmc.py` and
-  `pdf_discovery.py`; `test_polite_clients.py` pins both.
-- Tests: `tests/test_doi_resolver_statuses.py` drives the real `head`
-  through the mounted `PoliteAdapter` (retries and redirects included),
-  with `HTTPAdapter.send` scripted -- so it cannot see urllib3; the
-  `Retry-After` fix is tested against a loopback server in
-  `test_polite_session.py` (`ScriptedAnswer` now takes `headers`).
-  `pytest` 5881 passed; lint delta 0 new; review-round mutation sweep 11 of
-  11 caught.
+- **#447:** `doc/cross_platform/request_failure_parity/answered_lookup_verb.json`
+  holds the unanswered statuses, a row per (kind, status) with every kind, and
+  the apps' whole `absenceNotEstablished` sentence. Read by
+  `tests/test_answered_lookup_verb.py`, BioMedLit's
+  `AnsweredLookupVerbContractTests` and Android's
+  `AnsweredLookupVerbContractTest`; Gradle declares the directory a test input.
+  The set is its own constant (`UNANSWERED_HTTP_STATUSES` /
+  `unansweredStatusCodes` / `UNANSWERED_STATUS_CODES`), not the pacing
+  throttle list.
+- **#445 (user, 2026-09-30):** a 429 **and every 5xx** (500–599, Cloudflare's
+  52x included) "could not be asked". The 4xx refusals (400, 401, 403, 408,
+  422) and a missing status stay answers: configuration advice for a refused
+  key or email was **not** chosen. The doi.org publisher's 5xx now reads
+  "could not be asked"; its recorded 408/425 still "did not serve it".
+- Each suite was run red against the new rows before the predicates changed.
 
 ## Recently landed (context)
 
@@ -55,10 +34,16 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **doi.org's HEAD status is read** (Python; PR #448, #446), named by host:
+  doi.org's 400/404 are absences; a publisher's bot-wall 4xx stays "no PDF"
+  (`doi_resolution_failure`). **`mount_politely` turns off urllib3's
+  `respect_retry_after_header`**, or a throttle is re-sent below the limiter
+  (`polite_request_pacing.md` rule 6).
 - **An answered lookup "did not serve it"** (all three; PR #444, #435). An
   `HTTP_STATUS` failure reads "… Europe PMC (HTTP 404 Not Found) did not
-  serve it" **except a throttle** (429, 503), which "could not be asked" with
-  every other kind. One predicate: `RequestFailure.is_answer` / `isAnswer`.
+  serve it" **except a throttle or a 5xx** (#445), which "could not be asked"
+  with every other kind. One predicate: `RequestFailure.is_answer` /
+  `isAnswer`, pinned by one shared fixture (#447).
   **The rest of the sentence follows the verb**: only an unasked source earns
   "a freely available copy may exist". Python builds every such sentence with
   `unsettled_lookups_clause`; within one service an unasked failure outranks
@@ -214,12 +199,6 @@ the rest.
 
 Open issues by family; each issue carries the detail. None blocks another.
 
-### Left by the #435 round (PR #444)
-
-- **#445** which statuses are answers: 5xx, configuration 4xx (400/401/403/
-  422) and a missing status (maintainer decision; all three platforms).
-- **#447** a shared JSON fixture for `is_answer` and the apps' sentence.
-
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 
 - **#430** segment PDF-extracted text into body and end matter (LLM-based;
@@ -237,8 +216,10 @@ Open issues by family; each issue carries the detail. None blocks another.
   twice after `NotEstablished`; **#443** a preprint record with no usable
   accession ends as a permanent absence without a lookup.
 - **#432** Europe PMC answered 500 for PMC IDs without OA XML, still so two
-  hours later (re-probe on another day before deciding). `has_fulltext_xml` counts `inPMC` for non-OA articles, so they
-  always fetch XML that cannot be served, and spend the retries doing it.
+  hours later (re-probe on another day before deciding). Since #445 that 500
+  reads "could not be asked", so a freely available copy may exist.
+  `has_fulltext_xml` counts `inPMC` for non-OA articles, so they always fetch
+  XML that cannot be served, and spend the retries doing it.
 - **#427** MCP `get_document_fulltext` and reader-facing discovery callers
   discard a stale cached text when the refresh fails
   (`pdf_utils.read_stale_cached_fulltext` exists); the analyser must never

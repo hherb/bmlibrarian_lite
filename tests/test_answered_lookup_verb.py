@@ -12,12 +12,18 @@ built from the lookup record then said the source "could not be asked":
     … Europe PMC (HTTP 404 Not Found) could not be asked, so …
 
 Europe PMC was asked, and answered. The maintainer's decision: an HTTP
-status reads "did not serve it", except a throttle (429, 503), which says
-only "not now" and keeps "could not be asked" with every other kind.
+status reads "did not serve it", except a throttle (429) or any 5xx (#445),
+which say nothing about the article and keep "could not be asked" with
+every other kind. The rows are the shared contract,
+``doc/cross_platform/request_failure_parity/answered_lookup_verb.json``.
 
 The sentences are asserted whole, never by a substring another caveat
 shares. No test here touches the network.
 """
+
+import json
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -30,10 +36,10 @@ from bmlibrarian_lite.analysis_failures import (
 )
 from bmlibrarian_lite.config import LiteConfig
 from bmlibrarian_lite.constants import (
-    POLITE_THROTTLE_STATUSES,
     SERVICE_DOI_RESOLVER,
     SERVICE_EUROPE_PMC,
     SERVICE_UNPAYWALL,
+    UNANSWERED_HTTP_STATUSES,
 )
 from bmlibrarian_lite.data_models import (
     LookupRecord,
@@ -48,6 +54,25 @@ from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer im
     StudyTransparencyAnalyzer,
     TransparencyReport,
 )
+
+#: The verb contract all three platforms read (#447).
+VERB_CONTRACT: dict[str, Any] = json.loads(
+    (
+        Path(__file__).resolve().parents[1]
+        / "doc/cross_platform/request_failure_parity/answered_lookup_verb.json"
+    ).read_text(encoding="utf-8")
+)
+
+
+def _contract_unanswered_statuses() -> set[int]:
+    """The contract's unanswered statuses, its listed ones and its range.
+
+    Returns:
+        Every status the contract says is not an answer.
+    """
+    rule = VERB_CONTRACT["unanswered_statuses"]
+    return {*rule["listed"], *range(rule["from"], rule["through"] + 1)}
+
 
 NOT_FOUND = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=404)
 THROTTLED = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=429)
@@ -73,7 +98,7 @@ UNPAYWALL_NUDGE = (
 SERVICE_UNAVAILABLE = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=503)
 
 #: Europe PMC answered, doi.org was throttled with a 503, Unpaywall is not
-#: configured: every group and both throttle statuses' verb in one record.
+#: configured: every group and both verbs in one record.
 MIXED = LookupRecord(
     failures=(
         SourceLookupFailure(SERVICE_EUROPE_PMC, NOT_FOUND),
@@ -105,41 +130,39 @@ def _failed(service: str, failure: RequestFailure) -> LookupRecord:
 
 
 class TestAnHttpStatusIsAnAnswer:
-    """The predicate every platform's verb is chosen by."""
+    """The predicate every platform's verb is chosen by.
 
-    @pytest.mark.parametrize("status", [400, 401, 403, 404, 410, 500, 502, 504])
-    def test_a_status_that_is_not_a_throttle_is_an_answer(
-        self, status: int
-    ) -> None:
-        """The source took the question and said no."""
-        failure = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=status)
-        assert failure.is_answer
-
-    @pytest.mark.parametrize("status", POLITE_THROTTLE_STATUSES)
-    def test_a_throttle_is_not_an_answer(self, status: int) -> None:
-        """A throttle says "not now": the question was never put."""
-        failure = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=status)
-        assert not failure.is_answer
-
-    def test_the_throttles_are_429_and_503(self) -> None:
-        """Pinned: the Swift and Android ports name the same two statuses."""
-        assert set(POLITE_THROTTLE_STATUSES) == {429, 503}
-
-    def test_an_http_error_of_unknown_status_is_an_answer(self) -> None:
-        """A status was answered even when this build could not keep it."""
-        assert RequestFailure(RequestFailureKind.HTTP_STATUS).is_answer
+    The rows are the shared contract, ``answered_lookup_verb.json``, which
+    the Swift and Android suites read too (#447): a change on one platform
+    alone fails the other two.
+    """
 
     @pytest.mark.parametrize(
-        "kind",
-        [kind for kind in RequestFailureKind if kind is not RequestFailureKind.HTTP_STATUS],
+        "row",
+        VERB_CONTRACT["predicate"],
+        ids=lambda row: f"{row['kind']}-{row['status_code']}",
     )
-    def test_no_other_kind_is_an_answer(self, kind: RequestFailureKind) -> None:
-        """Only ``HTTP_STATUS`` changes verb: the decision, as made.
+    def test_each_contract_row(self, row: dict[str, Any]) -> None:
+        """Each (kind, status) is an answer exactly when the contract says."""
+        failure = RequestFailure(RequestFailureKind(row["kind"]), row["status_code"])
+        assert failure.is_answer is row["is_answer"]
 
-        A refused redirect is our own refusal, and a blank or garbled 200 is
-        not an answer about the article either.
-        """
-        assert not RequestFailure(kind).is_answer
+    def test_the_unanswered_statuses_are_the_contracts(self) -> None:
+        """Pinned: the Swift and Android ports name the same statuses."""
+        assert set(UNANSWERED_HTTP_STATUSES) == _contract_unanswered_statuses()
+
+    def test_the_rows_agree_with_the_set(self) -> None:
+        """The set and the rows cannot disagree about a status."""
+        unanswered = _contract_unanswered_statuses()
+        for row in VERB_CONTRACT["predicate"]:
+            if row["kind"] == RequestFailureKind.HTTP_STATUS.value and row["status_code"] is not None:
+                assert (row["status_code"] not in unanswered) is row["is_answer"], row
+
+    def test_every_kind_has_a_row(self) -> None:
+        """A kind added later cannot inherit a verb nobody chose for it."""
+        assert {row["kind"] for row in VERB_CONTRACT["predicate"]} == {
+            kind.value for kind in RequestFailureKind
+        }
 
 
 class TestTheClauseChoosesTheVerb:
@@ -218,6 +241,19 @@ class TestTheClauseChoosesTheVerb:
         )
         assert unsettled_lookups_clause(record) == (
             "Europe PMC (the request timed out) could not be asked"
+        )
+
+    def test_a_later_server_error_outranks_an_answer(self) -> None:
+        """The XML 404, then a 500 on the PDF render: a 5xx is unasked (#445)."""
+        server_error = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=500)
+        record = LookupRecord(
+            failures=(
+                SourceLookupFailure(SERVICE_EUROPE_PMC, NOT_FOUND),
+                SourceLookupFailure(SERVICE_EUROPE_PMC, server_error),
+            ),
+        )
+        assert unsettled_lookups_clause(record) == (
+            "Europe PMC (HTTP 500 Internal Server Error) could not be asked"
         )
 
     def test_an_answer_does_not_outrank_an_earlier_unasked_lookup(self) -> None:
@@ -349,7 +385,7 @@ class TestEverySentenceUsesTheVerb:
             f"{ACCESS_OPEN} {UNPAYWALL_NUDGE}"
         )
 
-    @pytest.mark.parametrize("status", [403, 500])
+    @pytest.mark.parametrize("status", [403, 410, 422])
     def test_any_answer_other_than_a_404_reads_the_same(self, status: int) -> None:
         """Not a 404 special case: the predicate, at sentence level."""
         answer = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=status)
@@ -357,6 +393,16 @@ class TestEverySentenceUsesTheVerb:
         assert message == (
             "No PDF sources found for this document, and Europe PMC "
             f"({answer.describe()}) did not serve it, {ANSWERED_ACCESS_OPEN}"
+        )
+
+    @pytest.mark.parametrize("status", [500, 502, 504])
+    def test_a_server_error_could_not_be_asked(self, status: int) -> None:
+        """A 5xx says nothing about the article, so a copy may exist (#445)."""
+        fault = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=status)
+        message = no_pdf_sources_message(_failed(SERVICE_EUROPE_PMC, fault))
+        assert message == (
+            "No PDF sources found for this document, but Europe PMC "
+            f"({fault.describe()}) could not be asked, {ACCESS_OPEN}"
         )
 
 

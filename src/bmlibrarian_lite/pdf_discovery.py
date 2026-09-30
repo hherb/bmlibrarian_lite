@@ -138,9 +138,9 @@ def doi_resolution_failure(status_code: int, url: str) -> SourceLookupFailure | 
       question open.
     * The publisher's throttle, server fault, 408 or 425 left it open too,
       retried or not: Cloudflare's 522 is an origin that timed out, and a
-      timeout we raise ourselves is recorded. Only a throttle reads as
-      "could not be asked"; the rest are the publisher's answer, "did not
-      serve it" (#435). Any other 4xx -- the bot wall that 9 of 20 surveyed
+      timeout we raise ourselves is recorded. A throttle or a server fault
+      reads as "could not be asked" (#445); a 408 or 425 is the publisher's
+      answer, "did not serve it" (#435). Any other 4xx -- the bot wall that 9 of 20 surveyed
       DOIs ended in, a 404, a 405 to the HEAD -- answers that content
       negotiation serves no PDF, as all 11 other surveyed DOIs did, with
       HTML. Recording it would caveat nearly half of all DOIs for a route

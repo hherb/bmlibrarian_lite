@@ -466,11 +466,11 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
     /// Carries what Europe PMC's side of the chain got instead of the
     /// article's text. That is either an answer — an HTTP status such as
     /// `fullTextXML`'s 404 for an article Europe PMC holds but does not serve
-    /// as open access (#432), or a 5xx other than 503 that outlasted its
-    /// retries, from the fetch or the identifier search — or no answer at
-    /// all: a throttle (429, 503), a timeout, a dropped connection, a blank
-    /// body, an identifier never sent. Either way the article may have a full
-    /// text we did not reach (#434). The reader's sentence follows the same
+    /// as open access (#432), from the fetch or the identifier search — or no
+    /// answer at all: a throttle (429), a 5xx that outlasted its retries
+    /// (#445), a timeout, a dropped connection, a blank body, an identifier
+    /// never sent. Either way the article may have a full text we did not
+    /// reach (#434). The reader's sentence follows the same
     /// split, by ``RequestFailure/isAnswer`` (see `errorDescription`).
     ///
     /// Like ``identifierKindUnresolved(_:)``, a claim about *us*, and callers
@@ -516,8 +516,8 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
                 """
         case .absenceNotEstablished(let failure):
             // The verb follows #435's decision: an HTTP status other than a
-            // throttle was an answer, so Europe PMC "did not serve it"; a
-            // throttle and every other kind keep "could not be asked".
+            // throttle or a 5xx (#445) was an answer, so Europe PMC "did not
+            // serve it"; those and every other kind read "could not be asked".
             if failure.isAnswer {
                 return """
                     No source provided this article's full text. Europe PMC \

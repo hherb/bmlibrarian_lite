@@ -26,6 +26,7 @@ from bmlibrarian_lite.constants import (
     POLITE_MAX_THROTTLE_RETRIES,
     POLITE_RATE_CEILINGS,
     POLITE_RECOVERY_SUCCESSES,
+    POLITE_THROTTLE_STATUSES,
 )
 from bmlibrarian_lite.polite_session import (
     PoliteAdapter,
@@ -448,6 +449,14 @@ class TestThrottleRetryBudgetFollowsMountedRetry:
         adapter.send(request_to("https://www.ebi.ac.uk/x"))
 
         assert always_throttled.sent == POLITE_MAX_THROTTLE_RETRIES + 1
+
+
+def test_the_pacing_throttles_are_429_and_503() -> None:
+    """Pinned exactly: adding a server fault would change the pacing.
+
+    No longer the verb's set (#445), so nothing else pins it.
+    """
+    assert set(POLITE_THROTTLE_STATUSES) == {429, 503}
 
 
 class TestMountPolitely:

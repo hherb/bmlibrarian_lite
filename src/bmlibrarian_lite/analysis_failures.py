@@ -46,9 +46,9 @@ here turn either record into what a reader sees.
   it would have told us is not assessed rather than absent (#346).
   :func:`unsettled_lookups_clause` names every source that left access open,
   failed or skipped, each once, with the verb its answer earns (#435):
-  "did not serve it" for an HTTP status other than a throttle (429, 503;
-  :attr:`~bmlibrarian_lite.data_models.RequestFailure.is_answer`), "could
-  not be asked" for anything else; :func:`no_pdf_sources_message`,
+  "did not serve it" for an HTTP status other than a throttle or a 5xx
+  (#445; :attr:`~bmlibrarian_lite.data_models.RequestFailure.is_answer`),
+  "could not be asked" for anything else; :func:`no_pdf_sources_message`,
   :func:`paywall_message` (and :func:`refused_access_sentence`, its wording
   without the advice) and :func:`with_unestablished_access` are the three
   sentences that carry it to the reader, and none of them claims a licence
