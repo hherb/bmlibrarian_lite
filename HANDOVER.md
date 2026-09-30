@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **#432 — ask `fullTextXML` only when Europe PMC's record allows it** (Python),
-branch `fix/europepmc-xml-predictor-432`. Compress into **Recently landed**
+branch `fix/europepmc-xml-predictor-432`, **PR #452**. Compress into **Recently landed**
 once merged.
 
 - **Measured, not guessed:** `scripts/europepmc_xml_survey.py`, 761 records
