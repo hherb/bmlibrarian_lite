@@ -1898,6 +1898,12 @@ final class FactCheckWorkflow {
     private func extractCitations() async throws {
         guard let session = session, let llmService = llmService else { return }
 
+        // Before the filter below: transparency analysis reads the same text,
+        // so a paper that already has its citations still gets fetched.
+        if settings.autoFetchFullTextEnabled {
+            try await fetchFullTextsForTopDocuments()
+        }
+
         let relevantDocs = (session.documents ?? []).filter {
             $0.meetsThreshold(settings.minScoreThreshold) && ($0.citations ?? []).isEmpty
         }
@@ -1922,12 +1928,19 @@ final class FactCheckWorkflow {
 
         // Create citation inputs (thread-safe structs)
         let inputs = relevantDocs.map { doc in
-            CitationInput(
+            // Only for the papers the setting is about, so a text fetched by
+            // hand for a lower-scored paper does not change what that paper costs.
+            let fullText = settings.autoFetchFullTextEnabled && doc.meetsThreshold(
+                FullTextAutoFetch.minimumScore(minScoreThreshold: settings.minScoreThreshold)
+            ) ? FullTextAutoFetch.citationText(for: doc) : nil
+            return CitationInput(
                 pmid: doc.pmid,
                 title: doc.title,
                 abstract: doc.abstract,
                 authors: doc.formattedAuthors,
-                year: doc.year ?? 0
+                year: doc.year ?? 0,
+                fullText: fullText?.text,
+                fullTextTruncated: fullText?.truncated ?? false
             )
         }
 
@@ -1952,6 +1965,81 @@ final class FactCheckWorkflow {
                 self?.applyCitationResult(result)
             }
         )
+    }
+
+    /// Retrieve the full text of the top-scoring documents, one at a time.
+    ///
+    /// One at a time because the chain talks to Europe PMC, Unpaywall and
+    /// publishers, which are rate limited, and a PDF can take minutes.
+    ///
+    /// A document no source had is recorded as such and is not asked again. Any
+    /// other failure leaves the document as it was, so the next run retries it,
+    /// and is named in the run's notice: a paper missing its full text is
+    /// otherwise indistinguishable from one that never had any. Neither stops
+    /// the run, since the abstract still makes a report.
+    ///
+    /// - Throws: `CancellationError` when the user stops the run.
+    private func fetchFullTextsForTopDocuments() async throws {
+        guard let session = session else { return }
+
+        let targets = FullTextAutoFetch.documentsToFetch(
+            from: session.documents ?? [],
+            minScoreThreshold: settings.minScoreThreshold
+        )
+        guard !targets.isEmpty else { return }
+
+        let service = BMLFullTextService.create(from: settings)
+        var failures: [String] = []
+
+        for (index, document) in targets.enumerated() {
+            try Task.checkCancellation()
+            updateProgress(
+                .extractingCitations,
+                "Retrieving full text \(index + 1)/\(targets.count)..."
+            )
+
+            do {
+                let bmlResult = try await service.fetchFullText(for: document)
+                document.applyFullTextResult(BioMedLitAdapters.toAppFullTextResult(bmlResult))
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch FullTextError.noFullTextAvailable {
+                // The expected outcome for a closed-access paper, not a failure.
+                document.markFullTextUnavailable()
+            } catch {
+                failures.append(document.title)
+                logger.error(
+                    "Automatic full text fetch failed for \(document.id) (\(document.title)): \(error.localizedDescription)"
+                )
+                continue
+            }
+
+            do {
+                try modelContext.save()
+            } catch {
+                logger.error(
+                    "Could not save full text for \(document.id): \(error.localizedDescription)"
+                )
+            }
+        }
+
+        if !failures.isEmpty, session.errorMessage == nil {
+            session.errorMessage = Self.fullTextFailureNotice(for: failures)
+        }
+    }
+
+    /// A one-line summary of the documents whose full text could not be fetched.
+    ///
+    /// Names them while the list is short, counts past that; each failure is
+    /// logged individually either way.
+    ///
+    /// - Parameter titles: Titles of the documents that failed, in run order.
+    /// - Returns: A sentence naming or counting the failures.
+    static func fullTextFailureNotice(for titles: [String]) -> String {
+        if titles.count <= WorkflowConstants.maxFailedTitlesToName {
+            return "Full text could not be retrieved for: \(titles.joined(separator: "; ")). Their abstracts were used."
+        }
+        return "Full text could not be retrieved for \(titles.count) documents. Their abstracts were used."
     }
 
     /// Apply a citation result to the corresponding document.
@@ -2009,7 +2097,12 @@ final class FactCheckWorkflow {
         // is the common case for that population rather than an edge.
         let documentsToAnalyze = (session.documents ?? [])
             .filter { $0.meetsThreshold(settings.minScoreThreshold) }
-            .filter { $0.needsTransparencyAnalysis }
+            // A result produced before this run fetched the paper's full text
+            // cannot have seen the statements that live there.
+            .filter {
+                $0.needsTransparencyAnalysis
+                    || (settings.autoFetchFullTextEnabled && $0.transparencyNeedsFullTextRerun)
+            }
             .filter { $0.canAnalyzeTransparency }
 
         guard !documentsToAnalyze.isEmpty else {

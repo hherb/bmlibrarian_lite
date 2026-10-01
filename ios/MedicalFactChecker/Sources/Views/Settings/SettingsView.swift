@@ -367,6 +367,15 @@ struct SettingsView: View {
                     Text("When enabled, documents are scored using both LLM and on-device semantic similarity. This allows comparing the two methods without API cost for embedding scores.")
                 }
 
+                // Full-text retrieval
+                Section {
+                    Toggle("Fetch Full Text for Top Papers", isOn: $settings.autoFetchFullTextEnabled)
+                } header: {
+                    Text("Full Text")
+                } footer: {
+                    Text("Automatically retrieve the full text of papers scored 4 or 5 before extracting citations and analysing transparency. Slower, and uses more tokens per paper; papers with no open full text fall back to the abstract.")
+                }
+
                 // Budget Settings
                 Section {
                     HStack {

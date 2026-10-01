@@ -37,6 +37,12 @@ struct CitationInput: Sendable {
     /// Publication year (0 if unknown).
     let year: Int
 
+    /// The article's full text, when it was retrieved; the abstract is used otherwise.
+    let fullText: String?
+
+    /// Whether ``fullText`` was cut to bound the cost of the call.
+    let fullTextTruncated: Bool
+
     /// Create citation input from document fields.
     ///
     /// - Parameters:
@@ -45,18 +51,24 @@ struct CitationInput: Sendable {
     ///   - abstract: Document abstract.
     ///   - authors: Formatted author string (e.g., "Smith et al.").
     ///   - year: Publication year.
+    ///   - fullText: Retrieved article text, if any.
+    ///   - fullTextTruncated: Whether `fullText` was shortened.
     init(
         pmid: String,
         title: String,
         abstract: String,
         authors: String,
-        year: Int
+        year: Int,
+        fullText: String? = nil,
+        fullTextTruncated: Bool = false
     ) {
         self.pmid = pmid
         self.title = title
         self.abstract = abstract
         self.authors = authors
         self.year = year
+        self.fullText = fullText
+        self.fullTextTruncated = fullTextTruncated
     }
 }
 
@@ -344,15 +356,15 @@ actor ParallelCitationService {
     ///   - claim: The claim to extract relevant passages for.
     /// - Returns: Formatted prompt string.
     private func buildCitationPrompt(input: CitationInput, claim: String) -> String {
-        """
-        Extract 1-2 key passages from this abstract that are most relevant to the claim.
+        let source = Self.sourceSection(for: input)
+        return """
+        Extract 1-2 key passages from this \(source.noun) that are most relevant to the claim.
 
         Claim: \(claim)
 
         Document: \(input.title) (\(input.authors), \(input.year))
 
-        Abstract:
-        \(input.abstract)
+        \(source.body)
 
         Extract exact or close quotes that:
         1. Directly address the claim (whether supporting OR refuting it)
@@ -367,5 +379,26 @@ actor ParallelCitationService {
         Respond in JSON format only:
         {"passages": [{"text": "<quote>", "relevance": "<why relevant>", "direction": "<SUPPORTS|REFUTES|NEUTRAL>", "study_type": "<type or unknown>", "sample_size": "<size or unknown>"}]}
         """
+    }
+
+    /// What the prompt reads the paper from: the full text when there is one.
+    ///
+    /// The abstract stays alongside the full text, which may be cut and so may
+    /// lack the conclusions an abstract states. A cut is announced, so the
+    /// model does not mistake the end of the excerpt for the end of the paper.
+    ///
+    /// - Parameter input: The document's citation input.
+    /// - Returns: The noun for the instruction line and the text block.
+    static func sourceSection(for input: CitationInput) -> (noun: String, body: String) {
+        guard let fullText = input.fullText else {
+            return ("abstract", "Abstract:\n\(input.abstract)")
+        }
+        let cut = input.fullTextTruncated
+            ? "\n[The full text is cut here for length; the rest of the article is not shown.]"
+            : ""
+        return (
+            "article",
+            "Abstract:\n\(input.abstract)\n\nFull text:\n\(fullText)\(cut)"
+        )
     }
 }
