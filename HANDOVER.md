@@ -8,8 +8,8 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-Nothing. #451 is on branch `fix/preprint-steady-500-451` (PR below, once
-opened); pick the next slice from **Potential follow-ups** (freshest: #450,
+Nothing. #451 is on branch `fix/preprint-steady-500-451`, **PR #455**
+(compress it once merged); pick the next slice from **Potential follow-ups** (freshest: #450,
 #453, #454).
 
 ## Recently landed (context)
