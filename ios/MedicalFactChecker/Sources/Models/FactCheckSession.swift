@@ -283,9 +283,15 @@ final class FactCheckSession {
     }
 
     /// Progress percentage (0-100) for the current workflow.
+    ///
+    /// The claim is analysed and the search runs before any document exists,
+    /// so only the fractions that divide by the documents found are guarded:
+    /// an early return of 0 held the bar empty through both, the first of
+    /// which waits on the model, and the app read as hung.
     var progressPercent: Double {
-        guard documentsFound > 0 else { return 0 }
-        let scoringProgress = Double(documentsScored) / Double(documentsFound)
+        let scoringProgress = documentsFound > 0
+            ? Double(documentsScored) / Double(documentsFound)
+            : 0
         let citationProgress = relevantDocumentsFound > 0
             ? Double(citationsExtracted) / Double(relevantDocumentsFound)
             : 0
