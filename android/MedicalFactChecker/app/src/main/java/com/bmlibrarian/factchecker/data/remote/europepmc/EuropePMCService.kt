@@ -98,7 +98,7 @@ class EuropePMCService @Inject constructor(
      * @return The XML; Europe PMC's 404; or why it could not be read, of its real
      *   kind once the retries are spent (a 429 stays a 429). A blank answer is an
      *   incomplete response, and an identifier that is not an accession is never
-     *   sent (#355)
+     *   sent (#355). A preprint's 500 is asked once, not retried (#451)
      * @throws kotlin.coroutines.cancellation.CancellationException if the caller
      *   cancelled, and nothing else: a cancelled fetch is not a dead source
      */

@@ -582,7 +582,8 @@ class EuropePMCClient:
         """Initialize the Europe PMC client."""
         self._session = self._create_session()
         # Preprint full text is asked on a session that does not retry a 500
-        # (#451). The pacing is per host, so it is the same budget as above.
+        # (#451). The rate limiter is keyed by host, so both sessions share
+        # one 1/s budget.
         self._preprint_xml_session = self._create_session(
             unretried_statuses=EUROPEPMC_PREPRINT_XML_UNRETRIED_STATUSES
         )
@@ -1021,10 +1022,12 @@ class EuropePMCClient:
             stays a 429 (#429). In practice Europe PMC rarely answers 404
             here: text it will not serve (closed access, older preprints)
             and an ID it does not hold both answer 500, which stays a 500
-            (#432). A preprint's 500 is asked once, not retried: it is
-            steady, and the retries cost ~48 s per article (#451).
-            Callers that check ``ArticleInfo.has_fulltext_xml``
-            first do not ask for closed-access text. A blank answer is an
+            (#432).
+
+            A preprint's 500 is asked once, not retried: it is steady, so
+            each retry only repeats it (#451). Callers that check
+            ``ArticleInfo.has_fulltext_xml`` first do not ask for
+            closed-access text. A blank answer is an
             incomplete response, and an identifier that is not an accession
             is a request never made (#355), not an absence.
         """

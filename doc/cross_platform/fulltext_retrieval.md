@@ -158,9 +158,9 @@ not that its text is open. So:
   years some are (2019–23), open-access preprints answer 500 as well (#451).
 - **A preprint's 500 is asked once** (#451, all three platforms; Python
   `EUROPEPMC_PREPRINT_XML_UNRETRIED_STATUSES`). Preprints whose text arrived
-  before 2026 (and 41 of 56 that arrived in 2025) answer a *steady* 500, so
-  each retry only repeats it: four paced requests, 48 s for one article. The
-  500 is still reported as `HTTP_STATUS 500`, so the chain is unchanged; the
+  before 2025 all answer a *steady* 500, as do 41 of the 56 that arrived in
+  2025 (survey: `doc/developer/europepmc_and_pubmed.md`), so each retry only
+  repeats it and costs paced requests and backoff time. The 500 is still reported as `HTTP_STATUS 500`, so the chain is unchanged; the
   PDF tiers simply start sooner. A `PPR` accession's throttle (429/503) and
   gateway faults (502/504) keep the full retry budget, and **a PMC
   accession's 500 is still retried**: an open-access PMC article always

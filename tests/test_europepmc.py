@@ -28,6 +28,8 @@ Tests cover:
 - Error handling and edge cases
 """
 
+from http import HTTPStatus
+
 import pytest
 from unittest.mock import MagicMock, patch
 from typing import Dict, Any
@@ -774,7 +776,61 @@ class TestSteadyFullTextXmlFailure:
 
             assert len(server.requests_to("/PMC1/fullTextXML")) == self.RETRIES + 1
 
-    def test_a_preprint_search_session_still_retries_a_500(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_a_preprints_404_is_still_an_absence_asked_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Control: the preprint session keeps 404 an absence, not a failure."""
+        from http import HTTPStatus
+
+        from tests.scripted_http_server import running, status_answer
+
+        with running({"/PPR1/fullTextXML": [status_answer(HTTPStatus.NOT_FOUND)]}) as server:
+            fetch = self._client(monkeypatch, server.url).fetch_fulltext_xml("PPR1")
+
+            assert len(server.requests_to("/PPR1/fullTextXML")) == 1
+        assert fetch == FullTextXmlFetch.absent()
+
+    @pytest.mark.parametrize(
+        "status",
+        [HTTPStatus.TOO_MANY_REQUESTS, HTTPStatus.BAD_GATEWAY, HTTPStatus.GATEWAY_TIMEOUT],
+    )
+    def test_a_preprints_other_retryable_statuses_are_still_retried(
+        self, monkeypatch: pytest.MonkeyPatch, status: HTTPStatus
+    ) -> None:
+        """Control: the unretried set is the 500 alone, not every 5xx."""
+        from tests.scripted_http_server import running, status_answer
+
+        with running({"/PPR1/fullTextXML": [status_answer(status)]}) as server:
+            self._client(monkeypatch, server.url).fetch_fulltext_xml("PPR1")
+
+            assert len(server.requests_to("/PPR1/fullTextXML")) == self.RETRIES + 1
+
+    def test_a_padded_lowercase_preprint_accession_is_asked_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The session is chosen on the normalised accession, not the raw one."""
+        from http import HTTPStatus
+
+        from tests.scripted_http_server import running, status_answer
+
+        with running({"/PPR1/fullTextXML": [status_answer(HTTPStatus.INTERNAL_SERVER_ERROR)]}) as server:
+            self._client(monkeypatch, server.url).fetch_fulltext_xml(" ppr1 ")
+
+            assert len(server.requests_to("/PPR1/fullTextXML")) == 1
+
+    def test_each_accession_kind_uses_its_own_session(self) -> None:
+        """A swap of the two sessions would pass every mocked test but this one."""
+        client = EuropePMCClient()
+        client._session = session_answering(_response(404))
+        client._preprint_xml_session = session_answering(_response(404))
+
+        client.fetch_fulltext_xml("PPR1")
+        client.fetch_fulltext_xml("PMC1")
+
+        assert client._preprint_xml_session.get.call_count == 1
+        assert "PPR1" in client._preprint_xml_session.get.call_args.args[0]
+        assert client._session.get.call_count == 1
+        assert "PMC1" in client._session.get.call_args.args[0]
+
+    def test_the_shared_session_still_retries_a_500(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Control: giving up applies to the XML fetch only, not the shared session."""
         from http import HTTPStatus
 
