@@ -253,7 +253,8 @@ served), the only one the `pmc-not-epmc` stratum found.
 - **No search field cleanly separates a served preprint from a 500.** The date
   its text arrived comes closest: every preprint whose text arrived in 2026
   was served and none from before 2025, but 41 of 56 from 2025 answered 500.
-  All 194 records the rule still asks in vain are preprints (#451).
+  All 194 records the rule still asks in vain are preprints, so a `PPR`
+  accession's 500 is asked once, not retried (#451).
 - **The licence and the URL list's `OA` availability code both misclassify**
   (10 and 4 served texts skipped).
 - **A nonexistent ID is also a 500** (`PMC99999999`, `PPR99999999`, probed

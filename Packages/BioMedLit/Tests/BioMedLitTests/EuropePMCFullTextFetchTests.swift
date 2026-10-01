@@ -140,6 +140,23 @@ final class EuropePMCFullTextFetchTests: XCTestCase {
         XCTAssertEqual(fullTextRequests().count, Self.fastRetry.maxAttempts)
     }
 
+    /// Europe PMC answers a preprint it will not serve with a steady 500; asking
+    /// again only repeats the answer (#451).
+    func testAPreprintsServerErrorIsAskedOnce() async throws {
+        StubURLProtocol.routes = ["fullTextXML": (500, Data())]
+        let fetch = try await service().fetchEuropePMCXML(accession: "PPR1316954")
+        XCTAssertEqual(fetch, .unreachable(.httpStatus(500)))
+        XCTAssertEqual(fullTextRequests().count, 1)
+    }
+
+    /// Control: only the 500 is given up on; a preprint's throttle keeps its budget.
+    func testAPreprintsThrottleIsStillRetried() async throws {
+        StubURLProtocol.routes = ["fullTextXML": (429, Data())]
+        let fetch = try await service().fetchEuropePMCXML(accession: "PPR1316954")
+        XCTAssertEqual(fetch, .unreachable(.httpStatus(429)))
+        XCTAssertEqual(fullTextRequests().count, Self.fastRetry.maxAttempts)
+    }
+
     func testAStatusWeDoNotModelIsUnreachableAndNotRetried() async throws {
         StubURLProtocol.routes = ["fullTextXML": (403, Data())]
         let fetch = try await service().fetchEuropePMCXML(accession: "PMC123")

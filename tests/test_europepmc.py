@@ -114,10 +114,11 @@ class TestEuropePMCClientSession:
     @patch("bmlibrarian_lite.europepmc.requests.Session")
     def test_session_headers(self, mock_session_class: MagicMock) -> None:
         """Test that session has correct headers."""
-        mock_session = MagicMock()
-        mock_session_class.return_value = mock_session
+        # One session per use, as the client makes two (#451)
+        mock_session_class.side_effect = lambda: MagicMock()
 
         client = EuropePMCClient()
+        mock_session = client._session
 
         mock_session.headers.update.assert_called_once()
         call_args = mock_session.headers.update.call_args[0][0]
@@ -128,10 +129,10 @@ class TestEuropePMCClientSession:
     @patch("bmlibrarian_lite.europepmc.requests.Session")
     def test_retry_adapter_mounted(self, mock_session_class: MagicMock) -> None:
         """Test that retry adapter is mounted for http and https."""
-        mock_session = MagicMock()
-        mock_session_class.return_value = mock_session
+        mock_session_class.side_effect = lambda: MagicMock()
 
         client = EuropePMCClient()
+        mock_session = client._session
 
         # Should mount adapters for both http and https
         assert mock_session.mount.call_count == 2
@@ -255,6 +256,7 @@ def _client_answering(answer: object) -> tuple[EuropePMCClient, MagicMock]:
     client = EuropePMCClient()
     session = session_answering(answer)
     client._session = session
+    client._preprint_xml_session = session
     return client, session
 
 
@@ -709,3 +711,77 @@ class TestXMLToMarkdown:
 
         assert "*italic*" in markdown
         assert "**bold**" in markdown
+
+
+class TestSteadyFullTextXmlFailure:
+    """A preprint's 500 is asked once; a PMC article's keeps its retries (#451).
+
+    Real sockets, because the claim is a request count and a mocked session
+    would assert whatever it was told.
+    """
+
+    RETRIES = 2
+
+    def _client(self, monkeypatch: pytest.MonkeyPatch, server_url: str) -> EuropePMCClient:
+        """A client whose REST base is a scripted loopback server.
+
+        Args:
+            monkeypatch: Pytest's patcher.
+            server_url: The scripted server's base URL.
+
+        Returns:
+            The client.
+        """
+        from bmlibrarian_lite import europepmc
+
+        monkeypatch.setattr(europepmc, "EUROPEPMC_MAX_RETRIES", self.RETRIES)
+        monkeypatch.setattr(europepmc, "EUROPEPMC_REST_BASE_URL", server_url)
+        return EuropePMCClient()
+
+    def test_a_preprints_500_is_not_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """One request, and the 500 is still reported as the status it is."""
+        from http import HTTPStatus
+
+        from tests.scripted_http_server import running, status_answer
+
+        with running({"/PPR1/fullTextXML": [status_answer(HTTPStatus.INTERNAL_SERVER_ERROR)]}) as server:
+            fetch = self._client(monkeypatch, server.url).fetch_fulltext_xml("PPR1")
+
+            assert len(server.requests_to("/PPR1/fullTextXML")) == 1
+        assert fetch == FullTextXmlFetch.unreachable(
+            RequestFailure(RequestFailureKind.HTTP_STATUS, 500)
+        )
+
+    def test_a_preprints_throttle_is_still_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Control: only the 500 is given up on; a 503 gets the full budget."""
+        from http import HTTPStatus
+
+        from tests.scripted_http_server import running, status_answer
+
+        with running({"/PPR1/fullTextXML": [status_answer(HTTPStatus.SERVICE_UNAVAILABLE)]}) as server:
+            self._client(monkeypatch, server.url).fetch_fulltext_xml("PPR1")
+
+            assert len(server.requests_to("/PPR1/fullTextXML")) == self.RETRIES + 1
+
+    def test_a_pmc_articles_500_is_still_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Control: the rule is for preprints; an open PMC article is not a steady 500."""
+        from http import HTTPStatus
+
+        from tests.scripted_http_server import running, status_answer
+
+        with running({"/PMC1/fullTextXML": [status_answer(HTTPStatus.INTERNAL_SERVER_ERROR)]}) as server:
+            self._client(monkeypatch, server.url).fetch_fulltext_xml("PMC1")
+
+            assert len(server.requests_to("/PMC1/fullTextXML")) == self.RETRIES + 1
+
+    def test_a_preprint_search_session_still_retries_a_500(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Control: giving up applies to the XML fetch only, not the shared session."""
+        from http import HTTPStatus
+
+        from tests.scripted_http_server import running, status_answer
+
+        with running({"/x": [status_answer(HTTPStatus.INTERNAL_SERVER_ERROR)]}) as server:
+            client = self._client(monkeypatch, server.url)
+            client._session.get(f"{server.url}/x")
+
+            assert len(server.requests_to("/x")) == self.RETRIES + 1

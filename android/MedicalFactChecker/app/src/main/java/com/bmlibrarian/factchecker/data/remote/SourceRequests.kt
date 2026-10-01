@@ -36,14 +36,19 @@ import kotlin.coroutines.cancellation.CancellationException
 /**
  * Run a request to a literature source, retrying it while its failure is transient.
  *
+ * @param isRetryable Whether a failure is worth another attempt; by default,
+ *   [RequestFailure.isRetryable]
  * @param block The request, failing with a [SourceRequestException]
  * @return What the request returned
  * @throws SourceRequestException when it failed and retrying would not help, or the retries ran out
  */
-internal suspend fun <T> withSourceRetries(block: suspend () -> T): T =
+internal suspend fun <T> withSourceRetries(
+    isRetryable: (RequestFailure) -> Boolean = { it.isRetryable },
+    block: suspend () -> T
+): T =
     NetworkRetry.withExponentialBackoff(
         maxRetries = Constants.NETWORK_MAX_RETRIES,
-        shouldRetry = { e -> e is SourceRequestException && e.failure.isRetryable }
+        shouldRetry = { e -> e is SourceRequestException && isRetryable(e.failure) }
     ) { block() }
 
 /**

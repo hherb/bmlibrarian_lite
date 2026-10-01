@@ -542,6 +542,47 @@ class EuropePMCServiceTest {
     }
 
     @Test
+    fun `fetchFullTextXml asks a preprint's 500 once`() = runTest {
+        // Europe PMC's steady answer for a preprint it will not serve (#451)
+        var callCount = 0
+        coEvery { api.getFullTextXml(any()) } answers {
+            callCount++
+            Response.error(500, "".toResponseBody(null))
+        }
+
+        val fetch = service.fetchFullTextXml("PPR1316954")
+
+        assertEquals(FullTextXmlFetch.Unreachable(RequestFailure(RequestFailureKind.HTTP_STATUS, 500)), fetch)
+        assertEquals(1, callCount)
+    }
+
+    @Test
+    fun `fetchFullTextXml still retries a preprint's throttle`() = runTest {
+        var callCount = 0
+        coEvery { api.getFullTextXml(any()) } answers {
+            callCount++
+            Response.error(429, "".toResponseBody(null))
+        }
+
+        service.fetchFullTextXml("PPR1316954")
+
+        assertEquals(Constants.NETWORK_MAX_RETRIES + 1, callCount)
+    }
+
+    @Test
+    fun `fetchFullTextXml still retries a PMC article's 500`() = runTest {
+        var callCount = 0
+        coEvery { api.getFullTextXml(any()) } answers {
+            callCount++
+            Response.error(500, "".toResponseBody(null))
+        }
+
+        service.fetchFullTextXml("PMC12345")
+
+        assertEquals(Constants.NETWORK_MAX_RETRIES + 1, callCount)
+    }
+
+    @Test
     fun `fetchFullTextXml keeps a connection failure's kind`() = runTest {
         coEvery { api.getFullTextXml(any()) } throws IOException("Network error")
 

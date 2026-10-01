@@ -109,8 +109,19 @@ class EuropePMCService @Inject constructor(
             return FullTextXmlFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
         }
 
+        // A preprint's 500 is Europe PMC's steady answer for text it will not
+        // serve, so it is asked once (#451); a throttle or a gateway fault, and
+        // every PMC accession's 500, keep the full budget
+        val isPreprint = normalized.startsWith(FullTextAccession.PREPRINT_PREFIX)
         val response = try {
-            withSourceRetries {
+            withSourceRetries(
+                isRetryable = { failure ->
+                    val steadyPreprint500 = isPreprint &&
+                        failure.kind == RequestFailureKind.HTTP_STATUS &&
+                        failure.statusCode == Constants.HTTP_INTERNAL_SERVER_ERROR
+                    failure.isRetryable && !steadyPreprint500
+                }
+            ) {
                 sendSourceRequest(
                     SearchProvider.EUROPE_PMC,
                     TAG,
