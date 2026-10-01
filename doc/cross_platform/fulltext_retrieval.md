@@ -156,6 +156,16 @@ not that its text is open. So:
   stated no, and the fetch is made. Preprints are held to the same rule at
   no cost: none published since 2024 is marked closed access, and in the
   years some are (2019–23), open-access preprints answer 500 as well (#451).
+- **A preprint's 500 is asked once** (#451, all three platforms; Python
+  `EUROPEPMC_PREPRINT_XML_UNRETRIED_STATUSES`). Preprints whose text arrived
+  before 2025 all answer a *steady* 500, as do 41 of the 56 that arrived in
+  2025 (survey: `doc/developer/europepmc_and_pubmed.md`), so each retry only
+  repeats it and costs paced requests and backoff time. The 500 is still reported as `HTTP_STATUS 500`, so the chain is unchanged; the
+  PDF tiers simply start sooner. A `PPR` accession's throttle (429/503) and
+  gateway faults (502/504) keep the full retry budget, and **a PMC
+  accession's 500 is still retried**: an open-access PMC article always
+  served in the survey, so there a 500 is a fault. The price is that a
+  transient 500 on a served preprint costs its XML for that attempt.
 - **A record that states closed access is Europe PMC's answer about its own
   service** (maintainer's decision, 2026-09-30), as "not held" already was:
   no failure is recorded, the chain goes on to the PDF tiers (the Europe PMC
@@ -171,9 +181,7 @@ not that its text is open. So:
 The apps do not read the record's flags yet: they ask for every accession,
 and a 500 leaves Europe PMC's side unsettled (#450). So in the apps a
 closed-access article spends every retry and can never reach an established
-absence, where Python settles it once the PDF tiers answer. Preprints whose
-text arrived before 2026 also answer a steady 500 and spend every retry, on
-all three platforms (#451).
+absence, where Python settles it once the PDF tiers answer.
 
 **The apps (#434).** Swift (`FullTextService.fetchEuropePMCXML(accession:)` →
 `FullTextXmlFetch`) and Android (`EuropePMCService.fetchFullTextXml` →

@@ -653,6 +653,17 @@ FULLTEXT_SOURCE_PRIORITY = {
 # Maximum retry attempts for Europe PMC XML retrieval
 EUROPEPMC_MAX_RETRIES = 3
 
+# The statuses Europe PMC's ``fullTextXML`` answers, for a preprint's ``PPR``
+# accession, when it will not serve the text: a steady 500 (#451; the survey
+# is in doc/developer/europepmc_and_pubmed.md). Each is asked once, since
+# every retry only repeats the answer, paced 1/s, before the PDF tiers run.
+# PMC accessions keep the full budget: an open-access PMC article always
+# served in the survey, so a 500 there is a fault. Swift
+# (``httpStatusInternalServerError``) and Android
+# (``HTTP_INTERNAL_SERVER_ERROR``) hold the same single status; keep them in
+# step.
+EUROPEPMC_PREPRINT_XML_UNRETRIED_STATUSES = (500,)
+
 # Delay between Europe PMC retry attempts (seconds)
 EUROPEPMC_RETRY_DELAY_SECONDS = 1.0
 

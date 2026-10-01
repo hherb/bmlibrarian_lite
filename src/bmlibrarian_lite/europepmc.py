@@ -55,6 +55,7 @@ from .constants import (
     EUROPEPMC_DEFAULT_FILTERS,
     EUROPEPMC_INITIAL_CURSOR,
     EUROPEPMC_MAX_RETRIES,
+    EUROPEPMC_PREPRINT_XML_UNRETRIED_STATUSES,
     EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
     EUROPEPMC_REST_BASE_URL,
     EUROPEPMC_RESULT_TYPE,
@@ -580,9 +581,25 @@ class EuropePMCClient:
     def __init__(self) -> None:
         """Initialize the Europe PMC client."""
         self._session = self._create_session()
+        # Preprint full text is asked on a session that does not retry a 500
+        # (#451). The rate limiter is keyed by host, so both sessions share
+        # one 1/s budget.
+        self._preprint_xml_session = self._create_session(
+            unretried_statuses=EUROPEPMC_PREPRINT_XML_UNRETRIED_STATUSES
+        )
 
-    def _create_session(self) -> requests.Session:
-        """Create HTTP session with retry logic."""
+    def _create_session(
+        self, unretried_statuses: tuple[int, ...] = ()
+    ) -> requests.Session:
+        """Create HTTP session with retry logic.
+
+        Args:
+            unretried_statuses: Statuses of the usual retryable set that this
+                session hands back at once instead of retrying.
+
+        Returns:
+            The session.
+        """
         session = requests.Session()
         session.headers.update({
             "User-Agent": EUROPEPMC_USER_AGENT,
@@ -595,7 +612,11 @@ class EuropePMCClient:
         retry_strategy = Retry(
             total=EUROPEPMC_MAX_RETRIES,
             backoff_factor=1,
-            status_forcelist=list(RETRYABLE_HTTP_STATUSES),
+            status_forcelist=[
+                status
+                for status in RETRYABLE_HTTP_STATUSES
+                if status not in unretried_statuses
+            ],
             allowed_methods=["HEAD", "GET"],
             raise_on_status=False,
         )
@@ -1001,8 +1022,12 @@ class EuropePMCClient:
             stays a 429 (#429). In practice Europe PMC rarely answers 404
             here: text it will not serve (closed access, older preprints)
             and an ID it does not hold both answer 500, which stays a 500
-            (#432). Callers that check ``ArticleInfo.has_fulltext_xml``
-            first do not ask for closed-access text. A blank answer is an
+            (#432).
+
+            A preprint's 500 is asked once, not retried: it is steady, so
+            each retry only repeats it (#451). Callers that check
+            ``ArticleInfo.has_fulltext_xml`` first do not ask for
+            closed-access text. A blank answer is an
             incomplete response, and an identifier that is not an accession
             is a request never made (#355), not an absence.
         """
@@ -1019,8 +1044,13 @@ class EuropePMCClient:
         accession = normalised
 
         url = f"{EUROPEPMC_REST_BASE_URL}/{accession}/fullTextXML"
+        session = (
+            self._preprint_xml_session
+            if _PREPRINT_ACCESSION_RE.fullmatch(accession)
+            else self._session
+        )
         try:
-            response = self._session.get(
+            response = session.get(
                 url,
                 headers={"Accept": "application/xml"},
                 timeout=EUROPEPMC_REQUEST_TIMEOUT_SECONDS,

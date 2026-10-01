@@ -98,7 +98,7 @@ class EuropePMCService @Inject constructor(
      * @return The XML; Europe PMC's 404; or why it could not be read, of its real
      *   kind once the retries are spent (a 429 stays a 429). A blank answer is an
      *   incomplete response, and an identifier that is not an accession is never
-     *   sent (#355)
+     *   sent (#355). A preprint's 500 is asked once, not retried (#451)
      * @throws kotlin.coroutines.cancellation.CancellationException if the caller
      *   cancelled, and nothing else: a cancelled fetch is not a dead source
      */
@@ -109,8 +109,19 @@ class EuropePMCService @Inject constructor(
             return FullTextXmlFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
         }
 
+        // A preprint's 500 is Europe PMC's steady answer for text it will not
+        // serve, so it is asked once (#451); a throttle or a gateway fault, and
+        // every PMC accession's 500, keep the full budget
+        val isPreprint = normalized.startsWith(FullTextAccession.PREPRINT_PREFIX)
         val response = try {
-            withSourceRetries {
+            withSourceRetries(
+                isRetryable = { failure ->
+                    val steadyPreprint500 = isPreprint &&
+                        failure.kind == RequestFailureKind.HTTP_STATUS &&
+                        failure.statusCode == Constants.HTTP_INTERNAL_SERVER_ERROR
+                    failure.isRetryable && !steadyPreprint500
+                }
+            ) {
                 sendSourceRequest(
                     SearchProvider.EUROPE_PMC,
                     TAG,

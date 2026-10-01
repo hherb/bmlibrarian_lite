@@ -140,6 +140,50 @@ final class EuropePMCFullTextFetchTests: XCTestCase {
         XCTAssertEqual(fullTextRequests().count, Self.fastRetry.maxAttempts)
     }
 
+    /// Europe PMC answers a preprint it will not serve with a steady 500; asking
+    /// again only repeats the answer (#451).
+    func testAPreprintsServerErrorIsAskedOnce() async throws {
+        StubURLProtocol.routes = ["fullTextXML": (500, Data())]
+        let fetch = try await service().fetchEuropePMCXML(accession: "PPR1316954")
+        XCTAssertEqual(fetch, .unreachable(.httpStatus(500)))
+        XCTAssertEqual(fullTextRequests().count, 1)
+    }
+
+    /// Control: only the 500 is given up on; a preprint's throttle keeps its budget.
+    func testAPreprintsThrottleIsStillRetried() async throws {
+        StubURLProtocol.routes = ["fullTextXML": (429, Data())]
+        let fetch = try await service().fetchEuropePMCXML(accession: "PPR1316954")
+        XCTAssertEqual(fetch, .unreachable(.httpStatus(429)))
+        XCTAssertEqual(fullTextRequests().count, Self.fastRetry.maxAttempts)
+    }
+
+    /// Control: a preprint's 404 is still an absence, asked once (#451).
+    func testAPreprints404IsStillAnAbsenceAskedOnce() async throws {
+        StubURLProtocol.routes = ["fullTextXML": (404, Data())]
+        let fetch = try await service().fetchEuropePMCXML(accession: "PPR1316954")
+        XCTAssertEqual(fetch, .absent)
+        XCTAssertEqual(fullTextRequests().count, 1)
+    }
+
+    /// Control: the unretried set is the 500 alone, not every 5xx (#451).
+    func testAPreprintsGatewayFaultsAreStillRetried() async throws {
+        for status in [502, 503, 504] {
+            StubURLProtocol.routes = ["fullTextXML": (status, Data())]
+            let before = fullTextRequests().count
+            let fetch = try await service().fetchEuropePMCXML(accession: "PPR1316954")
+            XCTAssertEqual(fetch, .unreachable(.httpStatus(status)))
+            XCTAssertEqual(fullTextRequests().count - before, Self.fastRetry.maxAttempts, "status \(status)")
+        }
+    }
+
+    /// The accession is chosen on its normalised form (#451).
+    func testAPaddedLowercasePreprintAccessionIsAskedOnce() async throws {
+        StubURLProtocol.routes = ["fullTextXML": (500, Data())]
+        let fetch = try await service().fetchEuropePMCXML(accession: " ppr1316954 ")
+        XCTAssertEqual(fetch, .unreachable(.httpStatus(500)))
+        XCTAssertEqual(fullTextRequests().count, 1)
+    }
+
     func testAStatusWeDoNotModelIsUnreachableAndNotRetried() async throws {
         StubURLProtocol.routes = ["fullTextXML": (403, Data())]
         let fetch = try await service().fetchEuropePMCXML(accession: "PMC123")

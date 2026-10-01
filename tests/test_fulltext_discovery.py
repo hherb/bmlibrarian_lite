@@ -438,6 +438,7 @@ def _discoverer_whose_xml_fetch(
         return_value=ArticleInfoFetch.served(info or _listed_article())
     )
     client._session = session_answering(answer)
+    client._preprint_xml_session = client._session
     discoverer = FulltextDiscoverer()
     discoverer._europepmc = client
     return discoverer
@@ -652,6 +653,7 @@ def _discoverer_searching(
 
     client = EuropePMCClient()
     client._session = MagicMock()
+    client._preprint_xml_session = client._session
     client._session.get.side_effect = get
     discoverer = FulltextDiscoverer()
     discoverer._europepmc = client

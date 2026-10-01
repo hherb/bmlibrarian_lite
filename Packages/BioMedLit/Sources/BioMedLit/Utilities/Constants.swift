@@ -183,6 +183,10 @@ public enum BioMedLitConstants {
     /// HTTP 429 Too Many Requests.
     public static let httpStatusRateLimited = 429
 
+    /// HTTP 500 Internal Server Error. Python's
+    /// `EUROPEPMC_PREPRINT_XML_UNRETRIED_STATUSES` holds the same status.
+    public static let httpStatusInternalServerError = 500
+
     /// Retryable HTTP status codes.
     public static let retryableStatusCodes: Set<Int> = [429, 500, 502, 503, 504]
 

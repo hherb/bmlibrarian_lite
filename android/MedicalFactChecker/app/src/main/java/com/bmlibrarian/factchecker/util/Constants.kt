@@ -59,6 +59,12 @@ object Constants {
     /** HTTP 429: rate limited. */
     const val HTTP_TOO_MANY_REQUESTS = 429
 
+    /**
+     * HTTP 500 Internal Server Error (one of [HTTP_SERVER_ERROR_STATUS_CODES]).
+     * Python's `EUROPEPMC_PREPRINT_XML_UNRETRIED_STATUSES` holds the same status.
+     */
+    const val HTTP_INTERNAL_SERVER_ERROR = 500
+
     /** HTTP server error status codes (5xx). */
     val HTTP_SERVER_ERROR_STATUS_CODES = 500..599
 

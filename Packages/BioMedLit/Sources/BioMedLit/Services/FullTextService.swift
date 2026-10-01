@@ -618,7 +618,8 @@ public actor FullTextService {
     ///   real kind once the retries are spent — a 429 stays a 429 (#434). A
     ///   blank answer is ``RequestFailure/incompleteResponse``, and an
     ///   identifier that is not an accession is never sent
-    ///   (``RequestFailure/requestFailed``, #355).
+    ///   (``RequestFailure/requestFailed``, #355). A preprint's 500 is asked
+    ///   once, not retried (#451).
     /// - Throws: `CancellationError` if the caller cancelled, and nothing else:
     ///   a cancelled fetch is not a dead source.
     func fetchEuropePMCXML(accession: String) async throws -> FullTextXmlFetch {
@@ -644,7 +645,12 @@ public actor FullTextService {
                 config: europePMCRetry,
                 shouldRetry: RetryHelper.retryOnlyTransient
             ) {
-                try await self.requestEuropePMCXML(url)
+                try await self.requestEuropePMCXML(
+                    url,
+                    retriesServerFault: !normalized.hasPrefix(
+                        BioMedLitConstants.europePMCPreprintAccessionPrefix
+                    )
+                )
             }
         } catch where error.isCancellation {
             throw CancellationError()
@@ -682,14 +688,23 @@ public actor FullTextService {
 
     /// One request for full-text XML, throwing only what is worth retrying.
     ///
-    /// - Parameter url: The `fullTextXML` URL.
+    /// - Parameters:
+    ///   - url: The `fullTextXML` URL.
+    ///   - retriesServerFault: Whether a 500 is treated as transient. It is not
+    ///     for a preprint's `PPR` accession: Europe PMC answers a steady 500 for
+    ///     text it will not serve, so each retry only repeats it (#451).
+    ///     Throttles and gateway faults stay retryable.
     /// - Returns: The status and body of any answer the retry policy does not
     ///   treat as transient.
     /// - Throws: `FullTextError.serverError` for a status in
-    ///   `BioMedLitConstants.retryableStatusCodes` (429, 500, 502–504),
-    ///   `FullTextError.invalidResponse` when the answer is not HTTP, and the
+    ///   `BioMedLitConstants.retryableStatusCodes` (429, 500, 502–504), except
+    ///   a 500 when `retriesServerFault` is false (that 500 is returned as a
+    ///   status), `FullTextError.invalidResponse` when the answer is not HTTP, and the
     ///   transport's own error otherwise.
-    private func requestEuropePMCXML(_ url: URL) async throws -> (status: Int, body: Data) {
+    private func requestEuropePMCXML(
+        _ url: URL,
+        retriesServerFault: Bool = true
+    ) async throws -> (status: Int, body: Data) {
         var request = URLRequest(url: url)
         request.setValue("application/xml", forHTTPHeaderField: "Accept")
         request.timeoutInterval = BioMedLitConstants.defaultRequestTimeout
@@ -701,7 +716,8 @@ public actor FullTextService {
 
         let statusCode = httpResponse.statusCode
         BioMedLitLib.logger?.debug("Europe PMC response status: \(statusCode)", category: .fullText)
-        if BioMedLitConstants.retryableStatusCodes.contains(statusCode) {
+        if BioMedLitConstants.retryableStatusCodes.contains(statusCode),
+           retriesServerFault || statusCode != BioMedLitConstants.httpStatusInternalServerError {
             BioMedLitLib.logger?.warning(
                 "Europe PMC server error (\(statusCode)), will retry with backoff",
                 category: .fullText
