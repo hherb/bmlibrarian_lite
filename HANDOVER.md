@@ -8,9 +8,17 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-Nothing. #451 is on branch `fix/preprint-steady-500-451`, **PR #455**
-(compress it once merged); pick the next slice from **Potential follow-ups** (freshest: #450,
-#453, #454).
+**iOS/macOS only: automatic full text for papers scored 4-5**, branch
+`feat/auto-fulltext-top-papers`, **PR #458** (compress once merged). Setting
+`autoFetchFullTextEnabled`; `Utilities/FullTextAutoFetch.swift` holds the pure
+rules (selection, retrieval loop, budget fit). Deliberately no Python/Android
+counterpart, so it is not a parity gap. Rules that bind: per-document failures
+go to `workflow.fullTextNotice`, **not** `session.errorMessage` (that drives the
+"Report Generation Failed" / retry UI); full texts are dropped to abstracts when
+the estimated input cost would cross the run budget; the 40,000-character cut is
+the product's call and is announced to the model. Open: the transparency notice
+still uses `errorMessage` (issue 459). Pick the next slice from
+**Potential follow-ups** (freshest: #450, #453, #454).
 
 ## Recently landed (context)
 

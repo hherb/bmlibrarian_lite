@@ -149,7 +149,8 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(minScoreThreshold, forKey: Keys.minScoreThreshold) }
     }
 
-    /// Fetch full text automatically for the most relevant papers (score 4-5).
+    /// Fetch full text automatically for the most relevant papers: those at or
+    /// above `WorkflowConstants.fullTextAutoFetchMinScore` (and the user's threshold).
     ///
     /// Those papers influence the report most, so their full text is retrieved
     /// before citation extraction and transparency analysis, and both read it.

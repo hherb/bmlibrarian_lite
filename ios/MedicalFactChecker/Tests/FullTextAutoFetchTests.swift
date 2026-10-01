@@ -16,6 +16,7 @@
 
 
 import XCTest
+import BioMedLit
 @testable import MedicalFactChecker
 
 /// Which papers the automatic full-text setting fetches, and what citation
@@ -195,5 +196,233 @@ final class FullTextAutoFetchTests: XCTestCase {
 
         XCTAssertTrue(notice.contains("4 documents"))
         XCTAssertFalse(notice.contains("a; b"))
+    }
+
+    // MARK: - Selection by identifier
+
+    func testAPMCIDAloneIsEnoughToLookAPaperUp() {
+        let document = makeDocument(pmid: "")
+        document.pmcId = "PMC1234567"
+
+        XCTAssertEqual(FullTextAutoFetch.documentsToFetch(from: [document], minScoreThreshold: 3).count, 1)
+    }
+
+    /// A preprint's accession lives in the `pmid` slot, with no PMC ID or DOI.
+    func testAPreprintAccessionInThePMIDSlotIsFetched() {
+        let preprint = makeDocument(pmid: "PPR123456")
+
+        XCTAssertEqual(FullTextAutoFetch.documentsToFetch(from: [preprint], minScoreThreshold: 3).count, 1)
+    }
+
+    // MARK: - Citation text edges
+
+    func testATextOfExactlyTheLimitIsNotCut() {
+        let document = makeDocument()
+        document.fullTextContent = String(repeating: "a", count: 10)
+
+        let result = FullTextAutoFetch.citationText(for: document, maxCharacters: 10)
+
+        XCTAssertEqual(result?.text.count, 10)
+        XCTAssertEqual(result?.truncated, false)
+    }
+
+    func testAWhitespaceOnlyTextIsNoCitationText() {
+        let document = makeDocument()
+        document.fullTextContent = "  \n  "
+
+        XCTAssertNil(FullTextAutoFetch.citationText(for: document))
+    }
+
+    // MARK: - Settings gates
+
+    func testCitationFullTextIsGivenOnlyWhenTheSettingIsOn() {
+        let document = makeDocument()
+        document.fullTextContent = "Body."
+
+        XCTAssertNotNil(FullTextAutoFetch.citationFullText(
+            for: document, autoFetchEnabled: true, minScoreThreshold: 3))
+        XCTAssertNil(FullTextAutoFetch.citationFullText(
+            for: document, autoFetchEnabled: false, minScoreThreshold: 3))
+    }
+
+    /// A text fetched by hand for a lower-scored paper must not change its cost.
+    func testCitationFullTextIsNotGivenForALowerScoredPaper() {
+        let document = makeDocument(score: 3)
+        document.fullTextContent = "Body."
+
+        XCTAssertNil(FullTextAutoFetch.citationFullText(
+            for: document, autoFetchEnabled: true, minScoreThreshold: 3))
+    }
+
+    func testAnUnanalysedDocumentNeedsAPassWhateverTheSetting() {
+        let document = makeDocument()
+
+        XCTAssertTrue(FullTextAutoFetch.needsTransparencyPass(document, autoFetchEnabled: false))
+        XCTAssertTrue(FullTextAutoFetch.needsTransparencyPass(document, autoFetchEnabled: true))
+    }
+
+    /// An analysis made on the abstract alone is redone once full text is
+    /// there, but only when the setting is on.
+    func testAnAbstractOnlyAnalysisIsRedoneOnlyWithTheSettingOn() {
+        let document = Document(pmid: "12345678", title: "A Study", abstract: "")
+        document.doi = "10.1000/example"
+        var builder = TransparencyResultBuilder(pmid: "12345678")
+        builder.title = "A Study"
+        builder.fullTextSearched = false
+        document.storeTransparencyResult(builder.build())
+        document.fullTextContent = "Body text."
+
+        XCTAssertFalse(FullTextAutoFetch.needsTransparencyPass(document, autoFetchEnabled: false))
+        XCTAssertTrue(FullTextAutoFetch.needsTransparencyPass(document, autoFetchEnabled: true))
+    }
+
+    // MARK: - Retrieval
+
+    private struct Boom: Error {}
+
+    func testRetrievalAppliesEachFetchAndPersists() async throws {
+        let docs = [makeDocument(pmid: "1"), makeDocument(pmid: "2")]
+        var fetched: [String] = []
+        var saves = 0
+
+        let failures = try await FullTextAutoFetch.retrieve(
+            docs,
+            fetch: { fetched.append($0.pmid) },
+            persist: { saves += 1 }
+        )
+
+        XCTAssertTrue(failures.isEmpty)
+        XCTAssertEqual(fetched, ["1", "2"])
+        XCTAssertEqual(saves, 2)
+    }
+
+    /// The expected outcome for a closed-access paper: recorded, not a failure.
+    func testNoFullTextIsRecordedAndIsNotAFailure() async throws {
+        let document = makeDocument()
+
+        let failures = try await FullTextAutoFetch.retrieve(
+            [document],
+            fetch: { _ in throw FullTextError.noFullTextAvailable },
+            persist: {}
+        )
+
+        XCTAssertTrue(failures.isEmpty)
+        XCTAssertTrue(document.fullTextAttempted)
+    }
+
+    /// Any other error leaves the document untouched, so the next run retries
+    /// it, and the loop goes on to the next one.
+    func testAnotherErrorIsReportedAndLeavesTheDocumentForARetry() async throws {
+        let bad = makeDocument(pmid: "1")
+        let good = makeDocument(pmid: "2")
+
+        let failures = try await FullTextAutoFetch.retrieve(
+            [bad, good],
+            fetch: { if $0.pmid == "1" { throw Boom() } },
+            persist: {}
+        )
+
+        XCTAssertEqual(failures.map { $0.document.pmid }, ["1"])
+        XCTAssertFalse(bad.fullTextAttempted)
+        XCTAssertEqual(
+            FullTextAutoFetch.documentsToFetch(from: [bad], minScoreThreshold: 3).count, 1
+        )
+    }
+
+    func testAFailedSaveIsReported() async throws {
+        let failures = try await FullTextAutoFetch.retrieve(
+            [makeDocument()],
+            fetch: { _ in },
+            persist: { throw Boom() }
+        )
+
+        XCTAssertEqual(failures.count, 1)
+    }
+
+    func testCancellationStopsTheLoopRatherThanCountingAsAFailure() async {
+        var fetched = 0
+        do {
+            _ = try await FullTextAutoFetch.retrieve(
+                [makeDocument(pmid: "1"), makeDocument(pmid: "2")],
+                fetch: { _ in fetched += 1; throw CancellationError() },
+                persist: {}
+            )
+            XCTFail("cancellation must propagate")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertEqual(fetched, 1)
+    }
+
+    /// A cancelled request surfaces as `URLError.cancelled`, not `CancellationError`.
+    func testAURLCancellationAlsoStopsTheLoop() async {
+        do {
+            _ = try await FullTextAutoFetch.retrieve(
+                [makeDocument()],
+                fetch: { _ in throw URLError(.cancelled) },
+                persist: {}
+            )
+            XCTFail("cancellation must propagate")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+    }
+
+    // MARK: - Budget
+
+    private func input(_ pmid: String, fullTextCharacters: Int?) -> CitationInput {
+        CitationInput(
+            pmid: pmid, title: "T", abstract: "Abs.", authors: "A", year: 2020,
+            fullText: fullTextCharacters.map { String(repeating: "a", count: $0) },
+            fullTextTruncated: false
+        )
+    }
+
+    func testTextsWithinTheBudgetAreKept() {
+        // 400 characters = 100 tokens at $1 each = $100.
+        let result = FullTextAutoFetch.fittingBudget(
+            [input("1", fullTextCharacters: 400)], remainingUSD: 100, usdPerInputToken: 1
+        )
+
+        XCTAssertEqual(result.droppedCount, 0)
+        XCTAssertNotNil(result.inputs[0].fullText)
+    }
+
+    func testTextsPastTheBudgetFallBackToTheAbstractInOrder() {
+        let result = FullTextAutoFetch.fittingBudget(
+            [input("1", fullTextCharacters: 400),
+             input("2", fullTextCharacters: 400),
+             input("3", fullTextCharacters: nil)],
+            remainingUSD: 150, usdPerInputToken: 1
+        )
+
+        XCTAssertEqual(result.droppedCount, 1)
+        XCTAssertNotNil(result.inputs[0].fullText)
+        XCTAssertNil(result.inputs[1].fullText)
+        XCTAssertFalse(result.inputs[1].fullTextTruncated)
+        XCTAssertEqual(result.inputs[1].abstract, "Abs.")
+        XCTAssertEqual(result.inputs[2].pmid, "3")
+    }
+
+    func testTheBudgetNoticeCountsThePapers() {
+        XCTAssertTrue(FullTextAutoFetch.budgetNotice(droppedCount: 1).contains("1 paper "))
+        XCTAssertTrue(FullTextAutoFetch.budgetNotice(droppedCount: 3).contains("3 papers"))
+    }
+
+    // MARK: - Setting
+
+    @MainActor
+    func testTheSettingDefaultsOffPersistsAndResets() {
+        let settings = AppSettings.shared
+        let key = "auto_fetch_full_text_enabled"
+        let original = settings.autoFetchFullTextEnabled
+        defer { settings.autoFetchFullTextEnabled = original }
+
+        settings.autoFetchFullTextEnabled = true
+        XCTAssertTrue(UserDefaults.standard.bool(forKey: key))
+
+        settings.resetToDefaults()
+        XCTAssertFalse(settings.autoFetchFullTextEnabled)
+        XCTAssertFalse(UserDefaults.standard.bool(forKey: key))
     }
 }

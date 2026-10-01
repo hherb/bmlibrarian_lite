@@ -65,6 +65,15 @@ enum WorkflowConstants {
     /// so, so the model does not treat the cut as the end of the paper.
     static let maxCitationFullTextCharacters = 40_000
 
+    /// Characters per token assumed when estimating what a text costs to send.
+    ///
+    /// A rough rule for English prose; it only has to be close enough to keep a
+    /// batch of full texts from overshooting the run budget by several times.
+    static let charactersPerToken = 4
+
+    /// Tokens in the unit model prices are quoted per.
+    static let tokensPerMillion = 1_000_000
+
     // MARK: - Concurrency
 
     /// Default number of concurrent requests for cloud LLM providers.

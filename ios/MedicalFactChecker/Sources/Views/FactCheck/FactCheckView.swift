@@ -103,6 +103,9 @@ struct FactCheckView: View {
                         if let notice = workflow.smartSearchNotice {
                             IncompleteSearchNotice(text: notice)
                         }
+                        if let notice = workflow.fullTextNotice {
+                            IncompleteSearchNotice(text: notice)
+                        }
 
                         if workflow.isRunning {
                             ProgressSection(workflow: workflow)
