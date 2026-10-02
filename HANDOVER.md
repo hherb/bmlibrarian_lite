@@ -21,7 +21,7 @@ Citations the report was not made from (`unreportedCitationCount`, against
 retry (user's call); a regenerated report deletes the one it replaces. Earlier
 builds' stored notices offer no retry beside a report
 (`isStoredTransparencyNotice`, `storedFetchCancelledNotice`; never reword
-them). **Next: #461** (top of the follow-ups).
+them). **Next: #461, then #462** (top of the follow-ups).
 
 ## Recently landed (context)
 
@@ -227,6 +227,11 @@ Open issues by family; each issue carries the detail. None blocks another.
   does. **Parity is the rule** (user's call): add `analyzeTransparency()`
   between `extractCitations()` and `generateReport()`. Until then the derived
   notice names every study a fetch-more adds.
+- **#462** iOS/macOS have no working cancel: the macOS Cancel button is a
+  `// TODO`, iOS has none, and `fetchMoreEvidence()` runs in an unstored
+  `Task`, out of `workflowTask`'s reach. Android's works. A cancel must keep
+  #460's rules: no `errorMessage` beside a standing report, Regenerate for
+  citations the report lacks.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 
