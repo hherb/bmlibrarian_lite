@@ -8,40 +8,25 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**iOS/macOS: fetching more evidence runs the transparency step** (#461),
-branch `fix/fetch-more-transparency-461` (compress once merged). Android
-parity: the post-search tail of `fetchMoreEvidence()` is now
-`regenerateReportWithNewEvidence(analyzeTransparencyUsing:)` — extract
-citations, analyse transparency (step `.analyzingTransparency`), regenerate
-the report — tested through its analyser seam in
-`TransparencyNoticeTests`. The old report is deleted only once another has
-replaced it (`!==` the session's). **Next: #462** (top of the follow-ups).
-
-**Unpaywall landing pages are read, never downloaded as the PDF** (all three;
-#464), branch `fix/unpaywall-landing-page`, **PR #465** (compress once
-merged). A location's PDF is `url_for_pdf` only (blank is none, in Python
-discovery too); when no location has one, the landing page is read once for
-`<meta name="citation_pdf_url">`, resolved against the page served after
-redirects (http(s) only; an absolute URL kept as given). A page served as
-`application/pdf` is the PDF. Pinned by
-`doc/cross_platform/fulltext_parity/unpaywall_landing_page.json` (four
-tables; each platform asserts it reads every one); contract
-`fulltext_retrieval.md` "Landing Pages". **Only `;`-terminated references
-decode** (five names, numbers; else U+FFFD): `html.unescape` turned a URL's
-`&section=` into `§ion=`. An undeclared charset is UTF-8 on all three.
-**Unreachable is not "declares none"** on all three (`web_page_status_unsettled`,
-the #446 rule, ported): Python records a `SourceLookupFailure` (the body read
-is inside the guard); Swift carries `FullTextResult.openAccessShortfall` and
-the app keeps a stored PDF link rather than trade it for that fallback
-(`FullTextAutoFetch.storedLinkKept`); Android raises
-`OpenAccessUnsettledException` and retries 429/5xx. **Records holding only an
-undownloaded PDF link** (`Document.holdsOnlyUndownloadedPDFLink`: pre-#464
-landing pages, and failed downloads) are fetched again every run and offer
-**Try Download Again** (the maintainer's decision). **Android's Unpaywall tier
-never ran before this**: its Retrofit models were not `@Serializable`. The page
-is read up to 2 MiB (`LANDING_PAGE_MAX_BYTES`; user's call: rule 13 guards
-research content, not a lookup page). Lodged: **#466**
-(tell the app reader), **#467** (remaining parity edges).
+**iOS/macOS: a working cancel** (#462), branch `fix/ios-cancel-462`
+(compress once merged). macOS's Cancel button was a `// TODO`, iOS had none.
+**Every workflow entry point runs its whole body through
+`runAsWorkflowTask(_:)`** (fetch-more, retry, smart search included — they
+ran in unstored view `Task`s before), which waits for a cancelled run to wind
+down before starting new work; a new entry point must do the same.
+**`recordStop(of:reason:)` is the one record of a stop** (cancel, background
+expiry, a stray `CancellationError`): beside a standing report the session
+stays `.completed` with no `errorMessage` (no red retry; unreported citations
+get the amber Regenerate), without one it waits at `.awaitingUserDecision`
+("Cancelled by user"). **`isStop(error)`**: a cancelled request throws
+`URLError(.cancelled)`, not `CancellationError` — read as a failure it
+recorded a cancelled run as failed. Scoring and citation task groups start
+no document after a cancel and give a stopped one **no result** (a failure is
+checkpointed and `scoreParseFailed` blocks it forever). `runWorkflow` checks
+cancellation before "Complete": a cancel moves `currentStep`, every step
+guard then reads false, and the run completed without a report. Test seam:
+`useServices(llm:pubMed:)`; tests in `WorkflowCancelTests`. Smart search
+throws on a cancel only after recording its shortfalls. Lodged: **#468**.
 
 ## Recently landed (context)
 
@@ -49,29 +34,26 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
-- **iOS/macOS: a missing transparency rating is a notice, not a failed run**
-  (PR #460, #459). The notice is **derived from the documents**
-  (`Document.unratedTransparencyNotice`) once a report exists, on the Check
-  and Report tabs. **`session.errorMessage` means a failure and nothing
-  else**: run starts and completions clear it (`forgetLastStop`). Citations a
-  report was not made from (`unreportedCitationCount`) get an amber
-  **Regenerate Report**, never the red retry (user's call). Earlier builds'
-  stored notices (`isStoredTransparencyNotice`, `storedFetchCancelledNotice`)
-  are never reworded.
-- **iOS/macOS automatic full text for papers scored 4-5** (PR #458). Setting
-  `autoFetchFullTextEnabled`; the pure rules are in
-  `Utilities/FullTextAutoFetch.swift`; no Python/Android counterpart, on
-  purpose. **Per-document misses go to a workflow notice, never
-  `session.errorMessage`** (it drives the retry UI). Full texts drop to abstracts when
-  the estimated input cost would cross the run budget; the 40,000-character
-  cut is the product's call and is announced to the model.
-
-- **A preprint's `fullTextXML` 500 is asked once** (all three; #451): a `PPR`
-  accession's 500 is not retried (Python
-  `EUROPEPMC_PREPRINT_XML_UNRETRIED_STATUSES`, Swift `retriesServerFault`,
-  Android `withSourceRetries(isRetryable)`); every PMC accession's 500 and any
-  429/502/503/504 keep the full budget (user's call). Still reported as
-  `HTTP_STATUS 500`. Contract: `fulltext_retrieval.md`.
+- **Unpaywall landing pages are read, never downloaded as the PDF** (all
+  three; PR #465, #464): `url_for_pdf` only, else the page's
+  `citation_pdf_url` (read up to 2 MiB). Contract `fulltext_retrieval.md`
+  "Landing Pages", fixture `fulltext_parity/unpaywall_landing_page.json`.
+  **Only `;`-terminated references decode**; **unreachable is not "declares
+  none"** on all three. An undownloaded PDF link offers **Try Download Again**.
+- **iOS/macOS workflow notices** (PRs #458, #460, #463; #459, #461).
+  **`session.errorMessage` means a failure and nothing else** (it drives the
+  red retry); run starts and completions clear it (`forgetLastStop`).
+  Per-document misses are notices: `fullTextNotice`, and the transparency
+  notice **derived from the documents** (`Document.unratedTransparencyNotice`).
+  Citations a report lacks (`unreportedCitationCount`) get an amber
+  **Regenerate Report** (user's call). Fetch-more runs the transparency step
+  (`regenerateReportWithNewEvidence`); an old report is deleted only once
+  another replaced it. Auto full text for papers scored 4-5
+  (`FullTextAutoFetch.swift`, Apple only on purpose; the 40,000-character cut
+  is the product's call). Earlier builds' stored notices are never reworded.
+- **A preprint's `fullTextXML` 500 is asked once** (all three; #451); every
+  PMC accession's 500 and any 429/502/503/504 keep the full budget (user's
+  call). Contract: `fulltext_retrieval.md`.
 - **`fullTextXML` is asked only when Europe PMC's record allows it** (Python;
   PR #452, #432): it answers **500, not 404**, for a held closed-access
   article. `europepmc.offers_fulltext_xml` skips only a record that *states*
@@ -228,11 +210,8 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **#462** iOS/macOS have no working cancel: the macOS Cancel button is a
-  `// TODO`, iOS has none, and `fetchMoreEvidence()` runs in an unstored
-  `Task`, out of `workflowTask`'s reach. Android's works. A cancel must keep
-  #460's rules: no `errorMessage` beside a standing report, Regenerate for
-  citations the report lacks.
+- **#466** apps: tell the reader the open-access copy was unreachable;
+  **#467** landing-page parsing parity edges; **#468** cancel follow-ups.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 

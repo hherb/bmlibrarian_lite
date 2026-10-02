@@ -417,6 +417,15 @@ struct ProgressSection: View {
                 Text(workflow.progressMessage)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
+
+                if workflow.isRunning {
+                    Spacer()
+                    Button("Cancel", role: .cancel) {
+                        workflow.cancelFactCheck()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!workflow.canCancel)
+                }
             }
 
             // Generated query (show once generated, collapsed by default)

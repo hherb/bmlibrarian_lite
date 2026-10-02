@@ -90,20 +90,7 @@ struct ReportContentView: View {
 
     /// Overlay shown when fetching more evidence.
     private var fetchingProgressOverlay: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-                .scaleEffect(1.5)
-            Text(workflow?.progressMessage ?? "Fetching more evidence...")
-                .font(.headline)
-            if let session = report.session {
-                Text("\(session.documentsFound) documents, \(session.citationsExtracted) citations")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding(32)
-        .background(.regularMaterial)
-        .cornerRadius(16)
+        FetchingEvidenceOverlay(workflow: workflow, session: report.session)
     }
 
     private var reportContent: some View {
@@ -257,6 +244,43 @@ struct ReportContentView: View {
 /// screen shows the verdict and the summary ahead of that text — so a notice
 /// left where it was written would reach the reader after the verdict it
 /// qualifies. It is drawn here instead and taken off the body, never dropped.
+/// What the report shows while more evidence is fetched for it: the step
+/// under way, the session's counts, and a way to stop.
+///
+/// Cancelling leaves the report standing (#462): nothing is recorded as a
+/// failure, and citations already extracted for the stopped batch are offered
+/// for a new report.
+struct FetchingEvidenceOverlay: View {
+    /// The workflow fetching the evidence.
+    let workflow: FactCheckWorkflow?
+    /// The session the report belongs to, for its counts.
+    let session: FactCheckSession?
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .scaleEffect(1.5)
+            Text(workflow?.progressMessage ?? "Fetching more evidence...")
+                .font(.headline)
+            if let session {
+                Text("\(session.documentsFound) documents, \(session.citationsExtracted) citations")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            if let workflow {
+                Button("Cancel", role: .cancel) {
+                    workflow.cancelFactCheck()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!workflow.canCancel)
+            }
+        }
+        .padding(32)
+        .background(.regularMaterial)
+        .cornerRadius(16)
+    }
+}
+
 struct IncompleteSearchNotice: View {
     /// The notice, as plain text.
     let text: String
@@ -429,20 +453,7 @@ struct ReportView: View {
 
                 // Progress overlay when fetching more evidence
                 if isFetchingEvidence {
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                        Text(workflow?.progressMessage ?? "Fetching more evidence...")
-                            .font(.headline)
-                        if let session = report.session {
-                            Text("\(session.documentsFound) documents, \(session.citationsExtracted) citations")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .padding(32)
-                    .background(.regularMaterial)
-                    .cornerRadius(16)
+                    FetchingEvidenceOverlay(workflow: workflow, session: report.session)
                 }
             }
             .navigationTitle("Evidence Report")

@@ -127,7 +127,8 @@ struct MacFactCheckView: View {
                     buttonText: buttonText,
                     selectedSearchProvider: $selectedSearchProvider,
                     includePreprints: $includePreprints,
-                    onSubmit: handleSubmit
+                    onSubmit: handleSubmit,
+                    onCancel: { workflow?.cancelFactCheck() }
                 )
 
                 // Budget display
@@ -368,6 +369,8 @@ struct MacClaimInputSection: View {
     @Binding var includePreprints: Bool
     /// Callback when the user submits the claim.
     let onSubmit: () -> Void
+    /// Callback when the user cancels the run under way.
+    let onCancel: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: MacSpacing.standard) {
@@ -421,9 +424,7 @@ struct MacClaimInputSection: View {
                     .disabled(!canSubmit)
 
                     if isRunning {
-                        Button("Cancel") {
-                            // TODO: Implement cancellation
-                        }
+                        Button("Cancel", action: onCancel)
                         .buttonStyle(.bordered)
                         .controlSize(.large)
                     }
