@@ -242,6 +242,54 @@ final class TransparencyNoticeTests: XCTestCase {
         XCTAssertFalse(workflow.canRetryReportGeneration)
     }
 
+    // MARK: - Fetching more evidence (#461)
+
+    /// "Get More Evidence" used to go from citations straight to the report,
+    /// so a study the batch made relevant was cited but never rated. Only the
+    /// new study is analysed: the one rated by the first run keeps its result.
+    ///
+    /// No LLM service is set up here, so citation extraction and report
+    /// generation return without work; the transparency step is the one under
+    /// test.
+    func testFetchingMoreEvidenceRatesTheStudiesTheBatchAdded() async throws {
+        let session = makeSession(titles: ["Rated", "Added"])
+        let rated = try XCTUnwrap(session.documents?.first { $0.title == "Rated" })
+        XCTAssertTrue(rated.storeTransparencyResult(result()))
+        let workflow = restore(session)
+        XCTAssertEqual(
+            workflow.transparencyNotice,
+            "No transparency rating for: Added. Open a study to analyse it.",
+            "control: the added study starts unrated"
+        )
+
+        var analysed: [String?] = []
+        try await workflow.regenerateReportWithNewEvidence(
+            analyzeTransparencyUsing: { [result = result()] doi, _, _ in
+                analysed.append(doi)
+                return result
+            }
+        )
+
+        XCTAssertEqual(analysed, ["10.1000/Added"])
+        XCTAssertNil(workflow.transparencyNotice)
+    }
+
+    /// The previous report is deleted only once another has replaced it.
+    /// Here none was generated, so the reader keeps the one they had.
+    func testARegenerationThatMadeNoReportKeepsTheOldOne() async throws {
+        let session = makeSession()
+        let report = try XCTUnwrap(session.report)
+        let workflow = restore(session)
+
+        try await workflow.regenerateReportWithNewEvidence(
+            analyzeTransparencyUsing: { [result = result()] _, _, _ in result }
+        )
+        try context.save()
+
+        XCTAssertTrue(session.report === report)
+        XCTAssertFalse(report.isDeleted)
+    }
+
     // MARK: - What the analyser is given
 
     /// The analyser takes its three values by position, so swapping two
