@@ -1267,6 +1267,30 @@ struct DocumentDetailSheet: View {
                         FullTextSourceBadge(source: fullTextSource)
                     }
                 }
+                // Only a PDF link, never downloaded: how earlier builds stored an
+                // Unpaywall landing page, and how a failed download is kept, so
+                // it is offered again (#464)
+                if document.holdsOnlyUndownloadedPDFLink {
+                    HStack(spacing: 12) {
+                        Button(action: fetchFullText) {
+                            if isLoadingFullText {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            } else {
+                                Label("Try Download Again", systemImage: "arrow.clockwise")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isLoadingFullText)
+
+                        if let error = fullTextError {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                                .lineLimit(2)
+                        }
+                    }
+                }
             } else if document.fullTextUnavailable {
                 // Already tried, not available
                 HStack(spacing: 8) {
@@ -1340,6 +1364,10 @@ struct DocumentDetailSheet: View {
             do {
                 let service = BMLFullTextService.create(from: .shared)
                 let bmlResult = try await service.fetchFullText(for: document)
+                // Shown as the error, the stored link left as it is (#464)
+                if let kept = FullTextAutoFetch.storedLinkKept(document, refetched: bmlResult) {
+                    throw kept
+                }
                 let result = BioMedLitAdapters.toAppFullTextResult(bmlResult)
 
                 await MainActor.run {

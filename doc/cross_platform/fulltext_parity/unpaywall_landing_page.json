@@ -1,0 +1,361 @@
+{
+  "schema_version": 2,
+  "description": "Which URL the Unpaywall tier tries, the PDF a landing page declares, the character references decoded in the tag's value, and which error statuses leave a landing page unread (#464). Read by tests/test_oa_landing_page.py, Packages/BioMedLit UnpaywallLandingPageContractTests and Android UnpaywallLandingPageContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, 'Unpaywall PDF' > 'Landing Pages (#464)'. Every case is asserted on all three platforms, and each platform asserts it reads every table: add a row here, not a test on one platform.",
+  "unpaywall_choice": [
+    {
+      "name": "the best location's url_for_pdf",
+      "response": {
+        "best_oa_location": {
+          "url": "https://pub.example.org/a.pdf",
+          "url_for_pdf": "https://pub.example.org/a.pdf",
+          "url_for_landing_page": "https://pub.example.org/a"
+        },
+        "oa_locations": [
+          {
+            "url": "https://pub.example.org/a.pdf",
+            "url_for_pdf": "https://pub.example.org/a.pdf",
+            "url_for_landing_page": "https://pub.example.org/a"
+          }
+        ]
+      },
+      "pdf_url": "https://pub.example.org/a.pdf",
+      "landing_page": null
+    },
+    {
+      "name": "another location's url_for_pdf beats the best location's landing page",
+      "response": {
+        "best_oa_location": {
+          "url": "https://repo.example.org/item/1",
+          "url_for_pdf": null,
+          "url_for_landing_page": "https://repo.example.org/item/1"
+        },
+        "oa_locations": [
+          {
+            "url": "https://repo.example.org/item/1",
+            "url_for_pdf": null,
+            "url_for_landing_page": "https://repo.example.org/item/1"
+          },
+          {
+            "url": "https://other.example.org/b.pdf",
+            "url_for_pdf": "https://other.example.org/b.pdf",
+            "url_for_landing_page": "https://other.example.org/b"
+          }
+        ]
+      },
+      "pdf_url": "https://other.example.org/b.pdf",
+      "landing_page": null
+    },
+    {
+      "name": "no url_for_pdf anywhere: the best location's landing page is visited, never used as a PDF (PMID 40608933)",
+      "response": {
+        "best_oa_location": {
+          "url": "https://hdl.handle.net/2115/95934",
+          "url_for_pdf": null,
+          "url_for_landing_page": "https://hdl.handle.net/2115/95934"
+        },
+        "oa_locations": [
+          {
+            "url": "https://hdl.handle.net/2115/95934",
+            "url_for_pdf": null,
+            "url_for_landing_page": "https://hdl.handle.net/2115/95934"
+          }
+        ]
+      },
+      "pdf_url": null,
+      "landing_page": "https://hdl.handle.net/2115/95934"
+    },
+    {
+      "name": "a landing page given only as url",
+      "response": {
+        "best_oa_location": {
+          "url": "https://repo.example.org/item/2",
+          "url_for_pdf": null,
+          "url_for_landing_page": null
+        },
+        "oa_locations": []
+      },
+      "pdf_url": null,
+      "landing_page": "https://repo.example.org/item/2"
+    },
+    {
+      "name": "no best location: the first location with a landing page",
+      "response": {
+        "best_oa_location": null,
+        "oa_locations": [
+          {
+            "url": null,
+            "url_for_pdf": null,
+            "url_for_landing_page": null
+          },
+          {
+            "url": "https://repo.example.org/item/3",
+            "url_for_pdf": null,
+            "url_for_landing_page": "https://repo.example.org/item/3/landing"
+          }
+        ]
+      },
+      "pdf_url": null,
+      "landing_page": "https://repo.example.org/item/3/landing"
+    },
+    {
+      "name": "a blank url_for_pdf is no PDF",
+      "response": {
+        "best_oa_location": {
+          "url": "https://repo.example.org/item/4",
+          "url_for_pdf": "  ",
+          "url_for_landing_page": "https://repo.example.org/item/4"
+        },
+        "oa_locations": []
+      },
+      "pdf_url": null,
+      "landing_page": "https://repo.example.org/item/4"
+    },
+    {
+      "name": "fields absent altogether",
+      "response": {
+        "is_oa": false
+      },
+      "pdf_url": null,
+      "landing_page": null
+    }
+  ],
+  "citation_pdf_url": [
+    {
+      "name": "the HUSCAP landing page of PMID 40608933, as served",
+      "page_url": "https://eprints.lib.hokudai.ac.jp/repo/huscap/all/95934/",
+      "html": "<head>\n\t<meta name=\"citation_title\" content=\"Membrane topology inversion of GGCX\" />\n\t<meta name=\"citation_pdf_url\" content=\"https://eprints.lib.hokudai.ac.jp/repo/huscap/all/95934/Okazakietal_2025.pdf\" />\n</head><body><a href=\"./Okazakietal_2025.pdf\">PDF</a></body>",
+      "expected": "https://eprints.lib.hokudai.ac.jp/repo/huscap/all/95934/Okazakietal_2025.pdf"
+    },
+    {
+      "name": "a relative URL resolves against the page",
+      "page_url": "https://repo.example.org/items/1/",
+      "html": "<meta name=\"citation_pdf_url\" content=\"./paper.pdf\">",
+      "expected": "https://repo.example.org/items/1/paper.pdf"
+    },
+    {
+      "name": "a parent-relative URL",
+      "page_url": "https://repo.example.org/items/1/view",
+      "html": "<meta name=\"citation_pdf_url\" content=\"../files/paper.pdf\">",
+      "expected": "https://repo.example.org/items/files/paper.pdf"
+    },
+    {
+      "name": "a scheme-relative URL takes the page's scheme",
+      "page_url": "https://repo.example.org/items/1",
+      "html": "<meta name=\"citation_pdf_url\" content=\"//cdn.example.org/paper.pdf\">",
+      "expected": "https://cdn.example.org/paper.pdf"
+    },
+    {
+      "name": "a page URL with no path",
+      "page_url": "https://repo.example.org",
+      "html": "<meta name=\"citation_pdf_url\" content=\"a.pdf\">",
+      "expected": "https://repo.example.org/a.pdf"
+    },
+    {
+      "name": "dot segments above the root are removed (RFC 3986 5.2.4)",
+      "page_url": "https://repo.example.org/item",
+      "html": "<meta name=\"citation_pdf_url\" content=\"../../a.pdf\">",
+      "expected": "https://repo.example.org/a.pdf"
+    },
+    {
+      "name": "content before name, single quotes, upper case",
+      "page_url": "https://repo.example.org/",
+      "html": "<META CONTENT='https://repo.example.org/a.pdf' NAME='Citation_PDF_URL'/>",
+      "expected": "https://repo.example.org/a.pdf"
+    },
+    {
+      "name": "the first of a repeated attribute counts",
+      "page_url": "https://repo.example.org/",
+      "html": "<meta name=\"citation_pdf_url\" name=\"citation_title\" content=\"https://repo.example.org/r.pdf\">",
+      "expected": "https://repo.example.org/r.pdf"
+    },
+    {
+      "name": "unquoted attribute values",
+      "page_url": "https://repo.example.org/",
+      "html": "<meta name=citation_pdf_url content=https://repo.example.org/b.pdf>",
+      "expected": "https://repo.example.org/b.pdf"
+    },
+    {
+      "name": "entities in the URL are decoded",
+      "page_url": "https://repo.example.org/",
+      "html": "<meta name=\"citation_pdf_url\" content=\"https://repo.example.org/get?id=7&amp;type=pdf&#38;v=2&#x26;x=1\">",
+      "expected": "https://repo.example.org/get?id=7&type=pdf&v=2&x=1"
+    },
+    {
+      "name": "surrounding whitespace in the value is ignored",
+      "page_url": "https://repo.example.org/",
+      "html": "<meta name=\" citation_pdf_url \" content=\"  https://repo.example.org/c.pdf\n\">",
+      "expected": "https://repo.example.org/c.pdf"
+    },
+    {
+      "name": "an empty tag is passed over for the next",
+      "page_url": "https://repo.example.org/",
+      "html": "<meta name=\"citation_pdf_url\" content=\"\"><meta name=\"citation_pdf_url\" content=\"https://repo.example.org/d.pdf\">",
+      "expected": "https://repo.example.org/d.pdf"
+    },
+    {
+      "name": "the first usable tag wins",
+      "page_url": "https://repo.example.org/",
+      "html": "<meta name=\"citation_pdf_url\" content=\"https://repo.example.org/first.pdf\"><meta name=\"citation_pdf_url\" content=\"https://repo.example.org/second.pdf\">",
+      "expected": "https://repo.example.org/first.pdf"
+    },
+    {
+      "name": "a scheme other than http(s) is not a PDF we can fetch",
+      "page_url": "https://repo.example.org/",
+      "html": "<meta name=\"citation_pdf_url\" content=\"javascript:alert(1)\"><meta name=\"citation_pdf_url\" content=\"ftp://repo.example.org/e.pdf\">",
+      "expected": null
+    },
+    {
+      "name": "an http URL is kept as given",
+      "page_url": "https://repo.example.org/",
+      "html": "<meta name=\"citation_pdf_url\" content=\"http://repo.example.org/f.pdf\">",
+      "expected": "http://repo.example.org/f.pdf"
+    },
+    {
+      "name": "the name only in text or another attribute is no tag",
+      "page_url": "https://repo.example.org/",
+      "html": "<p>citation_pdf_url</p><meta property=\"citation_pdf_url\" content=\"https://repo.example.org/g.pdf\"><meta name=\"citation_pdf_url_extra\" content=\"https://repo.example.org/h.pdf\">",
+      "expected": null
+    },
+    {
+      "name": "a page with no tag",
+      "page_url": "https://repo.example.org/",
+      "html": "<html><head><title>Item</title><meta name=\"citation_title\" content=\"A study\"></head></html>",
+      "expected": null
+    },
+    {
+      "name": "a bare & is no reference: legacy names written without ; are left alone",
+      "page_url": "https://repo.example.org/",
+      "html": "<meta name=\"citation_pdf_url\" content=\"https://repo.example.org/get?id=7&param=pdf&section=2&not=3&region=eu&times=4&copy=1\">",
+      "expected": "https://repo.example.org/get?id=7&param=pdf&section=2&not=3&region=eu&times=4&copy=1"
+    },
+    {
+      "name": "an absolute URL is kept as given, dot segments and all",
+      "page_url": "https://repo.example.org/item/",
+      "html": "<meta name=\"citation_pdf_url\" content=\"https://cdn.example.org/a/../b.pdf\">",
+      "expected": "https://cdn.example.org/a/../b.pdf"
+    },
+    {
+      "name": "a content that will not parse as a URL is passed over for the next tag",
+      "page_url": "https://repo.example.org/",
+      "html": "<meta name=\"citation_pdf_url\" content=\"http://[bad/a.pdf\"><meta name=\"citation_pdf_url\" content=\"https://repo.example.org/i.pdf\">",
+      "expected": "https://repo.example.org/i.pdf"
+    }
+  ],
+  "character_references": [
+    {
+      "name": "the five named references",
+      "raw": "&amp; &lt; &gt; &quot; &apos;",
+      "expected": "& < > \" '"
+    },
+    {
+      "name": "decimal and hexadecimal references",
+      "raw": "a&#38;b&#x26;c&#X26;d",
+      "expected": "a&b&c&d"
+    },
+    {
+      "name": "legacy names without their ; are text",
+      "raw": "?id=1&param=2&section=3&not=4&copy&amp",
+      "expected": "?id=1&param=2&section=3&not=4&copy&amp"
+    },
+    {
+      "name": "names are matched with their case",
+      "raw": "&Amp;&AMP;&Lt;",
+      "expected": "&Amp;&AMP;&Lt;"
+    },
+    {
+      "name": "any other name is left as written",
+      "raw": "&nbsp;&copy;&hellip;&unknown1;",
+      "expected": "&nbsp;&copy;&hellip;&unknown1;"
+    },
+    {
+      "name": "a number that names no character becomes U+FFFD",
+      "raw": "&#0;|&#xD800;|&#1114112;|&#99999999999;",
+      "expected": "\ufffd|\ufffd|\ufffd|\ufffd"
+    },
+    {
+      "name": "a C1 control is decoded as itself, not as windows-1252",
+      "raw": "&#150;",
+      "expected": "\u0096"
+    },
+    {
+      "name": "a reference with no digits is text",
+      "raw": "&#;&#x;&#xg;",
+      "expected": "&#;&#x;&#xg;"
+    },
+    {
+      "name": "decoding is one pass",
+      "raw": "&amp;amp;",
+      "expected": "&amp;"
+    }
+  ],
+  "landing_page_status": [
+    {
+      "status": 400,
+      "unsettled": false
+    },
+    {
+      "status": 401,
+      "unsettled": false
+    },
+    {
+      "status": 403,
+      "unsettled": false
+    },
+    {
+      "status": 404,
+      "unsettled": false
+    },
+    {
+      "status": 408,
+      "unsettled": true
+    },
+    {
+      "status": 410,
+      "unsettled": false
+    },
+    {
+      "status": 425,
+      "unsettled": true
+    },
+    {
+      "status": 429,
+      "unsettled": true
+    },
+    {
+      "status": 451,
+      "unsettled": false
+    },
+    {
+      "status": 500,
+      "unsettled": true
+    },
+    {
+      "status": 501,
+      "unsettled": true
+    },
+    {
+      "status": 502,
+      "unsettled": true
+    },
+    {
+      "status": 503,
+      "unsettled": true
+    },
+    {
+      "status": 504,
+      "unsettled": true
+    },
+    {
+      "status": 505,
+      "unsettled": true
+    },
+    {
+      "status": 520,
+      "unsettled": true
+    },
+    {
+      "status": 599,
+      "unsettled": true
+    }
+  ]
+}

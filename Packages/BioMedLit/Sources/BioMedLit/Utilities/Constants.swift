@@ -146,6 +146,32 @@ public enum BioMedLitConstants {
     /// Unpaywall API base URL.
     public static let unpaywallBaseURL = "https://api.unpaywall.org/v2"
 
+    /// The Highwire Press meta tag a landing page declares its PDF in.
+    /// Repositories (DSpace, EPrints) and most publishers emit it (#464).
+    public static let citationPDFURLMetaName = "citation_pdf_url"
+
+    /// What a landing-page request asks for: the page, not a PDF.
+    public static let landingPageAccept = "text/html,application/xhtml+xml"
+
+    /// The only schemes a declared PDF URL may use.
+    public static let landingPagePDFSchemes: Set<String> = ["http", "https"]
+
+    /// How much of a landing page is read for its tag. The tag sits in `<head>`,
+    /// so a page cut here still declares its PDF. A lookup page, not research
+    /// content, so the cap loses no evidence (the maintainer's call, #464).
+    /// Python's `LANDING_PAGE_MAX_BYTES`.
+    public static let landingPageMaxBytes = 2 * 1024 * 1024
+
+    /// What a landing page's Content-Type contains when it is a page to read.
+    public static let landingPageHTMLMarker = "html"
+
+    /// What it contains when the "page" is the PDF itself: a repository
+    /// bitstream link named as the landing page (#464).
+    public static let landingPagePDFMarker = "pdf"
+
+    /// What a numeric character reference to no character decodes to.
+    public static let unicodeReplacementCharacter = "\u{FFFD}"
+
     // MARK: - DOI Resolution
 
     /// DOI resolution base URL.
@@ -180,6 +206,10 @@ public enum BioMedLitConstants {
     /// HTTP 404 Not Found.
     public static let httpStatusNotFound = 404
 
+    /// The lowest status that means the request did not succeed. Python's
+    /// `HTTP_ERROR_STATUS_MIN`.
+    public static let httpErrorStatusMin = 400
+
     /// HTTP 429 Too Many Requests.
     public static let httpStatusRateLimited = 429
 
@@ -199,6 +229,11 @@ public enum BioMedLitConstants {
     /// `doc/cross_platform/request_failure_parity/answered_lookup_verb.json`.
     public static let unansweredStatusCodes: Set<Int> = Set([httpStatusRateLimited])
         .union(httpServerErrorStatusCodes)
+
+    /// The client errors that say "not now" about a web page rather than
+    /// answering for it: 408 Request Timeout and 425 Too Early. Python's
+    /// `HTTP_UNSETTLED_CLIENT_STATUSES` (#446, #464).
+    public static let httpUnsettledClientStatusCodes: Set<Int> = [408, 425]
 
     /// HTTP server error status codes (5xx).
     public static let httpServerErrorStatusCodes: ClosedRange<Int> = 500...599

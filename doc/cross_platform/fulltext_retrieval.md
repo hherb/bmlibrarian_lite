@@ -251,7 +251,8 @@ GET https://api.unpaywall.org/v2/{doi}?email={your_email}
   "is_oa": true,
   "best_oa_location": {
     "url_for_pdf": "https://example.com/article.pdf",
-    "url": "https://example.com/article",
+    "url": "https://example.com/article.pdf",
+    "url_for_landing_page": "https://example.com/article",
     "host_type": "publisher",
     "license": "cc-by"
   },
@@ -276,28 +277,128 @@ async function fetch_unpaywall_pdf_url(doi: string, email: string) -> string | n
         if response.status == 404:
             return null  # DOI not found
 
-        response.raise_for_status()
+        response.raise_for_status()   # a 429 or 5xx is retried first
         data = response.json()
 
-        # Check if open access
-        if not data.is_oa:
-            return null
-
-        # Get best PDF URL
-        best_location = data.best_oa_location
-        if best_location and best_location.url_for_pdf:
-            return best_location.url_for_pdf
-
-        # Fall back to any PDF URL
-        for location in data.oa_locations:
-            if location.url_for_pdf:
-                return location.url_for_pdf
-
+        choice = choose_unpaywall_url(data)
+        if choice.pdf_url:
+            return choice.pdf_url
+        if choice.landing_page:
+            match await read_landing_page(choice.landing_page):
+                case Declared(pdf_url): return pdf_url
+                case DeclaresNone: return null
+                case Unreachable(failure): raise Unsettled(failure)
         return null
 
-    except HttpError:
-        return null  # Don't fail hard on Unpaywall errors
+    except HttpError, Timeout, ConnectionError, UnreadableJson as e:
+        # Not "no copy": Unpaywall could not answer (see "Landing Pages")
+        raise Unsettled(failure_of(e))
 ```
+
+### Landing Pages (#464)
+
+**A location's PDF is `url_for_pdf` and nothing else.** Unpaywall sets `url`
+to `url_for_pdf` when it has one and to the landing page when it does not, so
+`url_for_pdf ?? url` adds no PDF, only the landing page. The apps took it, and
+PMID 40608933's repository landing page was downloaded as "the PDF", failed
+the `%PDF` check, and was stored as an Unpaywall full text with no text in it.
+
+When no location offers a `url_for_pdf`, the landing page is **read** for the
+PDF it declares in a Highwire Press tag, which repositories (DSpace, EPrints)
+and most publishers emit:
+
+```html
+<meta name="citation_pdf_url" content="https://repo.example.org/item/1/paper.pdf">
+```
+
+```pseudocode
+# Pure; pinned by fulltext_parity/unpaywall_landing_page.json ("unpaywall_choice")
+function choose_unpaywall_url(data) -> (pdf_url, landing_page):
+    locations = [data.best_oa_location] + data.oa_locations   # objects only
+    for location in locations:                 # first url_for_pdf, best first
+        if present(location.url_for_pdf): return (trim(it), null)
+    for location in locations:                 # else the first landing page
+        page = present(location.url_for_landing_page) or present(location.url)
+        if page: return (null, trim(page))
+    return (null, null)                        # present() = non-blank string
+
+# Pure; pinned by the same file ("citation_pdf_url")
+function citation_pdf_url(html, page_url) -> string | null:
+    for tag in regex_all(r"<meta\b[^>]*>", html, ignore_case):
+        attrs = attributes(tag)   # names lower-cased; "..", '..' or bare values;
+                                  # references decoded (see below); trimmed;
+                                  # the first of a repeated name wins
+        if lower(attrs.name) != "citation_pdf_url" or not attrs.content:
+            continue              # property= is not name=
+        url = resolve(page_url, attrs.content)   # RFC 3986, against the
+        if url is None: continue                 # page served after redirects;
+        if scheme(url) in {http, https}:         # an absolute URL kept as given,
+            return url                           # one that will not parse skipped
+    return null
+
+# Pure; pinned by the same file ("character_references")
+function decode_character_references(value) -> string:
+    # Only references ending in ";": &#38; &#x26; and the five names
+    # amp lt gt quot apos, matched with their case. Without the ";" it is
+    # text, so a URL's bare &section= or &param= survives: Python's
+    # html.unescape decoded HTML's legacy names written bare, turning them
+    # into §ion= and ¶m=, which no browser does inside an attribute. Any
+    # other name is left as written; a number naming no character (zero, a
+    # surrogate, past U+10FFFF) becomes U+FFFD. One pass: &amp;amp; is &amp;.
+
+# Pure; pinned by the same file ("landing_page_status")
+function web_page_status_unsettled(status) -> bool:   # status >= 400
+    return status >= 500 or status in {429, 408, 425}
+
+async function read_landing_page(page_url) -> Declared | DeclaresNone | Unreachable:
+    response = GET page_url, Accept: text/html,application/xhtml+xml,
+               redirects followed, paced; a 429 or 5xx retried
+    if the request or the body read failed: return Unreachable(failure)
+    if status >= 400:
+        return Unreachable(status) if web_page_status_unsettled(status) else DeclaresNone
+    if "pdf" in content_type: return Declared(response.final_url)   # the page is the PDF
+    if content_type and "html" not in content_type: return DeclaresNone
+    body = first 2 MiB of the body, decoded by its declared charset, else UTF-8
+    url = citation_pdf_url(body, response.final_url)
+    return Declared(url) if url else DeclaresNone
+```
+
+One extra request, only for an article whose every Unpaywall location lacks a
+PDF URL. The PDF found keeps Unpaywall's provenance and goes through the
+ordinary download and extraction (and, in Python and Swift, the `%PDF` check;
+Android has none). A "landing page" served as a PDF is a repository bitstream
+link, taken as `_discover_doi_direct` takes a DOI that resolves to a PDF.
+
+No body is read but an HTML page's (or one of no stated type), and that one only
+up to 2 MiB: the tag sits in `<head>`, and a large file served as the page is
+not downloaded to find out what it is. A landing page is a lookup, not research
+content, so the cap loses no evidence (the maintainer's call; golden rule 13
+guards the article text). A page that declares no charset is read as UTF-8, as the apps' HTTP clients read it; `requests`
+would read an undeclared `text/html` page as ISO-8859-1 and garble a non-ASCII
+PDF path.
+
+Python reads the landing page only when Unpaywall offered neither a PDF URL nor
+a PMC page to derive one from: a PMC render is the same article's PDF.
+
+**A page that could not answer is not a page without a PDF.** A landing page
+that could not be reached, whose body broke off, or that ended on a status
+`web_page_status_unsettled` calls unsettled is `Unreachable`, by the rule #446
+set for the publisher's page a DOI resolves to; any other 4xx, a page neither
+HTML nor PDF, or a page without the tag is its answer (`DeclaresNone`).
+
+- **Python** records `Unreachable` as a `SourceLookupFailure` under "the
+  open-access copy's landing page", and an Unpaywall it could not ask under
+  Unpaywall's own name; both reach the reader.
+- **Swift** returns the failure on the chain's fallback as
+  `FullTextResult.openAccessShortfall`, for Unpaywall and the landing page
+  alike. The app reads it to keep a stored PDF link rather than trade it for
+  that fallback (`FullTextAutoFetch.storedLinkKept`), so the next run tries
+  again.
+- **Android** raises `OpenAccessUnsettledException` inside the tier and logs
+  it as a warning; the chain goes on to the DOI link.
+
+Neither app yet tells the reader the open-access copy went unassessed; see
+#466.
 
 ### PDF Downloading and Caching
 

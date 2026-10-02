@@ -91,7 +91,110 @@ final class FullTextAutoFetchTests: XCTestCase {
         XCTAssertTrue(FullTextAutoFetch.documentsToFetch(from: [document], minScoreThreshold: 3).isEmpty)
     }
 
-    /// Control for the two above: a fresh paper of the same score is fetched,
+    /// A PDF link stored without a file or text is fetched again (#464): how
+    /// earlier builds stored an Unpaywall landing page as the article's PDF.
+    func testAPaperHoldingOnlyAnUndownloadedPDFLinkIsFetchedAgain() {
+        let document = makeDocument(doi: "10.1126/science.adk9967")
+        document.fullTextFetchedAt = Date()
+        document.fullTextSource = "unpaywall"
+        document.fullTextPDFPath = "https://hdl.handle.net/2115/95934"
+        document.fullTextPDFPathIsLocalFile = false
+
+        XCTAssertTrue(document.holdsOnlyUndownloadedPDFLink)
+        XCTAssertEqual(
+            FullTextAutoFetch.documentsToFetch(from: [document], minScoreThreshold: 3).count, 1
+        )
+    }
+
+    /// Controls for the one above: a downloaded file with no text (a scan) and
+    /// a PDF whose text was read are not fetched again.
+    func testADownloadedPDFIsNotFetchedAgainWithOrWithoutText() {
+        let scan = makeDocument(pmid: "1")
+        scan.fullTextFetchedAt = Date()
+        scan.fullTextPDFPath = "/tmp/scan.pdf"
+        scan.fullTextPDFPathIsLocalFile = true
+        let read = makeDocument(pmid: "2")
+        read.fullTextFetchedAt = Date()
+        read.fullTextPDFPath = "https://example.org/a.pdf"
+        read.fullTextPDFPathIsLocalFile = false
+        read.fullTextContent = "The article."
+
+        XCTAssertFalse(scan.holdsOnlyUndownloadedPDFLink)
+        XCTAssertFalse(read.holdsOnlyUndownloadedPDFLink)
+        XCTAssertTrue(
+            FullTextAutoFetch.documentsToFetch(from: [scan, read], minScoreThreshold: 3).isEmpty
+        )
+    }
+
+    /// Records stored before the local-file flag existed have it `nil`, and
+    /// count as remote: they are most of the pre-#464 landing-page records.
+    func testAnUndownloadedLinkWrittenBeforeTheLocalFileFlagIsFetchedAgain() {
+        let document = makeDocument(doi: "10.1126/science.adk9967")
+        document.fullTextFetchedAt = Date()
+        document.fullTextPDFPath = "https://hdl.handle.net/2115/95934"
+        document.fullTextPDFPathIsLocalFile = nil
+
+        XCTAssertTrue(document.holdsOnlyUndownloadedPDFLink)
+        XCTAssertEqual(
+            FullTextAutoFetch.documentsToFetch(from: [document], minScoreThreshold: 3).count, 1
+        )
+    }
+
+    // MARK: - Keeping a stored link
+
+    private func documentHoldingALink() -> Document {
+        let document = makeDocument(doi: "10.1126/science.adk9967")
+        document.fullTextFetchedAt = Date()
+        document.fullTextPDFPath = "https://repo.example.org/files/a.pdf"
+        document.fullTextPDFPathIsLocalFile = false
+        return document
+    }
+
+    private let doiLink = URL(string: "https://doi.org/10.1126/science.adk9967")!
+
+    /// A fallback the chain settled on because the open-access copy could not
+    /// be reached does not replace the stored link (#464).
+    func testAFallbackFromAnUnreachableCopyKeepsTheStoredLink() {
+        let result = FullTextResult(content: .doi(webURL: doiLink), openAccessShortfall: .timeout)
+
+        let kept = FullTextAutoFetch.storedLinkKept(documentHoldingALink(), refetched: result)
+
+        XCTAssertEqual(kept, FullTextAutoFetch.StoredLinkKept(failure: .timeout))
+        XCTAssertNotNil(kept?.errorDescription)
+    }
+
+    /// Controls: a fallback with nothing unsettled is the chain's answer, and
+    /// a document holding no link has nothing to keep.
+    func testAnAnsweredFallbackOrADocumentWithNoLinkIsApplied() {
+        let answered = FullTextResult(content: .doi(webURL: doiLink))
+        let unsettled = FullTextResult(content: .doi(webURL: doiLink), openAccessShortfall: .timeout)
+
+        XCTAssertNil(FullTextAutoFetch.storedLinkKept(documentHoldingALink(), refetched: answered))
+        XCTAssertNil(FullTextAutoFetch.storedLinkKept(makeDocument(), refetched: unsettled))
+    }
+
+    /// The refusal fails the document in the run, which leaves it as it was.
+    func testARefusedRefetchLeavesTheDocumentToBeFetchedNextRun() async throws {
+        let document = documentHoldingALink()
+        let result = FullTextResult(content: .doi(webURL: doiLink), openAccessShortfall: .connection)
+
+        let failures = try await FullTextAutoFetch.retrieve(
+            [document],
+            fetch: { document in
+                if let kept = FullTextAutoFetch.storedLinkKept(document, refetched: result) {
+                    throw kept
+                }
+                XCTFail("the fallback was applied")
+            },
+            persist: {}
+        )
+
+        XCTAssertEqual(failures.count, 1)
+        XCTAssertEqual(document.fullTextPDFPath, "https://repo.example.org/files/a.pdf")
+        XCTAssertTrue(document.holdsOnlyUndownloadedPDFLink)
+    }
+
+    /// Control for the not-again tests above: a fresh paper of the same score is fetched,
     /// so those tests are not passing because nothing ever is.
     func testAFreshHighScoringPaperIsFetched() {
         XCTAssertEqual(

@@ -85,6 +85,11 @@ val transparencyParityFixtures: File =
 val requestFailureParityFixtures: File =
     rootProject.file("../../doc/cross_platform/request_failure_parity")
 
+// The Unpaywall landing-page contract (#464), read the same way and for the same
+// reason: an edit to the contract alone must re-run the Android half.
+val fulltextParityFixtures: File =
+    rootProject.file("../../doc/cross_platform/fulltext_parity")
+
 tasks.withType<Test>().configureEach {
     // Absent in a partial checkout of android/ alone; the test itself fails with
     // a clear message in that case, so do not break configuration over it.
@@ -97,6 +102,11 @@ tasks.withType<Test>().configureEach {
         inputs.dir(requestFailureParityFixtures)
             .withPathSensitivity(PathSensitivity.RELATIVE)
             .withPropertyName("requestFailureParityFixtures")
+    }
+    if (fulltextParityFixtures.isDirectory) {
+        inputs.dir(fulltextParityFixtures)
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+            .withPropertyName("fulltextParityFixtures")
     }
 }
 

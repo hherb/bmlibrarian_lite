@@ -17,6 +17,32 @@ the report — tested through its analyser seam in
 `TransparencyNoticeTests`. The old report is deleted only once another has
 replaced it (`!==` the session's). **Next: #462** (top of the follow-ups).
 
+**Unpaywall landing pages are read, never downloaded as the PDF** (all three;
+#464), branch `fix/unpaywall-landing-page`, **PR #465** (compress once
+merged). A location's PDF is `url_for_pdf` only (blank is none, in Python
+discovery too); when no location has one, the landing page is read once for
+`<meta name="citation_pdf_url">`, resolved against the page served after
+redirects (http(s) only; an absolute URL kept as given). A page served as
+`application/pdf` is the PDF. Pinned by
+`doc/cross_platform/fulltext_parity/unpaywall_landing_page.json` (four
+tables; each platform asserts it reads every one); contract
+`fulltext_retrieval.md` "Landing Pages". **Only `;`-terminated references
+decode** (five names, numbers; else U+FFFD): `html.unescape` turned a URL's
+`&section=` into `§ion=`. An undeclared charset is UTF-8 on all three.
+**Unreachable is not "declares none"** on all three (`web_page_status_unsettled`,
+the #446 rule, ported): Python records a `SourceLookupFailure` (the body read
+is inside the guard); Swift carries `FullTextResult.openAccessShortfall` and
+the app keeps a stored PDF link rather than trade it for that fallback
+(`FullTextAutoFetch.storedLinkKept`); Android raises
+`OpenAccessUnsettledException` and retries 429/5xx. **Records holding only an
+undownloaded PDF link** (`Document.holdsOnlyUndownloadedPDFLink`: pre-#464
+landing pages, and failed downloads) are fetched again every run and offer
+**Try Download Again** (the maintainer's decision). **Android's Unpaywall tier
+never ran before this**: its Retrofit models were not `@Serializable`. The page
+is read up to 2 MiB (`LANDING_PAGE_MAX_BYTES`; user's call: rule 13 guards
+research content, not a lookup page). Lodged: **#466**
+(tell the app reader), **#467** (remaining parity edges).
+
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
@@ -58,8 +84,8 @@ the rest.
   (`doi_resolution_failure`). **`mount_politely` turns off urllib3's
   `respect_retry_after_header`**, or a throttle is re-sent below the limiter
   (`polite_request_pacing.md` rule 6).
-- **An answered lookup "did not serve it"** (all three; PRs #444, #449). An
-  `HTTP_STATUS` failure is an answer **except a 429 or any 5xx**, which
+- **An answered lookup "did not serve it"** (all three; PRs #444, #449;
+  #435, #445, #447). An `HTTP_STATUS` failure is an answer **except a 429 or any 5xx**, which
   "could not be asked"; one predicate, `RequestFailure.is_answer` /
   `isAnswer`, pinned by `request_failure_parity/answered_lookup_verb.json`
   (every kind needs a row). Only an unasked source earns "a freely available
@@ -154,13 +180,18 @@ the rest.
   - **One parser for the screen and the export** (#233/#230); **a removal
     takes machine syntax, never the report's words**, and the reader is told
     (`RemovedCitationNotice`). **`Document.id` is an opaque UUID** (#208).
+    **Find the surface a reader actually reaches** (#221). **A shared gate is
+    only shared if every caller reads it.**
     **An identifier is only what a source stated it to be**: the shape of a
-    number never states a PubMed ID (`fulltext_retrieval.md`). **Logging is
-    not reporting** (#180/#181); a reader-facing payload is typed, not
-    rendered English (#184); a persisted tagged union needs named keys and a
-    `schemaVersion` (#163). **Measure JATS prevalence from the XML, never
-    through the parser** (`scripts/jats_survey.py`, #164); **bmlib is ahead
-    of Swift — port from it** (#165).
+    number never states a PubMed ID (`fulltext_retrieval.md`). **A downloaded
+    PDF contributes its text** (PR #198); **a guard must name its own cause**
+    (PR #195). **Logging is not reporting** (#180/#181); a reader-facing
+    payload is typed, not rendered English (#184); a persisted tagged union
+    needs named keys and a `schemaVersion` (#163). **A view's private computed
+    state cannot be tested.** **Route markup on the owning element, not on
+    ambient parser state** (#156–#175). **Measure JATS prevalence from the
+    XML, never through the parser** (`scripts/jats_survey.py`, #164); **bmlib
+    is ahead of Swift — port from it** (#165).
   - **Real PMC JATS corpus** (#146) under `doc/cross_platform/jats_corpus/`.
     **Read that directory's `README.md` before touching it.** Two traps it
     omits: **the fixture walk stops at the checkout root** in both
@@ -169,9 +200,10 @@ the rest.
     validates a branch against the main checkout's fixtures and passes; and
     **a test only hears what the logger records** — the recorder ignored
     `debug`, so the corpus dropped 21 of 62 captions under a green test.
-  - **Funder classification**: `sponsor_patterns.json` is the contract;
-    never merge funder lists into `INDUSTRY_KEYWORDS`; `NONPROFIT` means
-    "not recognised".
+  - **Funder classification** (#143/#147/#152): `sponsor_patterns.json` is
+    the contract, `confidence_probes` checked behaviourally; never merge
+    funder lists into `INDUSTRY_KEYWORDS`; `NONPROFIT` means "not
+    recognised".
   - **CI on all three platforms** (#129). **No job may gain a `paths:`
     filter** (the parity fixtures live outside `src/` and `tests/`). **A Qt
     preflight constructs a `QApplication` before pytest**, or a broken Qt
@@ -264,16 +296,13 @@ Open issues by family; each issue carries the detail. None blocks another.
   `doc/cross_platform/analysis_failure_reporting.md`**, now several rules
   longer (#302–#304, #306, #307, #310, #315). Both run the same pipeline with the
   same shape. The largest remaining slice of this family.
-- Python, lodged by PR #366 and PR #375:
-  **#369** a cancel is reported as a failure;
-  **#371** the model path's 5xx advice still blames the reader's connection;
-  **#367** the quality filter has no caller; **#368** `TransparencyResult` is
-  mutable and unvalidated; **#370** Android has no version comparison;
-  **#378** nothing re-reads a newer build's row
-  before saving over it; **#380** newer-build vs damaged rows in the report
-  count and the dialog; **#381** a store error stops the review's queueing
-  loop; **#382** the startup COI migration and non-UTF-8 text; **#376** one
-  skeleton for the Research Questions passes; **#377** say how many pending documents are missing from the library.
+- Python, lodged by PRs #366 and #375: **#369** a cancel reported as a
+  failure; **#371** model-path 5xx advice blames the connection; **#367** the
+  quality filter has no caller; **#368** `TransparencyResult` mutable;
+  **#370** Android has no version comparison; **#378** a newer build's row is
+  not re-read before saving; **#380** newer-build vs damaged rows; **#381** a
+  store error stops queueing; **#382** COI migration and non-UTF-8 text;
+  **#376** one skeleton for the passes; **#377** count missing documents.
 - Python, the rest of what PR #358 and PR #365 lodged: **#362** a DOI-only
   document never asks PubMed for the statement it reports as unavailable —
   PR #365 reports that honestly rather than fixing it; **#350** the download
@@ -288,24 +317,14 @@ Open issues by family; each issue carries the detail. None blocks another.
 - Lodged by PR #325, Python: **#328** a re-scored failure supersedes a
   document's good score under latest-wins, and the Scored column does not show
   it (a cancelled re-score also leaves an empty checkpoint).
-- Lodged by PR #329, Python: **#330** `also_failed_text` interpolates the raw
-  provider error into a progress label and a dialog, and it can carry a
-  credential — **six** production call sites, not the three recorded here
-  until the review of PR #333 counted them; the remedy (classify, log the raw
-  text) is golden rule 13, so it was put to the user rather than made
-  silently; **#331** a stored quality benchmark result has no reader, so a
-  cancelled one's partiality is lost the moment anyone adds a history view
-  (mirror the relevance `get_benchmark_result`, status cross-check included).
-- Lodged by the review of PR #333, Python: **#334** `WorkflowWorker` — the
-  whole systematic review — is not on the single-terminal-signal contract and
-  reports a cancel as `finished`; **#335** a storage failure inside a pass is
-  classified as a *provider* failure, so a full disk is advised to "check that
-  Ollama is running"; **#336** a pass that ends on an error does not say how
-  far it got; **#337** the pass workers' `_run_once` fallback reports a
-  cancelled run as an outright error; **#338** the contract sweep checks
-  inheritance rather than use, and reaches one module; **#339** type-design
-  cleanups around `PassOutcome`/`PassFailure`; **#340** a cancelled re-run
-  discards the search shortfalls it recorded.
+- Python, lodged by PRs #329 and #333: **#330** `also_failed_text` puts raw
+  provider text (possibly a credential) in six reader-facing places (golden
+  rule 13: ask first); **#331** a stored quality benchmark has no reader;
+  **#334** `WorkflowWorker` reports a cancel as `finished`; **#335** a storage
+  failure is advised as a provider one; **#336** a failed pass does not say
+  how far it got; **#337** `_run_once` reports a cancel as an error; **#338**
+  the contract sweep checks inheritance, not use; **#339** `PassOutcome`
+  type cleanups; **#340** a cancelled re-run drops its search shortfalls.
 - **#319** the review's quality filter records a failed classification as an
   "unknown" design, which `passes_filter()` then decides on (what the filter
   does with such a document is a maintainer decision).
@@ -315,12 +334,10 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **#318** make "a failure is not a score" a type invariant rather than a
   convention (`ScoredDocument` accepts 0; storage getters return the older form
   as a judgement; mutable `CitationOutcome.citations`).
-- Python, lodged by PR #305: **#308** the Interrogation paywall flow (stale
-  pending citation, empty pane on Cancel); **#309** three abstract fallbacks
-  still misstating their cause; **#311** raw provider error text in the PDF and
-  OpenAthens dialogs; **#312** a restore's found documents span every run of
-  the question, and the checkpoint keeps no quality filter settings (its
-  citations half was fixed by PR #317).
+- Python, lodged by PR #305: **#308** the Interrogation paywall flow;
+  **#309** three abstract fallbacks misstate their cause; **#311** raw
+  provider text in the PDF and OpenAthens dialogs; **#312** a restore's
+  documents span every run, and the checkpoint keeps no quality filter.
 - Older: **#258** the search
   merge drops a distinct article whose title differs by a number, as
   "duplicates removed"; **#259** Python full-text discovery reports an
@@ -462,8 +479,10 @@ enables DEBUG; **#245** the transparency CLIs take the NCBI key only as
   shows how, with a snapshot `@Model` in the test); that is the only path that
   reaches the duplicate-checksum exception and an unclassified migration error.
 - **A silent SwiftPM hang** is the manifest binary stuck behind `syspolicyd`
-  (7–11 min per invocation): `swiftc -typecheck` first, then chain build,
-  test and `xcodebuild` in one background job (see the swift-build memory).
+  (7–11 min per invocation; `--disable-sandbox` does not prevent it):
+  `swiftc -typecheck` first, then chain build, test and `xcodebuild` in one
+  background job. The lasting fix is the user's: Privacy & Security →
+  Developer Tools.
 - **`swift test` compiles neither app target's platform-guarded sources.** On a
   macOS host every `#if os(iOS)` file becomes nothing, and the SPM target excludes
   `Sources/macOS` — so a break behind either guard is invisible to it *and* to

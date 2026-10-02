@@ -1,6 +1,6 @@
 /*
  * BMLibrarian Lite - Biomedical Literature Research Tool
- * Copyright (C) 2024-2025 Dr Horst Herb
+ * Copyright (C) 2024-2026 Dr Horst Herb
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.data.remote.fulltext
 
+import kotlinx.serialization.Serializable
 import retrofit2.Response
 import retrofit2.http.GET
 import retrofit2.http.Path
@@ -53,52 +54,67 @@ interface UnpaywallApi {
 
 /**
  * Response from Unpaywall API for a work lookup.
+ *
+ * Serializable because the app's Retrofit builder decodes with kotlinx
+ * serialization only: without it Retrofit could not build a converter, every
+ * lookup threw "Unable to create converter", and the Unpaywall tier never
+ * offered a PDF (found with #464). Every field defaults to null, since
+ * Unpaywall omits some and the decoder demands a default for a missing key.
  */
+@Serializable
 data class UnpaywallResponse(
     /** Digital Object Identifier. */
-    val doi: String?,
+    val doi: String? = null,
 
     /** Whether the work is open access. */
-    val is_oa: Boolean?,
+    val is_oa: Boolean? = null,
 
     /** Best open access location. */
-    val best_oa_location: UnpaywallOaLocation?,
+    val best_oa_location: UnpaywallOaLocation? = null,
 
     /** All open access locations. */
-    val oa_locations: List<UnpaywallOaLocation>?,
+    val oa_locations: List<UnpaywallOaLocation>? = null,
 
     /** Title of the work. */
-    val title: String?,
+    val title: String? = null,
 
     /** Publication year. */
-    val year: Int?,
+    val year: Int? = null,
 
     /** Publisher name. */
-    val publisher: String?
+    val publisher: String? = null
 )
 
 /**
  * Open access location information from Unpaywall.
+ *
+ * `url` is `url_for_pdf` when there is one and the landing page when not, so
+ * it never names a PDF that `url_for_pdf` does not (#464): see
+ * [UnpaywallLandingPage.chooseUrl].
  */
+@Serializable
 data class UnpaywallOaLocation(
-    /** URL to the OA version (may be PDF or landing page). */
-    val url: String?,
+    /**
+     * `url_for_pdf` when Unpaywall has one, else the landing page: never a PDF that
+     * `url_for_pdf` does not already name (#464).
+     */
+    val url: String? = null,
 
     /** Direct URL to PDF (may be null). */
-    val url_for_pdf: String?,
+    val url_for_pdf: String? = null,
 
     /** Landing page URL. */
-    val url_for_landing_page: String?,
+    val url_for_landing_page: String? = null,
 
     /** License type (e.g., "cc-by", "public-domain"). */
-    val license: String?,
+    val license: String? = null,
 
     /** Version type (e.g., "publishedVersion", "acceptedVersion"). */
-    val version: String?,
+    val version: String? = null,
 
     /** Host type (e.g., "publisher", "repository"). */
-    val host_type: String?,
+    val host_type: String? = null,
 
     /** Whether this is the best location. */
-    val is_best: Boolean?
+    val is_best: Boolean? = null
 )

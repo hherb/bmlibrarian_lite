@@ -1056,6 +1056,45 @@ SERVICE_DOI_RESOLVER = "doi.org"
 SERVICE_DOI_PUBLISHER = "the publisher's site the DOI resolves to"
 SERVICE_PMC_ID_CONVERTER = "PubMed Central's ID converter"
 SERVICE_EUROPE_PMC = "Europe PMC"
+# The page Unpaywall names when it knows of an open-access copy but not of a
+# PDF URL for it, read for the PDF it declares (#464).
+SERVICE_UNPAYWALL_LANDING_PAGE = "the open-access copy's landing page"
+
+# The Highwire Press meta tag a landing page declares its PDF in. Repositories
+# (DSpace, EPrints) and most publishers emit it for Google Scholar (#464).
+CITATION_PDF_URL_META_NAME = "citation_pdf_url"
+
+# What a landing-page request asks for: the page, not the PDF the discovery
+# session asks for by default.
+LANDING_PAGE_ACCEPT = "text/html,application/xhtml+xml"
+
+# The only schemes a declared PDF URL may use: anything else is not a file
+# this client can download.
+LANDING_PAGE_PDF_SCHEMES = frozenset({"http", "https"})
+
+# How much of a landing page is read for its tag. The tag sits in ``<head>``,
+# so a page cut here still declares its PDF. A lookup page, not research
+# content, so the cap loses no evidence (the maintainer's call, #464).
+LANDING_PAGE_MAX_BYTES = 2 * 1024 * 1024
+
+# The read size while streaming a landing page up to that cap.
+LANDING_PAGE_READ_CHUNK_BYTES = 64 * 1024
+
+# What a landing page's Content-Type contains when it is a page to read, and
+# when the "page" is the PDF itself (a repository bitstream link, #464).
+LANDING_PAGE_HTML_MARKER = "html"
+LANDING_PAGE_PDF_MARKER = "pdf"
+
+# How a web page that declares no charset is read: what the apps' HTTP
+# clients assume, rather than the ISO-8859-1 ``requests`` assumes for text/*.
+DEFAULT_WEB_PAGE_CHARSET = "utf-8"
+
+# What a numeric character reference to no character decodes to, and the
+# bounds of what does name one (a surrogate does not).
+UNICODE_REPLACEMENT_CHARACTER = "\ufffd"
+UNICODE_MAX_CODE_POINT = 0x10FFFF
+UNICODE_SURROGATE_FIRST = 0xD800
+UNICODE_SURROGATE_LAST = 0xDFFF
 
 # The metadata sources a transparency analysis reads an article's record
 # from. Same rule: each name travels into a sentence the user reads (#356).

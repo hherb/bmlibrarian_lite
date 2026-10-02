@@ -2162,6 +2162,9 @@ final class FactCheckWorkflow {
             targets,
             fetch: { document in
                 let bmlResult = try await service.fetchFullText(for: document)
+                if let kept = FullTextAutoFetch.storedLinkKept(document, refetched: bmlResult) {
+                    throw kept
+                }
                 document.applyFullTextResult(BioMedLitAdapters.toAppFullTextResult(bmlResult))
             },
             persist: { try modelContext.save() },

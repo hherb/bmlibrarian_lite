@@ -56,6 +56,12 @@ object Constants {
      */
     const val HTTP_NOT_FOUND = 404
 
+    /**
+     * The lowest status that means the request did not succeed. Python's
+     * `HTTP_ERROR_STATUS_MIN`.
+     */
+    const val HTTP_ERROR_STATUS_MIN = 400
+
     /** HTTP 429: rate limited. */
     const val HTTP_TOO_MANY_REQUESTS = 429
 
@@ -319,6 +325,56 @@ object Constants {
 
     /** Default email for Unpaywall API (should be configured by user). */
     const val UNPAYWALL_DEFAULT_EMAIL = "bmlibrarian@example.com"
+
+    // ==================== Open-Access Landing Pages (#464) ====================
+    // Python's constants of the same names, but for HTTP_ACCEPT_HEADER; the
+    // parsing rules are pinned by
+    // doc/cross_platform/fulltext_parity/unpaywall_landing_page.json.
+
+    /**
+     * The Highwire Press meta tag a landing page declares its PDF in. Repositories
+     * (DSpace, EPrints) and most publishers emit it for Google Scholar.
+     */
+    const val CITATION_PDF_URL_META_NAME = "citation_pdf_url"
+
+    /** The request header a landing-page request names what it accepts in. */
+    const val HTTP_ACCEPT_HEADER = "Accept"
+
+    /** What a landing-page request asks for: the page, not a PDF. */
+    const val LANDING_PAGE_ACCEPT = "text/html,application/xhtml+xml"
+
+    /**
+     * Found in the Content-Type of every HTML page (`text/html`,
+     * `application/xhtml+xml`). A landing page served as anything else declares
+     * no PDF we can read.
+     */
+    const val LANDING_PAGE_HTML_MARKER = "html"
+
+    /**
+     * The only schemes a declared PDF URL may use: anything else is not a file
+     * this client can download.
+     */
+    val LANDING_PAGE_PDF_SCHEMES: Set<String> = setOf("http", "https")
+
+    /**
+     * Found in the Content-Type of a "landing page" that is the PDF itself: a
+     * repository bitstream link Unpaywall names as the landing page.
+     */
+    const val LANDING_PAGE_PDF_MARKER = "pdf"
+
+    /**
+     * How much of a landing page is read for its tag. The tag sits in `<head>`, so
+     * a page cut here still declares its PDF. A lookup page, not research content,
+     * so the cap loses no evidence (the maintainer's call, #464).
+     */
+    const val LANDING_PAGE_MAX_BYTES = 2 * 1024 * 1024
+
+    /**
+     * The client errors that say "not now" about a web page rather than answering
+     * for it: 408 Request Timeout and 425 Too Early. Python's
+     * `HTTP_UNSETTLED_CLIENT_STATUSES` (#446, #464).
+     */
+    val HTTP_UNSETTLED_CLIENT_STATUS_CODES: Set<Int> = setOf(408, 425)
 
     // ==================== External URL Prefixes ====================
 
