@@ -13,14 +13,15 @@ its slice has landed; add a new section when handing off new work.
 merged). `workflow.transparencyNotice` is **derived from the documents**
 (`Document.unratedTransparencyNotice`: relevant, analysable, no stored
 analysis) once the session has a report, so a reopened session says what the
-finished run said; the Report tab shows it too. **Every run start clears
-`session.errorMessage`** (`forgetLastStop`): a run continued after cancel or a
-background pause no longer offers to retry its own finished report. Sessions
-from earlier builds hold the old notice in `errorMessage`; with a report it
-offers no retry (`isStoredTransparencyNotice`; its two prefixes must never be
-reworded). Open: fetching more evidence runs no transparency step, so the
-notice names the studies it added. Pick the next slice from **Potential
-follow-ups** (freshest: #450, #453, #454).
+finished run said; the Report tab shows it too. **`session.errorMessage` means
+a failure and nothing else**: every run start and every completion clears it
+(`forgetLastStop`), and a stopped fetch-more beside a report writes nothing.
+Citations the report was not made from (`unreportedCitationCount`, against
+`report.citationCount`) get an amber **Regenerate Report** offer, never the red
+retry (user's call); a regenerated report deletes the one it replaces. Earlier
+builds' stored notices offer no retry beside a report
+(`isStoredTransparencyNotice`, `storedFetchCancelledNotice`; never reword
+them). **Next: #461** (top of the follow-ups).
 
 ## Recently landed (context)
 
@@ -219,6 +220,13 @@ the rest.
 ## Potential follow-ups
 
 Open issues by family; each issue carries the detail. None blocks another.
+
+### Next up
+
+- **#461** iOS/macOS `fetchMoreEvidence` runs no transparency step; Android's
+  does. **Parity is the rule** (user's call): add `analyzeTransparency()`
+  between `extractCitations()` and `generateReport()`. Until then the derived
+  notice names every study a fetch-more adds.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 

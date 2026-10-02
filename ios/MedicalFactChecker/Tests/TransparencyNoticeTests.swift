@@ -314,14 +314,22 @@ final class TransparencyNoticeTests: XCTestCase {
 
     /// "Cancelled by user" outlived the run it described: continued to its
     /// report, the session still offered to retry a report it had made.
+    ///
+    /// Gone from the start, not only at the end: a continued run that stops
+    /// short of completing, or is killed, must not leave the old reason.
     func testContinuingACancelledRunForgetsWhyItStopped() async {
         let session = makeSession(titles: [], withReport: false)
         session.currentStep = .awaitingUserDecision
         session.errorMessage = "Cancelled by user"
         let workflow = restore(session)
+        var messageWhileRunning: String?? = .none
+        workflow.onProgress = { _, _ in
+            if case .none = messageWhileRunning { messageWhileRunning = .some(session.errorMessage) }
+        }
 
         await workflow.proceedWithCurrentDocuments()
 
+        XCTAssertEqual(messageWhileRunning, .some(nil), "cleared by the time the run reports progress")
         XCTAssertNil(session.errorMessage)
     }
 

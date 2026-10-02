@@ -933,9 +933,11 @@ final class FactCheckWorkflow {
               let message = session.errorMessage else {
             return false
         }
-        // Without a report the stored notice is no proof the run finished:
-        // one killed while generating it still needs the retry
-        if Self.isStoredTransparencyNotice(message), session.report != nil {
+        // Notices earlier builds stored in the slot. Without a report they are
+        // no proof the run finished: one killed while generating it still
+        // needs the retry
+        if session.report != nil,
+           Self.isStoredTransparencyNotice(message) || message == Self.storedFetchCancelledNotice {
             return false
         }
 
@@ -948,15 +950,49 @@ final class FactCheckWorkflow {
         return citationCount > 0
     }
 
+    /// How many of the session's citations its report was not generated from.
+    ///
+    /// Fetching more evidence extracts citations before it regenerates the
+    /// report, so one stopped in between — the app closed, or the run
+    /// cancelled — leaves citations the report never saw. `0` without a
+    /// report, or when the report rests on them all.
+    var unreportedCitationCount: Int {
+        guard let session, let report = session.report else { return 0 }
+        let held = (session.documents ?? []).reduce(0) { $0 + ($1.citations?.count ?? 0) }
+        return max(0, held - report.citationCount)
+    }
+
+    /// Whether to offer regenerating the report with citations it lacks.
+    ///
+    /// Not while a run is under way, and not beside a failure: that section's
+    /// retry regenerates from the same citations.
+    var canRegenerateWithNewCitations: Bool {
+        !isRunning && !canRetryReportGeneration && unreportedCitationCount > 0
+    }
+
+    /// The sentence offering that regeneration, or `nil` when there is
+    /// nothing to offer.
+    var unreportedCitationsNotice: String? {
+        guard canRegenerateWithNewCitations else { return nil }
+        let count = unreportedCitationCount
+        return count == 1
+            ? "1 new citation is not in the report yet."
+            : "\(count) new citations are not in the report yet."
+    }
+
     /// Retry report generation after a failure.
     ///
     /// This method allows users to retry just the report generation step when it
     /// fails (e.g., due to timeout, network issues, or LLM errors). It skips
     /// all previous workflow steps and directly attempts to regenerate the report.
     ///
+    /// Also regenerates a standing report with citations it was not made
+    /// from (``canRegenerateWithNewCitations``); the report it replaces is
+    /// deleted once the new one exists.
+    ///
     /// Prerequisites:
     /// - Session must have relevant documents with citations already extracted
-    /// - Previous report generation must have failed
+    /// - Previous report generation failed, or the report lacks citations
     func retryReportGeneration() async {
         guard let session = session else { return }
 
@@ -988,11 +1024,19 @@ final class FactCheckWorkflow {
         do {
             try Task.checkCancellation()
             updateProgress(.generatingReport, "Retrying report generation...")
+            let previousReport = session.report
             try await generateReport()
+
+            // Only once the new one exists: a failed attempt leaves the old
+            // report standing, as fetching more evidence does
+            if let previousReport, previousReport !== session.report {
+                modelContext.delete(previousReport)
+            }
 
             // Complete
             session.currentStep = .completed
             session.stopReason = .completed
+            forgetLastStop(of: session)
             session.updatedAt = Date()
             try? modelContext.save()
 
@@ -1179,6 +1223,7 @@ final class FactCheckWorkflow {
             // Complete
             session.currentStep = .completed
             session.stopReason = .completed
+            forgetLastStop(of: session)
             session.updatedAt = Date()
             try? modelContext.save()
 
@@ -1194,8 +1239,11 @@ final class FactCheckWorkflow {
             // Preserve existing state - if we have a report, keep completed state
             if !isCancelling {
                 if session.report != nil {
+                    // The report stands, so nothing failed. Citations the
+                    // batch extracted before the stop are offered for a new
+                    // report (``canRegenerateWithNewCitations``), not as a
+                    // failed one to retry.
                     session.currentStep = .completed
-                    session.errorMessage = "Additional evidence fetch cancelled"
                 } else {
                     session.currentStep = .awaitingUserDecision
                     session.errorMessage = "Cancelled"
@@ -1363,6 +1411,7 @@ final class FactCheckWorkflow {
             // Complete
             session.currentStep = .completed
             session.stopReason = .completed
+            forgetLastStop(of: session)
             session.updatedAt = Date()
             try? modelContext.save()
 
@@ -1407,15 +1456,17 @@ final class FactCheckWorkflow {
         await BackgroundTaskManager.shared.setActiveWork(false)
     }
 
-    /// Forgets why the session's last run stopped, as a new one starts.
+    /// Forgets why the session's last run stopped, as a new one starts and
+    /// again as one completes.
     ///
     /// `errorMessage` is how the screen tells a failed run: it offers the
-    /// retry section for one. Nothing else clears it, so a run cancelled or
+    /// retry section for one. Nothing else cleared it, so a run cancelled or
     /// paused in the background and then continued to its report kept
     /// "Cancelled by user", and the finished report sat under "Report
-    /// Generation Failed" — #459's symptom from another source. The same
-    /// clears a transparency notice an earlier build stored there. A run that
-    /// stops again records its own reason.
+    /// Generation Failed" — #459's symptom from another source. At the start
+    /// is not enough: a background pause writes its message during the run,
+    /// and the step under way can still finish. Both also clear a notice an
+    /// earlier build stored there. A run that stops records its own reason.
     ///
     /// - Parameter session: The session the run continues.
     private func forgetLastStop(of session: FactCheckSession) {
@@ -2252,6 +2303,10 @@ final class FactCheckWorkflow {
     /// How the same notice began when it counted them ("Transparency analysis
     /// could not be completed for 4 documents"). Not to be reworded, as above.
     private static let storedCountedNoticePrefix = "Transparency analysis could not be completed for "
+
+    /// What earlier builds stored in `errorMessage` when fetching more evidence
+    /// was stopped beside a finished report. The report stood; nothing failed.
+    private static let storedFetchCancelledNotice = "Additional evidence fetch cancelled"
 
     /// Whether a session's stored `errorMessage` is a transparency notice an
     /// earlier build put there, rather than a failure of the run.

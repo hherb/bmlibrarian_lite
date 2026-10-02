@@ -137,6 +137,15 @@ struct FactCheckView: View {
                             )
                         }
 
+                        // Citations the standing report was not made from
+                        if let notice = workflow.unreportedCitationsNotice {
+                            RegenerateReportSection(text: notice) {
+                                Task {
+                                    await workflow.retryReportGeneration()
+                                }
+                            }
+                        }
+
                         // Scored Documents Section
                         if let session = workflow.session,
                            !(session.documents ?? []).filter({ $0.isScored }).isEmpty {
@@ -683,6 +692,44 @@ struct RetryReportSection: View {
         }
         .padding()
         .background(Color.red.opacity(0.1))
+        .cornerRadius(10)
+    }
+}
+
+// MARK: - Regenerate Report Section
+
+/// Offers to regenerate a standing report with citations it was not made
+/// from, as fetching more evidence stopped before its report can leave.
+///
+/// Amber, not red: the report stands and nothing failed.
+struct RegenerateReportSection: View {
+    /// What the report lacks, from ``FactCheckWorkflow/unreportedCitationsNotice``.
+    let text: String
+
+    /// Called when the user taps the button.
+    let onRegenerate: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "doc.badge.plus")
+                    .foregroundColor(.orange)
+                Text(text)
+                    .font(.subheadline)
+            }
+
+            Button(action: onRegenerate) {
+                HStack {
+                    Image(systemName: "arrow.clockwise")
+                    Text("Regenerate Report")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityHint("Writes the report again from all citations, including the new ones")
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.1))
         .cornerRadius(10)
     }
 }
