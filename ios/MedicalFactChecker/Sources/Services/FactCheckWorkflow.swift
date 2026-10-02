@@ -1083,7 +1083,10 @@ final class FactCheckWorkflow {
     /// 1. Fetch more documents from PubMed (if available) or try smart search
     /// 2. Score only the newly fetched documents
     /// 3. Extract citations from new relevant documents
-    /// 4. Regenerate the report with all accumulated evidence
+    /// 4. Analyse the transparency of documents not yet rated
+    /// 5. Regenerate the report with all accumulated evidence
+    ///
+    /// Steps 3-5 are ``regenerateReportWithNewEvidence(analyzeTransparencyUsing:)``.
     ///
     /// Can be called multiple times until PubMed is exhausted and smart search has been tried.
     /// Fetches additional evidence for the current session.
@@ -1199,26 +1202,7 @@ final class FactCheckWorkflow {
                 return
             }
 
-            try Task.checkCancellation()
-            // Step 2: Extract citations from new relevant documents only
-            updateProgress(.fetchingMoreEvidence, "Extracting citations from new documents...")
-            try await extractCitations()
-
-            // Step 3: Preserve existing report reference for recovery on error
-            let previousReport = session.report
-
-            try Task.checkCancellation()
-            // Step 4: Regenerate report with all evidence
-            session.currentStep = .generatingReport
-            try? modelContext.save()
-
-            updateProgress(.generatingReport, "Regenerating report with additional evidence...")
-            try await generateReport()
-
-            // Step 5: Delete old report only after new one succeeds
-            if let oldReport = previousReport {
-                modelContext.delete(oldReport)
-            }
+            try await regenerateReportWithNewEvidence()
 
             // Complete
             session.currentStep = .completed
@@ -1270,6 +1254,56 @@ final class FactCheckWorkflow {
 
         isRunning = false
         isCancelling = false
+    }
+
+    /// The steps that turn a fetched batch into a new report: extract
+    /// citations, analyse transparency, regenerate the report.
+    ///
+    /// The same order as ``runWorkflow()`` and Android's `fetchMoreEvidence`.
+    /// Without the transparency step, a study the batch made relevant was cited
+    /// in the new report but never rated (#461). Each step picks up only what
+    /// still needs it: documents without citations, and documents without a
+    /// current transparency result.
+    ///
+    /// The previous report is deleted only once a new one has replaced it, so
+    /// a failed regeneration leaves the reader the report they had.
+    ///
+    /// - Parameter analyze: Analyses one article's transparency; `nil` uses
+    ///   ``TransparencyAnalysisService``. Tests pass their own.
+    /// - Throws: `CancellationError` when the user stops the run between
+    ///   steps, or whatever citation extraction or report generation throws.
+    func regenerateReportWithNewEvidence(
+        analyzeTransparencyUsing analyze: TransparencyAnalysis? = nil
+    ) async throws {
+        guard let session = session else { return }
+
+        try Task.checkCancellation()
+        // Citations from the new relevant documents only
+        updateProgress(.fetchingMoreEvidence, "Extracting citations from new documents...")
+        try await extractCitations()
+
+        try Task.checkCancellation()
+        // Rate the documents this batch made relevant before the report is
+        // written, so it is not written over unrated studies
+        session.currentStep = .analyzingTransparency
+        try? modelContext.save()
+        await analyzeTransparency(using: analyze)
+
+        // Kept for recovery: a failed regeneration leaves this report in place
+        let previousReport = session.report
+
+        try Task.checkCancellation()
+        session.currentStep = .generatingReport
+        try? modelContext.save()
+
+        updateProgress(.generatingReport, "Regenerating report with additional evidence...")
+        try await generateReport()
+
+        // Only a report that has been replaced is deleted: one that is still
+        // the session's would leave the reader with none
+        if let oldReport = previousReport, oldReport !== session.report {
+            modelContext.delete(oldReport)
+        }
     }
 
     // MARK: - Workflow Execution
