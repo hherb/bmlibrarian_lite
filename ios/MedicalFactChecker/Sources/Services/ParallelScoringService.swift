@@ -388,12 +388,13 @@ actor ParallelScoringService {
                     try await Task.sleep(for: .seconds(delay + jitter))
                 }
 
-            } catch where error is CancellationError || Task.isCancelled {
+            } catch where Task.isCancelled {
                 // Stopped, not failed: the abandoned request throws
                 // `URLError(.cancelled)`, a backoff `CancellationError`.
                 // Recorded as a failure, the document would never be scored
-                // again. Usage of any earlier parse attempt goes unrecorded,
-                // at most one short scoring request.
+                // again. Usage of the earlier parse attempts goes unrecorded,
+                // at most `maxParseRetries - 1` short scoring requests (#468).
+                // A `CancellationError` without a cancel is a failure, below
                 return nil
             } catch {
                 // Network/API error - return immediately (LLMService has its own retry logic)

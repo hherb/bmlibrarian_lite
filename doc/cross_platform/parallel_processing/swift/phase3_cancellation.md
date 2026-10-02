@@ -4,6 +4,15 @@
 
 Enable users to cancel in-progress processing with graceful termination and clear feedback.
 
+> **As implemented (#462).** This page is the original plan. The app departs
+> from it where the plan said requests in flight would complete: a cancel
+> **abandons** them. A document whose scoring or citation extraction the cancel
+> stopped gets **no result**, so it is neither checkpointed as failed nor
+> marked `scoreParseFailed`, and a later run picks it up. Every
+> `FactCheckWorkflow` entry point runs as one stored task
+> (`runAsWorkflowTask(_:)`), which waits for a stopped run to end before new
+> work starts. A stop beside a finished report records no failure.
+
 ## Phase 2 Integration Notes
 
 Phase 3 builds on the Phase 2 implementation. Key types and changes to be aware of:
@@ -109,7 +118,8 @@ actor CancellableScoringService {
 
     /// Cancel the current scoring operation.
     ///
-    /// In-flight requests will complete, but no new documents will be started.
+    /// No new documents will be started. (As implemented, requests in flight
+    /// are abandoned: see the note at the top.)
     /// Already-checkpointed results are preserved (Phase 2 handles this).
     func cancel() {
         currentTask?.cancel()
@@ -466,7 +476,7 @@ The `FactCheckViewModel` uses `@MainActor` to ensure:
 
 - [ ] Cancel button visible during processing
 - [ ] Cancellation stops new documents from being processed
-- [ ] In-flight requests complete (not aborted mid-request)
+- [ ] ~~In-flight requests complete (not aborted mid-request)~~ — as implemented, they are abandoned and the document is left for a later run (#462)
 - [ ] UI shows cancellation status with counts (using Phase 2's `PhaseProgress`)
 - [ ] Checkpointed results preserved after cancellation (Phase 2 handles this)
 - [ ] Session can be resumed after cancellation (Phase 2 checkpoint restoration)

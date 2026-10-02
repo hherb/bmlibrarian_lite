@@ -348,9 +348,11 @@ actor ParallelCitationService {
                 usage: usage
             )
 
-        } catch where error is CancellationError || Task.isCancelled {
+        } catch where Task.isCancelled {
             // Stopped, not failed: the abandoned request throws
-            // `URLError(.cancelled)`
+            // `URLError(.cancelled)`, LLMService's backoff a
+            // `CancellationError`. A `CancellationError` without a cancel is
+            // a failure, below
             return nil
         } catch {
             return .failure(

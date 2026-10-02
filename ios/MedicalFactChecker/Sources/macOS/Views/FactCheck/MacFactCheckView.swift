@@ -152,6 +152,9 @@ struct MacFactCheckView: View {
                     if let notice = workflow.transparencyNotice {
                         MacIncompleteSearchNotice(text: notice)
                     }
+                    if let notice = workflow.stopNotice {
+                        MacIncompleteSearchNotice(text: notice)
+                    }
                 }
 
                 // Progress section
@@ -164,6 +167,7 @@ struct MacFactCheckView: View {
                     MacUserDecisionSection(
                         prompt: workflow.userDecisionPrompt,
                         showSmartSearchOption: workflow.awaitingSmartSearchDecision,
+                        canFetchMore: workflow.decisionOffersFetchMore,
                         onContinue: { Task { await workflow.continueWithMoreDocuments() } },
                         onSmartSearch: { Task { await workflow.continueWithSmartSearch() } },
                         onProceed: { Task { await workflow.proceedWithCurrentDocuments() } }
@@ -664,6 +668,9 @@ struct MacUserDecisionSection: View {
     let prompt: String
     /// Whether to show smart search option instead of fetch more.
     let showSmartSearchOption: Bool
+    /// Whether the search has pages left to fetch. Without them only
+    /// "Proceed with Current" carries the run on.
+    let canFetchMore: Bool
     /// Callback when user chooses to continue fetching.
     let onContinue: () -> Void
     /// Callback when user chooses to try smart search.
@@ -690,7 +697,7 @@ struct MacUserDecisionSection: View {
                         onSmartSearch?()
                     }
                     .buttonStyle(.borderedProminent)
-                } else {
+                } else if canFetchMore {
                     Button("Fetch More Documents") {
                         onContinue()
                     }

@@ -99,6 +99,10 @@ struct ReportContentView: View {
             if let notice = report.incompleteSearchNotice {
                 IncompleteSearchNotice(text: notice)
             }
+            // A fetch or regeneration that was stopped left this report as it was
+            if let notice = workflow?.stopNotice {
+                IncompleteSearchNotice(text: notice)
+            }
 
             // Verdict Badge
             HStack {
@@ -236,20 +240,16 @@ struct ReportContentView: View {
     }
 }
 
-// MARK: - Incomplete Search Notice
+// MARK: - Fetching Evidence Overlay
 
-/// The incomplete-search notice, drawn before the verdict (#256).
+/// What the report shows while the workflow works on it — fetching more
+/// evidence, or regenerating the report: the step under way, the session's
+/// counts, and a way to stop.
 ///
-/// The report's text carries the notice as a Markdown block quote, and this
-/// screen shows the verdict and the summary ahead of that text — so a notice
-/// left where it was written would reach the reader after the verdict it
-/// qualifies. It is drawn here instead and taken off the body, never dropped.
-/// What the report shows while more evidence is fetched for it: the step
-/// under way, the session's counts, and a way to stop.
-///
-/// Cancelling leaves the report standing (#462): nothing is recorded as a
-/// failure, and citations already extracted for the stopped batch are offered
-/// for a new report.
+/// Stopping leaves the report standing (#462): nothing is recorded as a
+/// failure, the screen says the report has not changed
+/// (``FactCheckWorkflow/stopNotice``), and citations already extracted for a
+/// stopped batch are offered for a new report.
 struct FetchingEvidenceOverlay: View {
     /// The workflow fetching the evidence.
     let workflow: FactCheckWorkflow?
@@ -281,6 +281,14 @@ struct FetchingEvidenceOverlay: View {
     }
 }
 
+// MARK: - Incomplete Search Notice
+
+/// The incomplete-search notice, drawn before the verdict (#256).
+///
+/// The report's text carries the notice as a Markdown block quote, and this
+/// screen shows the verdict and the summary ahead of that text — so a notice
+/// left where it was written would reach the reader after the verdict it
+/// qualifies. It is drawn here instead and taken off the body, never dropped.
 struct IncompleteSearchNotice: View {
     /// The notice, as plain text.
     let text: String
@@ -340,6 +348,10 @@ struct ReportView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     // Incomplete search, before the verdict it qualifies
                     if let notice = report.incompleteSearchNotice {
+                        IncompleteSearchNotice(text: notice)
+                    }
+                    // A fetch or regeneration that was stopped left this report as it was
+                    if let notice = workflow?.stopNotice {
                         IncompleteSearchNotice(text: notice)
                     }
 

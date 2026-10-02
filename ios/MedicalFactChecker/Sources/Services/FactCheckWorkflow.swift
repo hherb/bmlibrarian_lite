@@ -57,10 +57,14 @@ final class FactCheckWorkflow {
     private(set) var isRunning = false
     private(set) var progressMessage = ""
 
-    /// Whether a cancellation has been requested (Phase 3).
+    /// Whether a stop has been requested and the stopped work has not ended
+    /// yet (Phase 3).
     ///
-    /// Set to true when `cancelFactCheck()` is called. Cleared when a new
-    /// workflow starts or when the workflow completes/fails.
+    /// Set by ``cancelFactCheck()`` and by background expiry, before they
+    /// cancel ``workflowTask``. It stays set until the stopped work's body
+    /// ends, which clears it, as does the start of the next piece of work.
+    /// While it is set, whatever the work throws is how its stop surfaced
+    /// (``stopRequested``), not a failure.
     private(set) var isCancelling = false
 
     /// The task running the workflow's current work, which a cancel stops.
@@ -85,6 +89,14 @@ final class FactCheckWorkflow {
     /// Set to true when specifically waiting for smart search decision.
     private(set) var awaitingSmartSearchDecision = false
 
+    /// Whether the decision section offers to fetch more documents.
+    ///
+    /// Only while the search has pages left. A run stopped, or reopened, with
+    /// nothing more to fetch carries on with "Proceed with Current".
+    var decisionOffersFetchMore: Bool {
+        session?.canFetchMoreFromAnyProvider ?? false
+    }
+
     /// Why no alternative search ran, for the screen to show while the session proceeds.
     ///
     /// `nil` when smart search has not failed. Generating alternative queries is
@@ -101,6 +113,16 @@ final class FactCheckWorkflow {
     /// report: a paper whose full text could not be had does not fail the run,
     /// because its abstract still makes a report. Each run starts it afresh.
     private(set) var fullTextNotice: String?
+
+    /// What a stop left undone beside a report that stands, for the screen to
+    /// show.
+    ///
+    /// `nil` unless the last piece of work was stopped while a report stood.
+    /// Such a stop records no failure, and the session stays completed with
+    /// the report it had (``recordStop(of:)``), so without this notice a
+    /// fetch the user asked for and the app stopped in the background would
+    /// read as one that found nothing new. Each new piece of work clears it.
+    private(set) var stopNotice: String?
 
     /// Which relevant documents carry no transparency rating, for the screen
     /// to show.
@@ -142,11 +164,13 @@ final class FactCheckWorkflow {
     /// Used by `EnhancedScoredDocumentsView` to display the error queue.
     private(set) var processingErrors: [TransientErrorEntry] = []
 
-    /// Whether the workflow was paused due to app backgrounding.
+    /// Whether the workflow was paused due to app backgrounding and waits on
+    /// the user to resume.
     ///
-    /// Set to true when processing is interrupted because the app entered
-    /// background and background time expired. When true, the UI should
-    /// show a banner allowing the user to resume.
+    /// Set when background time expired during a run that had no report yet.
+    /// When true, the UI shows a banner allowing the user to resume. Beside a
+    /// report that stands there is nothing to resume, so it stays false and
+    /// ``stopNotice`` says what the stop left undone.
     private(set) var wasPausedByBackground = false
 
     /// Observer token for background expiration notification.
@@ -227,48 +251,21 @@ final class FactCheckWorkflow {
 
     /// Handle background task expiration.
     ///
-    /// Called when iOS is about to suspend the app. Stops the run and saves
-    /// the session at once, as ``cancelFactCheck()`` does
-    /// (``recordStop(of:reason:)``). The workflow shows itself as paused,
-    /// offering to resume, only when the session waits on the user: beside a
-    /// report that stands there is nothing to resume, and the banner's resume
-    /// would search on from the first run's pages.
+    /// Called when iOS is about to suspend the app. Stops the work under way
+    /// and saves the session at once, as ``cancelFactCheck()`` does
+    /// (``stopWork(_:)``). The workflow shows itself as paused, offering to
+    /// resume, only when the session waits on the user: beside a report that
+    /// stands there is nothing to resume, and ``stopNotice`` says what the
+    /// stop left undone.
     private func handleBackgroundExpiration() async {
-        guard isRunning, let session = session else { return }
+        guard let session = session, let counts = stopWork(.background) else { return }
 
-        logger.info("Background expiring - saving state for session \(session.id)")
-
-        // Cancel the workflow task gracefully. `isCancelling` stays set until
-        // the task has ended: its stop handler reads it to leave this record
-        // standing.
-        isCancelling = true
-        workflowTask?.cancel()
-
-        let awaitsDecision = recordStop(of: session, reason: "Paused: App was backgrounded")
-        wasPausedByBackground = awaitsDecision
-
-        isRunning = false
-        awaitingUserDecision = awaitsDecision
-        awaitingSmartSearchDecision = false
-
-        // Build resumption prompt based on progress
-        let scoredCount = session.documentsScored
-        let totalDocs = session.documentsFound
-        let remaining = totalDocs - scoredCount
-
-        if !awaitsDecision {
-            userDecisionPrompt = ""
-        } else if remaining > 0 {
-            userDecisionPrompt = "Processing paused when app was backgrounded. \(scoredCount) document(s) scored, \(remaining) remaining."
-        } else {
-            userDecisionPrompt = "Processing paused when app was backgrounded."
-        }
+        logger.info("Background expiring - saved state for session \(session.id)")
 
         // Notify BackgroundTaskManager that work is paused
         await BackgroundTaskManager.shared.setActiveWork(false)
 
-        // Notify callback
-        onCancelled?(scoredCount, remaining)
+        onCancelled?(counts.scored, counts.remaining)
     }
 
     /// Create a fact-check workflow using just the model context.
@@ -420,10 +417,11 @@ final class FactCheckWorkflow {
                 awaitingSmartSearchDecision = false
                 userDecisionPrompt = "Found \(relevant) relevant document(s). Minimum is \(needed). Fetch \(min(settings.batchSize, available)) more?"
             } else {
-                // No more options available - proceed with current
-                awaitingUserDecision = false
+                // Nothing more to fetch. The decision left is to carry on with
+                // what was found: hidden, a run stopped here could never reach
+                // its report
                 awaitingSmartSearchDecision = false
-                userDecisionPrompt = ""
+                userDecisionPrompt = "Found \(relevant) relevant document(s). No more can be fetched. Proceed with Current continues to the report."
             }
         } else {
             awaitingUserDecision = false
@@ -573,6 +571,7 @@ final class FactCheckWorkflow {
 
     /// The work of ``continueWithMoreDocuments()``, run as ``workflowTask`` so a cancel reaches it.
     private func continueWithMoreDocumentsWork() async {
+        guard await ensureServices() else { return }
         awaitingUserDecision = false
         awaitingSmartSearchDecision = false
         userDecisionPrompt = ""
@@ -584,6 +583,35 @@ final class FactCheckWorkflow {
         await runWorkflow()
     }
 
+    /// Builds the language model and PubMed services from the user's
+    /// settings when the workflow has none, and reads the month's spending.
+    ///
+    /// A workflow restored from history has neither until the user acts.
+    /// The decision's entry points never built them, so "Proceed with
+    /// Current" on a reopened session passed every step without a model,
+    /// each step returning at once, and recorded the session as completed
+    /// with no report.
+    ///
+    /// - Returns: Whether the services are ready. When they cannot be built
+    ///   the error has been logged and reported through ``onError``.
+    private func ensureServices() async -> Bool {
+        guard llmService == nil || pubmedService == nil else { return true }
+        do {
+            if llmService == nil {
+                llmService = try LLMService.create(from: settings)
+            }
+            if pubmedService == nil {
+                pubmedService = BMLPubMedService.create(from: settings)
+            }
+        } catch {
+            logger.error("Could not build the workflow's services: \(error.localizedDescription)")
+            onError?(error)
+            return false
+        }
+        await loadMonthlyUsage()
+        return true
+    }
+
     /// User declined fetching more documents - proceed with current results.
     func proceedWithCurrentDocuments() async {
         await runAsWorkflowTask { [weak self] in
@@ -593,17 +621,36 @@ final class FactCheckWorkflow {
 
     /// The work of ``proceedWithCurrentDocuments()``, run as ``workflowTask`` so a cancel reaches it.
     private func proceedWithCurrentDocumentsWork() async {
+        guard await ensureServices() else { return }
         awaitingUserDecision = false
         awaitingSmartSearchDecision = false
         userDecisionPrompt = ""
 
         guard let session = session else { return }
 
-        // Skip to citation extraction
-        session.currentStep = .extractingCitations
+        session.currentStep = Self.stepToProceedFrom(
+            hasDocuments: !(session.documents ?? []).isEmpty,
+            hasQuery: session.pubmedQuery != nil
+        )
         try? modelContext.save()
 
         await runWorkflow()
+    }
+
+    /// Where "Proceed with Current" carries a run on from.
+    ///
+    /// Normally the citations: the documents are found and scored, and
+    /// extraction first scores any a stop left unscored. A run stopped before
+    /// it found any documents has nothing to proceed with, so it goes back to
+    /// the step it stopped in: the search, or, without a query, the claim.
+    ///
+    /// - Parameters:
+    ///   - hasDocuments: Whether the session holds any document.
+    ///   - hasQuery: Whether the claim has been turned into a query.
+    /// - Returns: The step to set before running the workflow.
+    static func stepToProceedFrom(hasDocuments: Bool, hasQuery: Bool) -> WorkflowStep {
+        if hasDocuments { return .extractingCitations }
+        return hasQuery ? .searchingPubMed : .idle
     }
 
     /// User chose to continue with smart search (alternative queries).
@@ -618,6 +665,7 @@ final class FactCheckWorkflow {
 
     /// The work of ``continueWithSmartSearch()``, run as ``workflowTask`` so a cancel reaches it.
     private func continueWithSmartSearchWork() async {
+        guard await ensureServices() else { return }
         awaitingUserDecision = false
         awaitingSmartSearchDecision = false
         userDecisionPrompt = ""
@@ -661,12 +709,9 @@ final class FactCheckWorkflow {
                 await runWorkflow()
             }
 
-        } catch where isStop(error) {
-            // Phase 3: a stop requested through cancelFactCheck() or background
-            // expiry has already been recorded; any other is recorded here
-            if !isCancelling {
-                recordStop(of: session, reason: "Cancelled")
-            }
+        } catch where stopRequested {
+            // Recorded as the stop was requested, and again as the work ends
+            // (settleStop); checkpoints keep what was scored (Phase 2)
         } catch {
             let reported = userFacing(error)
             session.currentStep = .failed
@@ -690,10 +735,11 @@ final class FactCheckWorkflow {
 
     /// Cancel the current fact-check operation (Phase 3).
     ///
-    /// Reaches whatever the workflow is doing — a new run, a resumed one,
-    /// fetching more evidence, retrying the report or smart search — because
-    /// each runs as ``workflowTask`` (#462). Already-scored documents are
-    /// preserved via Phase 2 checkpointing and can be resumed later.
+    /// Reaches whatever the workflow is doing once the work has marked itself
+    /// running — a new run, a resumed one, fetching more evidence, retrying
+    /// the report or smart search — because each runs as ``workflowTask``
+    /// (#462). Already-scored documents are preserved via Phase 2
+    /// checkpointing and can be resumed later.
     ///
     /// ## Behavior
     ///
@@ -701,69 +747,153 @@ final class FactCheckWorkflow {
     ///   stopped is left unscored, not recorded as failed
     /// - No new documents are started after cancellation
     /// - Checkpointed results are preserved for later resumption
-    /// - The session is recorded by ``recordStop(of:reason:)``: beside a
-    ///   report that stands it stays completed, with nothing written as a
-    ///   failure; without one it waits on the user to resume
+    /// - The session is recorded by ``recordStop(of:)``: beside a report that
+    ///   stands it stays completed, with nothing written as a failure and
+    ///   ``stopNotice`` saying what was left undone; without one it waits on
+    ///   the user to continue
     ///
     /// The session is recorded here, not when the task ends, so the screen
-    /// answers the button at once. The task can still be winding down; the
-    /// next piece of work waits for it (``runAsWorkflowTask(_:)``).
+    /// answers the button at once. The task can still be winding down; it is
+    /// recorded again as it ends (``settleStop()``), and the next piece of
+    /// work waits for it (``runAsWorkflowTask(_:)``).
     func cancelFactCheck() {
-        guard isRunning else { return }
-
-        isCancelling = true
+        guard let counts = stopWork(.user) else { return }
         progressMessage = "Cancelled"
-
-        // Cooperative cancellation. The task is kept, not cleared: it has not
-        // ended yet, and the next run waits for it.
-        workflowTask?.cancel()
-
-        let awaitsDecision = session.map { recordStop(of: $0, reason: "Cancelled by user") } ?? false
-
-        isRunning = false
-        awaitingUserDecision = awaitsDecision
-        awaitingSmartSearchDecision = false
-
-        // Build resumption prompt based on progress
-        let scoredCount = session?.documentsScored ?? 0
-        let totalDocs = session?.documentsFound ?? 0
-        let remaining = totalDocs - scoredCount
-
-        if !awaitsDecision {
-            userDecisionPrompt = ""
-        } else if remaining > 0 {
-            userDecisionPrompt = "Processing cancelled. \(scoredCount) document(s) scored, \(remaining) remaining. Resume to continue from where you left off."
-        } else {
-            userDecisionPrompt = "Processing cancelled. Resume to continue from where you left off."
-        }
-
-        // Notify callback
-        onCancelled?(scoredCount, remaining)
-
-        // Note: isCancelling is cleared when the cancelled task ends, not
-        // here. Its stop handler reads the flag to leave this record standing.
+        onCancelled?(counts.scored, counts.remaining)
     }
 
-    /// Records a run that stopped before it finished: cancelled by the user,
-    /// or paused as the app was backgrounded.
+    /// Who stopped a piece of work before it finished.
+    enum StopCause {
+        /// The user pressed Cancel.
+        case user
+        /// iOS ended the app's background time.
+        case background
+    }
+
+    /// The stop requested of the work under way, kept until that work ends.
+    private struct PendingStop {
+        /// Who stopped it.
+        let cause: StopCause
+        /// The report that stood when it was stopped, if any.
+        let report: EvidenceReport?
+    }
+
+    /// The stop requested of the work under way; `nil` when none was.
     ///
-    /// Beside a report that stands, nothing failed and there is nothing to
-    /// resume: the session stays completed, and `errorMessage` is left as the
-    /// run found it, cleared as the run began (``forgetLastStop(of:)``).
-    /// That slot means a failure, and the screen offers a red retry for one
-    /// (#459). Citations the stopped run extracted before the report was
-    /// regenerated are offered for a new one instead
-    /// (``canRegenerateWithNewCitations``).
+    /// Read as the stopped work ends (``settleStop()``), which records the
+    /// stop again from what the work actually left.
+    private var pendingStop: PendingStop?
+
+    /// Stops the work under way and records the stop at once.
     ///
-    /// Without a report the session waits on the user, with `reason` saying
-    /// why it stopped.
+    /// The one path for both the user's cancel and background expiry.
+    /// `isCancelling` stays set until the stopped work's body has ended, so
+    /// whatever it throws on the way out reads as the stop
+    /// (``stopRequested``), not as a failure.
+    ///
+    /// - Parameter cause: Who stopped the work.
+    /// - Returns: How many of the session's documents were scored and how
+    ///   many were not, for ``onCancelled``; `nil` when nothing was running.
+    @discardableResult
+    private func stopWork(_ cause: StopCause) -> (scored: Int, remaining: Int)? {
+        guard isRunning else { return nil }
+
+        isCancelling = true
+        // Cooperative cancellation. The task is kept, not cleared: it has not
+        // ended yet, and the next work waits for it.
+        workflowTask?.cancel()
+        isRunning = false
+
+        let scored = session?.documentsScored ?? 0
+        let remaining = (session?.documentsFound ?? 0) - scored
+        if let session {
+            pendingStop = PendingStop(cause: cause, report: session.report)
+            showStop(of: session, cause: cause)
+        }
+        return (scored, remaining)
+    }
+
+    /// Records a stop on the session and shows it on the screen.
     ///
     /// - Parameters:
-    ///   - session: The session the run was working on.
-    ///   - reason: Why it stopped, written only when no report stands.
+    ///   - session: The session the stopped work was on.
+    ///   - cause: Who stopped it.
+    private func showStop(of session: FactCheckSession, cause: StopCause) {
+        let awaitsDecision = recordStop(of: session)
+        awaitingUserDecision = awaitsDecision
+        awaitingSmartSearchDecision = false
+        wasPausedByBackground = awaitsDecision && cause == .background
+        if awaitsDecision {
+            userDecisionPrompt = Self.stopPrompt(
+                cause,
+                scored: session.documentsScored,
+                remaining: session.documentsFound - session.documentsScored
+            )
+            stopNotice = nil
+        } else {
+            userDecisionPrompt = ""
+            stopNotice = Self.stopNoticeText(cause)
+        }
+    }
+
+    /// Records the stop again as the stopped work ends, from what it left.
+    ///
+    /// The stop was recorded when it was requested, but the work runs on to
+    /// its next cancellation point. A report requested before the stop can
+    /// still arrive in that time: recorded as "no report", the session would
+    /// wait on the user beside a finished report, and that report would never
+    /// be shown. Runs inside the stopped task, before the next work, which
+    /// waits for that task to end, can start.
+    ///
+    /// Work that completed after the stop was requested (its last step had
+    /// no cancellation point left) wrote `.completed` over the stop's
+    /// `.userCancelled`: nothing was stopped, and the stop's prompt or notice
+    /// is taken down.
+    private func settleStop() {
+        guard let stop = pendingStop else { return }
+        pendingStop = nil
+        guard let session else { return }
+
+        if session.stopReason == .completed {
+            awaitingUserDecision = false
+            userDecisionPrompt = ""
+            wasPausedByBackground = false
+            stopNotice = nil
+            return
+        }
+
+        showStop(of: session, cause: stop.cause)
+
+        // The report the stopped work was making arrived before it stopped:
+        // the work finished what it was asked to do
+        if let report = session.report, report !== stop.report {
+            session.stopReason = .completed
+            try? modelContext.save()
+            stopNotice = nil
+            onComplete?(report)
+        }
+    }
+
+    /// Writes a stop into the session.
+    ///
+    /// Always sets `stopReason` to `.userCancelled`, for a background stop
+    /// too: the work did not finish, and nothing failed.
+    ///
+    /// Beside a report that stands, there is nothing to resume: the session
+    /// is set to completed, and `errorMessage` is left as the work found it,
+    /// cleared as the work began (``forgetLastStop(of:)``). That slot means a
+    /// failure, and the screen offers a red retry for one (#459). Citations
+    /// the stopped work extracted before the report was regenerated are
+    /// offered for a new one instead (``canRegenerateWithNewCitations``).
+    ///
+    /// Without a report the session waits on the user's decision. Why it
+    /// stopped is not written to `errorMessage` either: a stop is not a
+    /// failure, and the decision section offers to carry on.
+    ///
+    /// - Parameter session: The session the stopped work was on.
     /// - Returns: Whether the session now waits on the user's decision.
     @discardableResult
-    private func recordStop(of session: FactCheckSession, reason: String) -> Bool {
+    private func recordStop(of session: FactCheckSession) -> Bool {
         session.stopReason = .userCancelled
         defer { try? modelContext.save() }
         guard session.report == nil else {
@@ -771,37 +901,71 @@ final class FactCheckWorkflow {
             return false
         }
         session.currentStep = .awaitingUserDecision
-        session.errorMessage = reason
         return true
     }
 
-    /// Whether an error ending a piece of work is how its stop surfaced,
-    /// rather than a failure.
+    /// The decision prompt shown after a stop that left no report.
+    ///
+    /// - Parameters:
+    ///   - cause: Who stopped the work.
+    ///   - scored: How many of the session's documents were scored.
+    ///   - remaining: How many were found but not scored.
+    /// - Returns: The prompt, naming what is left and how to carry on.
+    static func stopPrompt(_ cause: StopCause, scored: Int, remaining: Int) -> String {
+        let opening = cause == .user
+            ? "Processing cancelled."
+            : "Processing paused when the app was backgrounded."
+        let carryOn = "Proceed with Current continues from where it stopped."
+        guard remaining > 0 else {
+            return "\(opening) \(carryOn)"
+        }
+        return "\(opening) \(scored) document(s) scored, \(remaining) remaining. \(carryOn)"
+    }
+
+    /// The notice shown after a stop beside a report that stands.
+    ///
+    /// - Parameter cause: Who stopped the work.
+    /// - Returns: What the stop left undone.
+    static func stopNoticeText(_ cause: StopCause) -> String {
+        let opening = cause == .user
+            ? "Stopped before it finished."
+            : "Stopped when the app was backgrounded."
+        return "\(opening) The report has not changed."
+    }
+
+    /// Whether the work under way has been stopped, so that whatever it
+    /// throws is how the stop surfaced rather than a failure.
+    ///
+    /// True for any error while a stop is pending (`isCancelling`) and for
+    /// any error once the task is cancelled. Only ``stopWork(_:)`` cancels
+    /// the workflow's task, and it sets `isCancelling` first.
     ///
     /// A cancelled task does not always throw `CancellationError`.
     /// `URLSession` ends a request in flight with `URLError(.cancelled)`,
-    /// which ``LLMService`` passes on as not worth retrying, and whatever
-    /// the work was doing when the stop arrived can throw its own error. Read
-    /// as failures, they recorded a cancelled run as failed, under a red
-    /// retry. After a stop the run has nothing more to report.
-    ///
-    /// - Parameter error: The error the work ended with.
-    /// - Returns: `true` when the work was stopped.
-    private func isStop(_ error: Error) -> Bool {
-        error is CancellationError || isCancelling || Task.isCancelled
+    /// which ``LLMService`` passes on as not worth retrying, and whatever the
+    /// work was doing when the stop arrived can throw its own error, a budget
+    /// error included. Read as failures, they recorded a cancelled run as
+    /// failed, under a red retry. The error itself is not consulted:
+    /// BioMedLit's services turn every `URLError(.cancelled)` into a
+    /// `CancellationError`, so one the user never asked for would otherwise
+    /// end the work as a silent stop.
+    private var stopRequested: Bool {
+        isCancelling || Task.isCancelled
     }
 
     /// Runs one piece of the workflow's work as ``workflowTask``, so that
     /// ``cancelFactCheck()`` and background expiry reach it.
     ///
     /// Every entry point that does work runs its whole body through here.
-    /// Before #462, fetching more evidence, retrying the report and smart
-    /// search each ran in a task the view started and nothing stored, so a
-    /// cancel could not stop them.
     ///
-    /// A run just cancelled may still be winding down, since it stops only at
-    /// its next cancellation point. The new work waits for it, so the old
-    /// run's last writes cannot land on the new one's session or state.
+    /// Waits first for any earlier work to end: one just cancelled stops only
+    /// at its next cancellation point, and its last writes must not land on
+    /// the new work's session or state.
+    ///
+    /// The body runs in an unstructured task, so cancelling the caller's own
+    /// task does not stop it; only ``cancelFactCheck()`` and background
+    /// expiry do. A stop is recorded again from what the body left, inside
+    /// the task (``settleStop()``).
     ///
     /// - Parameter body: The work. Runs on the main actor.
     func runAsWorkflowTask(_ body: @escaping @MainActor () async -> Void) async {
@@ -810,7 +974,10 @@ final class FactCheckWorkflow {
             // Ended; its owner may not have run yet to clear it
             if workflowTask == previous { workflowTask = nil }
         }
-        let task = Task { @MainActor in await body() }
+        let task = Task { @MainActor [weak self] in
+            await body()
+            self?.settleStop()
+        }
         workflowTask = task
         await task.value
         // Only this work's own task: a stop may have let another start since
@@ -821,7 +988,10 @@ final class FactCheckWorkflow {
     /// the ones it builds from the user's settings when it has none.
     ///
     /// For tests: the settings' services need the user's API key, so an entry
-    /// point would otherwise end before doing anything.
+    /// point would otherwise end before doing anything. Retrying the report,
+    /// fetching more evidence and the decision's entry points use them;
+    /// ``startFactCheck(claim:searchOptions:)`` and ``resumeSession(_:)``
+    /// build their own from the settings regardless.
     ///
     /// - Parameters:
     ///   - llm: The language model service.
@@ -924,8 +1094,22 @@ final class FactCheckWorkflow {
     ///
     /// - Parameter pmids: List of PMIDs to retry.
     func retryFailedDocuments(pmids: [String]) async {
+        await runAsWorkflowTask { [weak self] in
+            await self?.retryFailedDocumentsWork(pmids: pmids)
+        }
+    }
+
+    /// The work of ``retryFailedDocuments(pmids:)``, run as ``workflowTask`` so a cancel reaches it.
+    private func retryFailedDocumentsWork(pmids: [String]) async {
         guard let session = session else { return }
         let sessionId = session.id.uuidString
+
+        isRunning = true
+        isCancelling = false
+        defer {
+            isRunning = false
+            isCancelling = false
+        }
 
         // Remove from in-memory errors
         processingErrors.removeAll { pmids.contains($0.pmid) }
@@ -1018,8 +1202,10 @@ final class FactCheckWorkflow {
     /// - A session exists
     /// - The session has an `errorMessage` set that records a failure: not a
     ///   transparency notice an earlier build stored there beside a finished
-    ///   report (``isStoredTransparencyNotice(_:)``). This build puts
-    ///   per-document misses in ``fullTextNotice`` and ``transparencyNotice``.
+    ///   report (``isStoredTransparencyNotice(_:)``), and not why a run
+    ///   stopped (``storedStopReasons``). This build puts per-document misses
+    ///   in ``fullTextNotice`` and ``transparencyNotice``, and a stop in the
+    ///   session's step and stop reason.
     /// - The session has relevant documents with citations extracted
     /// - The workflow is not currently running
     var canRetryReportGeneration: Bool {
@@ -1033,6 +1219,11 @@ final class FactCheckWorkflow {
         // needs the retry
         if session.report != nil,
            Self.isStoredTransparencyNotice(message) || message == Self.storedFetchCancelledNotice {
+            return false
+        }
+        // Why a run stopped, as earlier builds stored it: not a failure. The
+        // session waits on the user's decision, which offers to carry on
+        if Self.storedStopReasons.contains(message) {
             return false
         }
 
@@ -1149,12 +1340,9 @@ final class FactCheckWorkflow {
                 onComplete?(report)
             }
 
-        } catch where isStop(error) {
-            // Phase 3: a stop requested through cancelFactCheck() or background
-            // expiry has already been recorded; any other is recorded here
-            if !isCancelling {
-                recordStop(of: session, reason: "Cancelled")
-            }
+        } catch where stopRequested {
+            // Recorded as the stop was requested, and again as the work ends
+            // (settleStop); checkpoints keep what was scored (Phase 2)
         } catch let error as BudgetError {
             session.currentStep = .budgetExceeded
             session.errorMessage = error.localizedDescription
@@ -1280,6 +1468,18 @@ final class FactCheckWorkflow {
                 isResumedSession = false // Clear flag after refresh
             }
 
+            // Documents an earlier fetch found and a stop left unscored. The
+            // branches below score only what they fetch: smart search only
+            // its new PubMed IDs, and with both exhausted nothing at all
+            let finishesStoppedFetch = session.unscoredDocuments.contains { !$0.scoreParseFailed }
+            if finishesStoppedFetch {
+                try Task.checkCancellation()
+                updateProgress(.fetchingMoreEvidence, "Scoring documents a stopped fetch left...")
+                try await scoreDocuments()
+                // Scoring does not throw when stopped
+                try Task.checkCancellation()
+            }
+
             // Step 1: Fetch more documents (beyond the original set)
             if session.canFetchMoreDocuments {
                 try Task.checkCancellation()
@@ -1301,11 +1501,13 @@ final class FactCheckWorkflow {
                 // PubMed exhausted but smart search not tried - try alternative queries
                 updateProgress(.fetchingMoreEvidence, "Trying alternative search strategies...")
                 try await executeSmartSearch(askedForMoreEvidence: true)
-            } else {
-                // Both exhausted - nothing more we can do
+            } else if !finishesStoppedFetch {
+                // Both exhausted, and no stopped fetch left documents to
+                // finish - nothing more we can do
                 session.currentStep = .completed
                 try? modelContext.save()
                 isRunning = false
+                isCancelling = false
                 return
             }
 
@@ -1325,15 +1527,9 @@ final class FactCheckWorkflow {
                 onComplete?(report)
             }
 
-        } catch where isStop(error) {
-            // Phase 3: a stop requested through cancelFactCheck() or background
-            // expiry has already been recorded; any other is recorded here.
-            // Beside the report that stands, nothing failed: citations the
-            // batch extracted before the stop are offered for a new report
-            // (``canRegenerateWithNewCitations``), not as a failed one to retry
-            if !isCancelling {
-                recordStop(of: session, reason: "Cancelled")
-            }
+        } catch where stopRequested {
+            // Recorded as the stop was requested, and again as the work ends
+            // (settleStop); checkpoints keep what was scored (Phase 2)
         } catch let error as BudgetError {
             session.currentStep = .budgetExceeded
             session.errorMessage = error.localizedDescription
@@ -1493,6 +1689,7 @@ final class FactCheckWorkflow {
                             onNeedMoreDocuments?(relevantAfterSmart, needed, available)
 
                             isRunning = false
+                            isCancelling = false
                             return
                         }
                     } else if available > 0 {
@@ -1505,17 +1702,31 @@ final class FactCheckWorkflow {
                         onNeedMoreDocuments?(relevant, needed, available)
 
                         isRunning = false
+                        isCancelling = false
                         return  // Wait for user decision
                     }
                 }
             }
 
-            // Step 4: Extract citations
-            if session.currentStep == .scoringDocuments || session.currentStep == .awaitingUserDecision {
+            // Step 4: Extract citations. Also where a run continues: from the
+            // user's decision ("Proceed with Current" and smart search set
+            // `.extractingCitations`), or resumed after the app was closed
+            // mid-extraction. Those skipped this step before, so the report
+            // was written without the citations it needed.
+            let continued = session.currentStep == .awaitingUserDecision
+                || session.currentStep == .extractingCitations
+            if session.currentStep == .scoringDocuments || continued {
                 try Task.checkCancellation()
 
                 session.currentStep = .extractingCitations
                 try? modelContext.save()
+
+                if continued {
+                    // Documents a stop left unscored; nothing to do otherwise.
+                    // Scoring does not throw when stopped, so check again
+                    try await scoreDocuments()
+                    try Task.checkCancellation()
+                }
 
                 try await extractCitations()
             }
@@ -1541,9 +1752,10 @@ final class FactCheckWorkflow {
                 try await generateReport()
             }
 
-            // A cancel records the session as waiting on the user, so every
-            // step guard above reads false and the run arrives here without
-            // its report. Marked complete, it would forget the stop (#462).
+            // A stop moves `currentStep` (recordStop), so one during the later
+            // steps, which do not throw when stopped, skips the step guards
+            // after it and arrives here without its report. Marked complete,
+            // the run would forget the stop (#462).
             try Task.checkCancellation()
 
             // Complete
@@ -1560,13 +1772,9 @@ final class FactCheckWorkflow {
                 onComplete?(report)
             }
 
-        } catch where isStop(error) {
-            // Phase 3: Checkpoints are preserved by Phase 2, so no cleanup is
-            // needed. A stop requested through cancelFactCheck() or background
-            // expiry has already been recorded; any other is recorded here.
-            if !isCancelling {
-                recordStop(of: session, reason: "Cancelled")
-            }
+        } catch where stopRequested {
+            // Recorded as the stop was requested, and again as the work ends
+            // (settleStop); checkpoints keep what was scored (Phase 2)
         } catch let error as BudgetError {
             session.currentStep = .budgetExceeded
             session.errorMessage = error.localizedDescription
@@ -1599,11 +1807,16 @@ final class FactCheckWorkflow {
     /// Generation Failed" — #459's symptom from another source. At the start
     /// is not enough: a background pause writes its message during the run,
     /// and the step under way can still finish. Both also clear a notice an
-    /// earlier build stored there. A run that stops records its own reason.
+    /// earlier build stored there. A stop records itself in the session's
+    /// step and stop reason, never in this slot (``recordStop(of:)``).
+    ///
+    /// Also takes down the screen's notice of the last stop beside a report
+    /// (``stopNotice``): the new work answers for itself.
     ///
     /// - Parameter session: The session the run continues.
     private func forgetLastStop(of session: FactCheckSession) {
         session.errorMessage = nil
+        stopNotice = nil
     }
 
     /// Clean up checkpoints for a completed session.
@@ -2078,7 +2291,14 @@ final class FactCheckWorkflow {
         let hydeText: String
         do {
             hydeText = try await generateHypotheticalDocument(for: session.claim)
+        } catch where stopRequested {
+            // Stopped, not failed. Scores against the bare claim would be
+            // saved, and no later run recomputes a document that has one
+            return
         } catch {
+            // Embedding scores rank documents beside the model's own scores;
+            // the bare claim still ranks them, less sharply
+            logger.warning("Hypothetical document failed, scoring against the claim: \(error.localizedDescription)")
             hydeText = session.claim
         }
 
@@ -2373,7 +2593,7 @@ final class FactCheckWorkflow {
             try await service.analyze(doi: doi, pmid: pmid, fullText: fullText)
         }
         for (index, document) in documentsToAnalyze.enumerated() {
-            if Task.isCancelled { break }
+            if stopRequested { break }
 
             updateProgress(
                 .analyzingTransparency,
@@ -2410,9 +2630,9 @@ final class FactCheckWorkflow {
                     continue
                 }
                 try? modelContext.save()
-            } catch where error is CancellationError || Task.isCancelled {
-                // The user stopped the run, whatever the abandoned request
-                // threw. Not a failure, and it must not be counted as one or
+            } catch where stopRequested {
+                // The run was stopped, whatever the abandoned request threw.
+                // Not a failure, and it must not be counted as one or
                 // reported as though something went wrong.
                 break
             } catch {
@@ -2444,6 +2664,15 @@ final class FactCheckWorkflow {
     /// What earlier builds stored in `errorMessage` when fetching more evidence
     /// was stopped beside a finished report. The report stood; nothing failed.
     private static let storedFetchCancelledNotice = "Additional evidence fetch cancelled"
+
+    /// Why a run stopped, as earlier builds stored it in `errorMessage`: the
+    /// user's cancel, a stop recorded as the run ended, and background
+    /// expiry. A stop is not a failure, and this build writes none of them
+    /// (``recordStop(of:)``). Not to be reworded: stored sessions hold this
+    /// exact text.
+    private static let storedStopReasons: Set<String> = [
+        "Cancelled by user", "Cancelled", "Paused: App was backgrounded"
+    ]
 
     /// Whether a session's stored `errorMessage` is a transparency notice an
     /// earlier build put there, rather than a failure of the run.
@@ -2711,7 +2940,7 @@ final class FactCheckWorkflow {
                     maxTokens: 1024,
                     jsonMode: true
                 )
-            } catch where error is CancellationError || Task.isCancelled {
+            } catch where stopRequested {
                 // A stopped run, whatever the request threw as it was
                 // abandoned: not a reason to tell the user smart search failed
                 throw CancellationError()
@@ -2787,11 +3016,11 @@ final class FactCheckWorkflow {
         var pendingShortfalls: [RetrievalShortfall] = []
         var foundDocuments = false
 
-        // Execute each alternative query
+        // Execute each alternative query. A stop between queries or inside
+        // one ends the loop: what the queries already run found is still
+        // recorded below, with what they lost
         for (index, structuredQuery) in alternatives.enumerated() {
-            // Stopped: what the queries already run found is still recorded
-            // below, with what they lost
-            if Task.isCancelled { break }
+            if stopRequested { break }
             try checkBudget()
 
             session.currentAlternativeQueryIndex = index
@@ -2800,9 +3029,16 @@ final class FactCheckWorkflow {
             let queryDescription = structuredQuery.concepts.first?.name ?? "alternative \(index + 1)"
             updateProgress(.searchingPubMed, "Smart search \(index + 1)/\(alternatives.count): \(queryDescription)...")
 
-            let found = try await executeAlternativeQuery(
-                structuredQuery, pendingShortfalls: &pendingShortfalls
-            )
+            let found: Bool
+            do {
+                found = try await executeAlternativeQuery(
+                    structuredQuery, pendingShortfalls: &pendingShortfalls
+                )
+            } catch where stopRequested {
+                // The search request was abandoned: thrown on, it would skip
+                // recording what the earlier queries lost
+                break
+            }
             foundDocuments = foundDocuments || found
 
             // Check if we now have enough relevant documents
@@ -2813,14 +3049,16 @@ final class FactCheckWorkflow {
             }
         }
 
+        let stopped = stopRequested
         if !foundDocuments, askedForMoreEvidence, let failed = SearchFailedError(shortfalls: pendingShortfalls) {
-            // Nothing is kept, and smart search stays available to try again
+            // Nothing is kept, and smart search stays available to try again.
+            // A stop is not a failed search
+            if stopped { throw CancellationError() }
             throw failed
         }
 
         // Smart search ran, so no later batch generates its queries again.
-        // One the user stopped did not run all its queries: it stays available.
-        let stopped = Task.isCancelled
+        // One that was stopped did not run all its queries: it stays available.
         if !stopped {
             session.smartSearchEnabled = true
         }

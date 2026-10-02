@@ -8,25 +8,33 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**iOS/macOS: a working cancel** (#462), branch `fix/ios-cancel-462`
+**iOS/macOS: a working cancel** (#462), branch `fix/ios-cancel-462`, PR #469
 (compress once merged). macOS's Cancel button was a `// TODO`, iOS had none.
 **Every workflow entry point runs its whole body through
-`runAsWorkflowTask(_:)`** (fetch-more, retry, smart search included — they
-ran in unstored view `Task`s before), which waits for a cancelled run to wind
-down before starting new work; a new entry point must do the same.
-**`recordStop(of:reason:)` is the one record of a stop** (cancel, background
-expiry, a stray `CancellationError`): beside a standing report the session
-stays `.completed` with no `errorMessage` (no red retry; unreported citations
-get the amber Regenerate), without one it waits at `.awaitingUserDecision`
-("Cancelled by user"). **`isStop(error)`**: a cancelled request throws
-`URLError(.cancelled)`, not `CancellationError` — read as a failure it
-recorded a cancelled run as failed. Scoring and citation task groups start
-no document after a cancel and give a stopped one **no result** (a failure is
-checkpointed and `scoreParseFailed` blocks it forever). `runWorkflow` checks
-cancellation before "Complete": a cancel moves `currentStep`, every step
-guard then reads false, and the run completed without a report. Test seam:
-`useServices(llm:pubMed:)`; tests in `WorkflowCancelTests`. Smart search
-throws on a cancel only after recording its shortfalls. Lodged: **#468**.
+`runAsWorkflowTask(_:)`** (fetch-more, retry, smart search and
+`retryFailedDocuments` included — they ran in unstored `Task`s before), which
+waits for earlier work to end before starting; a new entry point must do the
+same. **`stopWork(_:)` is the one path for a stop** (Cancel, background
+expiry): it records the stop at once, and `settleStop()` records it again
+inside the stopped task as it ends (a report that landed during the stop is
+kept and shown). **A stop is never written to `errorMessage`**, which means a
+failure and offers the red retry (#459): beside a report the session stays
+`.completed` and `stopNotice` says the report has not changed; without one it
+waits at `.awaitingUserDecision`. Earlier builds' stored stop reasons are
+recognised (`storedStopReasons`). **`stopRequested`** (`isCancelling ||
+Task.isCancelled`) decides whether a thrown error is a stop — never the error
+itself: a cancelled request throws `URLError(.cancelled)`, and BioMedLit turns
+every -999 into `CancellationError`, so one the user never asked for stays a
+failure. Scoring and citation task groups start nothing after a cancel and
+give a stopped document **no result** (a scoring failure is checkpointed and
+`scoreParseFailed` blocks it for good). **"Proceed with Current" resumes**:
+Step 4 accepts `.awaitingUserDecision`/`.extractingCitations`, scores what a
+stop left, then extracts (it skipped extraction before, on iOS only — Android
+was right); with no documents it goes back to search or the claim
+(`stepToProceedFrom`). The decision entry points build their services
+(`ensureServices()`); a reopened session ran Proceed with none and "completed"
+with no report. Test seam: `useServices(llm:pubMed:)`; tests in
+`WorkflowCancelTests`. Follow-ups: **#468**, **#470**.
 
 ## Recently landed (context)
 
