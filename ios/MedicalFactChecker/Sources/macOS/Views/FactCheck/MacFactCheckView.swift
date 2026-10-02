@@ -148,6 +148,9 @@ struct MacFactCheckView: View {
                     if let notice = workflow.fullTextNotice {
                         MacIncompleteSearchNotice(text: notice)
                     }
+                    if let notice = workflow.transparencyNotice {
+                        MacIncompleteSearchNotice(text: notice)
+                    }
                 }
 
                 // Progress section
@@ -177,6 +180,15 @@ struct MacFactCheckView: View {
                             }
                         }
                     )
+                }
+
+                // Citations the standing report was not made from
+                if let workflow = workflow, let notice = workflow.unreportedCitationsNotice {
+                    MacRegenerateReportSection(text: notice) {
+                        Task {
+                            await workflow.retryReportGeneration()
+                        }
+                    }
                 }
 
                 Spacer(minLength: MacSpacing.xLarge)
@@ -749,6 +761,45 @@ struct MacRetryReportSection: View {
         }
         .padding(MacSpacing.large)
         .background(Color.red.opacity(MacOpacity.light))
+        .cornerRadius(MacCornerRadius.large)
+    }
+}
+
+// MARK: - Regenerate Report Section
+
+/// Offers to regenerate a standing report with citations it was not made
+/// from, as fetching more evidence stopped before its report can leave.
+///
+/// Amber, not red: the report stands and nothing failed.
+struct MacRegenerateReportSection: View {
+    /// What the report lacks, from ``FactCheckWorkflow/unreportedCitationsNotice``.
+    let text: String
+
+    /// Called when the user clicks the button.
+    let onRegenerate: () -> Void
+
+    var body: some View {
+        HStack(spacing: MacSpacing.large) {
+            Image(systemName: "doc.badge.plus")
+                .font(.title2)
+                .foregroundColor(.orange)
+
+            Text(text)
+                .font(.body)
+
+            Spacer()
+
+            Button(action: onRegenerate) {
+                HStack(spacing: MacSpacing.medium) {
+                    Image(systemName: "arrow.clockwise")
+                    Text("Regenerate Report")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+        .padding(MacSpacing.large)
+        .background(Color.orange.opacity(MacOpacity.light))
         .cornerRadius(MacCornerRadius.large)
     }
 }

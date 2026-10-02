@@ -8,23 +8,34 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**iOS/macOS only: automatic full text for papers scored 4-5**, branch
-`feat/auto-fulltext-top-papers`, **PR #458** (compress once merged). Setting
-`autoFetchFullTextEnabled`; `Utilities/FullTextAutoFetch.swift` holds the pure
-rules (selection, retrieval loop, budget fit). Deliberately no Python/Android
-counterpart, so it is not a parity gap. Rules that bind: per-document failures
-go to `workflow.fullTextNotice`, **not** `session.errorMessage` (that drives the
-"Report Generation Failed" / retry UI); full texts are dropped to abstracts when
-the estimated input cost would cross the run budget; the 40,000-character cut is
-the product's call and is announced to the model. Open: the transparency notice
-still uses `errorMessage` (issue 459). Pick the next slice from
-**Potential follow-ups** (freshest: #450, #453, #454).
+**iOS/macOS: a missing transparency rating is a notice, not a failed run**
+(#459), branch `fix/transparency-notice-459`, **PR #460** (compress once
+merged). `workflow.transparencyNotice` is **derived from the documents**
+(`Document.unratedTransparencyNotice`: relevant, analysable, no stored
+analysis) once the session has a report, so a reopened session says what the
+finished run said; the Report tab shows it too. **`session.errorMessage` means
+a failure and nothing else**: every run start and every completion clears it
+(`forgetLastStop`), and a stopped fetch-more beside a report writes nothing.
+Citations the report was not made from (`unreportedCitationCount`, against
+`report.citationCount`) get an amber **Regenerate Report** offer, never the red
+retry (user's call); a regenerated report deletes the one it replaces. Earlier
+builds' stored notices offer no retry beside a report
+(`isStoredTransparencyNotice`, `storedFetchCancelledNotice`; never reword
+them). **Next: #461, then #462** (top of the follow-ups).
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
+
+- **iOS/macOS automatic full text for papers scored 4-5** (PR #458). Setting
+  `autoFetchFullTextEnabled`; the pure rules are in
+  `Utilities/FullTextAutoFetch.swift`; no Python/Android counterpart, on
+  purpose. **Per-document misses go to a workflow notice, never
+  `session.errorMessage`** (it drives the retry UI). Full texts drop to abstracts when
+  the estimated input cost would cross the run budget; the 40,000-character
+  cut is the product's call and is announced to the model.
 
 - **A preprint's `fullTextXML` 500 is asked once** (all three; #451). Europe PMC
   answers a steady 500 for preprint text it will not serve, and four paced
@@ -209,6 +220,18 @@ the rest.
 ## Potential follow-ups
 
 Open issues by family; each issue carries the detail. None blocks another.
+
+### Next up
+
+- **#461** iOS/macOS `fetchMoreEvidence` runs no transparency step; Android's
+  does. **Parity is the rule** (user's call): add `analyzeTransparency()`
+  between `extractCitations()` and `generateReport()`. Until then the derived
+  notice names every study a fetch-more adds.
+- **#462** iOS/macOS have no working cancel: the macOS Cancel button is a
+  `// TODO`, iOS has none, and `fetchMoreEvidence()` runs in an unstored
+  `Task`, out of `workflowTask`'s reach. Android's works. A cancel must keep
+  #460's rules: no `errorMessage` beside a standing report, Regenerate for
+  citations the report lacks.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 

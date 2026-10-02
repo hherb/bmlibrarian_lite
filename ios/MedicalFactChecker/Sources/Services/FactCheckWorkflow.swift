@@ -99,6 +99,32 @@ final class FactCheckWorkflow {
     /// because its abstract still makes a report. Each run starts it afresh.
     private(set) var fullTextNotice: String?
 
+    /// Which relevant documents carry no transparency rating, for the screen
+    /// to show.
+    ///
+    /// Read from the documents (``Document/unratedTransparencyNotice(in:minScore:)``)
+    /// once the session has a report and nothing is running, so a run just
+    /// finished and the same session reopened from history say the same
+    /// thing, and a study analysed from its detail sheet drops out of it.
+    /// `nil` while a run is under way: the pass has not had its say.
+    ///
+    /// Not the session's `errorMessage`: a document without a badge does not
+    /// fail the run, and that slot offers to retry a report that was
+    /// generated (#459).
+    var transparencyNotice: String? {
+        guard !isRunning, let session, session.report != nil else { return nil }
+        return Document.unratedTransparencyNotice(
+            in: session.documents ?? [], minScore: settings.minScoreThreshold
+        )
+    }
+
+    /// Analyses one article's transparency from its DOI, PubMed ID and full
+    /// text. The workflow's own is ``TransparencyAnalysisService``; tests pass
+    /// their own so the pass can run without the network.
+    typealias TransparencyAnalysis = (
+        _ doi: String?, _ pmid: String?, _ fullText: String?
+    ) async throws -> TransparencyResult
+
     /// Whether this workflow was restored from history.
     ///
     /// When true, the first call to `fetchMoreEvidence()` will refresh pagination
@@ -580,6 +606,7 @@ final class FactCheckWorkflow {
 
         isRunning = true
         isCancelling = false
+        forgetLastStop(of: session)
 
         do {
             // Phase 3: Check for cancellation before starting
@@ -894,14 +921,23 @@ final class FactCheckWorkflow {
     ///
     /// Returns true when:
     /// - A session exists
-    /// - The session has an `errorMessage` set (a failure, or a non-fatal
-    ///   notice such as the transparency one)
+    /// - The session has an `errorMessage` set that records a failure: not a
+    ///   transparency notice an earlier build stored there beside a finished
+    ///   report (``isStoredTransparencyNotice(_:)``). This build puts
+    ///   per-document misses in ``fullTextNotice`` and ``transparencyNotice``.
     /// - The session has relevant documents with citations extracted
     /// - The workflow is not currently running
     var canRetryReportGeneration: Bool {
         guard let session = session,
               !isRunning,
-              session.errorMessage != nil else {
+              let message = session.errorMessage else {
+            return false
+        }
+        // Notices earlier builds stored in the slot. Without a report they are
+        // no proof the run finished: one killed while generating it still
+        // needs the retry
+        if session.report != nil,
+           Self.isStoredTransparencyNotice(message) || message == Self.storedFetchCancelledNotice {
             return false
         }
 
@@ -914,15 +950,49 @@ final class FactCheckWorkflow {
         return citationCount > 0
     }
 
+    /// How many of the session's citations its report was not generated from.
+    ///
+    /// Fetching more evidence extracts citations before it regenerates the
+    /// report, so one stopped in between — the app closed, or the run
+    /// cancelled — leaves citations the report never saw. `0` without a
+    /// report, or when the report rests on them all.
+    var unreportedCitationCount: Int {
+        guard let session, let report = session.report else { return 0 }
+        let held = (session.documents ?? []).reduce(0) { $0 + ($1.citations?.count ?? 0) }
+        return max(0, held - report.citationCount)
+    }
+
+    /// Whether to offer regenerating the report with citations it lacks.
+    ///
+    /// Not while a run is under way, and not beside a failure: that section's
+    /// retry regenerates from the same citations.
+    var canRegenerateWithNewCitations: Bool {
+        !isRunning && !canRetryReportGeneration && unreportedCitationCount > 0
+    }
+
+    /// The sentence offering that regeneration, or `nil` when there is
+    /// nothing to offer.
+    var unreportedCitationsNotice: String? {
+        guard canRegenerateWithNewCitations else { return nil }
+        let count = unreportedCitationCount
+        return count == 1
+            ? "1 new citation is not in the report yet."
+            : "\(count) new citations are not in the report yet."
+    }
+
     /// Retry report generation after a failure.
     ///
     /// This method allows users to retry just the report generation step when it
     /// fails (e.g., due to timeout, network issues, or LLM errors). It skips
     /// all previous workflow steps and directly attempts to regenerate the report.
     ///
+    /// Also regenerates a standing report with citations it was not made
+    /// from (``canRegenerateWithNewCitations``); the report it replaces is
+    /// deleted once the new one exists.
+    ///
     /// Prerequisites:
     /// - Session must have relevant documents with citations already extracted
-    /// - Previous report generation must have failed
+    /// - Previous report generation failed, or the report lacks citations
     func retryReportGeneration() async {
         guard let session = session else { return }
 
@@ -948,17 +1018,25 @@ final class FactCheckWorkflow {
         isRunning = true
         isCancelling = false
         session.currentStep = .generatingReport
-        session.errorMessage = nil  // Clear previous error
+        forgetLastStop(of: session)
         try? modelContext.save()
 
         do {
             try Task.checkCancellation()
             updateProgress(.generatingReport, "Retrying report generation...")
+            let previousReport = session.report
             try await generateReport()
+
+            // Only once the new one exists: a failed attempt leaves the old
+            // report standing, as fetching more evidence does
+            if let previousReport, previousReport !== session.report {
+                modelContext.delete(previousReport)
+            }
 
             // Complete
             session.currentStep = .completed
             session.stopReason = .completed
+            forgetLastStop(of: session)
             session.updatedAt = Date()
             try? modelContext.save()
 
@@ -1065,6 +1143,7 @@ final class FactCheckWorkflow {
         isRunning = true
         isCancelling = false
         session.currentStep = .fetchingMoreEvidence
+        forgetLastStop(of: session)
         try? modelContext.save()
 
         do {
@@ -1144,6 +1223,7 @@ final class FactCheckWorkflow {
             // Complete
             session.currentStep = .completed
             session.stopReason = .completed
+            forgetLastStop(of: session)
             session.updatedAt = Date()
             try? modelContext.save()
 
@@ -1159,8 +1239,11 @@ final class FactCheckWorkflow {
             // Preserve existing state - if we have a report, keep completed state
             if !isCancelling {
                 if session.report != nil {
+                    // The report stands, so nothing failed. Citations the
+                    // batch extracted before the stop are offered for a new
+                    // report (``canRegenerateWithNewCitations``), not as a
+                    // failed one to retry.
                     session.currentStep = .completed
-                    session.errorMessage = "Additional evidence fetch cancelled"
                 } else {
                     session.currentStep = .awaitingUserDecision
                     session.errorMessage = "Cancelled"
@@ -1196,6 +1279,7 @@ final class FactCheckWorkflow {
         isRunning = true
         isCancelling = false
         wasPausedByBackground = false
+        forgetLastStop(of: session)
 
         // Notify BackgroundTaskManager that active work is in progress
         await BackgroundTaskManager.shared.setActiveWork(true)
@@ -1327,6 +1411,7 @@ final class FactCheckWorkflow {
             // Complete
             session.currentStep = .completed
             session.stopReason = .completed
+            forgetLastStop(of: session)
             session.updatedAt = Date()
             try? modelContext.save()
 
@@ -1369,6 +1454,23 @@ final class FactCheckWorkflow {
 
         // Notify BackgroundTaskManager that active work has stopped
         await BackgroundTaskManager.shared.setActiveWork(false)
+    }
+
+    /// Forgets why the session's last run stopped, as a new one starts and
+    /// again as one completes.
+    ///
+    /// `errorMessage` is how the screen tells a failed run: it offers the
+    /// retry section for one. Nothing else cleared it, so a run cancelled or
+    /// paused in the background and then continued to its report kept
+    /// "Cancelled by user", and the finished report sat under "Report
+    /// Generation Failed" — #459's symptom from another source. At the start
+    /// is not enough: a background pause writes its message during the run,
+    /// and the step under way can still finish. Both also clear a notice an
+    /// earlier build stored there. A run that stops records its own reason.
+    ///
+    /// - Parameter session: The session the run continues.
+    private func forgetLastStop(of session: FactCheckSession) {
+        session.errorMessage = nil
     }
 
     /// Clean up checkpoints for a completed session.
@@ -2095,8 +2197,13 @@ final class FactCheckWorkflow {
     /// Analyze transparency for all documents that meet the score threshold.
     ///
     /// Runs sequentially to respect API rate limits. Failures on individual
-    /// documents are logged but do not block the workflow.
-    private func analyzeTransparency() async {
+    /// documents are logged and do not block the workflow. A document left
+    /// without a rating is named by ``transparencyNotice``, which reads the
+    /// documents rather than this pass.
+    ///
+    /// - Parameter analyze: Analyses one article; `nil` uses
+    ///   ``TransparencyAnalysisService`` built from the settings.
+    func analyzeTransparency(using analyze: TransparencyAnalysis? = nil) async {
         guard let session = session else { return }
 
         // Stale results are re-run, not skipped. Filtering on presence alone left
@@ -2125,9 +2232,10 @@ final class FactCheckWorkflow {
             return
         }
 
-        let service = TransparencyAnalysisService.create(from: settings)
-        var failures: [String] = []
-
+        // Built once for the whole pass, not once per document
+        let analyze = analyze ?? { [service = TransparencyAnalysisService.create(from: settings)] doi, pmid, fullText in
+            try await service.analyze(doi: doi, pmid: pmid, fullText: fullText)
+        }
         for (index, document) in documentsToAnalyze.enumerated() {
             if Task.isCancelled { break }
 
@@ -2137,23 +2245,34 @@ final class FactCheckWorkflow {
             )
 
             do {
-                let result = try await service.analyze(
+                let result = try await analyze(
                     // Not the raw field: it may be an empty string straight
                     // from a provider's JSON, which `analyze`'s own guard reads
                     // as present and then searches CrossRef for.
-                    doi: document.usableDOI,
+                    document.usableDOI,
                     // Not the raw slot: it also holds thesis and case-report
                     // accessions, and `analyze` searches PubMed with whatever
                     // it is given, then adopts the first hit's title, journal,
                     // authors and DOI. A bare Europe PMC accession would file
                     // an unrelated article's funding and conflicts under this
                     // document (#212).
-                    pmid: document.pubmedID,
+                    document.pubmedID,
                     // Not `fullTextContent`: an abstract-only deposit's text
                     // is an abstract, and must not be analysed as a body.
-                    fullText: document.analyzableFullText
+                    document.analyzableFullText
                 )
-                document.storeTransparencyResult(result)
+                // A result that could not be stored is a failed analysis: the
+                // document keeps whatever it held before. The store logs why,
+                // but under the PMID, which is empty for preprints (#208)
+                guard document.storeTransparencyResult(result) else {
+                    logger.error(
+                        """
+                        Transparency result for \(document.id) \
+                        (\(document.title)) could not be stored
+                        """
+                    )
+                    continue
+                }
                 try? modelContext.save()
             } catch is CancellationError {
                 // The user stopped the run. Not a failure, and it must not be
@@ -2163,7 +2282,6 @@ final class FactCheckWorkflow {
                 // Keyed by identity, not by `pmid`: that slot is empty for
                 // exactly the documents this workflow has most trouble with,
                 // which made the log line read "failed for : ..." (#208).
-                failures.append(document.title)
                 logger.error(
                     """
                     Transparency analysis failed for \(document.id) \
@@ -2173,36 +2291,36 @@ final class FactCheckWorkflow {
             }
         }
 
-        // Golden rule 8: a per-document failure is still a failure the reader
-        // must be told about. Each one leaves a document with no transparency
-        // badge, and a missing badge is otherwise indistinguishable from one
-        // that was analysed and found nothing worth flagging.
-        //
-        // Only when nothing else has claimed the slot: a fatal error stopping
-        // the run matters more than a per-document miss, and must not be
-        // overwritten by it.
-        if !failures.isEmpty, session.errorMessage == nil {
-            session.errorMessage = Self.transparencyFailureNotice(for: failures)
-        }
     }
 
-    /// A one-line summary of the documents whose transparency analysis failed.
+    /// How the transparency notice earlier builds stored began when it named
+    /// documents ("Transparency analysis failed for: A; B").
     ///
-    /// Names them while the list is short enough to read, because a bare count
-    /// leaves the reader unable to tell *which* badge is missing. Past that it
-    /// counts, since a notice nobody finishes reading reports nothing.
+    /// Not wording to improve: sessions stored before #459 hold this exact
+    /// text, and ``isStoredTransparencyNotice(_:)`` recognises them by it.
+    private static let storedNamedNoticePrefix = "Transparency analysis failed for: "
+
+    /// How the same notice began when it counted them ("Transparency analysis
+    /// could not be completed for 4 documents"). Not to be reworded, as above.
+    private static let storedCountedNoticePrefix = "Transparency analysis could not be completed for "
+
+    /// What earlier builds stored in `errorMessage` when fetching more evidence
+    /// was stopped beside a finished report. The report stood; nothing failed.
+    private static let storedFetchCancelledNotice = "Additional evidence fetch cancelled"
+
+    /// Whether a session's stored `errorMessage` is a transparency notice an
+    /// earlier build put there, rather than a failure of the run.
     ///
-    /// No failure is lost either way: each one is logged individually with the
-    /// document's identity and the underlying error as it happens. This is a
-    /// summary of that log, not a substitute for it.
+    /// Builds before #459 wrote the notice to that slot, and those sessions are
+    /// still in the store until a later run clears it. Read as a failure, a
+    /// finished report would offer to be generated again. Only the notice's
+    /// two forms match: no other writer of the slot uses either prefix.
     ///
-    /// - Parameter titles: Titles of the documents that failed, in run order.
-    /// - Returns: A sentence naming or counting the failures.
-    private static func transparencyFailureNotice(for titles: [String]) -> String {
-        if titles.count <= WorkflowConstants.maxFailedTitlesToName {
-            return "Transparency analysis failed for: \(titles.joined(separator: "; "))"
-        }
-        return "Transparency analysis could not be completed for \(titles.count) documents"
+    /// - Parameter message: The session's stored `errorMessage`.
+    /// - Returns: `true` when it is a stored transparency notice.
+    static func isStoredTransparencyNotice(_ message: String) -> Bool {
+        message.hasPrefix(storedNamedNoticePrefix)
+            || message.hasPrefix(storedCountedNoticePrefix)
     }
 
     private func generateReport() async throws {

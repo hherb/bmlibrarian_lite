@@ -185,6 +185,12 @@ struct ReportContentView: View {
 
             // Transparency Summary
             if let session = report.session {
+                // Before the summary, which shows nothing when no study was rated
+                if let notice = Document.unratedTransparencyNotice(
+                    in: session.documents ?? [], minScore: AppSettings.shared.minScoreThreshold
+                ) {
+                    IncompleteSearchNotice(text: notice)
+                }
                 TransparencySummarySection(documents: session.documents ?? [])
                 HighRiskTransparencyDetails(documents: session.documents ?? [])
             }
@@ -385,6 +391,12 @@ struct ReportView: View {
 
                     // Transparency Summary
                     if let session = report.session {
+                        // Before the summary, which shows nothing when no study was rated
+                        if let notice = Document.unratedTransparencyNotice(
+                            in: session.documents ?? [], minScore: AppSettings.shared.minScoreThreshold
+                        ) {
+                            IncompleteSearchNotice(text: notice)
+                        }
                         TransparencySummarySection(documents: session.documents ?? [])
                         HighRiskTransparencyDetails(documents: session.documents ?? [])
                     }
