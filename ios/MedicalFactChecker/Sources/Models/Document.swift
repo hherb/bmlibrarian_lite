@@ -1629,3 +1629,38 @@ struct TransparencyReportCounts: Equatable {
             + "carry no rating here. Re-analyse to rate them."
     }
 }
+
+// MARK: - Unrated Transparency
+
+extension Document {
+    /// The sentence naming the relevant documents left without a transparency
+    /// rating, or `nil` when every one that could be rated was.
+    ///
+    /// Worked out from the documents rather than kept from the pass that
+    /// missed them: nothing else about that pass is stored, and a session
+    /// reopened from history must explain its missing badges as the finished
+    /// run did (#459). A missing badge otherwise reads as an analysis that
+    /// found nothing worth flagging (golden rule 8).
+    ///
+    /// Counted: the documents the transparency step analyses — relevant
+    /// enough, with an identifier the analyser accepts — that hold no stored
+    /// analysis, whether it failed, could not be stored or was never run.
+    /// A stale or unreadable stored analysis is not counted: its badge, or
+    /// ``TransparencyReportCounts/unreadableSummary``, already says so.
+    ///
+    /// - Parameters:
+    ///   - documents: The documents the report rests on, in display order.
+    ///   - minScore: The relevance threshold the transparency step applies.
+    /// - Returns: A sentence naming them while the list is short, counting
+    ///   them past that, or `nil` when there are none.
+    static func unratedTransparencyNotice(in documents: [Document], minScore: Int) -> String? {
+        let titles = documents
+            .filter { $0.meetsThreshold(minScore) && $0.canAnalyzeTransparency && !$0.hasTransparencyAnalysis }
+            .map(\.title)
+        guard !titles.isEmpty else { return nil }
+        if titles.count <= WorkflowConstants.maxFailedTitlesToName {
+            return "No transparency rating for: \(titles.joined(separator: "; ")). Open a study to analyse it."
+        }
+        return "No transparency rating for \(titles.count) documents. Open a study to analyse it."
+    }
+}

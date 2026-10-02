@@ -19,11 +19,11 @@ import SwiftData
 import BioMedLit
 @testable import MedicalFactChecker
 
-/// Where a per-document transparency failure is reported (#459).
+/// Where a missing transparency rating is reported (#459).
 ///
-/// It used to be written to the session's `errorMessage`, which the screen
-/// reads as a failed run: a finished report sat under a red "Report
-/// Generation Failed" section with a retry button.
+/// A per-document failure used to be written to the session's `errorMessage`,
+/// which the screen reads as a failed run: a finished report sat under a red
+/// "Report Generation Failed" section with a retry button.
 @MainActor
 final class TransparencyNoticeTests: XCTestCase {
     private var container: ModelContainer!
@@ -45,27 +45,64 @@ final class TransparencyNoticeTests: XCTestCase {
 
     private struct Boom: Error {}
 
-    /// A session whose one document is scored, cited and analysable, held by a
-    /// workflow as a finished run is.
-    private func makeWorkflow(title: String = "A Study") -> (FactCheckWorkflow, FactCheckSession) {
-        let session = FactCheckSession(claim: "Aspirin prevents stroke")
-        context.insert(session)
+    /// A scored, cited document the transparency step analyses.
+    ///
+    /// Its DOI, not its PMID slot, makes it analysable: a bare number states
+    /// no PubMed ID, so without a DOI ``Document/canAnalyzeTransparency``
+    /// would exclude it.
+    @discardableResult
+    private func addDocument(
+        _ title: String, doi: String? = nil, to session: FactCheckSession
+    ) -> Document {
         let document = Document(pmid: "12345678", title: title, abstract: "An abstract.")
         // The top score, so the user's threshold setting cannot exclude it
         document.relevanceScore = 5
-        // A DOI, not the PMID slot: a bare number does not state a PubMed ID
-        document.doi = "10.1000/example"
+        document.doi = doi ?? "10.1000/\(title)"
         context.insert(document)
         document.session = session
         let citation = Citation(passage: "A passage.")
         context.insert(citation)
         citation.document = document
+        return document
+    }
 
+    private func attachReport(to session: FactCheckSession) {
+        let report = EvidenceReport(
+            verdict: .supported,
+            summary: "A summary.",
+            fullReport: "## Analysis\n\nThe evidence.",
+            citationCount: 1,
+            uniqueSourceCount: 1,
+            documentsReviewed: 1,
+            searchShortfallsRecord: nil
+        )
+        report.session = session
+        context.insert(report)
+        session.report = report
+    }
+
+    /// A session reopened from history, holding the named documents and,
+    /// unless told otherwise, the report a finished run made.
+    private func makeSession(
+        titles: [String] = ["A Study"], withReport: Bool = true
+    ) -> FactCheckSession {
+        let session = FactCheckSession(claim: "Aspirin prevents stroke")
+        context.insert(session)
+        for title in titles {
+            addDocument(title, to: session)
+        }
+        if withReport {
+            attachReport(to: session)
+        }
+        return session
+    }
+
+    private func restore(_ session: FactCheckSession) -> FactCheckWorkflow {
         let workflow = FactCheckWorkflow(
             modelContext: context, modelContainer: container, settings: .shared
         )
         workflow.restoreForViewing(session)
-        return (workflow, session)
+        return workflow
     }
 
     private func result() -> TransparencyResult {
@@ -74,54 +111,97 @@ final class TransparencyNoticeTests: XCTestCase {
         return builder.build()
     }
 
+    // MARK: - A failure is a notice, not a failed run
+
     func testAFailedAnalysisIsANoticeNotAFailedRun() async {
-        let (workflow, session) = makeWorkflow(title: "Alpha")
+        let session = makeSession(titles: ["Alpha"])
+        let workflow = restore(session)
 
         await workflow.analyzeTransparency(using: { _, _, _ in throw Boom() })
 
         XCTAssertNil(session.errorMessage)
         XCTAssertFalse(workflow.canRetryReportGeneration)
-        XCTAssertEqual(workflow.transparencyNotice, "Transparency analysis failed for: Alpha")
+        XCTAssertEqual(
+            workflow.transparencyNotice,
+            "No transparency rating for: Alpha. Open a study to analyse it."
+        )
     }
 
     /// Control: the fixture is one the retry section is offered for, so the
     /// test above is not passing on a session that could never show it.
     func testTheFixtureOffersARetryWhenTheRunFailed() {
-        let (workflow, session) = makeWorkflow()
+        let session = makeSession()
+        let workflow = restore(session)
 
         session.errorMessage = "Report generation timed out"
 
         XCTAssertTrue(workflow.canRetryReportGeneration)
     }
 
-    /// The run's own failure and the per-document notice are both shown;
-    /// neither takes the other's place.
+    /// The run's own failure and the notice are both shown; neither takes the
+    /// other's place, and the failure keeps its retry.
     func testARunFailureIsKeptBesideTheNotice() async {
-        let (workflow, session) = makeWorkflow(title: "Alpha")
+        let session = makeSession(titles: ["Alpha"])
         session.errorMessage = "Report generation timed out"
+        let workflow = restore(session)
 
         await workflow.analyzeTransparency(using: { _, _, _ in throw Boom() })
 
         XCTAssertEqual(session.errorMessage, "Report generation timed out")
+        XCTAssertTrue(workflow.canRetryReportGeneration)
         XCTAssertNotNil(workflow.transparencyNotice)
     }
 
-    func testASuccessfulPassStoresTheResultAndClearsTheNotice() async throws {
-        let (workflow, session) = makeWorkflow()
+    /// Reopened from history, a session still explains its missing badge. The
+    /// notice used to live only as long as the run that set it.
+    func testAReopenedSessionStillNamesItsUnratedStudy() async {
+        let session = makeSession(titles: ["Alpha"])
+        await restore(session).analyzeTransparency(using: { _, _, _ in throw Boom() })
+
+        let reopened = restore(session)
+
+        XCTAssertEqual(
+            reopened.transparencyNotice,
+            "No transparency rating for: Alpha. Open a study to analyse it."
+        )
+    }
+
+    func testOnlyTheStudiesLeftUnratedAreNamed() async throws {
+        let session = makeSession(titles: ["Alpha", "Beta"])
+        let workflow = restore(session)
+
+        await workflow.analyzeTransparency(using: { [result = result()] doi, _, _ in
+            if doi == "10.1000/Beta" { throw Boom() }
+            return result
+        })
+
+        XCTAssertEqual(
+            workflow.transparencyNotice,
+            "No transparency rating for: Beta. Open a study to analyse it."
+        )
+        let alpha = try XCTUnwrap(session.documents?.first { $0.title == "Alpha" })
+        XCTAssertTrue(alpha.hasTransparencyAnalysis)
+    }
+
+    /// A study rated afterwards, by a later pass or from its detail sheet,
+    /// drops out of the notice.
+    func testRatingTheMissingStudyClearsTheNotice() async throws {
+        let session = makeSession()
+        let workflow = restore(session)
         await workflow.analyzeTransparency(using: { _, _, _ in throw Boom() })
         XCTAssertNotNil(workflow.transparencyNotice)
 
-        await workflow.analyzeTransparency(using: { [result = result()] _, _, _ in result })
+        let document = try XCTUnwrap(session.documents?.first)
+        XCTAssertTrue(document.storeTransparencyResult(result()))
 
         XCTAssertNil(workflow.transparencyNotice)
-        let document = try XCTUnwrap(session.documents?.first)
-        XCTAssertTrue(document.hasTransparencyAnalysis)
     }
 
-    /// A result that cannot be encoded leaves the document without a badge,
+    /// A result that cannot be encoded leaves the document without a rating,
     /// as a thrown error does, so the reader is told about it the same way.
     func testAResultThatCannotBeStoredIsReported() async {
-        let (workflow, _) = makeWorkflow(title: "Alpha")
+        let session = makeSession(titles: ["Alpha"])
+        let workflow = restore(session)
         var builder = TransparencyResultBuilder(pmid: "12345678")
         // JSONEncoder refuses a non-finite number
         builder.industryFundingConfidence = .nan
@@ -129,43 +209,172 @@ final class TransparencyNoticeTests: XCTestCase {
 
         await workflow.analyzeTransparency(using: { _, _, _ in unstorable })
 
-        XCTAssertEqual(workflow.transparencyNotice, "Transparency analysis failed for: Alpha")
+        XCTAssertEqual(
+            workflow.transparencyNotice,
+            "No transparency rating for: Alpha. Open a study to analyse it."
+        )
     }
 
-    func testCancellingIsNotReportedAsAFailure() async {
-        let (workflow, session) = makeWorkflow()
+    /// Before the report exists the pass has not finished its run, and the
+    /// screen's progress, not this notice, says where it stands.
+    func testNoNoticeBeforeTheRunHasAReport() async {
+        let session = makeSession(titles: ["Alpha"], withReport: false)
+        let workflow = restore(session)
 
-        await workflow.analyzeTransparency(using: { _, _, _ in throw CancellationError() })
+        await workflow.analyzeTransparency(using: { _, _, _ in throw Boom() })
 
         XCTAssertNil(workflow.transparencyNotice)
+    }
+
+    func testCancellingStopsThePassWithoutFailingTheRun() async {
+        let session = makeSession(titles: ["Alpha", "Beta", "Gamma"])
+        let workflow = restore(session)
+        var calls = 0
+
+        await workflow.analyzeTransparency(using: { _, _, _ in
+            calls += 1
+            if calls == 2 { throw CancellationError() }
+            throw Boom()
+        })
+
+        XCTAssertEqual(calls, 2, "no study is analysed after the user stops the run")
+        XCTAssertNil(session.errorMessage)
+        XCTAssertFalse(workflow.canRetryReportGeneration)
+    }
+
+    // MARK: - What the analyser is given
+
+    /// The analyser takes its three values by position, so swapping two
+    /// `String?`s compiles. Each document here differs from the raw fields in
+    /// one way the call site must respect (#212).
+    func testTheAnalyserIsGivenWhatEachDocumentStates() async {
+        let session = makeSession(titles: [], withReport: false)
+
+        // A declared PubMed ID beside a DOI; its stored text is an abstract
+        let declared = addDocument("Declared", doi: "10.1000/declared", to: session)
+        declared.pmid = "11111111"
+        declared.identifierKind = .pubmed
+        declared.fullTextContent = "Only the abstract."
+        declared.fullTextContentKindRaw = "abstract"
+
+        // A bare number in the PMID slot, which states no PubMed ID
+        let bare = addDocument("Bare", doi: "10.1000/bare", to: session)
+        bare.pmid = "22222222"
+        bare.fullTextContent = "The body."
+        bare.fullTextContentKindRaw = "extracted"
+
+        // An empty DOI straight from a provider's JSON
+        let emptyDOI = addDocument("Empty DOI", doi: "", to: session)
+        emptyDOI.pmid = "33333333"
+        emptyDOI.identifierKind = .pubmed
+
+        var given: [String] = []
+        await restore(session).analyzeTransparency(using: { [result = result()] doi, pmid, fullText in
+            given.append("\(doi ?? "-") | \(pmid ?? "-") | \(fullText ?? "-")")
+            return result
+        })
+
+        XCTAssertEqual(given.sorted(), [
+            "- | 33333333 | -",
+            "10.1000/bare | - | The body.",
+            "10.1000/declared | 11111111 | -",
+        ])
+    }
+
+    // MARK: - Which studies the notice counts
+
+    func testAStudyTheStepWouldNotAnalyseIsNotCounted() {
+        let session = makeSession(titles: [], withReport: false)
+        let unidentifiable = addDocument("No identifier", to: session)
+        unidentifiable.doi = nil
+        let irrelevant = addDocument("Irrelevant", to: session)
+        irrelevant.relevanceScore = 1
+
+        XCTAssertNil(Document.unratedTransparencyNotice(
+            in: [unidentifiable, irrelevant], minScore: 3
+        ))
+    }
+
+    /// The boundary: three are still named, four are counted.
+    func testUpToThreeStudiesAreNamedAndMoreAreCounted() {
+        let session = makeSession(titles: [], withReport: false)
+        let documents = ["a", "b", "c", "d"].map { addDocument($0, to: session) }
+
+        XCTAssertEqual(
+            Document.unratedTransparencyNotice(in: Array(documents.prefix(3)), minScore: 3),
+            "No transparency rating for: a; b; c. Open a study to analyse it."
+        )
+        XCTAssertEqual(
+            Document.unratedTransparencyNotice(in: documents, minScore: 3),
+            "No transparency rating for 4 documents. Open a study to analyse it."
+        )
+    }
+
+    // MARK: - A run continued after it stopped
+
+    /// "Cancelled by user" outlived the run it described: continued to its
+    /// report, the session still offered to retry a report it had made.
+    func testContinuingACancelledRunForgetsWhyItStopped() async {
+        let session = makeSession(titles: [], withReport: false)
+        session.currentStep = .awaitingUserDecision
+        session.errorMessage = "Cancelled by user"
+        let workflow = restore(session)
+
+        await workflow.proceedWithCurrentDocuments()
+
         XCTAssertNil(session.errorMessage)
     }
 
     // MARK: - Sessions stored by earlier builds
 
     /// Builds before #459 stored the notice as the session's `errorMessage`.
-    func testAStoredNoticeOffersNoRetryAndIsShownAsTheNotice() {
-        let (_, session) = makeWorkflow()
-        let stored = FactCheckWorkflow.transparencyFailureNotice(for: ["Alpha"])
+    func testAStoredNoticeBesideAReportOffersNoRetry() {
+        let session = makeSession(titles: ["Alpha"])
+        let stored = "Transparency analysis failed for: Alpha"
         session.errorMessage = stored
 
-        let workflow = FactCheckWorkflow(
-            modelContext: context, modelContainer: container, settings: .shared
-        )
-        workflow.restoreForViewing(session)
+        let workflow = restore(session)
 
         XCTAssertFalse(workflow.canRetryReportGeneration)
-        XCTAssertEqual(workflow.transparencyNotice, stored)
+        // Shown as this build words it, from the documents as they are now
+        XCTAssertEqual(
+            workflow.transparencyNotice,
+            "No transparency rating for: Alpha. Open a study to analyse it."
+        )
         // Viewing does not rewrite the store
         XCTAssertEqual(session.errorMessage, stored)
     }
 
+    /// Without a report the stored notice does not show the run finished: one
+    /// killed while generating the report still needs the retry.
+    func testAStoredNoticeWithoutAReportKeepsTheRetry() {
+        let session = makeSession(titles: ["Alpha"], withReport: false)
+        session.errorMessage = "Transparency analysis failed for: Alpha"
+
+        XCTAssertTrue(restore(session).canRetryReportGeneration)
+    }
+
+    /// Control: restoring a session whose run really failed keeps its retry.
+    func testARestoredRunFailureKeepsItsRetry() {
+        let session = makeSession()
+        session.errorMessage = "Report generation timed out"
+
+        let workflow = restore(session)
+
+        XCTAssertTrue(workflow.canRetryReportGeneration)
+        XCTAssertNotEqual(workflow.transparencyNotice, "Report generation timed out")
+    }
+
+    // Written out, not built: earlier builds stored these exact sentences, and
+    // a session holding one is recognised only while each still begins as it
+    // did there.
+
     func testBothStoredFormsAreRecognised() {
         XCTAssertTrue(FactCheckWorkflow.isStoredTransparencyNotice(
-            FactCheckWorkflow.transparencyFailureNotice(for: ["Alpha"])
+            "Transparency analysis failed for: Alpha; Beta"
         ))
         XCTAssertTrue(FactCheckWorkflow.isStoredTransparencyNotice(
-            FactCheckWorkflow.transparencyFailureNotice(for: ["a", "b", "c", "d"])
+            "Transparency analysis could not be completed for 4 documents"
         ))
     }
 
@@ -173,24 +382,5 @@ final class TransparencyNoticeTests: XCTestCase {
     func testARunFailureIsNotAStoredNotice() {
         XCTAssertFalse(FactCheckWorkflow.isStoredTransparencyNotice("Report generation timed out"))
         XCTAssertFalse(FactCheckWorkflow.isStoredTransparencyNotice("Cancelled"))
-    }
-
-    // MARK: - Wording
-
-    // Pinned whole: earlier builds stored these exact sentences, and a session
-    // holding one is recognised only while the wording still matches.
-
-    func testAShortFailureListIsNamed() {
-        XCTAssertEqual(
-            FactCheckWorkflow.transparencyFailureNotice(for: ["Alpha", "Beta"]),
-            "Transparency analysis failed for: Alpha; Beta"
-        )
-    }
-
-    func testALongFailureListIsCounted() {
-        XCTAssertEqual(
-            FactCheckWorkflow.transparencyFailureNotice(for: ["a", "b", "c", "d"]),
-            "Transparency analysis could not be completed for 4 documents"
-        )
     }
 }

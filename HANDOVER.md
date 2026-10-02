@@ -8,15 +8,19 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**iOS/macOS: per-document transparency failures are a notice, not a failed
-run** (#459), branch `fix/transparency-notice-459`. The notice moved from
-`session.errorMessage` to `workflow.transparencyNotice`, shown beside
-`fullTextNotice`; a result that cannot be stored now counts as a failure;
-sessions stored by earlier builds are recognised on restore
-(`isStoredTransparencyNotice`, read-only). Both notices are transient: a
-session reopened from history no longer shows a failure that a new build
-recorded. Pick the next slice from **Potential follow-ups** (freshest: #450,
-#453, #454).
+**iOS/macOS: a missing transparency rating is a notice, not a failed run**
+(#459), branch `fix/transparency-notice-459`, **PR #460** (compress once
+merged). `workflow.transparencyNotice` is **derived from the documents**
+(`Document.unratedTransparencyNotice`: relevant, analysable, no stored
+analysis) once the session has a report, so a reopened session says what the
+finished run said; the Report tab shows it too. **Every run start clears
+`session.errorMessage`** (`forgetLastStop`): a run continued after cancel or a
+background pause no longer offers to retry its own finished report. Sessions
+from earlier builds hold the old notice in `errorMessage`; with a report it
+offers no retry (`isStoredTransparencyNotice`; its two prefixes must never be
+reworded). Open: fetching more evidence runs no transparency step, so the
+notice names the studies it added. Pick the next slice from **Potential
+follow-ups** (freshest: #450, #453, #454).
 
 ## Recently landed (context)
 
@@ -88,19 +92,27 @@ the rest.
   `segment_unmarked_end_matter`. Analyser **2.6**. Stem-based heading words
   and asking about every empty heading were **dropped**: both released honest
   data charges.
-- **Statements reach the analyser** (Python; PR #426). The converter is
-  `jats_markdown.py`: every `<back>` element but the ref-list, plus PLOS's
-  front statements, each under a heading, after the body. **Bump
+- **Statements reach the analyser** (Python; PR #426, #420, #421). **The
+  converter is `jats_markdown.py`**: every `<back>` element but the ref-list,
+  plus PLOS's front statements, each under a heading, after the body;
+  `<sub-article>`s are ignored. **In the
+  end matter no piece goes without a heading once a sibling has one**.
+  **Recognising more end matter creates charges** (the #359 trap; `_mentions`
+  and #428's heading rule guard it). **Bump
   `JATS_MARKDOWN_CONVERTER_VERSION`** whenever the same XML converts
-  differently. **No full text, no data-availability request** (user's call).
+  differently (cached markdown carries the stamp). **No full text, no
+  data-availability request** (#421, user's call). Survey scratch: `tmp/jats-*`.
+
 - **Desktop certainty and high-risk explanation** (Python; PR #419, #386).
   Every no-full-text rating says "Limited certainty because of lack of full
   text access"; badge tooltip and report name the rules that made a study
   High. **"Without full text" means nothing in it was recognised**; analyser
   **2.3**. **Score = clamped sum of `score_components`; High iff
-  `high_risk_triggers` is non-empty**, under the user's settings. Contract:
-  `transparency_parity/risk_explanation_strings.json`. **No Unassessed rule
-  on the desktop** (user's call).
+  `high_risk_triggers` is non-empty**, under the **user's settings, one shared
+  object**; a stored breakdown that will not decode, is empty or does not sum
+  to the score reads as `None`. Contract: `transparency_parity/risk_explanation_strings.json`.
+  **No Unassessed rule on the desktop** (user's call), pinned by
+  `test_no_high_rests_on_unread_text.py`.
 - **An unreachable source is provisional** (all three; PR #410, #385): the
   apps store `sourcesUnreachable` when a source fails *or answers
   unreadably*; Python needs **every cited trial answered** before "without
@@ -174,14 +186,18 @@ the rest.
   - **Measure prevalence from the XML, never through the parser** (#164):
     `scripts/jats_survey.py`. Asking the parser would agree with its own
     bugs, which is how #161/#162 survived a green suite.
-  - **Real PMC JATS corpus** (#146) under `doc/cross_platform/jats_corpus/`;
-    read its `README.md` first. **The fixture walk stops at the checkout
-    root** in `JATSRealCorpusTests` and `TransparencyParityTests` (worktrees
-    live inside the checkout), and **a test only hears what the logger
-    records**.
-  - **Funder classification** (#143): `sponsor_patterns.json` is the
-    contract; never merge it into `INDUSTRY_KEYWORDS`; `NONPROFIT` means "not
-    recognised".
+  - **Real PMC JATS corpus** (#146) under `doc/cross_platform/jats_corpus/`.
+    **Read that directory's `README.md` before touching it.** Two traps it
+    omits: **the fixture walk stops at the checkout root** in both
+    `JATSRealCorpusTests` and `TransparencyParityTests` and they must not
+    drift — worktrees live *inside* the checkout, so a climb to `/`
+    validates a branch against the main checkout's fixtures and passes; and
+    **a test only hears what the logger records** — the recorder ignored
+    `debug`, so the corpus dropped 21 of 62 captions under a green test.
+  - **Funder classification** (#143/#147/#152): `sponsor_patterns.json` is
+    the contract, `confidence_probes` checked *behaviourally*. **Never merge
+    the funder lists into `INDUSTRY_KEYWORDS`** (COI prose). **`NONPROFIT`
+    means "not recognised"**.
   - **CI on all three platforms** (#129). **No job may gain a `paths:`
     filter** (the parity fixtures live outside `src/` and `tests/`). **A Qt
     preflight constructs a `QApplication` before pytest**, or a broken Qt
@@ -221,9 +237,11 @@ Open issues by family; each issue carries the detail. None blocks another.
   twice after `NotEstablished`; **#443** a preprint record with no usable
   accession ends as a permanent absence without a lookup.
 - **#450** Swift + Android ask `fullTextXML` for every accession: port #432's
-  `isOpenAccess` rule (the apps often start from a stored PMC ID). **#453**
-  `?pdf=render` answers 403 to non-browser clients (all three). **#454** a
-  fresh preprint can be served while its record says `inEPMC=N`.
+  `isOpenAccess` rule (needs the record's flag at the fetch; the apps often
+  start from a stored PMC ID). **#453** Europe PMC's
+  `?pdf=render` answers 403 to every non-browser client, so the render tier
+  serves nothing (all three). **#454** a fresh preprint can be served while
+  its record says `inEPMC=N`, and every rule skips it.
 - **#427** MCP `get_document_fulltext` and reader-facing discovery callers
   discard a stale cached text when the refresh fails
   (`pdf_utils.read_stale_cached_fulltext` exists); the analyser must never
@@ -429,9 +447,12 @@ enables DEBUG; **#245** the transparency CLIs take the NCBI key only as
 
 ### Verify
 
-- **Closing an issue is a claim.** "Lodged rather than fixed: #217" closes
-  #217; write "Deferred: #N". After every merge, confirm each deferred issue
-  is still open and each fixed one closed.
+- **Closing an issue is a claim; check the commit made it true.** Five
+  deferred issues were closed by their own commits: "Lodged rather than
+  fixed: #217" contains `fixed: #217`, "not fixed: #N" is no negation to
+  GitHub, and quoting the phrase to explain it closes the issue again. Write
+  no closing keyword before a deferred number ("Deferred: #N"). After every
+  merge, confirm each deferred issue is still open and each fixed one closed.
 - Touching any data-availability pattern? Run all three parity suites; a change
   that does not update `doc/cross_platform/transparency_parity/` **and** all
   three platforms is meant to fail.
@@ -458,9 +479,11 @@ enables DEBUG; **#245** the transparency CLIs take the NCBI key only as
   the store in an **earlier build's** model shape first (`StoreMigrationTests`
   shows how, with a snapshot `@Model` in the test); that is the only path that
   reaches the duplicate-checksum exception and an unclassified migration error.
-- **A silent SwiftPM hang** is the manifest binary stuck behind `syspolicyd`
-  (7–11 min each); chain build, test and `xcodebuild` in one background job.
-  The lasting fix is the user's: Privacy & Security → Developer Tools.
+- **A silent SwiftPM hang with no second build running** is its manifest binary
+  stuck at `_dyld_start` behind `syspolicyd`; each invocation can stall 7–11
+  minutes, and `--disable-sandbox` did not prevent it (2026-09-13). Check with `swiftc -typecheck`
+  first, then chain build, test and `xcodebuild` in one background job. The
+  lasting fix is the user's: Privacy & Security → Developer Tools.
 - **`swift test` compiles neither app target's platform-guarded sources.** On a
   macOS host every `#if os(iOS)` file becomes nothing, and the SPM target excludes
   `Sources/macOS` — so a break behind either guard is invisible to it *and* to

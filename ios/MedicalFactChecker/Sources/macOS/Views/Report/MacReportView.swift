@@ -102,6 +102,12 @@ struct MacReportView: View {
                     // Transparency Summary
                     if let session = report.session {
                         let docs = session.documents ?? []
+                        // Outside the guard below: it matters most when no study was rated
+                        if let notice = Document.unratedTransparencyNotice(
+                            in: docs, minScore: AppSettings.shared.minScoreThreshold
+                        ) {
+                            MacIncompleteSearchNotice(text: notice)
+                        }
                         if docs.contains(where: { $0.hasTransparencyAnalysis }) {
                             MacTransparencySummarySection(documents: docs)
                             MacHighRiskTransparencyDetails(documents: docs)

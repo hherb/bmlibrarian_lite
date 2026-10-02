@@ -99,14 +99,24 @@ final class FactCheckWorkflow {
     /// because its abstract still makes a report. Each run starts it afresh.
     private(set) var fullTextNotice: String?
 
-    /// Which documents' transparency analysis failed, for the screen to show.
+    /// Which relevant documents carry no transparency rating, for the screen
+    /// to show.
     ///
-    /// `nil` when nothing went wrong. Kept apart from the session's
-    /// `errorMessage` for the same reason as ``fullTextNotice``: a document
-    /// left without a transparency badge does not fail the run, and that slot
-    /// would offer to retry a report that was generated (#459). Each
-    /// transparency pass starts it afresh.
-    private(set) var transparencyNotice: String?
+    /// Read from the documents (``Document/unratedTransparencyNotice(in:minScore:)``)
+    /// once the session has a report and nothing is running, so a run just
+    /// finished and the same session reopened from history say the same
+    /// thing, and a study analysed from its detail sheet drops out of it.
+    /// `nil` while a run is under way: the pass has not had its say.
+    ///
+    /// Not the session's `errorMessage`: a document without a badge does not
+    /// fail the run, and that slot offers to retry a report that was
+    /// generated (#459).
+    var transparencyNotice: String? {
+        guard !isRunning, let session, session.report != nil else { return nil }
+        return Document.unratedTransparencyNotice(
+            in: session.documents ?? [], minScore: settings.minScoreThreshold
+        )
+    }
 
     /// Analyses one article's transparency from its DOI, PubMed ID and full
     /// text. The workflow's own is ``TransparencyAnalysisService``; tests pass
@@ -387,12 +397,6 @@ final class FactCheckWorkflow {
             )
         }
 
-        // Shown as the notice it is, and left in the store as it was: viewing
-        // a session does not rewrite it
-        if let message = session.errorMessage, Self.isStoredTransparencyNotice(message) {
-            transparencyNotice = message
-        }
-
         // Restore awaitingUserDecision state if the session was paused waiting for input
         if session.currentStep == .awaitingUserDecision {
             awaitingUserDecision = true
@@ -602,6 +606,7 @@ final class FactCheckWorkflow {
 
         isRunning = true
         isCancelling = false
+        forgetLastStop(of: session)
 
         do {
             // Phase 3: Check for cancellation before starting
@@ -916,15 +921,21 @@ final class FactCheckWorkflow {
     ///
     /// Returns true when:
     /// - A session exists
-    /// - The session has an `errorMessage` set (a failure; per-document
-    ///   misses go to ``fullTextNotice`` and ``transparencyNotice`` instead)
+    /// - The session has an `errorMessage` set that records a failure: not a
+    ///   transparency notice an earlier build stored there beside a finished
+    ///   report (``isStoredTransparencyNotice(_:)``). This build puts
+    ///   per-document misses in ``fullTextNotice`` and ``transparencyNotice``.
     /// - The session has relevant documents with citations extracted
     /// - The workflow is not currently running
     var canRetryReportGeneration: Bool {
         guard let session = session,
               !isRunning,
-              let message = session.errorMessage,
-              !Self.isStoredTransparencyNotice(message) else {
+              let message = session.errorMessage else {
+            return false
+        }
+        // Without a report the stored notice is no proof the run finished:
+        // one killed while generating it still needs the retry
+        if Self.isStoredTransparencyNotice(message), session.report != nil {
             return false
         }
 
@@ -971,7 +982,7 @@ final class FactCheckWorkflow {
         isRunning = true
         isCancelling = false
         session.currentStep = .generatingReport
-        session.errorMessage = nil  // Clear previous error
+        forgetLastStop(of: session)
         try? modelContext.save()
 
         do {
@@ -1088,6 +1099,7 @@ final class FactCheckWorkflow {
         isRunning = true
         isCancelling = false
         session.currentStep = .fetchingMoreEvidence
+        forgetLastStop(of: session)
         try? modelContext.save()
 
         do {
@@ -1219,6 +1231,7 @@ final class FactCheckWorkflow {
         isRunning = true
         isCancelling = false
         wasPausedByBackground = false
+        forgetLastStop(of: session)
 
         // Notify BackgroundTaskManager that active work is in progress
         await BackgroundTaskManager.shared.setActiveWork(true)
@@ -1392,6 +1405,21 @@ final class FactCheckWorkflow {
 
         // Notify BackgroundTaskManager that active work has stopped
         await BackgroundTaskManager.shared.setActiveWork(false)
+    }
+
+    /// Forgets why the session's last run stopped, as a new one starts.
+    ///
+    /// `errorMessage` is how the screen tells a failed run: it offers the
+    /// retry section for one. Nothing else clears it, so a run cancelled or
+    /// paused in the background and then continued to its report kept
+    /// "Cancelled by user", and the finished report sat under "Report
+    /// Generation Failed" — #459's symptom from another source. The same
+    /// clears a transparency notice an earlier build stored there. A run that
+    /// stops again records its own reason.
+    ///
+    /// - Parameter session: The session the run continues.
+    private func forgetLastStop(of session: FactCheckSession) {
+        session.errorMessage = nil
     }
 
     /// Clean up checkpoints for a completed session.
@@ -2118,15 +2146,13 @@ final class FactCheckWorkflow {
     /// Analyze transparency for all documents that meet the score threshold.
     ///
     /// Runs sequentially to respect API rate limits. Failures on individual
-    /// documents are logged, named in ``transparencyNotice`` and do not block
-    /// the workflow.
+    /// documents are logged and do not block the workflow. A document left
+    /// without a rating is named by ``transparencyNotice``, which reads the
+    /// documents rather than this pass.
     ///
     /// - Parameter analyze: Analyses one article; `nil` uses
     ///   ``TransparencyAnalysisService`` built from the settings.
     func analyzeTransparency(using analyze: TransparencyAnalysis? = nil) async {
-        // Before any guard: a pass with nothing to analyse has nothing to report
-        transparencyNotice = nil
-
         guard let session = session else { return }
 
         // Stale results are re-run, not skipped. Filtering on presence alone left
@@ -2159,8 +2185,6 @@ final class FactCheckWorkflow {
         let analyze = analyze ?? { [service = TransparencyAnalysisService.create(from: settings)] doi, pmid, fullText in
             try await service.analyze(doi: doi, pmid: pmid, fullText: fullText)
         }
-        var failures: [String] = []
-
         for (index, document) in documentsToAnalyze.enumerated() {
             if Task.isCancelled { break }
 
@@ -2186,11 +2210,16 @@ final class FactCheckWorkflow {
                     // is an abstract, and must not be analysed as a body.
                     document.analyzableFullText
                 )
-                // A result that could not be stored leaves the document
-                // without a badge, exactly as a failed analysis does; the
-                // reason is already logged by the store
+                // A result that could not be stored is a failed analysis: the
+                // document keeps whatever it held before. The store logs why,
+                // but under the PMID, which is empty for preprints (#208)
                 guard document.storeTransparencyResult(result) else {
-                    failures.append(document.title)
+                    logger.error(
+                        """
+                        Transparency result for \(document.id) \
+                        (\(document.title)) could not be stored
+                        """
+                    )
                     continue
                 }
                 try? modelContext.save()
@@ -2202,7 +2231,6 @@ final class FactCheckWorkflow {
                 // Keyed by identity, not by `pmid`: that slot is empty for
                 // exactly the documents this workflow has most trouble with,
                 // which made the log line read "failed for : ..." (#208).
-                failures.append(document.title)
                 logger.error(
                     """
                     Transparency analysis failed for \(document.id) \
@@ -2212,56 +2240,32 @@ final class FactCheckWorkflow {
             }
         }
 
-        // Golden rule 8: a per-document failure is still a failure the reader
-        // must be told about. Each one leaves a document with no transparency
-        // badge, and a missing badge is otherwise indistinguishable from one
-        // that was analysed and found nothing worth flagging.
-        //
-        // Not `session.errorMessage`: that slot means the run failed, and the
-        // screen offers to retry a report that was generated (#459).
-        if !failures.isEmpty {
-            transparencyNotice = Self.transparencyFailureNotice(for: failures)
-        }
     }
 
-    /// A one-line summary of the documents whose transparency analysis failed.
+    /// How the transparency notice earlier builds stored began when it named
+    /// documents ("Transparency analysis failed for: A; B").
     ///
-    /// Names them while the list is short enough to read, because a bare count
-    /// leaves the reader unable to tell *which* badge is missing. Past that it
-    /// counts, since a notice nobody finishes reading reports nothing.
-    ///
-    /// No failure is lost either way: each one is logged individually with the
-    /// document's identity and the underlying error as it happens. This is a
-    /// summary of that log, not a substitute for it.
-    ///
-    /// - Parameter titles: Titles of the documents that failed, in run order.
-    /// - Returns: A sentence naming or counting the failures.
-    static func transparencyFailureNotice(for titles: [String]) -> String {
-        if titles.count <= WorkflowConstants.maxFailedTitlesToName {
-            return transparencyNamedFailuresPrefix + titles.joined(separator: "; ")
-        }
-        return transparencyCountedFailuresPrefix + "\(titles.count) documents"
-    }
+    /// Not wording to improve: sessions stored before #459 hold this exact
+    /// text, and ``isStoredTransparencyNotice(_:)`` recognises them by it.
+    private static let storedNamedNoticePrefix = "Transparency analysis failed for: "
 
-    /// How ``transparencyFailureNotice(for:)`` begins when it names documents.
-    private static let transparencyNamedFailuresPrefix = "Transparency analysis failed for: "
-
-    /// How ``transparencyFailureNotice(for:)`` begins when it counts them.
-    private static let transparencyCountedFailuresPrefix = "Transparency analysis could not be completed for "
+    /// How the same notice began when it counted them ("Transparency analysis
+    /// could not be completed for 4 documents"). Not to be reworded, as above.
+    private static let storedCountedNoticePrefix = "Transparency analysis could not be completed for "
 
     /// Whether a session's stored `errorMessage` is a transparency notice an
     /// earlier build put there, rather than a failure of the run.
     ///
     /// Builds before #459 wrote the notice to that slot, and those sessions are
-    /// still in the store. Read as a failure, a finished report would offer to
-    /// be generated again. Only this function's own two forms match: every
-    /// other message in the slot is the workflow's or an error's wording.
+    /// still in the store until a later run clears it. Read as a failure, a
+    /// finished report would offer to be generated again. Only the notice's
+    /// two forms match: no other writer of the slot uses either prefix.
     ///
     /// - Parameter message: The session's stored `errorMessage`.
     /// - Returns: `true` when it is a stored transparency notice.
     static func isStoredTransparencyNotice(_ message: String) -> Bool {
-        message.hasPrefix(transparencyNamedFailuresPrefix)
-            || message.hasPrefix(transparencyCountedFailuresPrefix)
+        message.hasPrefix(storedNamedNoticePrefix)
+            || message.hasPrefix(storedCountedNoticePrefix)
     }
 
     private func generateReport() async throws {
