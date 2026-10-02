@@ -38,8 +38,9 @@ the app keeps a stored PDF link rather than trade it for that fallback
 undownloaded PDF link** (`Document.holdsOnlyUndownloadedPDFLink`: pre-#464
 landing pages, and failed downloads) are fetched again every run and offer
 **Try Download Again** (the maintainer's decision). **Android's Unpaywall tier
-never ran before this**: its Retrofit models were not `@Serializable`. No read
-cap on the page (golden rule 13: a cap is the user's call). Lodged: **#466**
+never ran before this**: its Retrofit models were not `@Serializable`. The page
+is read up to 2 MiB (`LANDING_PAGE_MAX_BYTES`; user's call: rule 13 guards
+research content, not a lookup page). Lodged: **#466**
 (tell the app reader), **#467** (remaining parity edges).
 
 ## Recently landed (context)

@@ -230,6 +230,27 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         XCTAssertNil(result.openAccessShortfall)
     }
 
+    /// A page is read only up to its cap: a tag past it is not seen.
+    func testALandingPageIsReadOnlyUpToItsCap() async throws {
+        let padding = "<!--" + String(repeating: "x", count: BioMedLitConstants.landingPageMaxBytes) + "-->"
+        StubURLProtocol.routes = routes(page: (200, padding + Self.declaringPage))
+
+        let result = try await fetch()
+
+        XCTAssertNotEqual(result.source, .unpaywall)
+        XCTAssertNil(result.openAccessShortfall)
+    }
+
+    /// The control: the same padding after the tag leaves it readable.
+    func testATagBeforeTheCapIsRead() async throws {
+        let padding = "<!--" + String(repeating: "x", count: BioMedLitConstants.landingPageMaxBytes) + "-->"
+        StubURLProtocol.routes = routes(page: (200, Self.declaringPage + padding))
+
+        let result = try await fetch()
+
+        XCTAssertEqual(result.pdfURL?.absoluteString, Self.pdf)
+    }
+
     /// A page is read by the charset it declares, not always as UTF-8.
     func testALandingPageIsReadByItsDeclaredCharset() async throws {
         let page = #"<meta name="citation_pdf_url" content="/files/論文.pdf">"#

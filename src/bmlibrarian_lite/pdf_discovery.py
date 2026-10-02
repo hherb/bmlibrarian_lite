@@ -59,7 +59,9 @@ from .constants import (
     HTTP_UNSETTLED_CLIENT_STATUSES,
     LANDING_PAGE_ACCEPT,
     LANDING_PAGE_HTML_MARKER,
+    LANDING_PAGE_MAX_BYTES,
     LANDING_PAGE_PDF_MARKER,
+    LANDING_PAGE_READ_CHUNK_BYTES,
     PAYWALL_HTTP_STATUSES,
     POLITE_MAX_THROTTLE_RETRIES,
     RETRYABLE_HTTP_STATUSES,
@@ -1224,9 +1226,9 @@ class PDFDiscoverer:
         A page served as a PDF is the PDF (a repository bitstream link), as
         ``_discover_doi_direct`` takes one; the download's ``%PDF`` check
         still has the last word. An HTML page, or one of no stated type, is
-        read for the tag; its body is not read otherwise, so a large file
-        served as the page is not downloaded here. Anything else is the
-        page's answer that it declares nothing.
+        read up to :data:`LANDING_PAGE_MAX_BYTES` for the tag; no other body
+        is read, so a large file served as the page is not downloaded here.
+        Anything else is the page's answer that it declares nothing.
 
         Args:
             response: The page's response, its body not yet read.
@@ -1278,7 +1280,12 @@ class PDFDiscoverer:
             )
             return [], None
 
-        page = landing_page_text(response.content or b"", content_type)
+        body = bytearray()
+        for chunk in response.iter_content(chunk_size=LANDING_PAGE_READ_CHUNK_BYTES):
+            body.extend(chunk)
+            if len(body) >= LANDING_PAGE_MAX_BYTES:
+                break
+        page = landing_page_text(bytes(body[:LANDING_PAGE_MAX_BYTES]), content_type)
         pdf_url = citation_pdf_url(page, response.url)
         if pdf_url is None:
             logger.info("The open-access copy's landing page declares no PDF.")

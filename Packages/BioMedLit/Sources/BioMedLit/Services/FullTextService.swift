@@ -1294,8 +1294,9 @@ public actor FullTextService {
     ///
     /// A page served as a PDF is the PDF (a repository bitstream link); the
     /// download's `%PDF` check still has the last word. An HTML page, or one
-    /// of no stated type, is read for the tag, decoded by its declared charset
-    /// or as UTF-8. The page itself is never returned as a PDF otherwise.
+    /// of no stated type, is read up to ``BioMedLitConstants/landingPageMaxBytes``
+    /// for the tag, decoded by its declared charset or as UTF-8. The page
+    /// itself is never returned as a PDF otherwise.
     ///
     /// A throttle or server fault in ``BioMedLitConstants/retryableStatusCodes``
     /// is retried; one that outlasts the retries, any other status that
@@ -1396,7 +1397,8 @@ public actor FullTextService {
         return .declared(pdfURL)
     }
 
-    /// Read a landing page's body, if it is going to be parsed.
+    /// Read a landing page's body, up to ``BioMedLitConstants/landingPageMaxBytes``,
+    /// if it is going to be parsed.
     ///
     /// Nothing is read of a body the page is not going to be parsed from: an
     /// error status or a type that is not HTML is settled by its headers, so
@@ -1405,7 +1407,7 @@ public actor FullTextService {
     /// - Parameters:
     ///   - bytes: The body as it streams.
     ///   - response: The page's response.
-    /// - Returns: The body, or nothing when it is not read.
+    /// - Returns: The bytes read, at most the cap; nothing when it is not read.
     /// - Throws: Whatever the stream throws.
     private static func landingPageBody(
         _ bytes: URLSession.AsyncBytes, response: HTTPURLResponse
@@ -1417,6 +1419,7 @@ public actor FullTextService {
         var body = Data()
         for try await byte in bytes {
             body.append(byte)
+            if body.count >= BioMedLitConstants.landingPageMaxBytes { break }
         }
         return body
     }

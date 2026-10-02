@@ -539,7 +539,8 @@ class FullTextService @Inject constructor(
      * What a landing page's response settled.
      *
      * A page served as a PDF is the PDF (a repository bitstream link). An HTML
-     * page, or one of no stated type, is read for its `citation_pdf_url`, by its
+     * page, or one of no stated type, is read up to
+     * [Constants.LANDING_PAGE_MAX_BYTES] for its `citation_pdf_url`, by its
      * declared charset or as UTF-8, and resolved against the URL it was served
      * from after redirects; no other body is read. Anything else is the page's
      * answer that it declares none.
@@ -567,7 +568,12 @@ class FullTextService @Inject constructor(
             return LandingPageRead.DeclaresNone
         }
         val body = response.body ?: return LandingPageRead.DeclaresNone
-        val html = UnpaywallLandingPage.pageText(body.bytes(), body.contentType()?.charset())
+        val source = body.source()
+        source.request(Constants.LANDING_PAGE_MAX_BYTES.toLong())
+        val bytes = source.buffer.readByteArray(
+            minOf(source.buffer.size, Constants.LANDING_PAGE_MAX_BYTES.toLong())
+        )
+        val html = UnpaywallLandingPage.pageText(bytes, body.contentType()?.charset())
         return UnpaywallLandingPage.citationPdfUrl(html, finalUrl)
             ?.let { LandingPageRead.Declared(it) }
             ?: LandingPageRead.DeclaresNone

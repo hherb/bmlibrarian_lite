@@ -23,6 +23,7 @@ import requests
 
 from bmlibrarian_lite.constants import (
     LANDING_PAGE_ACCEPT,
+    LANDING_PAGE_MAX_BYTES,
     SERVICE_UNPAYWALL_LANDING_PAGE,
 )
 from bmlibrarian_lite.data_models import (
@@ -326,6 +327,20 @@ def test_an_undeclared_utf8_page_keeps_a_non_ascii_pdf_path(
     assert [source.url for source in sources] == [declared]
 
 
+def test_a_page_is_read_only_up_to_its_cap(discoverer: PDFDiscoverer) -> None:
+    """A tag past the cap is not read; one before it is."""
+    padding = "<!--" + "x" * LANDING_PAGE_MAX_BYTES + "-->"
+    late = _response(200, padding + HUSCAP_PAGE)
+    early = _response(200, HUSCAP_PAGE + padding)
+
+    late_sources, late_failure = _discover(discoverer, _Session(_answer(), late))
+    early_sources, _ = _discover(discoverer, _Session(_answer(), early))
+
+    assert late_sources == []
+    assert late_failure is None
+    assert [source.url for source in early_sources] == [PDF]
+
+
 def test_a_blank_url_for_pdf_is_no_pdf_and_the_page_is_read(
     discoverer: PDFDiscoverer,
 ) -> None:
@@ -360,3 +375,34 @@ def test_a_null_location_list_is_no_locations(discoverer: PDFDiscoverer) -> None
 
     assert _discover(discoverer, session) == ([], None)
 
+
+class _EndlessPage(requests.Response):
+    """A "page" that never ends, counting what was read of it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.status_code = 200
+        self.headers["Content-Type"] = "text/html"
+        self.url = FINAL_PAGE
+        self.raw = io.BytesIO()
+        self.bytes_read = 0
+
+    def iter_content(self, chunk_size: int | None = 1, *args: Any, **kwargs: Any) -> Any:
+        """Yield chunks for as long as they are asked for, up to a guard."""
+        size = chunk_size or 1
+        while self.bytes_read <= 4 * LANDING_PAGE_MAX_BYTES:
+            self.bytes_read += size
+            yield b"x" * size
+        raise AssertionError("the landing page was read past its cap")
+
+
+def test_a_page_that_never_ends_is_read_no_further_than_its_cap(
+    discoverer: PDFDiscoverer,
+) -> None:
+    """The cap bounds the download, not just what is parsed of it."""
+    page = _EndlessPage()
+
+    sources, failure = _discover(discoverer, _Session(_answer(), page))
+
+    assert (sources, failure) == ([], None)
+    assert page.bytes_read <= 2 * LANDING_PAGE_MAX_BYTES

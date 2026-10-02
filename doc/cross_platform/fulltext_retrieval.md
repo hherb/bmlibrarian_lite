@@ -358,7 +358,7 @@ async function read_landing_page(page_url) -> Declared | DeclaresNone | Unreacha
         return Unreachable(status) if web_page_status_unsettled(status) else DeclaresNone
     if "pdf" in content_type: return Declared(response.final_url)   # the page is the PDF
     if content_type and "html" not in content_type: return DeclaresNone
-    body = the body, decoded by its declared charset, else UTF-8
+    body = first 2 MiB of the body, decoded by its declared charset, else UTF-8
     url = citation_pdf_url(body, response.final_url)
     return Declared(url) if url else DeclaresNone
 ```
@@ -369,9 +369,11 @@ ordinary download and extraction (and, in Python and Swift, the `%PDF` check;
 Android has none). A "landing page" served as a PDF is a repository bitstream
 link, taken as `_discover_doi_direct` takes a DOI that resolves to a PDF.
 
-No body is read but an HTML page's (or one of no stated type), so a large file
-served as the page is not downloaded to find out what it is. A page that
-declares no charset is read as UTF-8, as the apps' HTTP clients read it; `requests`
+No body is read but an HTML page's (or one of no stated type), and that one only
+up to 2 MiB: the tag sits in `<head>`, and a large file served as the page is
+not downloaded to find out what it is. A landing page is a lookup, not research
+content, so the cap loses no evidence (the maintainer's call; golden rule 13
+guards the article text). A page that declares no charset is read as UTF-8, as the apps' HTTP clients read it; `requests`
 would read an undeclared `text/html` page as ISO-8859-1 and garble a non-ASCII
 PDF path.
 

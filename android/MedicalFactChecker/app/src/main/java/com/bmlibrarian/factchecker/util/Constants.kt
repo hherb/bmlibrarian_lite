@@ -363,6 +363,13 @@ object Constants {
     const val LANDING_PAGE_PDF_MARKER = "pdf"
 
     /**
+     * How much of a landing page is read for its tag. The tag sits in `<head>`, so
+     * a page cut here still declares its PDF. A lookup page, not research content,
+     * so the cap loses no evidence (the maintainer's call, #464).
+     */
+    const val LANDING_PAGE_MAX_BYTES = 2 * 1024 * 1024
+
+    /**
      * The client errors that say "not now" about a web page rather than answering
      * for it: 408 Request Timeout and 425 Too Early. Python's
      * `HTTP_UNSETTLED_CLIENT_STATUSES` (#446, #464).

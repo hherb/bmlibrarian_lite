@@ -1072,6 +1072,14 @@ LANDING_PAGE_ACCEPT = "text/html,application/xhtml+xml"
 # this client can download.
 LANDING_PAGE_PDF_SCHEMES = frozenset({"http", "https"})
 
+# How much of a landing page is read for its tag. The tag sits in ``<head>``,
+# so a page cut here still declares its PDF. A lookup page, not research
+# content, so the cap loses no evidence (the maintainer's call, #464).
+LANDING_PAGE_MAX_BYTES = 2 * 1024 * 1024
+
+# The read size while streaming a landing page up to that cap.
+LANDING_PAGE_READ_CHUNK_BYTES = 64 * 1024
+
 # What a landing page's Content-Type contains when it is a page to read, and
 # when the "page" is the PDF itself (a repository bitstream link, #464).
 LANDING_PAGE_HTML_MARKER = "html"

@@ -291,6 +291,24 @@ class FullTextServiceUnpaywallTest {
     }
 
     @Test
+    fun `a landing page is read only up to its cap`() = runTest {
+        unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())
+        handleRedirectsToPage()
+        val padding = "<!--" + "x".repeat(Constants.LANDING_PAGE_MAX_BYTES) + "-->"
+        val tag = """<meta name="citation_pdf_url" content="./Okazakietal_2025.pdf">"""
+        pageServes(padding + tag)
+
+        assertEquals(doiLink, fetch())
+
+        pageServes(tag + padding)
+
+        assertEquals(
+            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = server.url(pdfPath).toString()),
+            fetch()
+        )
+    }
+
+    @Test
     fun `a cancelled landing-page read is not logged as a failed lookup`() = runTest {
         unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())
         routes[handlePath] = MockResponse()

@@ -156,6 +156,12 @@ public enum BioMedLitConstants {
     /// The only schemes a declared PDF URL may use.
     public static let landingPagePDFSchemes: Set<String> = ["http", "https"]
 
+    /// How much of a landing page is read for its tag. The tag sits in `<head>`,
+    /// so a page cut here still declares its PDF. A lookup page, not research
+    /// content, so the cap loses no evidence (the maintainer's call, #464).
+    /// Python's `LANDING_PAGE_MAX_BYTES`.
+    public static let landingPageMaxBytes = 2 * 1024 * 1024
+
     /// What a landing page's Content-Type contains when it is a page to read.
     public static let landingPageHTMLMarker = "html"
 
