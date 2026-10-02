@@ -1056,6 +1056,21 @@ SERVICE_DOI_RESOLVER = "doi.org"
 SERVICE_DOI_PUBLISHER = "the publisher's site the DOI resolves to"
 SERVICE_PMC_ID_CONVERTER = "PubMed Central's ID converter"
 SERVICE_EUROPE_PMC = "Europe PMC"
+# The page Unpaywall names when it knows of an open-access copy but not of a
+# PDF URL for it, read for the PDF it declares (#464).
+SERVICE_UNPAYWALL_LANDING_PAGE = "the open-access copy's landing page"
+
+# The Highwire Press meta tag a landing page declares its PDF in. Repositories
+# (DSpace, EPrints) and most publishers emit it for Google Scholar (#464).
+CITATION_PDF_URL_META_NAME = "citation_pdf_url"
+
+# What a landing-page request asks for: the page, not the PDF the discovery
+# session asks for by default.
+LANDING_PAGE_ACCEPT = "text/html,application/xhtml+xml"
+
+# The only schemes a declared PDF URL may use: anything else is not a file
+# this client can download.
+LANDING_PAGE_PDF_SCHEMES = frozenset({"http", "https"})
 
 # The metadata sources a transparency analysis reads an article's record
 # from. Same rule: each name travels into a sentence the user reads (#356).

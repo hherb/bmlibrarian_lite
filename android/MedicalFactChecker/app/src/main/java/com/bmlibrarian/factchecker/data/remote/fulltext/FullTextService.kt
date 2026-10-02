@@ -34,10 +34,13 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.cancellation.CancellationException
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -47,7 +50,7 @@ import javax.inject.Singleton
  * Implements a fallback chain:
  * 1. Europe PMC XML (JATS format) - preferred, machine-readable
  * 2. Europe PMC PDF render - a free PDF Europe PMC offers
- * 3. Unpaywall PDF - open access PDFs
+ * 3. Unpaywall PDF - open access PDFs, or the PDF an open-access landing page declares
  * 4. DOI Resolution - link to publisher website
  *
  * Full-text content is cached locally after first retrieval.
@@ -62,6 +65,15 @@ class FullTextService @Inject constructor(
     companion object {
         private const val TAG = "FullTextService"
         private const val PDF_CACHE_DIR = "fulltext_pdfs"
+
+        /** The request header this client names itself in. */
+        private const val USER_AGENT_HEADER = "User-Agent"
+
+        /** How this client names itself to the sites it fetches pages and PDFs from. */
+        private const val USER_AGENT = "BMLibrarian/1.0 (Medical Fact Checker)"
+
+        /** The response header a page's media type is read from. */
+        private const val CONTENT_TYPE_HEADER = "Content-Type"
     }
 
     /**
@@ -373,10 +385,20 @@ class FullTextService @Inject constructor(
     /**
      * Try to fetch a PDF from Unpaywall.
      *
+     * Unpaywall's answer is reduced to a choice by [UnpaywallLandingPage.chooseUrl]:
+     * the first location's `url_for_pdf`, or failing that a landing page. A
+     * location's `url` is never taken as the PDF: Unpaywall sets it to the landing
+     * page when it has no PDF URL, and that page was downloaded as "the PDF" (#464).
+     * A landing page is instead read for the PDF it declares ([landingPagePdfUrl]).
+     *
      * @param doi Digital Object Identifier.
      * @param email Email for API identification.
      * @param pmid PubMed ID for caching.
-     * @return Result containing PDF URL/path or error.
+     * @return Result containing the PDF URL, or the failure: a
+     *   [FullTextUnavailableException] when Unpaywall or the landing page answered
+     *   without a PDF (an expected miss, logged by the caller), any other exception
+     *   when the lookup failed (logged here). Either way the chain goes on.
+     * @throws CancellationException if the caller cancelled.
      */
     private suspend fun tryUnpaywallPdf(
         doi: String,
@@ -384,7 +406,7 @@ class FullTextService @Inject constructor(
         pmid: String?
     ): Result<FullTextResult> {
         return try {
-            NetworkRetry.withExponentialBackoff(
+            val choice = NetworkRetry.withExponentialBackoff(
                 maxRetries = Constants.NETWORK_MAX_RETRIES,
                 shouldRetry = { NetworkRetry.isRetryableException(it) }
             ) {
@@ -405,25 +427,110 @@ class FullTextService @Inject constructor(
                     throw FullTextUnavailableException("Not open access: $doi")
                 }
 
-                // Get PDF URL from best OA location
-                val pdfUrl = body.best_oa_location?.url_for_pdf
-                    ?: body.best_oa_location?.url
-                    ?: body.oa_locations?.firstNotNullOfOrNull { it.url_for_pdf ?: it.url }
-                    ?: throw FullTextUnavailableException("No PDF URL available for $doi")
-
-                Result.success(
-                    FullTextResult.UnpaywallPdf(
-                        pdfUrl = pdfUrl,
-                        localPath = null  // Not downloaded yet
-                    )
-                )
+                UnpaywallLandingPage.chooseUrl(body)
             }
+
+            // Outside the retry above: a landing page that cannot be read must not
+            // ask Unpaywall again
+            val pdfUrl = choice.pdfUrl
+                ?: choice.landingPage?.let { landingPagePdfUrl(it) }
+                ?: throw FullTextUnavailableException("No PDF URL available for $doi")
+
+            Result.success(
+                FullTextResult.UnpaywallPdf(
+                    pdfUrl = pdfUrl,
+                    localPath = null  // Not downloaded yet
+                )
+            )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: FullTextUnavailableException) {
             Result.failure(e)
         } catch (e: Exception) {
             Log.e(TAG, "Unpaywall lookup failed: ${e.message}")
             Result.failure(e)
         }
+    }
+
+    /**
+     * Read the landing page Unpaywall names for the PDF it declares (#464).
+     *
+     * Called only when no Unpaywall location offers a `url_for_pdf`. The page is
+     * fetched with GET, asking for HTML, redirects followed, transient network
+     * errors retried with backoff. Its `citation_pdf_url` meta tag is then read by
+     * [UnpaywallLandingPage.citationPdfUrl], resolved against the URL the page was
+     * served from after the redirects (a handle such as hdl.handle.net/2115/95934
+     * redirects to the repository page whose relative links it declares).
+     *
+     * Every outcome without a PDF ends the Unpaywall tier the same way, with a
+     * [FullTextUnavailableException] naming it: an error status, a page that is not
+     * HTML, a page without the tag, or a page that could not be reached (also
+     * logged as a warning here, since it is not the page's answer). The landing
+     * page itself is never returned: it is not a PDF.
+     *
+     * @param pageUrl The landing page Unpaywall named.
+     * @return The absolute PDF URL the page declares.
+     * @throws FullTextUnavailableException when the page yields no PDF.
+     * @throws CancellationException if the caller cancelled.
+     */
+    private suspend fun landingPagePdfUrl(pageUrl: String): String {
+        val url = pageUrl.toHttpUrlOrNull()
+            ?: throw FullTextUnavailableException("Unpaywall's landing page is not an http(s) URL: $pageUrl")
+        val request = Request.Builder()
+            .url(url)
+            .header(Constants.HTTP_ACCEPT_HEADER, Constants.LANDING_PAGE_ACCEPT)
+            .header(USER_AGENT_HEADER, USER_AGENT)
+            .build()
+
+        val declared = try {
+            NetworkRetry.withExponentialBackoff(
+                maxRetries = Constants.NETWORK_MAX_RETRIES,
+                shouldRetry = { NetworkRetry.isRetryableException(it) }
+            ) {
+                withContext(Dispatchers.IO) {
+                    httpClient.newCall(request).execute().use { response -> declaredPdfUrl(response, pageUrl) }
+                }
+            }
+        } catch (e: IOException) {
+            // Not the page's answer: it says nothing about whether the page declares a PDF
+            Log.w(TAG, "Unpaywall's landing page $pageUrl could not be read ($e); no PDF from it")
+            throw FullTextUnavailableException("Unpaywall's landing page $pageUrl could not be read: $e")
+        }
+        Log.d(TAG, "Unpaywall's landing page $pageUrl declares the PDF $declared")
+        return declared
+    }
+
+    /**
+     * The PDF a landing page's response declares.
+     *
+     * @param response The page's response, redirects already followed; its body
+     *   is read here.
+     * @param pageUrl The landing page Unpaywall named, for the messages.
+     * @return The absolute PDF URL the page declares.
+     * @throws FullTextUnavailableException for an error status, a page that is not
+     *   HTML, or a page without a usable `citation_pdf_url`.
+     * @throws IOException if the body could not be read (retried by the caller).
+     */
+    private fun declaredPdfUrl(response: Response, pageUrl: String): String {
+        if (!response.isSuccessful) {
+            throw FullTextUnavailableException(
+                "Unpaywall's landing page $pageUrl answered HTTP ${response.code}; no PDF from it"
+            )
+        }
+        // An absent Content-Type is read as the HTML it nearly always is
+        val contentType = response.header(CONTENT_TYPE_HEADER)
+        if (!contentType.isNullOrBlank() &&
+            !contentType.lowercase().contains(Constants.LANDING_PAGE_HTML_MARKER)
+        ) {
+            throw FullTextUnavailableException(
+                "Unpaywall's landing page $pageUrl is $contentType, not HTML; no PDF declared"
+            )
+        }
+        val html = response.body?.string().orEmpty()
+        return UnpaywallLandingPage.citationPdfUrl(html, response.request.url.toString())
+            ?: throw FullTextUnavailableException(
+                "Unpaywall's landing page $pageUrl declares no ${Constants.CITATION_PDF_URL_META_NAME}"
+            )
     }
 
     /**
@@ -516,7 +623,7 @@ class FullTextService @Inject constructor(
 
             val request = Request.Builder()
                 .url(pdfUrl)
-                .header("User-Agent", "BMLibrarian/1.0 (Medical Fact Checker)")
+                .header(USER_AGENT_HEADER, USER_AGENT)
                 .build()
 
             httpClient.newCall(request).execute().use { response ->

@@ -8,20 +8,31 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**iOS/macOS: a missing transparency rating is a notice, not a failed run**
-(#459), branch `fix/transparency-notice-459`, **PR #460** (compress once
-merged). `workflow.transparencyNotice` is **derived from the documents**
-(`Document.unratedTransparencyNotice`: relevant, analysable, no stored
-analysis) once the session has a report, so a reopened session says what the
-finished run said; the Report tab shows it too. **`session.errorMessage` means
-a failure and nothing else**: every run start and every completion clears it
-(`forgetLastStop`), and a stopped fetch-more beside a report writes nothing.
-Citations the report was not made from (`unreportedCitationCount`, against
-`report.citationCount`) get an amber **Regenerate Report** offer, never the red
-retry (user's call); a regenerated report deletes the one it replaces. Earlier
-builds' stored notices offer no retry beside a report
-(`isStoredTransparencyNotice`, `storedFetchCancelledNotice`; never reword
-them). **Next: #461, then #462** (top of the follow-ups).
+**iOS/macOS: fetching more evidence runs the transparency step** (#461),
+branch `fix/fetch-more-transparency-461` (compress once merged). Android
+parity: the post-search tail of `fetchMoreEvidence()` is now
+`regenerateReportWithNewEvidence(analyzeTransparencyUsing:)` — extract
+citations, analyse transparency (step `.analyzingTransparency`), regenerate
+the report — tested through its analyser seam in
+`TransparencyNoticeTests`. The old report is deleted only once another has
+replaced it (`!==` the session's). **Next: #462** (top of the follow-ups).
+
+**Unpaywall landing pages are read, never downloaded as the PDF** (all three;
+#464), branch `fix/unpaywall-landing-page` (compress once merged). A location's
+PDF is `url_for_pdf` only; when no location has one, the landing page is read
+once for `<meta name="citation_pdf_url">` (resolved against the page served
+after redirects, http(s) only). Pure rules: Python `oa_landing_page.py`, Swift
+`UnpaywallLandingPage`, Kotlin `UnpaywallLandingPage`, pinned by
+`doc/cross_platform/fulltext_parity/unpaywall_landing_page.json`; contract
+`fulltext_retrieval.md` "Landing Pages". Python records an unreadable page
+(exception, 429/5xx/408/425: `web_page_status_unsettled`, the #446 rule) under
+"the open-access copy's landing page"; the apps log it. **Records stored
+before the fix** (a remote PDF link, no file, no text:
+`Document.holdsOnlyUndownloadedPDFLink`) are fetched again by the automatic
+step and offer **Try Download Again** (user's call: a dead PDF link is retried
+too, at most once a run). **Android's Unpaywall tier never ran before this**:
+its Retrofit models were not `@Serializable`, so every lookup failed to decode.
+Android retries the page on I/O errors only, as its other calls do.
 
 ## Recently landed (context)
 
@@ -29,6 +40,15 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **iOS/macOS: a missing transparency rating is a notice, not a failed run**
+  (PR #460, #459). The notice is **derived from the documents**
+  (`Document.unratedTransparencyNotice`) once a report exists, on the Check
+  and Report tabs. **`session.errorMessage` means a failure and nothing
+  else**: run starts and completions clear it (`forgetLastStop`). Citations a
+  report was not made from (`unreportedCitationCount`) get an amber
+  **Regenerate Report**, never the red retry (user's call). Earlier builds'
+  stored notices (`isStoredTransparencyNotice`, `storedFetchCancelledNotice`)
+  are never reworded.
 - **iOS/macOS automatic full text for papers scored 4-5** (PR #458). Setting
   `autoFetchFullTextEnabled`; the pure rules are in
   `Utilities/FullTextAutoFetch.swift`; no Python/Android counterpart, on
@@ -37,44 +57,32 @@ the rest.
   the estimated input cost would cross the run budget; the 40,000-character
   cut is the product's call and is announced to the model.
 
-- **A preprint's `fullTextXML` 500 is asked once** (all three; #451). Europe PMC
-  answers a steady 500 for preprint text it will not serve, and four paced
-  requests cost ~48 s per article. A `PPR` accession's 500 is not retried
-  (Python: second session built with `EUROPEPMC_PREPRINT_XML_UNRETRIED_STATUSES`;
-  Swift `retriesServerFault`; Android `withSourceRetries(isRetryable)`); its
-  429/503/502/504 and **every PMC accession's 500 keep the full budget** (user's
-  call: no retry for PPR only). Still reported as `HTTP_STATUS 500`. Contract:
-  `fulltext_retrieval.md`.
+- **A preprint's `fullTextXML` 500 is asked once** (all three; #451): a `PPR`
+  accession's 500 is not retried (Python
+  `EUROPEPMC_PREPRINT_XML_UNRETRIED_STATUSES`, Swift `retriesServerFault`,
+  Android `withSourceRetries(isRetryable)`); every PMC accession's 500 and any
+  429/502/503/504 keep the full budget (user's call). Still reported as
+  `HTTP_STATUS 500`. Contract: `fulltext_retrieval.md`.
 - **`fullTextXML` is asked only when Europe PMC's record allows it** (Python;
-  PR #452, #432). `fullTextXML` answers **500, not 404**, for a held but
-  closed-access article. `europepmc.offers_fulltext_xml` asks unless the
-  record *states* `inEPMC=N` and `inPMC=N`, or `isOpenAccess=N`; a missing or
-  unreadable flag still asks. Sets `ArticleInfo.has_fulltext_xml`. A stated
-  closed-access record is Europe PMC's answer (user's call, 2026-09-30), so no
-  failure is recorded. A 200 search answer that cannot be read is
-  `MALFORMED_RESPONSE`, not "no record". Measured by
-  `scripts/europepmc_xml_survey.py`; the 761 committed rows in
+  PR #452, #432): it answers **500, not 404**, for a held closed-access
+  article. `europepmc.offers_fulltext_xml` skips only a record that *states*
+  `inEPMC=N` and `inPMC=N`, or `isOpenAccess=N` (no failure recorded, user's
+  call); an unreadable 200 is `MALFORMED_RESPONSE`. Survey rows in
   `doc/developer/europepmc_xml_survey/` are pinned by
-  `tests/test_europepmc_xml_survey.py` (re-analyse them, a re-fetch draws
-  different records).
+  `tests/test_europepmc_xml_survey.py` (re-analyse, never re-fetch).
 - **doi.org's HEAD status is read** (Python; PR #448, #446), named by host:
   doi.org's 400/404 are absences; a publisher's bot-wall 4xx stays "no PDF"
   (`doi_resolution_failure`). **`mount_politely` turns off urllib3's
   `respect_retry_after_header`**, or a throttle is re-sent below the limiter
   (`polite_request_pacing.md` rule 6).
-- **An answered lookup "did not serve it"** (all three; PRs #444, #449;
-  #435, #445, #447). An `HTTP_STATUS` failure reads "… Europe PMC (HTTP 404
-  Not Found) did not serve it" **except a 429 or any 5xx** (500–599), which
-  "could not be asked" with every other kind; the 4xx refusals and a missing
-  status stay answers (user's call: no configuration advice). One predicate,
-  `RequestFailure.is_answer` / `isAnswer`, over its own constant (not the
-  pacing throttle list), pinned with the apps' whole sentence by
-  `request_failure_parity/answered_lookup_verb.json`: every kind needs a row.
-  **The rest of the sentence follows the verb**: only an unasked source earns
-  "a freely available copy may exist". Python builds every such sentence with
-  `unsettled_lookups_clause`; within one service an unasked failure outranks
-  an earlier answer. **Unpaywall is never asked with `FALLBACK_CONTACT_EMAIL`**
-  (it answers 422). Contract: `search_failure_reporting.md`.
+- **An answered lookup "did not serve it"** (all three; PRs #444, #449). An
+  `HTTP_STATUS` failure is an answer **except a 429 or any 5xx**, which
+  "could not be asked"; one predicate, `RequestFailure.is_answer` /
+  `isAnswer`, pinned by `request_failure_parity/answered_lookup_verb.json`
+  (every kind needs a row). Only an unasked source earns "a freely available
+  copy may exist" (`unsettled_lookups_clause`). **Unpaywall is never asked
+  with `FALLBACK_CONTACT_EMAIL`** (422). Contract:
+  `search_failure_reporting.md`.
 - **Typed full-text XML fetch, all three** (PRs #433, #438; #429, #434).
   Served / absent (404) / unreachable of its real kind; a blank 200 is
   incomplete; a non-accession is never sent; **preprints are fetched by their
@@ -160,33 +168,16 @@ the rest.
     worker); `should_cancel` is asked before each document; `except
     Exception` does not catch a `BaseException`; `PassOutcome` /
     `PassFailure` refuse impossible counts. **No git in a mutation restore.**
-  - **One parser for the screen and the export** (#233/#230): recognition in
-    `ReportInlineText`, one block splitter (`ReportMarkdownBlock`) for both.
-    **Measure through the real renderer.** **A removal takes machine syntax,
-    never the report's words** (golden rule 6), and the reader is told
-    (`RemovedCitationNotice`).
-  - **A document's identity may not claim what the article is** (#208):
-    `Document.id` is an opaque UUID; stored `pmid-` rows are kept, never
-    reconstructed. **Find the surface a reader actually reaches** (#221).
-    **A shared gate is only shared if every caller reads it.**
-  - **An identifier is only what a source stated it to be** — the contract
-    is `doc/cross_platform/fulltext_retrieval.md`. **The shape of a number
-    never states a PubMed ID** (thesis `889149` is also a 1977 mouse paper)
-    and one predicate authorises every PubMed URL and `PMID:` line; an
-    article is named by a *ladder* (primary slot, PMC ID, DOI).
-  - **A downloaded PDF contributes its text** (PR #198); **a guard must
-    name its own cause** (PR #195). **Logging is not reporting** (#180/#181).
-  - **A reader-facing payload must not be rendered English** (#184/#183):
-    `JATSParseWarnings` carries typed losses and `diagnostics` is *derived*.
-    **A tagged union's persisted form needs named keys and a
-    `schemaVersion`** — synthesised `Codable` emits `{"_0":2}` (#163).
-    **A view's private computed state cannot be tested.**
-  - **Route markup on the owning element, not on ambient parser state**
-    (#156–#175): read `elementStack`; exhibit flags derive from one
-    `ExhibitCollector`. **bmlib is ahead of Swift — port from it** (#165).
-  - **Measure prevalence from the XML, never through the parser** (#164):
-    `scripts/jats_survey.py`. Asking the parser would agree with its own
-    bugs, which is how #161/#162 survived a green suite.
+  - **One parser for the screen and the export** (#233/#230); **a removal
+    takes machine syntax, never the report's words**, and the reader is told
+    (`RemovedCitationNotice`). **`Document.id` is an opaque UUID** (#208).
+    **An identifier is only what a source stated it to be**: the shape of a
+    number never states a PubMed ID (`fulltext_retrieval.md`). **Logging is
+    not reporting** (#180/#181); a reader-facing payload is typed, not
+    rendered English (#184); a persisted tagged union needs named keys and a
+    `schemaVersion` (#163). **Measure JATS prevalence from the XML, never
+    through the parser** (`scripts/jats_survey.py`, #164); **bmlib is ahead
+    of Swift — port from it** (#165).
   - **Real PMC JATS corpus** (#146) under `doc/cross_platform/jats_corpus/`.
     **Read that directory's `README.md` before touching it.** Two traps it
     omits: **the fixture walk stops at the checkout root** in both
@@ -195,10 +186,9 @@ the rest.
     validates a branch against the main checkout's fixtures and passes; and
     **a test only hears what the logger records** — the recorder ignored
     `debug`, so the corpus dropped 21 of 62 captions under a green test.
-  - **Funder classification** (#143/#147/#152): `sponsor_patterns.json` is
-    the contract, `confidence_probes` checked *behaviourally*. **Never merge
-    the funder lists into `INDUSTRY_KEYWORDS`** (COI prose). **`NONPROFIT`
-    means "not recognised"**.
+  - **Funder classification**: `sponsor_patterns.json` is the contract;
+    never merge funder lists into `INDUSTRY_KEYWORDS`; `NONPROFIT` means
+    "not recognised".
   - **CI on all three platforms** (#129). **No job may gain a `paths:`
     filter** (the parity fixtures live outside `src/` and `tests/`). **A Qt
     preflight constructs a `QApplication` before pytest**, or a broken Qt
@@ -223,10 +213,6 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **#461** iOS/macOS `fetchMoreEvidence` runs no transparency step; Android's
-  does. **Parity is the rule** (user's call): add `analyzeTransparency()`
-  between `extractCitations()` and `generateReport()`. Until then the derived
-  notice names every study a fetch-more adds.
 - **#462** iOS/macOS have no working cancel: the macOS Cancel button is a
   `// TODO`, iOS has none, and `fetchMoreEvidence()` runs in an unstored
   `Task`, out of `workflowTask`'s reach. Android's works. A cancel must keep
@@ -295,16 +281,13 @@ Open issues by family; each issue carries the detail. None blocks another.
   `doc/cross_platform/analysis_failure_reporting.md`**, now several rules
   longer (#302–#304, #306, #307, #310, #315). Both run the same pipeline with the
   same shape. The largest remaining slice of this family.
-- Python, lodged by PR #366 and PR #375:
-  **#369** a cancel is reported as a failure;
-  **#371** the model path's 5xx advice still blames the reader's connection;
-  **#367** the quality filter has no caller; **#368** `TransparencyResult` is
-  mutable and unvalidated; **#370** Android has no version comparison;
-  **#378** nothing re-reads a newer build's row
-  before saving over it; **#380** newer-build vs damaged rows in the report
-  count and the dialog; **#381** a store error stops the review's queueing
-  loop; **#382** the startup COI migration and non-UTF-8 text; **#376** one
-  skeleton for the Research Questions passes; **#377** say how many pending documents are missing from the library.
+- Python, lodged by PRs #366 and #375: **#369** a cancel reported as a
+  failure; **#371** model-path 5xx advice blames the connection; **#367** the
+  quality filter has no caller; **#368** `TransparencyResult` mutable;
+  **#370** Android has no version comparison; **#378** a newer build's row is
+  not re-read before saving; **#380** newer-build vs damaged rows; **#381** a
+  store error stops queueing; **#382** COI migration and non-UTF-8 text;
+  **#376** one skeleton for the passes; **#377** count missing documents.
 - Python, the rest of what PR #358 and PR #365 lodged: **#362** a DOI-only
   document never asks PubMed for the statement it reports as unavailable —
   PR #365 reports that honestly rather than fixing it; **#350** the download
@@ -319,24 +302,14 @@ Open issues by family; each issue carries the detail. None blocks another.
 - Lodged by PR #325, Python: **#328** a re-scored failure supersedes a
   document's good score under latest-wins, and the Scored column does not show
   it (a cancelled re-score also leaves an empty checkpoint).
-- Lodged by PR #329, Python: **#330** `also_failed_text` interpolates the raw
-  provider error into a progress label and a dialog, and it can carry a
-  credential — **six** production call sites, not the three recorded here
-  until the review of PR #333 counted them; the remedy (classify, log the raw
-  text) is golden rule 13, so it was put to the user rather than made
-  silently; **#331** a stored quality benchmark result has no reader, so a
-  cancelled one's partiality is lost the moment anyone adds a history view
-  (mirror the relevance `get_benchmark_result`, status cross-check included).
-- Lodged by the review of PR #333, Python: **#334** `WorkflowWorker` — the
-  whole systematic review — is not on the single-terminal-signal contract and
-  reports a cancel as `finished`; **#335** a storage failure inside a pass is
-  classified as a *provider* failure, so a full disk is advised to "check that
-  Ollama is running"; **#336** a pass that ends on an error does not say how
-  far it got; **#337** the pass workers' `_run_once` fallback reports a
-  cancelled run as an outright error; **#338** the contract sweep checks
-  inheritance rather than use, and reaches one module; **#339** type-design
-  cleanups around `PassOutcome`/`PassFailure`; **#340** a cancelled re-run
-  discards the search shortfalls it recorded.
+- Python, lodged by PRs #329 and #333: **#330** `also_failed_text` puts raw
+  provider text (possibly a credential) in six reader-facing places (golden
+  rule 13: ask first); **#331** a stored quality benchmark has no reader;
+  **#334** `WorkflowWorker` reports a cancel as `finished`; **#335** a storage
+  failure is advised as a provider one; **#336** a failed pass does not say
+  how far it got; **#337** `_run_once` reports a cancel as an error; **#338**
+  the contract sweep checks inheritance, not use; **#339** `PassOutcome`
+  type cleanups; **#340** a cancelled re-run drops its search shortfalls.
 - **#319** the review's quality filter records a failed classification as an
   "unknown" design, which `passes_filter()` then decides on (what the filter
   does with such a document is a maintainer decision).
@@ -346,12 +319,10 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **#318** make "a failure is not a score" a type invariant rather than a
   convention (`ScoredDocument` accepts 0; storage getters return the older form
   as a judgement; mutable `CitationOutcome.citations`).
-- Python, lodged by PR #305: **#308** the Interrogation paywall flow (stale
-  pending citation, empty pane on Cancel); **#309** three abstract fallbacks
-  still misstating their cause; **#311** raw provider error text in the PDF and
-  OpenAthens dialogs; **#312** a restore's found documents span every run of
-  the question, and the checkpoint keeps no quality filter settings (its
-  citations half was fixed by PR #317).
+- Python, lodged by PR #305: **#308** the Interrogation paywall flow;
+  **#309** three abstract fallbacks misstate their cause; **#311** raw
+  provider text in the PDF and OpenAthens dialogs; **#312** a restore's
+  documents span every run, and the checkpoint keeps no quality filter.
 - Older: **#258** the search
   merge drops a distinct article whose title differs by a number, as
   "duplicates removed"; **#259** Python full-text discovery reports an
@@ -492,11 +463,9 @@ enables DEBUG; **#245** the transparency CLIs take the NCBI key only as
   the store in an **earlier build's** model shape first (`StoreMigrationTests`
   shows how, with a snapshot `@Model` in the test); that is the only path that
   reaches the duplicate-checksum exception and an unclassified migration error.
-- **A silent SwiftPM hang with no second build running** is its manifest binary
-  stuck at `_dyld_start` behind `syspolicyd`; each invocation can stall 7–11
-  minutes, and `--disable-sandbox` did not prevent it (2026-09-13). Check with `swiftc -typecheck`
-  first, then chain build, test and `xcodebuild` in one background job. The
-  lasting fix is the user's: Privacy & Security → Developer Tools.
+- **A silent SwiftPM hang** is the manifest binary stuck behind `syspolicyd`
+  (7–11 min per invocation): `swiftc -typecheck` first, then chain build,
+  test and `xcodebuild` in one background job (see the swift-build memory).
 - **`swift test` compiles neither app target's platform-guarded sources.** On a
   macOS host every `#if os(iOS)` file becomes nothing, and the SPM target excludes
   `Sources/macOS` — so a break behind either guard is invisible to it *and* to

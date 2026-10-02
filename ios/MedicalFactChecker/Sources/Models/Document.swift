@@ -689,6 +689,24 @@ final class Document {
         fullTextFetchedAt != nil || fullTextUnavailable
     }
 
+    /// Whether the stored full text is only a PDF link we could not download.
+    ///
+    /// The app always extracts PDF text, so a remote PDF link stored with no
+    /// file and no text is the chain's "link we could not download" fallback.
+    /// Before #464 that was also how an Unpaywall *landing page* was stored:
+    /// Unpaywall's `url` was taken as the PDF, the HTML failed the `%PDF`
+    /// check, and the page was kept as the article's "Unpaywall" full text.
+    /// ``hasFullText`` is true for such a record, so nothing fetched it again
+    /// and its transparency analysis never had a text to read. A record in
+    /// this state is offered another fetch: the user's call, accepting that a
+    /// genuinely dead PDF link is retried too, at most once per run.
+    var holdsOnlyUndownloadedPDFLink: Bool {
+        fullTextPDFPath != nil
+            && fullTextPDFPathIsLocalFile != true
+            && fullTextContent == nil
+            && fullTextHTML == nil
+    }
+
     /// Whether this document was fetched and nothing displayable came back.
     ///
     /// What a publisher-link fallback stores: a web URL is opened in a browser

@@ -283,21 +283,77 @@ async function fetch_unpaywall_pdf_url(doi: string, email: string) -> string | n
         if not data.is_oa:
             return null
 
-        # Get best PDF URL
-        best_location = data.best_oa_location
-        if best_location and best_location.url_for_pdf:
-            return best_location.url_for_pdf
-
-        # Fall back to any PDF URL
-        for location in data.oa_locations:
-            if location.url_for_pdf:
-                return location.url_for_pdf
-
+        choice = choose_unpaywall_url(data)
+        if choice.pdf_url:
+            return choice.pdf_url
+        if choice.landing_page:
+            return await landing_page_pdf_url(choice.landing_page)
         return null
 
     except HttpError:
         return null  # Don't fail hard on Unpaywall errors
 ```
+
+### Landing Pages (#464)
+
+**A location's PDF is `url_for_pdf` and nothing else.** Unpaywall sets `url`
+to `url_for_pdf` when it has one and to the landing page when it does not, so
+`url_for_pdf ?? url` adds no PDF, only the landing page. The apps took it, and
+PMID 40608933's repository landing page was downloaded as "the PDF", failed
+the `%PDF` check, and was stored as an Unpaywall full text with no text in it.
+
+When no location offers a `url_for_pdf`, the landing page is **read** for the
+PDF it declares in a Highwire Press tag, which repositories (DSpace, EPrints)
+and most publishers emit:
+
+```html
+<meta name="citation_pdf_url" content="https://repo.example.org/item/1/paper.pdf">
+```
+
+```pseudocode
+# Pure; pinned by fulltext_parity/unpaywall_landing_page.json ("unpaywall_choice")
+function choose_unpaywall_url(data) -> (pdf_url, landing_page):
+    locations = [data.best_oa_location] + data.oa_locations   # objects only
+    for location in locations:                 # first url_for_pdf, best first
+        if present(location.url_for_pdf): return (trim(it), null)
+    for location in locations:                 # else the first landing page
+        page = present(location.url_for_landing_page) or present(location.url)
+        if page: return (null, trim(page))
+    return (null, null)                        # present() = non-blank string
+
+# Pure; pinned by the same file ("citation_pdf_url")
+function citation_pdf_url(html, page_url) -> string | null:
+    for tag in regex_all(r"<meta\b[^>]*>", html, ignore_case):
+        attrs = attributes(tag)   # names lower-cased; "..", '..' or bare values;
+                                  # entity-decoded (&amp; &#38; &#x26; ...); trimmed;
+                                  # the first of a repeated name wins
+        if lower(attrs.name) != "citation_pdf_url" or not attrs.content:
+            continue              # property= is not name=
+        url = resolve(page_url, attrs.content)   # RFC 3986, against the
+        if scheme(url) in {http, https}:         # page served after redirects
+            return url
+    return null
+
+async function landing_page_pdf_url(page_url) -> string | null:
+    response = GET page_url, Accept: text/html,application/xhtml+xml,
+               redirects followed, paced and retried like any request
+    if response failed or status >= 400 or (content type present and not HTML):
+        return null
+    return citation_pdf_url(response.body, response.final_url)
+```
+
+One extra request, only for an article whose every Unpaywall location lacks a
+PDF URL. The PDF found keeps Unpaywall's provenance and goes through the
+ordinary download, `%PDF` check and extraction.
+
+**A page that could not answer is not a page without a PDF.** Python records
+a landing page it could not reach (an exception) or that ended on a throttle,
+a 5xx, a 408 or a 425 as a `SourceLookupFailure` under "the open-access
+copy's landing page", by the rule #446 set for the publisher's page a DOI
+resolves to (`web_page_status_unsettled`); any other 4xx, a non-HTML page or
+a page without the tag is its answer and records nothing. The apps log it, as
+they log every other Unpaywall miss; their tier then has no PDF URL and the
+chain goes on.
 
 ### PDF Downloading and Caching
 

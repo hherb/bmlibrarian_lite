@@ -91,7 +91,42 @@ final class FullTextAutoFetchTests: XCTestCase {
         XCTAssertTrue(FullTextAutoFetch.documentsToFetch(from: [document], minScoreThreshold: 3).isEmpty)
     }
 
-    /// Control for the two above: a fresh paper of the same score is fetched,
+    /// A PDF link stored without a file or text is fetched again (#464): how
+    /// earlier builds stored an Unpaywall landing page as the article's PDF.
+    func testAPaperHoldingOnlyAnUndownloadedPDFLinkIsFetchedAgain() {
+        let document = makeDocument(doi: "10.1126/science.adk9967")
+        document.fullTextFetchedAt = Date()
+        document.fullTextSource = "unpaywall"
+        document.fullTextPDFPath = "https://hdl.handle.net/2115/95934"
+        document.fullTextPDFPathIsLocalFile = false
+
+        XCTAssertTrue(document.holdsOnlyUndownloadedPDFLink)
+        XCTAssertEqual(
+            FullTextAutoFetch.documentsToFetch(from: [document], minScoreThreshold: 3).count, 1
+        )
+    }
+
+    /// Controls for the one above: a downloaded file with no text (a scan) and
+    /// a PDF whose text was read are not fetched again.
+    func testADownloadedPDFIsNotFetchedAgainWithOrWithoutText() {
+        let scan = makeDocument(pmid: "1")
+        scan.fullTextFetchedAt = Date()
+        scan.fullTextPDFPath = "/tmp/scan.pdf"
+        scan.fullTextPDFPathIsLocalFile = true
+        let read = makeDocument(pmid: "2")
+        read.fullTextFetchedAt = Date()
+        read.fullTextPDFPath = "https://example.org/a.pdf"
+        read.fullTextPDFPathIsLocalFile = false
+        read.fullTextContent = "The article."
+
+        XCTAssertFalse(scan.holdsOnlyUndownloadedPDFLink)
+        XCTAssertFalse(read.holdsOnlyUndownloadedPDFLink)
+        XCTAssertTrue(
+            FullTextAutoFetch.documentsToFetch(from: [scan, read], minScoreThreshold: 3).isEmpty
+        )
+    }
+
+    /// Control for the not-again tests above: a fresh paper of the same score is fetched,
     /// so those tests are not passing because nothing ever is.
     func testAFreshHighScoringPaperIsFetched() {
         XCTAssertEqual(

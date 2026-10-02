@@ -937,6 +937,27 @@ struct MacDocumentDetailSheet: View {
                        let fullTextSource = AppFullTextSource(rawValue: source) {
                         MacFullTextSourceBadge(source: fullTextSource)
                     }
+
+                    // Only a PDF link, never downloaded: earlier builds stored
+                    // an Unpaywall landing page this way, so it is offered again (#464)
+                    if document.holdsOnlyUndownloadedPDFLink {
+                        Button(action: fetchFullText) {
+                            if isLoadingFullText {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            } else {
+                                Label("Try Download Again", systemImage: "arrow.clockwise")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isLoadingFullText)
+                    }
+                }
+                if document.holdsOnlyUndownloadedPDFLink, let error = fullTextError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .lineLimit(2)
                 }
             } else if document.fullTextUnavailable {
                 // Already tried, not available

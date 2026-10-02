@@ -44,6 +44,10 @@ enum FullTextAutoFetch {
     /// run would repeat the same failing round trips. The reader can still
     /// retry one by hand from the full-text tab.
     ///
+    /// The exception is a document holding only a PDF link that was never
+    /// downloaded (``Document/holdsOnlyUndownloadedPDFLink``), which is how
+    /// builds before #464 stored an Unpaywall landing page: it is fetched again.
+    ///
     /// - Parameters:
     ///   - documents: Candidate documents, in the order to fetch them.
     ///   - minScoreThreshold: The user's relevance threshold (1-5).
@@ -55,8 +59,8 @@ enum FullTextAutoFetch {
         let minimum = minimumScore(minScoreThreshold: minScoreThreshold)
         return documents.filter { document in
             document.meetsThreshold(minimum)
-                && !document.hasFullText
-                && !document.fullTextAttempted
+                && ((!document.hasFullText && !document.fullTextAttempted)
+                    || document.holdsOnlyUndownloadedPDFLink)
                 && hasIdentifier(document)
         }
     }

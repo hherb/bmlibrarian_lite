@@ -1192,22 +1192,118 @@ public actor FullTextService {
 
     // MARK: - Unpaywall
 
-    /// Fetch PDF URL from Unpaywall with retry logic.
+    /// Fetch the PDF URL Unpaywall offers, reading a landing page for one when
+    /// that is all it offers (#464).
+    ///
+    /// The landing page is read outside the Unpaywall retry, with its own: a
+    /// slow repository must not send the same question to Unpaywall again.
+    ///
+    /// - Parameter doi: Digital Object Identifier.
+    /// - Returns: URL to a downloadable PDF.
+    /// - Throws: `FullTextError.noFullTextAvailable` when Unpaywall offers no
+    ///   PDF and no landing page declares one; `CancellationError` when
+    ///   cancelled; whatever the Unpaywall request throws.
     private func fetchUnpaywallPDFWithRetry(doi: String) async throws -> URL {
-        try await RetryHelper.retry(
+        let choice = try await RetryHelper.retry(
             config: .networkDefault,
             shouldRetry: RetryHelper.retryOnlyTransient
         ) {
-            try await self.fetchUnpaywallPDF(doi: doi)
+            try await self.fetchUnpaywallChoice(doi: doi)
         }
+        if let pdf = choice.pdfURL, let pdfURL = URL(string: pdf) {
+            BioMedLitLib.logger?.debug("Found OA PDF location: \(pdf)", category: .fullText)
+            return pdfURL
+        }
+        if let landing = choice.landingPage, let pageURL = URL(string: landing),
+           let pdfURL = try await landingPagePDFURL(pageURL) {
+            return pdfURL
+        }
+        throw FullTextError.noFullTextAvailable
     }
 
-    /// Fetch open access PDF URL from Unpaywall.
+    /// Read the PDF a landing page Unpaywall names declares.
+    ///
+    /// A page that cannot be read, answers an error status, is not HTML or
+    /// declares nothing offers no PDF. Each is logged and the chain goes on,
+    /// as it does for every other Unpaywall miss; the page itself is never
+    /// returned as a PDF.
+    ///
+    /// - Parameter pageURL: The landing page.
+    /// - Returns: The declared PDF's URL, or `nil`.
+    /// - Throws: `CancellationError` when cancelled.
+    private func landingPagePDFURL(_ pageURL: URL) async throws -> URL? {
+        var request = URLRequest(url: pageURL)
+        request.setValue(BioMedLitConstants.landingPageAccept, forHTTPHeaderField: "Accept")
+        request.timeoutInterval = BioMedLitConstants.defaultRequestTimeout
+
+        let data: Data
+        let response: HTTPURLResponse
+        do {
+            (data, response) = try await RetryHelper.retry(
+                config: .networkDefault,
+                shouldRetry: RetryHelper.retryOnlyTransient
+            ) {
+                let (data, response) = try await self.session.data(for: request)
+                guard let http = response as? HTTPURLResponse else {
+                    throw FullTextError.networkError("Invalid server response")
+                }
+                // A throttle or a server fault is "not now": retried, and if it
+                // outlasts the retries, logged as a page we could not read
+                if BioMedLitConstants.retryableStatusCodes.contains(http.statusCode) {
+                    throw FullTextError.serverError(statusCode: http.statusCode)
+                }
+                return (data, http)
+            }
+        } catch where error.isCancellation {
+            throw CancellationError()
+        } catch {
+            BioMedLitLib.logger?.warning(
+                "The open-access copy's landing page \(pageURL.absoluteString) could not be "
+                    + "read (\(error.localizedDescription)); no PDF from it",
+                category: .fullText
+            )
+            return nil
+        }
+
+        guard response.statusCode < BioMedLitConstants.httpErrorStatusMin else {
+            BioMedLitLib.logger?.info(
+                "The open-access copy's landing page answered HTTP \(response.statusCode); "
+                    + "no PDF from it",
+                category: .fullText
+            )
+            return nil
+        }
+        if let contentType = response.value(forHTTPHeaderField: "Content-Type"),
+           !contentType.lowercased().contains("html") {
+            BioMedLitLib.logger?.info(
+                "The open-access copy's landing page is \(contentType), not HTML; no PDF declared",
+                category: .fullText
+            )
+            return nil
+        }
+        let html = String(decoding: data, as: UTF8.self)
+        guard let pdfURL = UnpaywallLandingPage.citationPDFURL(
+            html: html, pageURL: response.url ?? pageURL
+        ) else {
+            BioMedLitLib.logger?.info(
+                "The open-access copy's landing page \(pageURL.absoluteString) declares no PDF",
+                category: .fullText
+            )
+            return nil
+        }
+        BioMedLitLib.logger?.info(
+            "The open-access copy's landing page declares \(pdfURL.absoluteString)",
+            category: .fullText
+        )
+        return pdfURL
+    }
+
+    /// Ask Unpaywall which URL it offers for a DOI.
     ///
     /// - Parameter doi: Digital Object Identifier.
-    /// - Returns: URL to downloadable PDF.
+    /// - Returns: The PDF URL or landing page Unpaywall offers.
     /// - Throws: `FullTextError` on failure.
-    private func fetchUnpaywallPDF(doi: String) async throws -> URL {
+    private func fetchUnpaywallChoice(doi: String) async throws -> UnpaywallLandingPage.Choice {
         guard let encodedDOI = doi.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
             throw FullTextError.noIdentifiers
         }
@@ -1300,24 +1396,14 @@ public actor FullTextService {
             throw FullTextError.invalidResponse("JSON decode error: \(error.localizedDescription)")
         }
 
-        // Try best OA location first
-        if let bestOA = result.bestOaLocation,
-           let urlString = bestOA.urlForPdf ?? bestOA.url,
-           let pdfURL = URL(string: urlString) {
-            BioMedLitLib.logger?.debug("Found best OA location: \(pdfURL.absoluteString)", category: .fullText)
-            return pdfURL
+        // `url_for_pdf` only: a location's `url` is its landing page whenever
+        // `url_for_pdf` is missing, and downloading that as the PDF stored a
+        // repository page as the article (#464)
+        let choice = UnpaywallLandingPage.choose(from: result)
+        guard choice.pdfURL != nil || choice.landingPage != nil else {
+            throw FullTextError.noFullTextAvailable
         }
-
-        // Try other OA locations
-        for location in result.oaLocations ?? [] {
-            if let urlString = location.urlForPdf ?? location.url,
-               let pdfURL = URL(string: urlString) {
-                BioMedLitLib.logger?.debug("Found OA location: \(pdfURL.absoluteString)", category: .fullText)
-                return pdfURL
-            }
-        }
-
-        throw FullTextError.noFullTextAvailable
+        return choice
     }
 
     // MARK: - PDF Caching
@@ -1817,43 +1903,5 @@ public actor FullTextService {
                 category: .fullText
             )
         }
-    }
-}
-
-// MARK: - Unpaywall Response Types
-
-/// Response from Unpaywall API.
-private struct UnpaywallResponse: Codable {
-    /// Best available open access location.
-    let bestOaLocation: OALocation?
-
-    /// All available open access locations.
-    let oaLocations: [OALocation]?
-
-    enum CodingKeys: String, CodingKey {
-        case bestOaLocation = "best_oa_location"
-        case oaLocations = "oa_locations"
-    }
-}
-
-/// Open access location from Unpaywall.
-private struct OALocation: Codable {
-    /// Landing page URL.
-    let url: String?
-
-    /// Direct PDF URL (if available).
-    let urlForPdf: String?
-
-    /// Host type (publisher, repository, etc.).
-    let hostType: String?
-
-    /// License information.
-    let license: String?
-
-    enum CodingKeys: String, CodingKey {
-        case url
-        case urlForPdf = "url_for_pdf"
-        case hostType = "host_type"
-        case license
     }
 }

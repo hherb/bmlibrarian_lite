@@ -320,6 +320,35 @@ object Constants {
     /** Default email for Unpaywall API (should be configured by user). */
     const val UNPAYWALL_DEFAULT_EMAIL = "bmlibrarian@example.com"
 
+    // ==================== Open-Access Landing Pages (#464) ====================
+    // Python's constants of the same names; the parsing rules are pinned by
+    // doc/cross_platform/fulltext_parity/unpaywall_landing_page.json.
+
+    /**
+     * The Highwire Press meta tag a landing page declares its PDF in. Repositories
+     * (DSpace, EPrints) and most publishers emit it for Google Scholar.
+     */
+    const val CITATION_PDF_URL_META_NAME = "citation_pdf_url"
+
+    /** The request header a landing-page request names what it accepts in. */
+    const val HTTP_ACCEPT_HEADER = "Accept"
+
+    /** What a landing-page request asks for: the page, not a PDF. */
+    const val LANDING_PAGE_ACCEPT = "text/html,application/xhtml+xml"
+
+    /**
+     * Found in the Content-Type of every HTML page (`text/html`,
+     * `application/xhtml+xml`). A landing page served as anything else declares
+     * no PDF we can read.
+     */
+    const val LANDING_PAGE_HTML_MARKER = "html"
+
+    /**
+     * The only schemes a declared PDF URL may use: anything else is not a file
+     * this client can download.
+     */
+    val LANDING_PAGE_PDF_SCHEMES: Set<String> = setOf("http", "https")
+
     // ==================== External URL Prefixes ====================
 
     /** DOI resolver URL prefix. */
