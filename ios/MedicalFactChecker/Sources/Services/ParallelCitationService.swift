@@ -230,6 +230,10 @@ actor ParallelCitationService {
     ///     Called immediately when a document finishes extraction, enabling
     ///     incremental UI updates.
     /// - Returns: Array of citation results in completion order.
+    ///
+    /// When the calling task is cancelled, no further document is started,
+    /// and a document whose extraction the cancel stopped has no result: it
+    /// keeps no citations, so a later run extracts them (#462).
     func extractCitations(
         _ documents: [CitationInput],
         claim: String,
@@ -243,12 +247,12 @@ actor ParallelCitationService {
         var completed = 0
         let total = documents.count
 
-        await withTaskGroup(of: CitationResult.self) { group in
+        await withTaskGroup(of: CitationResult?.self) { group in
             var pending = documents[...]
 
             // Launch initial batch up to maxConcurrent
             for _ in 0..<min(maxConcurrent, documents.count) {
-                if let doc = pending.popFirst() {
+                if !Task.isCancelled, let doc = pending.popFirst() {
                     group.addTask {
                         await self.extractCitationsFromDocument(doc, claim: claim)
                     }
@@ -256,7 +260,10 @@ actor ParallelCitationService {
             }
 
             // Process results as they complete and refill the pool
-            for await result in group {
+            for await outcome in group {
+                // Stopped by a cancel: nothing to report, and the next
+                // document is not started
+                guard let result = outcome else { continue }
                 results.append(result)
                 completed += 1
                 let currentCompleted = completed  // Capture value for closure
@@ -272,7 +279,7 @@ actor ParallelCitationService {
                 }
 
                 // Add next document to maintain concurrency level
-                if let doc = pending.popFirst() {
+                if !Task.isCancelled, let doc = pending.popFirst() {
                     group.addTask {
                         await self.extractCitationsFromDocument(doc, claim: claim)
                     }
@@ -312,11 +319,12 @@ actor ParallelCitationService {
     /// - Parameters:
     ///   - input: The document citation input.
     ///   - claim: The claim to extract relevant passages for.
-    /// - Returns: Citation result with passages or error.
+    /// - Returns: Citation result with passages or error; `nil` when the
+    ///   calling task was cancelled before the extraction finished.
     private func extractCitationsFromDocument(
         _ input: CitationInput,
         claim: String
-    ) async -> CitationResult {
+    ) async -> CitationResult? {
         let prompt = buildCitationPrompt(input: input, claim: claim)
         let messages = [LLMService.userMessage(prompt)]
 
@@ -340,6 +348,12 @@ actor ParallelCitationService {
                 usage: usage
             )
 
+        } catch where Task.isCancelled {
+            // Stopped, not failed: the abandoned request throws
+            // `URLError(.cancelled)`, LLMService's backoff a
+            // `CancellationError`. A `CancellationError` without a cancel is
+            // a failure, below
+            return nil
         } catch {
             return .failure(
                 pmid: input.pmid,

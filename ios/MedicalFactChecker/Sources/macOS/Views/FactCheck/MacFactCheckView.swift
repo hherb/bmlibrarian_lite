@@ -127,7 +127,8 @@ struct MacFactCheckView: View {
                     buttonText: buttonText,
                     selectedSearchProvider: $selectedSearchProvider,
                     includePreprints: $includePreprints,
-                    onSubmit: handleSubmit
+                    onSubmit: handleSubmit,
+                    onCancel: { workflow?.cancelFactCheck() }
                 )
 
                 // Budget display
@@ -151,6 +152,9 @@ struct MacFactCheckView: View {
                     if let notice = workflow.transparencyNotice {
                         MacIncompleteSearchNotice(text: notice)
                     }
+                    if let notice = workflow.stopNotice {
+                        MacIncompleteSearchNotice(text: notice)
+                    }
                 }
 
                 // Progress section
@@ -163,6 +167,7 @@ struct MacFactCheckView: View {
                     MacUserDecisionSection(
                         prompt: workflow.userDecisionPrompt,
                         showSmartSearchOption: workflow.awaitingSmartSearchDecision,
+                        canFetchMore: workflow.decisionOffersFetchMore,
                         onContinue: { Task { await workflow.continueWithMoreDocuments() } },
                         onSmartSearch: { Task { await workflow.continueWithSmartSearch() } },
                         onProceed: { Task { await workflow.proceedWithCurrentDocuments() } }
@@ -368,6 +373,8 @@ struct MacClaimInputSection: View {
     @Binding var includePreprints: Bool
     /// Callback when the user submits the claim.
     let onSubmit: () -> Void
+    /// Callback when the user cancels the run under way.
+    let onCancel: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: MacSpacing.standard) {
@@ -421,9 +428,7 @@ struct MacClaimInputSection: View {
                     .disabled(!canSubmit)
 
                     if isRunning {
-                        Button("Cancel") {
-                            // TODO: Implement cancellation
-                        }
+                        Button("Cancel", action: onCancel)
                         .buttonStyle(.bordered)
                         .controlSize(.large)
                     }
@@ -663,6 +668,9 @@ struct MacUserDecisionSection: View {
     let prompt: String
     /// Whether to show smart search option instead of fetch more.
     let showSmartSearchOption: Bool
+    /// Whether the search has pages left to fetch. Without them only
+    /// "Proceed with Current" carries the run on.
+    let canFetchMore: Bool
     /// Callback when user chooses to continue fetching.
     let onContinue: () -> Void
     /// Callback when user chooses to try smart search.
@@ -689,7 +697,7 @@ struct MacUserDecisionSection: View {
                         onSmartSearch?()
                     }
                     .buttonStyle(.borderedProminent)
-                } else {
+                } else if canFetchMore {
                     Button("Fetch More Documents") {
                         onContinue()
                     }

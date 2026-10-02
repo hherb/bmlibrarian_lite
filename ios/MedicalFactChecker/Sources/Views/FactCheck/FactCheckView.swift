@@ -55,8 +55,10 @@ struct FactCheckView: View {
                                 ? "Processing was interrupted. Tap Resume to continue."
                                 : workflow.userDecisionPrompt,
                             onResume: {
+                                // Carries the paused run on; fetching more
+                                // would start a new page instead
                                 Task {
-                                    await workflow.continueWithMoreDocuments()
+                                    await workflow.proceedWithCurrentDocuments()
                                 }
                             },
                             onDismiss: {
@@ -109,6 +111,9 @@ struct FactCheckView: View {
                         if let notice = workflow.transparencyNotice {
                             IncompleteSearchNotice(text: notice)
                         }
+                        if let notice = workflow.stopNotice {
+                            IncompleteSearchNotice(text: notice)
+                        }
 
                         if workflow.isRunning {
                             ProgressSection(workflow: workflow)
@@ -118,6 +123,7 @@ struct FactCheckView: View {
                             UserDecisionSection(
                                 prompt: workflow.userDecisionPrompt,
                                 showSmartSearchOption: workflow.awaitingSmartSearchDecision,
+                                canFetchMore: workflow.decisionOffersFetchMore,
                                 onContinue: { Task { await workflow.continueWithMoreDocuments() } },
                                 onSmartSearch: { Task { await workflow.continueWithSmartSearch() } },
                                 onProceed: { Task { await workflow.proceedWithCurrentDocuments() } }
@@ -417,6 +423,15 @@ struct ProgressSection: View {
                 Text(workflow.progressMessage)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
+
+                if workflow.isRunning {
+                    Spacer()
+                    Button("Cancel", role: .cancel) {
+                        workflow.cancelFactCheck()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!workflow.canCancel)
+                }
             }
 
             // Generated query (show once generated, collapsed by default)
@@ -582,6 +597,10 @@ struct UserDecisionSection: View {
     /// When true, shows smart search button. When false, shows "Fetch More Documents".
     let showSmartSearchOption: Bool
 
+    /// Whether the search has pages left to fetch. Without them only
+    /// "Proceed with Current" carries the run on.
+    let canFetchMore: Bool
+
     /// Called when user wants to fetch more documents from current query.
     let onContinue: () -> Void
 
@@ -611,7 +630,7 @@ struct UserDecisionSection: View {
                     .buttonStyle(.borderedProminent)
                     .accessibilityLabel("Try Smart Search")
                     .accessibilityHint("Generates alternative search queries to find more relevant documents")
-                } else {
+                } else if canFetchMore {
                     Button {
                         onContinue()
                     } label: {

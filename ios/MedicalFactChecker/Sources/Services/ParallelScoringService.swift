@@ -258,6 +258,12 @@ actor ParallelScoringService {
     ///     Called immediately when a document finishes scoring, enabling
     ///     incremental UI updates.
     /// - Returns: Array of scoring results in completion order.
+    ///
+    /// When the calling task is cancelled, no further document is started,
+    /// and a document whose scoring the cancel stopped has no result: it is
+    /// left unscored for a later run, not recorded as a failure (#462). A
+    /// failure is checkpointed and marks the document so that no later run
+    /// scores it again.
     func scoreDocuments(
         _ documents: [ScoringInput],
         claim: String,
@@ -271,12 +277,12 @@ actor ParallelScoringService {
         var completed = 0
         let total = documents.count
 
-        await withTaskGroup(of: ScoringResult.self) { group in
+        await withTaskGroup(of: ScoringResult?.self) { group in
             var pending = documents[...]
 
             // Launch initial batch up to maxConcurrent
             for _ in 0..<min(maxConcurrent, documents.count) {
-                if let doc = pending.popFirst() {
+                if !Task.isCancelled, let doc = pending.popFirst() {
                     group.addTask {
                         await self.scoreDocument(doc, claim: claim)
                     }
@@ -284,7 +290,10 @@ actor ParallelScoringService {
             }
 
             // Process results as they complete and refill the pool
-            for await result in group {
+            for await outcome in group {
+                // Stopped by a cancel: nothing to report, and the next
+                // document is not started
+                guard let result = outcome else { continue }
                 results.append(result)
                 completed += 1
                 onProgress(result.pmid, completed, total)
@@ -293,7 +302,7 @@ actor ParallelScoringService {
                 await onResult?(result)
 
                 // Add next document to maintain concurrency level
-                if let doc = pending.popFirst() {
+                if !Task.isCancelled, let doc = pending.popFirst() {
                     group.addTask {
                         await self.scoreDocument(doc, claim: claim)
                     }
@@ -333,11 +342,12 @@ actor ParallelScoringService {
     /// - Parameters:
     ///   - input: The document scoring input.
     ///   - claim: The claim to evaluate against.
-    /// - Returns: Scoring result with score/rationale or error.
+    /// - Returns: Scoring result with score/rationale or error; `nil` when
+    ///   the calling task was cancelled before the document was scored.
     private func scoreDocument(
         _ input: ScoringInput,
         claim: String
-    ) async -> ScoringResult {
+    ) async -> ScoringResult? {
         let prompt = buildScoringPrompt(input: input, claim: claim)
         let messages = [LLMService.userMessage(prompt)]
 
@@ -378,6 +388,14 @@ actor ParallelScoringService {
                     try await Task.sleep(for: .seconds(delay + jitter))
                 }
 
+            } catch where Task.isCancelled {
+                // Stopped, not failed: the abandoned request throws
+                // `URLError(.cancelled)`, a backoff `CancellationError`.
+                // Recorded as a failure, the document would never be scored
+                // again. Usage of the earlier parse attempts goes unrecorded,
+                // at most `maxParseRetries - 1` short scoring requests (#468).
+                // A `CancellationError` without a cancel is a failure, below
+                return nil
             } catch {
                 // Network/API error - return immediately (LLMService has its own retry logic)
                 return .failure(

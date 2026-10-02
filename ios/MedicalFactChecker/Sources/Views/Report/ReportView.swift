@@ -90,26 +90,17 @@ struct ReportContentView: View {
 
     /// Overlay shown when fetching more evidence.
     private var fetchingProgressOverlay: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-                .scaleEffect(1.5)
-            Text(workflow?.progressMessage ?? "Fetching more evidence...")
-                .font(.headline)
-            if let session = report.session {
-                Text("\(session.documentsFound) documents, \(session.citationsExtracted) citations")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding(32)
-        .background(.regularMaterial)
-        .cornerRadius(16)
+        FetchingEvidenceOverlay(workflow: workflow, session: report.session)
     }
 
     private var reportContent: some View {
         VStack(alignment: .leading, spacing: 20) {
             // Incomplete search, before the verdict it qualifies
             if let notice = report.incompleteSearchNotice {
+                IncompleteSearchNotice(text: notice)
+            }
+            // A fetch or regeneration that was stopped left this report as it was
+            if let notice = workflow?.stopNotice {
                 IncompleteSearchNotice(text: notice)
             }
 
@@ -249,6 +240,47 @@ struct ReportContentView: View {
     }
 }
 
+// MARK: - Fetching Evidence Overlay
+
+/// What the report shows while the workflow works on it — fetching more
+/// evidence, or regenerating the report: the step under way, the session's
+/// counts, and a way to stop.
+///
+/// Stopping leaves the report standing (#462): nothing is recorded as a
+/// failure, the screen says the report has not changed
+/// (``FactCheckWorkflow/stopNotice``), and citations already extracted for a
+/// stopped batch are offered for a new report.
+struct FetchingEvidenceOverlay: View {
+    /// The workflow fetching the evidence.
+    let workflow: FactCheckWorkflow?
+    /// The session the report belongs to, for its counts.
+    let session: FactCheckSession?
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .scaleEffect(1.5)
+            Text(workflow?.progressMessage ?? "Fetching more evidence...")
+                .font(.headline)
+            if let session {
+                Text("\(session.documentsFound) documents, \(session.citationsExtracted) citations")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            if let workflow {
+                Button("Cancel", role: .cancel) {
+                    workflow.cancelFactCheck()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!workflow.canCancel)
+            }
+        }
+        .padding(32)
+        .background(.regularMaterial)
+        .cornerRadius(16)
+    }
+}
+
 // MARK: - Incomplete Search Notice
 
 /// The incomplete-search notice, drawn before the verdict (#256).
@@ -316,6 +348,10 @@ struct ReportView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     // Incomplete search, before the verdict it qualifies
                     if let notice = report.incompleteSearchNotice {
+                        IncompleteSearchNotice(text: notice)
+                    }
+                    // A fetch or regeneration that was stopped left this report as it was
+                    if let notice = workflow?.stopNotice {
                         IncompleteSearchNotice(text: notice)
                     }
 
@@ -429,20 +465,7 @@ struct ReportView: View {
 
                 // Progress overlay when fetching more evidence
                 if isFetchingEvidence {
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                        Text(workflow?.progressMessage ?? "Fetching more evidence...")
-                            .font(.headline)
-                        if let session = report.session {
-                            Text("\(session.documentsFound) documents, \(session.citationsExtracted) citations")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .padding(32)
-                    .background(.regularMaterial)
-                    .cornerRadius(16)
+                    FetchingEvidenceOverlay(workflow: workflow, session: report.session)
                 }
             }
             .navigationTitle("Evidence Report")

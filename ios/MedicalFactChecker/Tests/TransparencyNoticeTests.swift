@@ -231,15 +231,41 @@ final class TransparencyNoticeTests: XCTestCase {
         let workflow = restore(session)
         var calls = 0
 
+        let run = Task { @MainActor in
+            await workflow.analyzeTransparency(using: { _, _, _ in
+                calls += 1
+                if calls == 2 {
+                    // What the user's cancel does: the task under way is
+                    // cancelled, and its request throws as it is abandoned
+                    withUnsafeCurrentTask { $0?.cancel() }
+                    throw CancellationError()
+                }
+                throw Boom()
+            })
+        }
+        await run.value
+
+        XCTAssertEqual(calls, 2, "no study is analysed after the user stops the run")
+        XCTAssertNil(session.errorMessage)
+        XCTAssertFalse(workflow.canRetryReportGeneration)
+    }
+
+    /// Control: a `CancellationError` the user never asked for is one
+    /// study's failed analysis, not a stop. BioMedLit turns every
+    /// `URLError(.cancelled)` into one, so read as a stop it would end the
+    /// pass and leave the remaining studies unrated without a word (#462).
+    func testACancellationErrorWithoutACancelIsAFailedAnalysis() async {
+        let session = makeSession(titles: ["Alpha", "Beta", "Gamma"])
+        let workflow = restore(session)
+        var calls = 0
+
         await workflow.analyzeTransparency(using: { _, _, _ in
             calls += 1
             if calls == 2 { throw CancellationError() }
             throw Boom()
         })
 
-        XCTAssertEqual(calls, 2, "no study is analysed after the user stops the run")
-        XCTAssertNil(session.errorMessage)
-        XCTAssertFalse(workflow.canRetryReportGeneration)
+        XCTAssertEqual(calls, 3, "the pass goes on to the next study")
     }
 
     // MARK: - Fetching more evidence (#461)
@@ -370,9 +396,19 @@ final class TransparencyNoticeTests: XCTestCase {
         session.currentStep = .awaitingUserDecision
         session.errorMessage = "Cancelled by user"
         let workflow = restore(session)
+        workflow.useServices(
+            llm: LLMService(
+                baseURL: URL(string: "nosuch-scheme://x")!, apiKey: "test-key", model: "test-model"
+            ),
+            pubMed: BMLPubMedService.create(from: .shared)
+        )
         var messageWhileRunning: String?? = .none
-        workflow.onProgress = { _, _ in
-            if case .none = messageWhileRunning { messageWhileRunning = .some(session.errorMessage) }
+        workflow.onProgress = { [weak workflow] _, _ in
+            guard case .none = messageWhileRunning else { return }
+            messageWhileRunning = .some(session.errorMessage)
+            // With no documents the run goes back to the claim; stopped here,
+            // it records nothing of its own
+            workflow?.cancelFactCheck()
         }
 
         await workflow.proceedWithCurrentDocuments()

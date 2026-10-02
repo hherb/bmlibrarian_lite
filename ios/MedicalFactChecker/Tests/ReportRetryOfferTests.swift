@@ -147,12 +147,24 @@ final class ReportRetryOfferTests: XCTestCase {
 
     // MARK: - A completed run carries no stop message
 
-    /// A background pause writes its message during the run, after the run
-    /// cleared the last one; the step under way can still finish.
-    func testAPauseWrittenDuringARunThatCompletesIsForgotten() async {
+    /// A message written to the slot during a run, after the run cleared the
+    /// last one, is forgotten when the run completes. Earlier builds wrote a
+    /// background pause there while the step under way could still finish.
+    ///
+    /// The model is unreachable at once and the document's full text is
+    /// marked unavailable: extraction fails without a request, which does not
+    /// fail the run, and the report says no evidence was found.
+    func testAPauseWrittenDuringARunThatCompletesIsForgotten() async throws {
         let session = makeSession(citations: 0, reportedCitations: nil)
+        try XCTUnwrap(session.documents?.first).markFullTextUnavailable()
         session.currentStep = .awaitingUserDecision
         let workflow = restore(session)
+        workflow.useServices(
+            llm: LLMService(
+                baseURL: URL(string: "nosuch-scheme://x")!, apiKey: "test-key", model: "test-model"
+            ),
+            pubMed: BMLPubMedService.create(from: .shared)
+        )
         workflow.onProgress = { _, _ in
             session.errorMessage = "Paused: App was backgrounded"
         }
