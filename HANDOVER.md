@@ -18,21 +18,29 @@ the report — tested through its analyser seam in
 replaced it (`!==` the session's). **Next: #462** (top of the follow-ups).
 
 **Unpaywall landing pages are read, never downloaded as the PDF** (all three;
-#464), branch `fix/unpaywall-landing-page` (compress once merged). A location's
-PDF is `url_for_pdf` only; when no location has one, the landing page is read
-once for `<meta name="citation_pdf_url">` (resolved against the page served
-after redirects, http(s) only). Pure rules: Python `oa_landing_page.py`, Swift
-`UnpaywallLandingPage`, Kotlin `UnpaywallLandingPage`, pinned by
-`doc/cross_platform/fulltext_parity/unpaywall_landing_page.json`; contract
-`fulltext_retrieval.md` "Landing Pages". Python records an unreadable page
-(exception, 429/5xx/408/425: `web_page_status_unsettled`, the #446 rule) under
-"the open-access copy's landing page"; the apps log it. **Records stored
-before the fix** (a remote PDF link, no file, no text:
-`Document.holdsOnlyUndownloadedPDFLink`) are fetched again by the automatic
-step and offer **Try Download Again** (user's call: a dead PDF link is retried
-too, at most once a run). **Android's Unpaywall tier never ran before this**:
-its Retrofit models were not `@Serializable`, so every lookup failed to decode.
-Android retries the page on I/O errors only, as its other calls do.
+#464), branch `fix/unpaywall-landing-page`, **PR #465** (compress once
+merged). A location's PDF is `url_for_pdf` only (blank is none, in Python
+discovery too); when no location has one, the landing page is read once for
+`<meta name="citation_pdf_url">`, resolved against the page served after
+redirects (http(s) only; an absolute URL kept as given). A page served as
+`application/pdf` is the PDF. Pinned by
+`doc/cross_platform/fulltext_parity/unpaywall_landing_page.json` (four
+tables; each platform asserts it reads every one); contract
+`fulltext_retrieval.md` "Landing Pages". **Only `;`-terminated references
+decode** (five names, numbers; else U+FFFD): `html.unescape` turned a URL's
+`&section=` into `§ion=`. An undeclared charset is UTF-8 on all three.
+**Unreachable is not "declares none"** on all three (`web_page_status_unsettled`,
+the #446 rule, ported): Python records a `SourceLookupFailure` (the body read
+is inside the guard); Swift carries `FullTextResult.openAccessShortfall` and
+the app keeps a stored PDF link rather than trade it for that fallback
+(`FullTextAutoFetch.storedLinkKept`); Android raises
+`OpenAccessUnsettledException` and retries 429/5xx. **Records holding only an
+undownloaded PDF link** (`Document.holdsOnlyUndownloadedPDFLink`: pre-#464
+landing pages, and failed downloads) are fetched again every run and offer
+**Try Download Again** (the maintainer's decision). **Android's Unpaywall tier
+never ran before this**: its Retrofit models were not `@Serializable`. No read
+cap on the page (golden rule 13: a cap is the user's call). Lodged: **#466**
+(tell the app reader), **#467** (remaining parity edges).
 
 ## Recently landed (context)
 
@@ -75,8 +83,8 @@ the rest.
   (`doi_resolution_failure`). **`mount_politely` turns off urllib3's
   `respect_retry_after_header`**, or a throttle is re-sent below the limiter
   (`polite_request_pacing.md` rule 6).
-- **An answered lookup "did not serve it"** (all three; PRs #444, #449). An
-  `HTTP_STATUS` failure is an answer **except a 429 or any 5xx**, which
+- **An answered lookup "did not serve it"** (all three; PRs #444, #449;
+  #435, #445, #447). An `HTTP_STATUS` failure is an answer **except a 429 or any 5xx**, which
   "could not be asked"; one predicate, `RequestFailure.is_answer` /
   `isAnswer`, pinned by `request_failure_parity/answered_lookup_verb.json`
   (every kind needs a row). Only an unasked source earns "a freely available
@@ -171,13 +179,18 @@ the rest.
   - **One parser for the screen and the export** (#233/#230); **a removal
     takes machine syntax, never the report's words**, and the reader is told
     (`RemovedCitationNotice`). **`Document.id` is an opaque UUID** (#208).
+    **Find the surface a reader actually reaches** (#221). **A shared gate is
+    only shared if every caller reads it.**
     **An identifier is only what a source stated it to be**: the shape of a
-    number never states a PubMed ID (`fulltext_retrieval.md`). **Logging is
-    not reporting** (#180/#181); a reader-facing payload is typed, not
-    rendered English (#184); a persisted tagged union needs named keys and a
-    `schemaVersion` (#163). **Measure JATS prevalence from the XML, never
-    through the parser** (`scripts/jats_survey.py`, #164); **bmlib is ahead
-    of Swift — port from it** (#165).
+    number never states a PubMed ID (`fulltext_retrieval.md`). **A downloaded
+    PDF contributes its text** (PR #198); **a guard must name its own cause**
+    (PR #195). **Logging is not reporting** (#180/#181); a reader-facing
+    payload is typed, not rendered English (#184); a persisted tagged union
+    needs named keys and a `schemaVersion` (#163). **A view's private computed
+    state cannot be tested.** **Route markup on the owning element, not on
+    ambient parser state** (#156–#175). **Measure JATS prevalence from the
+    XML, never through the parser** (`scripts/jats_survey.py`, #164); **bmlib
+    is ahead of Swift — port from it** (#165).
   - **Real PMC JATS corpus** (#146) under `doc/cross_platform/jats_corpus/`.
     **Read that directory's `README.md` before touching it.** Two traps it
     omits: **the fixture walk stops at the checkout root** in both
@@ -186,9 +199,10 @@ the rest.
     validates a branch against the main checkout's fixtures and passes; and
     **a test only hears what the logger records** — the recorder ignored
     `debug`, so the corpus dropped 21 of 62 captions under a green test.
-  - **Funder classification**: `sponsor_patterns.json` is the contract;
-    never merge funder lists into `INDUSTRY_KEYWORDS`; `NONPROFIT` means
-    "not recognised".
+  - **Funder classification** (#143/#147/#152): `sponsor_patterns.json` is
+    the contract, `confidence_probes` checked behaviourally; never merge
+    funder lists into `INDUSTRY_KEYWORDS`; `NONPROFIT` means "not
+    recognised".
   - **CI on all three platforms** (#129). **No job may gain a `paths:`
     filter** (the parity fixtures live outside `src/` and `tests/`). **A Qt
     preflight constructs a `QApplication` before pytest**, or a broken Qt
@@ -464,8 +478,10 @@ enables DEBUG; **#245** the transparency CLIs take the NCBI key only as
   shows how, with a snapshot `@Model` in the test); that is the only path that
   reaches the duplicate-checksum exception and an unclassified migration error.
 - **A silent SwiftPM hang** is the manifest binary stuck behind `syspolicyd`
-  (7–11 min per invocation): `swiftc -typecheck` first, then chain build,
-  test and `xcodebuild` in one background job (see the swift-build memory).
+  (7–11 min per invocation; `--disable-sandbox` does not prevent it):
+  `swiftc -typecheck` first, then chain build, test and `xcodebuild` in one
+  background job. The lasting fix is the user's: Privacy & Security →
+  Developer Tools.
 - **`swift test` compiles neither app target's platform-guarded sources.** On a
   macOS host every `#if os(iOS)` file becomes nothing, and the SPM target excludes
   `Sources/macOS` — so a break behind either guard is invisible to it *and* to

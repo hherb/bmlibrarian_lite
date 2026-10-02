@@ -126,6 +126,74 @@ final class FullTextAutoFetchTests: XCTestCase {
         )
     }
 
+    /// Records stored before the local-file flag existed have it `nil`, and
+    /// count as remote: they are most of the pre-#464 landing-page records.
+    func testAnUndownloadedLinkWrittenBeforeTheLocalFileFlagIsFetchedAgain() {
+        let document = makeDocument(doi: "10.1126/science.adk9967")
+        document.fullTextFetchedAt = Date()
+        document.fullTextPDFPath = "https://hdl.handle.net/2115/95934"
+        document.fullTextPDFPathIsLocalFile = nil
+
+        XCTAssertTrue(document.holdsOnlyUndownloadedPDFLink)
+        XCTAssertEqual(
+            FullTextAutoFetch.documentsToFetch(from: [document], minScoreThreshold: 3).count, 1
+        )
+    }
+
+    // MARK: - Keeping a stored link
+
+    private func documentHoldingALink() -> Document {
+        let document = makeDocument(doi: "10.1126/science.adk9967")
+        document.fullTextFetchedAt = Date()
+        document.fullTextPDFPath = "https://repo.example.org/files/a.pdf"
+        document.fullTextPDFPathIsLocalFile = false
+        return document
+    }
+
+    private let doiLink = URL(string: "https://doi.org/10.1126/science.adk9967")!
+
+    /// A fallback the chain settled on because the open-access copy could not
+    /// be reached does not replace the stored link (#464).
+    func testAFallbackFromAnUnreachableCopyKeepsTheStoredLink() {
+        let result = FullTextResult(content: .doi(webURL: doiLink), openAccessShortfall: .timeout)
+
+        let kept = FullTextAutoFetch.storedLinkKept(documentHoldingALink(), refetched: result)
+
+        XCTAssertEqual(kept, FullTextAutoFetch.StoredLinkKept(failure: .timeout))
+        XCTAssertNotNil(kept?.errorDescription)
+    }
+
+    /// Controls: a fallback with nothing unsettled is the chain's answer, and
+    /// a document holding no link has nothing to keep.
+    func testAnAnsweredFallbackOrADocumentWithNoLinkIsApplied() {
+        let answered = FullTextResult(content: .doi(webURL: doiLink))
+        let unsettled = FullTextResult(content: .doi(webURL: doiLink), openAccessShortfall: .timeout)
+
+        XCTAssertNil(FullTextAutoFetch.storedLinkKept(documentHoldingALink(), refetched: answered))
+        XCTAssertNil(FullTextAutoFetch.storedLinkKept(makeDocument(), refetched: unsettled))
+    }
+
+    /// The refusal fails the document in the run, which leaves it as it was.
+    func testARefusedRefetchLeavesTheDocumentToBeFetchedNextRun() async throws {
+        let document = documentHoldingALink()
+        let result = FullTextResult(content: .doi(webURL: doiLink), openAccessShortfall: .connection)
+
+        let failures = try await FullTextAutoFetch.retrieve(
+            [document],
+            fetch: { document in
+                if let kept = FullTextAutoFetch.storedLinkKept(document, refetched: result) {
+                    throw kept
+                }
+                XCTFail("the fallback was applied")
+            },
+            persist: {}
+        )
+
+        XCTAssertEqual(failures.count, 1)
+        XCTAssertEqual(document.fullTextPDFPath, "https://repo.example.org/files/a.pdf")
+        XCTAssertTrue(document.holdsOnlyUndownloadedPDFLink)
+    }
+
     /// Control for the not-again tests above: a fresh paper of the same score is fetched,
     /// so those tests are not passing because nothing ever is.
     func testAFreshHighScoringPaperIsFetched() {

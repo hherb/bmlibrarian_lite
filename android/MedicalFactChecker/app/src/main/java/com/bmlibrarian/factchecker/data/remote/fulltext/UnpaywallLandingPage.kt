@@ -18,9 +18,11 @@
 
 package com.bmlibrarian.factchecker.data.remote.fulltext
 
+import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.util.Constants
 import java.net.URI
 import java.net.URISyntaxException
+import java.nio.charset.Charset
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
@@ -36,7 +38,43 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 data class UnpaywallChoice(
     val pdfUrl: String? = null,
     val landingPage: String? = null
-)
+) {
+    init {
+        require(pdfUrl == null || landingPage == null) {
+            "an Unpaywall choice is a PDF URL or a landing page, not both"
+        }
+    }
+}
+
+/**
+ * What reading a landing page settled.
+ *
+ * Three outcomes, kept apart as [FullTextXmlFetch] keeps Europe PMC's: a page we
+ * could not read is not a page without a PDF.
+ */
+sealed interface LandingPageRead {
+    /**
+     * The PDF to download: the one the page declares, or the page itself when it
+     * was served as a PDF.
+     *
+     * @property pdfUrl The absolute PDF URL
+     */
+    data class Declared(val pdfUrl: String) : LandingPageRead
+
+    /**
+     * The page answered without one: no tag, not HTML, or an error status that is
+     * its answer ([UnpaywallLandingPage.webPageStatusUnsettled] is false).
+     */
+    data object DeclaresNone : LandingPageRead
+
+    /**
+     * The page could not answer: a transport failure, or a status that leaves it
+     * unsettled, after any retries.
+     *
+     * @property failure Why, by kind and status only
+     */
+    data class Unreachable(val failure: RequestFailure) : LandingPageRead
+}
 
 /**
  * Which URL an Unpaywall answer offers, and the PDF a landing page declares (#464).
@@ -49,7 +87,9 @@ data class UnpaywallChoice(
  *
  * Pure functions, a port of Python's `oa_landing_page` module, pinned with the
  * Python and Swift versions by
- * `doc/cross_platform/fulltext_parity/unpaywall_landing_page.json`.
+ * `doc/cross_platform/fulltext_parity/unpaywall_landing_page.json`: the choice,
+ * the tag, the character references in its value, and which error statuses
+ * leave a page unread.
  */
 object UnpaywallLandingPage {
 
@@ -77,7 +117,11 @@ object UnpaywallLandingPage {
     /** The path of a URL whose path is the root. */
     private const val ROOT_PATH = "/"
 
-    /** One character reference: `&#38;`, `&#x26;` or a named one such as `&amp;`. */
+    /**
+     * One character reference, its `;` required: `&#38;`, `&#x26;` or a named one
+     * such as `&amp;`. Without the `;` it is no reference, so a URL's bare
+     * `&section=` is left alone, as a browser leaves it inside an attribute.
+     */
     private val CHARACTER_REFERENCE = Regex("""&(#[xX][0-9a-fA-F]+|#[0-9]+|[A-Za-z][A-Za-z0-9]*);""")
 
     /** The marker that opens a numeric character reference (`&#...;`). */
@@ -92,24 +136,48 @@ object UnpaywallLandingPage {
     /** Radix of a decimal character reference. */
     private const val DECIMAL_RADIX = 10
 
-    /**
-     * What a numeric reference to no character decodes to, as browsers and
-     * Python's `html.unescape` do: U+FFFD REPLACEMENT CHARACTER.
-     */
+    /** What a numeric reference to no character decodes to: U+FFFD REPLACEMENT CHARACTER. */
     private const val REPLACEMENT_CHARACTER = "\uFFFD"
 
     /**
-     * The named references an attribute value is decoded for. A URL needs only
-     * these; any other name is left as written.
+     * The named references an attribute value is decoded for, matched with their
+     * case (`&Amp;` is not `&amp;`). A URL needs only these; any other name is left
+     * as written.
      */
     private val NAMED_REFERENCES = mapOf(
         "amp" to "&",
         "lt" to "<",
         "gt" to ">",
         "quot" to "\"",
-        "apos" to "'",
-        "nbsp" to "\u00A0"
+        "apos" to "'"
     )
+
+    /**
+     * Whether a web page's error status left the read unsettled.
+     *
+     * A throttle, a server fault, a 408 or a 425 is "not now". Any other 4xx (a bot
+     * wall, a 404) is the page's answer that it serves us nothing. Python's
+     * `web_page_status_unsettled`.
+     *
+     * @param status An error status (400 or above)
+     * @return True when the status says nothing about the page's content
+     */
+    fun webPageStatusUnsettled(status: Int): Boolean =
+        status >= Constants.HTTP_SERVER_ERROR_STATUS_CODES.first ||
+            status == Constants.HTTP_TOO_MANY_REQUESTS ||
+            status in Constants.HTTP_UNSETTLED_CLIENT_STATUS_CODES
+
+    /**
+     * Decode a landing page's bytes as the other ports do: by the charset its
+     * Content-Type declares, else as UTF-8.
+     *
+     * @param bytes The page's bytes, as read
+     * @param declared The declared charset, or null when none was declared or it
+     *   names none this runtime knows
+     * @return The page as text; bytes the charset cannot read become U+FFFD
+     */
+    fun pageText(bytes: ByteArray, declared: Charset?): String =
+        String(bytes, declared ?: Charsets.UTF_8)
 
     /**
      * Decide which URL an Unpaywall answer offers.
@@ -125,13 +193,11 @@ object UnpaywallLandingPage {
      */
     fun chooseUrl(response: UnpaywallResponse): UnpaywallChoice {
         val locations = listOfNotNull(response.best_oa_location) + response.oa_locations.orEmpty()
-        locations.firstNotNullOfOrNull { present(it.url_for_pdf) }?.let { pdfUrl ->
-            return UnpaywallChoice(pdfUrl = pdfUrl)
-        }
-        locations.firstNotNullOfOrNull { present(it.url_for_landing_page) ?: present(it.url) }?.let { page ->
-            return UnpaywallChoice(landingPage = page)
-        }
-        return UnpaywallChoice()
+        val pdfUrl = locations.firstNotNullOfOrNull { present(it.url_for_pdf) }
+        if (pdfUrl != null) return UnpaywallChoice(pdfUrl = pdfUrl)
+        return UnpaywallChoice(
+            landingPage = locations.firstNotNullOfOrNull { present(it.url_for_landing_page) ?: present(it.url) }
+        )
     }
 
     /**
@@ -182,21 +248,21 @@ object UnpaywallLandingPage {
             val name = match.groupValues[1].lowercase()
             // Exactly one of the three value groups matched; an unmatched group is null
             val raw = (2..4).firstNotNullOf { match.groups[it]?.value }
-            attributes.putIfAbsent(name, decodeEntities(raw).trim())
+            attributes.putIfAbsent(name, decodeCharacterReferences(raw).trim())
         }
         return attributes
     }
 
     /**
      * Decode the character references in an attribute value: numeric ones
-     * (`&#38;`, `&#x26;`) and the named ones in [NAMED_REFERENCES]. An unknown
-     * name is left as written; a number that names no character becomes
-     * U+FFFD.
+     * (`&#38;`, `&#x26;`) and the named ones in [NAMED_REFERENCES], each ending in
+     * `;`. An unknown name is left as written; a number that names no character
+     * becomes U+FFFD.
      *
      * @param value The value as written in the page
-     * @return The value as a browser reads it
+     * @return The value with its `;`-terminated references decoded
      */
-    private fun decodeEntities(value: String): String =
+    internal fun decodeCharacterReferences(value: String): String =
         CHARACTER_REFERENCE.replace(value) { match ->
             val reference = match.groupValues[1]
             if (reference.startsWith(NUMERIC_REFERENCE_PREFIX)) {
@@ -215,15 +281,12 @@ object UnpaywallLandingPage {
      */
     private fun decodeNumericReference(digits: String): String {
         val isHex = digits.firstOrNull()?.lowercaseChar() == HEX_REFERENCE_MARKER
-        val codePoint = if (isHex) {
-            digits.substring(1).toIntOrNull(HEX_RADIX)
-        } else {
-            digits.toIntOrNull(DECIMAL_RADIX)
-        }
-        val namesACharacter = codePoint != null && codePoint != 0 &&
+        val codePoint = (if (isHex) digits.substring(1).toIntOrNull(HEX_RADIX) else digits.toIntOrNull(DECIMAL_RADIX))
+            ?: return REPLACEMENT_CHARACTER
+        val namesACharacter = codePoint != 0 &&
             Character.isValidCodePoint(codePoint) &&
             Character.getType(codePoint) != Character.SURROGATE.toInt()
-        return if (namesACharacter) String(Character.toChars(codePoint!!)) else REPLACEMENT_CHARACTER
+        return if (namesACharacter) String(Character.toChars(codePoint)) else REPLACEMENT_CHARACTER
     }
 
     /**
@@ -234,7 +297,7 @@ object UnpaywallLandingPage {
      * older `URI.resolve` implementations (JDK-4666701, fixed in recent JDKs but
      * not necessarily in the runtime an Android device ships) run the host into
      * the relative path, `https://hosta.pdf`; and a
-     * reference `URI` refuses to parse (an unencoded space, say, which some
+     * reference that `URI` refuses to parse (an unencoded space, say, which some
      * repositories emit) is resolved by OkHttp's lenient parser instead, which
      * percent-encodes it, rather than losing a PDF the page does declare. A
      * `..` that climbs above the root is then dropped

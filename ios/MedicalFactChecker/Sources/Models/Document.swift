@@ -698,8 +698,13 @@ final class Document {
     /// check, and the page was kept as the article's "Unpaywall" full text.
     /// ``hasFullText`` is true for such a record, so nothing fetched it again
     /// and its transparency analysis never had a text to read. A record in
-    /// this state is offered another fetch: the user's call, accepting that a
-    /// genuinely dead PDF link is retried too, at most once per run.
+    /// this state is fetched again by the automatic step and offered **Try
+    /// Download Again** (the maintainer's decision, #464), accepting that a
+    /// genuinely dead PDF link is retried too: once in every run.
+    ///
+    /// A record written before ``fullTextPDFPathIsLocalFile`` existed has the
+    /// flag `nil` and counts as remote, which is what nearly all of the pre-#464
+    /// records are; a legacy local scan with no text matches too.
     var holdsOnlyUndownloadedPDFLink: Bool {
         fullTextPDFPath != nil
             && fullTextPDFPathIsLocalFile != true

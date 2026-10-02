@@ -27,15 +27,63 @@ import Foundation
 /// `<meta name="citation_pdf_url" content="...">`, which
 /// ``citationPDFURL(html:pageURL:)`` reads.
 ///
-/// Pure functions, pinned with the Python and Android ports by
-/// `doc/cross_platform/fulltext_parity/unpaywall_landing_page.json`.
+/// Pure functions, a port of Python's `oa_landing_page` module, pinned with
+/// the Python and Android ports by
+/// `doc/cross_platform/fulltext_parity/unpaywall_landing_page.json`: the
+/// choice, the tag, the character references in its value, and which error
+/// statuses leave a page unread.
 enum UnpaywallLandingPage {
-    /// What an Unpaywall answer offers the PDF tier. At most one is set.
-    struct Choice: Equatable {
+    /// What an Unpaywall answer offers the PDF tier: one of the two, or neither.
+    enum Choice: Equatable {
         /// The first location's `url_for_pdf`, best location first.
-        let pdfURL: String?
+        case pdf(String)
         /// The page to read for a PDF when no location offers a PDF URL.
-        let landingPage: String?
+        /// Never a PDF itself: only a page that may declare one.
+        case page(String)
+        /// No location offers either.
+        case nothing
+
+        /// The PDF URL, when that is the choice.
+        var pdfURL: String? {
+            if case .pdf(let url) = self { return url }
+            return nil
+        }
+
+        /// The landing page, when that is the choice.
+        var landingPage: String? {
+            if case .page(let url) = self { return url }
+            return nil
+        }
+    }
+
+    /// What reading a landing page settled.
+    ///
+    /// Three outcomes, kept apart as ``FullTextXmlFetch`` keeps Europe PMC's:
+    /// a page we could not read is not a page without a PDF.
+    enum Read: Equatable {
+        /// The PDF to download: the one the page declares, or the page itself
+        /// when it was served as a PDF.
+        case declared(URL)
+        /// The page answered without one: no tag, not HTML, or an error status
+        /// that is its answer (``webPageStatusUnsettled(_:)`` is false).
+        case declaresNone
+        /// The page could not answer: a transport failure, or a status that
+        /// leaves it unsettled, after any retries.
+        case unreachable(RequestFailure)
+    }
+
+    /// Whether a web page's error status left the read unsettled.
+    ///
+    /// A throttle, a server fault, a 408 or a 425 is "not now". Any other 4xx
+    /// (a bot wall, a 404) is the page's answer that it serves us nothing.
+    /// Python's `web_page_status_unsettled`.
+    ///
+    /// - Parameter status: An error status (400 or above).
+    /// - Returns: `true` when the status says nothing about the page's content.
+    static func webPageStatusUnsettled(_ status: Int) -> Bool {
+        status >= BioMedLitConstants.httpServerErrorStatusCodes.lowerBound
+            || BioMedLitConstants.retryableStatusCodes.contains(status)
+            || BioMedLitConstants.httpUnsettledClientStatusCodes.contains(status)
     }
 
     /// Decide which URL an Unpaywall answer offers.
@@ -49,19 +97,24 @@ enum UnpaywallLandingPage {
     static func choose(from response: UnpaywallResponse) -> Choice {
         let locations = [response.bestOaLocation].compactMap { $0 } + (response.oaLocations ?? [])
         if let pdf = locations.lazy.compactMap({ present($0.urlForPdf) }).first {
-            return Choice(pdfURL: pdf, landingPage: nil)
+            return .pdf(pdf)
         }
-        let landing = locations.lazy
-            .compactMap { present($0.urlForLandingPage) ?? present($0.url) }
-            .first
-        return Choice(pdfURL: nil, landingPage: landing)
+        if let landing = locations.lazy
+            .compactMap({ present($0.urlForLandingPage) ?? present($0.url) })
+            .first {
+            return .page(landing)
+        }
+        return .nothing
     }
 
     /// Return the PDF a landing page declares, or `nil` when it declares none.
     ///
     /// The first `<meta name="citation_pdf_url">` whose content resolves,
     /// against the page's own URL, to an http(s) URL. Tag and attribute names
-    /// are matched without regard to case; `property=` is not `name=`.
+    /// are matched without regard to case; `property=` is not `name=`. An
+    /// absolute content is kept as given; a relative one is resolved, with any
+    /// `..` that climbs above the root dropped (RFC 3986 section 5.2.4). A
+    /// content that will not parse as a URL is passed over for the next tag.
     ///
     /// - Parameters:
     ///   - html: The landing page as served.
@@ -75,7 +128,7 @@ enum UnpaywallLandingPage {
             let attributes = attributes(of: String(html[tagRange]))
             guard attributes["name"]?.lowercased() == BioMedLitConstants.citationPDFURLMetaName,
                   let content = attributes["content"], !content.isEmpty,
-                  let resolved = URL(string: content, relativeTo: pageURL)?.absoluteURL.standardized,
+                  let resolved = resolve(content, against: pageURL),
                   let scheme = resolved.scheme?.lowercased(),
                   BioMedLitConstants.landingPagePDFSchemes.contains(scheme)
             else { continue }
@@ -84,7 +137,46 @@ enum UnpaywallLandingPage {
         return nil
     }
 
+    /// Decode a landing page's bytes as the other ports do: by the charset its
+    /// Content-Type declares, else as UTF-8. Bytes the encoding cannot read
+    /// become U+FFFD.
+    ///
+    /// - Parameters:
+    ///   - data: The page's bytes, as read.
+    ///   - textEncodingName: The declared charset (`URLResponse.textEncodingName`),
+    ///     or `nil` when none was declared.
+    /// - Returns: The page as text.
+    static func pageText(_ data: Data, textEncodingName: String?) -> String {
+        if let name = textEncodingName {
+            let cfEncoding = CFStringConvertIANACharSetNameToEncoding(name as CFString)
+            if cfEncoding != kCFStringEncodingInvalidId {
+                let encoding = String.Encoding(
+                    rawValue: CFStringConvertEncodingToNSStringEncoding(cfEncoding)
+                )
+                if let text = String(data: data, encoding: encoding) {
+                    return text
+                }
+            }
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
     // MARK: - Parsing
+
+    /// Resolve a declared URL against the page it was found on.
+    ///
+    /// - Parameters:
+    ///   - content: The declared URL, absolute or relative.
+    ///   - pageURL: The page's URL.
+    /// - Returns: The absolute URL, or `nil` when the content will not parse.
+    private static func resolve(_ content: String, against pageURL: URL) -> URL? {
+        // Absolute: kept as given, as Python's `urljoin` and Java's
+        // `URI.resolve` keep it, dot segments and all
+        if let absolute = URL(string: content), absolute.scheme != nil {
+            return absolute
+        }
+        return URL(string: content, relativeTo: pageURL)?.absoluteURL.standardized
+    }
 
     /// One `<meta ...>` tag. A `>` inside a quoted value ends it early, which
     /// no URL needs: it would be percent-encoded.
@@ -97,15 +189,27 @@ enum UnpaywallLandingPage {
         pattern: #"([^\s"'<>/=]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))"#
     )
 
-    /// A character reference: decimal, hexadecimal or named.
+    /// One character reference, its `;` required: decimal, hexadecimal or
+    /// named. Without the `;` it is no reference, so a URL's bare `&section=`
+    /// is left alone, as a browser leaves it inside an attribute.
     private static let entity = try! NSRegularExpression(
-        pattern: #"&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z]+);"#
+        pattern: #"&(#[xX][0-9a-fA-F]+|#[0-9]+|[A-Za-z][A-Za-z0-9]*);"#
     )
 
-    /// The named references a URL in an attribute plausibly carries.
+    /// The named references a URL plausibly carries, matched with their case
+    /// (`&Amp;` is not `&amp;`). Any other name is left as written.
     private static let namedEntities: [String: String] = [
         "amp": "&", "lt": "<", "gt": ">", "quot": "\"", "apos": "'",
     ]
+
+    /// The largest Unicode code point.
+    private static let maxCodePoint: UInt32 = 0x10FFFF
+
+    /// The radix of a hexadecimal character reference.
+    private static let hexRadix = 16
+
+    /// The radix of a decimal character reference.
+    private static let decimalRadix = 10
 
     /// A tag's attributes: names lower-cased, values entity-decoded and
     /// trimmed, the first of a repeated name kept.
@@ -120,16 +224,21 @@ enum UnpaywallLandingPage {
                 .compactMap { Range(match.range(at: $0), in: tag) }
                 .map { String(tag[$0]) }
                 .first ?? ""
-            found[name] = decodeEntities(value).trimmingCharacters(in: .whitespacesAndNewlines)
+            found[name] = decodeCharacterReferences(value)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return found
     }
 
-    /// Replace character references with the characters they name.
+    /// Decode the character references in an attribute value.
     ///
-    /// An unknown named reference, or a number that names no character, is
-    /// left as written.
-    private static func decodeEntities(_ text: String) -> String {
+    /// Numeric references and the five names in ``namedEntities``, each ending
+    /// in `;`. An unknown name is left as written; a number that names no
+    /// character (zero, a surrogate, beyond Unicode) becomes U+FFFD.
+    ///
+    /// - Parameter text: The value as written in the page.
+    /// - Returns: The value with those references decoded.
+    static func decodeCharacterReferences(_ text: String) -> String {
         var decoded = ""
         var cursor = text.startIndex
         let range = NSRange(text.startIndex..., in: text)
@@ -144,14 +253,22 @@ enum UnpaywallLandingPage {
         return decoded
     }
 
-    /// The character a reference's body (`amp`, `#38`, `#x26`) names.
+    /// The character a reference's body (`amp`, `#38`, `#x26`) names, or
+    /// `nil` for a name to leave as written.
     private static func character(for body: String) -> String? {
-        guard body.hasPrefix("#") else { return namedEntities[body.lowercased()] }
+        guard body.hasPrefix("#") else { return namedEntities[body] }
         let digits = body.dropFirst()
-        let value = digits.first.map { $0 == "x" || $0 == "X" } == true
-            ? UInt32(digits.dropFirst(), radix: 16)
-            : UInt32(digits, radix: 10)
-        return value.flatMap(Unicode.Scalar.init).map { String(Character($0)) }
+        let isHex = digits.first == "x" || digits.first == "X"
+        let value = isHex
+            ? UInt32(digits.dropFirst(), radix: hexRadix)
+            : UInt32(digits, radix: decimalRadix)
+        // `Unicode.Scalar` refuses a surrogate and anything past U+10FFFF;
+        // zero it accepts, and a NUL is no character to put in a URL
+        guard let value, value != 0, value <= maxCodePoint,
+              let scalar = Unicode.Scalar(value) else {
+            return BioMedLitConstants.unicodeReplacementCharacter
+        }
+        return String(Character(scalar))
     }
 
     /// A string value trimmed, or `nil` when it names nothing.

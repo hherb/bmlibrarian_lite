@@ -938,8 +938,9 @@ struct MacDocumentDetailSheet: View {
                         MacFullTextSourceBadge(source: fullTextSource)
                     }
 
-                    // Only a PDF link, never downloaded: earlier builds stored
-                    // an Unpaywall landing page this way, so it is offered again (#464)
+                    // Only a PDF link, never downloaded: how earlier builds stored
+                    // an Unpaywall landing page, and how a failed download is kept,
+                    // so it is offered again (#464)
                     if document.holdsOnlyUndownloadedPDFLink {
                         Button(action: fetchFullText) {
                             if isLoadingFullText {
@@ -1122,6 +1123,10 @@ struct MacDocumentDetailSheet: View {
             do {
                 let service = BioMedLit.FullTextService.create(from: AppSettings.shared)
                 let bmlResult = try await service.fetchFullText(for: document)
+                // Shown as the error, the stored link left as it is (#464)
+                if let kept = FullTextAutoFetch.storedLinkKept(document, refetched: bmlResult) {
+                    throw kept
+                }
                 let result = BioMedLitAdapters.toAppFullTextResult(bmlResult)
 
                 await MainActor.run {

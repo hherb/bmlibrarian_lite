@@ -47,6 +47,17 @@ final class StubURLProtocol: URLProtocol {
     /// nothing about the others. One route at a time isolates one guard.
     static var failures: [String: Error] = [:]
 
+    /// Response headers for requests whose URL contains the key; none otherwise.
+    ///
+    /// A route served with no Content-Type exercises only the "no stated type"
+    /// branch of a check on it, so its other branches need a header.
+    static var headers: [String: [String: String]] = [:]
+
+    /// Redirects: a request whose URL contains the key is redirected to the
+    /// value, as a server's 302 would, and the redirected request is then
+    /// served like any other.
+    static var redirects: [String: String] = [:]
+
     /// Every URL asked for, in order.
     ///
     /// ``routes`` matches on a substring, so a stub keyed on `search` answers
@@ -64,11 +75,13 @@ final class StubURLProtocol: URLProtocol {
         requestedURLs.contains { $0.contains(fragment) }
     }
 
-    /// Reset all four, so one test's setup cannot leak into the next.
+    /// Reset them all, so one test's setup cannot leak into the next.
     static func reset() {
         stubbed = (200, Data())
         routes = [:]
         failures = [:]
+        headers = [:]
+        redirects = [:]
         requestedURLs = []
     }
 
@@ -83,12 +96,26 @@ final class StubURLProtocol: URLProtocol {
             client?.urlProtocol(self, didFailWithError: failure)
             return
         }
+        if let target = Self.redirects.first(where: { url.contains($0.key) })?.value,
+           let targetURL = URL(string: target) {
+            let redirect = HTTPURLResponse(
+                url: request.url!, statusCode: 302, httpVersion: nil,
+                headerFields: ["Location": target]
+            )!
+            client?.urlProtocol(
+                self, wasRedirectedTo: URLRequest(url: targetURL), redirectResponse: redirect
+            )
+            return
+        }
         let match = Self.routes
             .filter { url.contains($0.key) }
             .max { $0.key.count < $1.key.count }
         let (status, body) = match?.value ?? Self.stubbed
+        let headerFields = Self.headers
+            .filter { url.contains($0.key) }
+            .max { $0.key.count < $1.key.count }?.value
         let response = HTTPURLResponse(
-            url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil
+            url: request.url!, statusCode: status, httpVersion: nil, headerFields: headerFields
         )!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: body)

@@ -94,7 +94,10 @@ data class UnpaywallResponse(
  */
 @Serializable
 data class UnpaywallOaLocation(
-    /** The PDF when there is one, else the landing page: never a PDF on its own (#464). */
+    /**
+     * `url_for_pdf` when Unpaywall has one, else the landing page: never a PDF that
+     * `url_for_pdf` does not already name (#464).
+     */
     val url: String? = null,
 
     /** Direct URL to PDF (may be null). */

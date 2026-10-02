@@ -1072,6 +1072,22 @@ LANDING_PAGE_ACCEPT = "text/html,application/xhtml+xml"
 # this client can download.
 LANDING_PAGE_PDF_SCHEMES = frozenset({"http", "https"})
 
+# What a landing page's Content-Type contains when it is a page to read, and
+# when the "page" is the PDF itself (a repository bitstream link, #464).
+LANDING_PAGE_HTML_MARKER = "html"
+LANDING_PAGE_PDF_MARKER = "pdf"
+
+# How a web page that declares no charset is read: what the apps' HTTP
+# clients assume, rather than the ISO-8859-1 ``requests`` assumes for text/*.
+DEFAULT_WEB_PAGE_CHARSET = "utf-8"
+
+# What a numeric character reference to no character decodes to, and the
+# bounds of what does name one (a surrogate does not).
+UNICODE_REPLACEMENT_CHARACTER = "\ufffd"
+UNICODE_MAX_CODE_POINT = 0x10FFFF
+UNICODE_SURROGATE_FIRST = 0xD800
+UNICODE_SURROGATE_LAST = 0xDFFF
+
 # The metadata sources a transparency analysis reads an article's record
 # from. Same rule: each name travels into a sentence the user reads (#356).
 SERVICE_PUBMED = "PubMed"

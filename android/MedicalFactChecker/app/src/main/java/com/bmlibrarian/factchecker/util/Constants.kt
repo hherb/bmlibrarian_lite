@@ -56,6 +56,12 @@ object Constants {
      */
     const val HTTP_NOT_FOUND = 404
 
+    /**
+     * The lowest status that means the request did not succeed. Python's
+     * `HTTP_ERROR_STATUS_MIN`.
+     */
+    const val HTTP_ERROR_STATUS_MIN = 400
+
     /** HTTP 429: rate limited. */
     const val HTTP_TOO_MANY_REQUESTS = 429
 
@@ -321,7 +327,8 @@ object Constants {
     const val UNPAYWALL_DEFAULT_EMAIL = "bmlibrarian@example.com"
 
     // ==================== Open-Access Landing Pages (#464) ====================
-    // Python's constants of the same names; the parsing rules are pinned by
+    // Python's constants of the same names, but for HTTP_ACCEPT_HEADER; the
+    // parsing rules are pinned by
     // doc/cross_platform/fulltext_parity/unpaywall_landing_page.json.
 
     /**
@@ -348,6 +355,19 @@ object Constants {
      * this client can download.
      */
     val LANDING_PAGE_PDF_SCHEMES: Set<String> = setOf("http", "https")
+
+    /**
+     * Found in the Content-Type of a "landing page" that is the PDF itself: a
+     * repository bitstream link Unpaywall names as the landing page.
+     */
+    const val LANDING_PAGE_PDF_MARKER = "pdf"
+
+    /**
+     * The client errors that say "not now" about a web page rather than answering
+     * for it: 408 Request Timeout and 425 Too Early. Python's
+     * `HTTP_UNSETTLED_CLIENT_STATUSES` (#446, #464).
+     */
+    val HTTP_UNSETTLED_CLIENT_STATUS_CODES: Set<Int> = setOf(408, 425)
 
     // ==================== External URL Prefixes ====================
 

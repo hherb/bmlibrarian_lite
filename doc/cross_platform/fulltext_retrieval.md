@@ -251,7 +251,8 @@ GET https://api.unpaywall.org/v2/{doi}?email={your_email}
   "is_oa": true,
   "best_oa_location": {
     "url_for_pdf": "https://example.com/article.pdf",
-    "url": "https://example.com/article",
+    "url": "https://example.com/article.pdf",
+    "url_for_landing_page": "https://example.com/article",
     "host_type": "publisher",
     "license": "cc-by"
   },
@@ -276,22 +277,22 @@ async function fetch_unpaywall_pdf_url(doi: string, email: string) -> string | n
         if response.status == 404:
             return null  # DOI not found
 
-        response.raise_for_status()
+        response.raise_for_status()   # a 429 or 5xx is retried first
         data = response.json()
-
-        # Check if open access
-        if not data.is_oa:
-            return null
 
         choice = choose_unpaywall_url(data)
         if choice.pdf_url:
             return choice.pdf_url
         if choice.landing_page:
-            return await landing_page_pdf_url(choice.landing_page)
+            match await read_landing_page(choice.landing_page):
+                case Declared(pdf_url): return pdf_url
+                case DeclaresNone: return null
+                case Unreachable(failure): raise Unsettled(failure)
         return null
 
-    except HttpError:
-        return null  # Don't fail hard on Unpaywall errors
+    except HttpError, Timeout, ConnectionError, UnreadableJson as e:
+        # Not "no copy": Unpaywall could not answer (see "Landing Pages")
+        raise Unsettled(failure_of(e))
 ```
 
 ### Landing Pages (#464)
@@ -325,35 +326,77 @@ function choose_unpaywall_url(data) -> (pdf_url, landing_page):
 function citation_pdf_url(html, page_url) -> string | null:
     for tag in regex_all(r"<meta\b[^>]*>", html, ignore_case):
         attrs = attributes(tag)   # names lower-cased; "..", '..' or bare values;
-                                  # entity-decoded (&amp; &#38; &#x26; ...); trimmed;
+                                  # references decoded (see below); trimmed;
                                   # the first of a repeated name wins
         if lower(attrs.name) != "citation_pdf_url" or not attrs.content:
             continue              # property= is not name=
         url = resolve(page_url, attrs.content)   # RFC 3986, against the
-        if scheme(url) in {http, https}:         # page served after redirects
-            return url
+        if url is None: continue                 # page served after redirects;
+        if scheme(url) in {http, https}:         # an absolute URL kept as given,
+            return url                           # one that will not parse skipped
     return null
 
-async function landing_page_pdf_url(page_url) -> string | null:
+# Pure; pinned by the same file ("character_references")
+function decode_character_references(value) -> string:
+    # Only references ending in ";": &#38; &#x26; and the five names
+    # amp lt gt quot apos, matched with their case. Without the ";" it is
+    # text, so a URL's bare &section= or &param= survives: Python's
+    # html.unescape decoded HTML's legacy names written bare, turning them
+    # into §ion= and ¶m=, which no browser does inside an attribute. Any
+    # other name is left as written; a number naming no character (zero, a
+    # surrogate, past U+10FFFF) becomes U+FFFD. One pass: &amp;amp; is &amp;.
+
+# Pure; pinned by the same file ("landing_page_status")
+function web_page_status_unsettled(status) -> bool:   # status >= 400
+    return status >= 500 or status in {429, 408, 425}
+
+async function read_landing_page(page_url) -> Declared | DeclaresNone | Unreachable:
     response = GET page_url, Accept: text/html,application/xhtml+xml,
-               redirects followed, paced and retried like any request
-    if response failed or status >= 400 or (content type present and not HTML):
-        return null
-    return citation_pdf_url(response.body, response.final_url)
+               redirects followed, paced; a 429 or 5xx retried
+    if the request or the body read failed: return Unreachable(failure)
+    if status >= 400:
+        return Unreachable(status) if web_page_status_unsettled(status) else DeclaresNone
+    if "pdf" in content_type: return Declared(response.final_url)   # the page is the PDF
+    if content_type and "html" not in content_type: return DeclaresNone
+    body = the body, decoded by its declared charset, else UTF-8
+    url = citation_pdf_url(body, response.final_url)
+    return Declared(url) if url else DeclaresNone
 ```
 
 One extra request, only for an article whose every Unpaywall location lacks a
 PDF URL. The PDF found keeps Unpaywall's provenance and goes through the
-ordinary download, `%PDF` check and extraction.
+ordinary download and extraction (and, in Python and Swift, the `%PDF` check;
+Android has none). A "landing page" served as a PDF is a repository bitstream
+link, taken as `_discover_doi_direct` takes a DOI that resolves to a PDF.
 
-**A page that could not answer is not a page without a PDF.** Python records
-a landing page it could not reach (an exception) or that ended on a throttle,
-a 5xx, a 408 or a 425 as a `SourceLookupFailure` under "the open-access
-copy's landing page", by the rule #446 set for the publisher's page a DOI
-resolves to (`web_page_status_unsettled`); any other 4xx, a non-HTML page or
-a page without the tag is its answer and records nothing. The apps log it, as
-they log every other Unpaywall miss; their tier then has no PDF URL and the
-chain goes on.
+No body is read but an HTML page's (or one of no stated type), so a large file
+served as the page is not downloaded to find out what it is. A page that
+declares no charset is read as UTF-8, as the apps' HTTP clients read it; `requests`
+would read an undeclared `text/html` page as ISO-8859-1 and garble a non-ASCII
+PDF path.
+
+Python reads the landing page only when Unpaywall offered neither a PDF URL nor
+a PMC page to derive one from: a PMC render is the same article's PDF.
+
+**A page that could not answer is not a page without a PDF.** A landing page
+that could not be reached, whose body broke off, or that ended on a status
+`web_page_status_unsettled` calls unsettled is `Unreachable`, by the rule #446
+set for the publisher's page a DOI resolves to; any other 4xx, a page neither
+HTML nor PDF, or a page without the tag is its answer (`DeclaresNone`).
+
+- **Python** records `Unreachable` as a `SourceLookupFailure` under "the
+  open-access copy's landing page", and an Unpaywall it could not ask under
+  Unpaywall's own name; both reach the reader.
+- **Swift** returns the failure on the chain's fallback as
+  `FullTextResult.openAccessShortfall`, for Unpaywall and the landing page
+  alike. The app reads it to keep a stored PDF link rather than trade it for
+  that fallback (`FullTextAutoFetch.storedLinkKept`), so the next run tries
+  again.
+- **Android** raises `OpenAccessUnsettledException` inside the tier and logs
+  it as a warning; the chain goes on to the DOI link.
+
+Neither app yet tells the reader the open-access copy went unassessed; see
+#466.
 
 ### PDF Downloading and Caching
 

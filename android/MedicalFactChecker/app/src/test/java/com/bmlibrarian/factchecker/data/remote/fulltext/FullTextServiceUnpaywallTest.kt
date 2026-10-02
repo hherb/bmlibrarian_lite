@@ -21,29 +21,35 @@ package com.bmlibrarian.factchecker.data.remote.fulltext
 import android.util.Log
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCSearchResult
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
+import com.bmlibrarian.factchecker.di.AppModule
+import com.bmlibrarian.factchecker.di.NetworkModule
 import com.bmlibrarian.factchecker.util.Constants
-import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import io.mockk.coEvery
 import io.mockk.mockk
+import java.nio.charset.Charset
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
+import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import retrofit2.Retrofit
 
 /**
  * The Unpaywall tier against a local server (#464): Unpaywall's answer and the
  * landing page it names are both served by [server], and Unpaywall is asked
- * through Retrofit built as `NetworkModule` builds it, so the decoding is the
- * app's too.
+ * through Retrofit built by `NetworkModule.provideRetrofitBuilder` from
+ * `AppModule.provideJson`, so the decoding is the app's own.
  *
  * The parsing rules themselves are pinned by [UnpaywallLandingPageContractTest].
  */
@@ -71,17 +77,8 @@ class FullTextServiceUnpaywallTest {
         }
         server.start()
 
-        // AppModule.provideJson and NetworkModule.provideRetrofitBuilder
-        val json = Json {
-            ignoreUnknownKeys = true
-            isLenient = true
-            encodeDefaults = true
-            prettyPrint = false
-        }
         val httpClient = OkHttpClient()
-        val unpaywallApi = Retrofit.Builder()
-            .client(httpClient)
-            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+        val unpaywallApi = NetworkModule.provideRetrofitBuilder(httpClient, AppModule.provideJson())
             .baseUrl(server.url("/v2/"))
             .build()
             .create(UnpaywallApi::class.java)
@@ -221,7 +218,107 @@ class FullTextServiceUnpaywallTest {
         assertEquals(listOf<String?>(unpaywallPath), requestedPaths())
     }
 
+    /** How many times the handle was asked for. */
+    private fun handleRequests(): Int = requestedPaths().count { it == handlePath }
+
+    private val doiLink = FullTextService.FullTextResult.DoiUrl("${Constants.DOI_URL_PREFIX}$doi")
+
+    @Test
+    fun `an unreachable landing page is retried and logged as unread, not as declaring nothing`() = runTest {
+        unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())
+        routes[handlePath] = MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
+
+        assertEquals(doiLink, fetch())
+        assertTrue("${Log.lines}", handleRequests() > 1)
+        assertTrue("${Log.lines}", Log.lines.any { "could not be read" in it })
+        assertFalse("${Log.lines}", Log.lines.any { "declares no PDF" in it })
+    }
+
+    @Test
+    fun `a landing page server fault is retried, then left unsettled`() = runTest {
+        unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())
+        routes[handlePath] = MockResponse().setResponseCode(HTTP_SERVICE_UNAVAILABLE)
+
+        assertEquals(doiLink, fetch())
+        assertTrue("${Log.lines}", handleRequests() > 1)
+        assertTrue("${Log.lines}", Log.lines.any { "could not be read (HTTP 503" in it })
+    }
+
+    @Test
+    fun `a 501 is not retried but is still not the page's answer`() = runTest {
+        unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())
+        routes[handlePath] = MockResponse().setResponseCode(HTTP_NOT_IMPLEMENTED)
+
+        assertEquals(doiLink, fetch())
+        assertEquals(1, handleRequests())
+        assertTrue("${Log.lines}", Log.lines.any { "could not be read (HTTP 501" in it })
+    }
+
+    @Test
+    fun `a throttled Unpaywall is retried and logged as unassessed`() = runTest {
+        routes[unpaywallPath] = MockResponse().setResponseCode(Constants.HTTP_TOO_MANY_REQUESTS)
+
+        assertEquals(doiLink, fetch())
+        assertTrue("${Log.lines}", requestedPaths().count { it == unpaywallPath } > 1)
+        assertTrue("${Log.lines}", Log.lines.any { "went unassessed" in it })
+    }
+
+    @Test
+    fun `a landing page served as a PDF is the PDF`() = runTest {
+        unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())
+        handleRedirectsToPage()
+        pageServes("%PDF-1.7", contentType = "application/pdf")
+
+        assertEquals(
+            "${Log.lines}",
+            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = server.url(pagePath).toString()),
+            fetch()
+        )
+    }
+
+    @Test
+    fun `a landing page is read by the charset it declares`() = runTest {
+        unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())
+        handleRedirectsToPage()
+        val shiftJis = Charset.forName("Shift_JIS")
+        routes[pagePath] = MockResponse()
+            .setHeader("Content-Type", "text/html; charset=Shift_JIS")
+            .setBody(Buffer().writeString("""<meta name="citation_pdf_url" content="./論文.pdf">""", shiftJis))
+
+        val result = fetch()
+
+        assertTrue("$result", (result as FullTextService.FullTextResult.UnpaywallPdf).pdfUrl.endsWith("/論文.pdf"))
+    }
+
+    @Test
+    fun `a cancelled landing-page read is not logged as a failed lookup`() = runTest {
+        unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())
+        routes[handlePath] = MockResponse()
+            .setHeadersDelay(1, TimeUnit.SECONDS)
+            .setHeader("Content-Type", "text/html")
+            .setBody("""<meta name="citation_pdf_url" content="$pdfPath">""")
+
+        var completed = false
+        val job = launch(Dispatchers.Default) {
+            fetch()
+            completed = true
+        }
+        server.takeRequest() // Unpaywall
+        server.takeRequest() // the landing page, now in flight
+        job.cancel()
+        job.join()
+
+        assertFalse(completed)
+        assertFalse("${Log.lines}", Log.lines.any { "lookup failed" in it || "went unassessed" in it })
+    }
+
     private companion object {
+        /** HTTP 503: a server fault that is retried. */
+        const val HTTP_SERVICE_UNAVAILABLE = 503
+
+        /** HTTP 501: a server fault outside the retried statuses. */
+        const val HTTP_NOT_IMPLEMENTED = 501
+
         /** HTTP 302: the redirect a handle server answers with. */
         const val HTTP_FOUND = 302
     }

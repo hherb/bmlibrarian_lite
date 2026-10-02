@@ -233,6 +233,16 @@ public struct FullTextResult: Sendable, Equatable {
     /// text whatsoever.
     public let extractionCoverage: PDFExtractionCoverage?
 
+    /// Why the open-access copy Unpaywall may know of went unassessed, or `nil`
+    /// when Unpaywall answered and any landing page it named did too.
+    ///
+    /// Set only on a fallback returned after the Unpaywall tier: a caller that
+    /// already holds a PDF link must not trade it for a fallback the chain
+    /// settled on only because a source could not answer (#464). Not a
+    /// ``degradation``: that names a lost machine-readable source and is
+    /// persisted; this is the state of one fetch.
+    public let openAccessShortfall: RequestFailure?
+
     /// Create a retrieval result.
     ///
     /// - Parameters:
@@ -249,6 +259,8 @@ public struct FullTextResult: Sendable, Equatable {
     ///     default — when none was cached.
     ///   - extractionCoverage: How much of the PDF `extractedText` came from,
     ///     or `nil` — the default — when no extraction was run.
+    ///   - openAccessShortfall: Why the open-access copy went unassessed, or
+    ///     `nil` — the default — when nothing was left unsettled.
     public init(
         content: FullTextContent,
         warnings: JATSParseWarnings = JATSParseWarnings(),
@@ -256,7 +268,8 @@ public struct FullTextResult: Sendable, Equatable {
         contentKind: FullTextContentKind = .none,
         extractedText: String? = nil,
         localPDFPath: String? = nil,
-        extractionCoverage: PDFExtractionCoverage? = nil
+        extractionCoverage: PDFExtractionCoverage? = nil,
+        openAccessShortfall: RequestFailure? = nil
     ) {
         // Three combinations the fallback chain never emits, and which the reader
         // would be shown as fact if it ever did. They were unspellable while
@@ -336,6 +349,24 @@ public struct FullTextResult: Sendable, Equatable {
         self.extractedText = extractedText
         self.localPDFPath = localPDFPath
         self.extractionCoverage = extractionCoverage
+        self.openAccessShortfall = openAccessShortfall
+    }
+
+    /// This result, noting why the open-access copy went unassessed.
+    ///
+    /// - Parameter openAccessShortfall: The failure, or `nil` for none.
+    /// - Returns: The same result with ``openAccessShortfall`` set.
+    func noting(openAccessShortfall: RequestFailure?) -> FullTextResult {
+        FullTextResult(
+            content: content,
+            warnings: warnings,
+            degradation: degradation,
+            contentKind: contentKind,
+            extractedText: extractedText,
+            localPDFPath: localPDFPath,
+            extractionCoverage: extractionCoverage,
+            openAccessShortfall: openAccessShortfall
+        )
     }
 
     /// The source of this full-text content.

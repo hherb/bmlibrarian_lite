@@ -156,6 +156,16 @@ public enum BioMedLitConstants {
     /// The only schemes a declared PDF URL may use.
     public static let landingPagePDFSchemes: Set<String> = ["http", "https"]
 
+    /// What a landing page's Content-Type contains when it is a page to read.
+    public static let landingPageHTMLMarker = "html"
+
+    /// What it contains when the "page" is the PDF itself: a repository
+    /// bitstream link named as the landing page (#464).
+    public static let landingPagePDFMarker = "pdf"
+
+    /// What a numeric character reference to no character decodes to.
+    public static let unicodeReplacementCharacter = "\u{FFFD}"
+
     // MARK: - DOI Resolution
 
     /// DOI resolution base URL.
@@ -213,6 +223,11 @@ public enum BioMedLitConstants {
     /// `doc/cross_platform/request_failure_parity/answered_lookup_verb.json`.
     public static let unansweredStatusCodes: Set<Int> = Set([httpStatusRateLimited])
         .union(httpServerErrorStatusCodes)
+
+    /// The client errors that say "not now" about a web page rather than
+    /// answering for it: 408 Request Timeout and 425 Too Early. Python's
+    /// `HTTP_UNSETTLED_CLIENT_STATUSES` (#446, #464).
+    public static let httpUnsettledClientStatusCodes: Set<Int> = [408, 425]
 
     /// HTTP server error status codes (5xx).
     public static let httpServerErrorStatusCodes: ClosedRange<Int> = 500...599

@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "description": "Which URL the Unpaywall tier tries, and the PDF a landing page declares (#464). Read by tests/test_oa_landing_page.py, Packages/BioMedLit UnpaywallLandingPageContractTests and Android UnpaywallLandingPageContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, 'Unpaywall PDF'. Every case is asserted on all three platforms: add a row here, not a test on one platform.",
+  "schema_version": 2,
+  "description": "Which URL the Unpaywall tier tries, the PDF a landing page declares, the character references decoded in the tag's value, and which error statuses leave a landing page unread (#464). Read by tests/test_oa_landing_page.py, Packages/BioMedLit UnpaywallLandingPageContractTests and Android UnpaywallLandingPageContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, 'Unpaywall PDF' > 'Landing Pages (#464)'. Every case is asserted on all three platforms, and each platform asserts it reads every table: add a row here, not a test on one platform.",
   "unpaywall_choice": [
     {
       "name": "the best location's url_for_pdf",
@@ -221,6 +221,141 @@
       "page_url": "https://repo.example.org/",
       "html": "<html><head><title>Item</title><meta name=\"citation_title\" content=\"A study\"></head></html>",
       "expected": null
+    },
+    {
+      "name": "a bare & is no reference: legacy names written without ; are left alone",
+      "page_url": "https://repo.example.org/",
+      "html": "<meta name=\"citation_pdf_url\" content=\"https://repo.example.org/get?id=7&param=pdf&section=2&not=3&region=eu&times=4&copy=1\">",
+      "expected": "https://repo.example.org/get?id=7&param=pdf&section=2&not=3&region=eu&times=4&copy=1"
+    },
+    {
+      "name": "an absolute URL is kept as given, dot segments and all",
+      "page_url": "https://repo.example.org/item/",
+      "html": "<meta name=\"citation_pdf_url\" content=\"https://cdn.example.org/a/../b.pdf\">",
+      "expected": "https://cdn.example.org/a/../b.pdf"
+    },
+    {
+      "name": "a content that will not parse as a URL is passed over for the next tag",
+      "page_url": "https://repo.example.org/",
+      "html": "<meta name=\"citation_pdf_url\" content=\"http://[bad/a.pdf\"><meta name=\"citation_pdf_url\" content=\"https://repo.example.org/i.pdf\">",
+      "expected": "https://repo.example.org/i.pdf"
+    }
+  ],
+  "character_references": [
+    {
+      "name": "the five named references",
+      "raw": "&amp; &lt; &gt; &quot; &apos;",
+      "expected": "& < > \" '"
+    },
+    {
+      "name": "decimal and hexadecimal references",
+      "raw": "a&#38;b&#x26;c&#X26;d",
+      "expected": "a&b&c&d"
+    },
+    {
+      "name": "legacy names without their ; are text",
+      "raw": "?id=1&param=2&section=3&not=4&copy&amp",
+      "expected": "?id=1&param=2&section=3&not=4&copy&amp"
+    },
+    {
+      "name": "names are matched with their case",
+      "raw": "&Amp;&AMP;&Lt;",
+      "expected": "&Amp;&AMP;&Lt;"
+    },
+    {
+      "name": "any other name is left as written",
+      "raw": "&nbsp;&copy;&hellip;&unknown1;",
+      "expected": "&nbsp;&copy;&hellip;&unknown1;"
+    },
+    {
+      "name": "a number that names no character becomes U+FFFD",
+      "raw": "&#0;|&#xD800;|&#1114112;|&#99999999999;",
+      "expected": "\ufffd|\ufffd|\ufffd|\ufffd"
+    },
+    {
+      "name": "a C1 control is decoded as itself, not as windows-1252",
+      "raw": "&#150;",
+      "expected": "\u0096"
+    },
+    {
+      "name": "a reference with no digits is text",
+      "raw": "&#;&#x;&#xg;",
+      "expected": "&#;&#x;&#xg;"
+    },
+    {
+      "name": "decoding is one pass",
+      "raw": "&amp;amp;",
+      "expected": "&amp;"
+    }
+  ],
+  "landing_page_status": [
+    {
+      "status": 400,
+      "unsettled": false
+    },
+    {
+      "status": 401,
+      "unsettled": false
+    },
+    {
+      "status": 403,
+      "unsettled": false
+    },
+    {
+      "status": 404,
+      "unsettled": false
+    },
+    {
+      "status": 408,
+      "unsettled": true
+    },
+    {
+      "status": 410,
+      "unsettled": false
+    },
+    {
+      "status": 425,
+      "unsettled": true
+    },
+    {
+      "status": 429,
+      "unsettled": true
+    },
+    {
+      "status": 451,
+      "unsettled": false
+    },
+    {
+      "status": 500,
+      "unsettled": true
+    },
+    {
+      "status": 501,
+      "unsettled": true
+    },
+    {
+      "status": 502,
+      "unsettled": true
+    },
+    {
+      "status": 503,
+      "unsettled": true
+    },
+    {
+      "status": 504,
+      "unsettled": true
+    },
+    {
+      "status": 505,
+      "unsettled": true
+    },
+    {
+      "status": 520,
+      "unsettled": true
+    },
+    {
+      "status": 599,
+      "unsettled": true
     }
   ]
 }

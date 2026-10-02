@@ -24,7 +24,9 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -124,5 +126,45 @@ class UnpaywallLandingPageContractTest {
                 )
             )
         }
+    }
+
+    @Test
+    fun `each character_references row`() {
+        for (row in table("character_references")) {
+            assertEquals(
+                "${row.string("name")}",
+                row.string("expected"),
+                UnpaywallLandingPage.decodeCharacterReferences(row.getValue("raw").jsonPrimitive.content)
+            )
+        }
+    }
+
+    @Test
+    fun `each landing_page_status row`() {
+        for (row in table("landing_page_status")) {
+            val status = row.getValue("status").jsonPrimitive.int
+            assertEquals(
+                "HTTP $status",
+                row.getValue("unsettled").jsonPrimitive.boolean,
+                UnpaywallLandingPage.webPageStatusUnsettled(status)
+            )
+        }
+    }
+
+    /** A table added to the contract and asserted nowhere would pin nothing. */
+    @Test
+    fun `every contract table is read here`() {
+        assertEquals(
+            setOf(
+                "schema_version", "description", "unpaywall_choice", "citation_pdf_url",
+                "character_references", "landing_page_status"
+            ),
+            contract.keys
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `a choice cannot offer both a PDF and a landing page`() {
+        UnpaywallChoice(pdfUrl = "https://r.org/a.pdf", landingPage = "https://r.org/a")
     }
 }

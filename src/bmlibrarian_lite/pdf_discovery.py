@@ -39,6 +39,7 @@ import logging
 import re
 import time
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
@@ -57,6 +58,8 @@ from .constants import (
     HTTP_SERVER_ERROR_MIN,
     HTTP_UNSETTLED_CLIENT_STATUSES,
     LANDING_PAGE_ACCEPT,
+    LANDING_PAGE_HTML_MARKER,
+    LANDING_PAGE_PDF_MARKER,
     PAYWALL_HTTP_STATUSES,
     POLITE_MAX_THROTTLE_RETRIES,
     RETRYABLE_HTTP_STATUSES,
@@ -79,7 +82,13 @@ from .data_models import (
     SourceLookupFailure,
     SourceLookupSkipped,
 )
-from .oa_landing_page import choose_unpaywall_url, citation_pdf_url
+from .oa_landing_page import (
+    choose_unpaywall_url,
+    citation_pdf_url,
+    landing_page_text,
+    location_pdf_url,
+    unpaywall_locations,
+)
 from .polite_session import is_loopback_host, mount_politely
 from .rate_limit import limiter_for
 from .search_failures import request_failure_from_exception
@@ -91,7 +100,7 @@ logger = logging.getLogger(__name__)
 _ID_CONVERTER_ERROR_STATUS = "error"
 
 # The lookup paths below -- ``_get_pmcid_from_pmid``, ``_discover_unpaywall``
-# and ``_discover_doi_direct`` -- describe every failure through
+# (with ``_resolve_landing_page``) and ``_discover_doi_direct`` -- describe every failure through
 # ``request_failure_from_exception(...).describe()``, which keeps the kind and
 # the HTTP status and nothing else. A local helper did the same job until #347
 # gave them a typed failure to carry. The rule they follow: ``str()`` on a
@@ -127,28 +136,6 @@ def doi_lookup_service(url: str | bytes | None) -> str:
     return (
         SERVICE_DOI_RESOLVER if host in DOI_RESOLVER_HOSTS else SERVICE_DOI_PUBLISHER
     )
-
-
-def _location_of(data: dict[str, Any], page_url: str) -> dict[str, Any]:
-    """Find the Unpaywall location a landing page came from.
-
-    Args:
-        data: Unpaywall's answer.
-        page_url: The landing page :func:`choose_unpaywall_url` chose.
-
-    Returns:
-        The location, best first, or an empty mapping if none names it.
-    """
-    for location in [data.get("best_oa_location"), *(data.get("oa_locations") or [])]:
-        if not isinstance(location, dict):
-            continue
-        named = {
-            str(location.get(key) or "").strip()
-            for key in ("url_for_landing_page", "url")
-        }
-        if page_url in named:
-            return location
-    return {}
 
 
 def web_page_status_unsettled(status_code: int) -> bool:
@@ -1052,11 +1039,14 @@ class PDFDiscoverer:
             doi: The article's DOI.
 
         Returns:
-            The open-access sources Unpaywall knows of, and the failure that
-            stopped it being asked. An empty list with no failure means
-            Unpaywall answered and knows of none; with a failure it means we
-            never found out, which is not the same thing and must not reach
-            the reader as one (#347).
+            The open-access sources found, and the failure that left the
+            lookup unsettled: Unpaywall itself could not be asked
+            (:data:`SERVICE_UNPAYWALL`), or the landing page it named could
+            not be read (:data:`SERVICE_UNPAYWALL_LANDING_PAGE`, #464). No
+            failure means every request was answered, so an empty list is
+            Unpaywall knowing of none; with a failure it means we never found
+            out, which is not the same thing and must not reach the reader as
+            one (#347).
 
         Raises:
             ValueError: If no Unpaywall email is configured. The caller
@@ -1095,70 +1085,54 @@ class PDFDiscoverer:
             response.raise_for_status()
             data = response.json()
 
-            # Check for best open access location
-            best_oa = data.get("best_oa_location")
-            if best_oa and best_oa.get("url_for_pdf"):
-                sources.append(PDFSource(
-                    url=best_oa["url_for_pdf"],
-                    source_type=PDFSourceType.UNPAYWALL_OA,
-                    is_open_access=True,
-                    host_type=best_oa.get("host_type", ""),
-                    version=best_oa.get("version", ""),
-                    license=best_oa.get("license", ""),
-                ))
+            # Every location's PDF URL, best location first. A location with
+            # none whose ``url`` is a PMC article page yields the PMC renders
+            # instead. "Has a PDF URL" is ``location_pdf_url``'s definition,
+            # the one the contract pins, so a blank ``url_for_pdf`` is no PDF
+            # here either.
+            for location in unpaywall_locations(data):
+                pdf_url = location_pdf_url(location)
+                if pdf_url:
+                    if pdf_url not in [s.url for s in sources]:
+                        sources.append(PDFSource(
+                            url=pdf_url,
+                            source_type=PDFSourceType.UNPAYWALL_OA,
+                            is_open_access=True,
+                            host_type=location.get("host_type") or "",
+                            version=location.get("version") or "",
+                            license=location.get("license") or "",
+                        ))
+                    continue
 
-            # Also check all OA locations
-            for location in data.get("oa_locations", []):
-                pdf_url = location.get("url_for_pdf")
-                if pdf_url and pdf_url not in [s.url for s in sources]:
-                    sources.append(PDFSource(
-                        url=pdf_url,
-                        source_type=PDFSourceType.UNPAYWALL_OA,
-                        is_open_access=True,
-                        host_type=location.get("host_type", ""),
-                        version=location.get("version", ""),
-                        license=location.get("license", ""),
-                    ))
-
-                # If no pdf_url but there's a PMC URL, extract PMCID and add PMC sources
-                if not pdf_url:
-                    loc_url = location.get("url", "")
-                    pmcid = self._extract_pmcid_from_url(loc_url)
-                    if pmcid:
-                        # Europe PMC (more reliable)
-                        europepmc_url = f"https://europepmc.org/backend/ptpmcrender.fcgi?accid={pmcid}&blobtype=pdf"
-                        if europepmc_url not in [s.url for s in sources]:
+                pmcid = self._extract_pmcid_from_url(location.get("url") or "")
+                if pmcid:
+                    # Europe PMC (more reliable), then NCBI PMC as fallback
+                    for pmc_url in (
+                        f"https://europepmc.org/backend/ptpmcrender.fcgi?accid={pmcid}&blobtype=pdf",
+                        f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/pdf/",
+                    ):
+                        if pmc_url not in [s.url for s in sources]:
                             sources.append(PDFSource(
-                                url=europepmc_url,
+                                url=pmc_url,
                                 source_type=PDFSourceType.PMC,
                                 is_open_access=True,
                                 host_type="repository",
-                                version=location.get("version", ""),
+                                version=location.get("version") or "",
                             ))
 
-                        # NCBI PMC as fallback
-                        ncbi_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/pdf/"
-                        if ncbi_url not in [s.url for s in sources]:
-                            sources.append(PDFSource(
-                                url=ncbi_url,
-                                source_type=PDFSourceType.PMC,
-                                is_open_access=True,
-                                host_type="repository",
-                                version=location.get("version", ""),
-                            ))
-
-            # No location offered a PDF URL. Unpaywall's ``url`` is then the
-            # landing page, never the PDF, so it is read for the PDF it
-            # declares rather than downloaded as one (#464).
+            # Neither a PDF URL nor a PMC page to derive one from. Unpaywall's
+            # ``url`` is then the landing page, never the PDF, so it is read
+            # for the PDF it declares rather than downloaded as one (#464). A
+            # PMC render already in hand is the same article's PDF, so the
+            # page is not read beside it.
             landing_failure: SourceLookupFailure | None = None
             if not sources:
-                landing_page = choose_unpaywall_url(data).landing_page
-                if landing_page:
-                    landing_source, landing_failure = self._resolve_landing_page(
-                        landing_page, _location_of(data, landing_page)
+                choice = choose_unpaywall_url(data)
+                if choice.landing_page:
+                    landing_sources, landing_failure = self._resolve_landing_page(
+                        choice.landing_page, choice.location or {}
                     )
-                    if landing_source is not None:
-                        sources.append(landing_source)
+                    sources.extend(landing_sources)
 
             # Always try publisher-specific patterns for OA content as fallback
             if data.get("is_oa"):
@@ -1183,9 +1157,14 @@ class PDFDiscoverer:
         return sources, landing_failure
 
     def _resolve_landing_page(
-        self, page_url: str, location: dict[str, Any]
-    ) -> tuple[PDFSource | None, SourceLookupFailure | None]:
+        self, page_url: str, location: Mapping[str, Any]
+    ) -> tuple[list[PDFSource], SourceLookupFailure | None]:
         """Read the PDF a landing page Unpaywall names declares (#464).
+
+        The body is read inside the same guard as the request: with
+        ``stream=True`` a read that times out or breaks mid-body raises from
+        the read, and outside the guard it reached ``_discover_unpaywall``'s
+        handler and was blamed on Unpaywall, which had answered.
 
         Args:
             page_url: The landing page.
@@ -1193,7 +1172,7 @@ class PDFDiscoverer:
                 host type, version and licence.
 
         Returns:
-            The declared PDF as an Unpaywall source, or ``None``; and the
+            The declared PDF as an Unpaywall source, or no source; and the
             failure that left the page unread, or ``None`` when the page
             answered -- with a PDF, without one, or with a refusal (see
             :func:`web_page_status_unsettled`).
@@ -1206,27 +1185,48 @@ class PDFDiscoverer:
                 timeout=REQUEST_TIMEOUT,
                 stream=True,
             )
+            with response:
+                return self._landing_page_answer(response, location)
         except requests.exceptions.RequestException as e:
-            failure = request_failure_from_exception(e)
+            return self._unread_landing_page(request_failure_from_exception(e))
         except ValueError:
             # A redirect whose Location will not parse, as in
             # ``_discover_doi_direct``.
-            failure = RequestFailure(RequestFailureKind.REQUEST_FAILED)
-        else:
-            with response:
-                return self._landing_page_answer(response, location)
+            return self._unread_landing_page(
+                RequestFailure(RequestFailureKind.REQUEST_FAILED)
+            )
+
+    @staticmethod
+    def _unread_landing_page(
+        failure: RequestFailure,
+    ) -> tuple[list[PDFSource], SourceLookupFailure]:
+        """Record a landing page we could not read.
+
+        Args:
+            failure: Why it went unread.
+
+        Returns:
+            No source, and the failure under the landing page's own name.
+        """
         logger.warning(
             "The open-access copy's landing page could not be read (%s), so "
             "any PDF it declares is not assessed.",
             failure.describe(),
         )
-        return None, SourceLookupFailure(SERVICE_UNPAYWALL_LANDING_PAGE, failure)
+        return [], SourceLookupFailure(SERVICE_UNPAYWALL_LANDING_PAGE, failure)
 
     @staticmethod
     def _landing_page_answer(
-        response: requests.Response, location: dict[str, Any]
-    ) -> tuple[PDFSource | None, SourceLookupFailure | None]:
+        response: requests.Response, location: Mapping[str, Any]
+    ) -> tuple[list[PDFSource], SourceLookupFailure | None]:
         """Turn a landing page's answer into a PDF source.
+
+        A page served as a PDF is the PDF (a repository bitstream link), as
+        ``_discover_doi_direct`` takes one; the download's ``%PDF`` check
+        still has the last word. An HTML page, or one of no stated type, is
+        read for the tag; its body is not read otherwise, so a large file
+        served as the page is not downloaded here. Anything else is the
+        page's answer that it declares nothing.
 
         Args:
             response: The page's response, its body not yet read.
@@ -1234,46 +1234,57 @@ class PDFDiscoverer:
 
         Returns:
             As :meth:`_resolve_landing_page`.
+
+        Raises:
+            requests.exceptions.RequestException: If reading the body fails;
+                the caller records it against the page.
         """
         status = response.status_code
         if status >= HTTP_ERROR_STATUS_MIN:
             if web_page_status_unsettled(status):
-                failure = RequestFailure(RequestFailureKind.HTTP_STATUS, status)
-                logger.warning(
-                    "The open-access copy's landing page could not be read "
-                    "(%s), so any PDF it declares is not assessed.",
-                    failure.describe(),
-                )
-                return None, SourceLookupFailure(
-                    SERVICE_UNPAYWALL_LANDING_PAGE, failure
+                return PDFDiscoverer._unread_landing_page(
+                    RequestFailure(RequestFailureKind.HTTP_STATUS, status)
                 )
             logger.info(
                 "The open-access copy's landing page answered HTTP %d; no PDF "
                 "from it.",
                 status,
             )
-            return None, None
+            return [], None
+
+        def source(url: str) -> list[PDFSource]:
+            """The PDF at ``url`` as an Unpaywall source, with the location's metadata."""
+            return [PDFSource(
+                url=url,
+                source_type=PDFSourceType.UNPAYWALL_OA,
+                is_open_access=True,
+                host_type=location.get("host_type") or "",
+                version=location.get("version") or "",
+                license=location.get("license") or "",
+            )]
+
         content_type = response.headers.get("Content-Type", "")
-        if content_type and "html" not in content_type.lower():
+        if LANDING_PAGE_PDF_MARKER in content_type.lower():
+            logger.info(
+                "The open-access copy's landing page is itself a PDF: %s",
+                response.url,
+            )
+            return source(response.url), None
+        if content_type and LANDING_PAGE_HTML_MARKER not in content_type.lower():
             logger.info(
                 "The open-access copy's landing page is %s, not HTML; no PDF "
                 "declared.",
                 content_type,
             )
-            return None, None
-        pdf_url = citation_pdf_url(response.text, response.url)
+            return [], None
+
+        page = landing_page_text(response.content or b"", content_type)
+        pdf_url = citation_pdf_url(page, response.url)
         if pdf_url is None:
             logger.info("The open-access copy's landing page declares no PDF.")
-            return None, None
+            return [], None
         logger.info("The open-access copy's landing page declares %s", pdf_url)
-        return PDFSource(
-            url=pdf_url,
-            source_type=PDFSourceType.UNPAYWALL_OA,
-            is_open_access=True,
-            host_type=location.get("host_type") or "",
-            version=location.get("version") or "",
-            license=location.get("license") or "",
-        ), None
+        return source(pdf_url), None
 
     def _extract_pmcid_from_url(self, url: str) -> Optional[str]:
         """Extract PMCID from a PMC URL."""

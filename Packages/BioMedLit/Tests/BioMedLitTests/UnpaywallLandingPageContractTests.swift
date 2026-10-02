@@ -48,18 +48,25 @@ final class UnpaywallLandingPageContractTests: XCTestCase {
         return nil
     }()
 
-    /// The contract's two tables, as untyped rows.
+    /// The contract as a whole, untyped.
+    private func loadContract() throws -> [String: Any] {
+        guard let file = Self.contractFile else {
+            throw ContractError.notFound(origin: #filePath)
+        }
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: file))
+        guard let contract = object as? [String: Any] else {
+            throw ContractError.malformed("the contract")
+        }
+        return contract
+    }
+
+    /// One of the contract's tables, as untyped rows.
     ///
     /// Untyped because each `response` is Unpaywall's JSON, which is decoded
     /// here exactly as the service decodes it: re-serialised, then handed to
     /// `JSONDecoder` as ``UnpaywallResponse``.
     private func loadTable(_ name: String) throws -> [[String: Any]] {
-        guard let file = Self.contractFile else {
-            throw ContractError.notFound(origin: #filePath)
-        }
-        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: file))
-        guard let contract = object as? [String: Any],
-              let rows = contract[name] as? [[String: Any]] else {
+        guard let rows = try loadContract()[name] as? [[String: Any]] else {
             throw ContractError.malformed(name)
         }
         return rows
@@ -97,5 +104,42 @@ final class UnpaywallLandingPageContractTests: XCTestCase {
 
             XCTAssertEqual(found?.absoluteString, string(row, "expected"), name)
         }
+    }
+
+    func testEachCharacterReferencesRow() throws {
+        let rows = try loadTable("character_references")
+        XCTAssertGreaterThanOrEqual(rows.count, 5, "an empty table would pass vacuously")
+        for row in rows {
+            let name = string(row, "name") ?? "?"
+            let raw = try XCTUnwrap(string(row, "raw"), name)
+
+            XCTAssertEqual(
+                UnpaywallLandingPage.decodeCharacterReferences(raw), string(row, "expected"), name
+            )
+        }
+    }
+
+    func testEachLandingPageStatusRow() throws {
+        let rows = try loadTable("landing_page_status")
+        XCTAssertGreaterThanOrEqual(rows.count, 10, "an empty table would pass vacuously")
+        for row in rows {
+            let status = try XCTUnwrap(row["status"] as? Int)
+            let unsettled = try XCTUnwrap(row["unsettled"] as? Bool)
+
+            XCTAssertEqual(
+                UnpaywallLandingPage.webPageStatusUnsettled(status), unsettled, "HTTP \(status)"
+            )
+        }
+    }
+
+    /// A table added to the contract and asserted nowhere would pin nothing.
+    func testEveryContractTableIsReadHere() throws {
+        XCTAssertEqual(
+            Set(try loadContract().keys),
+            [
+                "schema_version", "description", "unpaywall_choice", "citation_pdf_url",
+                "character_references", "landing_page_status",
+            ]
+        )
     }
 }
