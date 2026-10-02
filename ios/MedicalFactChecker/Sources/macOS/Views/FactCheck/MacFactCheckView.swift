@@ -148,6 +148,9 @@ struct MacFactCheckView: View {
                     if let notice = workflow.fullTextNotice {
                         MacIncompleteSearchNotice(text: notice)
                     }
+                    if let notice = workflow.transparencyNotice {
+                        MacIncompleteSearchNotice(text: notice)
+                    }
                 }
 
                 // Progress section
