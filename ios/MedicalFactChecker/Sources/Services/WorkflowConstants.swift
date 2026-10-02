@@ -47,6 +47,33 @@ enum WorkflowConstants {
     /// long enough to be skipped reports nothing at all.
     static let maxFailedTitlesToName = 3
 
+    // MARK: - Automatic Full-Text Retrieval
+
+    /// Lowest relevance score (1-5) whose papers are fetched in full when the
+    /// automatic full-text setting is on.
+    ///
+    /// Scores 4 and 5 are the papers that shape the report most, so they are
+    /// the ones where the full text (methods, results, funding, conflicts) is
+    /// worth the retrieval time. Never lowers the user's own relevance
+    /// threshold: a paper the report would not use is not fetched.
+    static let fullTextAutoFetchMinScore = 4
+
+    /// Most characters of a paper's full text handed to citation extraction.
+    ///
+    /// About 10,000 tokens. Bounds the cost per paper, since every relevant
+    /// paper is a separate paid call. A longer text is cut and the prompt says
+    /// so, so the model does not treat the cut as the end of the paper.
+    static let maxCitationFullTextCharacters = 40_000
+
+    /// Characters per token assumed when estimating what a text costs to send.
+    ///
+    /// A rough rule for English prose; it only has to be close enough to keep a
+    /// batch of full texts from overshooting the run budget by several times.
+    static let charactersPerToken = 4
+
+    /// Tokens in the unit model prices are quoted per.
+    static let tokensPerMillion = 1_000_000
+
     // MARK: - Concurrency
 
     /// Default number of concurrent requests for cloud LLM providers.

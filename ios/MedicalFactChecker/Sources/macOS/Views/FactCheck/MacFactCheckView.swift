@@ -145,6 +145,9 @@ struct MacFactCheckView: View {
                     if let notice = workflow.smartSearchNotice {
                         MacIncompleteSearchNotice(text: notice)
                     }
+                    if let notice = workflow.fullTextNotice {
+                        MacIncompleteSearchNotice(text: notice)
+                    }
                 }
 
                 // Progress section
@@ -508,8 +511,14 @@ struct MacProgressSection: View {
                     .frame(width: MacLayout.percentageWidth, alignment: .trailing)
             }
 
-            // Status message
+            // Status message. The spinner shows the app is working while the
+            // bar cannot move: a step waiting on one model or network call.
             HStack {
+                if workflow.isRunning {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Working")
+                }
                 Text(workflow.progressMessage)
                     .font(.body)
                     .foregroundColor(.secondary)

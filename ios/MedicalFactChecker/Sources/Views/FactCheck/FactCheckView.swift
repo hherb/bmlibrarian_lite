@@ -103,6 +103,9 @@ struct FactCheckView: View {
                         if let notice = workflow.smartSearchNotice {
                             IncompleteSearchNotice(text: notice)
                         }
+                        if let notice = workflow.fullTextNotice {
+                            IncompleteSearchNotice(text: notice)
+                        }
 
                         if workflow.isRunning {
                             ProgressSection(workflow: workflow)
@@ -391,10 +394,18 @@ struct ProgressSection: View {
             ProgressView(value: workflow.session?.progressPercent ?? 0, total: 100)
                 .progressViewStyle(LinearProgressViewStyle())
 
-            // Status message
-            Text(workflow.progressMessage)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+            // Status message. The spinner shows the app is working while the
+            // bar cannot move: a step waiting on one model or network call.
+            HStack {
+                if workflow.isRunning {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Working")
+                }
+                Text(workflow.progressMessage)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
 
             // Generated query (show once generated, collapsed by default)
             if let query = workflow.session?.pubmedQuery, !query.isEmpty {

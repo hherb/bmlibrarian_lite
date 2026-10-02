@@ -149,6 +149,15 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(minScoreThreshold, forKey: Keys.minScoreThreshold) }
     }
 
+    /// Fetch full text automatically for the most relevant papers: those at or
+    /// above `WorkflowConstants.fullTextAutoFetchMinScore` (and the user's threshold).
+    ///
+    /// Those papers influence the report most, so their full text is retrieved
+    /// before citation extraction and transparency analysis, and both read it.
+    var autoFetchFullTextEnabled: Bool {
+        didSet { UserDefaults.standard.set(autoFetchFullTextEnabled, forKey: Keys.autoFetchFullTextEnabled) }
+    }
+
     // MARK: - Search Provider Settings
 
     /// Selected search provider for literature searches.
@@ -244,6 +253,7 @@ final class AppSettings {
             self.selectedSearchProvider = .pubmed
         }
         self.includePreprints = defaults.bool(forKey: Keys.includePreprints)
+        self.autoFetchFullTextEnabled = defaults.bool(forKey: Keys.autoFetchFullTextEnabled)
 
         self.embeddingScoringEnabled = defaults.bool(forKey: Keys.embeddingScoringEnabled)
 
@@ -292,6 +302,7 @@ final class AppSettings {
         static let minScoreThreshold = "min_score_threshold"
         static let selectedSearchProvider = "selected_search_provider"
         static let includePreprints = "include_preprints"
+        static let autoFetchFullTextEnabled = "auto_fetch_full_text_enabled"
         static let embeddingScoringEnabled = "embedding_scoring_enabled"
         static let maxRunBudgetUSD = "max_run_budget_usd"
         static let monthlyBudgetUSD = "monthly_budget_usd"
@@ -345,6 +356,7 @@ final class AppSettings {
         minScoreThreshold = 3
         selectedSearchProvider = .pubmed
         includePreprints = false
+        autoFetchFullTextEnabled = false
         embeddingScoringEnabled = false
         maxRunBudgetUSD = 1.0
         monthlyBudgetUSD = 10.0

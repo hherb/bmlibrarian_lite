@@ -281,6 +281,15 @@ struct LLMSettingsTab: View {
                     }
                 }
             }
+
+            // Full-text retrieval
+            Section("Full Text") {
+                Toggle("Fetch Full Text for Top Papers", isOn: $settings.autoFetchFullTextEnabled)
+
+                Text("Automatically retrieve the full text of papers scored 4 or 5 before extracting citations and analysing transparency. Slower, and uses more tokens per paper; papers with no open full text fall back to the abstract.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding()
