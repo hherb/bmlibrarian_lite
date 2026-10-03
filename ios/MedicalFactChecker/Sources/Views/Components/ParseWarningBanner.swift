@@ -166,6 +166,60 @@ enum ParseWarningMessage: Equatable {
     }
 }
 
+/// Everything a ``ParseWarningBanner`` says about a retrieval, or `nil` when it
+/// has nothing to say.
+///
+/// A pure value for the reason ``ParseWarningMessage`` is one: the choice of
+/// what to show is the part with logic in it, and a view's private state cannot
+/// be tested.
+struct ParseWarningBannerContent: Equatable {
+    /// What the banner says about the text shown or its source, if anything.
+    let message: ParseWarningMessage?
+
+    /// What an open-access lookup that went unsettled leaves open, if one did
+    /// (#466).
+    ///
+    /// A line of its own rather than another ``ParseWarningMessage`` case,
+    /// because it is a separate fact that can be true beside any of them: a
+    /// substitute shown because Europe PMC could not be reached, *and* an
+    /// Unpaywall that could not be asked whether a free copy exists. One
+    /// message chosen by precedence would hide one of the two.
+    let openAccessNotice: String?
+
+    /// Gather what the banner says.
+    ///
+    /// - Parameters:
+    ///   - warnings: What the parse of this content lost.
+    ///   - degradation: Why this is not the best source that existed, if it is not.
+    ///   - extractionCoverage: How much of a PDF yielded text, when one was extracted.
+    ///   - openAccessShortfall: Why the open-access copy went unassessed, if it did.
+    init?(
+        warnings: JATSParseWarnings,
+        degradation: FullTextDegradation?,
+        extractionCoverage: PDFExtractionCoverage?,
+        openAccessShortfall: OpenAccessShortfall?
+    ) {
+        let message = ParseWarningMessage(
+            warnings: warnings,
+            degradation: degradation,
+            extractionCoverage: extractionCoverage
+        )
+        guard message != nil || openAccessShortfall != nil else { return nil }
+        self.message = message
+        self.openAccessNotice = openAccessShortfall?.notice
+    }
+
+    /// Whether the banner is a warning or a note.
+    ///
+    /// Only the message can make it a warning. An unsettled open-access lookup
+    /// says nothing about the text on screen, which is complete in itself: a
+    /// warning over it is the false alarm ``ParseWarningMessage/isWarning``
+    /// rations.
+    var isWarning: Bool {
+        message?.isWarning ?? false
+    }
+}
+
 /// Tells the reader when what they are looking at is not the whole article, or
 /// not the copy we would have preferred to give them.
 ///
@@ -188,9 +242,13 @@ enum ParseWarningMessage: Equatable {
 ///   was recovered at all;
 /// - a better source existed and could not be used — an informational note, with
 ///   a sentence per reason: our parser failed on it, we could not reach it, or a
-///   record from a newer build names a reason this one does not know (#186).
+///   record from a newer build names a reason this one does not know (#186);
+/// - an open-access lookup went unsettled — an informational line of its own,
+///   beside any of the above or alone (#466): whether the article has a free
+///   copy was not established, because Unpaywall, or the landing page it named,
+///   could not be asked or did not serve it.
 ///
-/// The last group is deliberately *not* a warning. A fallback PDF or publisher link is
+/// The last two groups are deliberately *not* warnings. A fallback PDF or publisher link is
 /// complete in itself, and a warning triangle over content that is fine is the
 /// false alarm that trains a reader to dismiss the banner on the article where
 /// text really was discarded (#183).
@@ -219,18 +277,39 @@ struct ParseWarningBanner: View {
     /// extraction to describe need not name it.
     var extractionCoverage: PDFExtractionCoverage? = nil
 
+    /// Why the open-access copy went unassessed, if it did (#466).
+    ///
+    /// Defaulted like `degradation`, so callers with no retrieval to describe
+    /// need not name it.
+    var openAccessShortfall: OpenAccessShortfall? = nil
+
     @State private var showingDetail = false
 
     var body: some View {
-        if let message = ParseWarningMessage(
+        if let content = ParseWarningBannerContent(
             warnings: warnings,
             degradation: degradation,
-            extractionCoverage: extractionCoverage
+            extractionCoverage: extractionCoverage,
+            openAccessShortfall: openAccessShortfall
         ) {
             VStack(alignment: .leading, spacing: ParseWarningBannerConstants.spacing) {
-                Label(message.headline, systemImage: message.iconName)
+                if let message = content.message {
+                    Label(message.headline, systemImage: message.iconName)
+                        .font(.footnote)
+                        .foregroundStyle(.primary)
+                }
+
+                // Verbatim: the sentence is the shared contract's, built in
+                // BioMedLit, and not a localisation key.
+                if let notice = content.openAccessNotice {
+                    Label {
+                        Text(verbatim: notice)
+                    } icon: {
+                        Image(systemName: "info.circle.fill")
+                    }
                     .font(.footnote)
                     .foregroundStyle(.primary)
+                }
 
                 // The package's developer diagnostics, for a bug report. A
                 // degradation has none — the parser's own error went to the log —
@@ -264,7 +343,7 @@ struct ParseWarningBanner: View {
             .padding(ParseWarningBannerConstants.padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                (message.isWarning ? Color.yellow : Color.accentColor)
+                (content.isWarning ? Color.yellow : Color.accentColor)
                     .opacity(ParseWarningBannerConstants.backgroundOpacity)
             )
             .clipShape(
@@ -284,6 +363,15 @@ struct ParseWarningBanner: View {
         ParseWarningBanner(warnings: JATSParseWarnings(), degradation: .jatsParseFailed)
         ParseWarningBanner(warnings: JATSParseWarnings(), degradation: .europePMCUnreachable)
         ParseWarningBanner(warnings: JATSParseWarnings(), degradation: .unspecified)
+        ParseWarningBanner(
+            warnings: JATSParseWarnings(),
+            openAccessShortfall: OpenAccessShortfall(source: .unpaywall, failure: .timeout)
+        )
+        ParseWarningBanner(
+            warnings: JATSParseWarnings(),
+            degradation: .europePMCUnreachable,
+            openAccessShortfall: OpenAccessShortfall(source: .landingPage, failure: .httpStatus(503))
+        )
         ParseWarningBanner(
             warnings: JATSParseWarnings(),
             extractionCoverage: PDFExtractionCoverage(convertedPages: 10, pageCount: 14)

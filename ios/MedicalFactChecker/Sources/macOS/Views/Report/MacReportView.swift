@@ -1157,8 +1157,9 @@ struct MacDocumentDetailSheet: View {
                         // browser before they have read why this is a substitute
                         // is the silent fallback #183 objects to. The Full Text
                         // tab banners the record from its stored fields, so a
-                        // degraded link is sent there to be explained.
-                        if result.degradation == nil {
+                        // degraded link, or one an unsettled open-access lookup
+                        // left behind (#466), is sent there to be explained.
+                        if result.hasNothingToExplain {
                             NSWorkspace.shared.open(url)
                         } else {
                             showFullTextInTab()

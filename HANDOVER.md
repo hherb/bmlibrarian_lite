@@ -8,33 +8,23 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**iOS/macOS: a working cancel** (#462), branch `fix/ios-cancel-462`, PR #469
-(compress once merged). macOS's Cancel button was a `// TODO`, iOS had none.
-**Every workflow entry point runs its whole body through
-`runAsWorkflowTask(_:)`** (fetch-more, retry, smart search and
-`retryFailedDocuments` included — they ran in unstored `Task`s before), which
-waits for earlier work to end before starting; a new entry point must do the
-same. **`stopWork(_:)` is the one path for a stop** (Cancel, background
-expiry): it records the stop at once, and `settleStop()` records it again
-inside the stopped task as it ends (a report that landed during the stop is
-kept and shown). **A stop is never written to `errorMessage`**, which means a
-failure and offers the red retry (#459): beside a report the session stays
-`.completed` and `stopNotice` says the report has not changed; without one it
-waits at `.awaitingUserDecision`. Earlier builds' stored stop reasons are
-recognised (`storedStopReasons`). **`stopRequested`** (`isCancelling ||
-Task.isCancelled`) decides whether a thrown error is a stop — never the error
-itself: a cancelled request throws `URLError(.cancelled)`, and BioMedLit turns
-every -999 into `CancellationError`, so one the user never asked for stays a
-failure. Scoring and citation task groups start nothing after a cancel and
-give a stopped document **no result** (a scoring failure is checkpointed and
-`scoreParseFailed` blocks it for good). **"Proceed with Current" resumes**:
-Step 4 accepts `.awaitingUserDecision`/`.extractingCitations`, scores what a
-stop left, then extracts (it skipped extraction before, on iOS only — Android
-was right); with no documents it goes back to search or the claim
-(`stepToProceedFrom`). The decision entry points build their services
-(`ensureServices()`); a reopened session ran Proceed with none and "completed"
-with no report. Test seam: `useServices(llm:pubMed:)`; tests in
-`WorkflowCancelTests`. Follow-ups: **#468**, **#470**.
+**Apps: tell the reader the open-access copy went unassessed** (#466), branch
+`fix/oa-unreachable-notice-466`, PR #473 (compress once merged). Both apps
+carry an **`OpenAccessShortfall`** (source + a failure, or **not configured**)
+on the fallback, store it with the full text (Swift
+`fullTextOpenAccessShortfallJSON`, Android Room **8**) and show **Python's
+sentence** (`unestablished_access_clause`) as a note
+(`ParseWarningBannerContent`; Android `OpenAccessShortfallNotice`). **Every
+fetch that settles it writes or clears it** (Android: one writer,
+`recordingFullTextFetch`, for all three screens); an unreadable stored value
+still speaks. **Any Unpaywall status of 400+ but 404 is unsettled** on all
+three. **No usable email is "not configured", never a 422**: Android's
+placeholder is not sent (`UnpaywallContact`, NCBI email as fallback), and the
+notice adds Python's configuration nudge. Room migrations register from
+`AppDatabase.ALL_MIGRATIONS`, pinned by `AppDatabaseMigrationsTest`. Contract:
+`fulltext_retrieval.md` "An unsettled open-access copy" and
+`fulltext_parity/open_access_unsettled_notice.json`. Follow-ups **#471**,
+**#472**, **#474**, **#475**, **#476**.
 
 ## Recently landed (context)
 
@@ -42,6 +32,16 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **iOS/macOS: a working cancel** (PR #469, #462). **Every workflow entry
+  point runs its body through `runAsWorkflowTask(_:)`**; **`stopWork(_:)` is
+  the one path for a stop** and `settleStop()` re-records it as the task ends;
+  **a stop is never written to `errorMessage`** (beside a report the session
+  stays `.completed` with `stopNotice`, else `.awaitingUserDecision`);
+  **`stopRequested`, never the error, decides a stop** (BioMedLit turns every
+  -999 into `CancellationError`). A stopped document gets **no result**.
+  "Proceed with Current" resumes scoring then extraction; decision entry points
+  call `ensureServices()`. Seam `useServices(llm:pubMed:)`, tests in
+  `WorkflowCancelTests`. Follow-ups **#468**, **#470**.
 - **Unpaywall landing pages are read, never downloaded as the PDF** (all
   three; PR #465, #464): `url_for_pdf` only, else the page's
   `citation_pdf_url` (read up to 2 MiB). Contract `fulltext_retrieval.md`
@@ -110,7 +110,6 @@ the rest.
   `JATS_MARKDOWN_CONVERTER_VERSION`** whenever the same XML converts
   differently (cached markdown carries the stamp). **No full text, no
   data-availability request** (#421, user's call). Survey scratch: `tmp/jats-*`.
-
 - **Desktop certainty and high-risk explanation** (Python; PR #419, #386).
   Every no-full-text rating says "Limited certainty because of lack of full
   text access"; badge tooltip and report name the rules that made a study
@@ -141,7 +140,6 @@ the rest.
   three-state value needs three arms; a withheld claim stays withheld at
   every surface. **Assert the built sentence, never a substring another
   caveat shares.**
-
 - **Older rounds, compressed to the rules that still bind.** Each cost a
   defect; the archaeology is in git history and the `doc/cross_platform/`
   READMEs, which these point at.
@@ -211,22 +209,21 @@ the rest.
     (declaration-order init silently appends nothing). `RegexHelper` uses
     `(?U)`.
 
-
 ## Potential follow-ups
 
 Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **#466** apps: tell the reader the open-access copy was unreachable;
-  **#467** landing-page parsing parity edges; **#468** cancel follow-ups.
+- **#467** landing-page parsing parity edges; **#468** / **#470** cancel
+  follow-ups (iOS/macOS); **#471** Android link-only state; **#472** the iOS
+  Full Text tab's link-only row skips the retrieval notice.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 
 - **#430** segment PDF-extracted text into body and end matter (LLM-based;
   plugs into `segment_unmarked_end_matter`), so PDF-only articles can be
   charged for a missing statement again.
-
 - **#436** Swift + Android: a JATS parse failure at the end of the chain is
   still recorded as "no full text available" for good.
 - **#437** Android stores no Europe PMC record ID for a preprint, so one with

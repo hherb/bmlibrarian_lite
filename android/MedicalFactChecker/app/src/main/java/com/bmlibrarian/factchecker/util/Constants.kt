@@ -323,7 +323,13 @@ object Constants {
     /** Europe PMC full text XML base URL. */
     const val EUROPE_PMC_FULLTEXT_BASE_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/"
 
-    /** Default email for Unpaywall API (should be configured by user). */
+    /**
+     * The app's placeholder contact address, for a service that accepts one when
+     * the reader has configured none. Unpaywall refuses it with HTTP 422 for every
+     * article, so there it counts as no email at all
+     * ([com.bmlibrarian.factchecker.domain.model.UnpaywallContact]). Python's
+     * `FALLBACK_CONTACT_EMAIL`.
+     */
     const val UNPAYWALL_DEFAULT_EMAIL = "bmlibrarian@example.com"
 
     // ==================== Open-Access Landing Pages (#464) ====================

@@ -1253,7 +1253,8 @@ struct DocumentDetailSheet: View {
             ParseWarningBanner(
                 warnings: document.cachedRetrievalNotice.warnings,
                 degradation: document.cachedRetrievalNotice.degradation,
-                extractionCoverage: document.cachedRetrievalNotice.extractionCoverage
+                extractionCoverage: document.cachedRetrievalNotice.extractionCoverage,
+                openAccessShortfall: document.cachedRetrievalNotice.openAccessShortfall
             )
 
             if let url = document.fullTextLinkDestination {
@@ -1419,7 +1420,7 @@ struct DocumentDetailSheet: View {
                     // the silent fallback #183 objects to; the note and a link
                     // are in the card, via `linkOnlyNotice`.
                     if case .webURL(let url) = result.content {
-                        if result.degradation == nil {
+                        if result.hasNothingToExplain {
                             openURL(url)
                         }
                     } else {

@@ -23,6 +23,10 @@ import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCSearchResult
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
 import com.bmlibrarian.factchecker.di.AppModule
 import com.bmlibrarian.factchecker.di.NetworkModule
+import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
+import com.bmlibrarian.factchecker.domain.model.OpenAccessSource
+import com.bmlibrarian.factchecker.domain.model.RequestFailure
+import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.util.Constants
 import io.mockk.coEvery
 import io.mockk.mockk
@@ -223,12 +227,19 @@ class FullTextServiceUnpaywallTest {
 
     private val doiLink = FullTextService.FullTextResult.DoiUrl("${Constants.DOI_URL_PREFIX}$doi")
 
+    /** The DOI fallback, carrying why the open-access copy went unassessed (#466). */
+    private fun doiLinkLeaving(source: OpenAccessSource, failure: RequestFailure) =
+        FullTextService.FullTextResult.DoiUrl("${Constants.DOI_URL_PREFIX}$doi", OpenAccessShortfall(source, failure))
+
     @Test
     fun `an unreachable landing page is retried and logged as unread, not as declaring nothing`() = runTest {
         unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())
         routes[handlePath] = MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
 
-        assertEquals(doiLink, fetch())
+        assertEquals(
+            doiLinkLeaving(OpenAccessSource.LANDING_PAGE, RequestFailure(RequestFailureKind.CONNECTION)),
+            fetch()
+        )
         assertTrue("${Log.lines}", handleRequests() > 1)
         assertTrue("${Log.lines}", Log.lines.any { "could not be read" in it })
         assertFalse("${Log.lines}", Log.lines.any { "declares no PDF" in it })
@@ -239,7 +250,10 @@ class FullTextServiceUnpaywallTest {
         unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())
         routes[handlePath] = MockResponse().setResponseCode(HTTP_SERVICE_UNAVAILABLE)
 
-        assertEquals(doiLink, fetch())
+        assertEquals(
+            doiLinkLeaving(OpenAccessSource.LANDING_PAGE, RequestFailure.forHttpStatus(HTTP_SERVICE_UNAVAILABLE)),
+            fetch()
+        )
         assertTrue("${Log.lines}", handleRequests() > 1)
         assertTrue("${Log.lines}", Log.lines.any { "could not be read (HTTP 503" in it })
     }
@@ -249,7 +263,10 @@ class FullTextServiceUnpaywallTest {
         unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())
         routes[handlePath] = MockResponse().setResponseCode(HTTP_NOT_IMPLEMENTED)
 
-        assertEquals(doiLink, fetch())
+        assertEquals(
+            doiLinkLeaving(OpenAccessSource.LANDING_PAGE, RequestFailure.forHttpStatus(HTTP_NOT_IMPLEMENTED)),
+            fetch()
+        )
         assertEquals(1, handleRequests())
         assertTrue("${Log.lines}", Log.lines.any { "could not be read (HTTP 501" in it })
     }
@@ -258,9 +275,110 @@ class FullTextServiceUnpaywallTest {
     fun `a throttled Unpaywall is retried and logged as unassessed`() = runTest {
         routes[unpaywallPath] = MockResponse().setResponseCode(Constants.HTTP_TOO_MANY_REQUESTS)
 
-        assertEquals(doiLink, fetch())
+        assertEquals(
+            doiLinkLeaving(OpenAccessSource.UNPAYWALL, RequestFailure.forHttpStatus(Constants.HTTP_TOO_MANY_REQUESTS)),
+            fetch()
+        )
         assertTrue("${Log.lines}", requestedPaths().count { it == unpaywallPath } > 1)
         assertTrue("${Log.lines}", Log.lines.any { "went unassessed" in it })
+    }
+
+    @Test
+    fun `an unreadable Unpaywall answer leaves the copy unassessed`() = runTest {
+        routes[unpaywallPath] = MockResponse()
+            .setHeader("Content-Type", "application/json")
+            .setBody("not json")
+
+        assertEquals(
+            doiLinkLeaving(OpenAccessSource.UNPAYWALL, RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)),
+            fetch()
+        )
+    }
+
+    /**
+     * Any error status but 404 leaves the copy unassessed, as Python records it: a
+     * 408 is an answer ("did not serve it"), a 501 or a Cloudflare 520 is not, and
+     * neither says Unpaywall holds no copy (#466).
+     */
+    @Test
+    fun `any Unpaywall error status but 404 leaves the copy unassessed`() = runTest {
+        for (status in listOf(408, 403, 501, 520)) {
+            routes[unpaywallPath] = MockResponse().setResponseCode(status)
+
+            assertEquals(
+                "HTTP $status",
+                doiLinkLeaving(OpenAccessSource.UNPAYWALL, RequestFailure(RequestFailureKind.HTTP_STATUS, status)),
+                fetch()
+            )
+        }
+    }
+
+    /** The control: Unpaywall knowing no copy leaves nothing for the reader to wonder about. */
+    @Test
+    fun `an Unpaywall that does not know the DOI leaves nothing unsettled`() = runTest {
+        routes[unpaywallPath] = MockResponse().setResponseCode(Constants.HTTP_NOT_FOUND)
+
+        assertEquals(doiLink, fetch())
+    }
+
+    /**
+     * Unpaywall refuses the app's placeholder address with 422 for every article,
+     * which read as "Unpaywall did not serve it": not asked, it is reported as not
+     * configured, with the advice that goes with that (Python's
+     * `usable_unpaywall_email`).
+     */
+    @Test
+    fun `an Unpaywall with no usable email is not asked, and is reported as not configured`() = runTest {
+        unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())
+
+        for (email in listOf(null, "", "   ", Constants.UNPAYWALL_DEFAULT_EMAIL)) {
+            val result = service.fetchFullText(pmcId = null, doi = doi, pmid = null, email = email).getOrThrow()
+
+            assertEquals(
+                "email $email",
+                FullTextService.FullTextResult.DoiUrl(
+                    "${Constants.DOI_URL_PREFIX}$doi",
+                    OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED
+                ),
+                result
+            )
+        }
+        assertEquals(0, server.requestCount)
+    }
+
+    /** An answer with no body has told us nothing about the article. */
+    @Test
+    fun `an empty Unpaywall answer leaves the copy unassessed`() = runTest {
+        for (empty in listOf(MockResponse().setResponseCode(HTTP_NO_CONTENT), MockResponse().setBody(""))) {
+            routes[unpaywallPath] = empty
+
+            assertEquals(
+                "$empty",
+                doiLinkLeaving(OpenAccessSource.UNPAYWALL, RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)),
+                fetch()
+            )
+        }
+    }
+
+    /**
+     * An error the tier does not expect is no answer about the article either:
+     * Retrofit refuses a DOI that reads as path traversal before anything is sent.
+     */
+    @Test
+    fun `an unexpected error leaves the copy unassessed rather than silent`() = runTest {
+        val traversal = "10.1234/.."
+
+        val result = service.fetchFullText(pmcId = null, doi = traversal, pmid = null, email = "test@example.org")
+            .getOrThrow()
+
+        assertEquals(
+            FullTextService.FullTextResult.DoiUrl(
+                "${Constants.DOI_URL_PREFIX}$traversal",
+                OpenAccessShortfall(OpenAccessSource.UNPAYWALL, RequestFailure(RequestFailureKind.REQUEST_FAILED))
+            ),
+            result
+        )
+        assertTrue("${Log.lines}", Log.lines.any { "failed unexpectedly" in it })
     }
 
     @Test
@@ -339,5 +457,8 @@ class FullTextServiceUnpaywallTest {
 
         /** HTTP 302: the redirect a handle server answers with. */
         const val HTTP_FOUND = 302
+
+        /** HTTP 204: an answer with no body. */
+        const val HTTP_NO_CONTENT = 204
     }
 }

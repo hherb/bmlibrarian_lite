@@ -221,7 +221,8 @@ struct MacFullTextTab: View {
             ParseWarningBanner(
                 warnings: document.cachedRetrievalNotice.warnings,
                 degradation: document.cachedRetrievalNotice.degradation,
-                extractionCoverage: document.cachedRetrievalNotice.extractionCoverage
+                extractionCoverage: document.cachedRetrievalNotice.extractionCoverage,
+                openAccessShortfall: document.cachedRetrievalNotice.openAccessShortfall
             )
 
             Image(systemName: "doc.text.magnifyingglass")

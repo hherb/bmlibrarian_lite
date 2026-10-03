@@ -52,6 +52,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.ui.common.MarkdownText
+import com.bmlibrarian.factchecker.ui.fulltext.components.OpenAccessShortfallNotice
 import com.bmlibrarian.factchecker.ui.theme.MedicalFactCheckerTheme
 import com.bmlibrarian.factchecker.ui.theme.scoreColor
 import com.bmlibrarian.factchecker.util.Constants
@@ -218,6 +219,12 @@ fun DocumentDetailSheet(
                 onViewFullText = onViewFullText,
                 onOpenPublisher = onOpenPublisher
             )
+
+            // What an unsettled open-access lookup leaves open (#466)
+            document.openAccessShortfall?.let { shortfall ->
+                Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
+                OpenAccessShortfallNotice(notice = shortfall.notice)
+            }
         }
 
         Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))

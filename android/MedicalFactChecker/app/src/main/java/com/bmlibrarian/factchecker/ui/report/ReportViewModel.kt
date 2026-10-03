@@ -24,10 +24,12 @@ import androidx.lifecycle.viewModelScope
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.local.entity.ReportEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
+import com.bmlibrarian.factchecker.data.remote.fulltext.recordingFullTextFetch
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
 import com.bmlibrarian.factchecker.data.repository.ReportRepository
 import com.bmlibrarian.factchecker.data.repository.SessionRepository
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
+import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
 import com.bmlibrarian.factchecker.ui.report.components.ReferenceInfo
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.PdfExporter
@@ -42,7 +44,6 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
-import java.util.Date
 import javax.inject.Inject
 
 /**
@@ -427,7 +428,7 @@ class ReportViewModel @Inject constructor(
 
             try {
                 val settings = settingsRepository.settings.value
-                val email = settings.unpaywallEmail.ifEmpty { Constants.UNPAYWALL_DEFAULT_EMAIL }
+                val email = UnpaywallContact.emailFor(settings)
 
                 val result = fullTextService.fetchFullText(
                     pmcId = document.pmcId,
@@ -438,52 +439,8 @@ class ReportViewModel @Inject constructor(
 
                 result.fold(
                     onSuccess = { fullTextResult ->
-                        val updatedDoc = when (fullTextResult) {
-                            is FullTextService.FullTextResult.EuropePmcXml -> {
-                                document.copy(
-                                    fullTextMarkdown = fullTextResult.markdown,
-                                    fullTextHTML = fullTextResult.html,
-                                    fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
-                                    fullTextFetchedAt = Date()
-                                )
-                            }
-                            is FullTextService.FullTextResult.EuropePmcPdf -> {
-                                val localPath = fullTextService.downloadPdf(
-                                    fullTextResult.pdfUrl,
-                                    document.id
-                                )
-                                document.copy(
-                                    pdfPath = localPath,
-                                    fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
-                                    fullTextFetchedAt = Date()
-                                )
-                            }
-                            is FullTextService.FullTextResult.UnpaywallPdf -> {
-                                val localPath = fullTextService.downloadPdf(
-                                    fullTextResult.pdfUrl,
-                                    document.id
-                                )
-                                document.copy(
-                                    pdfPath = localPath,
-                                    fullTextSource = Constants.FULLTEXT_SOURCE_UNPAYWALL,
-                                    fullTextFetchedAt = Date()
-                                )
-                            }
-                            is FullTextService.FullTextResult.DoiUrl -> {
-                                document.copy(
-                                    fullTextSource = Constants.FULLTEXT_SOURCE_DOI,
-                                    fullTextFetchedAt = Date()
-                                )
-                            }
-                            is FullTextService.FullTextResult.Unavailable -> {
-                                document.copy(
-                                    fullTextUnavailable = true,
-                                    fullTextFetchedAt = Date()
-                                )
-                            }
-                            // Not a fact about the article, so nothing is recorded
-                            // and the fetch stays on offer (#434)
-                            is FullTextService.FullTextResult.NotEstablished -> document
+                        val updatedDoc = document.recordingFullTextFetch(fullTextResult) { url ->
+                            fullTextService.downloadPdf(url, document.id)
                         }
 
                         documentRepository.updateDocument(updatedDoc)

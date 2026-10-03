@@ -23,6 +23,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
 import com.bmlibrarian.factchecker.util.Constants
 import java.util.Date
 import java.util.UUID
@@ -168,6 +169,20 @@ data class DocumentEntity(
     @ColumnInfo(name = "full_text_unavailable")
     val fullTextUnavailable: Boolean = false,
 
+    /**
+     * Why the open-access copy Unpaywall may know of went unassessed, as the JSON
+     * [OpenAccessShortfall.toJson] writes, or null when nothing was left unsettled
+     * (#466).
+     *
+     * Unpaywall, or the landing page it named, could not settle whether a free
+     * copy exists (or Unpaywall was not configured), so the chain ended on the
+     * DOI link without learning it. Stored with the fetch that produced it and
+     * cleared by every later fetch that settles it, so the cards can say so on
+     * every reopen; read it through [openAccessShortfall].
+     */
+    @ColumnInfo(name = "full_text_open_access_shortfall_json")
+    val fullTextOpenAccessShortfallJson: String? = null,
+
     // ==================== Transparency Analysis ====================
 
     /**
@@ -200,6 +215,17 @@ data class DocumentEntity(
     @ColumnInfo(name = "created_at")
     val createdAt: Date = Date()
 ) {
+    /**
+     * Why the open-access copy went unassessed, or null when nothing was left
+     * unsettled.
+     *
+     * Never null for a stored value: the column is only written when a lookup
+     * went unsettled, so one this build cannot interpret still means one did,
+     * and reads as a failed request to Unpaywall rather than as silence.
+     */
+    val openAccessShortfall: OpenAccessShortfall?
+        get() = fullTextOpenAccessShortfallJson?.let(OpenAccessShortfall::fromJson)
+
     /**
      * Format authors for display.
      *

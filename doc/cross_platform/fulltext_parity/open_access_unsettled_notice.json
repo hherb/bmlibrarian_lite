@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "description": "What the reader is told when Unpaywall, or the landing page it named, could not settle whether an open-access copy exists, and how the apps store that on a document (#466). Read by tests/test_open_access_unsettled_notice.py (Python: notices only), Packages/BioMedLit OpenAccessShortfallContractTests and Android OpenAccessShortfallContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, under the heading 'An unsettled open-access copy (#466)'. A row names a failed lookup by kind and status_code, or a lookup that was never made by skipped (Python's LookupSkipReason; only Unpaywall's not_configured), kind and status_code then null. notices: the sentence for one shortfall; Python builds it with analysis_failures.unestablished_access_clause, the apps with their own port. persisted.written: the stored value for a shortfall, compared as parsed JSON. persisted.read: a stored value and the shortfall it reads as; the field is written only when something went unsettled, so every stored value reads as some shortfall, never as none. Add a row here, not a test on one platform.",
+  "sources": {
+    "unpaywall": "Unpaywall",
+    "unpaywall_landing_page": "the open-access copy's landing page"
+  },
+  "notices": [
+    {"source": "unpaywall", "kind": "timeout", "status_code": null, "notice": "Unpaywall (the request timed out) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "unpaywall", "kind": "connection", "status_code": null, "notice": "Unpaywall (the connection failed) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "unpaywall", "kind": "http_status", "status_code": 429, "notice": "Unpaywall (HTTP 429 Too Many Requests) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "unpaywall", "kind": "http_status", "status_code": 503, "notice": "Unpaywall (HTTP 503 Service Unavailable) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "unpaywall", "kind": "malformed_response", "status_code": null, "notice": "Unpaywall (the response could not be read) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "unpaywall", "kind": "request_failed", "status_code": null, "notice": "Unpaywall (the request failed) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "unpaywall", "kind": "http_status", "status_code": 403, "notice": "Unpaywall (HTTP 403 Forbidden) did not serve it, so whether this document is open access was not established."},
+    {"source": "unpaywall", "kind": "http_status", "status_code": 422, "notice": "Unpaywall (HTTP 422) did not serve it, so whether this document is open access was not established."},
+    {"source": "unpaywall", "kind": "http_status", "status_code": 520, "notice": "Unpaywall (HTTP 520) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "unpaywall", "skipped": "not_configured", "kind": null, "status_code": null, "notice": "Unpaywall (not configured) could not be asked, so a freely available copy may exist. Whether this document is open access was not established. Configuring Unpaywall would add an open-access route this search did not have."},
+    {"source": "unpaywall_landing_page", "kind": "timeout", "status_code": null, "notice": "The open-access copy's landing page (the request timed out) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "unpaywall_landing_page", "kind": "http_status", "status_code": 502, "notice": "The open-access copy's landing page (HTTP 502 Bad Gateway) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "unpaywall_landing_page", "kind": "http_status", "status_code": 408, "notice": "The open-access copy's landing page (HTTP 408 Request Timeout) did not serve it, so whether this document is open access was not established."},
+    {"source": "unpaywall_landing_page", "kind": "http_status", "status_code": 425, "notice": "The open-access copy's landing page (HTTP 425) did not serve it, so whether this document is open access was not established."},
+    {"source": "unpaywall_landing_page", "kind": "redirect_refused", "status_code": 307, "notice": "The open-access copy's landing page (a redirect (HTTP 307) was refused) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "unpaywall_landing_page", "kind": "incomplete_response", "status_code": null, "notice": "The open-access copy's landing page (the response was incomplete) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "unpaywall_landing_page", "kind": "service_error", "status_code": null, "notice": "The open-access copy's landing page (the service reported an error) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."}
+  ],
+  "persisted": {
+    "written": [
+      {"source": "unpaywall", "kind": "timeout", "status_code": null, "stored": {"schema_version": 1, "source": "unpaywall", "failure": {"kind": "timeout", "status_code": null}}},
+      {"source": "unpaywall_landing_page", "kind": "http_status", "status_code": 408, "stored": {"schema_version": 1, "source": "unpaywall_landing_page", "failure": {"kind": "http_status", "status_code": 408}}},
+      {"source": "unpaywall_landing_page", "kind": "redirect_refused", "status_code": null, "stored": {"schema_version": 1, "source": "unpaywall_landing_page", "failure": {"kind": "redirect_refused", "status_code": null}}},
+      {"source": "unpaywall", "skipped": "not_configured", "kind": null, "status_code": null, "stored": {"schema_version": 1, "source": "unpaywall", "skipped": "not_configured"}}
+    ],
+    "read": [
+      {"name": "a stored shortfall", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "unpaywall", "kind": "timeout", "status_code": null},
+      {"name": "a landing page's status", "stored": "{\"schema_version\":1,\"source\":\"unpaywall_landing_page\",\"failure\":{\"kind\":\"http_status\",\"status_code\":502}}", "source": "unpaywall_landing_page", "kind": "http_status", "status_code": 502},
+      {"name": "an unknown kind reads as a failed request", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"failure\":{\"kind\":\"quantum\",\"status_code\":null}}", "source": "unpaywall", "kind": "request_failed", "status_code": null},
+      {"name": "a status outside 100-999 reads as none", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"failure\":{\"kind\":\"http_status\",\"status_code\":1000}}", "source": "unpaywall", "kind": "http_status", "status_code": null},
+      {"name": "a status on a kind that carries none reads as none", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"failure\":{\"kind\":\"timeout\",\"status_code\":503}}", "source": "unpaywall", "kind": "timeout", "status_code": null},
+      {"name": "a boolean status reads as none", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"failure\":{\"kind\":\"http_status\",\"status_code\":true}}", "source": "unpaywall", "kind": "http_status", "status_code": null},
+      {"name": "a missing failure reads as a failed request", "stored": "{\"schema_version\":1,\"source\":\"unpaywall_landing_page\"}", "source": "unpaywall_landing_page", "kind": "request_failed", "status_code": null},
+      {"name": "an unknown source reads as Unpaywall, the tier every open-access lookup belongs to", "stored": "{\"schema_version\":1,\"source\":\"crossref\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "unpaywall", "kind": "timeout", "status_code": null},
+      {"name": "a newer schema cannot be interpreted", "stored": "{\"schema_version\":2,\"source\":\"unpaywall_landing_page\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "unpaywall", "kind": "request_failed", "status_code": null},
+      {"name": "a missing schema version cannot be interpreted", "stored": "{\"source\":\"unpaywall_landing_page\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "unpaywall", "kind": "request_failed", "status_code": null},
+      {"name": "text that is not JSON", "stored": "timeout", "source": "unpaywall", "kind": "request_failed", "status_code": null},
+      {"name": "the JSON literal null", "stored": "null", "source": "unpaywall", "kind": "request_failed", "status_code": null},
+      {"name": "a JSON array", "stored": "[]", "source": "unpaywall", "kind": "request_failed", "status_code": null},
+      {"name": "a schema version stored as a string cannot be interpreted", "stored": "{\"schema_version\":\"1\",\"source\":\"unpaywall_landing_page\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "unpaywall", "kind": "request_failed", "status_code": null},
+      {"name": "a fractional schema version cannot be interpreted", "stored": "{\"schema_version\":1.5,\"source\":\"unpaywall_landing_page\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "unpaywall", "kind": "request_failed", "status_code": null},
+      {"name": "an Unpaywall that was not configured", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"skipped\":\"not_configured\"}", "source": "unpaywall", "skipped": "not_configured", "kind": null, "status_code": null},
+      {"name": "a skip is Unpaywall's, whatever source it names", "stored": "{\"schema_version\":1,\"source\":\"unpaywall_landing_page\",\"skipped\":\"not_configured\"}", "source": "unpaywall", "skipped": "not_configured", "kind": null, "status_code": null},
+      {"name": "an unknown skip reason reads by its failure", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"skipped\":\"quantum\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "unpaywall", "kind": "timeout", "status_code": null}
+    ]
+  }
+}

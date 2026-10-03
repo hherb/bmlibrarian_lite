@@ -25,6 +25,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.bmlibrarian.factchecker.data.local.AppDatabase
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.local.entity.SessionEntity
+import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -216,6 +217,30 @@ class DocumentDaoTest {
 
         val retrieved = documentDao.getById(document.id)
         assertTrue(retrieved?.fullTextUnavailable ?: false)
+    }
+
+    /**
+     * Each full-text update clears the open-access shortfall an earlier fetch
+     * stored (#466): it settles the question, and the card must not keep saying
+     * a free copy may exist.
+     */
+    @Test
+    fun fullTextUpdatesClearTheOpenAccessShortfall() = runTest {
+        val updates: List<suspend (String) -> Unit> = listOf(
+            { id -> documentDao.updateFullTextMarkdown(id, "# Text", "europepmc") },
+            { id -> documentDao.updatePdfPath(id, "/path/to/file.pdf", "unpaywall") },
+            { id -> documentDao.markFullTextUnavailable(id) }
+        )
+        updates.forEachIndexed { index, update ->
+            val document = createTestDocument(pmid = "9$index").copy(
+                fullTextOpenAccessShortfallJson = OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED.toJson()
+            )
+            documentDao.insert(document)
+
+            update(document.id)
+
+            assertNull("update $index", documentDao.getById(document.id)?.fullTextOpenAccessShortfallJson)
+        }
     }
 
     @Test

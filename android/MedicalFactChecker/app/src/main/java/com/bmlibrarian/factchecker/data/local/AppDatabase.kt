@@ -63,7 +63,7 @@ import com.bmlibrarian.factchecker.data.local.entity.UsageRecordEntity
         ProcessingCheckpointEntity::class,
         ProcessingErrorEntity::class
     ],
-    version = 7,
+    version = AppDatabase.DATABASE_VERSION,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -121,6 +121,9 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         /** Database file name. */
         const val DATABASE_NAME = "medical_factchecker.db"
+
+        /** The schema version; [ALL_MIGRATIONS] must reach it. */
+        const val DATABASE_VERSION = 8
 
         /**
          * Migration from version 1 to 2.
@@ -259,5 +262,36 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("ALTER TABLE documents ADD COLUMN transparency_analyzed_at INTEGER")
             }
         }
+
+        /**
+         * Migration from version 7 to 8.
+         *
+         * Adds why a document's open-access copy went unassessed (#466).
+         * Existing documents have nothing recorded, which reads as nothing
+         * unsettled: their next fetch writes or clears it.
+         */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE documents ADD COLUMN full_text_open_access_shortfall_json TEXT")
+            }
+        }
+
+        /**
+         * Every migration, in order, as the database is built with them.
+         *
+         * One list, so a migration added here is registered and one left out is
+         * caught by `AppDatabaseMigrationsTest`: the builder falls back to
+         * destructive migration, so a gap in the chain would not crash but wipe
+         * every saved session on upgrade.
+         */
+        val ALL_MIGRATIONS: Array<Migration> = arrayOf(
+            MIGRATION_1_2,
+            MIGRATION_2_3,
+            MIGRATION_3_4,
+            MIGRATION_4_5,
+            MIGRATION_5_6,
+            MIGRATION_6_7,
+            MIGRATION_7_8
+        )
     }
 }

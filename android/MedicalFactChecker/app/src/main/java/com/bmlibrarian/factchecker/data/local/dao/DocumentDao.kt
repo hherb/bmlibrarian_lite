@@ -114,6 +114,9 @@ interface DocumentDao {
     /**
      * Update full text content for a document.
      *
+     * Clears any open-access shortfall a link-only fetch left (#466): the text
+     * is in hand, so there is no longer a free copy to wonder about.
+     *
      * @param id Document ID
      * @param markdown Full text as markdown
      * @param source Source of full text (europepmc, unpaywall, doi)
@@ -123,7 +126,8 @@ interface DocumentDao {
         UPDATE documents SET
             full_text_markdown = :markdown,
             full_text_source = :source,
-            full_text_fetched_at = :fetchedAt
+            full_text_fetched_at = :fetchedAt,
+            full_text_open_access_shortfall_json = NULL
         WHERE id = :id
     """)
     suspend fun updateFullTextMarkdown(
@@ -136,6 +140,8 @@ interface DocumentDao {
     /**
      * Update PDF path for a document.
      *
+     * Clears any open-access shortfall, as [updateFullTextMarkdown] does.
+     *
      * @param id Document ID
      * @param pdfPath Local path to the PDF file
      * @param source Source of the PDF
@@ -145,7 +151,8 @@ interface DocumentDao {
         UPDATE documents SET
             pdf_path = :pdfPath,
             full_text_source = :source,
-            full_text_fetched_at = :fetchedAt
+            full_text_fetched_at = :fetchedAt,
+            full_text_open_access_shortfall_json = NULL
         WHERE id = :id
     """)
     suspend fun updatePdfPath(
@@ -160,7 +167,9 @@ interface DocumentDao {
      *
      * @param id Document ID
      */
-    @Query("UPDATE documents SET full_text_unavailable = 1 WHERE id = :id")
+    @Query(
+        "UPDATE documents SET full_text_unavailable = 1, full_text_open_access_shortfall_json = NULL WHERE id = :id"
+    )
     suspend fun markFullTextUnavailable(id: String)
 
     /**

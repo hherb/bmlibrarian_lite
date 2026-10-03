@@ -23,6 +23,7 @@ import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCSearchResult
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
 import com.bmlibrarian.factchecker.data.remote.europepmc.FullTextAccession
 import com.bmlibrarian.factchecker.data.remote.europepmc.FullTextXmlFetch
+import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
@@ -156,9 +157,15 @@ class FullTextServiceEuropePmcTest {
     /**
      * A shortfall is read only at the end: a later source still gets its turn.
      *
-     * Unpaywall is a strict mock, so its lookup fails and the chain reaches the
-     * DOI link, which a shortfall read any earlier would pre-empt.
+     * No Unpaywall email is given, so Unpaywall is skipped as not configured and
+     * the chain reaches the DOI link, which a shortfall read any earlier would
+     * pre-empt.
      */
+    /** The DOI link a chain without an Unpaywall email ends on. */
+    private val doiLinkWithoutUnpaywall = FullTextService.FullTextResult.DoiUrl(
+        "https://doi.org/10.1234/x", OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED
+    )
+
     @Test
     fun `a 404 or an unreachable Europe PMC does not pre-empt a later source`() = runTest {
         for (fetch in listOf(
@@ -169,7 +176,7 @@ class FullTextServiceEuropePmcTest {
 
             val result = service.fetchFullText(pmcId = "PMC1", doi = "10.1234/x", pmid = null).getOrThrow()
 
-            assertEquals("$fetch", FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1234/x"), result)
+            assertEquals("$fetch", doiLinkWithoutUnpaywall, result)
         }
     }
 
@@ -186,7 +193,7 @@ class FullTextServiceEuropePmcTest {
 
         val result = service.fetchFullText(pmcId = "PMC1", doi = "10.1234/x", pmid = null)
 
-        assertEquals(FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1234/x"), result.getOrThrow())
+        assertEquals(doiLinkWithoutUnpaywall, result.getOrThrow())
     }
 
     @Test
