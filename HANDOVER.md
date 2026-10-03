@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **Why Unpaywall's PDFs cannot be downloaded: measured** (#480), branch
-`survey/unpaywall-pdf-480`. A survey, not a code change:
+`survey/unpaywall-pdf-480`, PR #484. A survey, not a code change:
 `scripts/unpaywall_pdf_survey.py` (`fetch` / `browse` / `analyse`), rows and
 findings in `doc/developer/unpaywall_pdf_survey/` (README has the numbers),
 figures pinned by `tests/test_unpaywall_pdf_survey.py`. **Re-analyse the
