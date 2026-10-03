@@ -32,6 +32,7 @@ from bmlibrarian_lite.data_models import (
     SourceLookupFailure,
 )
 from bmlibrarian_lite.pdf_discovery import PDFDiscoverer, PDFSource, PDFSourceType
+from bmlibrarian_lite.polite_session import mount_politely
 
 DOI = "10.1126/science.adk9967"
 LANDING = "https://hdl.handle.net/2115/95934"
@@ -411,8 +412,10 @@ def test_a_page_that_never_ends_is_read_no_further_than_its_cap(
 class _RealRequestsForThePage(_Session):
     """Answers Unpaywall's API, and sends the landing page to ``requests`` itself.
 
-    ``requests`` refuses an address it cannot fetch while preparing the
-    request, before any connection is made, so no test touches the network.
+    ``requests`` refuses each address the tests give it before any connection
+    is made (a missing scheme while preparing the request, an unsupported one
+    when choosing an adapter), so no test touches the network. An http(s)
+    address would be fetched for real: do not add one.
     """
 
     def get(self, url: str, **kwargs: Any) -> requests.Response:
@@ -423,7 +426,8 @@ class _RealRequestsForThePage(_Session):
             **kwargs: The request's options.
 
         Returns:
-            Unpaywall's canned answer.
+            Unpaywall's canned answer, or what ``requests`` returns for any
+            other URL.
 
         Raises:
             requests.exceptions.RequestException: As ``requests`` raises it.
@@ -431,7 +435,9 @@ class _RealRequestsForThePage(_Session):
         if url.startswith("https://api.unpaywall.org/"):
             return super().get(url, **kwargs)
         self.landing_requests.append(kwargs)
-        with requests.Session() as session:
+        # Mounted as the discoverer's own session is, so a catch-all adapter
+        # added there would be caught here too
+        with mount_politely(requests.Session()) as session:
             return session.get(url, **kwargs)
 
 

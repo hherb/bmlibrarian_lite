@@ -40,6 +40,8 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
 
     private static let landing = "https://repo.example.org/item/95934"
     private static let pdf = "https://repo.example.org/files/Okazaki_2025.pdf"
+    /// The DOI link the chain falls back to for `fetch()`'s DOI.
+    private static let doiLink = URL(string: "https://doi.org/10.1/landing")!
 
     /// Unpaywall's answer for the DOI: a landing page and no PDF URL.
     private static let landingOnlyAnswer = #"""
@@ -411,6 +413,7 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
 
             let result = try await fetch()
 
+            XCTAssertEqual(result.content, .doi(webURL: Self.doiLink), address)
             XCTAssertEqual(
                 result.openAccessShortfall,
                 OpenAccessShortfall(source: .landingPage, failure: .requestFailed),
@@ -421,21 +424,23 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
     }
 
     /// The same for a `url_for_pdf`: Unpaywall named a copy we cannot fetch,
-    /// which leaves it unassessed (#474).
+    /// which leaves it unassessed (#474). The address is never asked for, and
+    /// the reader gets the DOI link rather than a link we will not open.
     func testAPDFAddressThatCannotBeFetchedIsUnsettled() async throws {
         let answer = #"{"best_oa_location": {"url_for_pdf": "ftp://repo.example.org/a.pdf"}}"#
         StubURLProtocol.routes = routes(unpaywall: answer)
 
         let result = try await fetch()
 
-        XCTAssertNotEqual(result.source, .unpaywall)
+        XCTAssertEqual(result.content, .doi(webURL: Self.doiLink))
         XCTAssertEqual(
             result.openAccessShortfall,
             OpenAccessShortfall(source: .unpaywall, failure: .requestFailed)
         )
+        XCTAssertFalse(StubURLProtocol.requested("repo.example.org/a.pdf"))
     }
 
-    /// The control: an absolute http(s) address is fetched, whatever case
+    /// The control: an absolute http(s) address is accepted, whatever case
     /// its scheme is written in.
     func testAFetchableAddressIsAnAbsoluteHTTPURL() {
         XCTAssertNotNil(UnpaywallLandingPage.fetchableURL(Self.landing))
@@ -447,8 +452,11 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
 
     /// The chain refuses to call a full text absent while the Unpaywall tier
     /// left a free copy unassessed, as it does for Europe PMC (#475). Tested
-    /// on the decision itself: the chain reaches it with an open-access
-    /// shortfall only when the DOI link will not build, which no DOI does.
+    /// on the decision itself: every fallback the chain returns after the
+    /// tier carries the shortfall, so it reaches the decision with one only
+    /// when no fallback at all could be built, and the DOI link always builds
+    /// on the iOS 17 / macOS 14 Foundation, which percent-encodes what it
+    /// would once have refused.
     func testAnExhaustedChainWithAnUnsettledCopyIsNotAnAbsence() {
         let shortfall = OpenAccessShortfall(source: .unpaywall, failure: .httpStatus(429))
         let error = FullTextService.exhaustedChainError(
@@ -469,9 +477,18 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         )
     }
 
-    /// Europe PMC's shortfall is named first, as before (#434), and with
-    /// nothing unsettled the chain's answer is an absence: the controls.
+    /// An unclassified primary slot is named before either shortfall, Europe
+    /// PMC's before the open-access one (#434), and with nothing unsettled the
+    /// chain's answer is an absence: the controls.
     func testAnExhaustedChainNamesEuropePMCFirstAndOtherwiseIsAnAbsence() {
+        let unclassified = FullTextService.exhaustedChainError(
+            primarySlot: "889149", primaryKind: nil, europePMCShortfall: .timeout,
+            openAccessShortfall: .unpaywallNotConfigured, articleName: "a test article"
+        )
+        guard case .identifierKindUnresolved("889149") = unclassified else {
+            return XCTFail("expected the unresolved kind, got \(unclassified)")
+        }
+
         let both = FullTextService.exhaustedChainError(
             primarySlot: "", primaryKind: nil, europePMCShortfall: .timeout,
             openAccessShortfall: .unpaywallNotConfigured, articleName: "a test article"

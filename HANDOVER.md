@@ -13,9 +13,11 @@ its slice has landed; add a new section when handing off new work.
 absolute http(s) URL is an unread page (`request_failed`) on both apps, as
 Python's `requests` refuses it (Swift `UnpaywallLandingPage.fetchableURL`,
 Android `readLandingPage`); Swift's unusable `url_for_pdf` records Unpaywall's
-`request_failed`. BioMedLit's closing throw is one pure function,
+`request_failed` (Android hands it on as the PDF link; which is right is
+**#478**). BioMedLit's closing throw is one static function,
 `FullTextService.exhaustedChainError`: no absence while an open-access
-shortfall is set (`FullTextError.openAccessNotEstablished`).
+shortfall is set (`FullTextError.openAccessNotEstablished`). The scheme set is
+now `BioMedLitConstants.unpaywallFetchableSchemes`.
 
 ## Recently landed (context)
 
@@ -60,7 +62,9 @@ the rest.
   another replaced it. Auto full text for papers scored 4-5
   (`FullTextAutoFetch.swift`, Apple only on purpose; the 40,000-character cut
   is the product's call). Earlier builds' stored notices are never reworded.
-- **A preprint's `fullTextXML` 500 is asked once** (all three; #451; user's call).
+- **A preprint's `fullTextXML` 500 is asked once** (all three; #451); every
+  PMC accession's 500 and any 429/502/503/504 keep the full budget (user's
+  call). Contract: `fulltext_retrieval.md`.
 - **`fullTextXML` is asked only when Europe PMC's record allows it** (Python;
   PR #452, #432): it answers **500, not 404**, for a held closed-access
   article. `europepmc.offers_fulltext_xml` skips only a record that *states*
@@ -68,9 +72,11 @@ the rest.
   call); an unreadable 200 is `MALFORMED_RESPONSE`. Survey rows in
   `doc/developer/europepmc_xml_survey/` are pinned by
   `tests/test_europepmc_xml_survey.py` (re-analyse, never re-fetch).
-- **doi.org's HEAD status is read** (Python; PR #448): doi.org's 400/404 are
-  absences (`doi_resolution_failure`). **`mount_politely` turns off urllib3's
-  `respect_retry_after_header`** (`polite_request_pacing.md` rule 6).
+- **doi.org's HEAD status is read** (Python; PR #448, #446), named by host:
+  doi.org's 400/404 are absences; a publisher's bot-wall 4xx stays "no PDF"
+  (`doi_resolution_failure`). **`mount_politely` turns off urllib3's
+  `respect_retry_after_header`**, or a throttle is re-sent below the limiter
+  (`polite_request_pacing.md` rule 6).
 - **An answered lookup "did not serve it"** (all three; PRs #444, #449;
   #435, #445, #447). An `HTTP_STATUS` failure is an answer **except a 429 or any 5xx**, which
   "could not be asked"; one predicate, `RequestFailure.is_answer` /
@@ -134,8 +140,9 @@ the rest.
 - **A source nobody asked is not a source that answered "nothing"** (Python;
   PRs #358, #365). Only a text we read and segmented can produce
   `NOT_STATED`; a skip is a third state (`SourceLookupSkipped`); a
-  three-state value needs three arms. **Assert the built sentence, never a
-  substring another caveat shares.**
+  three-state value needs three arms; a withheld claim stays withheld at
+  every surface. **Assert the built sentence, never a substring another
+  caveat shares.**
 - **Older rounds, compressed to the rules that still bind.** Each cost a
   defect; the archaeology is in git history and the `doc/cross_platform/`
   READMEs, which these point at.
@@ -213,7 +220,8 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 - **#467** landing-page parity edges; **#468** / **#470** iOS/macOS cancel
   follow-ups; **#471** Android link-only state; **#472** iOS Full Text tab
-  skips the retrieval notice; **#476** `OpenAccessShortfall` hardening.
+  skips the retrieval notice; **#476** `OpenAccessShortfall` hardening;
+  **#478** an unusable `url_for_pdf`: Swift and Android disagree.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 
@@ -405,7 +413,8 @@ enables DEBUG; **#245** the transparency CLIs take the NCBI key only as
 - **PubMed parsers (Swift + Android)**: **#402** the year comes from
   `DateCompleted`, not `PubDate`; **#403** Swift appends a translated
   `<OtherAbstract>`; **#404** Android's `ArticleId` has no `<Reference>` guard.
-- **#190** CI never builds the iOS app target.
+- **#190** CI never builds the iOS app target; cheapest guard: fail when a
+  `.swift` file under `ios/MedicalFactChecker/Sources/` belongs to no target.
 
 ### Transparency parity and pricing
 

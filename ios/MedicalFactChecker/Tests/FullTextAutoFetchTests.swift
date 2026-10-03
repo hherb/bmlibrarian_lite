@@ -449,6 +449,31 @@ final class FullTextAutoFetchTests: XCTestCase {
         XCTAssertTrue(document.fullTextAttempted)
     }
 
+    /// The chain's answers that were not established are not absences, though
+    /// none of them is retryable either: each is reported and leaves the
+    /// document for the next run (#434, #475). The rule must stay keyed on
+    /// `noFullTextAvailable` itself: `isRetryable` is false for all three, as
+    /// it is for an absence, so it cannot tell them apart.
+    func testAnAnswerThatWasNotEstablishedLeavesTheDocumentForARetry() async throws {
+        let notEstablished: [FullTextError] = [
+            .absenceNotEstablished(.timeout),
+            .openAccessNotEstablished(.unpaywallNotConfigured),
+            .identifierKindUnresolved("1287966"),
+        ]
+        for error in notEstablished {
+            let document = makeDocument()
+
+            let failures = try await FullTextAutoFetch.retrieve(
+                [document],
+                fetch: { _ in throw error },
+                persist: {}
+            )
+
+            XCTAssertEqual(failures.count, 1, "\(error)")
+            XCTAssertFalse(document.fullTextAttempted, "\(error)")
+        }
+    }
+
     /// Any other error leaves the document untouched, so the next run retries
     /// it, and the loop goes on to the next one.
     func testAnotherErrorIsReportedAndLeavesTheDocumentForARetry() async throws {

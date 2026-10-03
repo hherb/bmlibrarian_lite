@@ -540,15 +540,16 @@ public actor FullTextService {
         )
     }
 
-    /// Why a chain that found nothing to return ended, in the words it must
-    /// not confuse.
+    /// The error for a chain that found nothing to return, keeping an absence
+    /// apart from an answer that was not established.
     ///
     /// Only ``FullTextError/noFullTextAvailable`` is recorded on the document,
-    /// and it takes the retry away for good, so it is returned only when every
-    /// source answered and no last resort was refused. Pure, so the rule is
-    /// testable: the open-access arm is all but unreachable through the chain,
-    /// which reaches here with an open-access shortfall only when the DOI link
-    /// itself would not build (#475).
+    /// and it takes the retry away for good, so it is returned only when no
+    /// source left the question unsettled and no last resort was refused.
+    /// Static, and independent of the service's state, so the rule is testable:
+    /// the open-access arm is all but unreachable through the chain, because
+    /// every fallback returned after the Unpaywall tier carries the shortfall
+    /// and the DOI link among them always builds (#475).
     ///
     /// - Parameters:
     ///   - primarySlot: The document's primary identifier slot.
@@ -1276,8 +1277,9 @@ public actor FullTextService {
     /// Unpaywall miss.
     private enum UnpaywallTierFailure: Error {
         /// Unpaywall was not configured, answered with an error status other
-        /// than 404 or in a form that could not be read, or the landing page it
-        /// named could not be read; the shortfall names which.
+        /// than 404 or in a form that could not be read, named an address the
+        /// tier cannot fetch, or the landing page it named could not be read;
+        /// the shortfall names which.
         case unsettled(OpenAccessShortfall)
     }
 
@@ -1305,8 +1307,11 @@ public actor FullTextService {
         switch choice {
         case .pdf(let pdf):
             // Unpaywall named a copy; an address we cannot fetch leaves it
-            // unassessed, not absent (#474). Python's download of it fails and
-            // the reader is told only that it could not be downloaded.
+            // unassessed, not absent (#474). Python and Android hand it on as
+            // the PDF link and their download of it fails; Swift does not
+            // offer a link it will not open, so it records Unpaywall's
+            // `requestFailed`. That notice says Unpaywall "could not be asked",
+            // which approximates an answer we could not use (#478).
             guard let pdfURL = UnpaywallLandingPage.fetchableURL(pdf) else {
                 throw Self.unfetchableAddress(pdf, source: .unpaywall)
             }

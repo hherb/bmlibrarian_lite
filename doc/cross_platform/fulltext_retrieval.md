@@ -440,13 +440,17 @@ landing page, `Unreachable` above, including an address that is not an
 absolute http(s) URL (`request_failed`: Python's `requests` refuses it with
 `MissingSchema`, `InvalidSchema` or `InvalidURL`, #474). A `url_for_pdf` the
 tier cannot fetch is never "no copy" either: Python's download of it fails,
-Android hands it on as the PDF link, and Swift, which cannot build a link from
-it, records Unpaywall's `request_failed`.
+Android hands it on as the PDF link, and Swift, which does not offer a link it
+will not open, records Unpaywall's `request_failed`. The platforms differ here,
+and the Swift notice's "could not be asked" approximates an answer that could
+not be used (#478).
 
-**The chain never ends on an absence while it is unsettled.** Every path that
-records a shortfall returns the DOI link carrying it. Should that link not
-build, BioMedLit throws `openAccessNotEstablished`, never
-`noFullTextAvailable`, which the apps record on the document for good (#475).
+**The chain never ends on an absence while it is unsettled.** Every fallback
+returned after the tier carries the shortfall: on Android always the DOI link;
+in BioMedLit the abstract, a PDF link it could not download, the DOI link or
+the PubMed record. Only when none of these can be built does BioMedLit throw
+`openAccessNotEstablished`, never `noFullTextAvailable`, which the apps record
+on the document for good (#475).
 
 **No usable email is "not configured", not a 422.** Unpaywall refuses a blank
 address, and Android's placeholder `bmlibrarian@example.com` (Python's

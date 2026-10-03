@@ -238,7 +238,8 @@ class FullTextServiceUnpaywallTest {
      */
     @Test
     fun `a landing page that cannot be fetched is left unsettled, not read as declaring nothing`() = runTest {
-        for (address in listOf("ftp://repo.example.org$handlePath", handlePath, "file://$handlePath")) {
+        val addresses = listOf("ftp://repo.example.org$handlePath", handlePath, "file://$handlePath")
+        for (address in addresses) {
             unpaywallAnswers(pdfUrl = null, landingPage = address)
             Log.clear()
 
@@ -247,9 +248,27 @@ class FullTextServiceUnpaywallTest {
                 doiLinkLeaving(OpenAccessSource.LANDING_PAGE, RequestFailure(RequestFailureKind.REQUEST_FAILED)),
                 fetch()
             )
-            assertTrue("${Log.lines}", Log.lines.any { "not an http(s) URL" in it })
+            assertTrue("${Log.lines}", Log.lines.any { "so it was not read" in it })
         }
-        assertEquals(0, handleRequests())
+        // Unpaywall alone was asked, once a fetch: the address was refused, not retried
+        assertEquals(List<String?>(addresses.size) { unpaywallPath }, requestedPaths())
+    }
+
+    /**
+     * A `url_for_pdf` that is not an http(s) URL is handed on as the PDF link,
+     * as Python hands it on, and is never asked for here. Swift refuses it and
+     * records Unpaywall's `request_failed` instead; which is right is #478, so
+     * this pins the current behaviour rather than endorsing it. What must not
+     * happen is the landing page's old defect on this path: refusing the
+     * address and answering a DOI link with no shortfall, as if no copy existed.
+     */
+    @Test
+    fun `a url_for_pdf that cannot be fetched is handed on as the PDF link`() = runTest {
+        val pdfUrl = "ftp://repo.example.org/a.pdf"
+        unpaywallAnswers(pdfUrl = pdfUrl, landingPage = server.url(handlePath).toString())
+
+        assertEquals("${Log.lines}", FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = pdfUrl), fetch())
+        assertEquals(listOf<String?>(unpaywallPath), requestedPaths())
     }
 
     @Test

@@ -155,7 +155,7 @@ public enum BioMedLitConstants {
 
     /// The only schemes the Unpaywall tier fetches: a `url_for_pdf`, a landing
     /// page, and the PDF a page declares.
-    public static let landingPagePDFSchemes: Set<String> = ["http", "https"]
+    public static let unpaywallFetchableSchemes: Set<String> = ["http", "https"]
 
     /// How much of a landing page is read for its tag. The tag sits in `<head>`,
     /// so a page cut here still declares its PDF. A lookup page, not research

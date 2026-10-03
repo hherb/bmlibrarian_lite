@@ -526,11 +526,13 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
     /// Every source was exhausted, but the Unpaywall tier did not settle
     /// whether a free copy exists, and no link was left to fall back on.
     ///
-    /// The chain reaches this only when the DOI it asked Unpaywall about
-    /// would not build a link (#475): every other path returns the DOI link
-    /// carrying the ``OpenAccessShortfall``. Like ``absenceNotEstablished(_:)``,
-    /// a claim about *us*, and callers must **not** mark the document
-    /// permanently unavailable on it.
+    /// Every fallback the chain returns after the tier (the abstract, a PDF
+    /// link it could not download, the DOI link, the PubMed record) carries
+    /// the ``OpenAccessShortfall`` instead, so the chain reaches this only when
+    /// none of them could be built: no abstract or PDF link was held, the DOI
+    /// link would not build (#475), and the slot holds no PubMed ID. Like
+    /// ``absenceNotEstablished(_:)``, a claim about *us*, and callers must
+    /// **not** mark the document permanently unavailable on it.
     case openAccessNotEstablished(OpenAccessShortfall)
 
     /// PDF download failed.
@@ -614,8 +616,9 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
             // stored record will not name itself on a second attempt — but
             // unlike the others it must not be recorded as a permanent state of
             // the article; see the case's own note. An unsettled Europe PMC or
-            // Unpaywall has already spent its own retries inside the chain; the
-            // reader may try again later, so it is not permanent either.
+            // Unpaywall has already had whatever retries its tier allows inside
+            // the chain; the reader may try again later, so it is not permanent
+            // either.
             return false
         }
     }

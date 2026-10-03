@@ -111,16 +111,16 @@ enum UnpaywallLandingPage {
     ///
     /// An absolute http(s) URL with a host; anything else (a relative path, an
     /// `ftp:` or `file:` URL, text that will not parse) is refused. Python
-    /// sends the address to `requests`, which refuses the same addresses with
-    /// `MissingSchema`, `InvalidSchema` or `InvalidURL`, and records the lookup
-    /// as a failed request rather than an absence (#474).
+    /// sends the address to `requests`, which refuses the same kinds of
+    /// address with `MissingSchema`, `InvalidSchema` or `InvalidURL`, and
+    /// records the lookup as a failed request rather than an absence (#474).
     ///
     /// - Parameter address: A `url_for_pdf` or landing page, as Unpaywall gave it.
     /// - Returns: The URL, or `nil` when it cannot be fetched.
     static func fetchableURL(_ address: String) -> URL? {
         guard let url = URL(string: address),
               let scheme = url.scheme?.lowercased(),
-              BioMedLitConstants.landingPagePDFSchemes.contains(scheme),
+              BioMedLitConstants.unpaywallFetchableSchemes.contains(scheme),
               let host = url.host, !host.isEmpty
         else { return nil }
         return url
@@ -149,7 +149,7 @@ enum UnpaywallLandingPage {
                   let content = attributes["content"], !content.isEmpty,
                   let resolved = resolve(content, against: pageURL),
                   let scheme = resolved.scheme?.lowercased(),
-                  BioMedLitConstants.landingPagePDFSchemes.contains(scheme)
+                  BioMedLitConstants.unpaywallFetchableSchemes.contains(scheme)
             else { continue }
             return resolved
         }
