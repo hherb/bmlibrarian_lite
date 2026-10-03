@@ -178,9 +178,11 @@ public actor FullTextService {
     /// - Throws: When every source is exhausted, `FullTextError`:
     ///   `noFullTextAvailable` when every source answered without it (callers
     ///   record this on the document); `absenceNotEstablished` when Europe PMC
-    ///   did not settle it; `identifierKindUnresolved` when the PubMed last
-    ///   resort could not be authorised. Neither of the last two may be
-    ///   recorded. `CancellationError` if the caller cancelled: it propagates
+    ///   did not settle it; `openAccessNotEstablished` when the Unpaywall tier
+    ///   did not; `identifierKindUnresolved` when the PubMed last resort could
+    ///   not be authorised. None of the last three may be recorded (see
+    ///   ``exhaustedChainError(primarySlot:primaryKind:europePMCShortfall:openAccessShortfall:articleName:)``).
+    ///   `CancellationError` if the caller cancelled: it propagates
     ///   rather than falling
     ///   through, so a link is never cached as this article's full text just
     ///   because the caller went away.
@@ -529,6 +531,41 @@ public actor FullTextService {
             )
         }
 
+        throw Self.exhaustedChainError(
+            primarySlot: pmid,
+            primaryKind: primaryKind,
+            europePMCShortfall: europePMCShortfall,
+            openAccessShortfall: openAccessShortfall,
+            articleName: articleName
+        )
+    }
+
+    /// The error for a chain that found nothing to return, keeping an absence
+    /// apart from an answer that was not established.
+    ///
+    /// Only ``FullTextError/noFullTextAvailable`` is recorded on the document,
+    /// and it takes the retry away for good, so it is returned only when no
+    /// source left the question unsettled and no last resort was refused.
+    /// Static, and independent of the service's state, so the rule is testable:
+    /// the open-access arm is all but unreachable through the chain, because
+    /// every fallback returned after the Unpaywall tier carries the shortfall
+    /// and the DOI link among them always builds (#475).
+    ///
+    /// - Parameters:
+    ///   - primarySlot: The document's primary identifier slot.
+    ///   - primaryKind: What the provider said that slot holds, if it said.
+    ///   - europePMCShortfall: What Europe PMC's side got instead of the text.
+    ///   - openAccessShortfall: Why the Unpaywall tier left a free copy
+    ///     unassessed.
+    ///   - articleName: How the log names the article.
+    /// - Returns: The error to throw.
+    static func exhaustedChainError(
+        primarySlot: String,
+        primaryKind: ArticleIdentifierKind?,
+        europePMCShortfall: RequestFailure?,
+        openAccessShortfall: OpenAccessShortfall?,
+        articleName: String
+    ) -> FullTextError {
         // Two different answers, and they must not be given the same words.
         //
         // A slot that still holds something we could not classify means the
@@ -542,10 +579,10 @@ public actor FullTextService {
         // Only when the kind is genuinely *unresolved*. A stated preprint whose
         // sources are exhausted is not this case: we know exactly what the
         // identifier is, it simply has no PubMed record. It ends in
-        // `noFullTextAvailable`, or in `absenceNotEstablished` below when
-        // Europe PMC did not settle it. The refusal this case describes is narrower —
+        // `noFullTextAvailable`, or in one of the two below when a source did
+        // not settle it. The refusal this case describes is narrower —
         // nobody said, the shape does not settle it, and no provider vouched.
-        let unclassified = pmid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let unclassified = primarySlot.trimmingCharacters(in: .whitespacesAndNewlines)
         if !unclassified.isEmpty,
            ArticleIdentifierKind.resolved(declared: primaryKind, accession: unclassified) == .unknown {
             BioMedLitLib.logger?.error(
@@ -556,7 +593,7 @@ public actor FullTextService {
                 """,
                 category: .fullText
             )
-            throw FullTextError.identifierKindUnresolved(unclassified)
+            return .identifierKindUnresolved(unclassified)
         }
 
         // Nothing was found, but Europe PMC did not settle the question: it
@@ -570,11 +607,23 @@ public actor FullTextService {
                     + "settle it (\(europePMCShortfall.describe()))",
                 category: .fullText
             )
-            throw FullTextError.absenceNotEstablished(europePMCShortfall)
+            return .absenceNotEstablished(europePMCShortfall)
+        }
+
+        // The same for the Unpaywall tier: a free copy it could not assess is
+        // not a copy that does not exist (#475).
+        if let openAccessShortfall {
+            BioMedLitLib.logger?.warning(
+                "No source served full text for \(articleName), and the open-access copy "
+                    + "went unassessed (\(openAccessShortfall.source.serviceName): "
+                    + "\(openAccessShortfall.failure?.describe() ?? "not configured"))",
+                category: .fullText
+            )
+            return .openAccessNotEstablished(openAccessShortfall)
         }
 
         BioMedLitLib.logger?.error("No full text available for \(articleName)", category: .fullText)
-        throw FullTextError.noFullTextAvailable
+        return .noFullTextAvailable
     }
 
     // MARK: - Europe PMC
@@ -1228,8 +1277,9 @@ public actor FullTextService {
     /// Unpaywall miss.
     private enum UnpaywallTierFailure: Error {
         /// Unpaywall was not configured, answered with an error status other
-        /// than 404 or in a form that could not be read, or the landing page it
-        /// named could not be read; the shortfall names which.
+        /// than 404 or in a form that could not be read, named an address the
+        /// tier cannot fetch, or the landing page it named could not be read;
+        /// the shortfall names which.
         case unsettled(OpenAccessShortfall)
     }
 
@@ -1244,9 +1294,9 @@ public actor FullTextService {
     /// - Throws: `FullTextError.noFullTextAvailable` when Unpaywall answers 404
     ///   or offers no PDF and no landing page declares one; `UnpaywallTierFailure`
     ///   when Unpaywall was not configured, answered with any other error status
-    ///   or in a form that could not be read, or the landing page could not be
-    ///   read; `CancellationError` when cancelled; whatever else the Unpaywall
-    ///   request throws.
+    ///   or in a form that could not be read, named an address that cannot be
+    ///   fetched, or the landing page could not be read; `CancellationError`
+    ///   when cancelled; whatever else the Unpaywall request throws.
     private func fetchUnpaywallPDFWithRetry(doi: String) async throws -> URL {
         let choice = try await RetryHelper.retry(
             config: .networkDefault,
@@ -1256,11 +1306,23 @@ public actor FullTextService {
         }
         switch choice {
         case .pdf(let pdf):
-            guard let pdfURL = URL(string: pdf) else { break }
+            // Unpaywall named a copy; an address we cannot fetch leaves it
+            // unassessed, not absent (#474). Python and Android hand it on as
+            // the PDF link and their download of it fails; Swift does not
+            // offer a link it will not open, so it records Unpaywall's
+            // `requestFailed`. That notice says Unpaywall "could not be asked",
+            // which approximates an answer we could not use (#478).
+            guard let pdfURL = UnpaywallLandingPage.fetchableURL(pdf) else {
+                throw Self.unfetchableAddress(pdf, source: .unpaywall)
+            }
             BioMedLitLib.logger?.debug("Found OA PDF location: \(pdf)", category: .fullText)
             return pdfURL
         case .page(let landing):
-            guard let pageURL = URL(string: landing) else { break }
+            // Python's `requests` refuses the same addresses, and the page is
+            // recorded as unread (#474)
+            guard let pageURL = UnpaywallLandingPage.fetchableURL(landing) else {
+                throw Self.unfetchableAddress(landing, source: .landingPage)
+            }
             switch try await readLandingPage(pageURL) {
             case .declared(let pdfURL):
                 return pdfURL
@@ -1275,6 +1337,24 @@ public actor FullTextService {
             break
         }
         throw FullTextError.noFullTextAvailable
+    }
+
+    /// The failure for an address Unpaywall gave that the tier cannot fetch.
+    ///
+    /// - Parameters:
+    ///   - address: The address, as Unpaywall gave it.
+    ///   - source: The lookup it left unsettled: Unpaywall for a `url_for_pdf`,
+    ///     the landing page for a page.
+    /// - Returns: The tier failure to throw, a failed request.
+    private static func unfetchableAddress(
+        _ address: String, source: OpenAccessSource
+    ) -> UnpaywallTierFailure {
+        BioMedLitLib.logger?.warning(
+            "Unpaywall named an address that cannot be fetched ('\(address)'), so the "
+                + "open-access copy is not assessed",
+            category: .fullText
+        )
+        return .unsettled(OpenAccessShortfall(source: source, failure: .requestFailed))
     }
 
     /// What an Unpaywall tier failure left unsettled, if anything.

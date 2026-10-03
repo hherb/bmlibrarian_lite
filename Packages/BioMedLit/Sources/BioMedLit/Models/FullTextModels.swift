@@ -523,6 +523,18 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
     /// PMC.
     case absenceNotEstablished(RequestFailure)
 
+    /// Every source was exhausted, but the Unpaywall tier did not settle
+    /// whether a free copy exists, and no link was left to fall back on.
+    ///
+    /// Every fallback the chain returns after the tier (the abstract, a PDF
+    /// link it could not download, the DOI link, the PubMed record) carries
+    /// the ``OpenAccessShortfall`` instead, so the chain reaches this only when
+    /// none of them could be built: no abstract or PDF link was held, the DOI
+    /// link would not build (#475), and the slot holds no PubMed ID. Like
+    /// ``absenceNotEstablished(_:)``, a claim about *us*, and callers must
+    /// **not** mark the document permanently unavailable on it.
+    case openAccessNotEstablished(OpenAccessShortfall)
+
     /// PDF download failed.
     case pdfDownloadFailed(String)
 
@@ -574,6 +586,10 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
                 not be asked (\(failure.describe())), so it may still exist. \
                 Try again later.
                 """
+        case .openAccessNotEstablished(let shortfall):
+            // The shortfall's own sentence, Python's, so the reader of this
+            // error and of a stored notice is told the same thing (#466)
+            return "No source provided this article's full text. \(shortfall.notice)"
         case .pdfDownloadFailed(let reason):
             return "Failed to download PDF: \(reason)"
         case .jatsParseFailure(let error):
@@ -594,14 +610,15 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
             return true
         case .noIdentifiers, .noFullTextAvailable, .pdfDownloadFailed,
              .jatsParseFailure, .cachingFailed, .invalidResponse,
-             .identifierKindUnresolved, .absenceNotEstablished:
+             .identifierKindUnresolved, .absenceNotEstablished, .openAccessNotEstablished:
             // A parse failure is deterministic: retrying spends the network
             // budget to reach the same result. So is an unresolved kind — the
             // stored record will not name itself on a second attempt — but
             // unlike the others it must not be recorded as a permanent state of
-            // the article; see the case's own note. An unsettled Europe PMC has
-            // already spent its own retries inside the chain; the reader may
-            // try again later, so it is not permanent either.
+            // the article; see the case's own note. An unsettled Europe PMC or
+            // Unpaywall has already had whatever retries its tier allows inside
+            // the chain; the reader may try again later, so it is not permanent
+            // either.
             return false
         }
     }

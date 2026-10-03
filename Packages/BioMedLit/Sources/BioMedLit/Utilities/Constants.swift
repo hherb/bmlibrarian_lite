@@ -153,8 +153,9 @@ public enum BioMedLitConstants {
     /// What a landing-page request asks for: the page, not a PDF.
     public static let landingPageAccept = "text/html,application/xhtml+xml"
 
-    /// The only schemes a declared PDF URL may use.
-    public static let landingPagePDFSchemes: Set<String> = ["http", "https"]
+    /// The only schemes the Unpaywall tier fetches: a `url_for_pdf`, a landing
+    /// page, and the PDF a page declares.
+    public static let unpaywallFetchableSchemes: Set<String> = ["http", "https"]
 
     /// How much of a landing page is read for its tag. The tag sits in `<head>`,
     /// so a page cut here still declares its PDF. A lookup page, not research

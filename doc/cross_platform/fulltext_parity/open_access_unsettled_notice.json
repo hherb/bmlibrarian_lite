@@ -22,6 +22,7 @@
     {"source": "unpaywall_landing_page", "kind": "http_status", "status_code": 425, "notice": "The open-access copy's landing page (HTTP 425) did not serve it, so whether this document is open access was not established."},
     {"source": "unpaywall_landing_page", "kind": "redirect_refused", "status_code": 307, "notice": "The open-access copy's landing page (a redirect (HTTP 307) was refused) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
     {"source": "unpaywall_landing_page", "kind": "incomplete_response", "status_code": null, "notice": "The open-access copy's landing page (the response was incomplete) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "unpaywall_landing_page", "kind": "request_failed", "status_code": null, "notice": "The open-access copy's landing page (the request failed) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
     {"source": "unpaywall_landing_page", "kind": "service_error", "status_code": null, "notice": "The open-access copy's landing page (the service reported an error) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."}
   ],
   "persisted": {

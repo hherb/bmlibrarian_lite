@@ -32,6 +32,7 @@ from bmlibrarian_lite.data_models import (
     SourceLookupFailure,
 )
 from bmlibrarian_lite.pdf_discovery import PDFDiscoverer, PDFSource, PDFSourceType
+from bmlibrarian_lite.polite_session import mount_politely
 
 DOI = "10.1126/science.adk9967"
 LANDING = "https://hdl.handle.net/2115/95934"
@@ -406,3 +407,61 @@ def test_a_page_that_never_ends_is_read_no_further_than_its_cap(
 
     assert (sources, failure) == ([], None)
     assert page.bytes_read <= 2 * LANDING_PAGE_MAX_BYTES
+
+
+class _RealRequestsForThePage(_Session):
+    """Answers Unpaywall's API, and sends the landing page to ``requests`` itself.
+
+    ``requests`` refuses each address the tests give it before any connection
+    is made (a missing scheme while preparing the request, an unsupported one
+    when choosing an adapter), so no test touches the network. An http(s)
+    address would be fetched for real: do not add one.
+    """
+
+    def get(self, url: str, **kwargs: Any) -> requests.Response:
+        """Route one GET: Unpaywall canned, anything else to a real session.
+
+        Args:
+            url: The URL asked for.
+            **kwargs: The request's options.
+
+        Returns:
+            Unpaywall's canned answer, or what ``requests`` returns for any
+            other URL.
+
+        Raises:
+            requests.exceptions.RequestException: As ``requests`` raises it.
+        """
+        if url.startswith("https://api.unpaywall.org/"):
+            return super().get(url, **kwargs)
+        self.landing_requests.append(kwargs)
+        # Mounted as the discoverer's own session is, so a catch-all adapter
+        # added there would be caught here too
+        with mount_politely(requests.Session()) as session:
+            return session.get(url, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "address",
+    ["ftp://repo.example.org/item/95934", "/item/95934", "file:///item/95934"],
+)
+def test_a_landing_page_that_cannot_be_fetched_is_recorded_as_unread(
+    discoverer: PDFDiscoverer, address: str
+) -> None:
+    """An address ``requests`` refuses is a page we did not read (#474).
+
+    The apps port this: Swift's ``fetchableURL`` and Android's
+    ``toHttpUrlOrNull`` refuse the same addresses as a failed request rather
+    than reading them as a page that declares no PDF.
+    """
+    answer = {"is_oa": False, "best_oa_location": {"url": address, "url_for_pdf": None}}
+    session = _RealRequestsForThePage(answer)
+
+    sources, failure = _discover(discoverer, session)
+
+    assert sources == []
+    assert len(session.landing_requests) == 1
+    assert failure == SourceLookupFailure(
+        SERVICE_UNPAYWALL_LANDING_PAGE,
+        RequestFailure(RequestFailureKind.REQUEST_FAILED),
+    )

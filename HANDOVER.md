@@ -8,23 +8,16 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Apps: tell the reader the open-access copy went unassessed** (#466), branch
-`fix/oa-unreachable-notice-466`, PR #473 (compress once merged). Both apps
-carry an **`OpenAccessShortfall`** (source + a failure, or **not configured**)
-on the fallback, store it with the full text (Swift
-`fullTextOpenAccessShortfallJSON`, Android Room **8**) and show **Python's
-sentence** (`unestablished_access_clause`) as a note
-(`ParseWarningBannerContent`; Android `OpenAccessShortfallNotice`). **Every
-fetch that settles it writes or clears it** (Android: one writer,
-`recordingFullTextFetch`, for all three screens); an unreadable stored value
-still speaks. **Any Unpaywall status of 400+ but 404 is unsettled** on all
-three. **No usable email is "not configured", never a 422**: Android's
-placeholder is not sent (`UnpaywallContact`, NCBI email as fallback), and the
-notice adds Python's configuration nudge. Room migrations register from
-`AppDatabase.ALL_MIGRATIONS`, pinned by `AppDatabaseMigrationsTest`. Contract:
-`fulltext_retrieval.md` "An unsettled open-access copy" and
-`fulltext_parity/open_access_unsettled_notice.json`. Follow-ups **#471**,
-**#472**, **#474**, **#475**, **#476**.
+**Unpaywall: an address the tier cannot fetch is not "no copy"** (#474,
+#475), branch `fix/unusable-landing-url-474`, PR #477. A landing URL that is not an
+absolute http(s) URL is an unread page (`request_failed`) on both apps, as
+Python's `requests` refuses it (Swift `UnpaywallLandingPage.fetchableURL`,
+Android `readLandingPage`); Swift's unusable `url_for_pdf` records Unpaywall's
+`request_failed` (Android hands it on as the PDF link; which is right is
+**#478**). BioMedLit's closing throw is one static function,
+`FullTextService.exhaustedChainError`: no absence while an open-access
+shortfall is set (`FullTextError.openAccessNotEstablished`). The scheme set is
+now `BioMedLitConstants.unpaywallFetchableSchemes`.
 
 ## Recently landed (context)
 
@@ -32,6 +25,16 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **Apps: an unsettled open-access copy is told** (PR #473, #466). Both apps
+  carry an **`OpenAccessShortfall`** (source + failure, or **not configured**)
+  on the fallback, store it with the full text (Swift
+  `fullTextOpenAccessShortfallJSON`, Android Room **8**) and show **Python's
+  sentence** (`unestablished_access_clause`). **Every fetch that settles it
+  writes or clears it** (Android: one writer, `recordingFullTextFetch`).
+  **Any Unpaywall status of 400+ but 404 is unsettled**; **no usable email is
+  "not configured", never a 422**. Room migrations register from
+  `AppDatabase.ALL_MIGRATIONS`. Contract: `fulltext_retrieval.md` "An
+  unsettled open-access copy", `fulltext_parity/open_access_unsettled_notice.json`.
 - **iOS/macOS: a working cancel** (PR #469, #462). **Every workflow entry
   point runs its body through `runAsWorkflowTask(_:)`**; **`stopWork(_:)` is
   the one path for a stop** and `settleStop()` re-records it as the task ends;
@@ -215,9 +218,10 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **#467** landing-page parsing parity edges; **#468** / **#470** cancel
-  follow-ups (iOS/macOS); **#471** Android link-only state; **#472** the iOS
-  Full Text tab's link-only row skips the retrieval notice.
+- **#467** landing-page parity edges; **#468** / **#470** iOS/macOS cancel
+  follow-ups; **#471** Android link-only state; **#472** iOS Full Text tab
+  skips the retrieval notice; **#476** `OpenAccessShortfall` hardening;
+  **#478** an unusable `url_for_pdf`: Swift and Android disagree.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 

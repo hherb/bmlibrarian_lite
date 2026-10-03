@@ -40,6 +40,8 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
 
     private static let landing = "https://repo.example.org/item/95934"
     private static let pdf = "https://repo.example.org/files/Okazaki_2025.pdf"
+    /// The DOI link the chain falls back to for `fetch()`'s DOI.
+    private static let doiLink = URL(string: "https://doi.org/10.1/landing")!
 
     /// Unpaywall's answer for the DOI: a landing page and no PDF URL.
     private static let landingOnlyAnswer = #"""
@@ -366,6 +368,142 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
             result.openAccessShortfall,
             OpenAccessShortfall(source: .unpaywall, failure: .httpStatus(503))
         )
+    }
+
+    /// A PDF link the chain could not download carries the shortfall too: a
+    /// link to a copy we did not fetch says nothing about a free one (#475).
+    func testAnUndownloadedPDFLinkCarriesTheShortfall() async throws {
+        let render = "https://europepmc.org/articles/PMC12759138?pdf=render"
+        let search = #"""
+        {"resultList": {"result": [{
+          "id": "1", "pmid": "1", "pmcid": "PMC12759138", "inPMC": "Y",
+          "fullTextUrlList": {"fullTextUrl": [
+            {"documentStyle": "pdf", "site": "Europe_PMC", "url": "\#(render)",
+             "availability": "Open access", "availabilityCode": "OA"}
+          ]}
+        }]}}
+        """#
+        var stubs = routes(unpaywallStatus: 503)
+        stubs["search"] = (200, Data(search.utf8))
+        stubs["fullTextXML"] = (404, Data())
+        stubs["pdf=render"] = (403, Data("Forbidden".utf8))
+        StubURLProtocol.routes = stubs
+
+        let result = try await fetch()
+
+        guard case .europePMCPDF(let pdfURL) = result.content else {
+            return XCTFail("expected the undownloaded render link, got \(result.content)")
+        }
+        XCTAssertEqual(pdfURL.absoluteString, render)
+        XCTAssertNil(result.localPDFPath, "the render was refused, so nothing was downloaded")
+        XCTAssertEqual(
+            result.openAccessShortfall,
+            OpenAccessShortfall(source: .unpaywall, failure: .httpStatus(503))
+        )
+    }
+
+    /// A landing page whose address cannot be fetched is a page we did not
+    /// read, not one that declares no PDF: Python's `requests` refuses the
+    /// same addresses and records a failed request (#474).
+    func testALandingPageThatCannotBeFetchedIsUnsettled() async throws {
+        for address in ["ftp://repo.example.org/item/95934", "/item/95934", "file:///item/95934"] {
+            StubURLProtocol.reset()
+            let answer = #"{"best_oa_location": {"url": "\#(address)", "url_for_pdf": null}}"#
+            StubURLProtocol.routes = routes(unpaywall: answer)
+
+            let result = try await fetch()
+
+            XCTAssertEqual(result.content, .doi(webURL: Self.doiLink), address)
+            XCTAssertEqual(
+                result.openAccessShortfall,
+                OpenAccessShortfall(source: .landingPage, failure: .requestFailed),
+                address
+            )
+            XCTAssertEqual(landingPageReads, 0, address)
+        }
+    }
+
+    /// The same for a `url_for_pdf`: Unpaywall named a copy we cannot fetch,
+    /// which leaves it unassessed (#474). The address is never asked for, and
+    /// the reader gets the DOI link rather than a link we will not open.
+    func testAPDFAddressThatCannotBeFetchedIsUnsettled() async throws {
+        let answer = #"{"best_oa_location": {"url_for_pdf": "ftp://repo.example.org/a.pdf"}}"#
+        StubURLProtocol.routes = routes(unpaywall: answer)
+
+        let result = try await fetch()
+
+        XCTAssertEqual(result.content, .doi(webURL: Self.doiLink))
+        XCTAssertEqual(
+            result.openAccessShortfall,
+            OpenAccessShortfall(source: .unpaywall, failure: .requestFailed)
+        )
+        XCTAssertFalse(StubURLProtocol.requested("repo.example.org/a.pdf"))
+    }
+
+    /// The control: an absolute http(s) address is accepted, whatever case
+    /// its scheme is written in.
+    func testAFetchableAddressIsAnAbsoluteHTTPURL() {
+        XCTAssertNotNil(UnpaywallLandingPage.fetchableURL(Self.landing))
+        XCTAssertNotNil(UnpaywallLandingPage.fetchableURL("HTTP://repo.example.org/a"))
+        for address in ["ftp://repo.example.org/a", "/a", "repo.example.org/a", "https://", "mailto:a@b.org"] {
+            XCTAssertNil(UnpaywallLandingPage.fetchableURL(address), address)
+        }
+    }
+
+    /// The chain refuses to call a full text absent while the Unpaywall tier
+    /// left a free copy unassessed, as it does for Europe PMC (#475). Tested
+    /// on the decision itself: every fallback the chain returns after the
+    /// tier carries the shortfall, so it reaches the decision with one only
+    /// when no fallback at all could be built, and the DOI link always builds
+    /// on the iOS 17 / macOS 14 Foundation, which percent-encodes what it
+    /// would once have refused.
+    func testAnExhaustedChainWithAnUnsettledCopyIsNotAnAbsence() {
+        let shortfall = OpenAccessShortfall(source: .unpaywall, failure: .httpStatus(429))
+        let error = FullTextService.exhaustedChainError(
+            primarySlot: "", primaryKind: nil, europePMCShortfall: nil,
+            openAccessShortfall: shortfall, articleName: "a test article"
+        )
+
+        guard case .openAccessNotEstablished(let carried) = error else {
+            return XCTFail("expected openAccessNotEstablished, got \(error)")
+        }
+        XCTAssertEqual(carried, shortfall)
+        XCTAssertFalse(error.isRetryable)
+        XCTAssertEqual(
+            error.errorDescription,
+            "No source provided this article's full text. Unpaywall (HTTP 429 Too Many Requests) "
+                + "could not be asked, so a freely available copy may exist. Whether this document "
+                + "is open access was not established."
+        )
+    }
+
+    /// An unclassified primary slot is named before either shortfall, Europe
+    /// PMC's before the open-access one (#434), and with nothing unsettled the
+    /// chain's answer is an absence: the controls.
+    func testAnExhaustedChainNamesEuropePMCFirstAndOtherwiseIsAnAbsence() {
+        let unclassified = FullTextService.exhaustedChainError(
+            primarySlot: "889149", primaryKind: nil, europePMCShortfall: .timeout,
+            openAccessShortfall: .unpaywallNotConfigured, articleName: "a test article"
+        )
+        guard case .identifierKindUnresolved("889149") = unclassified else {
+            return XCTFail("expected the unresolved kind, got \(unclassified)")
+        }
+
+        let both = FullTextService.exhaustedChainError(
+            primarySlot: "", primaryKind: nil, europePMCShortfall: .timeout,
+            openAccessShortfall: .unpaywallNotConfigured, articleName: "a test article"
+        )
+        guard case .absenceNotEstablished(.timeout) = both else {
+            return XCTFail("expected Europe PMC's shortfall, got \(both)")
+        }
+
+        let neither = FullTextService.exhaustedChainError(
+            primarySlot: "", primaryKind: nil, europePMCShortfall: nil,
+            openAccessShortfall: nil, articleName: "a test article"
+        )
+        guard case .noFullTextAvailable = neither else {
+            return XCTFail("expected noFullTextAvailable, got \(neither)")
+        }
     }
 
     /// The control: Unpaywall's 404 is its answer that it knows no copy.

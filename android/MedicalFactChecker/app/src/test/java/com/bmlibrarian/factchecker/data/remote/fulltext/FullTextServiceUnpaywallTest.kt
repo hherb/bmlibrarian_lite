@@ -231,6 +231,46 @@ class FullTextServiceUnpaywallTest {
     private fun doiLinkLeaving(source: OpenAccessSource, failure: RequestFailure) =
         FullTextService.FullTextResult.DoiUrl("${Constants.DOI_URL_PREFIX}$doi", OpenAccessShortfall(source, failure))
 
+    /**
+     * An address that is not an http(s) URL is a page we did not read, not one
+     * that declares no PDF: Python's `requests` refuses the same addresses and
+     * records a failed request (#474).
+     */
+    @Test
+    fun `a landing page that cannot be fetched is left unsettled, not read as declaring nothing`() = runTest {
+        val addresses = listOf("ftp://repo.example.org$handlePath", handlePath, "file://$handlePath")
+        for (address in addresses) {
+            unpaywallAnswers(pdfUrl = null, landingPage = address)
+            Log.clear()
+
+            assertEquals(
+                address,
+                doiLinkLeaving(OpenAccessSource.LANDING_PAGE, RequestFailure(RequestFailureKind.REQUEST_FAILED)),
+                fetch()
+            )
+            assertTrue("${Log.lines}", Log.lines.any { "so it was not read" in it })
+        }
+        // Unpaywall alone was asked, once a fetch: the address was refused, not retried
+        assertEquals(List<String?>(addresses.size) { unpaywallPath }, requestedPaths())
+    }
+
+    /**
+     * A `url_for_pdf` that is not an http(s) URL is handed on as the PDF link,
+     * as Python hands it on, and is never asked for here. Swift refuses it and
+     * records Unpaywall's `request_failed` instead; which is right is #478, so
+     * this pins the current behaviour rather than endorsing it. What must not
+     * happen is the landing page's old defect on this path: refusing the
+     * address and answering a DOI link with no shortfall, as if no copy existed.
+     */
+    @Test
+    fun `a url_for_pdf that cannot be fetched is handed on as the PDF link`() = runTest {
+        val pdfUrl = "ftp://repo.example.org/a.pdf"
+        unpaywallAnswers(pdfUrl = pdfUrl, landingPage = server.url(handlePath).toString())
+
+        assertEquals("${Log.lines}", FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = pdfUrl), fetch())
+        assertEquals(listOf<String?>(unpaywallPath), requestedPaths())
+    }
+
     @Test
     fun `an unreachable landing page is retried and logged as unread, not as declaring nothing`() = runTest {
         unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())

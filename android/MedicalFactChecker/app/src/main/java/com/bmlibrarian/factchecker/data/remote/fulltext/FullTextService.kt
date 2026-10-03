@@ -536,21 +536,24 @@ class FullTextService @Inject constructor(
      * the throttles and server faults [NetworkRetry.isRetryableStatusCode] names are
      * retried with backoff. What the page settled is then read by [landingPageRead].
      *
-     * A page that could not be reached, or whose status
-     * [UnpaywallLandingPage.webPageStatusUnsettled] calls unsettled after the
-     * retries, is [LandingPageRead.Unreachable]: not the page's answer, so not a
-     * page without a PDF. The landing page itself is returned only when it was
-     * served as a PDF.
+     * A page that could not be reached, whose address is not an http(s) URL, or
+     * whose status [UnpaywallLandingPage.webPageStatusUnsettled] calls unsettled
+     * after the retries, is [LandingPageRead.Unreachable]: not the page's answer,
+     * so not a page without a PDF. The landing page itself is returned only when
+     * it was served as a PDF.
      *
      * @param pageUrl The landing page Unpaywall named.
      * @return What the read settled.
      * @throws CancellationException if the caller cancelled.
      */
     private suspend fun readLandingPage(pageUrl: String): LandingPageRead {
+        // An address we cannot fetch is a page we did not read, not one that
+        // declares no PDF: Python's `requests` refuses the same addresses and
+        // records a failed request (#474)
         val url = pageUrl.toHttpUrlOrNull()
         if (url == null) {
-            Log.d(TAG, "Unpaywall's landing page is not an http(s) URL: $pageUrl")
-            return LandingPageRead.DeclaresNone
+            Log.w(TAG, "Unpaywall's landing page is not an http(s) URL ($pageUrl), so it was not read")
+            return LandingPageRead.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
         }
         val request = Request.Builder()
             .url(url)
