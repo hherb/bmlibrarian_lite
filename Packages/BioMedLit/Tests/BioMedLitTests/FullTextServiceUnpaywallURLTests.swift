@@ -140,8 +140,10 @@ final class FullTextServiceUnpaywallURLTests: XCTestCase {
 
     /// An unset address must be named as such, not left to Unpaywall.
     ///
-    /// Unpaywall answers 422 for a missing email, which the caller renders as
-    /// "no full text available" -- an outage dressed up as an absent PDF.
+    /// Unpaywall answers 422 for a missing email, which would read to the reader
+    /// as "Unpaywall did not serve it", blaming the article for our
+    /// configuration. The result says it was not configured instead
+    /// (`UnpaywallLandingPageServiceTests`).
     func testAnEmptyAddressIsRejectedBeforeTheRequest() async {
         _ = try? await service(email: "   ")
             .fetchFullText(pmcId: nil, doi: "10.1234/example", pmid: "1")

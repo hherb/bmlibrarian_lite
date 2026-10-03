@@ -174,10 +174,11 @@ data class DocumentEntity(
      * [OpenAccessShortfall.toJson] writes, or null when nothing was left unsettled
      * (#466).
      *
-     * Unpaywall, or the landing page it named, could not answer, so the chain
-     * ended on the DOI link without learning whether a free copy exists. Stored
-     * with the fetch that produced it and cleared by any later one, so the cards
-     * can say so on every reopen; read it through [openAccessShortfall].
+     * Unpaywall, or the landing page it named, could not settle whether a free
+     * copy exists (or Unpaywall was not configured), so the chain ended on the
+     * DOI link without learning it. Stored with the fetch that produced it and
+     * cleared by every later fetch that settles it, so the cards can say so on
+     * every reopen; read it through [openAccessShortfall].
      */
     @ColumnInfo(name = "full_text_open_access_shortfall_json")
     val fullTextOpenAccessShortfallJson: String? = null,

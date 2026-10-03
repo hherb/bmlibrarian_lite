@@ -727,7 +727,7 @@ struct DocumentScoreRow: View {
                     // the silent fallback #183 objects to, one surface along;
                     // the note and an Open Publisher link are in the card.
                     if case .webURL(let url) = result.content {
-                        if result.degradation == nil && result.openAccessShortfall == nil {
+                        if result.hasNothingToExplain {
                             openURL(url)
                         }
                     } else {

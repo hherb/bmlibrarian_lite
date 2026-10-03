@@ -270,6 +270,16 @@ struct AppFullTextResult: Equatable, Sendable {
         content.canDisplayInApp
     }
 
+    /// Whether there is nothing to tell the reader before handing them this
+    /// result's web link.
+    ///
+    /// A degradation (#183) or an open-access shortfall (#466) is explained in
+    /// the card, beside an Open Publisher link; opening the browser first would
+    /// take the reader past it, the silent fallback both issues object to.
+    var hasNothingToExplain: Bool {
+        degradation == nil && openAccessShortfall == nil
+    }
+
     /// Get the HTML content if available.
     var htmlContent: String? {
         content.htmlContent

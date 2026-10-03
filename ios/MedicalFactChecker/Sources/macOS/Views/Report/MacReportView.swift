@@ -1159,7 +1159,7 @@ struct MacDocumentDetailSheet: View {
                         // tab banners the record from its stored fields, so a
                         // degraded link, or one an unsettled open-access lookup
                         // left behind (#466), is sent there to be explained.
-                        if result.degradation == nil && result.openAccessShortfall == nil {
+                        if result.hasNothingToExplain {
                             NSWorkspace.shared.open(url)
                         } else {
                             showFullTextInTab()

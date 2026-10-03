@@ -34,8 +34,9 @@ import com.bmlibrarian.factchecker.util.Constants
 /**
  * Tells the reader that an open-access copy went unassessed (#466).
  *
- * Unpaywall, or the landing page it named, could not answer, so the full text
- * ended on the publisher link without learning whether a free copy exists. A
+ * Unpaywall, or the landing page it named, could not settle whether a free copy
+ * exists (or Unpaywall was not configured), so the full text ended on the
+ * publisher link without learning it. A
  * note, not a warning: the link shown is complete in itself. The sentence is the
  * shared contract's ([com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall.notice]).
  *

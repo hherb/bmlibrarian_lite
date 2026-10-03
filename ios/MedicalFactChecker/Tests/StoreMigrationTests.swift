@@ -48,7 +48,9 @@ final class StoreMigrationTests: XCTestCase {
     }
 
     /// A document as a build before #466 stored it: fetched, ending on a
-    /// publisher link, with no open-access shortfall field.
+    /// publisher link, with no open-access shortfall field. A reduced model, a
+    /// handful of the real `Document`'s fields, so it pins that such a store
+    /// migrates lightweight and reads back silent, not the exact pre-#466 delta.
     enum EarlierBuildDocumentSchema: VersionedSchema {
         static var versionIdentifier: Schema.Version { Schema.Version(2, 0, 0) }
         static var models: [any PersistentModel.Type] { [Document.self] }

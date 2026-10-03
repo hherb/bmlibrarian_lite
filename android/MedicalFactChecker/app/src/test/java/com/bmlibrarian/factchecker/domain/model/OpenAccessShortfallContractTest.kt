@@ -65,10 +65,18 @@ class OpenAccessShortfallContractTest {
     private fun persisted(name: String): List<JsonObject> =
         rows(contract["persisted"]!!.jsonObject[name]!!.jsonArray)
 
-    /** The shortfall a row names by its `source`, `kind` and `status_code`. */
+    /**
+     * The shortfall a row names by its `source`, `kind` and `status_code`, or by
+     * `skipped` for a lookup that was never made.
+     */
     private fun shortfall(row: JsonObject): OpenAccessShortfall {
         val source = OpenAccessSource.fromPersisted(row["source"]!!.jsonPrimitive.content)
             ?: error("unknown source in $row")
+        row["skipped"]?.takeUnless { it is JsonNull }?.let { skipped ->
+            assertEquals("$row", "not_configured", skipped.jsonPrimitive.content)
+            assertEquals("$row", OpenAccessSource.UNPAYWALL, source)
+            return OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED
+        }
         val kind = RequestFailureKind.fromPersisted(row["kind"]!!.jsonPrimitive.content)
             ?: error("unknown kind in $row")
         val status = row["status_code"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.int
@@ -92,6 +100,7 @@ class OpenAccessShortfallContractTest {
         for (row in table) {
             assertEquals("$row", row["notice"]!!.jsonPrimitive.content, shortfall(row).notice)
         }
+        assertTrue("a skip row pins the not-configured sentence", table.any { "skipped" in it })
     }
 
     @Test
@@ -137,6 +146,8 @@ class OpenAccessShortfallContractTest {
                 assertEquals(shortfall, OpenAccessShortfall.fromJson(shortfall.toJson()))
             }
         }
+        val skipped = OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED
+        assertEquals(skipped, OpenAccessShortfall.fromJson(skipped.toJson()))
     }
 
     /** A table added to the contract and asserted nowhere would pin nothing. */

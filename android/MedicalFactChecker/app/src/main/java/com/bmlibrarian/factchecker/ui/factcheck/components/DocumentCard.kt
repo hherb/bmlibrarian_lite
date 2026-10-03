@@ -674,9 +674,8 @@ private fun FullTextSection(
             }
         }
 
-        // What an unsettled open-access lookup leaves open (#466). A DOI
-        // fallback stores no content, so without this the card reads as never
-        // fetched and the reader is not told a free copy may exist
+        // What an unsettled open-access lookup leaves open (#466); a DOI
+        // fallback stores no content to say it with
         document.openAccessShortfall?.let { shortfall ->
             OpenAccessShortfallNotice(notice = shortfall.notice)
         }

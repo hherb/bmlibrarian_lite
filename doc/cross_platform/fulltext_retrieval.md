@@ -268,6 +268,8 @@ const UNPAYWALL_API_URL = "https://api.unpaywall.org/v2"
 async function fetch_unpaywall_pdf_url(doi: string, email: string) -> string | null:
     if not doi:
         return null
+    if not usable_email(email):       # blank, or the app's own placeholder,
+        raise Unsettled(NOT_CONFIGURED)  # which Unpaywall refuses with 422 (#466)
 
     url = f"{UNPAYWALL_API_URL}/{encode_uri_component(doi)}?email={email}"
 
@@ -277,8 +279,10 @@ async function fetch_unpaywall_pdf_url(doi: string, email: string) -> string | n
         if response.status == 404:
             return null  # DOI not found
 
-        response.raise_for_status()   # a 429 or 5xx is retried first; any
-                                      # error status but 404 is Unsettled (#466)
+        response.raise_for_status()   # a 429, 500, 502, 503 or 504 is retried
+                                      # first; any status of 400 or above but
+                                      # 404 is Unsettled (#466); below 400 the
+                                      # body is decoded
         data = response.json()
 
         choice = choose_unpaywall_url(data)
@@ -292,7 +296,7 @@ async function fetch_unpaywall_pdf_url(doi: string, email: string) -> string | n
         return null
 
     except HttpError, Timeout, ConnectionError, UnreadableJson as e:
-        # Not "no copy": Unpaywall could not answer (see "Landing Pages")
+        # Not "no copy": Unpaywall did not settle it (see "Landing Pages")
         raise Unsettled(failure_of(e))
 ```
 
@@ -402,8 +406,9 @@ HTML nor PDF, or a page without the tag is its answer (`DeclaresNone`).
 #### An unsettled open-access copy (#466)
 
 The reader of a fallback the chain settled on because Unpaywall, or the
-landing page it named, could not answer is told so. Without it the publisher
-link reads exactly as one for an article with no free copy at all.
+landing page it named, could not settle whether a free copy exists is told so.
+Without it the publisher link reads exactly as one for an article with no free
+copy at all.
 
 **One sentence, Python's.** The notice is Python's
 `analysis_failures.unestablished_access_clause` for that one lookup, and the
@@ -415,22 +420,36 @@ verb is #435's (`RequestFailure.is_answer`, `search_failure_reporting.md`):
 - answered without serving it: `"The open-access copy's landing page (HTTP 408
   Request Timeout) did not serve it, so whether this document is open access
   was not established."`
+- not configured: `"Unpaywall (not configured) could not be asked, so a freely
+  available copy may exist. Whether this document is open access was not
+  established. Configuring Unpaywall would add an open-access route this search
+  did not have."` Python records this as a `SourceLookupSkipped`
+  (`NOT_CONFIGURED`), and `configuration_nudge` adds the last sentence.
 
 The source is named as Python records it (`SERVICE_UNPAYWALL`,
 `SERVICE_UNPAYWALL_LANDING_PAGE`), a leading "the" capitalised. The rows are
 `fulltext_parity/open_access_unsettled_notice.json`, read by all three suites.
 
 **Which answers leave it unsettled** is the same on all three platforms: from
-Unpaywall, any error status but 404 (a 408 or 403 is an answer, "did not serve
-it"; a 501 or 520 could not be asked), a transport failure, and an answer that
-is empty or will not decode; from the landing page, `Unreachable` above. The
-apps once gave a shortfall only for retried statuses, so a 501 or 403 from
-Unpaywall read as "no copy".
+Unpaywall, any status of 400 or above but 404 (a 408 or 403 is an answer, "did
+not serve it"; a 501 or 520 could not be asked), a transport failure, an answer
+that is empty or will not decode, and an unexpected error in the tier; from the
+landing page, `Unreachable` above.
+
+**No usable email is "not configured", not a 422.** Unpaywall refuses a blank
+address, and Android's placeholder `bmlibrarian@example.com` (Python's
+`FALLBACK_CONTACT_EMAIL`), with HTTP 422 for every article. Python
+(`usable_unpaywall_email`) and Android (`UnpaywallContact.usableEmail`) do not
+ask it then, and BioMedLit does not ask it with a blank address. Android asks
+with the Unpaywall email, or failing that the NCBI email the settings screen
+offers; iOS and macOS ask with the NCBI email, or an address of their own
+Unpaywall accepts.
 
 **Stored with the full text.** The apps keep it on the document beside the
 other full-text fields (Swift `Document.fullTextOpenAccessShortfallJSON`,
 Android `documents.full_text_open_access_shortfall_json`, Room 8). It is not a
-`FullTextDegradation`: both can be true of one fetch, and the banner says both.
+`FullTextDegradation`: both can be true of one fetch, and on iOS/macOS the
+banner says both.
 
 ```json
 {"schema_version": 1, "source": "unpaywall_landing_page",
@@ -439,11 +458,14 @@ Android `documents.full_text_open_access_shortfall_json`, Room 8). It is not a
 
 `source` is `unpaywall` or `unpaywall_landing_page`; `failure` is a search
 shortfall's failure object and reads back by its rules
-(`search_failure_reporting.md`, "Persisted form"). The field is written only
-when a lookup went unsettled, so **every stored value reads as some
-shortfall**: one that is not a JSON object, or whose `schema_version` is not 1
-(missing included), reads as `{unpaywall, request_failed}`; an unknown source
-reads as `unpaywall`.
+(`search_failure_reporting.md`, "Persisted form"). An Unpaywall that was not
+configured is stored as `{"schema_version": 1, "source": "unpaywall",
+"skipped": "not_configured"}` in place of a failure, and a stored skip reads as
+Unpaywall's whatever source it names. The field is written only when a lookup
+went unsettled, so **every stored value reads as some shortfall**: one that is
+not a JSON object, or whose `schema_version` is not the whole number 1 (missing
+included), reads as `{unpaywall, request_failed}`; an unknown source reads as
+`unpaywall`.
 
 **Written by every fetch, cleared by every fetch that settles it.** A result
 carrying no shortfall clears the field, as does an upload, a cleared cache and
@@ -456,9 +478,13 @@ refetch whose stored PDF link is kept (`storedLinkKept`) writes nothing either.
 - **iOS/macOS:** a line of its own in `ParseWarningBanner`
   (`ParseWarningBannerContent`), beside whatever else the banner says, on every
   card and viewer that banners a document; a web link is not opened in the
-  browser automatically while there is something to explain.
+  browser automatically while there is something to explain
+  (`AppFullTextResult.hasNothingToExplain`), except from the iOS Full Text
+  tab's link-only row, which opens Safari without the notice (#472).
 - **Android:** the full-text screen's web-link view, the fact-check document
-  card and the report's document sheet (`OpenAccessShortfallNotice`).
+  card and the report's document sheet (`OpenAccessShortfallNotice`). A
+  DOI-only card still offers "Get Full Text" and the web-link screen still says
+  full text is on the publisher's site (#471).
 
 ### PDF Downloading and Caching
 

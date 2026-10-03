@@ -10,16 +10,21 @@ its slice has landed; add a new section when handing off new work.
 
 **Apps: tell the reader the open-access copy went unassessed** (#466), branch
 `fix/oa-unreachable-notice-466`, PR #473 (compress once merged). Both apps
-carry an **`OpenAccessShortfall`** (source + failure) on the fallback, store it
-with the full text (Swift `fullTextOpenAccessShortfallJSON`, Android Room **8**)
-and show **Python's sentence** (`unestablished_access_clause`) as a note
+carry an **`OpenAccessShortfall`** (source + a failure, or **not configured**)
+on the fallback, store it with the full text (Swift
+`fullTextOpenAccessShortfallJSON`, Android Room **8**) and show **Python's
+sentence** (`unestablished_access_clause`) as a note
 (`ParseWarningBannerContent`; Android `OpenAccessShortfallNotice`). **Every
-fetch writes or clears it** (Android: one writer, `recordingFullTextFetch`);
-an unreadable stored value still speaks. **Any Unpaywall error status but 404
-is unsettled** on all three now (the apps took only retried ones). Contract:
+fetch that settles it writes or clears it** (Android: one writer,
+`recordingFullTextFetch`, for all three screens); an unreadable stored value
+still speaks. **Any Unpaywall status of 400+ but 404 is unsettled** on all
+three. **No usable email is "not configured", never a 422**: Android's
+placeholder is not sent (`UnpaywallContact`, NCBI email as fallback), and the
+notice adds Python's configuration nudge. Room migrations register from
+`AppDatabase.ALL_MIGRATIONS`, pinned by `AppDatabaseMigrationsTest`. Contract:
 `fulltext_retrieval.md` "An unsettled open-access copy" and
 `fulltext_parity/open_access_unsettled_notice.json`. Follow-ups **#471**,
-**#472**.
+**#472**, **#474**, **#475**, **#476**.
 
 ## Recently landed (context)
 

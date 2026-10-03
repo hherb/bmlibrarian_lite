@@ -242,11 +242,11 @@ struct ParseWarningBannerContent: Equatable {
 ///   was recovered at all;
 /// - a better source existed and could not be used — an informational note, with
 ///   a sentence per reason: our parser failed on it, we could not reach it, or a
-///   record from a newer build names a reason this one does not know (#186).
-///
+///   record from a newer build names a reason this one does not know (#186);
 /// - an open-access lookup went unsettled — an informational line of its own,
-///   beside any of the above or alone (#466): the article may have a free copy
-///   that Unpaywall, or the landing page it named, could not be asked about.
+///   beside any of the above or alone (#466): whether the article has a free
+///   copy was not established, because Unpaywall, or the landing page it named,
+///   could not be asked or did not serve it.
 ///
 /// The last two groups are deliberately *not* warnings. A fallback PDF or publisher link is
 /// complete in itself, and a warning triangle over content that is fine is the

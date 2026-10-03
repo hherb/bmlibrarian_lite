@@ -7,7 +7,9 @@
 When Unpaywall, or the landing page it named, could not answer, Python
 records a :class:`SourceLookupFailure` and tells the reader what that leaves
 open. The apps tell the reader the same thing beside a document whose full
-text ended on a fallback, and they word it exactly as Python does. The rows
+text ended on a fallback, and they word it exactly as Python does. An
+Unpaywall with no usable email is never asked; Python records that as a
+:class:`SourceLookupSkipped`, and the apps word it the same way too. The rows
 are the shared contract,
 ``doc/cross_platform/fulltext_parity/open_access_unsettled_notice.json``;
 Python reads only its ``sources`` and ``notices`` (the persisted form is the
@@ -27,9 +29,11 @@ from bmlibrarian_lite.constants import (
 )
 from bmlibrarian_lite.data_models import (
     LookupRecord,
+    LookupSkipReason,
     RequestFailure,
     RequestFailureKind,
     SourceLookupFailure,
+    SourceLookupSkipped,
 )
 
 CONTRACT: dict[str, Any] = json.loads(
@@ -54,19 +58,35 @@ def test_the_contract_names_the_services_python_records() -> None:
     assert CONTRACT["sources"] == SERVICES
 
 
+def _record(row: dict[str, Any]) -> LookupRecord:
+    """The record of the one lookup a contract row names.
+
+    Args:
+        row: A row naming a failed lookup by ``kind`` and ``status_code``, or
+            one never made by ``skipped``.
+
+    Returns:
+        A record holding that one failure or skip.
+    """
+    service = SERVICES[row["source"]]
+    if row.get("skipped") is not None:
+        return LookupRecord(
+            skipped=(SourceLookupSkipped(service, LookupSkipReason(row["skipped"])),)
+        )
+    failure = RequestFailure(RequestFailureKind(row["kind"]), row["status_code"])
+    return LookupRecord(failures=(SourceLookupFailure(service, failure),))
+
+
 @pytest.mark.parametrize(
     "row",
     CONTRACT["notices"],
-    ids=lambda row: f"{row['source']}-{row['kind']}-{row['status_code']}",
+    ids=lambda row: (
+        f"{row['source']}-{row.get('skipped') or row['kind']}-{row['status_code']}"
+    ),
 )
 def test_notice_matches_the_contract(row: dict[str, Any]) -> None:
     """One unsettled lookup reads exactly as the contract's sentence."""
-    failure = RequestFailure(RequestFailureKind(row["kind"]), row["status_code"])
-    record = LookupRecord(
-        failures=(SourceLookupFailure(SERVICES[row["source"]], failure),)
-    )
-
-    assert unestablished_access_clause(record) == row["notice"]
+    assert unestablished_access_clause(_record(row)) == row["notice"]
 
 
 def test_the_notices_reach_both_verbs_and_both_sources() -> None:
@@ -76,3 +96,4 @@ def test_the_notices_reach_both_verbs_and_both_sources() -> None:
     assert {row["source"] for row in notices} == set(SERVICES)
     assert any("could not be asked" in row["notice"] for row in notices)
     assert any("did not serve it" in row["notice"] for row in notices)
+    assert any(row.get("skipped") for row in notices)

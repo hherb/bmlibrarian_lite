@@ -99,10 +99,12 @@ class FullTextViewModelOpenAccessShortfallTest {
         coVerify { documentDao.update(match { it.openAccessShortfall == throttled }) }
     }
 
-    /** The control: a DOI link Unpaywall settled says nothing more. */
+    /** The control: a DOI link Unpaywall settled says nothing more, and forgets the old. */
     @Test
-    fun `a settled DOI link carries no notice`() {
-        val viewModel = open(document, FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1/x"))
+    fun `a settled DOI link carries no notice and clears an earlier shortfall`() {
+        val unsettled = document.copy(fullTextOpenAccessShortfallJson = throttled.toJson())
+
+        val viewModel = open(unsettled, FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1/x"))
 
         assertEquals(
             FullTextViewModel.FullTextState.WebUrl("https://doi.org/10.1/x", "t", null),
@@ -112,15 +114,86 @@ class FullTextViewModelOpenAccessShortfallTest {
     }
 
     /**
-     * Unpaywall now answered with a PDF the viewer could not download: the
-     * lookup is settled, so the earlier shortfall goes, though nothing else is stored.
+     * Every answer that settles the lookup clears what an earlier fetch stored,
+     * downloaded or not: the viewer writes through the fact-check and report
+     * screens' writer, so the card never keeps saying a free copy may exist.
      */
     @Test
-    fun `a PDF that could not be downloaded clears an earlier shortfall`() {
+    fun `every settled answer clears an earlier shortfall`() {
+        val pdfUrl = "https://repo.example.org/a.pdf"
+        val answers = listOf(
+            FullTextService.FullTextResult.EuropePmcXml(xml = "<a/>", markdown = "m", html = "<p>h</p>") to null,
+            FullTextService.FullTextResult.EuropePmcPdf(pdfUrl) to "/cache/a.pdf",
+            FullTextService.FullTextResult.EuropePmcPdf(pdfUrl) to null,
+            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl) to "/cache/a.pdf",
+            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl) to null,
+            FullTextService.FullTextResult.Unavailable("none") to null,
+        )
+        for ((answer, downloaded) in answers) {
+            documentDao = mockk(relaxed = true)
+            coEvery { fullTextService.downloadPdf(any(), any()) } returns downloaded
+            val unsettled = document.copy(fullTextOpenAccessShortfallJson = throttled.toJson())
+
+            open(unsettled, answer)
+
+            coVerify(exactly = 1) {
+                documentDao.update(match { it.fullTextOpenAccessShortfallJson == null && it.pdfPath == downloaded })
+            }
+        }
+    }
+
+    /** A downloaded PDF is shown; one that could not be is offered by its URL. */
+    @Test
+    fun `a PDF is shown when downloaded and linked when not`() {
+        val pdfUrl = "https://repo.example.org/a.pdf"
+        coEvery { fullTextService.downloadPdf(any(), any()) } returns "/cache/a.pdf"
+        assertEquals(
+            FullTextViewModel.FullTextState.PdfContent("/cache/a.pdf", "t", "Unpaywall"),
+            open(document, FullTextService.FullTextResult.UnpaywallPdf(pdfUrl)).state.value
+        )
+
+        coEvery { fullTextService.downloadPdf(any(), any()) } returns null
+        assertEquals(
+            FullTextViewModel.FullTextState.WebUrl(pdfUrl, "t"),
+            open(document, FullTextService.FullTextResult.EuropePmcPdf(pdfUrl)).state.value
+        )
+    }
+
+    /** A chain that settled nothing records nothing, the stored shortfall included (#434). */
+    @Test
+    fun `an unestablished answer leaves the stored shortfall as it was`() {
         val unsettled = document.copy(fullTextOpenAccessShortfallJson = throttled.toJson())
 
-        open(unsettled, FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = "https://repo.example.org/a.pdf"))
+        open(unsettled, FullTextService.FullTextResult.NotEstablished(RequestFailure(RequestFailureKind.TIMEOUT)))
 
-        coVerify { documentDao.update(unsettled.copy(fullTextOpenAccessShortfallJson = null)) }
+        coVerify(exactly = 0) { documentDao.update(any()) }
+    }
+
+    /** Refresh forgets everything the last fetch stored, so it really fetches again. */
+    @Test
+    fun `refresh clears the stored shortfall and the cached text`() {
+        val cached = document.copy(
+            fullTextHTML = "<p>h</p>",
+            fullTextMarkdown = "m",
+            fullTextOpenAccessShortfallJson = throttled.toJson()
+        )
+        val viewModel = open(cached, FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1/x"))
+
+        coEvery { documentDao.getById("d") } returns document
+
+        viewModel.refresh()
+
+        // Fetched again, rather than left on Loading
+        assertEquals(
+            FullTextViewModel.FullTextState.WebUrl("https://doi.org/10.1/x", "t", null),
+            viewModel.state.value
+        )
+        coVerify {
+            documentDao.update(
+                match {
+                    it.fullTextOpenAccessShortfallJson == null && it.fullTextHTML == null && it.fullTextMarkdown == null
+                }
+            )
+        }
     }
 }

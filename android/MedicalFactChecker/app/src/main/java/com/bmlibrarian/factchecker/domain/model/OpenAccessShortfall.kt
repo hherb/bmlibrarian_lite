@@ -33,7 +33,10 @@ import kotlinx.serialization.json.put
  *   mid-sentence (Python's `SERVICE_UNPAYWALL` and `SERVICE_UNPAYWALL_LANDING_PAGE`)
  */
 enum class OpenAccessSource(val persistedValue: String, val serviceName: String) {
-    /** Unpaywall itself: its answer did not arrive, or could not be read. */
+    /**
+     * Unpaywall itself: it was not asked, its answer did not arrive or could not
+     * be read, or it answered with an error status other than 404.
+     */
     UNPAYWALL("unpaywall", "Unpaywall"),
 
     /** The landing page Unpaywall named in place of a PDF (#464). */
@@ -52,40 +55,85 @@ enum class OpenAccessSource(val persistedValue: String, val serviceName: String)
 }
 
 /**
+ * Why a lookup of the Unpaywall tier left the question of a free copy open.
+ *
+ * Python records the two as a `SourceLookupFailure` and a `SourceLookupSkipped`
+ * with `LookupSkipReason.NOT_CONFIGURED`.
+ */
+sealed interface OpenAccessUnsettledReason {
+    /**
+     * The lookup was made and did not settle it.
+     *
+     * @property failure Why, by kind and status only
+     */
+    data class Failed(val failure: RequestFailure) : OpenAccessUnsettledReason
+
+    /**
+     * Unpaywall was never asked: there is no contact email it would accept.
+     * Only [OpenAccessSource.UNPAYWALL] is ever skipped so; see
+     * [OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED].
+     */
+    data object NotConfigured : OpenAccessUnsettledReason
+}
+
+/**
  * Why the open-access copy Unpaywall may know of went unassessed (#464, #466).
  *
- * Unpaywall, or the landing page it named, could not answer, so the chain ended
- * on a fallback without learning whether a free copy exists. That is not "no
+ * Unpaywall, or the landing page it named, could not settle whether a free copy
+ * exists, so the chain ended on a fallback without learning it. That is not "no
  * open-access copy": the reader is told so ([notice]), and the document keeps it
  * beside its full-text fields ([toJson]). Python records the same event as a
- * `SourceLookupFailure` and words it the same way; iOS and macOS have the twin
+ * `SourceLookupFailure` (or, for an Unpaywall with no usable email, a
+ * `SourceLookupSkipped`) and words it the same way; iOS and macOS have the twin
  * in BioMedLit. The contract is
  * `doc/cross_platform/fulltext_parity/open_access_unsettled_notice.json`.
  *
  * @property source Which lookup could not settle it
- * @property failure Why, by kind and status only
+ * @property reason Why: a failed lookup, or an Unpaywall that was not configured
  */
 data class OpenAccessShortfall(
     val source: OpenAccessSource,
-    val failure: RequestFailure
+    val reason: OpenAccessUnsettledReason
 ) {
+    /**
+     * A lookup that was made and failed.
+     *
+     * @param source Which lookup could not settle it
+     * @param failure Why, by kind and status only
+     */
+    constructor(source: OpenAccessSource, failure: RequestFailure) :
+        this(source, OpenAccessUnsettledReason.Failed(failure))
+
+    /** The failure, or null for a lookup that was never made. */
+    val failure: RequestFailure?
+        get() = (reason as? OpenAccessUnsettledReason.Failed)?.failure
+
     /**
      * What the reader is told: which lookup went unsettled, and what that leaves
      * open about access.
      *
      * The verb follows #435 ([RequestFailure.isAnswer]). A lookup that could not
      * be asked may have missed a free copy, and the reader is told so; one that
-     * answered without serving the copy is no reason to think one exists.
+     * answered without serving the copy is no reason to think one exists. An
+     * Unpaywall that was not configured could not be asked, and the reader is
+     * also told that configuring it would help, the one cause they can change.
      * Python's `analysis_failures.unestablished_access_clause`, word for word.
      */
     val notice: String
         get() {
-            val named = "${sentenceStart(source.serviceName)} (${failure.describe()})"
-            return if (failure.isAnswer) {
-                "$named did not serve it, so whether this document is open access was not established."
-            } else {
-                "$named could not be asked, so a freely available copy may exist. " +
-                    "Whether this document is open access was not established."
+            val name = sentenceStart(source.serviceName)
+            return when (reason) {
+                is OpenAccessUnsettledReason.Failed -> {
+                    val named = "$name (${reason.failure.describe()})"
+                    if (reason.failure.isAnswer) {
+                        "$named did not serve it, so whether this document is open access was not established."
+                    } else {
+                        "$named $MAY_EXIST"
+                    }
+                }
+                OpenAccessUnsettledReason.NotConfigured ->
+                    "$name ($NOT_CONFIGURED_DESCRIPTION) $MAY_EXIST " +
+                        "Configuring ${source.serviceName} would add an open-access route this search did not have."
             }
         }
 
@@ -93,12 +141,16 @@ data class OpenAccessShortfall(
      * The value a document stores for this shortfall.
      *
      * @return `{"schema_version":1,"source":…,"failure":{"kind":…,"status_code":…}}`,
-     *   the failure in the shape a search shortfall stores it
+     *   the failure in the shape a search shortfall stores it; for a lookup that
+     *   was not configured, `{"schema_version":1,"source":"unpaywall","skipped":"not_configured"}`
      */
     fun toJson(): String = buildJsonObject {
         put(KEY_SCHEMA_VERSION, SCHEMA_VERSION)
         put(KEY_SOURCE, source.persistedValue)
-        put(KEY_FAILURE, SearchFailureReporting.failureJson(failure))
+        when (reason) {
+            is OpenAccessUnsettledReason.Failed -> put(KEY_FAILURE, SearchFailureReporting.failureJson(reason.failure))
+            OpenAccessUnsettledReason.NotConfigured -> put(KEY_SKIPPED, SKIPPED_NOT_CONFIGURED)
+        }
     }.toString()
 
     companion object {
@@ -108,6 +160,22 @@ data class OpenAccessShortfall(
         private const val KEY_SCHEMA_VERSION = "schema_version"
         private const val KEY_SOURCE = "source"
         private const val KEY_FAILURE = "failure"
+        private const val KEY_SKIPPED = "skipped"
+
+        /** Python's `LookupSkipReason.NOT_CONFIGURED`, as stored. */
+        private const val SKIPPED_NOT_CONFIGURED = "not_configured"
+
+        /** Python's `SourceLookupSkipped.describe()` for that reason. */
+        private const val NOT_CONFIGURED_DESCRIPTION = "not configured"
+
+        /** The ending for a lookup that could not be asked. */
+        private const val MAY_EXIST =
+            "could not be asked, so a freely available copy may exist. " +
+                "Whether this document is open access was not established."
+
+        /** Unpaywall, never asked for want of a contact email it would accept. */
+        val UNPAYWALL_NOT_CONFIGURED =
+            OpenAccessShortfall(OpenAccessSource.UNPAYWALL, OpenAccessUnsettledReason.NotConfigured)
 
         /** The article a mid-sentence service name may begin with. */
         private const val LOWER_CASE_ARTICLE = "the "
@@ -120,7 +188,8 @@ data class OpenAccessShortfall(
          * What cannot be interpreted, a schema this build does not know
          * included, reads as a failed request to Unpaywall, the tier every
          * open-access lookup belongs to. An unknown source reads as Unpaywall
-         * too; the failure degrades as a search shortfall's does.
+         * too; the failure degrades as a search shortfall's does. A stored skip
+         * is Unpaywall's, whatever source it names: only Unpaywall is skipped.
          *
          * @param stored The stored value, untrusted
          * @return The shortfall, as specific as the stored value allows
@@ -129,6 +198,9 @@ data class OpenAccessShortfall(
             val fields = SearchFailureReporting.parsedOrNull(stored) as? JsonObject
             if (fields == null || SearchFailureReporting.wholeNumber(fields[KEY_SCHEMA_VERSION]) != SCHEMA_VERSION) {
                 return OpenAccessShortfall(OpenAccessSource.UNPAYWALL, RequestFailure(RequestFailureKind.REQUEST_FAILED))
+            }
+            if (fields[KEY_SKIPPED] == JsonPrimitive(SKIPPED_NOT_CONFIGURED)) {
+                return UNPAYWALL_NOT_CONFIGURED
             }
             val sourceValue = (fields[KEY_SOURCE] as? JsonPrimitive)?.takeIf { it.isString }?.content
             return OpenAccessShortfall(

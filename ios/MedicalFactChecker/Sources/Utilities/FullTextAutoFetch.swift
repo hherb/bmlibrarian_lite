@@ -71,18 +71,23 @@ enum FullTextAutoFetch {
     /// Why a re-fetch result must not replace the PDF link a document holds.
     ///
     /// The chain falls back to a weaker result (the abstract, another link, the
-    /// DOI page) when Unpaywall or the landing page it names could not answer,
-    /// and applying that fallback would clear the stored link for good: the
-    /// document would no longer hold an undownloaded PDF link, so nothing would
-    /// fetch it again. A source that could not answer is not one with nothing,
-    /// so the stored link is kept and the next run tries again (#464).
+    /// DOI page) when Unpaywall or the landing page it names could not settle
+    /// whether a free copy exists, and applying that fallback would clear the
+    /// stored link for good: the document would no longer hold an undownloaded
+    /// PDF link, so nothing would fetch it again. A lookup that settled nothing
+    /// is not one that found nothing, so the stored link is kept and the next
+    /// run tries again (#464).
     struct StoredLinkKept: LocalizedError, Equatable {
-        /// Why the open-access copy went unassessed.
-        let failure: RequestFailure
+        /// What left the open-access copy unassessed.
+        let shortfall: OpenAccessShortfall
 
+        /// The shortfall's own sentence (#466), what became of the stored link,
+        /// and "try again later" only where waiting can help: not for a source
+        /// that answered, nor for one that was not configured.
         var errorDescription: String? {
-            "The open-access copy could not be reached (\(failure.describe())), so the PDF "
-                + "link already stored was kept. Try again later."
+            let retrying = shortfall.failure.map { !$0.isAnswer } ?? false
+            return "\(shortfall.notice) The PDF link already stored was kept."
+                + (retrying ? " Try again later." : "")
         }
     }
 
@@ -93,13 +98,13 @@ enum FullTextAutoFetch {
     ///   - result: What the chain returned for it.
     /// - Returns: The refusal when the document holds only an undownloaded PDF
     ///   link and the result is a fallback the chain settled on because the
-    ///   open-access copy could not be reached; `nil` when it may be applied.
+    ///   open-access copy went unassessed; `nil` when it may be applied.
     static func storedLinkKept(
         _ document: Document, refetched result: BMLFullTextResult
     ) -> StoredLinkKept? {
         guard document.holdsOnlyUndownloadedPDFLink,
               let shortfall = result.openAccessShortfall else { return nil }
-        return StoredLinkKept(failure: shortfall.failure)
+        return StoredLinkKept(shortfall: shortfall)
     }
 
     /// Whether the retrieval chain has anything to look the document up by.

@@ -1420,7 +1420,7 @@ struct DocumentDetailSheet: View {
                     // the silent fallback #183 objects to; the note and a link
                     // are in the card, via `linkOnlyNotice`.
                     if case .webURL(let url) = result.content {
-                        if result.degradation == nil && result.openAccessShortfall == nil {
+                        if result.hasNothingToExplain {
                             openURL(url)
                         }
                     } else {

@@ -321,6 +321,66 @@ class FullTextServiceUnpaywallTest {
         assertEquals(doiLink, fetch())
     }
 
+    /**
+     * Unpaywall refuses the app's placeholder address with 422 for every article,
+     * which read as "Unpaywall did not serve it": not asked, it is reported as not
+     * configured, with the advice that goes with that (Python's
+     * `usable_unpaywall_email`).
+     */
+    @Test
+    fun `an Unpaywall with no usable email is not asked, and is reported as not configured`() = runTest {
+        unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())
+
+        for (email in listOf(null, "", "   ", Constants.UNPAYWALL_DEFAULT_EMAIL)) {
+            val result = service.fetchFullText(pmcId = null, doi = doi, pmid = null, email = email).getOrThrow()
+
+            assertEquals(
+                "email $email",
+                FullTextService.FullTextResult.DoiUrl(
+                    "${Constants.DOI_URL_PREFIX}$doi",
+                    OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED
+                ),
+                result
+            )
+        }
+        assertEquals(0, server.requestCount)
+    }
+
+    /** An answer with no body has told us nothing about the article. */
+    @Test
+    fun `an empty Unpaywall answer leaves the copy unassessed`() = runTest {
+        for (empty in listOf(MockResponse().setResponseCode(HTTP_NO_CONTENT), MockResponse().setBody(""))) {
+            routes[unpaywallPath] = empty
+
+            assertEquals(
+                "$empty",
+                doiLinkLeaving(OpenAccessSource.UNPAYWALL, RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)),
+                fetch()
+            )
+        }
+    }
+
+    /**
+     * An error the tier does not expect is no answer about the article either:
+     * Retrofit refuses a DOI that reads as path traversal before anything is sent.
+     */
+    @Test
+    fun `an unexpected error leaves the copy unassessed rather than silent`() = runTest {
+        val traversal = "10.1234/.."
+
+        val result = service.fetchFullText(pmcId = null, doi = traversal, pmid = null, email = "test@example.org")
+            .getOrThrow()
+
+        assertEquals(
+            FullTextService.FullTextResult.DoiUrl(
+                "${Constants.DOI_URL_PREFIX}$traversal",
+                OpenAccessShortfall(OpenAccessSource.UNPAYWALL, RequestFailure(RequestFailureKind.REQUEST_FAILED))
+            ),
+            result
+        )
+        assertTrue("${Log.lines}", Log.lines.any { "failed unexpectedly" in it })
+    }
+
     @Test
     fun `a landing page served as a PDF is the PDF`() = runTest {
         unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())
@@ -397,5 +457,8 @@ class FullTextServiceUnpaywallTest {
 
         /** HTTP 302: the redirect a handle server answers with. */
         const val HTTP_FOUND = 302
+
+        /** HTTP 204: an answer with no body. */
+        const val HTTP_NO_CONTENT = 204
     }
 }

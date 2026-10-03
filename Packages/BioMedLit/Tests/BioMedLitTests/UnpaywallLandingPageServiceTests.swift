@@ -50,6 +50,14 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
                        "url_for_landing_page": "https://repo.example.org/item/95934"}]}
     """#
 
+    /// A Europe PMC deposit with an abstract and no body.
+    private static let abstractOnlyDeposit = Data("""
+    <article><front><article-meta>
+      <title-group><article-title>A trial</article-title></title-group>
+      <abstract><p>Background and findings only.</p></abstract>
+    </article-meta></front></article>
+    """.utf8)
+
     private static let declaringPage = #"""
     <head><meta name="citation_pdf_url" content="../files/Okazaki_2025.pdf" /></head>
     """#
@@ -66,17 +74,19 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         super.tearDown()
     }
 
-    private func fetch() async throws -> FullTextResult {
+    private func fetch(
+        email: String = "test@example.org", pmcId: String? = nil
+    ) async throws -> FullTextResult {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]
         let session = URLSession(configuration: config)
         let service = FullTextService(
-            email: "test@example.org",
+            email: email,
             session: session,
             europePMCService: EuropePMCService(session: session),
             extractor: ExtractingStub()
         )
-        return try await service.fetchFullText(pmcId: nil, doi: "10.1/landing", pmid: Self.pmid)
+        return try await service.fetchFullText(pmcId: pmcId, doi: "10.1/landing", pmid: Self.pmid)
     }
 
     /// Europe PMC knows no record, so the Unpaywall tier decides the outcome.
@@ -313,6 +323,48 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         XCTAssertEqual(
             result.openAccessShortfall,
             OpenAccessShortfall(source: .unpaywall, failure: .malformedResponse)
+        )
+    }
+
+    /// An answer below 400 is decoded, as Python's `raise_for_status` lets it
+    /// through: a 204's empty body could not be read, and is no error status
+    /// Unpaywall answered with ("did not serve it").
+    func testAnEmptyUnpaywallAnswerIsUnreadableNotAnAnswer() async throws {
+        StubURLProtocol.routes = routes(unpaywall: "", unpaywallStatus: 204)
+
+        let result = try await fetch()
+
+        XCTAssertEqual(
+            result.openAccessShortfall,
+            OpenAccessShortfall(source: .unpaywall, failure: .malformedResponse)
+        )
+    }
+
+    /// Unpaywall refuses a missing address with 422, which would read as
+    /// "Unpaywall did not serve it": not asked, it is reported as not configured,
+    /// with the advice that goes with that (#466).
+    func testAnUnpaywallWithNoEmailIsNotAskedAndIsReportedAsNotConfigured() async throws {
+        StubURLProtocol.routes = routes()
+
+        let result = try await fetch(email: "  ")
+
+        XCTAssertEqual(result.openAccessShortfall, .unpaywallNotConfigured)
+        XCTAssertFalse(StubURLProtocol.requested("unpaywall"))
+    }
+
+    /// The abstract the chain falls back to carries the shortfall too: it is no
+    /// more an answer about a free copy than the publisher link is.
+    func testTheAbstractFallbackCarriesTheShortfall() async throws {
+        var stubs = routes(unpaywallStatus: 503)
+        stubs["fullTextXML"] = (200, Self.abstractOnlyDeposit)
+        StubURLProtocol.routes = stubs
+
+        let result = try await fetch(pmcId: "PMC1")
+
+        XCTAssertEqual(result.contentKind, .abstract)
+        XCTAssertEqual(
+            result.openAccessShortfall,
+            OpenAccessShortfall(source: .unpaywall, failure: .httpStatus(503))
         )
     }
 

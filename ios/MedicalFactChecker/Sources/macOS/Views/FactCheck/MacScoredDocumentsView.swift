@@ -682,7 +682,7 @@ struct MacDocumentCard: View {
                         // browser before they have read why this is a substitute
                         // is the silent fallback #183 objects to; the note and a
                         // link are in the card, via `linkOnlyNotice`.
-                        if result.degradation == nil && result.openAccessShortfall == nil {
+                        if result.hasNothingToExplain {
                             NSWorkspace.shared.open(url)
                         }
                     }

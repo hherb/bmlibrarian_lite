@@ -65,11 +65,17 @@ final class OpenAccessShortfallContractTests: XCTestCase {
         return rows
     }
 
-    /// The shortfall a row names by its `source`, `kind` and `status_code`.
+    /// The shortfall a row names by its `source`, `kind` and `status_code`, or
+    /// by `skipped` for a lookup that was never made.
     private func shortfall(_ row: [String: Any]) throws -> OpenAccessShortfall {
         let source = try XCTUnwrap(
             (row["source"] as? String).flatMap(OpenAccessSource.init(rawValue:)), "\(row)"
         )
+        if let skipped = row["skipped"] as? String {
+            XCTAssertEqual(skipped, "not_configured", "\(row)")
+            XCTAssertEqual(source, .unpaywall, "\(row)")
+            return .unpaywallNotConfigured
+        }
         let kind = try XCTUnwrap(
             (row["kind"] as? String).flatMap(RequestFailureKind.init(rawValue:)), "\(row)"
         )
@@ -94,6 +100,9 @@ final class OpenAccessShortfallContractTests: XCTestCase {
         for row in rows {
             XCTAssertEqual(try shortfall(row).notice, row["notice"] as? String, "\(row)")
         }
+        XCTAssertTrue(
+            rows.contains { $0["skipped"] is String }, "a skip row pins the not-configured sentence"
+        )
     }
 
     func testEachWrittenRow() throws {
@@ -137,6 +146,8 @@ final class OpenAccessShortfallContractTests: XCTestCase {
                 )
             }
         }
+        let skipped = OpenAccessShortfall.unpaywallNotConfigured
+        XCTAssertEqual(OpenAccessShortfall.restored(fromPersisted: skipped.persisted()), skipped)
     }
 
     /// A table added to the contract and asserted nowhere would pin nothing.

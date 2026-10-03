@@ -55,10 +55,10 @@ public enum SearchFailureReporting {
     private static let keyFailure = "failure"
 
     /// The key naming the kind of failure.
-    static let keyKind = "kind"
+    private static let keyKind = "kind"
 
     /// The key holding the failure's HTTP status.
-    static let keyStatusCode = "status_code"
+    private static let keyStatusCode = "status_code"
 
     /// The key holding how many records are missing.
     private static let keyRecordsMissing = "records_missing"

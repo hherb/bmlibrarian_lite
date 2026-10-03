@@ -242,8 +242,9 @@ final class Document {
     /// JSON ``OpenAccessShortfall/persisted()`` writes, or `nil` when nothing
     /// was left unsettled (#466).
     ///
-    /// Unpaywall, or the landing page it named, could not answer, so the chain
-    /// settled on a fallback without learning whether a free copy exists. Kept
+    /// Unpaywall, or the landing page it named, could not settle whether a free
+    /// copy exists (or Unpaywall was not configured), so the chain settled on a
+    /// fallback without learning it. Kept
     /// apart from ``fullTextDegradedReasonRaw`` because both can be true of one
     /// fetch: Europe PMC unreachable *and* Unpaywall throttled. Persisted for
     /// the reason that field is: the cards and viewers render from this model,
@@ -1249,7 +1250,7 @@ final class Document {
     /// be shown exactly like a whole article.
     ///
     /// The open-access shortfall joins them for #466: a fallback the chain
-    /// settled on because Unpaywall could not answer is the outcome a link-only
+    /// settled on because Unpaywall left the copy unassessed is the outcome a link-only
     /// card exists to explain, and nothing else on the record says it.
     var cachedRetrievalNotice: (
         warnings: JATSParseWarnings,

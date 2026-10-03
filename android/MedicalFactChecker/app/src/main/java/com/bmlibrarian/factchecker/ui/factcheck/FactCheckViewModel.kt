@@ -32,6 +32,7 @@ import com.bmlibrarian.factchecker.data.repository.UsageRepository
 import com.bmlibrarian.factchecker.domain.model.DocumentSortOrder
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
 import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
+import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
 import com.bmlibrarian.factchecker.domain.workflow.FactCheckWorkflow
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowConfig
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowProgress
@@ -579,7 +580,7 @@ class FactCheckViewModel @Inject constructor(
 
             try {
                 val settings = settingsRepository.settings.value
-                val email = settings.unpaywallEmail.ifEmpty { Constants.UNPAYWALL_DEFAULT_EMAIL }
+                val email = UnpaywallContact.emailFor(settings)
 
                 val result = fullTextService.fetchFullText(
                     pmcId = document.pmcId,

@@ -29,6 +29,7 @@ import com.bmlibrarian.factchecker.domain.model.OpenAccessSource
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
+import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
 import com.bmlibrarian.factchecker.util.jats.JATSParseError
@@ -128,8 +129,8 @@ class FullTextService @Inject constructor(
          *
          * @param url URL to the publisher page.
          * @param openAccessShortfall Why the open-access copy went unassessed when
-         *   Unpaywall, or the landing page it named, could not answer; null when
-         *   nothing was left unsettled. Stored on the document and shown to the
+         *   Unpaywall, or the landing page it named, could not settle whether a
+         *   free copy exists; null when nothing was left unsettled. Stored on the document and shown to the
          *   reader (#466): the link alone reads as "no free copy".
          */
         data class DoiUrl(
@@ -252,7 +253,8 @@ class FullTextService @Inject constructor(
      * @param pmcId PubMed Central ID (if available).
      * @param doi Digital Object Identifier (if available).
      * @param pmid PubMed ID (if available, used for caching).
-     * @param email Email for Unpaywall API (required for Unpaywall lookup).
+     * @param email Email to ask Unpaywall with ([UnpaywallContact.emailFor]); null,
+     *   blank or the placeholder skips Unpaywall as not configured.
      * @return The full text or a link to it; [FullTextResult.Unavailable] when every
      *   source answered without it (callers record this); or
      *   [FullTextResult.NotEstablished] when Europe PMC did not settle it (never
@@ -263,7 +265,7 @@ class FullTextService @Inject constructor(
         pmcId: String?,
         doi: String?,
         pmid: String?,
-        email: String = Constants.UNPAYWALL_DEFAULT_EMAIL
+        email: String? = null
     ): Result<FullTextResult> = withContext(Dispatchers.IO) {
         // What Europe PMC's side of the chain got instead of the article's text,
         // if anything. Set by a lost identifier search, a failed fetch and
@@ -319,9 +321,9 @@ class FullTextService @Inject constructor(
             )
         }
 
-        // Try Unpaywall if DOI is available. A lookup that could not answer is
-        // carried on the fallback, so the reader is told a free copy may exist
-        // rather than shown the DOI link as though there were none (#466)
+        // Try Unpaywall if DOI is available. A lookup that could not settle
+        // whether a free copy exists is carried on the fallback, so the reader is
+        // told so rather than shown the DOI link as though there were none (#466)
         var openAccessShortfall: OpenAccessShortfall? = null
         if (!doi.isNullOrEmpty()) {
             Log.d(TAG, "Attempting Unpaywall PDF for $doi")
@@ -410,28 +412,37 @@ class FullTextService @Inject constructor(
      * errors.
      *
      * @param doi Digital Object Identifier.
-     * @param email Email for API identification.
+     * @param email Email for API identification; with no usable one
+     *   ([UnpaywallContact.usableEmail]) Unpaywall is not asked at all.
      * @param pmid PubMed ID for caching.
      * @return Result containing the PDF URL, or the failure: a
-     *   [FullTextUnavailableException] when Unpaywall or the landing page answered
-     *   without a PDF (an expected miss, logged by the caller); an
-     *   [OpenAccessUnsettledException] when Unpaywall or the landing page could not
-     *   answer (logged here as a warning); any other exception when the lookup
-     *   failed otherwise (logged here). Either way the chain goes on.
+     *   [FullTextUnavailableException] when Unpaywall answered 404 or Unpaywall or
+     *   the landing page declared no PDF (an expected miss, logged by the caller);
+     *   otherwise an [OpenAccessUnsettledException] naming what left the copy
+     *   unassessed, logged here: Unpaywall not configured, its answer lost,
+     *   unreadable or an error status other than 404, the landing page unread, or
+     *   an unexpected error. Either way the chain goes on.
      * @throws CancellationException if the caller cancelled.
      */
     private suspend fun tryUnpaywallPdf(
         doi: String,
-        email: String,
+        email: String?,
         pmid: String?
     ): Result<FullTextResult> {
+        val contact = UnpaywallContact.usableEmail(email)
+        if (contact == null) {
+            // Unpaywall refuses a missing or placeholder address with 422 for
+            // every article; asking anyway blamed the article for our settings
+            Log.w(TAG, "Unpaywall not asked for $doi: no usable contact email is configured")
+            return Result.failure(OpenAccessUnsettledException(OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED))
+        }
         return try {
             val choice = try {
                 NetworkRetry.withExponentialBackoff(
                     maxRetries = Constants.NETWORK_MAX_RETRIES,
                     shouldRetry = { NetworkRetry.isRetryableException(it) }
                 ) {
-                    val response = unpaywallApi.getWorkByDoi(doi, email)
+                    val response = unpaywallApi.getWorkByDoi(doi, contact)
 
                     if (!response.isSuccessful) {
                         if (response.code() == Constants.HTTP_NOT_FOUND) {
@@ -506,8 +517,14 @@ class FullTextService @Inject constructor(
             Log.w(TAG, "The open-access copy of $doi went unassessed: ${e.message}")
             Result.failure(e)
         } catch (e: Exception) {
-            Log.e(TAG, "Unpaywall lookup failed: ${e.message}")
-            Result.failure(e)
+            // Not an answer about the article, so the copy went unassessed: the
+            // reader is told so, as Swift does for an unexpected error
+            Log.e(TAG, "Unpaywall lookup of $doi failed unexpectedly", e)
+            Result.failure(
+                OpenAccessUnsettledException(
+                    OpenAccessShortfall(OpenAccessSource.UNPAYWALL, RequestFailure(RequestFailureKind.REQUEST_FAILED))
+                )
+            )
         }
     }
 
@@ -796,14 +813,14 @@ class FullTextUnavailableException(message: String) : Exception(message)
 class FullTextException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
- * Unpaywall, or the landing page it named, could not answer: the open-access copy
- * went unassessed, which is not the same as there being none (#464). The chain
- * carries [shortfall] on its fallback to the reader (#466).
+ * Unpaywall, or the landing page it named, could not settle whether a free copy
+ * exists: the open-access copy went unassessed, which is not the same as there
+ * being none (#464). The chain carries [shortfall] on its fallback to the reader
+ * (#466).
  *
- * @property shortfall Which lookup could not answer, and why, by kind and status only
+ * @property shortfall Which lookup left it unsettled, and why
  */
-class OpenAccessUnsettledException(val shortfall: OpenAccessShortfall) :
-    Exception("the open-access copy could not be reached (${shortfall.failure.describe()})")
+class OpenAccessUnsettledException(val shortfall: OpenAccessShortfall) : Exception(shortfall.notice)
 
 /**
  * A throttle or server fault, thrown inside a retry block so the transport-error

@@ -33,10 +33,11 @@ import org.junit.Test
 /**
  * Migration 7 → 8 adds exactly what schema 8 has over schema 7 (#466).
  *
- * The database falls back to destructive migration, so a migration that leaves
- * a column out does not crash: it wipes every saved session instead. There is
- * no `room-testing` dependency to run the migration against a real database,
- * so this compares the migration's statements with Room's own exported schemas.
+ * A registered migration that leaves a column out fails Room's schema check and
+ * crashes on open; this test catches that before it ships. There is no
+ * `room-testing` dependency to run the migration against a real database, so it
+ * compares the migration's statements with Room's own exported schemas. That the
+ * migration is registered at all is `AppDatabaseMigrationsTest`'s concern.
  */
 class Migration7To8Test {
 
@@ -77,10 +78,20 @@ class Migration7To8Test {
         assertEquals(before.keys, after.keys - added.keys)
     }
 
+    /** Every table an exported schema holds. */
+    private fun tables(version: Int): Set<String> =
+        Json.parseToJsonElement(File(schemaDirectory, "$version.json").readText())
+            .jsonObject["database"]!!.jsonObject["entities"]!!.jsonArray
+            .map { it.jsonObject["tableName"]!!.jsonPrimitive.content }
+            .toSet()
+
     @Test
     fun `migration touches no other table`() {
-        for (table in listOf("sessions", "citations", "reports")) {
-            assertEquals(columns(7, table), columns(8, table))
+        assertEquals(tables(7), tables(8))
+        val others = tables(7) - "documents"
+        assertEquals("schema 7 lists its tables", true, others.size >= 3)
+        for (table in others) {
+            assertEquals(table, columns(7, table), columns(8, table))
         }
     }
 }

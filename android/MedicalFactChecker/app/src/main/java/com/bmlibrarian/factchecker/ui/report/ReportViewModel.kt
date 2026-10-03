@@ -29,6 +29,7 @@ import com.bmlibrarian.factchecker.data.repository.DocumentRepository
 import com.bmlibrarian.factchecker.data.repository.ReportRepository
 import com.bmlibrarian.factchecker.data.repository.SessionRepository
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
+import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
 import com.bmlibrarian.factchecker.ui.report.components.ReferenceInfo
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.PdfExporter
@@ -427,7 +428,7 @@ class ReportViewModel @Inject constructor(
 
             try {
                 val settings = settingsRepository.settings.value
-                val email = settings.unpaywallEmail.ifEmpty { Constants.UNPAYWALL_DEFAULT_EMAIL }
+                val email = UnpaywallContact.emailFor(settings)
 
                 val result = fullTextService.fetchFullText(
                     pmcId = document.pmcId,

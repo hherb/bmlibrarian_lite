@@ -26,7 +26,9 @@ import com.bmlibrarian.factchecker.data.local.dao.DocumentDao
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService.FullTextResult
+import com.bmlibrarian.factchecker.data.remote.fulltext.recordingFullTextFetch
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
+import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
 import com.bmlibrarian.factchecker.util.Constants
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlin.coroutines.cancellation.CancellationException
@@ -35,7 +37,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.util.Date
 import javax.inject.Inject
 
 /**
@@ -243,7 +244,7 @@ class FullTextViewModel @Inject constructor(
                 pmcId = doc.pmcId,
                 doi = doc.doi,
                 pmid = doc.pmid,
-                email = settings.unpaywallEmail.ifEmpty { Constants.UNPAYWALL_DEFAULT_EMAIL }
+                email = UnpaywallContact.emailFor(settings)
             )
 
             result.fold(
@@ -270,161 +271,77 @@ class FullTextViewModel @Inject constructor(
     }
 
     /**
-     * Handle the result of a full-text fetch.
+     * Handle the result of a full-text fetch: record it on the document, then show
+     * it.
+     *
+     * The document is written by [recordingFullTextFetch], the writer the
+     * fact-check and report screens use, so the three cannot drift apart on what a
+     * fetch stores or clears; every answer writes or clears the open-access
+     * shortfall (#466). [FullTextResult.NotEstablished] records nothing (#434).
+     *
+     * @param doc The document fetched.
+     * @param result What the chain returned.
      */
     private suspend fun handleFullTextResult(doc: DocumentEntity, result: FullTextResult) {
-        when (result) {
+        val recorded = doc.recordingFullTextFetch(result) { url -> fullTextService.downloadPdf(url, doc.id) }
+        if (result !is FullTextResult.NotEstablished) {
+            documentDao.update(recorded)
+            _document.value = recorded
+        }
+
+        _state.value = when (result) {
             is FullTextResult.EuropePmcXml -> {
                 Log.d(TAG, "Got Europe PMC XML content for ${doc.id}")
-
-                // Cache both markdown and HTML content
-                documentDao.update(
-                    doc.copy(
-                        fullTextMarkdown = result.markdown,
-                        fullTextHTML = result.html,
-                        fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
-                        fullTextFetchedAt = Date(),
-                        fullTextOpenAccessShortfallJson = null
-                    )
-                )
-
-                // Update local document state
-                _document.value = doc.copy(
-                    fullTextMarkdown = result.markdown,
-                    fullTextHTML = result.html,
-                    fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC
-                )
-
                 // Display as HTML (better rendering for tables/figures)
-                _state.value = FullTextState.HtmlContent(
+                FullTextState.HtmlContent(
                     html = wrapHtmlContent(result.html),
                     title = doc.title,
                     source = "Europe PMC"
                 )
             }
-
             is FullTextResult.EuropePmcPdf -> {
                 Log.d(TAG, "Got Europe PMC PDF URL for ${doc.id}: ${result.pdfUrl}")
-
-                // Download the PDF
-                val localPath = fullTextService.downloadPdf(result.pdfUrl, doc.id)
-
-                if (localPath != null) {
-                    // Update database with PDF path
-                    documentDao.update(
-                        doc.copy(
-                            pdfPath = localPath,
-                            fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
-                            fullTextFetchedAt = Date(),
-                            fullTextOpenAccessShortfallJson = null
-                        )
-                    )
-
-                    _state.value = FullTextState.PdfContent(
-                        pdfPath = localPath,
-                        title = doc.title,
-                        source = "Europe PMC"
-                    )
-                } else {
-                    forgetOpenAccessShortfall(doc)
-                    // Couldn't download, provide URL for external viewing
-                    _state.value = FullTextState.WebUrl(
-                        url = result.pdfUrl,
-                        title = doc.title
-                    )
-                }
+                pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, "Europe PMC")
             }
-
             is FullTextResult.UnpaywallPdf -> {
                 Log.d(TAG, "Got Unpaywall PDF URL for ${doc.id}: ${result.pdfUrl}")
-
-                // Download the PDF
-                val localPath = fullTextService.downloadPdf(result.pdfUrl, doc.id)
-
-                if (localPath != null) {
-                    // Update database with PDF path
-                    documentDao.update(
-                        doc.copy(
-                            pdfPath = localPath,
-                            fullTextSource = Constants.FULLTEXT_SOURCE_UNPAYWALL,
-                            fullTextFetchedAt = Date(),
-                            fullTextOpenAccessShortfallJson = null
-                        )
-                    )
-
-                    _state.value = FullTextState.PdfContent(
-                        pdfPath = localPath,
-                        title = doc.title,
-                        source = "Unpaywall"
-                    )
-                } else {
-                    forgetOpenAccessShortfall(doc)
-                    // Couldn't download, provide URL for external viewing
-                    _state.value = FullTextState.WebUrl(
-                        url = result.pdfUrl,
-                        title = doc.title
-                    )
-                }
+                pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, "Unpaywall")
             }
-
             is FullTextResult.DoiUrl -> {
                 Log.d(TAG, "Falling back to DOI URL for ${doc.id}: ${result.url}")
-
-                // Update source but no content cached
-                documentDao.update(
-                    doc.copy(
-                        fullTextSource = Constants.FULLTEXT_SOURCE_DOI,
-                        fullTextFetchedAt = Date(),
-                        fullTextOpenAccessShortfallJson = result.openAccessShortfall?.toJson()
-                    )
-                )
-
-                _state.value = FullTextState.WebUrl(
+                FullTextState.WebUrl(
                     url = result.url,
                     title = doc.title,
                     openAccessNotice = result.openAccessShortfall?.notice
                 )
             }
-
             is FullTextResult.Unavailable -> {
                 Log.d(TAG, "Full text unavailable for ${doc.id}: ${result.reason}")
-
-                // Mark as unavailable to avoid future fetch attempts
-                documentDao.update(
-                    doc.copy(
-                        fullTextUnavailable = true,
-                        fullTextFetchedAt = Date(),
-                        fullTextOpenAccessShortfallJson = null
-                    )
-                )
-
-                _state.value = FullTextState.Unavailable(result.reason)
+                FullTextState.Unavailable(result.reason)
             }
-
             is FullTextResult.NotEstablished -> {
-                // Not a fact about the article: nothing is recorded, and the
-                // reader is offered a retry (#434)
+                // Not a fact about the article: the reader is offered a retry (#434)
                 Log.d(TAG, "Full text not established for ${doc.id}: ${result.failure.describe()}")
-                _state.value = FullTextState.Error(message = result.reason, canRetry = true)
+                FullTextState.Error(message = result.reason, canRetry = true)
             }
         }
     }
 
     /**
-     * Clear an open-access shortfall an earlier fetch stored (#466), when this one
-     * found a PDF it could not download.
+     * The PDF, when it was downloaded; otherwise its URL, for external viewing.
      *
-     * The chain answered with a PDF URL, so the lookup that once went unsettled is
-     * settled now. Nothing else is written: the document caches no content, as
-     * before, and the card must not keep saying a free copy may exist.
-     *
-     * @param doc The document fetched.
+     * @param localPath Where the PDF was saved, or null when it could not be downloaded.
+     * @param pdfUrl The PDF's URL.
+     * @param title The document's title.
+     * @param source The source, as the reader is told of it.
+     * @return The state to show.
      */
-    private suspend fun forgetOpenAccessShortfall(doc: DocumentEntity) {
-        if (doc.fullTextOpenAccessShortfallJson != null) {
-            documentDao.update(doc.copy(fullTextOpenAccessShortfallJson = null))
+    private fun pdfOrLink(localPath: String?, pdfUrl: String, title: String, source: String): FullTextState =
+        if (localPath != null) {
+            FullTextState.PdfContent(pdfPath = localPath, title = title, source = source)
+        } else {
+            FullTextState.WebUrl(url = pdfUrl, title = title)
         }
-    }
 
     /**
      * Retry loading full text after an error.
@@ -443,6 +360,7 @@ class FullTextViewModel @Inject constructor(
                 documentDao.update(
                     doc.copy(
                         fullTextMarkdown = null,
+                        fullTextHTML = null,
                         fullTextSource = null,
                         pdfPath = null,
                         fullTextUnavailable = false,
@@ -451,7 +369,9 @@ class FullTextViewModel @Inject constructor(
                     )
                 )
 
-                // Reload
+                // Reload. `loadDocument` skips the document already loaded, so
+                // it is forgotten first; otherwise the screen stayed on Loading
+                currentDocumentId = null
                 _state.value = FullTextState.Loading
                 loadDocument(doc.id)
             }

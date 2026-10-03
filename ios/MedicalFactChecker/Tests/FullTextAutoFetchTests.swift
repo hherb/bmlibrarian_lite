@@ -162,8 +162,35 @@ final class FullTextAutoFetchTests: XCTestCase {
 
         let kept = FullTextAutoFetch.storedLinkKept(documentHoldingALink(), refetched: result)
 
-        XCTAssertEqual(kept, FullTextAutoFetch.StoredLinkKept(failure: .timeout))
-        XCTAssertNotNil(kept?.errorDescription)
+        XCTAssertEqual(
+            kept,
+            FullTextAutoFetch.StoredLinkKept(shortfall: OpenAccessShortfall(source: .unpaywall, failure: .timeout))
+        )
+        XCTAssertEqual(
+            kept?.errorDescription,
+            "Unpaywall (the request timed out) could not be asked, so a freely available copy may exist. "
+                + "Whether this document is open access was not established. "
+                + "The PDF link already stored was kept. Try again later."
+        )
+    }
+
+    /// The refusal is worded by the shortfall's own verb (#435): a source that
+    /// answered "did not serve it", and waiting will not change that, nor
+    /// configuration that is missing (#466).
+    func testTheRefusalSaysWhatTheShortfallSays() {
+        let answered = OpenAccessShortfall(source: .landingPage, failure: .httpStatus(403))
+        let refusal = FullTextAutoFetch.StoredLinkKept(shortfall: answered)
+
+        XCTAssertEqual(
+            refusal.errorDescription,
+            "The open-access copy's landing page (HTTP 403 Forbidden) did not serve it, so whether "
+                + "this document is open access was not established. The PDF link already stored was kept."
+        )
+        let unconfigured = FullTextAutoFetch.StoredLinkKept(shortfall: .unpaywallNotConfigured)
+        XCTAssertEqual(
+            unconfigured.errorDescription,
+            OpenAccessShortfall.unpaywallNotConfigured.notice + " The PDF link already stored was kept."
+        )
     }
 
     /// Controls: a fallback with nothing unsettled is the chain's answer, and

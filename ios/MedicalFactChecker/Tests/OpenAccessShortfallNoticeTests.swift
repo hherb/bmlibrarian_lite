@@ -49,6 +49,25 @@ final class OpenAccessShortfallNoticeTests: XCTestCase {
         XCTAssertEqual(result.openAccessShortfall, Self.throttled)
     }
 
+    /// The four "open the publisher link straight away" gates hold back while
+    /// there is a shortfall or a degradation to explain, and only then.
+    func testAWebLinkOpensStraightAwayOnlyWithNothingToExplain() {
+        func link(
+            _ degradation: FullTextDegradation?, _ shortfall: OpenAccessShortfall?
+        ) -> AppFullTextResult {
+            AppFullTextResult(
+                content: .webURL(Self.doiLink), source: .doi,
+                degradation: degradation, openAccessShortfall: shortfall
+            )
+        }
+
+        XCTAssertTrue(link(nil, nil).hasNothingToExplain)
+        XCTAssertFalse(link(nil, Self.throttled).hasNothingToExplain)
+        XCTAssertFalse(link(nil, .unpaywallNotConfigured).hasNothingToExplain)
+        XCTAssertFalse(link(.europePMCUnreachable, nil).hasNothingToExplain)
+        XCTAssertFalse(link(.europePMCUnreachable, Self.throttled).hasNothingToExplain)
+    }
+
     /// The control: an Unpaywall that answered leaves nothing to say.
     func testASettledFallbackCarriesNoShortfall() {
         let result = BioMedLitAdapters.toAppFullTextResult(

@@ -640,7 +640,7 @@ private fun AdvancedSection(
             onValueChange = onNcbiEmailChange,
             label = { Text("NCBI Email (optional)") },
             placeholder = { Text("your@email.com") },
-            supportingText = { Text("Increases PubMed rate limit") },
+            supportingText = { Text("Increases PubMed rate limit, and lets Unpaywall find open-access copies") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )

@@ -416,7 +416,8 @@ public actor FullTextService {
         // not reach Unpaywall either.
         let unpaywallDOI = doi?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         // Why the open-access copy Unpaywall may know of went unassessed, if it
-        // did: Unpaywall or the landing page it named could not answer. Carried
+        // did: Unpaywall or the landing page it named could not settle whether a
+        // free copy exists, or Unpaywall was not configured. Carried
         // on whatever fallback is returned, so a caller holding a better link
         // than that fallback knows not to trade it away (#464).
         var openAccessShortfall: OpenAccessShortfall?
@@ -433,10 +434,15 @@ public actor FullTextService {
                     "Unpaywall offers no PDF for DOI \(doi)", category: .fullText
                 )
             } catch {
-                openAccessShortfall = Self.openAccessShortfall(for: error)
+                let shortfall = Self.openAccessShortfall(for: error)
+                openAccessShortfall = shortfall
+                // The tier's own failure type carries no description, so the
+                // shortfall names what went unsettled and why
+                let cause = shortfall.map {
+                    "\($0.source.serviceName): \($0.failure?.describe() ?? "not configured")"
+                } ?? error.localizedDescription
                 BioMedLitLib.logger?.warning(
-                    "Unpaywall failed for DOI \(doi): \(error.localizedDescription)",
-                    category: .fullText
+                    "Unpaywall failed for DOI \(doi) (\(cause))", category: .fullText
                 )
             }
             if let pdfURL = unpaywallPDF {
@@ -1221,8 +1227,9 @@ public actor FullTextService {
     /// ``FullTextResult/openAccessShortfall`` and goes on, as it does for any
     /// Unpaywall miss.
     private enum UnpaywallTierFailure: Error {
-        /// Unpaywall's answer could not be read, or the landing page it named
-        /// could not answer; the shortfall names which.
+        /// Unpaywall was not configured, answered with an error status other
+        /// than 404 or in a form that could not be read, or the landing page it
+        /// named could not be read; the shortfall names which.
         case unsettled(OpenAccessShortfall)
     }
 
@@ -1234,11 +1241,12 @@ public actor FullTextService {
     ///
     /// - Parameter doi: Digital Object Identifier.
     /// - Returns: URL to a downloadable PDF.
-    /// - Throws: `FullTextError.noFullTextAvailable` when Unpaywall offers no
-    ///   PDF and no landing page declares one; `UnpaywallTierFailure` when
-    ///   Unpaywall's answer could not be read or the landing page could not
-    ///   answer; `CancellationError` when cancelled; whatever else the
-    ///   Unpaywall request throws.
+    /// - Throws: `FullTextError.noFullTextAvailable` when Unpaywall answers 404
+    ///   or offers no PDF and no landing page declares one; `UnpaywallTierFailure`
+    ///   when Unpaywall was not configured, answered with any other error status
+    ///   or in a form that could not be read, or the landing page could not be
+    ///   read; `CancellationError` when cancelled; whatever else the Unpaywall
+    ///   request throws.
     private func fetchUnpaywallPDFWithRetry(doi: String) async throws -> URL {
         let choice = try await RetryHelper.retry(
             config: .networkDefault,
@@ -1273,10 +1281,11 @@ public actor FullTextService {
     ///
     /// - Parameter error: What `fetchUnpaywallPDFWithRetry` threw, other than
     ///   cancellation and `noFullTextAvailable`.
-    /// - Returns: The lookup that went unsettled and why, by kind and status
-    ///   only; `nil` for an error that is no source failing to answer: a
-    ///   configuration fault of ours (`invalidResponse`), or a DOI that could
-    ///   not be sent (`noIdentifiers`).
+    /// - Returns: The lookup that went unsettled and why; `nil` for an error
+    ///   that is no source failing to answer: a fault in our own request
+    ///   (`invalidResponse`: the base URL or the email could not be encoded), or
+    ///   a DOI that could not be sent (`noIdentifiers`). A missing email arrives
+    ///   as `UnpaywallTierFailure`, so the reader is told it was not configured.
     private static func openAccessShortfall(for error: Error) -> OpenAccessShortfall? {
         let failure: RequestFailure
         switch error {
@@ -1432,9 +1441,10 @@ public actor FullTextService {
     ///
     /// - Parameter doi: Digital Object Identifier.
     /// - Returns: The PDF URL, the landing page, or neither.
-    /// - Throws: `FullTextError` on failure: `serverError` for a throttle or
-    ///   server fault, so it is retried; `UnpaywallTierFailure` for any other
-    ///   error status but 404, and for an answer that will not decode.
+    /// - Throws: `FullTextError.noFullTextAvailable` for a 404;
+    ///   `FullTextError.serverError` for a 429, 500, 502, 503 or 504, so it is
+    ///   retried; `UnpaywallTierFailure` for no configured email, any other
+    ///   status of 400 or above, and an answer that will not decode.
     private func fetchUnpaywallChoice(doi: String) async throws -> UnpaywallLandingPage.Choice {
         guard let encodedDOI = doi.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
             throw FullTextError.noIdentifiers
@@ -1456,13 +1466,15 @@ public actor FullTextService {
         }
 
         // Unpaywall answers 422 for a missing address, which would surface to the
-        // reader as "no full text available" -- an outage dressed up as an absent
-        // PDF. Caught here instead, where the cause can still be named.
+        // reader as "Unpaywall did not serve it", blaming the article for our
+        // configuration. Not asked, it is reported as not configured, with the
+        // advice that goes with that (Python's `usable_unpaywall_email`).
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedEmail.isEmpty else {
-            let reason = "Unpaywall requires a contact email address; none is configured"
-            BioMedLitLib.logger?.error(reason, category: .fullText)
-            throw FullTextError.invalidResponse(reason)
+            BioMedLitLib.logger?.error(
+                "Unpaywall requires a contact email address; none is configured", category: .fullText
+            )
+            throw UnpaywallTierFailure.unsettled(.unpaywallNotConfigured)
         }
 
         // `addingPercentEncoding` is total for any `String` Swift can hold, so
@@ -1509,7 +1521,10 @@ public actor FullTextService {
 
         BioMedLitLib.logger?.debug("Unpaywall response status: \(httpResponse.statusCode)", category: .fullText)
 
-        guard httpResponse.statusCode == BioMedLitConstants.httpStatusOK else {
+        // Below 400 the answer is decoded, as Python's `raise_for_status` lets it
+        // through: a 204's empty body is then an answer that could not be read,
+        // not an error status Unpaywall answered with.
+        guard httpResponse.statusCode < BioMedLitConstants.httpErrorStatusMin else {
             if httpResponse.statusCode == BioMedLitConstants.httpStatusNotFound {
                 throw FullTextError.noFullTextAvailable
             }
