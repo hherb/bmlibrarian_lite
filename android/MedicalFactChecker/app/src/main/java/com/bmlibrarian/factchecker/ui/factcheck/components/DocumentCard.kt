@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.ui.common.MarkdownText
+import com.bmlibrarian.factchecker.ui.fulltext.components.LinkOnlyFullTextSection
 import com.bmlibrarian.factchecker.ui.fulltext.components.OpenAccessShortfallNotice
 import com.bmlibrarian.factchecker.ui.theme.scoreColor
 import com.bmlibrarian.factchecker.util.Constants
@@ -524,8 +525,10 @@ private fun KeyPassageBox(
  *
  * Displays different states:
  * - View Full Text button when full text is already available
- * - Get Full Text button when not yet attempted
+ * - What the link is, a retry and the publisher when the last fetch left
+ *   only a link (#471)
  * - Unavailable message with fallback to publisher when retrieval failed
+ * - Get Full Text button when not yet attempted
  * - Upload Full Text button in all states where full text is not available
  *
  * @param document The document to display full-text actions for
@@ -549,6 +552,7 @@ private fun FullTextSection(
     Column(
         verticalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
     ) {
+        val linkOnlyKind = document.linkOnlyKind
         when {
             // Already have full text - show view button
             document.hasFullText -> {
@@ -587,6 +591,24 @@ private fun FullTextSection(
                         }
                     }
                 }
+            }
+
+            // Fetched, and all it left was a link: not "never fetched" (#471)
+            linkOnlyKind != null -> {
+                LinkOnlyFullTextSection(
+                    kind = linkOnlyKind,
+                    doi = document.doi,
+                    isLoading = isLoading,
+                    retryEnabled = !isUploading,
+                    onRetry = onGetFullText?.let { fetch -> { fetch(document) } },
+                    onOpenPublisher = onOpenPublisher
+                )
+
+                UploadFullTextButton(
+                    isUploading = isUploading,
+                    isLoading = isLoading,
+                    onUpload = { onUploadFullText?.invoke(document) }
+                )
             }
 
             // Already tried but unavailable

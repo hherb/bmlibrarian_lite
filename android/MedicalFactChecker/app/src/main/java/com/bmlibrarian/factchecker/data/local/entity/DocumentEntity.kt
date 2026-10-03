@@ -23,6 +23,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.bmlibrarian.factchecker.domain.model.FullTextLinkKind
 import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
 import com.bmlibrarian.factchecker.util.Constants
 import java.util.Date
@@ -265,6 +266,29 @@ data class DocumentEntity(
      */
     val hasFullText: Boolean
         get() = fullTextMarkdown != null || fullTextHTML != null || pdfPath != null
+
+    /**
+     * Whether the last fetch ran to the end and left only a link (#471).
+     *
+     * What a DOI fallback stores, and what a PDF that could not be downloaded
+     * leaves: a fetch date with nothing displayable behind it. Without this
+     * the cards fall into "not yet attempted" and offer **Get Full Text**, as
+     * though the chain had never run. iOS/macOS's `Document.isLinkOnly` (#187)
+     * draws the same line.
+     *
+     * Distinct from [fullTextUnavailable], which is the chain reporting that
+     * no source had anything. Tests the effect rather than the source, so
+     * anything that clears the content must clear [fullTextFetchedAt] with it,
+     * as the full-text screen's refresh does.
+     */
+    val isLinkOnly: Boolean
+        get() = fullTextFetchedAt != null && !hasFullText && !fullTextUnavailable
+
+    /**
+     * The kind of link a link-only record holds, or null when it is not one.
+     */
+    val linkOnlyKind: FullTextLinkKind?
+        get() = if (isLinkOnly) FullTextLinkKind.forStoredSource(fullTextSource) else null
 
     /**
      * Check if this document has an embedding score.

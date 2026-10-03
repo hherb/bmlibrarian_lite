@@ -83,6 +83,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.bmlibrarian.factchecker.domain.model.FullTextLinkKind
 import com.bmlibrarian.factchecker.ui.fulltext.FullTextViewModel.FullTextState
 import com.bmlibrarian.factchecker.ui.fulltext.components.FullTextSourceBadge
 import com.bmlibrarian.factchecker.ui.fulltext.components.OpenAccessShortfallNotice
@@ -229,7 +230,7 @@ fun FullTextScreen(
 
                 is FullTextState.WebUrl -> {
                     WebUrlContent(
-                        url = currentState.url,
+                        kind = currentState.kind,
                         openAccessNotice = currentState.openAccessNotice,
                         onOpenInBrowser = {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentState.url))
@@ -537,16 +538,20 @@ private fun PdfViewer(
 }
 
 /**
- * Web URL content with button to open in browser.
+ * A link the reader can open in the browser, in place of text we hold.
  *
- * @param url The URL to open
+ * Says what the link is, and nothing it does not know (#471): a DOI link is
+ * the publisher's page, which may be paywalled, and a PDF link is a copy that
+ * was found but could not be downloaded.
+ *
+ * @param kind What the link is
  * @param openAccessNotice What an unsettled open-access lookup leaves open, or
  *   null when nothing was left unsettled (#466)
- * @param onOpenInBrowser Opens [url]
+ * @param onOpenInBrowser Opens the link
  */
 @Composable
 private fun WebUrlContent(
-    url: String,
+    kind: FullTextLinkKind,
     openAccessNotice: String?,
     onOpenInBrowser: () -> Unit
 ) {
@@ -567,12 +572,12 @@ private fun WebUrlContent(
             )
             Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
             Text(
-                text = "External Full Text",
+                text = kind.title,
                 style = MaterialTheme.typography.titleLarge
             )
             Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
             Text(
-                text = "Full text is available on the publisher's website.",
+                text = kind.statement,
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -28,6 +28,7 @@ import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService.FullTextResult
 import com.bmlibrarian.factchecker.data.remote.fulltext.recordingFullTextFetch
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
+import com.bmlibrarian.factchecker.domain.model.FullTextLinkKind
 import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
 import com.bmlibrarian.factchecker.util.Constants
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -111,12 +112,15 @@ class FullTextViewModel @Inject constructor(
          *
          * @param url URL to open.
          * @param title Document title.
+         * @param kind What the link is: the publisher's page, or a PDF that
+         *   could not be downloaded. The screen says which (#471).
          * @param openAccessNotice What an open-access lookup that went unsettled
          *   leaves open, shown above the link; null when nothing was (#466).
          */
         data class WebUrl(
             val url: String,
             val title: String,
+            val kind: FullTextLinkKind,
             val openAccessNotice: String? = null
         ) : FullTextState()
 
@@ -312,6 +316,7 @@ class FullTextViewModel @Inject constructor(
                 FullTextState.WebUrl(
                     url = result.url,
                     title = doc.title,
+                    kind = FullTextLinkKind.PUBLISHER_PAGE,
                     openAccessNotice = result.openAccessShortfall?.notice
                 )
             }
@@ -340,7 +345,7 @@ class FullTextViewModel @Inject constructor(
         if (localPath != null) {
             FullTextState.PdfContent(pdfPath = localPath, title = title, source = source)
         } else {
-            FullTextState.WebUrl(url = pdfUrl, title = title)
+            FullTextState.WebUrl(url = pdfUrl, title = title, kind = FullTextLinkKind.UNDOWNLOADED_PDF)
         }
 
     /**

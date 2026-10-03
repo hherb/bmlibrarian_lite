@@ -495,12 +495,21 @@ refetch whose stored PDF link is kept (`storedLinkKept`) writes nothing either.
   (`ParseWarningBannerContent`), beside whatever else the banner says, on every
   card and viewer that banners a document; a web link is not opened in the
   browser automatically while there is something to explain
-  (`AppFullTextResult.hasNothingToExplain`), except from the iOS Full Text
-  tab's link-only row, which opens Safari without the notice (#472).
+  (`AppFullTextResult.hasNothingToExplain`). The iOS Full Text tab's link-only
+  row opens Safari on a tap, so it shows the banner beneath the row (#472).
 - **Android:** the full-text screen's web-link view, the fact-check document
-  card and the report's document sheet (`OpenAccessShortfallNotice`). A
-  DOI-only card still offers "Get Full Text" and the web-link screen still says
-  full text is on the publisher's site (#471).
+  card and the report's document sheet (`OpenAccessShortfallNotice`).
+
+**A link-only record is not an unfetched one** (#187 on iOS/macOS, #471 on
+Android). A fetch date with nothing displayable behind it, and no recorded
+absence, is link-only (`Document.isLinkOnly` / `DocumentEntity.isLinkOnly`).
+Its card shows the link and why it is only one, never the "Get Full Text"
+button of a record never fetched; a retry stays on offer. Nothing says full text
+"is available" behind a link the chain did not read: a DOI resolves to the
+publisher's landing page, which is often paywalled. Android names the two kinds
+it can hold (`FullTextLinkKind`): the publisher's page ("This article's full
+text was not retrieved; the publisher's page may offer it.") and a PDF that was
+found but could not be downloaded.
 
 ### PDF Downloading and Caching
 

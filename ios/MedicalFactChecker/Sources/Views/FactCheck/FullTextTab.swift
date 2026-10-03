@@ -385,6 +385,14 @@ struct FullTextDocumentRow: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            rowButton
+            linkOnlyNotice
+        }
+    }
+
+    /// The row itself: tapping it opens the viewer, the link, or a fetch.
+    private var rowButton: some View {
         Button(action: handleTap) {
             HStack(spacing: 12) {
                 // Score badge
@@ -478,6 +486,30 @@ struct FullTextDocumentRow: View {
         }
     }
 
+    /// What the record says about the link this row opens, under the row (#472).
+    ///
+    /// A tap on a link-only row goes straight to the browser, so this tab was
+    /// the one route to the publisher that skipped the explanation the cards
+    /// give (`DocumentScoreRow.linkOnlyNotice`): a stored degradation (Europe
+    /// PMC unreachable, a JATS parse failure) and, since #466, an open-access
+    /// copy that went unassessed. The banner renders nothing when the record
+    /// has nothing to say, so a plain link-only row is unchanged.
+    ///
+    /// Beside the row's button rather than inside it: the banner can hold a
+    /// "Technical details" disclosure, which inside the row's `Button` would
+    /// never get its own taps.
+    @ViewBuilder
+    private var linkOnlyNotice: some View {
+        if document.isLinkOnly {
+            ParseWarningBanner(
+                warnings: document.cachedRetrievalNotice.warnings,
+                degradation: document.cachedRetrievalNotice.degradation,
+                extractionCoverage: document.cachedRetrievalNotice.extractionCoverage,
+                openAccessShortfall: document.cachedRetrievalNotice.openAccessShortfall
+            )
+        }
+    }
+
     /// Handle tap on the row.
     ///
     /// The link-only arm is not cosmetic. Removing the download button for that
@@ -532,7 +564,7 @@ struct FullTextDocumentRow: View {
     ///
     /// Tinted with the accent colour rather than orange: a link is a working
     /// outcome, not a failure, and the reason it is only a link — if there is
-    /// one — is said in full on the document's card in the Fact Check tab.
+    /// one — is said in full beneath the row, by ``linkOnlyNotice``.
     private var linkOnlyBadge: some View {
         Text("Link only")
             .font(.caption2)
