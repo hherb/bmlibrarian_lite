@@ -406,3 +406,56 @@ def test_a_page_that_never_ends_is_read_no_further_than_its_cap(
 
     assert (sources, failure) == ([], None)
     assert page.bytes_read <= 2 * LANDING_PAGE_MAX_BYTES
+
+
+class _RealRequestsForThePage(_Session):
+    """Answers Unpaywall's API, and sends the landing page to ``requests`` itself.
+
+    ``requests`` refuses an address it cannot fetch while preparing the
+    request, before any connection is made, so no test touches the network.
+    """
+
+    def get(self, url: str, **kwargs: Any) -> requests.Response:
+        """Route one GET: Unpaywall canned, anything else to a real session.
+
+        Args:
+            url: The URL asked for.
+            **kwargs: The request's options.
+
+        Returns:
+            Unpaywall's canned answer.
+
+        Raises:
+            requests.exceptions.RequestException: As ``requests`` raises it.
+        """
+        if url.startswith("https://api.unpaywall.org/"):
+            return super().get(url, **kwargs)
+        self.landing_requests.append(kwargs)
+        with requests.Session() as session:
+            return session.get(url, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "address",
+    ["ftp://repo.example.org/item/95934", "/item/95934", "file:///item/95934"],
+)
+def test_a_landing_page_that_cannot_be_fetched_is_recorded_as_unread(
+    discoverer: PDFDiscoverer, address: str
+) -> None:
+    """An address ``requests`` refuses is a page we did not read (#474).
+
+    The apps port this: Swift's ``fetchableURL`` and Android's
+    ``toHttpUrlOrNull`` refuse the same addresses as a failed request rather
+    than reading them as a page that declares no PDF.
+    """
+    answer = {"is_oa": False, "best_oa_location": {"url": address, "url_for_pdf": None}}
+    session = _RealRequestsForThePage(answer)
+
+    sources, failure = _discover(discoverer, session)
+
+    assert sources == []
+    assert len(session.landing_requests) == 1
+    assert failure == SourceLookupFailure(
+        SERVICE_UNPAYWALL_LANDING_PAGE,
+        RequestFailure(RequestFailureKind.REQUEST_FAILED),
+    )

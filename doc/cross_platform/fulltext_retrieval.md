@@ -356,6 +356,8 @@ function web_page_status_unsettled(status) -> bool:   # status >= 400
     return status >= 500 or status in {429, 408, 425}
 
 async function read_landing_page(page_url) -> Declared | DeclaresNone | Unreachable:
+    if page_url is not an absolute http(s) URL with a host:   # relative, ftp:,
+        return Unreachable(REQUEST_FAILED)                     # file:, unparsable (#474)
     response = GET page_url, Accept: text/html,application/xhtml+xml,
                redirects followed, paced; a 429 or 5xx retried
     if the request or the body read failed: return Unreachable(failure)
@@ -434,7 +436,17 @@ The source is named as Python records it (`SERVICE_UNPAYWALL`,
 Unpaywall, any status of 400 or above but 404 (a 408 or 403 is an answer, "did
 not serve it"; a 501 or 520 could not be asked), a transport failure, an answer
 that is empty or will not decode, and an unexpected error in the tier; from the
-landing page, `Unreachable` above.
+landing page, `Unreachable` above, including an address that is not an
+absolute http(s) URL (`request_failed`: Python's `requests` refuses it with
+`MissingSchema`, `InvalidSchema` or `InvalidURL`, #474). A `url_for_pdf` the
+tier cannot fetch is never "no copy" either: Python's download of it fails,
+Android hands it on as the PDF link, and Swift, which cannot build a link from
+it, records Unpaywall's `request_failed`.
+
+**The chain never ends on an absence while it is unsettled.** Every path that
+records a shortfall returns the DOI link carrying it. Should that link not
+build, BioMedLit throws `openAccessNotEstablished`, never
+`noFullTextAvailable`, which the apps record on the document for good (#475).
 
 **No usable email is "not configured", not a 422.** Unpaywall refuses a blank
 address, and Android's placeholder `bmlibrarian@example.com` (Python's

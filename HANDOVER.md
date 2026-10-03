@@ -8,23 +8,14 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Apps: tell the reader the open-access copy went unassessed** (#466), branch
-`fix/oa-unreachable-notice-466`, PR #473 (compress once merged). Both apps
-carry an **`OpenAccessShortfall`** (source + a failure, or **not configured**)
-on the fallback, store it with the full text (Swift
-`fullTextOpenAccessShortfallJSON`, Android Room **8**) and show **Python's
-sentence** (`unestablished_access_clause`) as a note
-(`ParseWarningBannerContent`; Android `OpenAccessShortfallNotice`). **Every
-fetch that settles it writes or clears it** (Android: one writer,
-`recordingFullTextFetch`, for all three screens); an unreadable stored value
-still speaks. **Any Unpaywall status of 400+ but 404 is unsettled** on all
-three. **No usable email is "not configured", never a 422**: Android's
-placeholder is not sent (`UnpaywallContact`, NCBI email as fallback), and the
-notice adds Python's configuration nudge. Room migrations register from
-`AppDatabase.ALL_MIGRATIONS`, pinned by `AppDatabaseMigrationsTest`. Contract:
-`fulltext_retrieval.md` "An unsettled open-access copy" and
-`fulltext_parity/open_access_unsettled_notice.json`. Follow-ups **#471**,
-**#472**, **#474**, **#475**, **#476**.
+**Unpaywall: an address the tier cannot fetch is not "no copy"** (#474,
+#475), branch `fix/unusable-landing-url-474`. A landing URL that is not an
+absolute http(s) URL is an unread page (`request_failed`) on both apps, as
+Python's `requests` refuses it (Swift `UnpaywallLandingPage.fetchableURL`,
+Android `readLandingPage`); Swift's unusable `url_for_pdf` records Unpaywall's
+`request_failed`. BioMedLit's closing throw is one pure function,
+`FullTextService.exhaustedChainError`: no absence while an open-access
+shortfall is set (`FullTextError.openAccessNotEstablished`).
 
 ## Recently landed (context)
 
@@ -32,6 +23,16 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **Apps: an unsettled open-access copy is told** (PR #473, #466). Both apps
+  carry an **`OpenAccessShortfall`** (source + failure, or **not configured**)
+  on the fallback, store it with the full text (Swift
+  `fullTextOpenAccessShortfallJSON`, Android Room **8**) and show **Python's
+  sentence** (`unestablished_access_clause`). **Every fetch that settles it
+  writes or clears it** (Android: one writer, `recordingFullTextFetch`).
+  **Any Unpaywall status of 400+ but 404 is unsettled**; **no usable email is
+  "not configured", never a 422**. Room migrations register from
+  `AppDatabase.ALL_MIGRATIONS`. Contract: `fulltext_retrieval.md` "An
+  unsettled open-access copy", `fulltext_parity/open_access_unsettled_notice.json`.
 - **iOS/macOS: a working cancel** (PR #469, #462). **Every workflow entry
   point runs its body through `runAsWorkflowTask(_:)`**; **`stopWork(_:)` is
   the one path for a stop** and `settleStop()` re-records it as the task ends;
@@ -59,9 +60,7 @@ the rest.
   another replaced it. Auto full text for papers scored 4-5
   (`FullTextAutoFetch.swift`, Apple only on purpose; the 40,000-character cut
   is the product's call). Earlier builds' stored notices are never reworded.
-- **A preprint's `fullTextXML` 500 is asked once** (all three; #451); every
-  PMC accession's 500 and any 429/502/503/504 keep the full budget (user's
-  call). Contract: `fulltext_retrieval.md`.
+- **A preprint's `fullTextXML` 500 is asked once** (all three; #451; user's call).
 - **`fullTextXML` is asked only when Europe PMC's record allows it** (Python;
   PR #452, #432): it answers **500, not 404**, for a held closed-access
   article. `europepmc.offers_fulltext_xml` skips only a record that *states*
@@ -69,11 +68,9 @@ the rest.
   call); an unreadable 200 is `MALFORMED_RESPONSE`. Survey rows in
   `doc/developer/europepmc_xml_survey/` are pinned by
   `tests/test_europepmc_xml_survey.py` (re-analyse, never re-fetch).
-- **doi.org's HEAD status is read** (Python; PR #448, #446), named by host:
-  doi.org's 400/404 are absences; a publisher's bot-wall 4xx stays "no PDF"
-  (`doi_resolution_failure`). **`mount_politely` turns off urllib3's
-  `respect_retry_after_header`**, or a throttle is re-sent below the limiter
-  (`polite_request_pacing.md` rule 6).
+- **doi.org's HEAD status is read** (Python; PR #448): doi.org's 400/404 are
+  absences (`doi_resolution_failure`). **`mount_politely` turns off urllib3's
+  `respect_retry_after_header`** (`polite_request_pacing.md` rule 6).
 - **An answered lookup "did not serve it"** (all three; PRs #444, #449;
   #435, #445, #447). An `HTTP_STATUS` failure is an answer **except a 429 or any 5xx**, which
   "could not be asked"; one predicate, `RequestFailure.is_answer` /
@@ -137,9 +134,8 @@ the rest.
 - **A source nobody asked is not a source that answered "nothing"** (Python;
   PRs #358, #365). Only a text we read and segmented can produce
   `NOT_STATED`; a skip is a third state (`SourceLookupSkipped`); a
-  three-state value needs three arms; a withheld claim stays withheld at
-  every surface. **Assert the built sentence, never a substring another
-  caveat shares.**
+  three-state value needs three arms. **Assert the built sentence, never a
+  substring another caveat shares.**
 - **Older rounds, compressed to the rules that still bind.** Each cost a
   defect; the archaeology is in git history and the `doc/cross_platform/`
   READMEs, which these point at.
@@ -215,9 +211,9 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **#467** landing-page parsing parity edges; **#468** / **#470** cancel
-  follow-ups (iOS/macOS); **#471** Android link-only state; **#472** the iOS
-  Full Text tab's link-only row skips the retrieval notice.
+- **#467** landing-page parity edges; **#468** / **#470** iOS/macOS cancel
+  follow-ups; **#471** Android link-only state; **#472** iOS Full Text tab
+  skips the retrieval notice; **#476** `OpenAccessShortfall` hardening.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 
@@ -409,8 +405,7 @@ enables DEBUG; **#245** the transparency CLIs take the NCBI key only as
 - **PubMed parsers (Swift + Android)**: **#402** the year comes from
   `DateCompleted`, not `PubDate`; **#403** Swift appends a translated
   `<OtherAbstract>`; **#404** Android's `ArticleId` has no `<Reference>` guard.
-- **#190** CI never builds the iOS app target; cheapest guard: fail when a
-  `.swift` file under `ios/MedicalFactChecker/Sources/` belongs to no target.
+- **#190** CI never builds the iOS app target.
 
 ### Transparency parity and pricing
 

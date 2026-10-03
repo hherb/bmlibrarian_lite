@@ -231,6 +231,27 @@ class FullTextServiceUnpaywallTest {
     private fun doiLinkLeaving(source: OpenAccessSource, failure: RequestFailure) =
         FullTextService.FullTextResult.DoiUrl("${Constants.DOI_URL_PREFIX}$doi", OpenAccessShortfall(source, failure))
 
+    /**
+     * An address that is not an http(s) URL is a page we did not read, not one
+     * that declares no PDF: Python's `requests` refuses the same addresses and
+     * records a failed request (#474).
+     */
+    @Test
+    fun `a landing page that cannot be fetched is left unsettled, not read as declaring nothing`() = runTest {
+        for (address in listOf("ftp://repo.example.org$handlePath", handlePath, "file://$handlePath")) {
+            unpaywallAnswers(pdfUrl = null, landingPage = address)
+            Log.clear()
+
+            assertEquals(
+                address,
+                doiLinkLeaving(OpenAccessSource.LANDING_PAGE, RequestFailure(RequestFailureKind.REQUEST_FAILED)),
+                fetch()
+            )
+            assertTrue("${Log.lines}", Log.lines.any { "not an http(s) URL" in it })
+        }
+        assertEquals(0, handleRequests())
+    }
+
     @Test
     fun `an unreachable landing page is retried and logged as unread, not as declaring nothing`() = runTest {
         unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())

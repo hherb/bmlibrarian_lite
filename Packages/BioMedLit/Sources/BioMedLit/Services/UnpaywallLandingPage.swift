@@ -107,6 +107,25 @@ enum UnpaywallLandingPage {
         return .nothing
     }
 
+    /// The URL an Unpaywall address names, when the tier can fetch it.
+    ///
+    /// An absolute http(s) URL with a host; anything else (a relative path, an
+    /// `ftp:` or `file:` URL, text that will not parse) is refused. Python
+    /// sends the address to `requests`, which refuses the same addresses with
+    /// `MissingSchema`, `InvalidSchema` or `InvalidURL`, and records the lookup
+    /// as a failed request rather than an absence (#474).
+    ///
+    /// - Parameter address: A `url_for_pdf` or landing page, as Unpaywall gave it.
+    /// - Returns: The URL, or `nil` when it cannot be fetched.
+    static func fetchableURL(_ address: String) -> URL? {
+        guard let url = URL(string: address),
+              let scheme = url.scheme?.lowercased(),
+              BioMedLitConstants.landingPagePDFSchemes.contains(scheme),
+              let host = url.host, !host.isEmpty
+        else { return nil }
+        return url
+    }
+
     /// Return the PDF a landing page declares, or `nil` when it declares none.
     ///
     /// The first `<meta name="citation_pdf_url">` whose content resolves,
