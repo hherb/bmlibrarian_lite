@@ -70,6 +70,7 @@ from .constants import (
     SERVICE_PMC_ID_CONVERTER,
     SERVICE_UNPAYWALL,
     SERVICE_UNPAYWALL_LANDING_PAGE,
+    SERVICE_UNPAYWALL_PDF,
 )
 from .analysis_failures import (
     no_pdf_sources_message,
@@ -485,6 +486,13 @@ class DiscoveryResult:
             field; it is here so a caller can classify rather than parse a
             sentence -- which is what the transparency analyser does to tell
             an absence from a silence (#354).
+        failure: Why one download attempt got no PDF, as a typed failure
+            safe to show: the status, the transport failure, or
+            ``MALFORMED_RESPONSE`` for a body that is not the PDF. ``None``
+            on success, on a cancel, and for a PDF refused for its size,
+            which is our limit rather than the source's answer. Set only by
+            :meth:`PDFDiscoverer._try_download`, so the discovery can record
+            an Unpaywall PDF it could not obtain (#478).
     """
 
     success: bool
@@ -495,6 +503,7 @@ class DiscoveryResult:
     paywall_url: Optional[str] = None
     verification_warning: Optional[str] = None
     lookups: LookupRecord = LookupRecord()
+    failure: RequestFailure | None = None
 
     def with_lookups(self, record: LookupRecord) -> "DiscoveryResult":
         """Add the lookups that went unanswered to this result.
@@ -513,6 +522,55 @@ class DiscoveryResult:
             with nothing dropped.
         """
         return replace(self, lookups=self.lookups.merged(record))
+
+
+def refused_download_failure(status_code: int) -> RequestFailure:
+    """The failure a download met by a paywall or a bot wall records.
+
+    A refusal status (401, 403) is that status, which the reader is told
+    "did not serve it". A page served with a success status in place of the
+    PDF -- a login form, a captcha, a challenge page -- is a body that is
+    not the PDF, ``MALFORMED_RESPONSE``: that says nothing about the
+    article, so the reader is told the copy could not be asked (#478, #480).
+
+    Args:
+        status_code: The status the page was served with.
+
+    Returns:
+        The failure to record.
+    """
+    if status_code >= HTTP_ERROR_STATUS_MIN:
+        return RequestFailure(RequestFailureKind.HTTP_STATUS, status_code)
+    return RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+
+
+def unobtained_unpaywall_pdf(
+    source: "PDFSource", result: "DiscoveryResult"
+) -> SourceLookupFailure | None:
+    """Record an Unpaywall PDF we could not obtain, or nothing.
+
+    Unpaywall answered with a copy; that we then could not fetch it is not
+    an article without one. Unrecorded, every lookup read as answered and a
+    failed download let the discovery conclude the article had no full
+    text (#478). Only the download's own failures count: a cancel, and a
+    PDF refused for its size, carry none.
+
+    Args:
+        source: The source the download tried.
+        result: What the attempt came to.
+
+    Returns:
+        The failure under :data:`SERVICE_UNPAYWALL_PDF` when ``source`` is
+        a PDF Unpaywall named and the attempt failed for a reason it can
+        state; ``None`` otherwise.
+    """
+    if (
+        result.success
+        or result.failure is None
+        or source.source_type is not PDFSourceType.UNPAYWALL_OA
+    ):
+        return None
+    return SourceLookupFailure(SERVICE_UNPAYWALL_PDF, result.failure)
 
 
 def usable_unpaywall_email(email: str | None) -> str | None:
@@ -674,6 +732,7 @@ class PDFDiscoverer:
         # Try to download from each source
         last_paywall_result: Optional[DiscoveryResult] = None
         blocked_oa_sources: List[PDFSource] = []  # Track sources blocked by bot protection
+        unobtained_pdf = LookupRecord()
 
         for source in sources:
             if self._cancelled:
@@ -688,6 +747,16 @@ class PDFDiscoverer:
 
             if result.success:
                 return result.with_lookups(lookups)
+
+            # An Unpaywall PDF we could not obtain leaves the open-access copy
+            # unassessed (#478). Held apart from ``lookups`` and merged only
+            # where the discovery gives up: a later source that serves the
+            # PDF settles the question. The first is kept, the best
+            # location's, as the apps try that one alone.
+            if not unobtained_pdf.anything_unsettled:
+                unobtained = unobtained_unpaywall_pdf(source, result)
+                if unobtained is not None:
+                    unobtained_pdf = LookupRecord(failures=(unobtained,))
 
             if result.is_paywall:
                 # For open access sources, a 403 might be bot protection, not paywall
@@ -704,9 +773,9 @@ class PDFDiscoverer:
                     # that would have found a free copy could not be made,
                     # the claim is withheld rather than asserted (#347).
                     return replace(
-                        result.with_lookups(lookups),
+                        result.with_lookups(lookups.merged(unobtained_pdf)),
                         error=paywall_message(
-                            result.error or "", told
+                            result.error or "", told.merged(unobtained_pdf)
                         ),
                     )
 
@@ -730,9 +799,9 @@ class PDFDiscoverer:
         # If we had a paywall result but no success, return it for OpenAthens option
         if last_paywall_result:
             return replace(
-                last_paywall_result.with_lookups(lookups),
+                last_paywall_result.with_lookups(lookups.merged(unobtained_pdf)),
                 error=paywall_message(
-                    last_paywall_result.error or "", told
+                    last_paywall_result.error or "", told.merged(unobtained_pdf)
                 ),
             )
 
@@ -742,9 +811,9 @@ class PDFDiscoverer:
             # cannot falsify -- so it is qualified rather than withheld.
             error=with_unestablished_access(
                 "Failed to download PDF from any available source.",
-                told,
+                told.merged(unobtained_pdf),
             ),
-            lookups=lookups,
+            lookups=lookups.merged(unobtained_pdf),
         )
 
     def _discover_sources(
@@ -1595,6 +1664,7 @@ class PDFDiscoverer:
                     is_paywall=True,
                     paywall_url=source.url,
                     error="Access requires institutional subscription or purchase.",
+                    failure=refused_download_failure(response.status_code),
                 )
 
             response.raise_for_status()
@@ -1606,6 +1676,7 @@ class PDFDiscoverer:
                 return DiscoveryResult(
                     success=False,
                     error=f"Server returned non-PDF content: {content_type}",
+                    failure=RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
                 )
 
             # Check file size
@@ -1659,17 +1730,34 @@ class PDFDiscoverer:
                     is_paywall=True,
                     paywall_url=source.url,
                     error="Access denied - may require institutional access.",
+                    failure=refused_download_failure(e.response.status_code),
                 )
             logger.warning(f"HTTP error downloading from {source.url}: {e}")
-            return DiscoveryResult(success=False, error=str(e))
+            return DiscoveryResult(
+                success=False,
+                error=str(e),
+                failure=request_failure_from_exception(e),
+            )
 
         except requests.exceptions.RequestException as e:
+            # Includes an address ``requests`` will not send at all -- an
+            # ``ftp:``, ``file:`` or relative ``url_for_pdf`` raises
+            # InvalidSchema / MissingSchema / InvalidURL before any request
+            # -- which reads as REQUEST_FAILED, as the apps refuse it (#478).
             logger.warning(f"Request error downloading from {source.url}: {e}")
-            return DiscoveryResult(success=False, error=str(e))
+            return DiscoveryResult(
+                success=False,
+                error=str(e),
+                failure=request_failure_from_exception(e),
+            )
 
         except Exception as e:
             logger.exception(f"Unexpected error downloading from {source.url}")
-            return DiscoveryResult(success=False, error=str(e))
+            return DiscoveryResult(
+                success=False,
+                error=str(e),
+                failure=RequestFailure(RequestFailureKind.REQUEST_FAILED),
+            )
 
     def _try_browser_download(
         self,

@@ -419,7 +419,8 @@ public actor FullTextService {
         let unpaywallDOI = doi?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         // Why the open-access copy Unpaywall may know of went unassessed, if it
         // did: Unpaywall or the landing page it named could not settle whether a
-        // free copy exists, or Unpaywall was not configured. Carried
+        // free copy exists, the PDF it named could not be obtained (#478), or
+        // Unpaywall was not configured. Carried
         // on whatever fallback is returned, so a caller holding a better link
         // than that fallback knows not to trade it away (#464).
         var openAccessShortfall: OpenAccessShortfall?
@@ -453,7 +454,20 @@ public actor FullTextService {
                     category: .fullText
                 )
                 let outcome = try await downloadAndExtract(from: pdfURL, key: cacheKey)
-                if let result = pdfTierResult(
+                if case .downloadFailed(let failure?) = outcome {
+                    // Refused, not offered (#478): a PDF Unpaywall named that
+                    // we could not obtain leaves the open-access copy
+                    // unassessed. It is not held as a link fallback, and the
+                    // reader is told why on whatever the chain falls back to.
+                    // Whether a bot wall is behind such failures is #480.
+                    openAccessShortfall = OpenAccessShortfall(source: .pdf, failure: failure)
+                    BioMedLitLib.logger?.warning(
+                        "The open-access PDF Unpaywall named for DOI \(doi) could not be "
+                            + "obtained (\(failure.describe())), so the open-access copy is "
+                            + "not assessed",
+                        category: .fullText
+                    )
+                } else if let result = pdfTierResult(
                     outcome: outcome,
                     content: .unpaywall(pdfURL: pdfURL),
                     degradation: degradation,
@@ -1307,13 +1321,11 @@ public actor FullTextService {
         switch choice {
         case .pdf(let pdf):
             // Unpaywall named a copy; an address we cannot fetch leaves it
-            // unassessed, not absent (#474). Python and Android hand it on as
-            // the PDF link and their download of it fails; Swift does not
-            // offer a link it will not open, so it records Unpaywall's
-            // `requestFailed`. That notice says Unpaywall "could not be asked",
-            // which approximates an answer we could not use (#478).
+            // unassessed, not absent (#474). It is refused, not offered as a
+            // link, and recorded against the PDF, not Unpaywall, which
+            // answered (#478). Python's `requests` refuses the same addresses.
             guard let pdfURL = UnpaywallLandingPage.fetchableURL(pdf) else {
-                throw Self.unfetchableAddress(pdf, source: .unpaywall)
+                throw Self.unfetchableAddress(pdf, source: .pdf)
             }
             BioMedLitLib.logger?.debug("Found OA PDF location: \(pdf)", category: .fullText)
             return pdfURL
@@ -1343,7 +1355,7 @@ public actor FullTextService {
     ///
     /// - Parameters:
     ///   - address: The address, as Unpaywall gave it.
-    ///   - source: The lookup it left unsettled: Unpaywall for a `url_for_pdf`,
+    ///   - source: The lookup it left unsettled: the PDF for a `url_for_pdf`,
     ///     the landing page for a page.
     /// - Returns: The tier failure to throw, a failed request.
     private static func unfetchableAddress(
@@ -1686,23 +1698,34 @@ public actor FullTextService {
             category: .fullText
         )
 
-        let (data, response) = try await RetryHelper.retry(
-            config: .pdfDownload,
-            shouldRetry: RetryHelper.retryOnlyTransient
-        ) {
-            try await self.session.data(from: url)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await RetryHelper.retry(
+                config: .pdfDownload,
+                shouldRetry: RetryHelper.retryOnlyTransient
+            ) {
+                try await self.session.data(from: url)
+            }
+        } catch where error.isCancellation {
+            throw CancellationError()
+        } catch {
+            throw FullTextError.pdfDownloadFailed(SearchTransport.failure(for: error))
         }
 
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == BioMedLitConstants.httpStatusOK else {
-            throw FullTextError.pdfDownloadFailed("Invalid response")
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw FullTextError.pdfDownloadFailed(.malformedResponse)
+        }
+        guard httpResponse.statusCode == BioMedLitConstants.httpStatusOK else {
+            throw FullTextError.pdfDownloadFailed(.httpStatus(httpResponse.statusCode))
         }
 
-        // Verify it looks like a PDF by checking magic bytes (%PDF)
+        // Verify it looks like a PDF by checking magic bytes (%PDF). A login
+        // page or a bot wall's challenge served with a 200 stops here (#480).
         let pdfMagic = Data(BioMedLitConstants.pdfMagicBytes)
         guard data.count > pdfMagic.count,
               data.prefix(pdfMagic.count) == pdfMagic else {
-            throw FullTextError.pdfDownloadFailed("Response is not a valid PDF")
+            throw FullTextError.pdfDownloadFailed(.malformedResponse)
         }
 
         // Cache the PDF
@@ -1726,8 +1749,13 @@ public actor FullTextService {
         case notAttempted
 
         /// The bytes could not be fetched: a 404, a server error, a body that
-        /// is not a PDF, or a cache key we refuse to use.
-        case downloadFailed
+        /// is not a PDF, or the file could not be cached.
+        ///
+        /// Carries why, when the source is to blame (#478): the status, the
+        /// transport failure, or `malformedResponse` for a body that is not a
+        /// PDF. `nil` when the fault is ours, such as a cache write that
+        /// failed, which says nothing about the copy.
+        case downloadFailed(RequestFailure?)
 
         /// The file is on disk and holds no recoverable prose — a scan, or a
         /// document PDFKit declined to open.
@@ -1792,7 +1820,10 @@ public actor FullTextService {
                     + "trying the next source",
                 category: .fullText
             )
-            return .downloadFailed
+            if case FullTextError.pdfDownloadFailed(let failure) = error {
+                return .downloadFailed(failure)
+            }
+            return .downloadFailed(nil)
         }
 
         let extraction = extractor.extract(from: URL(fileURLWithPath: path))

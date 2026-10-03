@@ -438,8 +438,10 @@ class ReportViewModel @Inject constructor(
                 )
 
                 result.fold(
-                    onSuccess = { fullTextResult ->
-                        val updatedDoc = document.recordingFullTextFetch(fullTextResult) { url ->
+                    onSuccess = { chainResult ->
+                        // The result as settled by the download: a PDF Unpaywall
+                        // named that could not be downloaded is the DOI link (#478)
+                        val (updatedDoc, fullTextResult) = document.recordingFullTextFetch(chainResult) { url ->
                             fullTextService.downloadPdf(url, document.id)
                         }
 

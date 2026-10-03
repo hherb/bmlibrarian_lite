@@ -22,6 +22,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.bmlibrarian.factchecker.data.local.dao.DocumentDao
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
+import com.bmlibrarian.factchecker.data.remote.fulltext.PdfDownload
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.domain.model.AppSettings
 import com.bmlibrarian.factchecker.domain.model.FullTextLinkKind
@@ -60,12 +61,15 @@ class FullTextViewModelOpenAccessShortfallTest {
     )
     private val document = DocumentEntity(id = "d", sessionId = "s", title = "t", doi = "10.1/x")
 
+    /** A download the server answered with 404. */
+    private val notFound = PdfDownload.Failed(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
+
     @Before
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         fullTextService = mockk(relaxed = true) {
             every { getCachedPdfPath(any()) } returns null
-            coEvery { downloadPdf(any(), any()) } returns null
+            coEvery { downloadPdf(any(), any()) } returns notFound
         }
         documentDao = mockk(relaxed = true)
         settingsRepository = mockk(relaxed = true)
@@ -126,13 +130,12 @@ class FullTextViewModelOpenAccessShortfallTest {
             FullTextService.FullTextResult.EuropePmcXml(xml = "<a/>", markdown = "m", html = "<p>h</p>") to null,
             FullTextService.FullTextResult.EuropePmcPdf(pdfUrl) to "/cache/a.pdf",
             FullTextService.FullTextResult.EuropePmcPdf(pdfUrl) to null,
-            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl) to "/cache/a.pdf",
-            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl) to null,
+            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl, doi = "10.1/x") to "/cache/a.pdf",
             FullTextService.FullTextResult.Unavailable("none") to null,
         )
         for ((answer, downloaded) in answers) {
             documentDao = mockk(relaxed = true)
-            coEvery { fullTextService.downloadPdf(any(), any()) } returns downloaded
+            coEvery { fullTextService.downloadPdf(any(), any()) } returns (downloaded?.let(PdfDownload::Saved) ?: notFound)
             val unsettled = document.copy(fullTextOpenAccessShortfallJson = throttled.toJson())
 
             open(unsettled, answer)
@@ -147,17 +150,39 @@ class FullTextViewModelOpenAccessShortfallTest {
     @Test
     fun `a PDF is shown when downloaded and linked when not`() {
         val pdfUrl = "https://repo.example.org/a.pdf"
-        coEvery { fullTextService.downloadPdf(any(), any()) } returns "/cache/a.pdf"
+        coEvery { fullTextService.downloadPdf(any(), any()) } returns PdfDownload.Saved("/cache/a.pdf")
         assertEquals(
             FullTextViewModel.FullTextState.PdfContent("/cache/a.pdf", "t", "Unpaywall"),
-            open(document, FullTextService.FullTextResult.UnpaywallPdf(pdfUrl)).state.value
+            open(document, FullTextService.FullTextResult.UnpaywallPdf(pdfUrl, doi = "10.1/x")).state.value
         )
 
-        coEvery { fullTextService.downloadPdf(any(), any()) } returns null
+        coEvery { fullTextService.downloadPdf(any(), any()) } returns notFound
         assertEquals(
             FullTextViewModel.FullTextState.WebUrl(pdfUrl, "t", FullTextLinkKind.UNDOWNLOADED_PDF),
             open(document, FullTextService.FullTextResult.EuropePmcPdf(pdfUrl)).state.value
         )
+    }
+
+    /**
+     * A PDF Unpaywall named that could not be downloaded is refused (#478): the
+     * viewer offers the DOI link, says why the open-access copy went
+     * unassessed, and stores that, rather than offering the dead PDF link.
+     */
+    @Test
+    fun `an Unpaywall PDF that could not be downloaded is shown as the DOI link with why`() {
+        val shortfall = OpenAccessShortfall(OpenAccessSource.PDF, notFound.failure)
+
+        val viewModel = open(
+            document, FullTextService.FullTextResult.UnpaywallPdf("https://repo.example.org/a.pdf", doi = "10.1/x")
+        )
+
+        assertEquals(
+            FullTextViewModel.FullTextState.WebUrl(
+                "https://doi.org/10.1/x", "t", FullTextLinkKind.PUBLISHER_PAGE, shortfall.notice
+            ),
+            viewModel.state.value
+        )
+        coVerify { documentDao.update(match { it.openAccessShortfall == shortfall && it.pdfPath == null }) }
     }
 
     /** A chain that settled nothing records nothing, the stored shortfall included (#434). */

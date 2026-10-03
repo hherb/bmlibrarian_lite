@@ -170,7 +170,7 @@ class FullTextServiceUnpaywallTest {
 
         assertEquals(
             "${Log.lines}",
-            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = server.url(pdfPath).toString()),
+            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = server.url(pdfPath).toString(), doi = doi),
             result
         )
         server.takeRequest() // Unpaywall
@@ -218,7 +218,7 @@ class FullTextServiceUnpaywallTest {
         val pdfUrl = server.url(pdfPath).toString()
         unpaywallAnswers(pdfUrl = pdfUrl, landingPage = server.url(handlePath).toString())
 
-        assertEquals("${Log.lines}", FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = pdfUrl), fetch())
+        assertEquals("${Log.lines}", FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = pdfUrl, doi = doi), fetch())
         assertEquals(listOf<String?>(unpaywallPath), requestedPaths())
     }
 
@@ -255,20 +255,25 @@ class FullTextServiceUnpaywallTest {
     }
 
     /**
-     * A `url_for_pdf` that is not an http(s) URL is handed on as the PDF link,
-     * as Python hands it on, and is never asked for here. Swift refuses it and
-     * records Unpaywall's `request_failed` instead; which is right is #478, so
-     * this pins the current behaviour rather than endorsing it. What must not
-     * happen is the landing page's old defect on this path: refusing the
-     * address and answering a DOI link with no shortfall, as if no copy existed.
+     * A `url_for_pdf` that is not an http(s) URL is refused, never handed on as
+     * the PDF link (#478, the maintainer's call): the reader gets the DOI link,
+     * told the PDF Unpaywall named could not be asked, as Swift and Python
+     * tell it. Neither the address nor the landing page is requested.
      */
     @Test
-    fun `a url_for_pdf that cannot be fetched is handed on as the PDF link`() = runTest {
-        val pdfUrl = "ftp://repo.example.org/a.pdf"
-        unpaywallAnswers(pdfUrl = pdfUrl, landingPage = server.url(handlePath).toString())
+    fun `a url_for_pdf that cannot be fetched is refused`() = runTest {
+        for (pdfUrl in listOf("ftp://repo.example.org/a.pdf", "/bitstream/a.pdf", "file:///tmp/a.pdf")) {
+            Log.clear()
+            unpaywallAnswers(pdfUrl = pdfUrl, landingPage = server.url(handlePath).toString())
+            val before = server.requestCount
 
-        assertEquals("${Log.lines}", FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = pdfUrl), fetch())
-        assertEquals(listOf<String?>(unpaywallPath), requestedPaths())
+            assertEquals(
+                "$pdfUrl ${Log.lines}",
+                doiLinkLeaving(OpenAccessSource.PDF, RequestFailure(RequestFailureKind.REQUEST_FAILED)),
+                fetch()
+            )
+            assertEquals(pdfUrl, before + 1, server.requestCount)
+        }
     }
 
     @Test
@@ -429,7 +434,7 @@ class FullTextServiceUnpaywallTest {
 
         assertEquals(
             "${Log.lines}",
-            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = server.url(pagePath).toString()),
+            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = server.url(pagePath).toString(), doi = doi),
             fetch()
         )
     }
@@ -461,7 +466,7 @@ class FullTextServiceUnpaywallTest {
         pageServes(tag + padding)
 
         assertEquals(
-            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = server.url(pdfPath).toString()),
+            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = server.url(pdfPath).toString(), doi = doi),
             fetch()
         )
     }

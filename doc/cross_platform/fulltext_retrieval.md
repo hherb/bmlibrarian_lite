@@ -429,7 +429,7 @@ verb is #435's (`RequestFailure.is_answer`, `search_failure_reporting.md`):
   (`NOT_CONFIGURED`), and `configuration_nudge` adds the last sentence.
 
 The source is named as Python records it (`SERVICE_UNPAYWALL`,
-`SERVICE_UNPAYWALL_LANDING_PAGE`), a leading "the" capitalised. The rows are
+`SERVICE_UNPAYWALL_LANDING_PAGE`, `SERVICE_UNPAYWALL_PDF`), a leading "the" capitalised. The rows are
 `fulltext_parity/open_access_unsettled_notice.json`, read by all three suites.
 
 **Which answers leave it unsettled** is the same on all three platforms: from
@@ -438,12 +438,32 @@ not serve it"; a 501 or 520 could not be asked), a transport failure, an answer
 that is empty or will not decode, and an unexpected error in the tier; from the
 landing page, `Unreachable` above, including an address that is not an
 absolute http(s) URL (`request_failed`: Python's `requests` refuses it with
-`MissingSchema`, `InvalidSchema` or `InvalidURL`, #474). A `url_for_pdf` the
-tier cannot fetch is never "no copy" either: Python's download of it fails,
-Android hands it on as the PDF link, and Swift, which does not offer a link it
-will not open, records Unpaywall's `request_failed`. The platforms differ here,
-and the Swift notice's "could not be asked" approximates an answer that could
-not be used (#478).
+`MissingSchema`, `InvalidSchema` or `InvalidURL`, #474).
+
+**A PDF Unpaywall named that could not be obtained is refused** (#478, the
+maintainer's call). The PDF is its `url_for_pdf`, or the one its landing page
+declares. It is never offered as a link and never "no copy": the open-access
+copy went unassessed, under its own source, **the open-access copy's PDF**
+(`unpaywall_pdf`; Python `SERVICE_UNPAYWALL_PDF`), not Unpaywall's, which
+answered. The failure is:
+
+- `request_failed` for an address that is not an absolute http(s) URL with a
+  host, which is never requested (Python's `requests` refuses it as above);
+- the HTTP status of a download that answered with one (a 403 or 404 "did not
+  serve it"; a 429 or 5xx "could not be asked");
+- the transport failure of one that got no answer;
+- `malformed_response` for a body that is not a PDF, served with a success
+  status: it does not begin with `%PDF` (a login page, a bot wall's challenge,
+  #480).
+
+The chain then goes on as though Unpaywall had named no PDF: Python tries its
+remaining sources, Swift falls back past it (no link fallback is kept for it),
+and Android records the DOI link (`FullTextResult.UnpaywallPdf.refused`, applied
+where the download happens, `recordingFullTextFetch`). Python keeps only the
+first such failure, the best location's, as the apps try that one alone, and
+records it only when no source served the PDF. A cancel, and Python's refusal of
+an oversized PDF, are our own stops and record nothing. Whether these failures
+are genuinely unfetchable addresses or bot walls a browser would pass is #480.
 
 **The chain never ends on an absence while it is unsettled.** Every fallback
 returned after the tier carries the shortfall: on Android always the DOI link;
@@ -472,7 +492,7 @@ banner says both.
  "failure": {"kind": "http_status", "status_code": 408}}
 ```
 
-`source` is `unpaywall` or `unpaywall_landing_page`; `failure` is a search
+`source` is `unpaywall`, `unpaywall_landing_page` or `unpaywall_pdf`; `failure` is a search
 shortfall's failure object and reads back by its rules
 (`search_failure_reporting.md`, "Persisted form"). An Unpaywall that was not
 configured is stored as `{"schema_version": 1, "source": "unpaywall",
