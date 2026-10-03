@@ -8,22 +8,30 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Unpaywall: an address the tier cannot fetch is not "no copy"** (#474,
-#475), branch `fix/unusable-landing-url-474`, PR #477. A landing URL that is not an
-absolute http(s) URL is an unread page (`request_failed`) on both apps, as
-Python's `requests` refuses it (Swift `UnpaywallLandingPage.fetchableURL`,
-Android `readLandingPage`); Swift's unusable `url_for_pdf` records Unpaywall's
-`request_failed` (Android hands it on as the PDF link; which is right is
-**#478**). BioMedLit's closing throw is one static function,
-`FullTextService.exhaustedChainError`: no absence while an open-access
-shortfall is set (`FullTextError.openAccessNotEstablished`). The scheme set is
-now `BioMedLitConstants.unpaywallFetchableSchemes`.
+**A link-only record explains itself** (#471 Android, #472 iOS Full Text
+tab), branch `fix/link-only-state-471-472`, PR #479. Android: `DocumentEntity.isLinkOnly`
+(a fetch date, nothing displayable, no recorded absence; iOS's #187 line) and
+`linkOnlyKind` (`FullTextLinkKind`: the publisher's page, or a PDF found but
+not downloaded). Both cards show `LinkOnlyFullTextSection` (what the link is,
+**Try Again**, **Publisher**) instead of "Get Full Text"; the web-link screen
+says what the link is instead of "Full text is available on the publisher's
+website". iOS: the Full Text tab's link-only row shows `ParseWarningBanner`
+beneath it, outside the row's button. Contract: `fulltext_retrieval.md` "A
+link-only record is not an unfetched one".
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
+
+- **An address the tier cannot fetch is not "no copy"** (apps; PR #477,
+  #474, #475). A landing URL that is not an absolute http(s) URL is an unread
+  page (`request_failed`), as Python's `requests` refuses it (Swift
+  `UnpaywallLandingPage.fetchableURL`, Android `readLandingPage`; schemes in
+  `BioMedLitConstants.unpaywallFetchableSchemes`). BioMedLit's closing throw
+  is `FullTextService.exhaustedChainError`: **no absence while an open-access
+  shortfall is set**. An unusable `url_for_pdf`: the apps disagree (**#478**).
 
 - **Apps: an unsettled open-access copy is told** (PR #473, #466). Both apps
   carry an **`OpenAccessShortfall`** (source + failure, or **not configured**)
@@ -218,10 +226,10 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **#467** landing-page parity edges; **#468** / **#470** iOS/macOS cancel
-  follow-ups; **#471** Android link-only state; **#472** iOS Full Text tab
-  skips the retrieval notice; **#476** `OpenAccessShortfall` hardening;
-  **#478** an unusable `url_for_pdf`: Swift and Android disagree.
+- **#478** an unusable `url_for_pdf`: Swift and Android disagree (three
+  maintainer decisions listed in the issue); **#467** landing-page parity
+  edges; **#468** / **#470** iOS/macOS cancel follow-ups; **#476**
+  `OpenAccessShortfall` hardening.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 

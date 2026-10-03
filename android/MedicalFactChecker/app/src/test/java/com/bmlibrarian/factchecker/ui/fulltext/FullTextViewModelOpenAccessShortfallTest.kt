@@ -24,6 +24,7 @@ import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.domain.model.AppSettings
+import com.bmlibrarian.factchecker.domain.model.FullTextLinkKind
 import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
 import com.bmlibrarian.factchecker.domain.model.OpenAccessSource
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
@@ -93,7 +94,7 @@ class FullTextViewModelOpenAccessShortfallTest {
         val viewModel = open(document, FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1/x", throttled))
 
         assertEquals(
-            FullTextViewModel.FullTextState.WebUrl("https://doi.org/10.1/x", "t", throttled.notice),
+            FullTextViewModel.FullTextState.WebUrl("https://doi.org/10.1/x", "t", FullTextLinkKind.PUBLISHER_PAGE, throttled.notice),
             viewModel.state.value
         )
         coVerify { documentDao.update(match { it.openAccessShortfall == throttled }) }
@@ -107,7 +108,7 @@ class FullTextViewModelOpenAccessShortfallTest {
         val viewModel = open(unsettled, FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1/x"))
 
         assertEquals(
-            FullTextViewModel.FullTextState.WebUrl("https://doi.org/10.1/x", "t", null),
+            FullTextViewModel.FullTextState.WebUrl("https://doi.org/10.1/x", "t", FullTextLinkKind.PUBLISHER_PAGE, null),
             viewModel.state.value
         )
         coVerify { documentDao.update(match { it.fullTextOpenAccessShortfallJson == null }) }
@@ -154,7 +155,7 @@ class FullTextViewModelOpenAccessShortfallTest {
 
         coEvery { fullTextService.downloadPdf(any(), any()) } returns null
         assertEquals(
-            FullTextViewModel.FullTextState.WebUrl(pdfUrl, "t"),
+            FullTextViewModel.FullTextState.WebUrl(pdfUrl, "t", FullTextLinkKind.UNDOWNLOADED_PDF),
             open(document, FullTextService.FullTextResult.EuropePmcPdf(pdfUrl)).state.value
         )
     }
@@ -185,7 +186,7 @@ class FullTextViewModelOpenAccessShortfallTest {
 
         // Fetched again, rather than left on Loading
         assertEquals(
-            FullTextViewModel.FullTextState.WebUrl("https://doi.org/10.1/x", "t", null),
+            FullTextViewModel.FullTextState.WebUrl("https://doi.org/10.1/x", "t", FullTextLinkKind.PUBLISHER_PAGE, null),
             viewModel.state.value
         )
         coVerify {
