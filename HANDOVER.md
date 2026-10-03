@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **Unpaywall: an address the tier cannot fetch is not "no copy"** (#474,
-#475), branch `fix/unusable-landing-url-474`. A landing URL that is not an
+#475), branch `fix/unusable-landing-url-474`, PR #477. A landing URL that is not an
 absolute http(s) URL is an unread page (`request_failed`) on both apps, as
 Python's `requests` refuses it (Swift `UnpaywallLandingPage.fetchableURL`,
 Android `readLandingPage`); Swift's unusable `url_for_pdf` records Unpaywall's
