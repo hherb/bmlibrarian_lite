@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **Apps: tell the reader the open-access copy went unassessed** (#466), branch
-`fix/oa-unreachable-notice-466`, PR open (compress once merged). Both apps
+`fix/oa-unreachable-notice-466`, PR #473 (compress once merged). Both apps
 carry an **`OpenAccessShortfall`** (source + failure) on the fallback, store it
 with the full text (Swift `fullTextOpenAccessShortfallJSON`, Android Room **8**)
 and show **Python's sentence** (`unestablished_access_clause`) as a note
