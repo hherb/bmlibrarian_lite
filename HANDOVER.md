@@ -9,7 +9,7 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **A link-only record explains itself** (#471 Android, #472 iOS Full Text
-tab), branch `fix/link-only-state-471-472`. Android: `DocumentEntity.isLinkOnly`
+tab), branch `fix/link-only-state-471-472`, PR #479. Android: `DocumentEntity.isLinkOnly`
 (a fetch date, nothing displayable, no recorded absence; iOS's #187 line) and
 `linkOnlyKind` (`FullTextLinkKind`: the publisher's page, or a PDF found but
 not downloaded). Both cards show `LinkOnlyFullTextSection` (what the link is,
