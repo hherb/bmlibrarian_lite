@@ -238,6 +238,24 @@ final class Document {
     /// not a guarantee. Those records are rewritten on the next fetch.
     var fullTextDegradedReasonRaw: String?
 
+    /// Why the open-access copy Unpaywall may know of went unassessed, as the
+    /// JSON ``OpenAccessShortfall/persisted()`` writes, or `nil` when nothing
+    /// was left unsettled (#466).
+    ///
+    /// Unpaywall, or the landing page it named, could not answer, so the chain
+    /// settled on a fallback without learning whether a free copy exists. Kept
+    /// apart from ``fullTextDegradedReasonRaw`` because both can be true of one
+    /// fetch: Europe PMC unreachable *and* Unpaywall throttled. Persisted for
+    /// the reason that field is: the cards and viewers render from this model,
+    /// and the fallback it explains is usually a publisher link, which caches
+    /// nothing else to say it with.
+    ///
+    /// Written only when something went unsettled, so any stored value reads
+    /// as some shortfall (``storedOpenAccessShortfall``). `nil` for a record
+    /// written before this existed, which keeps its earlier silence until the
+    /// next fetch. An optional scalar, so lightweight migration adds it.
+    var fullTextOpenAccessShortfallJSON: String?
+
     /// What the stored full text actually is, as a ``FullTextContentKind`` raw
     /// value.
     ///
@@ -937,6 +955,7 @@ final class Document {
         // not inherit the previous attempt's note. Assigning these by hand at
         // each call site is what let the cache and the live result drift apart.
         fullTextDegradedReasonRaw = result.degradation?.rawValue
+        fullTextOpenAccessShortfallJSON = result.openAccessShortfall?.persisted()
         fullTextContentKindRaw = result.contentKind.rawValue
         storeExtractionCoverage(result.extractionCoverage)
 
@@ -1026,6 +1045,7 @@ final class Document {
         fullTextSource = nil
         fullTextParseWarningsJSON = nil
         fullTextDegradedReasonRaw = nil
+        fullTextOpenAccessShortfallJSON = nil
         fullTextContentKindRaw = nil
         storeExtractionCoverage(nil)
     }
@@ -1041,6 +1061,7 @@ final class Document {
         fullTextUnavailable = false
         fullTextParseWarningsJSON = nil
         fullTextDegradedReasonRaw = nil
+        fullTextOpenAccessShortfallJSON = nil
         fullTextContentKindRaw = nil
         storeExtractionCoverage(nil)
     }
@@ -1189,6 +1210,7 @@ final class Document {
             source: source,
             warnings: storedParseWarnings,
             degradation: storedDegradation,
+            openAccessShortfall: storedOpenAccessShortfall,
             contentKind: storedContentKind ?? .none,
             extractedText: storedContentKind == .extracted ? fullTextContent : nil,
             // Every stored path that is a file, not only the ones extraction
@@ -1225,15 +1247,21 @@ final class Document {
     /// on the in-flight result alone would never reach the reader there, and on
     /// iOS would be lost on reopen — which is how a partial extraction came to
     /// be shown exactly like a whole article.
+    ///
+    /// The open-access shortfall joins them for #466: a fallback the chain
+    /// settled on because Unpaywall could not answer is the outcome a link-only
+    /// card exists to explain, and nothing else on the record says it.
     var cachedRetrievalNotice: (
         warnings: JATSParseWarnings,
         degradation: FullTextDegradation?,
-        extractionCoverage: PDFExtractionCoverage?
+        extractionCoverage: PDFExtractionCoverage?,
+        openAccessShortfall: OpenAccessShortfall?
     ) {
         (
             storedParseWarnings,
             storedDegradation,
-            fullTextPDFPath == nil ? nil : storedExtractionCoverage
+            fullTextPDFPath == nil ? nil : storedExtractionCoverage,
+            storedOpenAccessShortfall
         )
     }
 
@@ -1308,6 +1336,17 @@ final class Document {
             """
         )
         return .unspecified
+    }
+
+    /// Why the open-access copy went unassessed, or `nil` when nothing was
+    /// left unsettled.
+    ///
+    /// Never `nil` for a stored value: the field is only written when a lookup
+    /// went unsettled, so one this build cannot interpret still means one did,
+    /// and reads as a failed request to Unpaywall (see
+    /// ``OpenAccessShortfall/restored(fromPersisted:)``) rather than as silence.
+    private var storedOpenAccessShortfall: OpenAccessShortfall? {
+        fullTextOpenAccessShortfallJSON.map(OpenAccessShortfall.restored(fromPersisted:))
     }
 
     /// The persisted content kind, or `nil` for a record that predates it.

@@ -238,10 +238,11 @@ public struct FullTextResult: Sendable, Equatable {
     ///
     /// Set only on a fallback returned after the Unpaywall tier: a caller that
     /// already holds a PDF link must not trade it for a fallback the chain
-    /// settled on only because a source could not answer (#464). Not a
-    /// ``degradation``: that names a lost machine-readable source and is
-    /// persisted; this is the state of one fetch.
-    public let openAccessShortfall: RequestFailure?
+    /// settled on only because a source could not answer (#464), and the reader
+    /// is told what it leaves open (``OpenAccessShortfall/notice``, #466). Not a
+    /// ``degradation``: that names a lost machine-readable source, and the two
+    /// can both be true of one fetch.
+    public let openAccessShortfall: OpenAccessShortfall?
 
     /// Create a retrieval result.
     ///
@@ -269,7 +270,7 @@ public struct FullTextResult: Sendable, Equatable {
         extractedText: String? = nil,
         localPDFPath: String? = nil,
         extractionCoverage: PDFExtractionCoverage? = nil,
-        openAccessShortfall: RequestFailure? = nil
+        openAccessShortfall: OpenAccessShortfall? = nil
     ) {
         // Three combinations the fallback chain never emits, and which the reader
         // would be shown as fact if it ever did. They were unspellable while
@@ -356,7 +357,7 @@ public struct FullTextResult: Sendable, Equatable {
     ///
     /// - Parameter openAccessShortfall: The failure, or `nil` for none.
     /// - Returns: The same result with ``openAccessShortfall`` set.
-    func noting(openAccessShortfall: RequestFailure?) -> FullTextResult {
+    func noting(openAccessShortfall: OpenAccessShortfall?) -> FullTextResult {
         FullTextResult(
             content: content,
             warnings: warnings,

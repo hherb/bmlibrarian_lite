@@ -110,10 +110,13 @@ class FullTextViewModel @Inject constructor(
          *
          * @param url URL to open.
          * @param title Document title.
+         * @param openAccessNotice What an open-access lookup that went unsettled
+         *   leaves open, shown above the link; null when nothing was (#466).
          */
         data class WebUrl(
             val url: String,
-            val title: String
+            val title: String,
+            val openAccessNotice: String? = null
         ) : FullTextState()
 
         /**
@@ -280,7 +283,8 @@ class FullTextViewModel @Inject constructor(
                         fullTextMarkdown = result.markdown,
                         fullTextHTML = result.html,
                         fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
-                        fullTextFetchedAt = Date()
+                        fullTextFetchedAt = Date(),
+                        fullTextOpenAccessShortfallJson = null
                     )
                 )
 
@@ -311,7 +315,8 @@ class FullTextViewModel @Inject constructor(
                         doc.copy(
                             pdfPath = localPath,
                             fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
-                            fullTextFetchedAt = Date()
+                            fullTextFetchedAt = Date(),
+                            fullTextOpenAccessShortfallJson = null
                         )
                     )
 
@@ -321,6 +326,7 @@ class FullTextViewModel @Inject constructor(
                         source = "Europe PMC"
                     )
                 } else {
+                    forgetOpenAccessShortfall(doc)
                     // Couldn't download, provide URL for external viewing
                     _state.value = FullTextState.WebUrl(
                         url = result.pdfUrl,
@@ -341,7 +347,8 @@ class FullTextViewModel @Inject constructor(
                         doc.copy(
                             pdfPath = localPath,
                             fullTextSource = Constants.FULLTEXT_SOURCE_UNPAYWALL,
-                            fullTextFetchedAt = Date()
+                            fullTextFetchedAt = Date(),
+                            fullTextOpenAccessShortfallJson = null
                         )
                     )
 
@@ -351,6 +358,7 @@ class FullTextViewModel @Inject constructor(
                         source = "Unpaywall"
                     )
                 } else {
+                    forgetOpenAccessShortfall(doc)
                     // Couldn't download, provide URL for external viewing
                     _state.value = FullTextState.WebUrl(
                         url = result.pdfUrl,
@@ -366,13 +374,15 @@ class FullTextViewModel @Inject constructor(
                 documentDao.update(
                     doc.copy(
                         fullTextSource = Constants.FULLTEXT_SOURCE_DOI,
-                        fullTextFetchedAt = Date()
+                        fullTextFetchedAt = Date(),
+                        fullTextOpenAccessShortfallJson = result.openAccessShortfall?.toJson()
                     )
                 )
 
                 _state.value = FullTextState.WebUrl(
                     url = result.url,
-                    title = doc.title
+                    title = doc.title,
+                    openAccessNotice = result.openAccessShortfall?.notice
                 )
             }
 
@@ -383,7 +393,8 @@ class FullTextViewModel @Inject constructor(
                 documentDao.update(
                     doc.copy(
                         fullTextUnavailable = true,
-                        fullTextFetchedAt = Date()
+                        fullTextFetchedAt = Date(),
+                        fullTextOpenAccessShortfallJson = null
                     )
                 )
 
@@ -396,6 +407,22 @@ class FullTextViewModel @Inject constructor(
                 Log.d(TAG, "Full text not established for ${doc.id}: ${result.failure.describe()}")
                 _state.value = FullTextState.Error(message = result.reason, canRetry = true)
             }
+        }
+    }
+
+    /**
+     * Clear an open-access shortfall an earlier fetch stored (#466), when this one
+     * found a PDF it could not download.
+     *
+     * The chain answered with a PDF URL, so the lookup that once went unsettled is
+     * settled now. Nothing else is written: the document caches no content, as
+     * before, and the card must not keep saying a free copy may exist.
+     *
+     * @param doc The document fetched.
+     */
+    private suspend fun forgetOpenAccessShortfall(doc: DocumentEntity) {
+        if (doc.fullTextOpenAccessShortfallJson != null) {
+            documentDao.update(doc.copy(fullTextOpenAccessShortfallJson = null))
         }
     }
 
@@ -419,7 +446,8 @@ class FullTextViewModel @Inject constructor(
                         fullTextSource = null,
                         pdfPath = null,
                         fullTextUnavailable = false,
-                        fullTextFetchedAt = null
+                        fullTextFetchedAt = null,
+                        fullTextOpenAccessShortfallJson = null
                     )
                 )
 

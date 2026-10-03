@@ -177,7 +177,8 @@ struct MacFullTextViewer: View {
             ParseWarningBanner(
                 warnings: document.cachedRetrievalNotice.warnings,
                 degradation: document.cachedRetrievalNotice.degradation,
-                extractionCoverage: document.cachedRetrievalNotice.extractionCoverage
+                extractionCoverage: document.cachedRetrievalNotice.extractionCoverage,
+                openAccessShortfall: document.cachedRetrievalNotice.openAccessShortfall
             )
             renderedContent
         }

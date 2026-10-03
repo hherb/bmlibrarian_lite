@@ -24,7 +24,10 @@ import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCArticle
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
 import com.bmlibrarian.factchecker.data.remote.europepmc.FullTextAccession
 import com.bmlibrarian.factchecker.data.remote.europepmc.FullTextXmlFetch
+import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
+import com.bmlibrarian.factchecker.domain.model.OpenAccessSource
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
+import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
@@ -124,8 +127,15 @@ class FullTextService @Inject constructor(
          * Fall back to DOI/publisher URL.
          *
          * @param url URL to the publisher page.
+         * @param openAccessShortfall Why the open-access copy went unassessed when
+         *   Unpaywall, or the landing page it named, could not answer; null when
+         *   nothing was left unsettled. Stored on the document and shown to the
+         *   reader (#466): the link alone reads as "no free copy".
          */
-        data class DoiUrl(val url: String) : FullTextResult(hasContent = true)
+        data class DoiUrl(
+            val url: String,
+            val openAccessShortfall: OpenAccessShortfall? = null
+        ) : FullTextResult(hasContent = true)
 
         /**
          * Full text is unavailable from all sources.
@@ -309,13 +319,17 @@ class FullTextService @Inject constructor(
             )
         }
 
-        // Try Unpaywall if DOI is available
+        // Try Unpaywall if DOI is available. A lookup that could not answer is
+        // carried on the fallback, so the reader is told a free copy may exist
+        // rather than shown the DOI link as though there were none (#466)
+        var openAccessShortfall: OpenAccessShortfall? = null
         if (!doi.isNullOrEmpty()) {
             Log.d(TAG, "Attempting Unpaywall PDF for $doi")
             val pdfResult = tryUnpaywallPdf(doi, email, pmid)
             if (pdfResult.isSuccess) {
                 return@withContext pdfResult
             }
+            openAccessShortfall = (pdfResult.exceptionOrNull() as? OpenAccessUnsettledException)?.shortfall
             Log.d(TAG, "Unpaywall PDF failed: ${pdfResult.exceptionOrNull()?.message}")
         }
 
@@ -323,7 +337,7 @@ class FullTextService @Inject constructor(
         if (!doi.isNullOrEmpty()) {
             Log.d(TAG, "Falling back to DOI URL for $doi")
             return@withContext Result.success(
-                FullTextResult.DoiUrl("${Constants.DOI_URL_PREFIX}$doi")
+                FullTextResult.DoiUrl("${Constants.DOI_URL_PREFIX}$doi", openAccessShortfall)
             )
         }
 
@@ -426,21 +440,42 @@ class FullTextService @Inject constructor(
                         if (NetworkRetry.isRetryableStatusCode(response.code())) {
                             throw RetryableStatusException(response.code())
                         }
-                        throw FullTextException("Unpaywall API error: ${response.code()} ${response.message()}")
+                        // Any other error status leaves the copy unassessed too: only a
+                        // 404 says Unpaywall holds no record of the DOI. Python records
+                        // every such status as a failed lookup, and the reader is told
+                        // so in the same words (#466)
+                        throw OpenAccessUnsettledException(
+                            OpenAccessShortfall(
+                                OpenAccessSource.UNPAYWALL,
+                                RequestFailure(RequestFailureKind.HTTP_STATUS, response.code())
+                            )
+                        )
                     }
 
+                    // An empty answer has told us nothing about the article
                     val body = response.body()
-                        ?: throw FullTextException("Empty response from Unpaywall")
+                        ?: throw OpenAccessUnsettledException(
+                            OpenAccessShortfall(
+                                OpenAccessSource.UNPAYWALL,
+                                RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+                            )
+                        )
 
                     UnpaywallLandingPage.chooseUrl(body)
                 }
             } catch (e: RetryableStatusException) {
-                throw OpenAccessUnsettledException(RequestFailure.forHttpStatus(e.statusCode))
+                throw OpenAccessUnsettledException(
+                    OpenAccessShortfall(OpenAccessSource.UNPAYWALL, RequestFailure.forHttpStatus(e.statusCode))
+                )
             } catch (e: IOException) {
-                throw OpenAccessUnsettledException(RequestFailure.fromException(e))
+                throw OpenAccessUnsettledException(
+                    OpenAccessShortfall(OpenAccessSource.UNPAYWALL, RequestFailure.fromException(e))
+                )
             } catch (e: SerializationException) {
                 // An answer we cannot read has told us nothing about the article
-                throw OpenAccessUnsettledException(RequestFailure.fromException(e))
+                throw OpenAccessUnsettledException(
+                    OpenAccessShortfall(OpenAccessSource.UNPAYWALL, RequestFailure.fromException(e))
+                )
             }
 
             // Outside the retry above: a landing page that cannot be read must not
@@ -450,7 +485,9 @@ class FullTextService @Inject constructor(
                     when (val read = readLandingPage(page)) {
                         is LandingPageRead.Declared -> read.pdfUrl
                         LandingPageRead.DeclaresNone -> null
-                        is LandingPageRead.Unreachable -> throw OpenAccessUnsettledException(read.failure)
+                        is LandingPageRead.Unreachable -> throw OpenAccessUnsettledException(
+                            OpenAccessShortfall(OpenAccessSource.LANDING_PAGE, read.failure)
+                        )
                     }
                 }
                 ?: throw FullTextUnavailableException("No PDF URL available for $doi")
@@ -760,12 +797,13 @@ class FullTextException(message: String, cause: Throwable? = null) : Exception(m
 
 /**
  * Unpaywall, or the landing page it named, could not answer: the open-access copy
- * went unassessed, which is not the same as there being none (#464).
+ * went unassessed, which is not the same as there being none (#464). The chain
+ * carries [shortfall] on its fallback to the reader (#466).
  *
- * @property failure Why, by kind and status only
+ * @property shortfall Which lookup could not answer, and why, by kind and status only
  */
-class OpenAccessUnsettledException(val failure: RequestFailure) :
-    Exception("the open-access copy could not be reached (${failure.describe()})")
+class OpenAccessUnsettledException(val shortfall: OpenAccessShortfall) :
+    Exception("the open-access copy could not be reached (${shortfall.failure.describe()})")
 
 /**
  * A throttle or server fault, thrown inside a retry block so the transport-error

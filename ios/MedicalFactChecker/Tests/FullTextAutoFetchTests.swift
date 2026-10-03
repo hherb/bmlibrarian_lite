@@ -155,7 +155,10 @@ final class FullTextAutoFetchTests: XCTestCase {
     /// A fallback the chain settled on because the open-access copy could not
     /// be reached does not replace the stored link (#464).
     func testAFallbackFromAnUnreachableCopyKeepsTheStoredLink() {
-        let result = FullTextResult(content: .doi(webURL: doiLink), openAccessShortfall: .timeout)
+        let result = FullTextResult(
+            content: .doi(webURL: doiLink),
+            openAccessShortfall: OpenAccessShortfall(source: .unpaywall, failure: .timeout)
+        )
 
         let kept = FullTextAutoFetch.storedLinkKept(documentHoldingALink(), refetched: result)
 
@@ -167,7 +170,10 @@ final class FullTextAutoFetchTests: XCTestCase {
     /// a document holding no link has nothing to keep.
     func testAnAnsweredFallbackOrADocumentWithNoLinkIsApplied() {
         let answered = FullTextResult(content: .doi(webURL: doiLink))
-        let unsettled = FullTextResult(content: .doi(webURL: doiLink), openAccessShortfall: .timeout)
+        let unsettled = FullTextResult(
+            content: .doi(webURL: doiLink),
+            openAccessShortfall: OpenAccessShortfall(source: .unpaywall, failure: .timeout)
+        )
 
         XCTAssertNil(FullTextAutoFetch.storedLinkKept(documentHoldingALink(), refetched: answered))
         XCTAssertNil(FullTextAutoFetch.storedLinkKept(makeDocument(), refetched: unsettled))
@@ -176,7 +182,10 @@ final class FullTextAutoFetchTests: XCTestCase {
     /// The refusal fails the document in the run, which leaves it as it was.
     func testARefusedRefetchLeavesTheDocumentToBeFetchedNextRun() async throws {
         let document = documentHoldingALink()
-        let result = FullTextResult(content: .doi(webURL: doiLink), openAccessShortfall: .connection)
+        let result = FullTextResult(
+            content: .doi(webURL: doiLink),
+            openAccessShortfall: OpenAccessShortfall(source: .unpaywall, failure: .connection)
+        )
 
         let failures = try await FullTextAutoFetch.retrieve(
             [document],

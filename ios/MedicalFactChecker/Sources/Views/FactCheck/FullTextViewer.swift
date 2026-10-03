@@ -58,7 +58,8 @@ struct FullTextViewer: View {
                 ParseWarningBanner(
                     warnings: result.warnings,
                     degradation: result.degradation,
-                    extractionCoverage: result.extractionCoverage
+                    extractionCoverage: result.extractionCoverage,
+                    openAccessShortfall: result.openAccessShortfall
                 )
                 content
             }

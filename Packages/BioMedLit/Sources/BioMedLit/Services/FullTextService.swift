@@ -419,7 +419,7 @@ public actor FullTextService {
         // did: Unpaywall or the landing page it named could not answer. Carried
         // on whatever fallback is returned, so a caller holding a better link
         // than that fallback knows not to trade it away (#464).
-        var openAccessShortfall: RequestFailure?
+        var openAccessShortfall: OpenAccessShortfall?
         if let cacheKey, !unpaywallDOI.isEmpty {
             let doi = unpaywallDOI
             var unpaywallPDF: URL?
@@ -1222,8 +1222,8 @@ public actor FullTextService {
     /// Unpaywall miss.
     private enum UnpaywallTierFailure: Error {
         /// Unpaywall's answer could not be read, or the landing page it named
-        /// could not answer.
-        case unsettled(RequestFailure)
+        /// could not answer; the shortfall names which.
+        case unsettled(OpenAccessShortfall)
     }
 
     /// Fetch the PDF URL Unpaywall offers, reading a landing page for one when
@@ -1259,7 +1259,9 @@ public actor FullTextService {
             case .declaresNone:
                 break
             case .unreachable(let failure):
-                throw UnpaywallTierFailure.unsettled(failure)
+                throw UnpaywallTierFailure.unsettled(
+                    OpenAccessShortfall(source: .landingPage, failure: failure)
+                )
             }
         case .nothing:
             break
@@ -1271,23 +1273,25 @@ public actor FullTextService {
     ///
     /// - Parameter error: What `fetchUnpaywallPDFWithRetry` threw, other than
     ///   cancellation and `noFullTextAvailable`.
-    /// - Returns: The failure, by kind and status only; `nil` for an error
-    ///   that is no source failing to answer: a configuration fault of ours or
-    ///   a status Unpaywall answered with (`invalidResponse`), or a DOI that
-    ///   could not be sent (`noIdentifiers`).
-    private static func openAccessShortfall(for error: Error) -> RequestFailure? {
+    /// - Returns: The lookup that went unsettled and why, by kind and status
+    ///   only; `nil` for an error that is no source failing to answer: a
+    ///   configuration fault of ours (`invalidResponse`), or a DOI that could
+    ///   not be sent (`noIdentifiers`).
+    private static func openAccessShortfall(for error: Error) -> OpenAccessShortfall? {
+        let failure: RequestFailure
         switch error {
-        case UnpaywallTierFailure.unsettled(let failure):
-            return failure
+        case UnpaywallTierFailure.unsettled(let shortfall):
+            return shortfall
         case FullTextError.serverError(let statusCode):
-            return .httpStatus(statusCode)
+            failure = .httpStatus(statusCode)
         case FullTextError.networkError:
-            return .connection
+            failure = .connection
         case FullTextError.invalidResponse, FullTextError.noIdentifiers:
             return nil
         default:
-            return SearchTransport.failure(for: error)
+            failure = SearchTransport.failure(for: error)
         }
+        return OpenAccessShortfall(source: .unpaywall, failure: failure)
     }
 
     /// Read a landing page Unpaywall names for the PDF it declares.
@@ -1429,8 +1433,8 @@ public actor FullTextService {
     /// - Parameter doi: Digital Object Identifier.
     /// - Returns: The PDF URL, the landing page, or neither.
     /// - Throws: `FullTextError` on failure: `serverError` for a throttle or
-    ///   server fault, so it is retried; `UnpaywallTierFailure` for an answer
-    ///   that will not decode.
+    ///   server fault, so it is retried; `UnpaywallTierFailure` for any other
+    ///   error status but 404, and for an answer that will not decode.
     private func fetchUnpaywallChoice(doi: String) async throws -> UnpaywallLandingPage.Choice {
         guard let encodedDOI = doi.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
             throw FullTextError.noIdentifiers
@@ -1514,7 +1518,13 @@ public actor FullTextService {
             if BioMedLitConstants.retryableStatusCodes.contains(httpResponse.statusCode) {
                 throw FullTextError.serverError(statusCode: httpResponse.statusCode)
             }
-            throw FullTextError.invalidResponse("HTTP \(httpResponse.statusCode)")
+            // Any other error status leaves it unsettled too, unretried: only a
+            // 404 says Unpaywall holds no record of the DOI. Python records every
+            // such status as a failed lookup (`pdf_discovery`), and the reader is
+            // told the copy went unassessed in the same words (#466).
+            throw UnpaywallTierFailure.unsettled(
+                OpenAccessShortfall(source: .unpaywall, failure: .httpStatus(httpResponse.statusCode))
+            )
         }
 
         // Parse Unpaywall response. An answer we cannot read has told us
@@ -1527,7 +1537,9 @@ public actor FullTextService {
                 "Failed to decode Unpaywall response: \(error.localizedDescription)",
                 category: .fullText
             )
-            throw UnpaywallTierFailure.unsettled(.malformedResponse)
+            throw UnpaywallTierFailure.unsettled(
+                OpenAccessShortfall(source: .unpaywall, failure: .malformedResponse)
+            )
         }
 
         // The PDF is `url_for_pdf` only. A location's `url` is its landing page

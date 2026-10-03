@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.ui.common.MarkdownText
+import com.bmlibrarian.factchecker.ui.fulltext.components.OpenAccessShortfallNotice
 import com.bmlibrarian.factchecker.ui.theme.scoreColor
 import com.bmlibrarian.factchecker.util.Constants
 
@@ -671,6 +672,13 @@ private fun FullTextSection(
                     onUpload = { onUploadFullText?.invoke(document) }
                 )
             }
+        }
+
+        // What an unsettled open-access lookup leaves open (#466). A DOI
+        // fallback stores no content, so without this the card reads as never
+        // fetched and the reader is not told a free copy may exist
+        document.openAccessShortfall?.let { shortfall ->
+            OpenAccessShortfallNotice(notice = shortfall.notice)
         }
     }
 }

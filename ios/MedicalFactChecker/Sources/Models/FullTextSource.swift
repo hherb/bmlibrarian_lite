@@ -183,6 +183,13 @@ struct AppFullTextResult: Equatable, Sendable {
     /// record written by a newer build.
     let degradation: FullTextDegradation?
 
+    /// Why the open-access copy Unpaywall may know of went unassessed, or `nil`
+    /// when nothing was left unsettled (#466).
+    ///
+    /// Carried for the reader, beside ``degradation`` rather than as one of its
+    /// cases, because both can be true of one fetch.
+    let openAccessShortfall: OpenAccessShortfall?
+
     /// What this result's text actually is.
     ///
     /// `nil`-free because a result always holds one of the four kinds, but note
@@ -226,6 +233,8 @@ struct AppFullTextResult: Equatable, Sendable {
     ///     default — for PDFs, publisher links and any source that was not parsed.
     ///   - degradation: Why this is not the best source that existed. `nil` —
     ///     the default — when it is.
+    ///   - openAccessShortfall: Why the open-access copy went unassessed, or
+    ///     `nil` — the default — when nothing was left unsettled.
     ///   - contentKind: What the text actually is. ``FullTextContentKind/none``
     ///     — the default — for a result that holds no text.
     ///   - extractedText: Prose recovered from a PDF, or `nil` — the default —
@@ -239,6 +248,7 @@ struct AppFullTextResult: Equatable, Sendable {
         source: AppFullTextSource,
         warnings: JATSParseWarnings = JATSParseWarnings(),
         degradation: FullTextDegradation? = nil,
+        openAccessShortfall: OpenAccessShortfall? = nil,
         contentKind: FullTextContentKind = .none,
         extractedText: String? = nil,
         localPDFPath: String? = nil,
@@ -248,6 +258,7 @@ struct AppFullTextResult: Equatable, Sendable {
         self.source = source
         self.warnings = warnings
         self.degradation = degradation
+        self.openAccessShortfall = openAccessShortfall
         self.contentKind = contentKind
         self.extractedText = extractedText
         self.localPDFPath = localPDFPath

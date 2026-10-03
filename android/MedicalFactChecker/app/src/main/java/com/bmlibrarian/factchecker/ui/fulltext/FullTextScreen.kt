@@ -85,6 +85,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bmlibrarian.factchecker.ui.fulltext.FullTextViewModel.FullTextState
 import com.bmlibrarian.factchecker.ui.fulltext.components.FullTextSourceBadge
+import com.bmlibrarian.factchecker.ui.fulltext.components.OpenAccessShortfallNotice
 import com.bmlibrarian.factchecker.util.Constants
 import java.io.File
 
@@ -229,6 +230,7 @@ fun FullTextScreen(
                 is FullTextState.WebUrl -> {
                     WebUrlContent(
                         url = currentState.url,
+                        openAccessNotice = currentState.openAccessNotice,
                         onOpenInBrowser = {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentState.url))
                             context.startActivity(intent)
@@ -536,10 +538,16 @@ private fun PdfViewer(
 
 /**
  * Web URL content with button to open in browser.
+ *
+ * @param url The URL to open
+ * @param openAccessNotice What an unsettled open-access lookup leaves open, or
+ *   null when nothing was left unsettled (#466)
+ * @param onOpenInBrowser Opens [url]
  */
 @Composable
 private fun WebUrlContent(
     url: String,
+    openAccessNotice: String?,
     onOpenInBrowser: () -> Unit
 ) {
     Box(
@@ -569,6 +577,10 @@ private fun WebUrlContent(
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            openAccessNotice?.let { notice ->
+                Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
+                OpenAccessShortfallNotice(notice = notice)
+            }
             Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
             Button(onClick = onOpenInBrowser) {
                 Icon(

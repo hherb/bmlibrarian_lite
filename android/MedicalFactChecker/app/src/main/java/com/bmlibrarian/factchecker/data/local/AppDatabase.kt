@@ -63,7 +63,7 @@ import com.bmlibrarian.factchecker.data.local.entity.UsageRecordEntity
         ProcessingCheckpointEntity::class,
         ProcessingErrorEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -257,6 +257,19 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("ALTER TABLE documents ADD COLUMN transparency_result_json TEXT")
                 database.execSQL("ALTER TABLE documents ADD COLUMN transparency_analyzed_at INTEGER")
+            }
+        }
+
+        /**
+         * Migration from version 7 to 8.
+         *
+         * Adds why a document's open-access copy went unassessed (#466).
+         * Existing documents have nothing recorded, which reads as nothing
+         * unsettled: their next fetch writes it.
+         */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE documents ADD COLUMN full_text_open_access_shortfall_json TEXT")
             }
         }
     }

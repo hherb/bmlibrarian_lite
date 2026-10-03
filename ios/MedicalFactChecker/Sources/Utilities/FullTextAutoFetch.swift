@@ -98,8 +98,8 @@ enum FullTextAutoFetch {
         _ document: Document, refetched result: BMLFullTextResult
     ) -> StoredLinkKept? {
         guard document.holdsOnlyUndownloadedPDFLink,
-              let failure = result.openAccessShortfall else { return nil }
-        return StoredLinkKept(failure: failure)
+              let shortfall = result.openAccessShortfall else { return nil }
+        return StoredLinkKept(failure: shortfall.failure)
     }
 
     /// Whether the retrieval chain has anything to look the document up by.

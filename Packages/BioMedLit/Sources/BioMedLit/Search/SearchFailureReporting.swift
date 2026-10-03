@@ -55,10 +55,10 @@ public enum SearchFailureReporting {
     private static let keyFailure = "failure"
 
     /// The key naming the kind of failure.
-    private static let keyKind = "kind"
+    static let keyKind = "kind"
 
     /// The key holding the failure's HTTP status.
-    private static let keyStatusCode = "status_code"
+    static let keyStatusCode = "status_code"
 
     /// The key holding how many records are missing.
     private static let keyRecordsMissing = "records_missing"
@@ -307,11 +307,9 @@ public enum SearchFailureReporting {
     public static func json(from shortfalls: [RetrievalShortfall]) -> String? {
         guard !shortfalls.isEmpty else { return nil }
         let entries: [[String: Any]] = shortfalls.map { shortfall in
-            var failure: [String: Any] = [keyKind: shortfall.failure.kind.rawValue]
-            failure[keyStatusCode] = shortfall.failure.statusCode ?? NSNull()
             var entry: [String: Any] = [
                 keyProvider: shortfall.source.rawValue,
-                keyFailure: failure,
+                keyFailure: failureObject(shortfall.failure),
                 keyRecordsMissing: shortfall.recordsMissing ?? NSNull(),
             ]
             if let marker = shortfall.query.persistedValue {
@@ -361,7 +359,7 @@ public enum SearchFailureReporting {
     ///
     /// - Parameter text: The stored text.
     /// - Returns: The decoded value, or `nil` when the text is not JSON.
-    private static func decodedJSON(_ text: String) -> Any? {
+    static func decodedJSON(_ text: String) -> Any? {
         guard let data = text.data(using: .utf8) else { return nil }
         return try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
     }
@@ -394,11 +392,22 @@ public enum SearchFailureReporting {
         return shortfall
     }
 
+    /// The stored form of a failure: its kind and its status, `null` for none.
+    ///
+    /// Shared with ``OpenAccessShortfall``'s stored form, so the two records
+    /// keep a failure in one shape and read it back by one rule.
+    ///
+    /// - Parameter failure: The failure.
+    /// - Returns: A JSON object for `JSONSerialization`.
+    static func failureObject(_ failure: RequestFailure) -> [String: Any] {
+        [keyKind: failure.kind.rawValue, keyStatusCode: failure.statusCode ?? NSNull()]
+    }
+
     /// Read a stored failure, degrading rather than refusing.
     ///
     /// - Parameter value: The stored value, untrusted.
     /// - Returns: The failure, as specific as the stored value allows.
-    private static func restoredFailure(_ value: Any?) -> RequestFailure {
+    static func restoredFailure(_ value: Any?) -> RequestFailure {
         guard let fields = value as? [String: Any],
               let name = fields[keyKind] as? String,
               let kind = RequestFailureKind(rawValue: name) else {
@@ -419,7 +428,7 @@ public enum SearchFailureReporting {
     /// - Parameter value: The stored value, untrusted.
     /// - Returns: The number, or `nil` for anything else: a string, a boolean, a
     ///   fraction, `null`, or a number too large to hold.
-    private static func wholeNumber(_ value: Any?) -> Int64? {
+    static func wholeNumber(_ value: Any?) -> Int64? {
         guard let number = value as? NSNumber,
               CFGetTypeID(number as CFTypeRef) != CFBooleanGetTypeID() else { return nil }
         let storage = String(cString: number.objCType)

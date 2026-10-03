@@ -277,7 +277,8 @@ async function fetch_unpaywall_pdf_url(doi: string, email: string) -> string | n
         if response.status == 404:
             return null  # DOI not found
 
-        response.raise_for_status()   # a 429 or 5xx is retried first
+        response.raise_for_status()   # a 429 or 5xx is retried first; any
+                                      # error status but 404 is Unsettled (#466)
         data = response.json()
 
         choice = choose_unpaywall_url(data)
@@ -389,16 +390,75 @@ HTML nor PDF, or a page without the tag is its answer (`DeclaresNone`).
 - **Python** records `Unreachable` as a `SourceLookupFailure` under "the
   open-access copy's landing page", and an Unpaywall it could not ask under
   Unpaywall's own name; both reach the reader.
-- **Swift** returns the failure on the chain's fallback as
-  `FullTextResult.openAccessShortfall`, for Unpaywall and the landing page
-  alike. The app reads it to keep a stored PDF link rather than trade it for
-  that fallback (`FullTextAutoFetch.storedLinkKept`), so the next run tries
-  again.
-- **Android** raises `OpenAccessUnsettledException` inside the tier and logs
-  it as a warning; the chain goes on to the DOI link.
+- **Swift** returns an `OpenAccessShortfall` (which lookup, and why) on the
+  chain's fallback as `FullTextResult.openAccessShortfall`. The app reads it
+  to keep a stored PDF link rather than trade it for that fallback
+  (`FullTextAutoFetch.storedLinkKept`), so the next run tries again, and
+  otherwise stores it on the document for the reader (below).
+- **Android** raises `OpenAccessUnsettledException` carrying the
+  `OpenAccessShortfall` inside the tier, logs it as a warning, and puts it on
+  the DOI link it falls back to (`FullTextResult.DoiUrl.openAccessShortfall`).
 
-Neither app yet tells the reader the open-access copy went unassessed; see
-#466.
+#### An unsettled open-access copy (#466)
+
+The reader of a fallback the chain settled on because Unpaywall, or the
+landing page it named, could not answer is told so. Without it the publisher
+link reads exactly as one for an article with no free copy at all.
+
+**One sentence, Python's.** The notice is Python's
+`analysis_failures.unestablished_access_clause` for that one lookup, and the
+verb is #435's (`RequestFailure.is_answer`, `search_failure_reporting.md`):
+
+- could not be asked: `"Unpaywall (the request timed out) could not be asked,
+  so a freely available copy may exist. Whether this document is open access
+  was not established."`
+- answered without serving it: `"The open-access copy's landing page (HTTP 408
+  Request Timeout) did not serve it, so whether this document is open access
+  was not established."`
+
+The source is named as Python records it (`SERVICE_UNPAYWALL`,
+`SERVICE_UNPAYWALL_LANDING_PAGE`), a leading "the" capitalised. The rows are
+`fulltext_parity/open_access_unsettled_notice.json`, read by all three suites.
+
+**Which answers leave it unsettled** is the same on all three platforms: from
+Unpaywall, any error status but 404 (a 408 or 403 is an answer, "did not serve
+it"; a 501 or 520 could not be asked), a transport failure, and an answer that
+is empty or will not decode; from the landing page, `Unreachable` above. The
+apps once gave a shortfall only for retried statuses, so a 501 or 403 from
+Unpaywall read as "no copy".
+
+**Stored with the full text.** The apps keep it on the document beside the
+other full-text fields (Swift `Document.fullTextOpenAccessShortfallJSON`,
+Android `documents.full_text_open_access_shortfall_json`, Room 8). It is not a
+`FullTextDegradation`: both can be true of one fetch, and the banner says both.
+
+```json
+{"schema_version": 1, "source": "unpaywall_landing_page",
+ "failure": {"kind": "http_status", "status_code": 408}}
+```
+
+`source` is `unpaywall` or `unpaywall_landing_page`; `failure` is a search
+shortfall's failure object and reads back by its rules
+(`search_failure_reporting.md`, "Persisted form"). The field is written only
+when a lookup went unsettled, so **every stored value reads as some
+shortfall**: one that is not a JSON object, or whose `schema_version` is not 1
+(missing included), reads as `{unpaywall, request_failed}`; an unknown source
+reads as `unpaywall`.
+
+**Written by every fetch, cleared by every fetch that settles it.** A result
+carrying no shortfall clears the field, as does an upload, a cleared cache and
+"no full text available". A result the chain could not settle at all
+(`absenceNotEstablished` / `NotEstablished`) records nothing, as before. A
+refetch whose stored PDF link is kept (`storedLinkKept`) writes nothing either.
+
+**Where it is shown.** A note, never a warning: the link is complete in itself.
+
+- **iOS/macOS:** a line of its own in `ParseWarningBanner`
+  (`ParseWarningBannerContent`), beside whatever else the banner says, on every
+  card and viewer that banners a document; a web link is not opened in the
+  browser automatically while there is something to explain.
+- **Android:** the full-text screen's web-link view, the fact-check document
+  card and the report's document sheet (`OpenAccessShortfallNotice`).
 
 ### PDF Downloading and Caching
 

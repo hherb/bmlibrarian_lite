@@ -24,6 +24,7 @@ import android.util.Log
 import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
+import com.bmlibrarian.factchecker.data.remote.fulltext.recordingFullTextFetch
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
 import com.bmlibrarian.factchecker.data.repository.SessionRepository
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
@@ -589,54 +590,8 @@ class FactCheckViewModel @Inject constructor(
 
                 result.fold(
                     onSuccess = { fullTextResult ->
-                        // Update document based on result type
-                        val updatedDoc = when (fullTextResult) {
-                            is FullTextService.FullTextResult.EuropePmcXml -> {
-                                document.copy(
-                                    fullTextMarkdown = fullTextResult.markdown,
-                                    fullTextHTML = fullTextResult.html,
-                                    fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
-                                    fullTextFetchedAt = java.util.Date()
-                                )
-                            }
-                            is FullTextService.FullTextResult.EuropePmcPdf -> {
-                                val localPath = fullTextService.downloadPdf(
-                                    fullTextResult.pdfUrl,
-                                    document.id
-                                )
-                                document.copy(
-                                    pdfPath = localPath,
-                                    fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
-                                    fullTextFetchedAt = java.util.Date()
-                                )
-                            }
-                            is FullTextService.FullTextResult.UnpaywallPdf -> {
-                                // Download PDF
-                                val localPath = fullTextService.downloadPdf(
-                                    fullTextResult.pdfUrl,
-                                    document.id
-                                )
-                                document.copy(
-                                    pdfPath = localPath,
-                                    fullTextSource = Constants.FULLTEXT_SOURCE_UNPAYWALL,
-                                    fullTextFetchedAt = java.util.Date()
-                                )
-                            }
-                            is FullTextService.FullTextResult.DoiUrl -> {
-                                document.copy(
-                                    fullTextSource = Constants.FULLTEXT_SOURCE_DOI,
-                                    fullTextFetchedAt = java.util.Date()
-                                )
-                            }
-                            is FullTextService.FullTextResult.Unavailable -> {
-                                document.copy(
-                                    fullTextUnavailable = true,
-                                    fullTextFetchedAt = java.util.Date()
-                                )
-                            }
-                            // Not a fact about the article, so nothing is recorded
-                            // and the fetch stays on offer (#434)
-                            is FullTextService.FullTextResult.NotEstablished -> document
+                        val updatedDoc = document.recordingFullTextFetch(fullTextResult) { url ->
+                            fullTextService.downloadPdf(url, document.id)
                         }
 
                         documentRepository.updateDocument(updatedDoc)

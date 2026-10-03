@@ -444,12 +444,15 @@ enum BioMedLitAdapters {
         // the parse failed, with nothing left to say so (#183). `contentKind`,
         // `extractedText` and `localPDFPath` describe the same retrieval, so the
         // same reasoning carries them across too: Task 8 reads them off the
-        // document regardless of which case produced the result.
+        // document regardless of which case produced the result. So does
+        // `openAccessShortfall`, which is what the reader is told about a
+        // fallback Unpaywall could not rule out a free copy behind (#466).
         AppFullTextResult(
             content: content(of: result.content, localPDFPath: result.localPDFPath),
             source: appSource(of: result.content),
             warnings: result.warnings,
             degradation: result.degradation,
+            openAccessShortfall: result.openAccessShortfall,
             contentKind: result.contentKind,
             extractedText: result.extractedText,
             localPDFPath: result.localPDFPath,

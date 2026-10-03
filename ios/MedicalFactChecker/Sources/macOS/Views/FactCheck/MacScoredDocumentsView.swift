@@ -425,7 +425,8 @@ struct MacDocumentCard: View {
             ParseWarningBanner(
                 warnings: document.cachedRetrievalNotice.warnings,
                 degradation: document.cachedRetrievalNotice.degradation,
-                extractionCoverage: document.cachedRetrievalNotice.extractionCoverage
+                extractionCoverage: document.cachedRetrievalNotice.extractionCoverage,
+                openAccessShortfall: document.cachedRetrievalNotice.openAccessShortfall
             )
 
             if let url = document.fullTextLinkDestination {
@@ -681,7 +682,7 @@ struct MacDocumentCard: View {
                         // browser before they have read why this is a substitute
                         // is the silent fallback #183 objects to; the note and a
                         // link are in the card, via `linkOnlyNotice`.
-                        if result.degradation == nil {
+                        if result.degradation == nil && result.openAccessShortfall == nil {
                             NSWorkspace.shared.open(url)
                         }
                     }

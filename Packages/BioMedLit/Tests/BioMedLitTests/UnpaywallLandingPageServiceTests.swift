@@ -149,7 +149,10 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
 
         XCTAssertNotEqual(result.source, .unpaywall)
         XCTAssertEqual(landingPageReads, RetryConfiguration.networkDefault.maxAttempts)
-        XCTAssertEqual(result.openAccessShortfall, .httpStatus(503))
+        XCTAssertEqual(
+            result.openAccessShortfall,
+            OpenAccessShortfall(source: .landingPage, failure: .httpStatus(503))
+        )
     }
 
     /// A 501 is no throttle, so it is not retried, but it is still a server
@@ -160,7 +163,10 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         let result = try await fetch()
 
         XCTAssertEqual(landingPageReads, 1)
-        XCTAssertEqual(result.openAccessShortfall, .httpStatus(501))
+        XCTAssertEqual(
+            result.openAccessShortfall,
+            OpenAccessShortfall(source: .landingPage, failure: .httpStatus(501))
+        )
     }
 
     /// A page that cannot be reached is not a page without a PDF.
@@ -171,7 +177,9 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         let result = try await fetch()
 
         XCTAssertNotEqual(result.source, .unpaywall)
-        XCTAssertEqual(result.openAccessShortfall, .timeout)
+        XCTAssertEqual(
+            result.openAccessShortfall, OpenAccessShortfall(source: .landingPage, failure: .timeout)
+        )
     }
 
     /// Cancelled while reading the page: the cancellation propagates, rather
@@ -272,8 +280,28 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
 
         let result = try await fetch()
 
-        XCTAssertEqual(result.openAccessShortfall, .httpStatus(429))
+        XCTAssertEqual(
+            result.openAccessShortfall,
+            OpenAccessShortfall(source: .unpaywall, failure: .httpStatus(429))
+        )
         XCTAssertFalse(StubURLProtocol.requested("item/95934"))
+    }
+
+    /// Any error status but 404 leaves the copy unassessed, as Python records it:
+    /// a 408 is an answer ("did not serve it"), a 501 or a Cloudflare 520 is
+    /// not, and neither says Unpaywall holds no copy (#466).
+    func testAnyUnpaywallErrorStatusButNotFoundIsUnsettled() async throws {
+        for status in [408, 403, 501, 520] {
+            StubURLProtocol.routes = routes(unpaywallStatus: status)
+
+            let result = try await fetch()
+
+            XCTAssertEqual(
+                result.openAccessShortfall,
+                OpenAccessShortfall(source: .unpaywall, failure: .httpStatus(status)),
+                "HTTP \(status)"
+            )
+        }
     }
 
     /// An Unpaywall answer that will not decode has told us nothing.
@@ -282,7 +310,10 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
 
         let result = try await fetch()
 
-        XCTAssertEqual(result.openAccessShortfall, .malformedResponse)
+        XCTAssertEqual(
+            result.openAccessShortfall,
+            OpenAccessShortfall(source: .unpaywall, failure: .malformedResponse)
+        )
     }
 
     /// The control: Unpaywall's 404 is its answer that it knows no copy.

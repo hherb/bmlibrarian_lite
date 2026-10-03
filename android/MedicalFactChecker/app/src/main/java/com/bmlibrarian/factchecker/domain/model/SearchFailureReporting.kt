@@ -27,8 +27,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
 
 /**
  * A failed source is not an empty one (#252, the Android half of #247).
@@ -325,10 +325,7 @@ object SearchFailureReporting {
             for (shortfall in shortfalls) {
                 addJsonObject {
                     put(KEY_PROVIDER, storedProvider(shortfall.provider))
-                    putJsonObject(KEY_FAILURE) {
-                        put(KEY_KIND, shortfall.failure.kind.persistedValue)
-                        put(KEY_STATUS_CODE, shortfall.failure.statusCode)
-                    }
+                    put(KEY_FAILURE, failureJson(shortfall.failure))
                     put(KEY_RECORDS_MISSING, shortfall.recordsMissing)
                     shortfall.query.persistedValue?.let { put(KEY_QUERY, it) }
                 }
@@ -368,7 +365,7 @@ object SearchFailureReporting {
      * @param text The text
      * @return The value, or null when the text is not JSON
      */
-    private fun parsedOrNull(text: String): JsonElement? = try {
+    internal fun parsedOrNull(text: String): JsonElement? = try {
         Json.parseToJsonElement(text)
     } catch (_: SerializationException) {
         null
@@ -398,12 +395,26 @@ object SearchFailureReporting {
     }
 
     /**
+     * The stored form of a failure: its kind and its status, `null` for none.
+     *
+     * Shared with [OpenAccessShortfall]'s stored form, so the two records keep a
+     * failure in one shape and read it back by one rule.
+     *
+     * @param failure The failure
+     * @return The JSON object
+     */
+    internal fun failureJson(failure: RequestFailure): JsonObject = buildJsonObject {
+        put(KEY_KIND, failure.kind.persistedValue)
+        put(KEY_STATUS_CODE, failure.statusCode)
+    }
+
+    /**
      * Read a stored failure, degrading rather than refusing.
      *
      * @param value The stored value, untrusted
      * @return The failure, as specific as the stored value allows
      */
-    private fun failureFrom(value: JsonElement?): RequestFailure {
+    internal fun failureFrom(value: JsonElement?): RequestFailure {
         val fields = value as? JsonObject ?: return RequestFailure(RequestFailureKind.REQUEST_FAILED)
         val kindValue = (fields[KEY_KIND] as? JsonPrimitive)?.takeIf { it.isString }?.content
         val kind = RequestFailureKind.fromPersisted(kindValue) ?: return RequestFailure(RequestFailureKind.REQUEST_FAILED)
@@ -420,7 +431,7 @@ object SearchFailureReporting {
      * @return The number, or null for anything else: a string, a boolean, a
      *   fraction, `null`, or a number too large to hold
      */
-    private fun wholeNumber(value: JsonElement?): Long? {
+    internal fun wholeNumber(value: JsonElement?): Long? {
         val primitive = value as? JsonPrimitive ?: return null
         if (primitive.isString || !WHOLE_NUMBER.matches(primitive.content)) return null
         return primitive.content.toLongOrNull()

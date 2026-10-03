@@ -107,6 +107,9 @@ data class Document(
     /** Whether full text is unavailable. */
     val fullTextUnavailable: Boolean,
 
+    /** Why the open-access copy went unassessed, or null when nothing was left unsettled (#466). */
+    val openAccessShortfall: OpenAccessShortfall?,
+
     /** Formatted authors string. */
     val formattedAuthors: String,
 
@@ -209,6 +212,7 @@ data class Document(
                 pdfPath = entity.pdfPath,
                 fullTextFetchedAt = entity.fullTextFetchedAt,
                 fullTextUnavailable = entity.fullTextUnavailable,
+                openAccessShortfall = entity.openAccessShortfall,
                 formattedAuthors = entity.formattedAuthors,
                 citationString = entity.citationString,
                 isScored = entity.isScored,

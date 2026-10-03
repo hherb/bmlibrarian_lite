@@ -23,6 +23,8 @@ import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.domain.model.AppSettings
+import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
+import com.bmlibrarian.factchecker.domain.model.OpenAccessSource
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
@@ -98,13 +100,16 @@ class FactCheckViewModelFullTextTest {
     }
 
     /** What the chain answers, and what the view model then stored and reported. */
-    private fun fetch(answer: FullTextService.FullTextResult): Pair<DocumentEntity, Boolean?> {
+    private fun fetch(
+        answer: FullTextService.FullTextResult,
+        from: DocumentEntity = document
+    ): Pair<DocumentEntity, Boolean?> {
         coEvery { fullTextService.fetchFullText(any(), any(), any(), any()) } returns Result.success(answer)
         val stored = slot<DocumentEntity>()
         coEvery { documentRepository.updateDocument(capture(stored)) } returns Unit
         var reported: Boolean? = null
 
-        viewModel.fetchFullText(document) { reported = it }
+        viewModel.fetchFullText(from) { reported = it }
 
         coVerify { documentRepository.updateDocument(any()) }
         return stored.captured to reported
@@ -135,6 +140,32 @@ class FactCheckViewModelFullTextTest {
         val (_, reported) = fetch(FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1/x"))
 
         assertEquals(true, reported)
+    }
+
+    /** A link the chain settled on because Unpaywall could not answer keeps why (#466). */
+    @Test
+    fun `a link left by an unsettled open-access lookup records the shortfall`() {
+        val shortfall = OpenAccessShortfall(OpenAccessSource.UNPAYWALL, RequestFailure(RequestFailureKind.TIMEOUT))
+
+        val (stored, _) = fetch(FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1/x", shortfall))
+
+        assertEquals(shortfall, stored.openAccessShortfall)
+    }
+
+    /** A later fetch that settled the question clears it, whatever it found. */
+    @Test
+    fun `a later settled fetch clears the shortfall`() {
+        val unsettled = document.copy(
+            fullTextOpenAccessShortfallJson = OpenAccessShortfall(
+                OpenAccessSource.LANDING_PAGE, RequestFailure(RequestFailureKind.CONNECTION)
+            ).toJson()
+        )
+
+        val (link, _) = fetch(FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1/x"), from = unsettled)
+        val (none, _) = fetch(FullTextService.FullTextResult.Unavailable("No full text source available"), from = unsettled)
+
+        assertEquals(null, link.openAccessShortfall)
+        assertEquals(null, none.openAccessShortfall)
     }
 
     /** A thrown fetch is not an article without full text either. */

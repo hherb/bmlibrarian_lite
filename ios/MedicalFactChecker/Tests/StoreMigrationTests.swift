@@ -47,6 +47,30 @@ final class StoreMigrationTests: XCTestCase {
         }
     }
 
+    /// A document as a build before #466 stored it: fetched, ending on a
+    /// publisher link, with no open-access shortfall field.
+    enum EarlierBuildDocumentSchema: VersionedSchema {
+        static var versionIdentifier: Schema.Version { Schema.Version(2, 0, 0) }
+        static var models: [any PersistentModel.Type] { [Document.self] }
+
+        @Model
+        final class Document {
+            var id: String = ""
+            var pmid: String = ""
+            var title: String = ""
+            var abstract: String = ""
+            var fullTextSource: String?
+            var fullTextFetchedAt: Date?
+            init(pmid: String, title: String) {
+                self.id = UUID().uuidString
+                self.pmid = pmid
+                self.title = title
+                self.fullTextSource = "doi"
+                self.fullTextFetchedAt = Date()
+            }
+        }
+    }
+
     private var directory: URL!
     private var storeURL: URL!
 
@@ -114,6 +138,35 @@ final class StoreMigrationTests: XCTestCase {
         let session = try XCTUnwrap(try ModelContext(container).fetch(FetchDescriptor<FactCheckSession>()).first)
         XCTAssertEqual(try session.retrievalShortfalls(), [])
         XCTAssertNil(session.europePMCRecordsReceived)
+    }
+
+    /// A document stored before the open-access shortfall existed (#466) is
+    /// carried across, and reads as having nothing unsettled rather than as a
+    /// damaged record.
+    func testADocumentFromBeforeTheOpenAccessShortfallMigrates() throws {
+        let earlier = Schema(versionedSchema: EarlierBuildDocumentSchema.self)
+        let earlierContainer = try ModelContainer(
+            for: earlier,
+            configurations: [ModelConfiguration(schema: earlier, url: storeURL, cloudKitDatabase: .none)]
+        )
+        let earlierContext = ModelContext(earlierContainer)
+        earlierContext.insert(EarlierBuildDocumentSchema.Document(pmid: "12345678", title: "An earlier study"))
+        try earlierContext.save()
+        var setAsideRan = false
+        let (schema, configuration) = todaysConfiguration()
+
+        let container = try CloudKitConfiguration.makeContainer(
+            schema: schema,
+            configuration: configuration,
+            setAsideUnreadableStore: { setAsideRan = true; return .noStoreFound }
+        )
+
+        let document = try XCTUnwrap(try ModelContext(container).fetch(FetchDescriptor<Document>()).first)
+        XCTAssertEqual(document.title, "An earlier study")
+        XCTAssertTrue(document.isLinkOnly)
+        XCTAssertNil(document.fullTextOpenAccessShortfallJSON)
+        XCTAssertNil(document.cachedRetrievalNotice.openAccessShortfall)
+        XCTAssertFalse(setAsideRan, "A store that migrates must never reach the last resort")
     }
 
     /// A store that cannot be opened at all is kept, and the app still starts.
