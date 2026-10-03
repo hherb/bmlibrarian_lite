@@ -245,7 +245,7 @@ struct ParseWarningBannerContent: Equatable {
 ///   record from a newer build names a reason this one does not know (#186);
 /// - an open-access lookup went unsettled — an informational line of its own,
 ///   beside any of the above or alone (#466): whether the article has a free
-///   copy was not established, because Unpaywall, or the landing page it named,
+///   copy was not established, because Unpaywall, the landing page it named, or the PDF it named (#478)
 ///   could not be asked or did not serve it.
 ///
 /// The last two groups are deliberately *not* warnings. A fallback PDF or publisher link is

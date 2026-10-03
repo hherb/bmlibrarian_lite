@@ -16,24 +16,29 @@ addresses, which use the real one: ``requests`` refuses them before any
 connection is made, and that refusal is what is under test.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 import requests
 
-from bmlibrarian_lite.constants import SERVICE_UNPAYWALL_PDF
+from bmlibrarian_lite.constants import PDF_PARTIAL_SUFFIX, SERVICE_UNPAYWALL_PDF
 from bmlibrarian_lite.data_models import (
     LookupRecord,
+    LookupSkipReason,
     RequestFailure,
     RequestFailureKind,
     SourceLookupFailure,
+    SourceLookupSkipped,
 )
 from bmlibrarian_lite.pdf_discovery import (
+    MAX_PDF_SIZE,
     DiscoveryResult,
     PDFDiscoverer,
     PDFSource,
     PDFSourceType,
+    read_body_prefix,
     refused_download_failure,
     unobtained_unpaywall_pdf,
 )
@@ -43,9 +48,15 @@ PUBLISHER_PDF = "https://publisher.example.org/a.pdf"
 PDF_BYTES = b"%PDF-1.7\n" + b"0" * 64
 
 
-def _unpaywall(url: str = UNPAYWALL_PDF) -> PDFSource:
-    """A PDF Unpaywall named."""
-    return PDFSource(url=url, source_type=PDFSourceType.UNPAYWALL_OA, is_open_access=True)
+def _unpaywall(url: str = UNPAYWALL_PDF, version: str = "", host_type: str = "") -> PDFSource:
+    """A PDF Unpaywall named, at a location of the given version and host."""
+    return PDFSource(
+        url=url,
+        source_type=PDFSourceType.UNPAYWALL_OA,
+        is_open_access=True,
+        version=version,
+        host_type=host_type,
+    )
 
 
 def _publisher(url: str = PUBLISHER_PDF) -> PDFSource:
@@ -62,6 +73,31 @@ def _response(status: int, body: bytes, content_type: str, url: str) -> requests
     response.headers["Content-Type"] = content_type
     response.url = url
     return response
+
+
+class _BrokenOffResponse(requests.Response):
+    """A 200 PDF whose body breaks off after its first chunk."""
+
+    def __init__(self, url: str, error: Exception, first: bytes = PDF_BYTES) -> None:
+        """Serve ``first`` from ``url``, then raise ``error``.
+
+        Args:
+            url: The address the response answers.
+            error: What the stream raises once ``first`` is read.
+            first: The chunk read before it breaks off; empty to fail at once.
+        """
+        super().__init__()
+        self.status_code = 200
+        self.headers["Content-Type"] = "application/pdf"
+        self.url = url
+        self._error = error
+        self._first = first
+
+    def iter_content(self, chunk_size: int | None = 1, decode_unicode: bool = False) -> Iterator[bytes]:
+        """Yield the first chunk, if any, then fail as a dropped stream does."""
+        if self._first:
+            yield self._first
+        raise self._error
 
 
 class _Session:
@@ -234,6 +270,150 @@ def test_a_refusal_is_its_status_and_a_served_page_is_not_the_pdf(
     assert refused_download_failure(status) == failure
 
 
-def test_a_cancel_or_a_size_refusal_records_nothing() -> None:
-    """Our own stops carry no failure, so they are never blamed on the copy."""
-    assert unobtained_unpaywall_pdf(_unpaywall(), DiscoveryResult(success=False, error="Cancelled")) is None
+def test_a_cancel_records_nothing() -> None:
+    """The caller walked away from the question; nothing is blamed on the copy."""
+    cancelled = DiscoveryResult(success=False, error="Cancelled")
+
+    assert unobtained_unpaywall_pdf(_unpaywall(), cancelled) == LookupRecord()
+
+
+def test_a_pdf_refused_for_its_size_is_unassessed_not_absent(tmp_path: Path) -> None:
+    """Our limit is no answer about the article: the copy exists and went unread."""
+    response = _response(200, PDF_BYTES, "application/pdf", UNPAYWALL_PDF)
+    response.headers["Content-Length"] = str(MAX_PDF_SIZE + 1)
+
+    result = _discover([_unpaywall()], tmp_path, _Session({UNPAYWALL_PDF: response}))
+
+    assert not result.success
+    assert result.lookups == LookupRecord(
+        skipped=(SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.OVER_SIZE_LIMIT),)
+    )
+    assert result.error == (
+        "Failed to download PDF from any available source. The open-access "
+        "copy's PDF (larger than the download limit) could not be asked, so a "
+        "freely available copy may exist. Whether this document is open access "
+        "was not established."
+    )
+
+
+def test_the_best_locations_failure_is_kept_though_another_is_tried_first(
+    tmp_path: Path,
+) -> None:
+    """The priority sort tries a published copy first; the best location's failure is kept."""
+    later = "https://publisher.example.org/oa/a.pdf"
+    session = _Session({
+        UNPAYWALL_PDF: requests.exceptions.Timeout("read timed out"),
+        later: _response(403, b"", "text/html", later),
+    })
+    best = _unpaywall(version="acceptedVersion", host_type="repository")
+    published = _unpaywall(later, version="publishedVersion", host_type="publisher")
+    assert published.priority > best.priority
+
+    result = _discover([best, published], tmp_path, session)
+
+    assert session.requested == [later, UNPAYWALL_PDF]
+    assert result.lookups == _pdf_failure(RequestFailure(RequestFailureKind.TIMEOUT))
+
+
+def test_a_paywalled_publisher_after_a_failed_unpaywall_pdf_withholds_the_claim(
+    tmp_path: Path,
+) -> None:
+    """The early return for a publisher's paywall carries the unobtained copy too."""
+    session = _Session({
+        UNPAYWALL_PDF: _response(404, b"", "text/html", UNPAYWALL_PDF),
+        PUBLISHER_PDF: _response(403, b"", "text/html", PUBLISHER_PDF),
+    })
+
+    result = _discover([_unpaywall(), _publisher()], tmp_path, session)
+
+    assert result.is_paywall
+    assert result.paywall_url == PUBLISHER_PDF
+    assert result.lookups == _pdf_failure(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
+    assert result.error == (
+        "A source refused access to this document, and the open-access copy's "
+        "PDF (HTTP 404 Not Found) did not serve it, so whether this document "
+        "is open access was not established."
+    )
+
+
+def test_a_page_labelled_as_a_pdf_is_not_the_pdf(tmp_path: Path) -> None:
+    """The body must begin with %PDF, whatever its Content-Type says."""
+    page = _response(200, b"<html>Just a moment...</html>", "application/pdf", UNPAYWALL_PDF)
+
+    result = _discover([_unpaywall()], tmp_path, _Session({UNPAYWALL_PDF: page}))
+
+    assert not result.success
+    assert result.lookups == _pdf_failure(RequestFailure(RequestFailureKind.MALFORMED_RESPONSE))
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_download_that_breaks_off_leaves_no_file(tmp_path: Path) -> None:
+    """A truncated body is recorded, and nothing is left to be served as cached."""
+    broken = _BrokenOffResponse(UNPAYWALL_PDF, requests.exceptions.ConnectionError("reset"))
+
+    result = _discover([_unpaywall()], tmp_path, _Session({UNPAYWALL_PDF: broken}))
+
+    assert not result.success
+    assert result.lookups == _pdf_failure(RequestFailure(RequestFailureKind.CONNECTION))
+    assert not (tmp_path / "a.pdf").exists()
+    assert not (tmp_path / f"a.pdf{PDF_PARTIAL_SUFFIX}").exists()
+
+
+def test_a_body_that_fails_at_its_first_read_is_the_transports_failure(tmp_path: Path) -> None:
+    """Swallowed, the failed read left an empty body a PDF Content-Type let through."""
+    broken = _BrokenOffResponse(
+        UNPAYWALL_PDF, requests.exceptions.ConnectionError("reset"), first=b""
+    )
+
+    result = _discover([_unpaywall()], tmp_path, _Session({UNPAYWALL_PDF: broken}))
+
+    assert not result.success
+    assert result.lookups == _pdf_failure(RequestFailure(RequestFailureKind.CONNECTION))
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_pdf_that_could_not_be_saved_is_unassessed_not_absent(tmp_path: Path) -> None:
+    """Our own fault after the PDF was served still leaves the copy open, not absent."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a file where the cache directory should be")
+    discoverer = PDFDiscoverer(unpaywall_email="test@example.com", use_browser_fallback=False)
+    discoverer._discover_sources = lambda doi, pmid, pmcid: ([_unpaywall()], LookupRecord())  # type: ignore[method-assign]
+    discoverer._session = _Session({  # type: ignore[assignment]
+        UNPAYWALL_PDF: _response(200, PDF_BYTES, "application/pdf", UNPAYWALL_PDF)
+    })
+
+    result = discoverer.discover_and_download(blocker / "a.pdf", doi="10.1/x")
+
+    assert not result.success
+    assert result.lookups == _pdf_failure(RequestFailure(RequestFailureKind.REQUEST_FAILED))
+
+
+def test_a_downloaded_pdf_is_written_whole_and_no_partial_file_is_left(tmp_path: Path) -> None:
+    """The control: the renamed file holds the whole body, its prefix included."""
+    session = _Session({UNPAYWALL_PDF: _response(200, PDF_BYTES, "application/pdf", UNPAYWALL_PDF)})
+
+    result = _discover([_unpaywall()], tmp_path, session)
+
+    assert result.success
+    assert (tmp_path / "a.pdf").read_bytes() == PDF_BYTES
+    assert not (tmp_path / f"a.pdf{PDF_PARTIAL_SUFFIX}").exists()
+
+
+def test_the_sniffed_prefix_joins_short_chunks() -> None:
+    """A first chunk shorter than %PDF is not taken for the whole start of the body."""
+    assert read_body_prefix(iter([b"%P", b"DF-1.7", b"rest"]), 4) == b"%PDF-1.7"
+    assert read_body_prefix(iter([b"%P"]), 4) == b"%P"
+
+
+@pytest.mark.parametrize(
+    "contradiction",
+    [
+        {"failure": RequestFailure(RequestFailureKind.TIMEOUT)},
+        {"refused_for_size": True},
+    ],
+    ids=["failure", "size-refusal"],
+)
+def test_a_success_cannot_say_why_no_pdf_was_obtained(contradiction: dict[str, Any]) -> None:
+    """A downloaded PDF with a download failure is a state no reader could be told."""
+    with pytest.raises(ValueError):
+        DiscoveryResult(success=True, **contradiction)

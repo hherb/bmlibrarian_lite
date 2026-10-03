@@ -71,8 +71,9 @@ enum FullTextAutoFetch {
     /// Why a re-fetch result must not replace the PDF link a document holds.
     ///
     /// The chain falls back to a weaker result (the abstract, another link, the
-    /// DOI page) when Unpaywall or the landing page it names could not settle
-    /// whether a free copy exists, and applying that fallback would clear the
+    /// DOI page) when Unpaywall, the landing page it names, or the PDF it names
+    /// (#478) could not settle whether a free copy exists, and applying that
+    /// fallback would clear the
     /// stored link for good: the document would no longer hold an undownloaded
     /// PDF link, so nothing would fetch it again. A lookup that settled nothing
     /// is not one that found nothing, so the stored link is kept and the next

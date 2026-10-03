@@ -18,9 +18,15 @@
 
 package com.bmlibrarian.factchecker.data.remote.fulltext
 
+import android.util.Log
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.util.Constants
 import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.io.InputStream
+
+private const val TAG = "PdfDownload"
 
 /**
  * What downloading a PDF came to.
@@ -38,14 +44,21 @@ sealed class PdfDownload {
     data class Saved(val path: String) : PdfDownload()
 
     /**
-     * No PDF was obtained.
+     * The source did not serve the PDF.
      *
      * @property failure Why: the status, the transport failure,
      *   `MALFORMED_RESPONSE` for a body that is not a PDF, or `REQUEST_FAILED`
-     *   for an address that cannot be requested or a file that could not be
-     *   written.
+     *   for an address that cannot be requested.
      */
     data class Failed(val failure: RequestFailure) : PdfDownload()
+
+    /**
+     * The source served the PDF, and it could not be saved: the cache could not
+     * be written. A fault of ours, which says nothing about the copy, so it is
+     * no [Failed] blamed on the source; the PDF's link is kept, as BioMedLit
+     * keeps it (#478).
+     */
+    object NotSaved : PdfDownload()
 
     /** The saved file's path, or null when nothing was saved. */
     val savedPath: String?
@@ -71,8 +84,82 @@ fun looksLikePdf(prefix: ByteArray): Boolean =
 internal fun isCachedPdf(file: File): Boolean {
     if (!file.isFile || file.length() == 0L) return false
     val prefix = ByteArray(Constants.PDF_MAGIC_BYTES.size)
-    val read = file.inputStream().use { it.read(prefix) }
+    val read = try {
+        file.inputStream().use { it.read(prefix) }
+    } catch (e: IOException) {
+        // A file we cannot read is no PDF we can show; it is fetched again
+        return false
+    }
     return read == prefix.size && looksLikePdf(prefix)
+}
+
+/**
+ * Set aside a cached file that is not a PDF, so it stops being served as one.
+ *
+ * Quarantined rather than deleted: its bytes stay for whoever investigates. A
+ * rename that fails is logged and the file deleted instead, so a recoverable
+ * cache miss never becomes a thrown error.
+ *
+ * @param file The cached file
+ * @param quarantine Where to move it; an earlier quarantined file is replaced
+ */
+internal fun quarantineCachedFile(file: File, quarantine: File) {
+    if (quarantine.exists()) quarantine.delete()
+    if (!file.renameTo(quarantine)) {
+        Log.w(TAG, "Could not quarantine ${file.absolutePath}; deleting it")
+        file.delete()
+    }
+}
+
+/**
+ * A fault of ours while saving a PDF: the cache could not be written.
+ *
+ * Not an [IOException], so that `RequestFailure.fromException` can never read
+ * it as the source's connection failing.
+ *
+ * @param cause The write's own failure
+ */
+internal class CacheWriteException(cause: IOException) : Exception(cause)
+
+/**
+ * Copy a body into a file, telling the two sides' failures apart.
+ *
+ * A read that fails is the transport's, and propagates as it is; a write that
+ * fails, or a file that cannot be opened, is ours, and is raised as a
+ * [CacheWriteException].
+ *
+ * @param file Where to write the body
+ * @throws IOException if the body could not be read
+ * @throws CacheWriteException if the file could not be written
+ */
+internal fun InputStream.copyToCache(file: File) {
+    val output = try {
+        FileOutputStream(file)
+    } catch (e: IOException) {
+        throw CacheWriteException(e)
+    }
+    var copied = false
+    try {
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val read = read(buffer)
+            if (read < 0) break
+            try {
+                output.write(buffer, 0, read)
+            } catch (e: IOException) {
+                throw CacheWriteException(e)
+            }
+        }
+        copied = true
+    } finally {
+        try {
+            output.close()
+        } catch (e: IOException) {
+            // Only a close that fails after a whole copy is the outcome; after a
+            // failed one, the failure already propagating is
+            if (copied) throw CacheWriteException(e)
+        }
+    }
 }
 
 /**

@@ -338,6 +338,7 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
         }
         XCTAssertEqual(pdfURL.absoluteString, "https://example.org/a.pdf")
         XCTAssertEqual(result.degradation, .jatsParseFailed)
+        XCTAssertNil(result.openAccessShortfall, "a PDF that arrived leaves nothing unsettled")
     }
 
     /// And when that PDF could not be downloaded: the DOI link it is refused

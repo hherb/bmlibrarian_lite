@@ -454,7 +454,7 @@ public actor FullTextService {
                     category: .fullText
                 )
                 let outcome = try await downloadAndExtract(from: pdfURL, key: cacheKey)
-                if case .downloadFailed(let failure?) = outcome {
+                if case .downloadFailed(let failure) = outcome {
                     // Refused, not offered (#478): a PDF Unpaywall named that
                     // we could not obtain leaves the open-access copy
                     // unassessed. It is not held as a link fallback, and the
@@ -1737,7 +1737,7 @@ public actor FullTextService {
 
     /// What a PDF tier's download-and-extract attempt produced.
     ///
-    /// Four outcomes rather than a `(path?, text?)` pair, because two of them
+    /// Five outcomes rather than a `(path?, text?)` pair, because two of them
     /// used to share `(nil, nil)` and the tier could not tell them apart. It
     /// therefore keyed its decision to try the next tier on whether an abstract
     /// happened to be in hand, so a Europe PMC render URL that 404s ended the
@@ -1748,14 +1748,15 @@ public actor FullTextService {
         /// Extraction is switched off, so nothing was downloaded.
         case notAttempted
 
-        /// The bytes could not be fetched: a 404, a server error, a body that
-        /// is not a PDF, or the file could not be cached.
-        ///
-        /// Carries why, when the source is to blame (#478): the status, the
+        /// The source did not serve the PDF, and why (#478): the status, the
         /// transport failure, or `malformedResponse` for a body that is not a
-        /// PDF. `nil` when the fault is ours, such as a cache write that
-        /// failed, which says nothing about the copy.
-        case downloadFailed(RequestFailure?)
+        /// PDF.
+        case downloadFailed(RequestFailure)
+
+        /// The source served the PDF, and it could not be cached. A fault of
+        /// ours, which says nothing about the copy, so its link is kept even
+        /// for a PDF Unpaywall named (#478).
+        case notCached
 
         /// The file is on disk and holds no recoverable prose — a scan, or a
         /// document PDFKit declined to open.
@@ -1823,7 +1824,8 @@ public actor FullTextService {
             if case FullTextError.pdfDownloadFailed(let failure) = error {
                 return .downloadFailed(failure)
             }
-            return .downloadFailed(nil)
+            // The only other failure the download throws is the cache write's
+            return .notCached
         }
 
         let extraction = extractor.extract(from: URL(fileURLWithPath: path))
@@ -1897,7 +1899,7 @@ public actor FullTextService {
         linkFallback: inout FullTextResult?
     ) -> FullTextResult? {
         switch outcome {
-        case .downloadFailed:
+        case .downloadFailed, .notCached:
             // Try the next tier, but keep the URL. Returning it here — which is
             // what this did, because a failed download was indistinguishable
             // from "extraction is switched off" — ended the chain on a link we
@@ -1905,6 +1907,8 @@ public actor FullTextService {
             // copy of the same paper was never tried. Held in reserve instead:
             // a link we could not download is still better than a publisher
             // page, and still worse than a copy a later tier actually retrieves.
+            // A PDF Unpaywall named arrives here only as `.notCached`: one its
+            // source did not serve is refused before this, never kept (#478).
             if linkFallback == nil {
                 linkFallback = FullTextResult(content: content, degradation: degradation)
             }

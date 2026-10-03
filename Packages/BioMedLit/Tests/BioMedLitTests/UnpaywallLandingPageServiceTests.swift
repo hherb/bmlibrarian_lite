@@ -122,6 +122,7 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         XCTAssertEqual(result.contentKind, .extracted)
         XCTAssertEqual(result.extractedText, "The article.")
         XCTAssertEqual(result.pdfURL?.absoluteString, Self.pdf)
+        XCTAssertNil(result.openAccessShortfall, "a PDF that arrived leaves nothing unsettled")
     }
 
     /// The defect itself: a page declaring nothing is not the article's PDF,
@@ -471,6 +472,22 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         }
     }
 
+    /// A download that got no answer is refused with its transport failure,
+    /// which the reader is told could not be asked.
+    func testAPDFWhoseDownloadGotNoAnswerIsRefusedWithItsTransportFailure() async throws {
+        let answer = #"{"best_oa_location": {"url_for_pdf": "\#(Self.pdf)"}}"#
+        StubURLProtocol.routes = routes(unpaywall: answer)
+        StubURLProtocol.failures["Okazaki_2025.pdf"] = URLError(.cannotLoadFromNetwork)
+
+        let result = try await fetch()
+
+        XCTAssertEqual(result.content, .doi(webURL: Self.doiLink))
+        XCTAssertEqual(
+            result.openAccessShortfall,
+            OpenAccessShortfall(source: .pdf, failure: .connection)
+        )
+    }
+
     /// The PDF a landing page declares is Unpaywall's copy too: refused the
     /// same way when its download fails.
     func testAPDFALandingPageDeclaresThatCannotBeDownloadedIsRefused() async throws {
@@ -604,5 +621,6 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         XCTAssertEqual(result.source, .unpaywall)
         XCTAssertEqual(result.pdfURL?.absoluteString, Self.pdf)
         XCTAssertFalse(StubURLProtocol.requested("item/95934"))
+        XCTAssertNil(result.openAccessShortfall, "a PDF that arrived leaves nothing unsettled")
     }
 }

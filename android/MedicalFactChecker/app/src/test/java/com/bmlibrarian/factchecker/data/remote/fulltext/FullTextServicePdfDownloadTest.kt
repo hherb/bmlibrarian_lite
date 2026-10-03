@@ -36,6 +36,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -128,7 +129,35 @@ class FullTextServicePdfDownloadTest {
         assertEquals(0, server.requestCount)
     }
 
-    /** A page an earlier build saved as the PDF is discarded and fetched again. */
+    /** A body that breaks off is a failure, and no part of it is left to be served as cached. */
+    @Test
+    fun `a download that breaks off leaves nothing cached`() = runTest {
+        server.enqueue(
+            MockResponse()
+                .setBody(Buffer().write(pdfBytes + ByteArray(TRUNCATED_BODY_PADDING)))
+                .setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY)
+        )
+
+        assertTrue(download() is PdfDownload.Failed)
+        assertEquals(emptyList<String>(), cachedFiles())
+        assertNull(service.getCachedPdfPath("d"))
+    }
+
+    /**
+     * A cache that cannot be written is our fault, never blamed on the source
+     * as a connection failure: the PDF was served (#478).
+     */
+    @Test
+    fun `a PDF that could not be saved is not the source's failure`() = runTest {
+        File(cache.root, "fulltext_pdfs").writeText("a file where the cache directory should be")
+        server.enqueue(MockResponse().setBody(Buffer().write(pdfBytes)))
+
+        assertSame(PdfDownload.NotSaved, download())
+        assertEquals(1, server.requestCount)
+        assertEquals(listOf("fulltext_pdfs"), cachedFiles())
+    }
+
+    /** A page an earlier build saved as the PDF is quarantined and fetched again. */
     @Test
     fun `a cached file that is not a PDF is fetched again`() = runTest {
         val stale = File(cache.root, "fulltext_pdfs/d.pdf").apply {
@@ -143,6 +172,7 @@ class FullTextServicePdfDownloadTest {
         assertEquals(stale.absolutePath, saved.path)
         assertArrayEquals(pdfBytes, stale.readBytes())
         assertEquals(1, server.requestCount)
+        assertEquals("<html>login</html>", File(cache.root, "fulltext_pdfs/d.pdf.corrupt").readText())
     }
 
     /** The control: a cached PDF is served without asking again. */
@@ -163,5 +193,10 @@ class FullTextServicePdfDownloadTest {
         assertFalse(looksLikePdf("%PD".toByteArray()))
         assertFalse(looksLikePdf("<html>".toByteArray()))
         assertFalse(looksLikePdf(ByteArray(0)))
+    }
+
+    private companion object {
+        /** Enough body that the server breaks off well before its end. */
+        const val TRUNCATED_BODY_PADDING = 256 * 1024
     }
 }

@@ -28,7 +28,7 @@ import java.util.Date
  *
  * @property document The document to store
  * @property result The chain's answer as the reader is to be shown it: the
- *   chain's own, except a PDF Unpaywall named that could not be downloaded,
+ *   chain's own, except a PDF Unpaywall named that the source did not serve,
  *   which becomes the DOI link carrying why ([FullTextResult.UnpaywallPdf.refused])
  */
 data class RecordedFetch(val document: DocumentEntity, val result: FullTextResult)
@@ -43,11 +43,13 @@ data class RecordedFetch(val document: DocumentEntity, val result: FullTextResul
  * every other answer clears what an earlier fetch stored, so the cards never say
  * a free copy may exist after a fetch settled it.
  *
- * The PDF is downloaded here. A PDF Unpaywall named that could not be
- * downloaded is refused, not recorded as found (#478): the document is
- * recorded as the DOI link, with the PDF's shortfall, as the chain would have
- * ended had Unpaywall named no PDF. A Europe PMC PDF that could not be
- * downloaded stays a link-only record of its own (#471).
+ * The PDF is downloaded here. A PDF Unpaywall named that the source did not
+ * serve is refused, not recorded as found (#478): the document is recorded as
+ * the DOI link, with the PDF's shortfall, as the chain would have ended had
+ * Unpaywall named no PDF. One the source served that could not be saved is a
+ * fault of ours, which says nothing about the copy: it stays a link-only
+ * record with no shortfall, as BioMedLit keeps its link. A Europe PMC PDF that
+ * could not be downloaded stays a link-only record of its own (#471).
  *
  * @param result What the chain returned
  * @param downloadPdf Downloads a PDF URL
@@ -64,6 +66,8 @@ suspend fun DocumentEntity.recordingFullTextFetch(
         is PdfDownload.Failed -> result.refused(download.failure).let { refused ->
             RecordedFetch(recording(refused, pdfPath = null), refused)
         }
+        // Served, but not saved: our fault, so the PDF's link is kept
+        PdfDownload.NotSaved -> RecordedFetch(recording(result, pdfPath = null), result)
     }
     is FullTextResult.EuropePmcPdf ->
         RecordedFetch(recording(result, downloadPdf(result.pdfUrl).savedPath), result)

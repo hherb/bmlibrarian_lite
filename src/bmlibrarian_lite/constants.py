@@ -1065,6 +1065,13 @@ SERVICE_UNPAYWALL_LANDING_PAGE = "the open-access copy's landing page"
 # copy it pointed at is what went unassessed, so it is never "no copy" (#478).
 SERVICE_UNPAYWALL_PDF = "the open-access copy's PDF"
 
+# What a PDF file begins with. A body that does not is not the PDF, whatever
+# it was served as -- a login page or a bot wall's challenge (#478, #480).
+PDF_MAGIC_BYTES = b"%PDF"
+# Appended to a PDF's cache path while its download is in progress; the file
+# is renamed into place only once the body has arrived whole (#478).
+PDF_PARTIAL_SUFFIX = ".part"
+
 # The Highwire Press meta tag a landing page declares its PDF in. Repositories
 # (DSpace, EPrints) and most publishers emit it for Google Scholar (#464).
 CITATION_PDF_URL_META_NAME = "citation_pdf_url"

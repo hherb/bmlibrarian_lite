@@ -24,9 +24,14 @@ three), branch `fix/unpaywall-unfetchable-pdf-478`, PR #482, stacked on #479. Th
 maintainer's calls: refuse an unrequestable address **and** a failed download;
 a true sentence. A new **source**, `unpaywall_pdf`, "the open-access copy's
 PDF", with the existing failures (`malformed_response` for a body not `%PDF`).
-Python `unobtained_unpaywall_pdf`; Swift `.downloadFailed(RequestFailure?)`,
+Python `unobtained_unpaywall_pdf`; Swift `.downloadFailed(RequestFailure)`,
 no link fallback; Android `PdfDownload`, `RecordedFetch`,
-`UnpaywallPdf.refused`. Rule: `fulltext_retrieval.md`. Follow-ups #480, #481.
+`UnpaywallPdf.refused`. Our own stops are not the copy's: a PDF served but not
+cached keeps its link with no shortfall in the apps (Swift `.notCached`,
+Android `PdfDownload.NotSaved`), and Python, with no link, records
+`request_failed`; Python's oversized PDF is a `LookupSkipReason.OVER_SIZE_LIMIT`
+skip. Python now requires `%PDF` whatever the Content-Type and writes through
+a `.part` file, as Android does. Rule: `fulltext_retrieval.md`. Follow-ups #480, #481.
 
 ## Recently landed (context)
 

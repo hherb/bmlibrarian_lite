@@ -64,7 +64,7 @@ public enum OpenAccessUnsettledReason: Sendable, Equatable, Hashable {
 
 /// Why the open-access copy Unpaywall may know of went unassessed (#464, #466).
 ///
-/// Unpaywall, or the landing page it named, could not settle whether a free
+/// Unpaywall, the landing page it named, or the PDF it named (#478) could not settle whether a free
 /// copy exists, so the chain ended on a fallback without learning it. That is
 /// not "no open-access copy": the reader is told so (``notice``), and the app
 /// keeps it beside the document's full text (``persisted()``). Python records

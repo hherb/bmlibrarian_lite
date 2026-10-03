@@ -20,6 +20,7 @@ package com.bmlibrarian.factchecker.data.remote.fulltext
 
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService.FullTextResult
+import com.bmlibrarian.factchecker.domain.model.FullTextLinkKind
 import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
 import com.bmlibrarian.factchecker.domain.model.OpenAccessSource
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
@@ -126,6 +127,24 @@ class FullTextRecordingTest {
         assertEquals("/cache/a.pdf", doc.pdfPath)
         assertEquals(Constants.FULLTEXT_SOURCE_UNPAYWALL, doc.fullTextSource)
         assertNull(doc.fullTextOpenAccessShortfallJson)
+    }
+
+    /**
+     * A PDF the source served that could not be saved is our fault, not the
+     * copy's: it stays the Unpaywall PDF's link, with no shortfall, as
+     * BioMedLit keeps its link (#478).
+     */
+    @Test
+    fun `an Unpaywall PDF that could not be saved keeps its link`() = runTest {
+        val answer = FullTextResult.UnpaywallPdf(pdfUrl = "https://repo.example.org/a.pdf", doi = "10.1/x")
+
+        val (doc, shown) = document.recordingFullTextFetch(answer) { PdfDownload.NotSaved }
+
+        assertSame(answer, shown)
+        assertNull(doc.pdfPath)
+        assertEquals(Constants.FULLTEXT_SOURCE_UNPAYWALL, doc.fullTextSource)
+        assertNull(doc.fullTextOpenAccessShortfallJson)
+        assertEquals(FullTextLinkKind.UNDOWNLOADED_PDF, doc.linkOnlyKind)
     }
 
     /** A chain that settled nothing records nothing, the shortfall included (#434). */
