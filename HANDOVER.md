@@ -8,30 +8,22 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**A link-only record explains itself** (#471 Android, #472 iOS Full Text
-tab), branch `fix/link-only-state-471-472`, PR #479. Android: `DocumentEntity.isLinkOnly`
-(a fetch date, nothing displayable, no recorded absence; iOS's #187 line) and
-`linkOnlyKind` (`FullTextLinkKind`: the publisher's page, or a PDF found but
-not downloaded). Both cards show `LinkOnlyFullTextSection` (what the link is,
-**Try Again**, **Publisher**) instead of "Get Full Text"; the web-link screen
-says what the link is instead of "Full text is available on the publisher's
-website". iOS: the Full Text tab's link-only row shows `ParseWarningBanner`
-beneath it, outside the row's button. Contract: `fulltext_retrieval.md` "A
-link-only record is not an unfetched one".
-
-**A PDF Unpaywall named that could not be obtained is refused** (#478, all
-three), branch `fix/unpaywall-unfetchable-pdf-478`, PR #482, stacked on #479. The
-maintainer's calls: refuse an unrequestable address **and** a failed download;
-a true sentence. A new **source**, `unpaywall_pdf`, "the open-access copy's
-PDF", with the existing failures (`malformed_response` for a body not `%PDF`).
-Python `unobtained_unpaywall_pdf`; Swift `.downloadFailed(RequestFailure)`,
-no link fallback; Android `PdfDownload`, `RecordedFetch`,
-`UnpaywallPdf.refused`. Our own stops are not the copy's: a PDF served but not
-cached keeps its link with no shortfall in the apps (Swift `.notCached`,
-Android `PdfDownload.NotSaved`), and Python, with no link, records
-`request_failed`; Python's oversized PDF is a `LookupSkipReason.OVER_SIZE_LIMIT`
-skip. Python now requires `%PDF` whatever the Content-Type and writes through
-a `.part` file, as Android does. Rule: `fulltext_retrieval.md`. Follow-ups #480, #481.
+**Why Unpaywall's PDFs cannot be downloaded: measured** (#480), branch
+`survey/unpaywall-pdf-480`. A survey, not a code change:
+`scripts/unpaywall_pdf_survey.py` (`fetch` / `browse` / `analyse`), rows and
+findings in `doc/developer/unpaywall_pdf_survey/` (README has the numbers),
+figures pinned by `tests/test_unpaywall_pdf_survey.py`. **Re-analyse the
+committed rows, never re-fetch.** Our clients get 28% of 400 PDFs; 81% of the
+failures are bot walls (PMC's reCAPTCHA, ScienceDirect, Cloudflare publishers),
+12% serve no PDF, 4% are our client (MDPI refuses the `BMLibrarian/1.0` UA).
+**A challenged failure is a wall 89% of the time**, which the apps can see at
+run time. #480's three decisions are the maintainer's and still open: offer a
+challenged PDF as a link to open in a browser; a `challenged` failure kind and
+sentence; no client change (impersonation buys 11 of 290). Untested: whether a
+person's own browser passes PMC and ScienceDirect (every Playwright browser,
+headed too, is stopped). Found: **#483** the desktop's browser fallback never
+works. The survey needs Playwright in the venv (`uv pip install playwright &&
+playwright install chromium`), deliberately not a declared dependency.
 
 ## Recently landed (context)
 
@@ -39,21 +31,24 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **An Unpaywall PDF not obtained is refused** (all three; PR #482, #478):
+  never a link; source `unpaywall_pdf`; a body not `%PDF` is
+  `malformed_response`. **Our own stops are not the copy's answer** (served but
+  not cached keeps its link; Python's oversized PDF is an `OVER_SIZE_LIMIT`
+  skip). **A link-only record explains itself** (apps; PR #479). Both rules:
+  `fulltext_retrieval.md`.
 - **An address the tier cannot fetch is not "no copy"** (apps; PR #477,
   #474, #475). A landing URL that is not an absolute http(s) URL is an unread
   page (`request_failed`), as Python's `requests` refuses it (Swift
   `UnpaywallLandingPage.fetchableURL`, Android `readLandingPage`; schemes in
   `BioMedLitConstants.unpaywallFetchableSchemes`). BioMedLit's closing throw
   is `FullTextService.exhaustedChainError`: **no absence while an open-access
-  shortfall is set**. An unusable `url_for_pdf` is refused (#478, in flight).
+  shortfall is set**.
 
-- **Apps: an unsettled open-access copy is told** (PR #473, #466). Both apps
-  carry an **`OpenAccessShortfall`** (source + failure, or **not configured**)
-  on the fallback, store it with the full text (Swift
-  `fullTextOpenAccessShortfallJSON`, Android Room **8**) and show **Python's
-  sentence** (`unestablished_access_clause`). **Every fetch that settles it
-  writes or clears it** (Android: `recordingFullTextFetch`). **No usable email
-  is "not configured", never a 422**. Room migrations register from
+- **Apps: an unsettled open-access copy is told** (PR #473): an
+  **`OpenAccessShortfall`** stored with the full text, shown in **Python's
+  sentence**; **every fetch that settles it writes or clears it**; no usable
+  email is "not configured", never a 422. Room migrations register from
   `AppDatabase.ALL_MIGRATIONS`.
 - **iOS/macOS: a working cancel** (PR #469, #462). Every entry point runs
   through `runAsWorkflowTask(_:)`; `stopWork(_:)` is the one stop path; **a
@@ -213,9 +208,9 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **#480** investigate whether the refused Unpaywall PDFs are genuinely
-  unfetchable or bot walls a browser would pass (survey method in the issue);
-  **#481** iOS keeps an earlier build's refused Unpaywall link; **#467**
+- **#480's decisions** (above; the survey is done) then **#483** the desktop
+  browser fallback (fix or remove, per #480); **#481** iOS keeps an earlier
+  build's refused Unpaywall link (its answer follows #480's); **#467**
   landing-page parity edges; **#468** / **#470** iOS/macOS cancel follow-ups;
   **#476** `OpenAccessShortfall` hardening.
 
