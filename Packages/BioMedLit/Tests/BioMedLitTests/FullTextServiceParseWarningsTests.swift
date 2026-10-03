@@ -316,10 +316,18 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
     /// Worth its own test because the degradation is attached at each `return`
     /// rather than at one exit, so a site that forgets it is a live defect that
     /// the publisher-link test above cannot see.
+    ///
+    /// The PDF is served, so the Unpaywall tier itself returns: one it could
+    /// not download is refused for the DOI link since #478, which the next
+    /// test covers.
     func testAnUnpaywallFallbackAlsoCarriesTheDegradation() async throws {
+        let key = try XCTUnwrap(ArticleCacheKey(pmid: "1", pmcId: "PMC12759138", doi: "10.1234/example"))
+        FullTextService.deleteCachedPDF(for: key)
+        defer { FullTextService.deleteCachedPDF(for: key) }
         StubURLProtocol.routes = [
             "europepmc": (200, Data("<article><body></article>".utf8)),
             "unpaywall": (200, Data(#"{"best_oa_location": {"url_for_pdf": "https://example.org/a.pdf"}}"#.utf8)),
+            "example.org/a.pdf": (200, Data("%PDF-1.4\n".utf8)),
         ]
 
         let result = try await stubbedService()
@@ -330,6 +338,27 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
         }
         XCTAssertEqual(pdfURL.absoluteString, "https://example.org/a.pdf")
         XCTAssertEqual(result.degradation, .jatsParseFailed)
+        XCTAssertNil(result.openAccessShortfall, "a PDF that arrived leaves nothing unsettled")
+    }
+
+    /// And when that PDF could not be downloaded: the DOI link it is refused
+    /// for (#478) carries the degradation beside the PDF's shortfall.
+    func testARefusedUnpaywallPDFsDOIFallbackCarriesTheDegradation() async throws {
+        StubURLProtocol.routes = [
+            "europepmc": (200, Data("<article><body></article>".utf8)),
+            "unpaywall": (200, Data(#"{"best_oa_location": {"url_for_pdf": "https://example.org/a.pdf"}}"#.utf8)),
+            "example.org/a.pdf": (404, Data()),
+        ]
+
+        let result = try await stubbedService()
+            .fetchFullText(pmcId: "PMC12759138", doi: "10.1234/example", pmid: "1")
+
+        XCTAssertEqual(result.content, .doi(webURL: URL(string: "https://doi.org/10.1234/example")!))
+        XCTAssertEqual(result.degradation, .jatsParseFailed)
+        XCTAssertEqual(
+            result.openAccessShortfall,
+            OpenAccessShortfall(source: .pdf, failure: .httpStatus(404))
+        )
     }
 
     /// The negative control. Without it every assertion above passes just as

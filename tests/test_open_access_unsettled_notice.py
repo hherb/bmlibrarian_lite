@@ -26,6 +26,7 @@ from bmlibrarian_lite.analysis_failures import unestablished_access_clause
 from bmlibrarian_lite.constants import (
     SERVICE_UNPAYWALL,
     SERVICE_UNPAYWALL_LANDING_PAGE,
+    SERVICE_UNPAYWALL_PDF,
 )
 from bmlibrarian_lite.data_models import (
     LookupRecord,
@@ -50,6 +51,7 @@ CONTRACT: dict[str, Any] = json.loads(
 SERVICES = {
     "unpaywall": SERVICE_UNPAYWALL,
     "unpaywall_landing_page": SERVICE_UNPAYWALL_LANDING_PAGE,
+    "unpaywall_pdf": SERVICE_UNPAYWALL_PDF,
 }
 
 

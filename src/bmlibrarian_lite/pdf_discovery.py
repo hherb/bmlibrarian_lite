@@ -39,7 +39,7 @@ import logging
 import re
 import time
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
@@ -63,6 +63,8 @@ from .constants import (
     LANDING_PAGE_PDF_MARKER,
     LANDING_PAGE_READ_CHUNK_BYTES,
     PAYWALL_HTTP_STATUSES,
+    PDF_MAGIC_BYTES,
+    PDF_PARTIAL_SUFFIX,
     POLITE_MAX_THROTTLE_RETRIES,
     RETRYABLE_HTTP_STATUSES,
     SERVICE_DOI_PUBLISHER,
@@ -70,6 +72,7 @@ from .constants import (
     SERVICE_PMC_ID_CONVERTER,
     SERVICE_UNPAYWALL,
     SERVICE_UNPAYWALL_LANDING_PAGE,
+    SERVICE_UNPAYWALL_PDF,
 )
 from .analysis_failures import (
     no_pdf_sources_message,
@@ -474,8 +477,9 @@ class DiscoveryResult:
         paywall_url: Where, so the caller can offer authentication.
         verification_warning: What the content check doubted.
         lookups: The lookups that went unanswered, whether they failed
-            (#347) or were never made (#355). Empty means every lookup this
-            discovery could make was made and answered. Independent of
+            (#347) or were never made (#355), and an Unpaywall PDF that could
+            not be obtained (#478). Empty means every lookup this discovery
+            could make was made and answered. Independent of
             ``success``, which says only whether a PDF arrived: a download
             can succeed while Unpaywall was throttled, and that is worth
             knowing.
@@ -485,6 +489,23 @@ class DiscoveryResult:
             field; it is here so a caller can classify rather than parse a
             sentence -- which is what the transparency analyser does to tell
             an absence from a silence (#354).
+        failure: Why one download attempt got no PDF, as a typed failure
+            safe to show: the status, the transport failure,
+            ``MALFORMED_RESPONSE`` for a body that is not the PDF, or
+            ``REQUEST_FAILED`` for an address that cannot be requested or a
+            fault of our own, such as a file that could not be written.
+            ``None`` on success, on a cancel, and for a PDF refused for its
+            size. Set only by :meth:`PDFDiscoverer._try_download`, so the
+            discovery can record an Unpaywall PDF it could not obtain (#478).
+        refused_for_size: Whether the source offered a PDF larger than
+            :data:`MAX_PDF_SIZE`. Our limit rather than the source's answer,
+            so it is no ``failure``; but the copy exists and went unread,
+            so an Unpaywall PDF refused for its size is still recorded as
+            unassessed (#478).
+
+    Raises:
+        ValueError: On construction, if a successful result carries a
+            failure or a size refusal.
     """
 
     success: bool
@@ -495,6 +516,13 @@ class DiscoveryResult:
     paywall_url: Optional[str] = None
     verification_warning: Optional[str] = None
     lookups: LookupRecord = LookupRecord()
+    failure: RequestFailure | None = None
+    refused_for_size: bool = False
+
+    def __post_init__(self) -> None:
+        """Refuse a success that also says why no PDF was obtained."""
+        if self.success and (self.failure is not None or self.refused_for_size):
+            raise ValueError("A downloaded PDF carries no download failure")
 
     def with_lookups(self, record: LookupRecord) -> "DiscoveryResult":
         """Add the lookups that went unanswered to this result.
@@ -513,6 +541,117 @@ class DiscoveryResult:
             with nothing dropped.
         """
         return replace(self, lookups=self.lookups.merged(record))
+
+
+def refused_download_failure(status_code: int) -> RequestFailure:
+    """The failure a download met by a paywall or a bot wall records.
+
+    A refusal status (401, 403) is that status, which the reader is told
+    "did not serve it". A page served with a success status in place of the
+    PDF -- a login form, a captcha, a challenge page -- is a body that is
+    not the PDF, ``MALFORMED_RESPONSE``: that says nothing about the
+    article, so the reader is told the copy could not be asked (#478, #480).
+
+    Args:
+        status_code: The status the page was served with.
+
+    Returns:
+        The failure to record.
+    """
+    if status_code >= HTTP_ERROR_STATUS_MIN:
+        return RequestFailure(RequestFailureKind.HTTP_STATUS, status_code)
+    return RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+
+
+def read_body_prefix(chunks: Iterator[bytes], at_least: int) -> bytes:
+    """Read the start of a streamed body, enough of it to sniff.
+
+    A first chunk can be shorter than the bytes a sniff needs -- one HTTP
+    chunk of a chunked body -- so chunks are joined until there are enough
+    or the body ends. A read that fails raises: it is the transport's
+    failure, not an empty body.
+
+    Args:
+        chunks: The body's chunks, consumed as far as needed.
+        at_least: How many bytes the caller needs.
+
+    Returns:
+        The bytes read, which are ``at_least`` or more unless the body was
+        shorter.
+    """
+    prefix = b""
+    for chunk in chunks:
+        prefix += chunk
+        if len(prefix) >= at_least:
+            break
+    return prefix
+
+
+def partial_download_path(output_path: Path) -> Path:
+    """Where a PDF is written while its download is in progress.
+
+    Args:
+        output_path: Where the PDF is to end up.
+
+    Returns:
+        ``output_path`` with :data:`PDF_PARTIAL_SUFFIX` appended, beside it,
+        so the rename into place stays on one filesystem.
+    """
+    return output_path.with_name(output_path.name + PDF_PARTIAL_SUFFIX)
+
+
+def discard_partial_download(partial: Path) -> None:
+    """Remove a partial download, if one is left.
+
+    Logged rather than raised when it cannot be removed: the download's own
+    outcome is what the caller reports, and a leftover partial file is never
+    read as the PDF -- only the renamed file is.
+
+    Args:
+        partial: The partial file; may not exist.
+    """
+    try:
+        partial.unlink(missing_ok=True)
+    except OSError as e:
+        logger.warning(f"Could not remove the partial download {partial}: {e}")
+
+
+def unobtained_unpaywall_pdf(
+    source: "PDFSource", result: "DiscoveryResult"
+) -> LookupRecord:
+    """Record an Unpaywall PDF we could not obtain, or nothing.
+
+    Unpaywall answered with a copy; that we could not then obtain it is not
+    an article without one, and the discovery must not conclude it has no
+    full text (#478). A PDF refused for its size is our limit, not the
+    source's answer, so it is recorded as a lookup not made rather than as
+    a failure; it is unassessed all the same. A cancel records nothing: the
+    caller walked away from the question.
+
+    Args:
+        source: The source the download tried.
+        result: What the attempt came to.
+
+    Returns:
+        A record under :data:`SERVICE_UNPAYWALL_PDF` when ``source`` is a
+        PDF Unpaywall named and the attempt did not obtain it; empty
+        otherwise.
+    """
+    if result.success or source.source_type is not PDFSourceType.UNPAYWALL_OA:
+        return LookupRecord()
+    if result.failure is not None:
+        return LookupRecord(
+            failures=(SourceLookupFailure(SERVICE_UNPAYWALL_PDF, result.failure),)
+        )
+    if result.refused_for_size:
+        return LookupRecord(
+            skipped=(
+                SourceLookupSkipped(
+                    SERVICE_UNPAYWALL_PDF, LookupSkipReason.OVER_SIZE_LIMIT
+                ),
+            )
+        )
+    return LookupRecord()
 
 
 def usable_unpaywall_email(email: str | None) -> str | None:
@@ -664,6 +803,16 @@ class PDFDiscoverer:
                 lookups=lookups,
             )
 
+        # Unpaywall's own order, best location first, before the priority
+        # sort reorders its PDFs: the failure kept for the reader is the best
+        # location's, the one PDF the apps try (#478).
+        unpaywall_rank = {
+            s.url: rank
+            for rank, s in enumerate(
+                s for s in sources if s.source_type is PDFSourceType.UNPAYWALL_OA
+            )
+        }
+
         # Sort by priority
         sources.sort(key=lambda s: s.priority, reverse=True)
 
@@ -674,6 +823,8 @@ class PDFDiscoverer:
         # Try to download from each source
         last_paywall_result: Optional[DiscoveryResult] = None
         blocked_oa_sources: List[PDFSource] = []  # Track sources blocked by bot protection
+        unobtained_pdf = LookupRecord()
+        unobtained_rank: int | None = None
 
         for source in sources:
             if self._cancelled:
@@ -688,6 +839,20 @@ class PDFDiscoverer:
 
             if result.success:
                 return result.with_lookups(lookups)
+
+            # An Unpaywall PDF we could not obtain leaves the open-access copy
+            # unassessed (#478). Held apart from ``lookups`` and merged only
+            # where the discovery gives up: a later source that serves the
+            # PDF settles the question. One is kept, the PDF earliest in
+            # Unpaywall's order, as the apps try the best location's alone.
+            unobtained = unobtained_unpaywall_pdf(source, result)
+            rank = unpaywall_rank.get(source.url)
+            if (
+                unobtained.anything_unsettled
+                and rank is not None
+                and (unobtained_rank is None or rank < unobtained_rank)
+            ):
+                unobtained_pdf, unobtained_rank = unobtained, rank
 
             if result.is_paywall:
                 # For open access sources, a 403 might be bot protection, not paywall
@@ -704,9 +869,9 @@ class PDFDiscoverer:
                     # that would have found a free copy could not be made,
                     # the claim is withheld rather than asserted (#347).
                     return replace(
-                        result.with_lookups(lookups),
+                        result.with_lookups(lookups.merged(unobtained_pdf)),
                         error=paywall_message(
-                            result.error or "", told
+                            result.error or "", told.merged(unobtained_pdf)
                         ),
                     )
 
@@ -730,9 +895,9 @@ class PDFDiscoverer:
         # If we had a paywall result but no success, return it for OpenAthens option
         if last_paywall_result:
             return replace(
-                last_paywall_result.with_lookups(lookups),
+                last_paywall_result.with_lookups(lookups.merged(unobtained_pdf)),
                 error=paywall_message(
-                    last_paywall_result.error or "", told
+                    last_paywall_result.error or "", told.merged(unobtained_pdf)
                 ),
             )
 
@@ -742,9 +907,9 @@ class PDFDiscoverer:
             # cannot falsify -- so it is qualified rather than withheld.
             error=with_unestablished_access(
                 "Failed to download PDF from any available source.",
-                told,
+                told.merged(unobtained_pdf),
             ),
-            lookups=lookups,
+            lookups=lookups.merged(unobtained_pdf),
         )
 
     def _discover_sources(
@@ -1561,16 +1726,15 @@ class PDFDiscoverer:
                 allow_redirects=True,
             )
 
-            # Read the first chunk once. Sniffing the body (paywall text / PDF
-            # magic bytes) consumes bytes from the stream, and iter_content does
-            # NOT rewind, so we must reuse this prefix when writing the file -
-            # otherwise the saved PDF would be missing its first bytes (header)
-            # for any source served without an explicit PDF Content-Type.
+            # Read the start of the body once. Sniffing it (paywall text / PDF
+            # magic bytes) consumes bytes from the stream, and iter_content
+            # does NOT rewind, so this prefix is reused when writing the file
+            # - otherwise the saved PDF would be missing its header. A read
+            # that fails here is the transport's failure and propagates to
+            # the handlers below: swallowed, it left an empty prefix that a
+            # PDF Content-Type let through as a 0-byte "PDF" (#478).
             content_iter = response.iter_content(chunk_size=8192)
-            try:
-                body_prefix = next(content_iter, b"")
-            except Exception:
-                body_prefix = b""
+            body_prefix = read_body_prefix(content_iter, len(PDF_MAGIC_BYTES))
 
             # A broken server is not a paywall. The paywall sniff below
             # treats any text/html body whose URL contains "access" as a
@@ -1595,17 +1759,21 @@ class PDFDiscoverer:
                     is_paywall=True,
                     paywall_url=source.url,
                     error="Access requires institutional subscription or purchase.",
+                    failure=refused_download_failure(response.status_code),
                 )
 
             response.raise_for_status()
 
-            # Verify it's actually a PDF
+            # Verify it's actually a PDF, whatever it was served as: a login
+            # or challenge page labelled application/pdf is not the PDF, and
+            # saved as one it was served from the cache ever after (#478).
             content_type = response.headers.get("Content-Type", "")
-            if "pdf" not in content_type.lower() and not self._looks_like_pdf(body_prefix):
+            if not self._looks_like_pdf(body_prefix):
                 logger.warning(f"Response is not a PDF: {content_type}")
                 return DiscoveryResult(
                     success=False,
                     error=f"Server returned non-PDF content: {content_type}",
+                    failure=RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
                 )
 
             # Check file size
@@ -1614,20 +1782,28 @@ class PDFDiscoverer:
                 return DiscoveryResult(
                     success=False,
                     error=f"PDF too large ({int(content_length) / 1024 / 1024:.1f} MB)",
+                    refused_for_size=True,
                 )
 
-            # Save the PDF, writing the already-consumed prefix first.
+            # Save the PDF, writing the already-consumed prefix first. The
+            # body goes to a partial file renamed into place only once the
+            # stream has ended: written straight to ``output_path``, a
+            # download that broke off left a truncated file there, which the
+            # cache lookup served as the whole article on every later run.
             output_path.parent.mkdir(parents=True, exist_ok=True)
             if self._cancelled:
                 return DiscoveryResult(success=False, error="Cancelled")
-            with open(output_path, "wb") as f:
-                if body_prefix:
+            partial = partial_download_path(output_path)
+            try:
+                with open(partial, "wb") as f:
                     f.write(body_prefix)
-                for chunk in content_iter:
-                    if self._cancelled:
-                        output_path.unlink(missing_ok=True)
-                        return DiscoveryResult(success=False, error="Cancelled")
-                    f.write(chunk)
+                    for chunk in content_iter:
+                        if self._cancelled:
+                            return DiscoveryResult(success=False, error="Cancelled")
+                        f.write(chunk)
+                partial.replace(output_path)
+            finally:
+                discard_partial_download(partial)
 
             self._emit_progress("download", "success")
 
@@ -1659,17 +1835,48 @@ class PDFDiscoverer:
                     is_paywall=True,
                     paywall_url=source.url,
                     error="Access denied - may require institutional access.",
+                    failure=refused_download_failure(e.response.status_code),
                 )
             logger.warning(f"HTTP error downloading from {source.url}: {e}")
-            return DiscoveryResult(success=False, error=str(e))
+            return DiscoveryResult(
+                success=False,
+                error=str(e),
+                failure=request_failure_from_exception(e),
+            )
 
         except requests.exceptions.RequestException as e:
+            # Includes an address ``requests`` will not send at all -- an
+            # ``ftp:``, ``file:`` or relative ``url_for_pdf`` raises
+            # InvalidSchema / MissingSchema / InvalidURL before any request
+            # -- which reads as REQUEST_FAILED, as the apps refuse it (#478).
             logger.warning(f"Request error downloading from {source.url}: {e}")
-            return DiscoveryResult(success=False, error=str(e))
+            return DiscoveryResult(
+                success=False,
+                error=str(e),
+                failure=request_failure_from_exception(e),
+            )
+
+        except OSError as e:
+            # After the ``requests`` handlers, whose exceptions are OSErrors
+            # too: what is left is ours, a file that could not be written.
+            # The source served the PDF, so this is no answer about the copy;
+            # but with no link to fall back on, recording nothing would let
+            # the discovery conclude the article has no full text. It is
+            # recorded as REQUEST_FAILED: the copy went unassessed (#478).
+            logger.error(f"Could not save the PDF from {source.url}: {e}")
+            return DiscoveryResult(
+                success=False,
+                error=f"The PDF could not be saved: {e}",
+                failure=RequestFailure(RequestFailureKind.REQUEST_FAILED),
+            )
 
         except Exception as e:
             logger.exception(f"Unexpected error downloading from {source.url}")
-            return DiscoveryResult(success=False, error=str(e))
+            return DiscoveryResult(
+                success=False,
+                error=str(e),
+                failure=RequestFailure(RequestFailureKind.REQUEST_FAILED),
+            )
 
     def _try_browser_download(
         self,
@@ -1781,7 +1988,7 @@ class PDFDiscoverer:
         Args:
             body_prefix: The already-read start of the response body.
         """
-        return body_prefix.startswith(b"%PDF")
+        return body_prefix.startswith(PDF_MAGIC_BYTES)
 
     def _verify_pdf_content(
         self,

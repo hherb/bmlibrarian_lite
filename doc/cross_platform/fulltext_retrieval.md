@@ -407,8 +407,9 @@ HTML nor PDF, or a page without the tag is its answer (`DeclaresNone`).
 
 #### An unsettled open-access copy (#466)
 
-The reader of a fallback the chain settled on because Unpaywall, or the
-landing page it named, could not settle whether a free copy exists is told so.
+The reader of a fallback the chain settled on because Unpaywall, the landing
+page it named, or the PDF it named (#478) could not settle whether a free copy
+exists is told so.
 Without it the publisher link reads exactly as one for an article with no free
 copy at all.
 
@@ -429,7 +430,7 @@ verb is #435's (`RequestFailure.is_answer`, `search_failure_reporting.md`):
   (`NOT_CONFIGURED`), and `configuration_nudge` adds the last sentence.
 
 The source is named as Python records it (`SERVICE_UNPAYWALL`,
-`SERVICE_UNPAYWALL_LANDING_PAGE`), a leading "the" capitalised. The rows are
+`SERVICE_UNPAYWALL_LANDING_PAGE`, `SERVICE_UNPAYWALL_PDF`), a leading "the" capitalised. The rows are
 `fulltext_parity/open_access_unsettled_notice.json`, read by all three suites.
 
 **Which answers leave it unsettled** is the same on all three platforms: from
@@ -438,12 +439,54 @@ not serve it"; a 501 or 520 could not be asked), a transport failure, an answer
 that is empty or will not decode, and an unexpected error in the tier; from the
 landing page, `Unreachable` above, including an address that is not an
 absolute http(s) URL (`request_failed`: Python's `requests` refuses it with
-`MissingSchema`, `InvalidSchema` or `InvalidURL`, #474). A `url_for_pdf` the
-tier cannot fetch is never "no copy" either: Python's download of it fails,
-Android hands it on as the PDF link, and Swift, which does not offer a link it
-will not open, records Unpaywall's `request_failed`. The platforms differ here,
-and the Swift notice's "could not be asked" approximates an answer that could
-not be used (#478).
+`MissingSchema`, `InvalidSchema` or `InvalidURL`, #474).
+
+**A PDF Unpaywall named that could not be obtained is refused** (#478, the
+maintainer's call). The PDF is its `url_for_pdf`, or the one its landing page
+declares. It is never offered as a link and never "no copy": the open-access
+copy went unassessed, under its own source, **the open-access copy's PDF**
+(`unpaywall_pdf`; Python `SERVICE_UNPAYWALL_PDF`), not Unpaywall's, which
+answered. The failure is:
+
+- `request_failed` for an address that is not an absolute http(s) URL with a
+  host, which is never requested (Python's `requests` refuses it as above);
+- the HTTP status of a download that answered with one (a 403 or 404 "did not
+  serve it"; a 429 or 5xx "could not be asked");
+- the transport failure of one that got no answer;
+- `malformed_response` for a body that is not a PDF, served with a success
+  status: it does not begin with `%PDF`, whatever its Content-Type says (a
+  login page, a bot wall's challenge, #480). Python's check was "a PDF
+  Content-Type *or* `%PDF`" until #478 and now matches the apps.
+
+The chain then goes on as though Unpaywall had named no PDF: Python tries its
+remaining sources, Swift falls back past it (no link fallback is kept for it),
+and Android records the DOI link (`FullTextResult.UnpaywallPdf.refused`, applied
+where the download happens, `recordingFullTextFetch`). Python tries every
+Unpaywall location, in its own priority order; it keeps one failure, that of the
+PDF earliest in Unpaywall's order (the best location's, the one PDF the apps
+try), and records it only when no source served the PDF. Whether these failures
+are genuinely unfetchable addresses or bot walls a browser would pass is #480.
+
+**Our own stops are not the copy's answer**, and none of them is "no copy":
+
+- A cancel records nothing: the caller walked away from the question.
+- Python refuses a PDF larger than `MAX_PDF_SIZE`. The copy exists and went
+  unread, so it is recorded as a lookup not made, `SourceLookupSkipped`
+  (`OVER_SIZE_LIMIT`): "The open-access copy's PDF (larger than the download
+  limit) could not be asked, …". Python's alone; the apps set no size limit.
+- A PDF the source served that could not be cached (a write that failed, a
+  rename that failed) is a fault of ours. The apps keep the PDF's link with no
+  shortfall: Swift's `PDFTierOutcome.notCached` is held as the link fallback,
+  and Android's `PdfDownload.NotSaved` is recorded as a link-only Unpaywall PDF
+  ("A PDF of this article was found but could not be downloaded."). Python has
+  no link to offer, and recording nothing would let the discovery conclude the
+  article has no full text, so it records `request_failed` under the PDF.
+
+**A partial download is never served as the PDF.** Python and Android write the
+body to `<file>.part` and rename it into place only once it has arrived whole
+(Android also checks `%PDF` first); a download that broke off leaves nothing a
+later cache lookup could return as the whole article. BioMedLit holds the body
+in memory and writes it atomically.
 
 **The chain never ends on an absence while it is unsettled.** Every fallback
 returned after the tier carries the shortfall: on Android always the DOI link;
@@ -472,7 +515,7 @@ banner says both.
  "failure": {"kind": "http_status", "status_code": 408}}
 ```
 
-`source` is `unpaywall` or `unpaywall_landing_page`; `failure` is a search
+`source` is `unpaywall`, `unpaywall_landing_page` or `unpaywall_pdf`; `failure` is a search
 shortfall's failure object and reads back by its rules
 (`search_failure_reporting.md`, "Persisted form"). An Unpaywall that was not
 configured is stored as `{"schema_version": 1, "source": "unpaywall",

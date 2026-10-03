@@ -535,8 +535,12 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
     /// **not** mark the document permanently unavailable on it.
     case openAccessNotEstablished(OpenAccessShortfall)
 
-    /// PDF download failed.
-    case pdfDownloadFailed(String)
+    /// PDF download failed: the status, the transport failure, or
+    /// `malformedResponse` for a body that is not a PDF.
+    ///
+    /// Typed, so the chain can tell the reader why an open-access PDF went
+    /// unobtained (#478) without parsing a sentence.
+    case pdfDownloadFailed(RequestFailure)
 
     /// JATS parsing failed, with the parser's own error preserved.
     ///
@@ -590,8 +594,8 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
             // The shortfall's own sentence, Python's, so the reader of this
             // error and of a stored notice is told the same thing (#466)
             return "No source provided this article's full text. \(shortfall.notice)"
-        case .pdfDownloadFailed(let reason):
-            return "Failed to download PDF: \(reason)"
+        case .pdfDownloadFailed(let failure):
+            return "Failed to download PDF: \(failure.describe())"
         case .jatsParseFailure(let error):
             return "Failed to parse XML: \(error.localizedDescription)"
         case .cachingFailed(let reason):

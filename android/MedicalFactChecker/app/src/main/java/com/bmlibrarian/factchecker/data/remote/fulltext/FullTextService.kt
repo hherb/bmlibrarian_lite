@@ -44,7 +44,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -70,6 +69,12 @@ class FullTextService @Inject constructor(
     companion object {
         private const val TAG = "FullTextService"
         private const val PDF_CACHE_DIR = "fulltext_pdfs"
+
+        /** Appended to a PDF's cache name while its download is in progress. */
+        private const val PDF_PARTIAL_SUFFIX = ".part"
+
+        /** Appended to a cached file that is not a PDF, kept aside for whoever investigates. */
+        private const val PDF_CORRUPT_SUFFIX = ".corrupt"
 
         /** The request header this client names itself in. */
         private const val USER_AGENT_HEADER = "User-Agent"
@@ -103,34 +108,50 @@ class FullTextService @Inject constructor(
         ) : FullTextResult(hasContent = true)
 
         /**
-         * PDF available from Europe PMC render URL (when XML is unavailable).
+         * PDF available from Europe PMC render URL (when XML is unavailable),
+         * not yet downloaded: where it is saved is recorded on the document.
          *
          * @param pdfUrl URL to the Europe PMC PDF.
-         * @param localPath Local file path if downloaded, null otherwise.
          */
         data class EuropePmcPdf(
-            val pdfUrl: String,
-            val localPath: String? = null
+            val pdfUrl: String
         ) : FullTextResult(hasContent = true)
 
         /**
-         * Full text available as PDF from Unpaywall.
+         * Full text available as PDF from Unpaywall, not yet downloaded: where
+         * it is saved is recorded on the document.
+         *
+         * A PDF Unpaywall named that the source does not then serve is refused,
+         * not offered as a link (#478): the caller records [refused] instead.
+         * One the source served that could not be saved is a fault of ours,
+         * and is kept as a link ([PdfDownload.NotSaved]).
          *
          * @param pdfUrl URL to the PDF.
-         * @param localPath Local file path if downloaded, null otherwise.
+         * @param doi The DOI Unpaywall was asked about, for the link a refused
+         *   PDF falls back to.
          */
         data class UnpaywallPdf(
             val pdfUrl: String,
-            val localPath: String? = null
-        ) : FullTextResult(hasContent = true)
+            val doi: String
+        ) : FullTextResult(hasContent = true) {
+            /**
+             * What the chain comes to when this PDF could not be obtained: the
+             * DOI link, carrying why the open-access copy went unassessed.
+             *
+             * @param failure Why the download got no PDF.
+             * @return The DOI link with the PDF's shortfall.
+             */
+            fun refused(failure: RequestFailure): DoiUrl =
+                DoiUrl(doiLink(doi), OpenAccessShortfall(OpenAccessSource.PDF, failure))
+        }
 
         /**
          * Fall back to DOI/publisher URL.
          *
          * @param url URL to the publisher page.
          * @param openAccessShortfall Why the open-access copy went unassessed when
-         *   Unpaywall, or the landing page it named, could not settle whether a
-         *   free copy exists; null when nothing was left unsettled. Stored on the document and shown to the
+         *   Unpaywall, the landing page it named, or the PDF it named could not
+         *   settle whether a free copy exists; null when nothing was left unsettled. Stored on the document and shown to the
          *   reader (#466): the link alone reads as "no free copy".
          */
         data class DoiUrl(
@@ -339,7 +360,7 @@ class FullTextService @Inject constructor(
         if (!doi.isNullOrEmpty()) {
             Log.d(TAG, "Falling back to DOI URL for $doi")
             return@withContext Result.success(
-                FullTextResult.DoiUrl("${Constants.DOI_URL_PREFIX}$doi", openAccessShortfall)
+                FullTextResult.DoiUrl(doiLink(doi), openAccessShortfall)
             )
         }
 
@@ -503,11 +524,18 @@ class FullTextService @Inject constructor(
                 }
                 ?: throw FullTextUnavailableException("No PDF URL available for $doi")
 
-            Result.success(
-                FullTextResult.UnpaywallPdf(
-                    pdfUrl = pdfUrl,
-                    localPath = null  // Not downloaded yet
+            // An address that cannot be requested is refused here, never
+            // handed on as the PDF link (#478): Unpaywall answered, and the
+            // copy it named went unassessed. Swift refuses the same addresses,
+            // and Python's `requests` will not send them
+            if (pdfUrl.toHttpUrlOrNull() == null) {
+                throw OpenAccessUnsettledException(
+                    OpenAccessShortfall(OpenAccessSource.PDF, RequestFailure(RequestFailureKind.REQUEST_FAILED))
                 )
+            }
+
+            Result.success(
+                FullTextResult.UnpaywallPdf(pdfUrl = pdfUrl, doi = doi)
             )
         } catch (e: CancellationException) {
             throw e
@@ -703,11 +731,23 @@ class FullTextService @Inject constructor(
     /**
      * Download a PDF to local cache.
      *
+     * The body is written to `<id>.pdf.part` and renamed into place only once
+     * it has arrived whole and begins with `%PDF` ([looksLikePdf]), so a page
+     * served in the PDF's place, or a download that broke off, is never
+     * returned as cached (#478). The partial file is removed on every other
+     * outcome. A cached file that is not a PDF, written by an earlier build, is
+     * quarantined and fetched again (fulltext_retrieval.md, "Cache Read
+     * Validation").
+     *
      * @param pdfUrl URL of the PDF to download.
      * @param documentId Document ID for file naming.
-     * @return Local file path or null if download failed.
+     * @return The cached file; why the source did not serve the PDF (the status,
+     *   the transport failure, `MALFORMED_RESPONSE` for a body that is not a
+     *   PDF, or `REQUEST_FAILED` for an address that cannot be requested); or
+     *   [PdfDownload.NotSaved] when the cache could not be written.
+     * @throws CancellationException if the caller cancelled.
      */
-    suspend fun downloadPdf(pdfUrl: String, documentId: String): String? = withContext(Dispatchers.IO) {
+    suspend fun downloadPdf(pdfUrl: String, documentId: String): PdfDownload = withContext(Dispatchers.IO) {
         try {
             val cacheDir = File(context.cacheDir, PDF_CACHE_DIR).apply {
                 if (!exists()) mkdirs()
@@ -716,38 +756,58 @@ class FullTextService @Inject constructor(
             val fileName = "${documentId}.pdf"
             val localFile = File(cacheDir, fileName)
 
-            // Return existing file if already cached
-            if (localFile.exists() && localFile.length() > 0) {
+            if (isCachedPdf(localFile)) {
                 Log.d(TAG, "Using cached PDF: ${localFile.absolutePath}")
-                return@withContext localFile.absolutePath
+                return@withContext PdfDownload.Saved(localFile.absolutePath)
+            }
+            if (localFile.exists()) {
+                Log.w(TAG, "Quarantining a cached file that is not a PDF: ${localFile.absolutePath}")
+                quarantineCachedFile(localFile, File(cacheDir, "$fileName$PDF_CORRUPT_SUFFIX"))
+            }
+
+            val request = pdfUrl.toHttpUrlOrNull()?.let { url ->
+                Request.Builder().url(url).header(USER_AGENT_HEADER, USER_AGENT).build()
+            } ?: run {
+                Log.w(TAG, "PDF address cannot be requested: $pdfUrl")
+                return@withContext PdfDownload.Failed(RequestFailure(RequestFailureKind.REQUEST_FAILED))
             }
 
             Log.d(TAG, "Downloading PDF from: $pdfUrl")
-
-            val request = Request.Builder()
-                .url(pdfUrl)
-                .header(USER_AGENT_HEADER, USER_AGENT)
-                .build()
-
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
-                    Log.e(TAG, "PDF download failed: ${response.code} ${response.message}")
-                    return@withContext null
+                    Log.w(TAG, "PDF download failed: HTTP ${response.code}")
+                    return@withContext PdfDownload.Failed(RequestFailure.forHttpStatus(response.code))
                 }
+                val body = response.body ?: return@withContext PdfDownload.Failed(
+                    RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+                )
 
-                response.body?.let { body ->
-                    FileOutputStream(localFile).use { output ->
-                        body.byteStream().copyTo(output)
+                val partial = File(cacheDir, "$fileName$PDF_PARTIAL_SUFFIX")
+                try {
+                    body.byteStream().use { input -> input.copyToCache(partial) }
+                    if (!isCachedPdf(partial)) {
+                        Log.w(TAG, "PDF download from $pdfUrl is not a PDF")
+                        return@withContext PdfDownload.Failed(RequestFailure(RequestFailureKind.MALFORMED_RESPONSE))
                     }
-                    Log.d(TAG, "PDF downloaded to: ${localFile.absolutePath}")
-                    return@withContext localFile.absolutePath
+                    if (!partial.renameTo(localFile)) {
+                        Log.e(TAG, "Could not cache the PDF at ${localFile.absolutePath}")
+                        return@withContext PdfDownload.NotSaved
+                    }
+                } finally {
+                    // Gone once renamed; otherwise never to be read as the PDF
+                    partial.delete()
                 }
+                Log.d(TAG, "PDF downloaded to: ${localFile.absolutePath}")
+                PdfDownload.Saved(localFile.absolutePath)
             }
-
-            null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: CacheWriteException) {
+            Log.e(TAG, "Could not write the PDF to the cache: ${e.cause?.javaClass?.simpleName}")
+            PdfDownload.NotSaved
         } catch (e: Exception) {
-            Log.e(TAG, "PDF download error: ${e.message}")
-            null
+            Log.w(TAG, "PDF download error: ${e.javaClass.simpleName}")
+            PdfDownload.Failed(RequestFailure.fromException(e))
         }
     }
 
@@ -762,11 +822,7 @@ class FullTextService @Inject constructor(
         val fileName = "${documentId}.pdf"
         val localFile = File(cacheDir, fileName)
 
-        return if (localFile.exists() && localFile.length() > 0) {
-            localFile.absolutePath
-        } else {
-            null
-        }
+        return if (isCachedPdf(localFile)) localFile.absolutePath else null
     }
 
     /**
@@ -816,7 +872,7 @@ class FullTextUnavailableException(message: String) : Exception(message)
 class FullTextException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
- * Unpaywall, or the landing page it named, could not settle whether a free copy
+ * Unpaywall, the landing page it named, or the PDF it named (#478) could not settle whether a free copy
  * exists: the open-access copy went unassessed, which is not the same as there
  * being none (#464). The chain carries [shortfall] on its fallback to the reader
  * (#466).

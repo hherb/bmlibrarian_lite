@@ -30,7 +30,8 @@ import kotlinx.serialization.json.put
  * @property persistedValue The value stored for this source, shared with iOS and
  *   macOS: never rename one
  * @property serviceName The source as the reader is told of it, worded to sit
- *   mid-sentence (Python's `SERVICE_UNPAYWALL` and `SERVICE_UNPAYWALL_LANDING_PAGE`)
+ *   mid-sentence (Python's `SERVICE_UNPAYWALL`, `SERVICE_UNPAYWALL_LANDING_PAGE` and
+ *   `SERVICE_UNPAYWALL_PDF`)
  */
 enum class OpenAccessSource(val persistedValue: String, val serviceName: String) {
     /**
@@ -40,7 +41,15 @@ enum class OpenAccessSource(val persistedValue: String, val serviceName: String)
     UNPAYWALL("unpaywall", "Unpaywall"),
 
     /** The landing page Unpaywall named in place of a PDF (#464). */
-    LANDING_PAGE("unpaywall_landing_page", "the open-access copy's landing page");
+    LANDING_PAGE("unpaywall_landing_page", "the open-access copy's landing page"),
+
+    /**
+     * The PDF Unpaywall named, its `url_for_pdf` or the one its landing page
+     * declares, when it could not be obtained: an address that cannot be
+     * requested, a download that failed, or a body that is not a PDF (#478).
+     * Unpaywall answered; the copy it pointed at went unassessed.
+     */
+    PDF("unpaywall_pdf", "the open-access copy's PDF");
 
     companion object {
         /**
@@ -79,7 +88,7 @@ sealed interface OpenAccessUnsettledReason {
 /**
  * Why the open-access copy Unpaywall may know of went unassessed (#464, #466).
  *
- * Unpaywall, or the landing page it named, could not settle whether a free copy
+ * Unpaywall, the landing page it named, or the PDF it named (#478) could not settle whether a free copy
  * exists, so the chain ended on a fallback without learning it. That is not "no
  * open-access copy": the reader is told so ([notice]), and the document keeps it
  * beside its full-text fields ([toJson]). Python records the same event as a

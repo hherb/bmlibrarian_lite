@@ -19,6 +19,20 @@ website". iOS: the Full Text tab's link-only row shows `ParseWarningBanner`
 beneath it, outside the row's button. Contract: `fulltext_retrieval.md` "A
 link-only record is not an unfetched one".
 
+**A PDF Unpaywall named that could not be obtained is refused** (#478, all
+three), branch `fix/unpaywall-unfetchable-pdf-478`, PR #482, stacked on #479. The
+maintainer's calls: refuse an unrequestable address **and** a failed download;
+a true sentence. A new **source**, `unpaywall_pdf`, "the open-access copy's
+PDF", with the existing failures (`malformed_response` for a body not `%PDF`).
+Python `unobtained_unpaywall_pdf`; Swift `.downloadFailed(RequestFailure)`,
+no link fallback; Android `PdfDownload`, `RecordedFetch`,
+`UnpaywallPdf.refused`. Our own stops are not the copy's: a PDF served but not
+cached keeps its link with no shortfall in the apps (Swift `.notCached`,
+Android `PdfDownload.NotSaved`), and Python, with no link, records
+`request_failed`; Python's oversized PDF is a `LookupSkipReason.OVER_SIZE_LIMIT`
+skip. Python now requires `%PDF` whatever the Content-Type and writes through
+a `.part` file, as Android does. Rule: `fulltext_retrieval.md`. Follow-ups #480, #481.
+
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
@@ -31,77 +45,50 @@ the rest.
   `UnpaywallLandingPage.fetchableURL`, Android `readLandingPage`; schemes in
   `BioMedLitConstants.unpaywallFetchableSchemes`). BioMedLit's closing throw
   is `FullTextService.exhaustedChainError`: **no absence while an open-access
-  shortfall is set**. An unusable `url_for_pdf`: the apps disagree (**#478**).
+  shortfall is set**. An unusable `url_for_pdf` is refused (#478, in flight).
 
 - **Apps: an unsettled open-access copy is told** (PR #473, #466). Both apps
   carry an **`OpenAccessShortfall`** (source + failure, or **not configured**)
   on the fallback, store it with the full text (Swift
   `fullTextOpenAccessShortfallJSON`, Android Room **8**) and show **Python's
   sentence** (`unestablished_access_clause`). **Every fetch that settles it
-  writes or clears it** (Android: one writer, `recordingFullTextFetch`).
-  **Any Unpaywall status of 400+ but 404 is unsettled**; **no usable email is
-  "not configured", never a 422**. Room migrations register from
-  `AppDatabase.ALL_MIGRATIONS`. Contract: `fulltext_retrieval.md` "An
-  unsettled open-access copy", `fulltext_parity/open_access_unsettled_notice.json`.
-- **iOS/macOS: a working cancel** (PR #469, #462). **Every workflow entry
-  point runs its body through `runAsWorkflowTask(_:)`**; **`stopWork(_:)` is
-  the one path for a stop** and `settleStop()` re-records it as the task ends;
-  **a stop is never written to `errorMessage`** (beside a report the session
-  stays `.completed` with `stopNotice`, else `.awaitingUserDecision`);
-  **`stopRequested`, never the error, decides a stop** (BioMedLit turns every
-  -999 into `CancellationError`). A stopped document gets **no result**.
-  "Proceed with Current" resumes scoring then extraction; decision entry points
-  call `ensureServices()`. Seam `useServices(llm:pubMed:)`, tests in
-  `WorkflowCancelTests`. Follow-ups **#468**, **#470**.
+  writes or clears it** (Android: `recordingFullTextFetch`). **No usable email
+  is "not configured", never a 422**. Room migrations register from
+  `AppDatabase.ALL_MIGRATIONS`.
+- **iOS/macOS: a working cancel** (PR #469, #462). Every entry point runs
+  through `runAsWorkflowTask(_:)`; `stopWork(_:)` is the one stop path; **a
+  stop is never written to `errorMessage`**; **`stopRequested`, never the
+  error, decides a stop**; a stopped document gets no result. Tests in
+  `WorkflowCancelTests`; follow-ups #468, #470.
 - **Unpaywall landing pages are read, never downloaded as the PDF** (all
-  three; PR #465, #464): `url_for_pdf` only, else the page's
-  `citation_pdf_url` (read up to 2 MiB). Contract `fulltext_retrieval.md`
-  "Landing Pages", fixture `fulltext_parity/unpaywall_landing_page.json`.
-  **Only `;`-terminated references decode**; **unreachable is not "declares
-  none"** on all three. An undownloaded PDF link offers **Try Download Again**.
-- **iOS/macOS workflow notices** (PRs #458, #460, #463; #459, #461).
-  **`session.errorMessage` means a failure and nothing else** (it drives the
-  red retry); run starts and completions clear it (`forgetLastStop`).
-  Per-document misses are notices: `fullTextNotice`, and the transparency
-  notice **derived from the documents** (`Document.unratedTransparencyNotice`).
-  Citations a report lacks (`unreportedCitationCount`) get an amber
-  **Regenerate Report** (user's call). Fetch-more runs the transparency step
-  (`regenerateReportWithNewEvidence`); an old report is deleted only once
-  another replaced it. Auto full text for papers scored 4-5
-  (`FullTextAutoFetch.swift`, Apple only on purpose; the 40,000-character cut
-  is the product's call). Earlier builds' stored notices are never reworded.
+  three; PR #465): `url_for_pdf`, else the page's `citation_pdf_url` (2 MiB
+  cap). Fixture `fulltext_parity/unpaywall_landing_page.json`; **only
+  `;`-terminated references decode**; unreachable is not "declares none".
+- **iOS/macOS workflow notices** (PRs #458, #460, #463). **`session.errorMessage`
+  means a failure and nothing else**; per-document misses are notices
+  (`fullTextNotice`, `Document.unratedTransparencyNotice`); a report missing
+  citations gets an amber **Regenerate Report** (user's call). Auto full text
+  for papers scored 4-5 is Apple-only on purpose; the 40,000-character cut is
+  the product's call.
 - **A preprint's `fullTextXML` 500 is asked once** (all three; #451); every
   PMC accession's 500 and any 429/502/503/504 keep the full budget (user's
   call). Contract: `fulltext_retrieval.md`.
 - **`fullTextXML` is asked only when Europe PMC's record allows it** (Python;
-  PR #452, #432): it answers **500, not 404**, for a held closed-access
-  article. `europepmc.offers_fulltext_xml` skips only a record that *states*
-  `inEPMC=N` and `inPMC=N`, or `isOpenAccess=N` (no failure recorded, user's
-  call); an unreadable 200 is `MALFORMED_RESPONSE`. Survey rows in
-  `doc/developer/europepmc_xml_survey/` are pinned by
+  PR #452): it answers **500, not 404**, for held closed-access text;
+  `europepmc.offers_fulltext_xml` skips only a record that *states* it is not
+  available (user's call). Survey rows pinned by
   `tests/test_europepmc_xml_survey.py` (re-analyse, never re-fetch).
-- **doi.org's HEAD status is read** (Python; PR #448, #446), named by host:
-  doi.org's 400/404 are absences; a publisher's bot-wall 4xx stays "no PDF"
-  (`doi_resolution_failure`). **`mount_politely` turns off urllib3's
-  `respect_retry_after_header`**, or a throttle is re-sent below the limiter
+- **doi.org's HEAD status is read** (Python; PR #448), named by host.
+  **`mount_politely` turns off urllib3's `respect_retry_after_header`**
   (`polite_request_pacing.md` rule 6).
-- **An answered lookup "did not serve it"** (all three; PRs #444, #449;
-  #435, #445, #447). An `HTTP_STATUS` failure is an answer **except a 429 or any 5xx**, which
-  "could not be asked"; one predicate, `RequestFailure.is_answer` /
-  `isAnswer`, pinned by `request_failure_parity/answered_lookup_verb.json`
-  (every kind needs a row). Only an unasked source earns "a freely available
-  copy may exist" (`unsettled_lookups_clause`). **Unpaywall is never asked
-  with `FALLBACK_CONTACT_EMAIL`** (422). Contract:
-  `search_failure_reporting.md`.
-- **Typed full-text XML fetch, all three** (PRs #433, #438; #429, #434).
-  Served / absent (404) / unreachable of its real kind; a blank 200 is
-  incomplete; a non-accession is never sent; **preprints are fetched by their
-  `PPR` ID**. A 404 after the search is a failure, not an absence (#432). A
-  chain ending with nothing while Europe PMC did not settle it (unreachable,
-  throttled, or a 404 for a held article) is **not** "no full
-  text" (Swift `absenceNotEstablished`, Android `NotEstablished`, never
-  recorded on the document). `fullTextXML` answers 200 with body-less XML for
-  OA abstract-only deposits. Contract: `fulltext_retrieval.md`.
+- **An answered lookup "did not serve it"** (all three; PRs #444, #449). An
+  `HTTP_STATUS` is an answer **except a 429 or any 5xx** ("could not be
+  asked"); one predicate, `RequestFailure.is_answer`, pinned by
+  `request_failure_parity/answered_lookup_verb.json` (every kind needs a row).
+- **Typed full-text XML fetch, all three** (PRs #433, #438). Served / absent
+  (404) / unreachable; **preprints are fetched by their `PPR` ID**; a chain
+  ending while Europe PMC did not settle it is **not** "no full text" (Swift
+  `absenceNotEstablished`, Android `NotEstablished`, never recorded).
 - **A missing statement is charged only when the end matter is known**
   (Python; PR #431, #428). The converter writes `END_MATTER_MARKER` where end
   matter begins (converter version **5**); a COI/data charge needs every
@@ -226,10 +213,11 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **#478** an unusable `url_for_pdf`: Swift and Android disagree (three
-  maintainer decisions listed in the issue); **#467** landing-page parity
-  edges; **#468** / **#470** iOS/macOS cancel follow-ups; **#476**
-  `OpenAccessShortfall` hardening.
+- **#480** investigate whether the refused Unpaywall PDFs are genuinely
+  unfetchable or bot walls a browser would pass (survey method in the issue);
+  **#481** iOS keeps an earlier build's refused Unpaywall link; **#467**
+  landing-page parity edges; **#468** / **#470** iOS/macOS cancel follow-ups;
+  **#476** `OpenAccessShortfall` hardening.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 

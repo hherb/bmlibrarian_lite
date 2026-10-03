@@ -122,6 +122,7 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         XCTAssertEqual(result.contentKind, .extracted)
         XCTAssertEqual(result.extractedText, "The article.")
         XCTAssertEqual(result.pdfURL?.absoluteString, Self.pdf)
+        XCTAssertNil(result.openAccessShortfall, "a PDF that arrived leaves nothing unsettled")
     }
 
     /// The defect itself: a page declaring nothing is not the article's PDF,
@@ -424,8 +425,9 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
     }
 
     /// The same for a `url_for_pdf`: Unpaywall named a copy we cannot fetch,
-    /// which leaves it unassessed (#474). The address is never asked for, and
-    /// the reader gets the DOI link rather than a link we will not open.
+    /// which leaves it unassessed (#474). The address is never asked for, the
+    /// reader gets the DOI link rather than a link we will not open, and the
+    /// failure is the PDF's, not Unpaywall's, which answered (#478).
     func testAPDFAddressThatCannotBeFetchedIsUnsettled() async throws {
         let answer = #"{"best_oa_location": {"url_for_pdf": "ftp://repo.example.org/a.pdf"}}"#
         StubURLProtocol.routes = routes(unpaywall: answer)
@@ -435,9 +437,103 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         XCTAssertEqual(result.content, .doi(webURL: Self.doiLink))
         XCTAssertEqual(
             result.openAccessShortfall,
-            OpenAccessShortfall(source: .unpaywall, failure: .requestFailed)
+            OpenAccessShortfall(source: .pdf, failure: .requestFailed)
         )
         XCTAssertFalse(StubURLProtocol.requested("repo.example.org/a.pdf"))
+    }
+
+    /// A PDF Unpaywall named whose download fails is refused, not offered as
+    /// a link (#478): the reader gets the DOI link, told why the open-access
+    /// copy went unassessed. A bot wall's 403, a dead file's 404 and a
+    /// challenge page served with 200 each keep their cause, so the reader
+    /// gets the right verb.
+    func testAPDFUnpaywallNamedThatCannotBeDownloadedIsRefused() async throws {
+        let answer = #"{"best_oa_location": {"url_for_pdf": "\#(Self.pdf)"}}"#
+        let cases: [(status: Int, body: Data, failure: RequestFailure)] = [
+            (403, Data("Forbidden".utf8), .httpStatus(403)),
+            (404, Data(), .httpStatus(404)),
+            (200, Data("<html>Just a moment...</html>".utf8), .malformedResponse),
+        ]
+        for served in cases {
+            StubURLProtocol.reset()
+            FullTextService.deleteCachedPDF(for: Self.cacheKey)
+            var stubs = routes(unpaywall: answer)
+            stubs["Okazaki_2025.pdf"] = (served.status, served.body)
+            StubURLProtocol.routes = stubs
+
+            let result = try await fetch()
+
+            XCTAssertEqual(result.content, .doi(webURL: Self.doiLink), "\(served.status)")
+            XCTAssertEqual(
+                result.openAccessShortfall,
+                OpenAccessShortfall(source: .pdf, failure: served.failure),
+                "\(served.status)"
+            )
+        }
+    }
+
+    /// A download that got no answer is refused with its transport failure,
+    /// which the reader is told could not be asked.
+    func testAPDFWhoseDownloadGotNoAnswerIsRefusedWithItsTransportFailure() async throws {
+        let answer = #"{"best_oa_location": {"url_for_pdf": "\#(Self.pdf)"}}"#
+        StubURLProtocol.routes = routes(unpaywall: answer)
+        StubURLProtocol.failures["Okazaki_2025.pdf"] = URLError(.cannotLoadFromNetwork)
+
+        let result = try await fetch()
+
+        XCTAssertEqual(result.content, .doi(webURL: Self.doiLink))
+        XCTAssertEqual(
+            result.openAccessShortfall,
+            OpenAccessShortfall(source: .pdf, failure: .connection)
+        )
+    }
+
+    /// The PDF a landing page declares is Unpaywall's copy too: refused the
+    /// same way when its download fails.
+    func testAPDFALandingPageDeclaresThatCannotBeDownloadedIsRefused() async throws {
+        var stubs = routes(page: (200, Self.declaringPage))
+        stubs["Okazaki_2025.pdf"] = (404, Data())
+        StubURLProtocol.routes = stubs
+
+        let result = try await fetch()
+
+        XCTAssertEqual(result.content, .doi(webURL: Self.doiLink))
+        XCTAssertEqual(
+            result.openAccessShortfall,
+            OpenAccessShortfall(source: .pdf, failure: .httpStatus(404))
+        )
+    }
+
+    /// A Europe PMC render that also failed is still offered, being Europe
+    /// PMC's link and not Unpaywall's, and it carries the PDF's shortfall.
+    func testAnUndownloadedRenderLinkCarriesTheUnobtainedPDFsShortfall() async throws {
+        let render = "https://europepmc.org/articles/PMC12759138?pdf=render"
+        let search = #"""
+        {"resultList": {"result": [{
+          "id": "1", "pmid": "1", "pmcid": "PMC12759138", "inPMC": "Y",
+          "fullTextUrlList": {"fullTextUrl": [
+            {"documentStyle": "pdf", "site": "Europe_PMC", "url": "\#(render)",
+             "availability": "Open access", "availabilityCode": "OA"}
+          ]}
+        }]}}
+        """#
+        var stubs = routes(unpaywall: #"{"best_oa_location": {"url_for_pdf": "\#(Self.pdf)"}}"#)
+        stubs["search"] = (200, Data(search.utf8))
+        stubs["fullTextXML"] = (404, Data())
+        stubs["pdf=render"] = (403, Data("Forbidden".utf8))
+        stubs["Okazaki_2025.pdf"] = (503, Data())
+        StubURLProtocol.routes = stubs
+
+        let result = try await fetch()
+
+        guard case .europePMCPDF(let pdfURL) = result.content else {
+            return XCTFail("expected the undownloaded render link, got \(result.content)")
+        }
+        XCTAssertEqual(pdfURL.absoluteString, render)
+        XCTAssertEqual(
+            result.openAccessShortfall,
+            OpenAccessShortfall(source: .pdf, failure: .httpStatus(503))
+        )
     }
 
     /// The control: an absolute http(s) address is accepted, whatever case
@@ -525,5 +621,6 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         XCTAssertEqual(result.source, .unpaywall)
         XCTAssertEqual(result.pdfURL?.absoluteString, Self.pdf)
         XCTAssertFalse(StubURLProtocol.requested("item/95934"))
+        XCTAssertNil(result.openAccessShortfall, "a PDF that arrived leaves nothing unsettled")
     }
 }

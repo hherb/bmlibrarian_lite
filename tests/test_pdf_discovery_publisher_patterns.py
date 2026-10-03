@@ -178,7 +178,11 @@ class _ScriptedResponse:
         status_code: The HTTP status the server answered with.
         headers: The response headers.
         url: The URL the response came from.
+        is_redirect: Never a redirect; read when a failed download is
+            classified by ``request_failure_from_exception`` (#478).
     """
+
+    is_redirect = False
 
     def __init__(self, status_code: int, content_type: str, url: str, body: bytes) -> None:
         """Answer one scripted request.

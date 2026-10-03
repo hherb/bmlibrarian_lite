@@ -1059,6 +1059,18 @@ SERVICE_EUROPE_PMC = "Europe PMC"
 # The page Unpaywall names when it knows of an open-access copy but not of a
 # PDF URL for it, read for the PDF it declares (#464).
 SERVICE_UNPAYWALL_LANDING_PAGE = "the open-access copy's landing page"
+# The PDF Unpaywall named (its ``url_for_pdf``, or the one its landing page
+# declares) when we could not obtain it: an address we cannot request, a
+# download that failed, or a body that is not a PDF. Unpaywall answered; the
+# copy it pointed at is what went unassessed, so it is never "no copy" (#478).
+SERVICE_UNPAYWALL_PDF = "the open-access copy's PDF"
+
+# What a PDF file begins with. A body that does not is not the PDF, whatever
+# it was served as -- a login page or a bot wall's challenge (#478, #480).
+PDF_MAGIC_BYTES = b"%PDF"
+# Appended to a PDF's cache path while its download is in progress; the file
+# is renamed into place only once the body has arrived whole (#478).
+PDF_PARTIAL_SUFFIX = ".part"
 
 # The Highwire Press meta tag a landing page declares its PDF in. Repositories
 # (DSpace, EPrints) and most publishers emit it for Google Scholar (#464).

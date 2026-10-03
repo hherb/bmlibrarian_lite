@@ -19,6 +19,7 @@
 package com.bmlibrarian.factchecker.data.local.entity
 
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService.FullTextResult
+import com.bmlibrarian.factchecker.data.remote.fulltext.PdfDownload
 import com.bmlibrarian.factchecker.data.remote.fulltext.recordingFullTextFetch
 import com.bmlibrarian.factchecker.domain.model.FullTextLinkKind
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
@@ -44,7 +45,9 @@ class DocumentEntityLinkOnlyTest {
     private val fresh = DocumentEntity(id = "d", sessionId = "s", title = "t", doi = "10.1/x")
 
     private suspend fun recorded(result: FullTextResult, downloaded: String? = null) =
-        fresh.recordingFullTextFetch(result) { downloaded }
+        fresh.recordingFullTextFetch(result) {
+            downloaded?.let(PdfDownload::Saved) ?: PdfDownload.Failed(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
+        }.document
 
     @Test
     fun `a record never fetched is not link-only`() {
@@ -59,20 +62,27 @@ class DocumentEntityLinkOnlyTest {
         assertSame(FullTextLinkKind.PUBLISHER_PAGE, doc.linkOnlyKind)
     }
 
-    /** Either PDF tier, when its download failed: a copy found, not held. */
+    /** Europe PMC's PDF, when its download failed: a copy found, not held. */
     @Test
-    fun `a PDF that could not be downloaded is an undownloaded PDF`() = runTest {
-        val pdfUrl = "https://repo.example.org/a.pdf"
-        for (answer in listOf(FullTextResult.UnpaywallPdf(pdfUrl), FullTextResult.EuropePmcPdf(pdfUrl))) {
-            assertSame("$answer", FullTextLinkKind.UNDOWNLOADED_PDF, recorded(answer).linkOnlyKind)
-        }
+    fun `a Europe PMC PDF that could not be downloaded is an undownloaded PDF`() = runTest {
+        val answer = FullTextResult.EuropePmcPdf("https://europepmc.org/a.pdf")
+
+        assertSame(FullTextLinkKind.UNDOWNLOADED_PDF, recorded(answer).linkOnlyKind)
+    }
+
+    /** An Unpaywall PDF that could not be downloaded is refused for the DOI link (#478). */
+    @Test
+    fun `an Unpaywall PDF that could not be downloaded is the publisher's page`() = runTest {
+        val answer = FullTextResult.UnpaywallPdf("https://repo.example.org/a.pdf", doi = "10.1/x")
+
+        assertSame(FullTextLinkKind.PUBLISHER_PAGE, recorded(answer).linkOnlyKind)
     }
 
     /** The controls: text in hand, a settled absence, and a fetch that settled nothing. */
     @Test
     fun `text in hand, an absence and an unsettled fetch are not link-only`() = runTest {
         val notLinkOnly = listOf(
-            recorded(FullTextResult.UnpaywallPdf("https://repo.example.org/a.pdf"), downloaded = "/cache/a.pdf"),
+            recorded(FullTextResult.UnpaywallPdf("https://repo.example.org/a.pdf", doi = "10.1/x"), downloaded = "/cache/a.pdf"),
             recorded(FullTextResult.EuropePmcXml(xml = "<a/>", markdown = "m", html = "<p>h</p>")),
             recorded(FullTextResult.Unavailable("No full text source available")),
             recorded(FullTextResult.NotEstablished(RequestFailure(RequestFailureKind.TIMEOUT))),

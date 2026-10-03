@@ -380,6 +380,12 @@ class LookupSkipReason(Enum):
     #: configure, but it still leaves the question open (#355).
     NOT_REQUESTED = "not_requested"
 
+    #: The source offered the file, and it was larger than this application
+    #: downloads. Our limit, not the source's answer: the copy exists and
+    #: went unread, so it leaves the question open (#478). Python's alone --
+    #: the apps set no size limit.
+    OVER_SIZE_LIMIT = "over_size_limit"
+
 
 #: What each skip reason tells the reader, as a parenthetical in the clause.
 #: The wording is here rather than in the sentence builder so that the enum
@@ -388,6 +394,7 @@ _SKIP_REASONS: dict[LookupSkipReason, str] = {
     LookupSkipReason.NOT_CONFIGURED: "not configured",
     LookupSkipReason.NO_IDENTIFIER: "no identifier to ask it about",
     LookupSkipReason.NOT_REQUESTED: "not requested on this run",
+    LookupSkipReason.OVER_SIZE_LIMIT: "larger than the download limit",
 }
 
 # The wording map is what :meth:`SourceLookupSkipped.describe` indexes, and

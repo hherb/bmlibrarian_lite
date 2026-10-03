@@ -29,13 +29,21 @@ public enum OpenAccessSource: String, Sendable, CaseIterable {
     /// The landing page Unpaywall named in place of a PDF (#464).
     case landingPage = "unpaywall_landing_page"
 
+    /// The PDF Unpaywall named, its `url_for_pdf` or the one its landing page
+    /// declares, when it could not be obtained: an address the tier cannot
+    /// fetch, a download that failed, or a body that is not a PDF (#478).
+    /// Unpaywall answered; the copy it pointed at went unassessed.
+    case pdf = "unpaywall_pdf"
+
     /// The source as the reader is told of it, worded to sit mid-sentence.
     ///
-    /// Python's `SERVICE_UNPAYWALL` and `SERVICE_UNPAYWALL_LANDING_PAGE`.
+    /// Python's `SERVICE_UNPAYWALL`, `SERVICE_UNPAYWALL_LANDING_PAGE` and
+    /// `SERVICE_UNPAYWALL_PDF`.
     public var serviceName: String {
         switch self {
         case .unpaywall: return "Unpaywall"
         case .landingPage: return "the open-access copy's landing page"
+        case .pdf: return "the open-access copy's PDF"
         }
     }
 }
@@ -56,7 +64,7 @@ public enum OpenAccessUnsettledReason: Sendable, Equatable, Hashable {
 
 /// Why the open-access copy Unpaywall may know of went unassessed (#464, #466).
 ///
-/// Unpaywall, or the landing page it named, could not settle whether a free
+/// Unpaywall, the landing page it named, or the PDF it named (#478) could not settle whether a free
 /// copy exists, so the chain ended on a fallback without learning it. That is
 /// not "no open-access copy": the reader is told so (``notice``), and the app
 /// keeps it beside the document's full text (``persisted()``). Python records

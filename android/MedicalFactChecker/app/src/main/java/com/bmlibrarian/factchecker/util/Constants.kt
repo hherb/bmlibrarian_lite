@@ -387,6 +387,13 @@ object Constants {
     /** DOI resolver URL prefix. */
     const val DOI_URL_PREFIX = "https://doi.org/"
 
+    /**
+     * The signature every PDF file begins with. A body without it is not the
+     * PDF, whatever it was served as: a login page or a bot wall's challenge
+     * (#478, #480).
+     */
+    val PDF_MAGIC_BYTES: ByteArray = "%PDF".toByteArray(Charsets.US_ASCII)
+
     /** PubMed article URL prefix. */
     const val PUBMED_URL_PREFIX = "https://pubmed.ncbi.nlm.nih.gov/"
 

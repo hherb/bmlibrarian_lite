@@ -242,7 +242,7 @@ final class Document {
     /// JSON ``OpenAccessShortfall/persisted()`` writes, or `nil` when nothing
     /// was left unsettled (#466).
     ///
-    /// Unpaywall, or the landing page it named, could not settle whether a free
+    /// Unpaywall, the landing page it named, or the PDF it named (#478) could not settle whether a free
     /// copy exists (or Unpaywall was not configured), so the chain settled on a
     /// fallback without learning it. Kept
     /// apart from ``fullTextDegradedReasonRaw`` because both can be true of one

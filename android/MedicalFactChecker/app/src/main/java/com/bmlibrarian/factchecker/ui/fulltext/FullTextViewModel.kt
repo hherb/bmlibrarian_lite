@@ -284,10 +284,14 @@ class FullTextViewModel @Inject constructor(
      * shortfall (#466). [FullTextResult.NotEstablished] records nothing (#434).
      *
      * @param doc The document fetched.
-     * @param result What the chain returned.
+     * @param chainResult What the chain returned.
      */
-    private suspend fun handleFullTextResult(doc: DocumentEntity, result: FullTextResult) {
-        val recorded = doc.recordingFullTextFetch(result) { url -> fullTextService.downloadPdf(url, doc.id) }
+    private suspend fun handleFullTextResult(doc: DocumentEntity, chainResult: FullTextResult) {
+        // The result as settled by the download: a PDF Unpaywall named that could
+        // not be downloaded is shown as the DOI link, with why (#478)
+        val (recorded, result) = doc.recordingFullTextFetch(chainResult) { url ->
+            fullTextService.downloadPdf(url, doc.id)
+        }
         if (result !is FullTextResult.NotEstablished) {
             documentDao.update(recorded)
             _document.value = recorded

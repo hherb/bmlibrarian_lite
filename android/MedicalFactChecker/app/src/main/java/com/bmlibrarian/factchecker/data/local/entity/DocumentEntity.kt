@@ -175,7 +175,7 @@ data class DocumentEntity(
      * [OpenAccessShortfall.toJson] writes, or null when nothing was left unsettled
      * (#466).
      *
-     * Unpaywall, or the landing page it named, could not settle whether a free
+     * Unpaywall, the landing page it named, or the PDF it named (#478) could not settle whether a free
      * copy exists (or Unpaywall was not configured), so the chain ended on the
      * DOI link without learning it. Stored with the fetch that produced it and
      * cleared by every later fetch that settles it, so the cards can say so on
