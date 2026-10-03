@@ -104,8 +104,17 @@ parked domain, and a 404.
 (two PMC, two ScienceDirect, one Wiley) were retried in a *headed*
 Playwright Chromium. PMC and ScienceDirect still showed their challenge, and
 Wiley still sent it to the abstract. Every automated browser is stopped by
-these walls. Whether a person's own browser passes them is **not measured
-here**.
+these walls.
+
+**A person's browser passes them.** As a spot check, the maintainer opened
+four of these addresses in Safari on 2026-10-04: two PMC and two
+ScienceDirect. All four were PDFs. Both PMC PDFs downloaded straight away.
+The first ScienceDirect PDF asked for a tick-box captcha, and the second
+then downloaded straight away (same publisher, with the challenge already
+solved). Four addresses are not a measurement, but these two hosts account
+for 119 of the 131 walls no automated browser passed
+(`challenge-in-browser` and `challenge-unresolved`), and a reader clears
+them in one click or none.
 
 ### What the app can see
 
@@ -128,10 +137,11 @@ the maintainer's.
 
 1. **Should a bot-walled PDF be offered as a link to open in the browser?**
    The evidence supports it, for a challenged failure only. 89% of those are
-   walls. A headless browser opened 103 of the 264 outright. The 115 that stop
-   every automated browser (mostly PMC and ScienceDirect) are the open
-   question: a quick manual check in an ordinary browser would settle it. About
-   6% would send the reader to an abstract or a 404 rather than the PDF. A
+   walls. A headless browser opened 103 of the 264 outright, and the walls
+   that stop every automated browser (mostly PMC and ScienceDirect) let a
+   person through in the spot check above, at most after a tick-box
+   captcha. About 6% would send the reader to an abstract or a 404 rather
+   than the PDF. A
    failure that was not challenged is mostly an address with no PDF (73%), and
    refusing it, as now, is right.
 2. **Does a challenge deserve its own failure kind and sentence?** Today a

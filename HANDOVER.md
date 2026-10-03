@@ -19,9 +19,9 @@ failures are bot walls (PMC's reCAPTCHA, ScienceDirect, Cloudflare publishers),
 **A challenged failure is a wall 89% of the time**, which the apps can see at
 run time. #480's three decisions are the maintainer's and still open: offer a
 challenged PDF as a link to open in a browser; a `challenged` failure kind and
-sentence; no client change (impersonation buys 11 of 290). Untested: whether a
-person's own browser passes PMC and ScienceDirect (every Playwright browser,
-headed too, is stopped). Found: **#483** the desktop's browser fallback never
+sentence; no client change (impersonation buys 11 of 290). A person's browser passes
+PMC and ScienceDirect (maintainer's Safari spot check, 4 of 4, one tick-box
+captcha), though every Playwright browser, headed too, is stopped. Found: **#483** the desktop's browser fallback never
 works. The survey needs Playwright in the venv (`uv pip install playwright &&
 playwright install chromium`), deliberately not a declared dependency.
 
