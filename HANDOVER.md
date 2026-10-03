@@ -20,7 +20,7 @@ beneath it, outside the row's button. Contract: `fulltext_retrieval.md` "A
 link-only record is not an unfetched one".
 
 **A PDF Unpaywall named that could not be obtained is refused** (#478, all
-three), branch `fix/unpaywall-unfetchable-pdf-478`, stacked on #479. The
+three), branch `fix/unpaywall-unfetchable-pdf-478`, PR #482, stacked on #479. The
 maintainer's calls: refuse an unrequestable address **and** a failed download;
 a true sentence. A new **source**, `unpaywall_pdf`, "the open-access copy's
 PDF", with the existing failures (`malformed_response` for a body not `%PDF`).
