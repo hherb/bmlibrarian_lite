@@ -183,6 +183,56 @@ def test_unconvertible_xml_is_recorded_not_absent(
     ) in result.lookups.failures
 
 
+def test_a_converter_crash_is_contained_and_the_pdf_stage_still_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A raising converter fails the bucket tier only, not the whole chain."""
+    bucket = _StubBucket(PmcOpenDataFetch.served(_JATS))
+    discoverer = _discoverer(bucket, monkeypatch, tmp_path)
+
+    def crash(_x: str) -> str:
+        raise AttributeError("converter bug")
+
+    monkeypatch.setattr(discoverer._europepmc, "xml_to_markdown", crash)
+    pdf_stage_calls: list[bool] = []
+
+    def pdf_stage(*_a: object, **_k: object) -> FulltextResult:
+        pdf_stage_calls.append(True)
+        return FulltextResult(success=False, source_type=FulltextSourceType.NOT_FOUND)
+
+    discoverer._try_pdf_download = pdf_stage  # type: ignore[method-assign]
+
+    result = discoverer.discover_fulltext(pmcid="PMC123")
+
+    assert pdf_stage_calls == [True]
+    assert SourceLookupFailure(
+        SERVICE_PMC_OPEN_DATA, RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+    ) in result.lookups.failures
+    assert not result.absence_established
+
+
+def test_a_failed_cache_write_keeps_the_bucket_text(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Losing the cache must not lose the article."""
+    bucket = _StubBucket(PmcOpenDataFetch.served(_JATS))
+    discoverer = _discoverer(bucket, monkeypatch, tmp_path)
+
+    def full_disk(_d: object, _m: object) -> Path:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(
+        "bmlibrarian_lite.fulltext_discovery.save_fulltext_markdown", full_disk
+    )
+
+    result = discoverer.discover_fulltext(pmcid="PMC123", skip_pdf=True)
+
+    assert result.success
+    assert result.source_type == FulltextSourceType.PMC_OPEN_DATA_XML
+    assert "We randomised 40 patients" in (result.markdown_content or "")
+    assert result.file_path is None
+
+
 def test_europe_pmcs_own_failure_still_travels(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Asking the bucket does not drop what Europe PMC left unsettled."""
     bucket = _StubBucket(PmcOpenDataFetch.absent())

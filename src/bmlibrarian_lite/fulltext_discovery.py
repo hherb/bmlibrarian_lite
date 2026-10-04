@@ -685,8 +685,42 @@ class FulltextDiscoverer:
                 source_type=FulltextSourceType.NOT_ASSESSED,
                 error="PMC's open-access collection holds no text for this article.",
             )
-        markdown_content = self._europepmc.xml_to_markdown(fetch.xml)
-        if not markdown_content.strip():
+        malformed = RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+        try:
+            markdown_content = self._europepmc.xml_to_markdown(fetch.xml)
+            if not markdown_content.strip():
+                logger.warning(
+                    "PMC's open-access text for %s could not be converted.", pmcid
+                )
+                return FulltextResult(
+                    success=False,
+                    source_type=FulltextSourceType.NOT_ASSESSED,
+                    error=(
+                        "PMC's open-access collection's text for this article "
+                        "could not be converted."
+                    ),
+                    lookups=LookupRecord(
+                        failures=(
+                            SourceLookupFailure(SERVICE_PMC_OPEN_DATA, malformed),
+                        )
+                    ),
+                )
+            cache_path: Path | None = None
+            try:
+                cache_path = save_fulltext_markdown(doc_dict, markdown_content)
+            except OSError as e:
+                logger.warning("Could not cache the full text of %s: %s", pmcid, e)
+        except Exception as e:
+            # Not narrowed: the converter's AttributeError is as much "we
+            # could not read the bucket's text" as an empty conversion, and
+            # letting it escape would abort the chain before the PDF tiers
+            # (the same lesson as the Europe PMC tier, PR #349's converter).
+            # The exception's type, not its text: the text may name a path.
+            logger.warning(
+                "PMC's open-access text for %s could not be converted (%s).",
+                pmcid,
+                type(e).__name__,
+            )
             return FulltextResult(
                 success=False,
                 source_type=FulltextSourceType.NOT_ASSESSED,
@@ -695,19 +729,9 @@ class FulltextDiscoverer:
                     "could not be converted."
                 ),
                 lookups=LookupRecord(
-                    failures=(
-                        SourceLookupFailure(
-                            SERVICE_PMC_OPEN_DATA,
-                            RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
-                        ),
-                    )
+                    failures=(SourceLookupFailure(SERVICE_PMC_OPEN_DATA, malformed),)
                 ),
             )
-        cache_path: Path | None = None
-        try:
-            cache_path = save_fulltext_markdown(doc_dict, markdown_content)
-        except OSError as e:
-            logger.warning("Could not cache the full text of %s: %s", pmcid, e)
         logger.info("Retrieved full text from PMC's open-access collection: %s", pmcid)
         return FulltextResult(
             success=True,
