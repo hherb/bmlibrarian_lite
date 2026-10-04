@@ -1,8 +1,9 @@
 import XCTest
 @testable import BioMedLit
 
-/// PMC's open-data bucket helpers against the shared contract (#480).
-final class PMCOpenDataContractTests: XCTestCase {
+/// Reads `doc/cross_platform/fulltext_parity/pmc_open_data.json`, shared by
+/// the contract tests and the chain's status-table test.
+enum PMCOpenDataContract {
     private static let contractFile: URL? = {
         var directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         while true {
@@ -18,17 +19,21 @@ final class PMCOpenDataContractTests: XCTestCase {
         }
     }()
 
-    private func contract() throws -> [String: Any] {
-        let url = try XCTUnwrap(Self.contractFile, "pmc_open_data.json not found")
+    static func load() throws -> [String: Any] {
+        let url = try XCTUnwrap(contractFile, "pmc_open_data.json not found")
         return try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
     }
+}
+
+/// PMC's open-data bucket helpers against the shared contract (#480).
+final class PMCOpenDataContractTests: XCTestCase {
+    private func contract() throws -> [String: Any] { try PMCOpenDataContract.load() }
 
     func testTheNamesAreTheContracts() throws {
         let c = try contract()
         XCTAssertEqual(BioMedLitConstants.pmcOpenDataServiceName, c["service_name"] as? String)
-        // Restored in Task 6:
-        // XCTAssertEqual(FullTextSource.pmcOpenData.rawValue, c["source"] as? String)
+        XCTAssertEqual(FullTextSource.pmcOpenData.rawValue, c["source"] as? String)
         XCTAssertEqual(BioMedLitConstants.pmcOpenDataBaseURL, c["base_url"] as? String)
     }
 
@@ -71,5 +76,66 @@ final class PMCOpenDataContractTests: XCTestCase {
     func testARecordThatIsNotAnObjectIsRefused() {
         XCTAssertThrowsError(try PMCOpenDataRecord(metadata: Data("[]".utf8)))
         XCTAssertThrowsError(try PMCOpenDataRecord(metadata: Data("not json".utf8)))
+    }
+
+    /// A prefixed root in the S3 namespace is the same element, as Python's
+    /// namespace-qualified tag test reads it; only the namespace is required.
+    func testAPrefixedS3RootIsAListing() throws {
+        let listing = Data("""
+            <s3:ListBucketResult xmlns:s3="http://s3.amazonaws.com/doc/2006-03-01/">\
+            <s3:Contents><s3:Key>metadata/PMC1.2.json</s3:Key></s3:Contents>\
+            <s3:Contents><s3:Key>metadata/PMC1.1.json</s3:Key></s3:Contents></s3:ListBucketResult>
+            """.utf8)
+        XCTAssertEqual(try PMCOpenData.latestMetadataKey(listing: listing, pmcid: "PMC1"),
+                       "metadata/PMC1.2.json")
+    }
+
+    /// A `Key` outside the S3 namespace is not one the listing names.
+    func testAKeyInAnotherNamespaceIsIgnored() throws {
+        let listing = Data("""
+            <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">\
+            <Contents><Key xmlns="urn:other">metadata/PMC1.9.json</Key></Contents>\
+            <Contents><Key>metadata/PMC1.1.json</Key></Contents></ListBucketResult>
+            """.utf8)
+        XCTAssertEqual(try PMCOpenData.latestMetadataKey(listing: listing, pmcid: "PMC1"),
+                       "metadata/PMC1.1.json")
+    }
+
+    func testNotEstablishedSentences() throws {
+        let rows = try XCTUnwrap(contract()["not_established_sentence"] as? [[String: Any]])
+        XCTAssertFalse(rows.isEmpty)
+        for row in rows {
+            let failureObject = try XCTUnwrap(row["failure"] as? [String: Any])
+            let kind = try XCTUnwrap(RequestFailureKind(rawValue: failureObject["kind"] as? String ?? ""))
+            let failure = try Self.failure(kind: kind, statusCode: failureObject["status_code"] as? Int)
+            XCTAssertEqual(
+                FullTextError.notEstablishedSentence(service: row["service"] as? String ?? "",
+                                                     failure: failure),
+                row["sentence"] as? String)
+        }
+    }
+
+    /// The two errors that use the sentence name their own service.
+    func testTheErrorsUseTheSentence() {
+        XCTAssertEqual(
+            FullTextError.pmcOpenDataNotEstablished(.timeout).errorDescription,
+            FullTextError.notEstablishedSentence(
+                service: BioMedLitConstants.pmcOpenDataServiceName, failure: .timeout))
+        XCTAssertEqual(
+            FullTextError.absenceNotEstablished(.httpStatus(404)).errorDescription,
+            FullTextError.notEstablishedSentence(service: "Europe PMC", failure: .httpStatus(404)))
+    }
+
+    private static func failure(kind: RequestFailureKind, statusCode: Int?) throws -> RequestFailure {
+        switch kind {
+        case .httpStatus: return .httpStatus(try XCTUnwrap(statusCode))
+        case .timeout: return .timeout
+        case .connection: return .connection
+        case .serviceError: return .serviceError
+        case .malformedResponse: return .malformedResponse
+        case .incompleteResponse: return .incompleteResponse
+        case .requestFailed: return .requestFailed
+        case .redirectRefused: return .redirectRefused(statusCode: statusCode)
+        }
     }
 }

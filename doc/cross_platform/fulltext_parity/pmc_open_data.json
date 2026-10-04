@@ -40,6 +40,12 @@
       "pmcid": "PMC1",
       "listing": "{\"not\": \"a listing\"}",
       "error": "malformed"
+    },
+    {
+      "name": "listing without the S3 namespace",
+      "pmcid": "PMC1",
+      "listing": "<?xml version=\"1.0\"?><ListBucketResult><KeyCount>1</KeyCount><Contents><Key>metadata/PMC1.1.json</Key></Contents></ListBucketResult>",
+      "error": "malformed"
     }
   ],
   "https_url": [

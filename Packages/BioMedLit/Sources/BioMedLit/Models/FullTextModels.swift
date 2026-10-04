@@ -21,6 +21,10 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
     /// Europe PMC XML converted to HTML/markdown.
     case europePMC = "europepmc"
 
+    /// PMC's open-data bucket's JATS converted to HTML/markdown (#480), asked
+    /// when Europe PMC's XML gave no body.
+    case pmcOpenData = "pmc_open_data"
+
     /// Europe PMC PDF (when XML is unavailable but free PDF exists).
     case europePMCPDF = "europepmc_pdf"
 
@@ -38,6 +42,8 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
         switch self {
         case .europePMC:
             return "Europe PMC"
+        case .pmcOpenData:
+            return "PMC Open-Access Collection"
         case .europePMCPDF:
             return "Europe PMC PDF"
         case .unpaywall:
@@ -179,6 +185,11 @@ public enum FullTextContentKind: String, Sendable, Codable, CaseIterable {
 /// app's own `AppFullTextResult` was already written down with, and which the
 /// enum form of this type contradicted.
 public struct FullTextResult: Sendable, Equatable {
+    /// Whether the content is parsed JATS (Europe PMC's or PMC's bucket).
+    private static func isParsedJATS(_ source: FullTextSource) -> Bool {
+        source == .europePMC || source == .pmcOpenData
+    }
+
     /// The content retrieved, in whichever form its source gave it.
     public let content: FullTextContent
 
@@ -284,14 +295,14 @@ public struct FullTextResult: Sendable, Equatable {
         // the false alarm that teaches a reader to dismiss the banner on the
         // article where text really was discarded.
         assert(
-            warnings.isClean || content.source == .europePMC,
+            warnings.isClean || Self.isParsedJATS(content.source),
             "parse warnings on \(content.source), which involves no parse"
         )
         // And a parse that succeeded is not a degradation: this flag means the
         // machine-readable source was lost, so it cannot travel with that
         // source's own content.
         assert(
-            degradation == nil || content.source != .europePMC,
+            degradation == nil || !Self.isParsedJATS(content.source),
             "\(content.source) content marked as a degradation from itself"
         )
         // The one case with no producer. Asserted rather than trusted, because
@@ -310,16 +321,16 @@ public struct FullTextResult: Sendable, Equatable {
             (extractedText != nil) == (contentKind == .extracted),
             "extractedText and .extracted must agree; got \(String(describing: extractedText?.count)) chars under \(contentKind)"
         )
-        // `.fulltext` and `.abstract` name what a *parse* found, and Europe PMC
-        // XML is the only thing this service parses.
+        // `.fulltext` and `.abstract` name what a *parse* found, and JATS XML
+        // (Europe PMC's or PMC's bucket's) is the only thing this service parses.
         assert(
-            (contentKind != .fulltext && contentKind != .abstract) || content.source == .europePMC,
+            (contentKind != .fulltext && contentKind != .abstract) || Self.isParsedJATS(content.source),
             "\(contentKind) claims a parse, but \(content.source) involves none"
         )
         // And the converse: a parsed source's text is its own. Extracted text
         // on it would mean two texts with no rule for which the analyzer reads.
         assert(
-            extractedText == nil || content.source != .europePMC,
+            extractedText == nil || !Self.isParsedJATS(content.source),
             "extracted text on \(content.source), which is parsed rather than extracted"
         )
         // A path on a publisher link hands the viewer a file that is not there.
@@ -385,10 +396,10 @@ public struct FullTextResult: Sendable, Equatable {
     /// The source of this full-text content.
     public var source: FullTextSource { content.source }
 
-    /// HTML content if available (only for Europe PMC).
+    /// HTML content if available (parsed JATS: Europe PMC or PMC's bucket).
     public var html: String? { content.html }
 
-    /// Markdown content if available (only for Europe PMC).
+    /// Markdown content if available (parsed JATS: Europe PMC or PMC's bucket).
     public var markdown: String? { content.markdown }
 
     /// PDF URL if available (Europe PMC PDF, Unpaywall, or cached).
@@ -402,6 +413,9 @@ public struct FullTextResult: Sendable, Equatable {
 public enum FullTextContent: Sendable, Equatable {
     /// Europe PMC XML converted to HTML and markdown.
     case europePMC(html: String, markdown: String)
+
+    /// PMC's open-data bucket's JATS converted to HTML and markdown (#480).
+    case pmcOpenData(html: String, markdown: String)
 
     /// Europe PMC PDF URL (when XML is unavailable but free PDF exists).
     case europePMCPDF(pdfURL: URL)
@@ -420,6 +434,8 @@ public enum FullTextContent: Sendable, Equatable {
         switch self {
         case .europePMC:
             return .europePMC
+        case .pmcOpenData:
+            return .pmcOpenData
         case .europePMCPDF:
             return .europePMCPDF
         case .unpaywall:
@@ -431,20 +447,24 @@ public enum FullTextContent: Sendable, Equatable {
         }
     }
 
-    /// HTML content if available (only for Europe PMC).
+    /// HTML content if available (parsed JATS: Europe PMC or PMC's bucket).
     public var html: String? {
-        if case .europePMC(let html, _) = self {
+        switch self {
+        case .europePMC(let html, _), .pmcOpenData(let html, _):
             return html
+        default:
+            return nil
         }
-        return nil
     }
 
-    /// Markdown content if available (only for Europe PMC).
+    /// Markdown content if available (parsed JATS: Europe PMC or PMC's bucket).
     public var markdown: String? {
-        if case .europePMC(_, let markdown) = self {
+        switch self {
+        case .europePMC(_, let markdown), .pmcOpenData(_, let markdown):
             return markdown
+        default:
+            return nil
         }
-        return nil
     }
 
     /// PDF URL if available (Europe PMC PDF, Unpaywall, or cached).
@@ -523,6 +543,21 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
     /// PMC.
     case absenceNotEstablished(RequestFailure)
 
+    /// Every source was exhausted, Europe PMC settled its side, but PMC's
+    /// open-data bucket could not be read (#480).
+    ///
+    /// Carries what the bucket's side got instead of the article's JATS: any
+    /// status but the listing's 200 or 404 (a 404 for a record the listing
+    /// named included), a body that did not parse, a blank XML, or no answer
+    /// at all. A listing 404, a listing naming no version, or a record naming
+    /// no XML is the bucket's answer that it holds nothing, and never lands
+    /// here. Named
+    /// only when Europe PMC left no shortfall of its own, so the reader is
+    /// given one sentence. Like ``absenceNotEstablished(_:)``, a claim about
+    /// *us*, and callers must **not** mark the document permanently
+    /// unavailable on it.
+    case pmcOpenDataNotEstablished(RequestFailure)
+
     /// Every source was exhausted, but the Unpaywall tier did not settle
     /// whether a free copy exists, and no link was left to fall back on.
     ///
@@ -560,6 +595,27 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
     /// Server error (5xx) - retryable.
     case serverError(statusCode: Int)
 
+    /// The not-established sentence, naming the source that left it so.
+    ///
+    /// The verb follows #435's decision: an HTTP status other than a throttle
+    /// or a 5xx (#445) was an answer, so the source "did not serve it"; those
+    /// and every other kind read "could not be asked". Shared by
+    /// ``absenceNotEstablished(_:)`` and ``pmcOpenDataNotEstablished(_:)``, and
+    /// pinned by `fulltext_parity/pmc_open_data.json`
+    /// ("not_established_sentence").
+    ///
+    /// - Parameters:
+    ///   - service: The source as the reader knows it, such as "Europe PMC".
+    ///   - failure: What that source's side got instead of the text.
+    /// - Returns: The sentence shown to the reader.
+    static func notEstablishedSentence(service: String, failure: RequestFailure) -> String {
+        let lead = "No source provided this article's full text."
+        let tail = "so it may still exist. Try again later."
+        return failure.isAnswer
+            ? "\(lead) \(service) (\(failure.describe())) did not serve it, \(tail)"
+            : "\(lead) \(service) could not be asked (\(failure.describe())), \(tail)"
+    }
+
     public var errorDescription: String? {
         switch self {
         case .noIdentifiers:
@@ -575,21 +631,11 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
                 Europe PMC for \(identifier).
                 """
         case .absenceNotEstablished(let failure):
-            // The verb follows #435's decision: an HTTP status other than a
-            // throttle or a 5xx (#445) was an answer, so Europe PMC "did not
-            // serve it"; those and every other kind read "could not be asked".
-            if failure.isAnswer {
-                return """
-                    No source provided this article's full text. Europe PMC \
-                    (\(failure.describe())) did not serve it, so it may still \
-                    exist. Try again later.
-                    """
-            }
-            return """
-                No source provided this article's full text. Europe PMC could \
-                not be asked (\(failure.describe())), so it may still exist. \
-                Try again later.
-                """
+            return Self.notEstablishedSentence(
+                service: BioMedLitConstants.europePMCServiceName, failure: failure)
+        case .pmcOpenDataNotEstablished(let failure):
+            return Self.notEstablishedSentence(
+                service: BioMedLitConstants.pmcOpenDataServiceName, failure: failure)
         case .openAccessNotEstablished(let shortfall):
             // The shortfall's own sentence, Python's, so the reader of this
             // error and of a stored notice is told the same thing (#466)
@@ -614,15 +660,16 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
             return true
         case .noIdentifiers, .noFullTextAvailable, .pdfDownloadFailed,
              .jatsParseFailure, .cachingFailed, .invalidResponse,
-             .identifierKindUnresolved, .absenceNotEstablished, .openAccessNotEstablished:
+             .identifierKindUnresolved, .absenceNotEstablished, .pmcOpenDataNotEstablished,
+             .openAccessNotEstablished:
             // A parse failure is deterministic: retrying spends the network
             // budget to reach the same result. So is an unresolved kind — the
             // stored record will not name itself on a second attempt — but
             // unlike the others it must not be recorded as a permanent state of
-            // the article; see the case's own note. An unsettled Europe PMC or
-            // Unpaywall has already had whatever retries its tier allows inside
-            // the chain; the reader may try again later, so it is not permanent
-            // either.
+            // the article; see the case's own note. An unsettled Europe PMC,
+            // PMC bucket or Unpaywall has already had whatever retries its
+            // tier allows inside the chain; the reader may try again later, so
+            // it is not permanent either.
             return false
         }
     }

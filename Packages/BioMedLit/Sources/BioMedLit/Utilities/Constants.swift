@@ -37,6 +37,12 @@ public enum BioMedLitConstants {
     public static let pmcOpenDataServiceName = "PMC's open-access collection"
     /// Five requests per second, Python's `POLITE_RATE_CEILINGS` entry.
     public static let pmcOpenDataMinimumInterval: TimeInterval = 0.2
+    /// The S3 namespace a bucket listing's elements must be in, as Python's
+    /// `latest_metadata_key` requires: a `ListBucketResult` outside it is
+    /// not a listing.
+    public static let s3ListingNamespace = "http://s3.amazonaws.com/doc/2006-03-01/"
+    /// Europe PMC as the reader's not-established sentence names it.
+    public static let europePMCServiceName = "Europe PMC"
 
     /// Default page size for Europe PMC searches.
     public static let europePMCDefaultPageSize = 25

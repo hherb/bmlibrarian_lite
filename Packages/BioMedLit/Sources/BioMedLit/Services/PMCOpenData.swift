@@ -26,7 +26,9 @@ public enum PMCOpenData {
     /// The metadata key of the newest version of `pmcid` an S3 listing names.
     ///
     /// Versions compare as numbers (`.10` beats `.2`); a key for a longer
-    /// PMC ID is not this article's.
+    /// PMC ID is not this article's. Namespace-strict, as Python's is: the
+    /// root must be `ListBucketResult` in the S3 namespace (with or without
+    /// a prefix), and only `Key` elements in that namespace are read.
     ///
     /// - Returns: The key, or `nil` when the listing names no version.
     /// - Throws: `ListingError.notAListing` when the body is not an S3
@@ -34,8 +36,11 @@ public enum PMCOpenData {
     public static func latestMetadataKey(listing: Data, pmcid: String) throws -> String? {
         let reader = ListingReader()
         let parser = XMLParser(data: listing)
+        parser.shouldProcessNamespaces = true
         parser.delegate = reader
-        guard parser.parse(), reader.rootElement == "ListBucketResult" else {
+        guard parser.parse(),
+              reader.rootElement == listingElement,
+              reader.rootNamespace == BioMedLitConstants.s3ListingNamespace else {
             throw ListingError.notAListing
         }
         let prefix = "metadata/\(pmcid)."
@@ -61,16 +66,33 @@ public enum PMCOpenData {
         return URL(string: "\(BioMedLitConstants.pmcOpenDataBaseURL)/\(key)")
     }
 
+    /// The listing's root element, by local name.
+    private static let listingElement = "ListBucketResult"
+    /// An object key inside the listing, by local name.
+    private static let keyElement = "Key"
+
+    /// Collects the root's local name and namespace and every S3 `Key`.
+    ///
+    /// Requires `shouldProcessNamespaces`, so element names arrive as local
+    /// names with their namespace URI beside them.
     private final class ListingReader: NSObject, XMLParserDelegate {
         var rootElement: String?
+        var rootNamespace: String?
         var keys: [String] = []
         private var inKey = false
         private var text = ""
 
+        private func isS3Key(_ name: String, _ namespaceURI: String?) -> Bool {
+            name == PMCOpenData.keyElement && namespaceURI == BioMedLitConstants.s3ListingNamespace
+        }
+
         func parser(_ parser: XMLParser, didStartElement name: String, namespaceURI: String?,
                     qualifiedName: String?, attributes: [String: String] = [:]) {
-            if rootElement == nil { rootElement = name }
-            if name == "Key" { inKey = true; text = "" }
+            if rootElement == nil {
+                rootElement = name
+                rootNamespace = namespaceURI
+            }
+            if isS3Key(name, namespaceURI) { inKey = true; text = "" }
         }
 
         func parser(_ parser: XMLParser, foundCharacters string: String) {
@@ -79,7 +101,7 @@ public enum PMCOpenData {
 
         func parser(_ parser: XMLParser, didEndElement name: String, namespaceURI: String?,
                     qualifiedName: String?) {
-            if name == "Key" {
+            if isS3Key(name, namespaceURI) {
                 keys.append(text.trimmingCharacters(in: .whitespacesAndNewlines))
                 inKey = false
             }
@@ -116,4 +138,21 @@ public struct PMCOpenDataRecord: Equatable, Sendable {
               CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
         return number.boolValue
     }
+}
+
+/// What asking PMC's open-data bucket for an article's JATS produced (#480).
+///
+/// The sibling of ``FullTextXmlFetch``, and Python's `PmcOpenDataFetch`.
+/// ``absent`` is the bucket's own answer that it holds no XML for the article
+/// (a listing 404, a listing naming no version, or a record naming no XML);
+/// ``unreachable(_:)`` is an answer we could not get, of its real kind.
+enum PMCOpenDataFetch: Sendable, Equatable {
+    /// The bucket served the article's JATS. Never blank.
+    case served(ServedXML)
+
+    /// The bucket holds no XML for this article.
+    case absent
+
+    /// The bucket's answer is missing, for the reason given.
+    case unreachable(RequestFailure)
 }
