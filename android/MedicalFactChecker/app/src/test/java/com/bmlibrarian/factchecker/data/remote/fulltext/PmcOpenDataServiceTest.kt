@@ -11,7 +11,14 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import okio.Buffer
 import org.junit.After
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import java.io.File
 import org.junit.Before
 import org.junit.Test
 
@@ -252,5 +259,52 @@ class PmcOpenDataServiceTest {
             PmcOpenDataFetch.Unreachable(RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)),
             service().fetchXml("PMC10358571")
         )
+    }
+
+    private fun statusRows() = run {
+        var candidate: File? = File("").absoluteFile
+        while (candidate != null) {
+            val file = File(candidate, "doc/cross_platform/fulltext_parity/pmc_open_data.json")
+            if (file.isFile) {
+                return@run Json.parseToJsonElement(file.readText())
+                    .jsonObject.getValue("status").jsonArray.map { it.jsonObject }
+            }
+            candidate = candidate.parentFile
+        }
+        error("pmc_open_data.json not found above ${File("").absolutePath}")
+    }
+
+    @Test
+    fun `every status row of the fixture gets its outcome`() = runBlocking {
+        val rows = statusRows()
+        assertTrue(rows.isNotEmpty())
+        for (row in rows) {
+            val step = row.getValue("step").jsonPrimitive.content
+            val status = row.getValue("status").jsonPrimitive.int
+            val outcome = row.getValue("outcome").jsonPrimitive.content
+            routes.clear()
+            routeAll()
+            val answer = MockResponse().setResponseCode(status)
+            if (status == 200) {
+                // A read row answers normally: the step's own body stays.
+            } else {
+                when (step) {
+                    "listing" -> routes["/"] = answer
+                    "metadata" -> routes[badRecordRoute] = answer
+                    "xml" -> routes[articlePath] = answer
+                    else -> error("unknown step $step")
+                }
+            }
+            val fetch = service(maxRetries = 0).fetchXml("PMC10358571")
+            val label = "$step $status"
+            when (outcome) {
+                "absent" -> assertEquals(label, PmcOpenDataFetch.Absent, fetch)
+                "unreachable" -> assertEquals(
+                    label, PmcOpenDataFetch.Unreachable(RequestFailure.forHttpStatus(status)), fetch
+                )
+                "read" -> assertTrue(label, fetch !is PmcOpenDataFetch.Unreachable)
+                else -> error("unknown outcome $outcome")
+            }
+        }
     }
 }
