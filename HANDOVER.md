@@ -20,22 +20,23 @@ kind; obscura stealth got 0/36. Never judge a wall by Playwright. Spec
 `docs/superpowers/specs/2026-10-04-fulltext-machine-channels-design.md`.
 
 **Machine channels, stage A: PMC's open-data bucket** (#480), branch
-`feat/pmc-open-data-480` (based on #484's branch, PR to master). The public S3
-bucket `pmc-oa-opendata` is a JATS source on all three platforms, after Europe
-PMC's XML and before its PDF render, by PMC ID only (Python `pmc_open_data.py`
-+ `fulltext_discovery.py` step 2a; Swift `PMCOpenData.swift` +
-`FullTextService`; Kotlin `PmcOpenData.kt`). Contract: `fulltext_retrieval.md`
-"PMC's Open-Data Bucket" + `fulltext_parity/pmc_open_data.json`. Rules:
-listing 404 / KeyCount 0 / no `xml_url` absent; a 404 after the listing named
-it unreachable; strict UTF-8 (S3 sends `binary/octet-stream`);
-namespace-strict listing; retry 429/500/502/503/504, 5/s per attempt; the
-apps' not-established sentence names "PMC's open-access collection" after
-Europe PMC's. Deviations for sign-off: no bucket PDF fallback; Swift does not
-ask after a body-less Europe PMC deposit (parity). Acceptance: 28 of 28 author
-manuscripts served live. Follow-ups #485 (desktop cache records no source),
-#486 (an unmappable `xml_url` reads as absent). **Next: stage B** (every
-Unpaywall location in the apps, OpenAlex), **then stage C** (CORE, Elsevier,
-keys in settings): write their plans from the spec.
+`feat/pmc-open-data-480` PR #487 (based on #484's branch, against master). The
+public S3 bucket `pmc-oa-opendata` is a JATS source on all three platforms,
+after Europe PMC's XML and before its PDF render, by PMC ID only (Python
+`pmc_open_data.py` + `fulltext_discovery.py` step 2a; Swift
+`PMCOpenData.swift` + `FullTextService`; Kotlin `PmcOpenData.kt`). Contract:
+`fulltext_retrieval.md` "PMC's Open-Data Bucket" +
+`fulltext_parity/pmc_open_data.json`. Rules: listing 404 / KeyCount 0 / no
+`xml_url` absent; a 404 after the listing named it unreachable; strict UTF-8
+(S3 sends `binary/octet-stream`); namespace-strict listing; retry
+429/500/502/503/504, 5/s per attempt; the apps' not-established sentence names
+"PMC's open-access collection" after Europe PMC's. Deviations for sign-off: no
+bucket PDF fallback; Swift does not ask after a body-less Europe PMC deposit
+(parity). Acceptance: 28 of 28 author manuscripts served live. Follow-ups #485
+(desktop cache records no source), #486 (an unmappable `xml_url` reads as
+absent). **Next: stage B** (every Unpaywall location in the apps, OpenAlex),
+**then stage C** (CORE, Elsevier, keys in settings): write their plans from
+the spec.
 
 ## Recently landed (context)
 
