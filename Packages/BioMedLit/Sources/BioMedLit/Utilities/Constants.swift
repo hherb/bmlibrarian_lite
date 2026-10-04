@@ -26,6 +26,18 @@ public enum BioMedLitConstants {
     /// Europe PMC search endpoint.
     public static let europePMCSearchURL = "\(europePMCBaseURL)/search"
 
+    // MARK: - PMC open data
+
+    /// PMC's open-access and author-manuscript collections, a public S3
+    /// bucket asked after Europe PMC's `fullTextXML` (#480). Pinned by
+    /// `fulltext_parity/pmc_open_data.json`.
+    public static let pmcOpenDataBaseURL = "https://pmc-oa-opendata.s3.amazonaws.com"
+    public static let pmcOpenDataBucket = "pmc-oa-opendata"
+    /// The bucket as the reader knows it, verbatim on every platform.
+    public static let pmcOpenDataServiceName = "PMC's open-access collection"
+    /// Five requests per second, Python's `POLITE_RATE_CEILINGS` entry.
+    public static let pmcOpenDataMinimumInterval: TimeInterval = 0.2
+
     /// Default page size for Europe PMC searches.
     public static let europePMCDefaultPageSize = 25
 
