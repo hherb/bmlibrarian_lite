@@ -471,7 +471,7 @@ enum BioMedLitAdapters {
         localPDFPath: String?
     ) -> AppFullTextContentType {
         switch content {
-        case .europePMC(let html, let markdown):
+        case .europePMC(let html, let markdown), .pmcOpenData(let html, let markdown):
             // Both HTML (for rendering) and markdown (for search/export fallback)
             return .html(content: html, markdown: markdown)
         case .europePMCPDF(let pdfURL), .unpaywall(let pdfURL):
@@ -499,6 +499,7 @@ enum BioMedLitAdapters {
     private static func appSource(of content: FullTextContent) -> AppFullTextSource {
         switch content {
         case .europePMC: return .europePMC
+        case .pmcOpenData: return .pmcOpenData
         case .europePMCPDF: return .europePMCPDF
         case .unpaywall: return .unpaywall
         case .doi: return .doi
