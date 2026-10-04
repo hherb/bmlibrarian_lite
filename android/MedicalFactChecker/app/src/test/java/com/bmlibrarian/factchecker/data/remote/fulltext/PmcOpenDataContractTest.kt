@@ -1,5 +1,7 @@
 package com.bmlibrarian.factchecker.data.remote.fulltext
 
+import com.bmlibrarian.factchecker.domain.model.RequestFailure
+import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.util.Constants
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -76,14 +78,13 @@ class PmcOpenDataContractTest {
         }
     }
 
-    // Restored in Task 9: needs notEstablishedMessage.
-    // @Test
-    // fun `not established sentences`() {
-    //     contract["not_established_sentence"]!!.jsonArray.map { it.jsonObject }.forEach { row ->
-    //         val f = row["failure"]!!.jsonObject
-    //         val kind = RequestFailureKind.fromPersisted(f.text("kind")!!)!!
-    //         val failure = RequestFailure(kind, f["status_code"]?.jsonPrimitive?.contentOrNull?.toInt())
-    //         assertEquals(row.text("sentence"), notEstablishedMessage(row.text("service")!!, failure))
-    //     }
-    // }
+    @Test
+    fun `not established sentences`() {
+        contract["not_established_sentence"]!!.jsonArray.map { it.jsonObject }.forEach { row ->
+            val f = row["failure"]!!.jsonObject
+            val kind = RequestFailureKind.fromPersisted(f.text("kind")!!)!!
+            val failure = RequestFailure(kind, f["status_code"]?.jsonPrimitive?.contentOrNull?.toInt())
+            assertEquals(row.text("sentence"), notEstablishedMessage(row.text("service")!!, failure))
+        }
+    }
 }

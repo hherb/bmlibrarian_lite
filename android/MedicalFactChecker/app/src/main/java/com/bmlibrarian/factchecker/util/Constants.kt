@@ -104,6 +104,12 @@ object Constants {
     /** Europe PMC REST API base URL. */
     const val EUROPE_PMC_BASE_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/"
 
+    /**
+     * Europe PMC as the reader's sentences name it, verbatim on every platform
+     * (BioMedLit's `europePMCServiceName`).
+     */
+    const val EUROPE_PMC_SERVICE_NAME = "Europe PMC"
+
     /** PMC's open-data bucket (#480); pinned by fulltext_parity/pmc_open_data.json. */
     const val PMC_OPEN_DATA_BASE_URL = "https://pmc-oa-opendata.s3.amazonaws.com"
 
@@ -317,6 +323,12 @@ object Constants {
 
     /** Full-text source: PMC's open-data bucket. */
     const val FULLTEXT_SOURCE_PMC_OPEN_DATA = "pmc_open_data"
+
+    /**
+     * How a stored [FULLTEXT_SOURCE_PMC_OPEN_DATA] is labelled for the reader:
+     * the iOS/macOS label for the same source.
+     */
+    const val FULLTEXT_SOURCE_PMC_OPEN_DATA_LABEL = "PMC Open-Access Collection"
 
     /** Full-text source: Unpaywall PDF. */
     const val FULLTEXT_SOURCE_UNPAYWALL = "unpaywall"

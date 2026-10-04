@@ -32,7 +32,7 @@ import com.bmlibrarian.factchecker.util.Constants
 /**
  * Badge displaying the source of full-text content.
  *
- * @param source Source name (e.g., "Europe PMC", "Unpaywall", "Publisher").
+ * @param source Source name (e.g., "Europe PMC", "PMC Open-Access Collection", "Unpaywall", "Publisher").
  * @param modifier Modifier for the badge.
  */
 @Composable
@@ -41,7 +41,8 @@ fun FullTextSourceBadge(
     modifier: Modifier = Modifier
 ) {
     val (backgroundColor, textColor) = when (source.lowercase()) {
-        "europe pmc" -> Pair(Color(0xFF1976D2), Color.White)
+        // PMC's open-access collection serves the same JATS as Europe PMC, so it shares its colour
+        "europe pmc", Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA_LABEL.lowercase() -> Pair(Color(0xFF1976D2), Color.White)
         "unpaywall" -> Pair(Color(0xFF4CAF50), Color.White)
         "publisher", "doi" -> Pair(Color(0xFF9E9E9E), Color.White)
         "cached" -> Pair(Color(0xFF607D8B), Color.White)

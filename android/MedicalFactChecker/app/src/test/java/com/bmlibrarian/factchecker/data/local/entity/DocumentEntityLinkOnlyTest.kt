@@ -84,6 +84,7 @@ class DocumentEntityLinkOnlyTest {
         val notLinkOnly = listOf(
             recorded(FullTextResult.UnpaywallPdf("https://repo.example.org/a.pdf", doi = "10.1/x"), downloaded = "/cache/a.pdf"),
             recorded(FullTextResult.EuropePmcXml(xml = "<a/>", markdown = "m", html = "<p>h</p>")),
+            recorded(FullTextResult.PmcOpenDataXml(xml = "<a/>", markdown = "m", html = "<p>h</p>")),
             recorded(FullTextResult.Unavailable("No full text source available")),
             recorded(FullTextResult.NotEstablished(RequestFailure(RequestFailureKind.TIMEOUT))),
         )
