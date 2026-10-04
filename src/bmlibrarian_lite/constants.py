@@ -645,6 +645,7 @@ PDF_BASE_DIR_ENV_VAR = "PDF_BASE_DIR"
 FULLTEXT_SOURCE_PRIORITY = {
     "cached_fulltext": 100,  # Cached markdown (fastest)
     "europepmc_xml": 90,     # Europe PMC XML API (best quality)
+    "pmc_open_data_xml": 85,  # PMC's open-data bucket (JATS)
     "cached_pdf": 80,        # Cached PDF
     "downloaded_pdf": 70,    # Downloaded PDF
     "abstract_only": 10,     # Abstract fallback
@@ -946,6 +947,9 @@ POLITE_RATE_CEILINGS: dict[str, float] = {
     "clinicaltrials.gov": DEFAULT_POLITE_RATE_PER_SECOND,
     "doi.org": 1.0,
     "dx.doi.org": 1.0,
+    # PMC's open-data bucket on S3 (#480). S3 publishes no per-client limit;
+    # three requests per article (listing, metadata, XML) at 5/s.
+    "pmc-oa-opendata.s3.amazonaws.com": 5.0,
 }
 
 
@@ -1056,6 +1060,17 @@ SERVICE_DOI_RESOLVER = "doi.org"
 SERVICE_DOI_PUBLISHER = "the publisher's site the DOI resolves to"
 SERVICE_PMC_ID_CONVERTER = "PubMed Central's ID converter"
 SERVICE_EUROPE_PMC = "Europe PMC"
+# PMC's open-access and author-manuscript collections, published in a public
+# S3 bucket (AWS Open Data). A JATS source asked after Europe PMC's
+# fullTextXML: it holds the author manuscripts Europe PMC answers 500 for
+# (#432, #480). Named as the reader knows it.
+SERVICE_PMC_OPEN_DATA = "PMC's open-access collection"
+FULLTEXT_SOURCE_PMC_OPEN_DATA = "pmc_open_data"
+PMC_OPEN_DATA_HOST = "pmc-oa-opendata.s3.amazonaws.com"
+PMC_OPEN_DATA_BASE_URL = f"https://{PMC_OPEN_DATA_HOST}"
+PMC_OPEN_DATA_BUCKET = "pmc-oa-opendata"
+PMC_OPEN_DATA_REQUEST_TIMEOUT_SECONDS = 45
+PMC_OPEN_DATA_MAX_RETRIES = 3
 # The page Unpaywall names when it knows of an open-access copy but not of a
 # PDF URL for it, read for the PDF it declares (#464).
 SERVICE_UNPAYWALL_LANDING_PAGE = "the open-access copy's landing page"

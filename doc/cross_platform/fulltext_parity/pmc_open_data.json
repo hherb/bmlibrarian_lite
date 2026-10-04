@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "description": "PMC's open-data bucket (pmc-oa-opendata) as a JATS source: which metadata key a listing names, how an s3:// URL becomes an https:// one, what a metadata record says, which statuses settle what, and the sentence an unreachable bucket earns in the apps. Read by tests/test_pmc_open_data.py, Packages/BioMedLit PMCOpenDataContractTests and Android PmcOpenDataContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, 'PMC's open-data bucket'.",
+  "service_name": "PMC's open-access collection",
+  "source": "pmc_open_data",
+  "base_url": "https://pmc-oa-opendata.s3.amazonaws.com",
+  "latest_metadata_key": [
+    {
+      "name": "one version",
+      "pmcid": "PMC10358571",
+      "listing": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Name>pmc-oa-opendata</Name><Prefix>metadata/PMC10358571.</Prefix><KeyCount>1</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated><Contents><Key>metadata/PMC10358571.1.json</Key><Size>900</Size></Contents></ListBucketResult>",
+      "key": "metadata/PMC10358571.1.json"
+    },
+    {
+      "name": "multiple versions, numeric not lexical",
+      "pmcid": "PMC77",
+      "listing": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Name>pmc-oa-opendata</Name><Prefix>metadata/PMC77.</Prefix><KeyCount>3</KeyCount><Contents><Key>metadata/PMC77.1.json</Key></Contents><Contents><Key>metadata/PMC77.10.json</Key></Contents><Contents><Key>metadata/PMC77.2.json</Key></Contents></ListBucketResult>",
+      "key": "metadata/PMC77.10.json"
+    },
+    {
+      "name": "no keys: not in the collection",
+      "pmcid": "PMC99999999",
+      "listing": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Name>pmc-oa-opendata</Name><Prefix>metadata/PMC99999999.</Prefix><KeyCount>0</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated></ListBucketResult>",
+      "key": null
+    },
+    {
+      "name": "longer PMC ID in listing",
+      "pmcid": "PMC123",
+      "listing": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><KeyCount>2</KeyCount><Contents><Key>metadata/PMC1234.1.json</Key></Contents><Contents><Key>metadata/PMC123.x.json</Key></Contents></ListBucketResult>",
+      "key": null
+    },
+    {
+      "name": "a JATS article where a listing should be",
+      "pmcid": "PMC1",
+      "listing": "<?xml version=\"1.0\"?><article><front><article-meta><title-group><article-title>T</article-title></title-group></article-meta></front></article>",
+      "error": "malformed"
+    },
+    {
+      "name": "not XML",
+      "pmcid": "PMC1",
+      "listing": "{\"not\": \"a listing\"}",
+      "error": "malformed"
+    }
+  ],
+  "https_url": [
+    {"name": "object with md5 query", "s3_url": "s3://pmc-oa-opendata/PMC10358571.1/PMC10358571.1.xml?md5=62ed7fe79a191f5", "https_url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC10358571.1/PMC10358571.1.xml"},
+    {"name": "object without query", "s3_url": "s3://pmc-oa-opendata/PMC1.2/PMC1.2.xml", "https_url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC1.2/PMC1.2.xml"},
+    {"name": "another bucket", "s3_url": "s3://some-other-bucket/PMC1.1/PMC1.1.xml", "https_url": null},
+    {"name": "already https", "s3_url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC1.1/PMC1.1.xml", "https_url": null},
+    {"name": "bucket with no key", "s3_url": "s3://pmc-oa-opendata/", "https_url": null},
+    {"name": "blank", "s3_url": "", "https_url": null}
+  ],
+  "record": [
+    {
+      "name": "open access",
+      "metadata": {"pmcid": "PMC8593813", "version": 1, "is_pmc_openaccess": true, "is_manuscript": false, "license_code": "CC BY", "xml_url": "s3://pmc-oa-opendata/PMC8593813.1/PMC8593813.1.xml?md5=62ed", "pdf_url": "s3://pmc-oa-opendata/PMC8593813.1/PMC8593813.1.pdf?md5=7743"},
+      "xml_url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC8593813.1/PMC8593813.1.xml",
+      "is_open_access": true,
+      "is_manuscript": false,
+      "license_code": "CC BY"
+    },
+    {
+      "name": "author manuscript",
+      "metadata": {"pmcid": "PMC10373475", "version": 1, "is_pmc_openaccess": false, "is_manuscript": true, "license_code": "TDM", "xml_url": "s3://pmc-oa-opendata/PMC10373475.1/PMC10373475.1.xml?md5=d332", "text_url": "s3://pmc-oa-opendata/PMC10373475.1/PMC10373475.1.txt?md5=e804"},
+      "xml_url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC10373475.1/PMC10373475.1.xml",
+      "is_open_access": false,
+      "is_manuscript": true,
+      "license_code": "TDM"
+    },
+    {
+      "name": "no XML",
+      "metadata": {"pmcid": "PMC5", "version": 1, "is_pmc_openaccess": true, "pdf_url": "s3://pmc-oa-opendata/PMC5.1/PMC5.1.pdf"},
+      "xml_url": null,
+      "is_open_access": true,
+      "is_manuscript": null,
+      "license_code": null
+    },
+    {
+      "name": "fields of the wrong type",
+      "metadata": {"is_pmc_openaccess": "yes", "is_manuscript": 1, "license_code": 7, "xml_url": 42},
+      "xml_url": null,
+      "is_open_access": null,
+      "is_manuscript": null,
+      "license_code": null
+    }
+  ],
+  "status": [
+    {"step": "listing", "status": 200, "outcome": "read"},
+    {"step": "listing", "status": 404, "outcome": "absent"},
+    {"step": "listing", "status": 403, "outcome": "unreachable"},
+    {"step": "listing", "status": 429, "outcome": "unreachable"},
+    {"step": "listing", "status": 503, "outcome": "unreachable"},
+    {"step": "metadata", "status": 200, "outcome": "read"},
+    {"step": "metadata", "status": 404, "outcome": "unreachable"},
+    {"step": "metadata", "status": 500, "outcome": "unreachable"},
+    {"step": "xml", "status": 200, "outcome": "read"},
+    {"step": "xml", "status": 404, "outcome": "unreachable"},
+    {"step": "xml", "status": 503, "outcome": "unreachable"}
+  ],
+  "not_established_sentence": [
+    {"service": "Europe PMC", "failure": {"kind": "http_status", "status_code": 404}, "sentence": "No source provided this article's full text. Europe PMC (HTTP 404 Not Found) did not serve it, so it may still exist. Try again later."},
+    {"service": "PMC's open-access collection", "failure": {"kind": "http_status", "status_code": 403}, "sentence": "No source provided this article's full text. PMC's open-access collection (HTTP 403 Forbidden) did not serve it, so it may still exist. Try again later."},
+    {"service": "PMC's open-access collection", "failure": {"kind": "http_status", "status_code": 503}, "sentence": "No source provided this article's full text. PMC's open-access collection could not be asked (HTTP 503 Service Unavailable), so it may still exist. Try again later."},
+    {"service": "PMC's open-access collection", "failure": {"kind": "timeout"}, "sentence": "No source provided this article's full text. PMC's open-access collection could not be asked (the request timed out), so it may still exist. Try again later."}
+  ]
+}
