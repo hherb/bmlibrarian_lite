@@ -72,7 +72,7 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
 
     /// Whether this source provides in-app viewable content.
     ///
-    /// Europe PMC and Unpaywall provide content that can be displayed
+    /// Europe PMC, PMC's open-access collection and Unpaywall provide content that can be displayed
     /// within the app. DOI sources require opening in an external browser.
     var canDisplayInApp: Bool {
         switch self {
