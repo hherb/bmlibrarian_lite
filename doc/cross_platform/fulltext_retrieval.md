@@ -248,9 +248,11 @@ function fetch_pmc_open_data(pmcid) -> PmcOpenDataFetch:
     if listing.status == 404: return ABSENT            # an answer
     if listing.status != 200: return UNREACHABLE(http_status)
     key = latest_metadata_key(listing.body, pmcid)     # numeric max of .{N}.json
-    if body is not an S3 listing: return UNREACHABLE(malformed_response)
+                                                       # raises on a body that is not an S3 listing
+                                                       # (or not UTF-8): UNREACHABLE(malformed_response)
     if key == null: return ABSENT                      # KeyCount 0
     record = GET {base}/{key}                          # 404 here: UNREACHABLE(404)
+                                                       # unparseable JSON or not an object: UNREACHABLE(malformed_response)
     xml_url = https_url(record.xml_url)                # s3://pmc-oa-opendata/k?md5= -> https://…/k
     if xml_url == null: return ABSENT                  # no XML named
     xml = GET xml_url                                  # 404: UNREACHABLE(404); blank: incomplete_response
@@ -261,11 +263,13 @@ The bucket serves its objects as `binary/octet-stream` with no charset, so
 every body is decoded as UTF-8; a body that is not valid UTF-8 is
 `malformed_response`. The served XML goes through the platform's JATS
 converter, under the same rules as Europe PMC's (Swift's abstract holdback
-included). An unreachable bucket is recorded under its service name, so a
-chain that then finds nothing has **not established** an absence; in the apps
-the sentence names the bucket (`not_established_sentence` rows). Paced at 5
-requests per second. Only XML is read: a record without `xml_url` is an
-answer, and the chain goes on to the PDF tiers.
+included); XML whose conversion yields no text is recorded as
+`malformed_response`, not an absence. An unreachable bucket is recorded under
+its service name, so a chain that then finds nothing has **not established**
+an absence; in the apps the sentence names the bucket
+(`not_established_sentence` rows). Paced at 5 requests per second. Only XML
+is read: a record without `xml_url` is an answer, and the chain goes on to
+the PDF tiers.
 
 ## Unpaywall PDF
 
@@ -777,12 +781,14 @@ async function fetch_fulltext(
             else:
                 return result   # FULLTEXT — nothing beats it
 
-    # 2a. PMC's open-data bucket (#480), when a PMC ID is known and step 2 did
-    #     not return. Its abstract-only deposit is held back as Europe PMC's is.
-    if pmc_id and not returned:
+    # 2a. PMC's open-data bucket (#480), reached only when step 2 returned no
+    #     FULLTEXT result. Its abstract-only deposit is held back as Europe PMC's is.
+    if pmc_id:
         bucket = await fetch_pmc_open_data(pmc_id)
         if bucket is SERVED: (same parse and holdback as step 2, source pmc_open_data)
         if bucket is UNREACHABLE and europe_pmc_shortfall == null:
+            # The apps keep one not-established sentence, so Europe PMC's shortfall
+            # takes precedence; Python records both in its lookup record.
             pmc_open_data_shortfall = bucket.failure   # blocks "no full text"
 
     # 3. Try a free PDF tier (Europe PMC's own render, then Unpaywall).
@@ -844,12 +850,15 @@ async function fetch_fulltext(
         if web_url:
             return FullTextResult.DOI(web_url)
 
-    # 6b. (apps) Europe PMC's side recorded a lost search, a failed fetch or a
-    #     404, and no later fetch was served: the absence is not established,
+    # 6b. (apps) Europe PMC or the bucket recorded a lost search, a failed fetch
+    #     or a 404, and no later fetch was served: the absence is not established,
     #     and callers persist Unavailable (#434). A JATS parse failure does not
-    #     yet count here (#436).
+    #     yet count here (#436). Europe PMC's shortfall takes precedence in the
+    #     sentence shown.
     if europe_pmc_shortfall != null:
         return FullTextResult.NotEstablished(europe_pmc_shortfall)
+    if pmc_open_data_shortfall != null:
+        return FullTextResult.NotEstablished(pmc_open_data_shortfall)
 
     # 7. No full text available
     return FullTextResult.Unavailable
