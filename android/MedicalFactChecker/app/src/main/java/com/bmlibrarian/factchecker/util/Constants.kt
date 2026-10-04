@@ -119,6 +119,9 @@ object Constants {
     /** Retries for a 429 or 5xx from the bucket (four attempts), as Python and Swift do. */
     const val PMC_OPEN_DATA_MAX_RETRIES = 3
 
+    /** Statuses retried for the bucket: Python's RETRYABLE_HTTP_STATUSES (no 408). */
+    val PMC_OPEN_DATA_RETRYABLE_STATUSES = setOf(429, 500, 502, 503, 504)
+
     /** The XML namespace of an S3 ListObjectsV2 answer. */
     const val S3_LISTING_NAMESPACE = "http://s3.amazonaws.com/doc/2006-03-01/"
 

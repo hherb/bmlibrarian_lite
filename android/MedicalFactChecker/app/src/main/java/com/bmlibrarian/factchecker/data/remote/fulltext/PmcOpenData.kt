@@ -179,15 +179,15 @@ class PmcOpenDataService internal constructor(
     }
 
     private suspend fun get(url: String): Answer {
-        pacer.awaitTurn()
         val request = Request.Builder().url(url).build()
         return NetworkRetry.withExponentialBackoff(
             maxRetries = maxRetries,
             shouldRetry = { NetworkRetry.isRetryableException(it) }
         ) {
+            pacer.awaitTurn() // every attempt takes its own slot
             withContext(Dispatchers.IO) {
                 httpClient.newCall(request).execute().use { response ->
-                    if (NetworkRetry.isRetryableStatusCode(response.code)) {
+                    if (response.code in Constants.PMC_OPEN_DATA_RETRYABLE_STATUSES) {
                         throw RetryableStatusException(response.code)
                     }
                     Answer(response.code, response.body?.bytes() ?: ByteArray(0))
@@ -243,6 +243,9 @@ class PmcOpenDataService internal constructor(
             unreachableStatus(e.statusCode)
         } catch (e: IOException) {
             PmcOpenDataFetch.Unreachable(RequestFailure.fromException(e))
+        } catch (e: IllegalArgumentException) {
+            // A bucket-controlled key that is not a valid URL: an unreadable answer.
+            malformed()
         }
     }
 

@@ -150,4 +150,107 @@ class PmcOpenDataServiceTest {
         assertEquals("2", url.queryParameter("list-type"))
         assertEquals("metadata/PMC10358571.", url.queryParameter("prefix"))
     }
+
+    private val badRecordRoute = "/metadata/PMC10358571.1.json"
+
+    @Test
+    fun `a 404 listing is asked once and is absent`() = runBlocking {
+        assertEquals(PmcOpenDataFetch.Absent, service(maxRetries = 1).fetchXml("PMC10358571"))
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `a 403 listing is asked once and is unreachable`() = runBlocking {
+        routes["/"] = MockResponse().setResponseCode(403)
+        assertEquals(
+            PmcOpenDataFetch.Unreachable(RequestFailure.forHttpStatus(403)),
+            service(maxRetries = 1).fetchXml("PMC10358571")
+        )
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `a 408 is not retried`() = runBlocking {
+        routes["/"] = MockResponse().setResponseCode(408)
+        // OkHttp itself replays a 408 unless told not to; this isolates the service's own policy.
+        val client = OkHttpClient.Builder().retryOnConnectionFailure(false).build()
+        val service = PmcOpenDataService(
+            client, server.url("/").toString().trimEnd('/'), RequestPacer(0L), 1
+        )
+        assertEquals(
+            PmcOpenDataFetch.Unreachable(RequestFailure.forHttpStatus(408)),
+            service.fetchXml("PMC10358571")
+        )
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `a constant 503 listing is asked twice with one retry`() = runBlocking {
+        routes["/"] = MockResponse().setResponseCode(503)
+        assertEquals(
+            PmcOpenDataFetch.Unreachable(RequestFailure.forHttpStatus(503)),
+            service(maxRetries = 1).fetchXml("PMC10358571")
+        )
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun `an article 404 and an article 503 are unreachable with that status`() = runBlocking {
+        routeAll()
+        routes.remove(articlePath)
+        assertEquals(
+            PmcOpenDataFetch.Unreachable(RequestFailure.forHttpStatus(404)),
+            service().fetchXml("PMC10358571")
+        )
+        routes[articlePath] = MockResponse().setResponseCode(503)
+        assertEquals(
+            PmcOpenDataFetch.Unreachable(RequestFailure.forHttpStatus(503)),
+            service().fetchXml("PMC10358571")
+        )
+    }
+
+    @Test
+    fun `a record without xml_url is absent`() = runBlocking {
+        routeAll()
+        routes[badRecordRoute] = MockResponse().setBody("""{"license_code":"TDM"}""")
+        assertEquals(PmcOpenDataFetch.Absent, service().fetchXml("PMC10358571"))
+    }
+
+    @Test
+    fun `non-JSON metadata is malformed`() = runBlocking {
+        routeAll()
+        routes[badRecordRoute] = MockResponse().setBody("not json")
+        assertEquals(
+            PmcOpenDataFetch.Unreachable(RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)),
+            service().fetchXml("PMC10358571")
+        )
+    }
+
+    @Test
+    fun `an empty listing is absent`() = runBlocking {
+        routes["/"] = MockResponse().setBody(
+            """<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><KeyCount>0</KeyCount></ListBucketResult>"""
+        )
+        assertEquals(PmcOpenDataFetch.Absent, service().fetchXml("PMC10358571"))
+    }
+
+    @Test
+    fun `a listing without the S3 namespace is malformed`() = runBlocking {
+        routes["/"] = MockResponse().setBody(
+            """<ListBucketResult><KeyCount>1</KeyCount><Contents><Key>metadata/PMC10358571.1.json</Key></Contents></ListBucketResult>"""
+        )
+        assertEquals(
+            PmcOpenDataFetch.Unreachable(RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)),
+            service().fetchXml("PMC10358571")
+        )
+    }
+
+    @Test
+    fun `a listing that is not valid UTF-8 is malformed`() = runBlocking {
+        routes["/"] = MockResponse().setBody(Buffer().write(byteArrayOf(0xFF.toByte(), 0xFE.toByte())))
+        assertEquals(
+            PmcOpenDataFetch.Unreachable(RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)),
+            service().fetchXml("PMC10358571")
+        )
+    }
 }
