@@ -104,6 +104,24 @@ object Constants {
     /** Europe PMC REST API base URL. */
     const val EUROPE_PMC_BASE_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/"
 
+    /** PMC's open-data bucket (#480); pinned by fulltext_parity/pmc_open_data.json. */
+    const val PMC_OPEN_DATA_BASE_URL = "https://pmc-oa-opendata.s3.amazonaws.com"
+
+    /** The bucket's name, as `s3://` addresses spell it. */
+    const val PMC_OPEN_DATA_BUCKET = "pmc-oa-opendata"
+
+    /** The bucket as the reader knows it, verbatim on every platform. */
+    const val PMC_OPEN_DATA_SERVICE_NAME = "PMC's open-access collection"
+
+    /** Five requests per second, Python's POLITE_RATE_CEILINGS entry. */
+    const val PMC_OPEN_DATA_MIN_INTERVAL_MS = 200L
+
+    /** Retries for a 429 or 5xx from the bucket (four attempts), as Python and Swift do. */
+    const val PMC_OPEN_DATA_MAX_RETRIES = 3
+
+    /** The XML namespace of an S3 ListObjectsV2 answer. */
+    const val S3_LISTING_NAMESPACE = "http://s3.amazonaws.com/doc/2006-03-01/"
+
     /** Unpaywall API base URL for open access PDF lookup. */
     const val UNPAYWALL_BASE_URL = "https://api.unpaywall.org/v2/"
 
@@ -293,6 +311,9 @@ object Constants {
 
     /** Full-text source: Europe PMC XML. */
     const val FULLTEXT_SOURCE_EUROPE_PMC = "europepmc"
+
+    /** Full-text source: PMC's open-data bucket. */
+    const val FULLTEXT_SOURCE_PMC_OPEN_DATA = "pmc_open_data"
 
     /** Full-text source: Unpaywall PDF. */
     const val FULLTEXT_SOURCE_UNPAYWALL = "unpaywall"
