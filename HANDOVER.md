@@ -11,19 +11,31 @@ its slice has landed; add a new section when handing off new work.
 **Why Unpaywall's PDFs cannot be downloaded: measured, and what recovers
 them** (#480), branch `survey/unpaywall-pdf-480`, PR #484. No code change:
 `scripts/unpaywall_pdf_survey.py`, rows and findings in
-`doc/developer/unpaywall_pdf_survey/` (figures pinned by
-`tests/test_unpaywall_pdf_survey.py`; **re-analyse, never re-fetch**), spikes
+`doc/developer/unpaywall_pdf_survey/` (**re-analyse, never re-fetch**), spikes
 in its `spikes/`. Our clients get 28% of 400 PDFs; 81% of failures are bot
-walls, 12% serve no PDF. **Decided (maintainer):** machine channels first (PMC
-AWS bucket incl. author-manuscript text, every Unpaywall/OpenAlex location,
-CORE text and Elsevier with user-entered keys), then a real embedded browser
-(QtWebEngine got PMC hidden and every Cloudflare publisher once shown;
-ScienceDirect needs one tick, so a review queue), with a `challenged` failure
-kind; no client change; obscura stealth got 0/36, not adopted. Never judge a
-wall by Playwright. Also **#483** (the desktop's browser fallback never works;
-the embedded browser replaces it). **Next: implement
-`docs/superpowers/specs/2026-10-04-fulltext-machine-channels-design.md`**
-(awaiting review, then a plan; stage A first).
+walls. **Decided (maintainer):** machine channels first, then a real embedded
+browser (QtWebEngine got PMC hidden and every Cloudflare publisher once shown;
+ScienceDirect needs one tick, so a review queue) with a `challenged` failure
+kind; obscura stealth got 0/36. Never judge a wall by Playwright. Spec
+`docs/superpowers/specs/2026-10-04-fulltext-machine-channels-design.md`.
+
+**Machine channels, stage A: PMC's open-data bucket** (#480), branch
+`feat/pmc-open-data-480` (based on #484's branch, PR to master). The public S3
+bucket `pmc-oa-opendata` is a JATS source on all three platforms, after Europe
+PMC's XML and before its PDF render, by PMC ID only (Python `pmc_open_data.py`
++ `fulltext_discovery.py` step 2a; Swift `PMCOpenData.swift` +
+`FullTextService`; Kotlin `PmcOpenData.kt`). Contract: `fulltext_retrieval.md`
+"PMC's Open-Data Bucket" + `fulltext_parity/pmc_open_data.json`. Rules:
+listing 404 / KeyCount 0 / no `xml_url` absent; a 404 after the listing named
+it unreachable; strict UTF-8 (S3 sends `binary/octet-stream`);
+namespace-strict listing; retry 429/500/502/503/504, 5/s per attempt; the
+apps' not-established sentence names "PMC's open-access collection" after
+Europe PMC's. Deviations for sign-off: no bucket PDF fallback; Swift does not
+ask after a body-less Europe PMC deposit (parity). Acceptance: 28 of 28 author
+manuscripts served live. Follow-ups #485 (desktop cache records no source),
+#486 (an unmappable `xml_url` reads as absent). **Next: stage B** (every
+Unpaywall location in the apps, OpenAlex), **then stage C** (CORE, Elsevier,
+keys in settings): write their plans from the spec.
 
 ## Recently landed (context)
 
@@ -44,30 +56,19 @@ the rest.
   `BioMedLitConstants.unpaywallFetchableSchemes`). BioMedLit's closing throw
   is `FullTextService.exhaustedChainError`: **no absence while an open-access
   shortfall is set**.
-
 - **Apps: an unsettled open-access copy is told** (PR #473): an
   **`OpenAccessShortfall`** stored with the full text, shown in **Python's
   sentence**; **every fetch that settles it writes or clears it**; no usable
   email is "not configured", never a 422. Room migrations register from
   `AppDatabase.ALL_MIGRATIONS`.
-- **iOS/macOS: a working cancel** (PR #469, #462). Every entry point runs
-  through `runAsWorkflowTask(_:)`; `stopWork(_:)` is the one stop path; **a
-  stop is never written to `errorMessage`**; **`stopRequested`, never the
-  error, decides a stop**; a stopped document gets no result. Tests in
-  `WorkflowCancelTests`; follow-ups #468, #470.
-- **Unpaywall landing pages are read, never downloaded as the PDF** (all
-  three; PR #465): `url_for_pdf`, else the page's `citation_pdf_url` (2 MiB
-  cap). Fixture `fulltext_parity/unpaywall_landing_page.json`; **only
-  `;`-terminated references decode**; unreachable is not "declares none".
-- **iOS/macOS workflow notices** (PRs #458, #460, #463). **`session.errorMessage`
-  means a failure and nothing else**; per-document misses are notices
-  (`fullTextNotice`, `Document.unratedTransparencyNotice`); a report missing
-  citations gets an amber **Regenerate Report** (user's call). Auto full text
-  for papers scored 4-5 is Apple-only on purpose; the 40,000-character cut is
-  the product's call.
-- **A preprint's `fullTextXML` 500 is asked once** (all three; #451); every
-  PMC accession's 500 and any 429/502/503/504 keep the full budget (user's
-  call). Contract: `fulltext_retrieval.md`.
+- **iOS/macOS: a working cancel** (PR #469): one stop path, `stopWork(_:)`;
+  **a stop is never written to `errorMessage`**.
+- **Unpaywall landing pages are read, never downloaded as the PDF** (PR #465):
+  `citation_pdf_url`, 2 MiB cap; unreachable is not "declares none".
+- **iOS/macOS workflow notices** (PRs #458, #460, #463): **`session.errorMessage`
+  means a failure and nothing else**; per-document misses are notices.
+- **A preprint's `fullTextXML` 500 is asked once** (#451); PMC accessions and
+  429/502/503/504 keep the full budget.
 - **`fullTextXML` is asked only when Europe PMC's record allows it** (Python;
   PR #452): it answers **500, not 404**, for held closed-access text;
   `europepmc.offers_fulltext_xml` skips only a record that *states* it is not
@@ -208,11 +209,10 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **#480's decisions** (above; the survey is done) then **#483** the desktop
-  browser fallback (fix or remove, per #480); **#481** iOS keeps an earlier
-  build's refused Unpaywall link (its answer follows #480's); **#467**
-  landing-page parity edges; **#468** / **#470** iOS/macOS cancel follow-ups;
-  **#476** `OpenAccessShortfall` hardening.
+- **Machine channels stages B and C** (above), then the **embedded browser and
+  review queue** with the `challenged` kind (replaces **#483**); **#481**
+  follows it; **#485**, **#486** (stage A follow-ups); **#467**, **#468** /
+  **#470**, **#476**.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 
