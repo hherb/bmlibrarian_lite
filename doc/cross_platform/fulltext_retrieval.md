@@ -236,8 +236,10 @@ computing it.
 ## PMC's Open-Data Bucket (#480)
 
 PMC publishes its open-access and author-manuscript collections in the public
-S3 bucket `pmc-oa-opendata`. Asked **after Europe PMC's `fullTextXML` gave no
-usable body, by PMC ID only** (a preprint has none), and before Europe PMC's
+S3 bucket `pmc-oa-opendata`. Asked **after Europe PMC's `fullTextXML` returned no
+text (a body-less deposit Europe PMC served counts as text on every platform:
+Swift holds it back but does not ask the bucket, for parity with Python and
+Kotlin, which have no content kind), by PMC ID only** (a preprint has none), and before Europe PMC's
 PDF render. Service name: **"PMC's open-access collection"**; source
 `pmc_open_data`. Pinned by `fulltext_parity/pmc_open_data.json`.
 
@@ -270,6 +272,10 @@ an absence; in the apps the sentence names the bucket
 (`not_established_sentence` rows). Paced at 5 requests per second. Only XML
 is read: a record without `xml_url` is an answer, and the chain goes on to
 the PDF tiers.
+
+Only a listing 404 or `KeyCount` 0 is an absence. A 404 on the metadata record
+or on the XML *after the listing named it* is **unreachable**, not an absence:
+the bucket is disagreeing with itself, and that is a lookup that failed.
 
 ## Unpaywall PDF
 
@@ -759,6 +765,10 @@ async function fetch_fulltext(
     # had its turn. null when none was seen. See "Abstract Holdback" below.
     held_abstract: FullTextResult | null = null
 
+    # Declared with europe_pmc_shortfall (the apps' not-established record).
+    europe_pmc_shortfall = null
+    pmc_open_data_shortfall = null
+
     # 2. Try Europe PMC XML (best quality). A preprint is fetched by its
     # Europe PMC record ID, having no PMC ID; with neither, the lookup is
     # recorded as skipped (no identifier), not as Europe PMC failing.
@@ -783,7 +793,10 @@ async function fetch_fulltext(
 
     # 2a. PMC's open-data bucket (#480), reached only when step 2 returned no
     #     FULLTEXT result. Its abstract-only deposit is held back as Europe PMC's is.
-    if pmc_id:
+    #     Not asked while Swift holds a body-less Europe PMC deposit: Python and
+    #     Kotlin have no content kind and treat that deposit as served, so Swift
+    #     matches them.
+    if pmc_id and held_abstract == null:
         bucket = await fetch_pmc_open_data(pmc_id)
         if bucket is SERVED: (same parse and holdback as step 2, source pmc_open_data)
         if bucket is UNREACHABLE and europe_pmc_shortfall == null:
