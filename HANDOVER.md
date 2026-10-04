@@ -8,22 +8,22 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Why Unpaywall's PDFs cannot be downloaded: measured** (#480), branch
-`survey/unpaywall-pdf-480`, PR #484. A survey, not a code change:
-`scripts/unpaywall_pdf_survey.py` (`fetch` / `browse` / `analyse`), rows and
-findings in `doc/developer/unpaywall_pdf_survey/` (README has the numbers),
-figures pinned by `tests/test_unpaywall_pdf_survey.py`. **Re-analyse the
-committed rows, never re-fetch.** Our clients get 28% of 400 PDFs; 81% of the
-failures are bot walls (PMC's reCAPTCHA, ScienceDirect, Cloudflare publishers),
-12% serve no PDF, 4% are our client (MDPI refuses the `BMLibrarian/1.0` UA).
-**A challenged failure is a wall 89% of the time**, which the apps can see at
-run time. #480's three decisions are the maintainer's and still open: offer a
-challenged PDF as a link to open in a browser; a `challenged` failure kind and
-sentence; no client change (impersonation buys 11 of 290). A person's browser passes
-PMC and ScienceDirect (maintainer's Safari spot check, 4 of 4, one tick-box
-captcha), though every Playwright browser, headed too, is stopped. Found: **#483** the desktop's browser fallback never
-works. The survey needs Playwright in the venv (`uv pip install playwright &&
-playwright install chromium`), deliberately not a declared dependency.
+**Why Unpaywall's PDFs cannot be downloaded: measured, and what recovers
+them** (#480), branch `survey/unpaywall-pdf-480`, PR #484. No code change:
+`scripts/unpaywall_pdf_survey.py`, rows and findings in
+`doc/developer/unpaywall_pdf_survey/` (figures pinned by
+`tests/test_unpaywall_pdf_survey.py`; **re-analyse, never re-fetch**), spikes
+in its `spikes/`. Our clients get 28% of 400 PDFs; 81% of failures are bot
+walls, 12% serve no PDF. **Decided (maintainer):** machine channels first (PMC
+AWS bucket incl. author-manuscript text, every Unpaywall/OpenAlex location,
+CORE text and Elsevier with user-entered keys), then a real embedded browser
+(QtWebEngine got PMC hidden and every Cloudflare publisher once shown;
+ScienceDirect needs one tick, so a review queue), with a `challenged` failure
+kind; no client change; obscura stealth got 0/36, not adopted. Playwright is
+stopped by these walls, so never judge a wall by it. Also **#483** (the
+desktop's browser fallback never works; the embedded browser replaces it).
+**Next: the machine-channels design spec.** The survey script needs Playwright
+in the venv, deliberately undeclared.
 
 ## Recently landed (context)
 

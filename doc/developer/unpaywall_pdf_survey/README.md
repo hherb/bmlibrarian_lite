@@ -167,3 +167,10 @@ open-access 401/403 (`pdf_discovery.BrowserSession`). It never works:
 Playwright is not a dependency, and once installed, the code reads Chrome's
 "Download is starting" as a failure and discards the download it had just got
 past the wall for. Lodged as #483.
+
+## What came next
+
+Three spikes asked what recovers the walled PDFs: unattended machine
+channels, a real embedded browser (QtWebEngine), and a stealth headless
+browser (obscura). Their findings, and the decision taken, are in
+`spikes/README.md`.
