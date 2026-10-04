@@ -233,6 +233,40 @@ which instance is authoritative, not of which answer is right. See
 [Content Kind](#content-kind) for what `produced_body` means and the trap in
 computing it.
 
+## PMC's Open-Data Bucket (#480)
+
+PMC publishes its open-access and author-manuscript collections in the public
+S3 bucket `pmc-oa-opendata`. Asked **after Europe PMC's `fullTextXML` gave no
+usable body, by PMC ID only** (a preprint has none), and before Europe PMC's
+PDF render. Service name: **"PMC's open-access collection"**; source
+`pmc_open_data`. Pinned by `fulltext_parity/pmc_open_data.json`.
+
+```pseudocode
+# SERVED(xml) | ABSENT | UNREACHABLE(failure of its real kind)
+function fetch_pmc_open_data(pmcid) -> PmcOpenDataFetch:
+    listing = GET {base}/?list-type=2&prefix=metadata/{pmcid}.
+    if listing.status == 404: return ABSENT            # an answer
+    if listing.status != 200: return UNREACHABLE(http_status)
+    key = latest_metadata_key(listing.body, pmcid)     # numeric max of .{N}.json
+    if body is not an S3 listing: return UNREACHABLE(malformed_response)
+    if key == null: return ABSENT                      # KeyCount 0
+    record = GET {base}/{key}                          # 404 here: UNREACHABLE(404)
+    xml_url = https_url(record.xml_url)                # s3://pmc-oa-opendata/k?md5= -> https://…/k
+    if xml_url == null: return ABSENT                  # no XML named
+    xml = GET xml_url                                  # 404: UNREACHABLE(404); blank: incomplete_response
+    return SERVED(xml)
+```
+
+The bucket serves its objects as `binary/octet-stream` with no charset, so
+every body is decoded as UTF-8; a body that is not valid UTF-8 is
+`malformed_response`. The served XML goes through the platform's JATS
+converter, under the same rules as Europe PMC's (Swift's abstract holdback
+included). An unreachable bucket is recorded under its service name, so a
+chain that then finds nothing has **not established** an absence; in the apps
+the sentence names the bucket (`not_established_sentence` rows). Paced at 5
+requests per second. Only XML is read: a record without `xml_url` is an
+answer, and the chain goes on to the PDF tiers.
+
 ## Unpaywall PDF
 
 ### API Details
@@ -742,6 +776,14 @@ async function fetch_fulltext(
                 held_abstract = result
             else:
                 return result   # FULLTEXT — nothing beats it
+
+    # 2a. PMC's open-data bucket (#480), when a PMC ID is known and step 2 did
+    #     not return. Its abstract-only deposit is held back as Europe PMC's is.
+    if pmc_id and not returned:
+        bucket = await fetch_pmc_open_data(pmc_id)
+        if bucket is SERVED: (same parse and holdback as step 2, source pmc_open_data)
+        if bucket is UNREACHABLE and europe_pmc_shortfall == null:
+            pmc_open_data_shortfall = bucket.failure   # blocks "no full text"
 
     # 3. Try a free PDF tier (Europe PMC's own render, then Unpaywall).
     #
