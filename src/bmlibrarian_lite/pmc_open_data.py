@@ -17,11 +17,30 @@ The pure functions here are pinned with the Swift and Kotlin ports by
 
 from __future__ import annotations
 
+import logging
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
-from .constants import PMC_OPEN_DATA_BASE_URL, PMC_OPEN_DATA_BUCKET
+import requests
+from urllib3.util.retry import Retry
+
+from .constants import (
+    EUROPEPMC_USER_AGENT,
+    HTTP_NOT_FOUND,
+    PMC_OPEN_DATA_BASE_URL,
+    PMC_OPEN_DATA_BUCKET,
+    PMC_OPEN_DATA_MAX_RETRIES,
+    PMC_OPEN_DATA_REQUEST_TIMEOUT_SECONDS,
+    RETRYABLE_HTTP_STATUSES,
+)
+from .data_models import RequestFailure, RequestFailureKind
+from .europepmc import pmc_accession
+from .polite_session import mount_politely
+from .search_failures import request_failure_from_exception
+
+logger = logging.getLogger(__name__)
+_HTTP_OK = 200
 
 _S3_NAMESPACE = "{http://s3.amazonaws.com/doc/2006-03-01/}"
 _LISTING_TAG = f"{_S3_NAMESPACE}ListBucketResult"
@@ -128,3 +147,152 @@ class PmcOpenDataRecord:
             is_manuscript=_bool_or_none(obj.get("is_manuscript")),
             license_code=licence if isinstance(licence, str) else None,
         )
+
+
+@dataclass(frozen=True)
+class PmcOpenDataFetch:
+    """What asking the bucket for an article's JATS produced.
+
+    The sibling of ``europepmc.FullTextXmlFetch``. ``absent()`` is the
+    bucket's answer that it holds no record (or none naming XML) for the
+    article; a failure is an answer we could not get.
+
+    Attributes:
+        xml: The JATS XML, when served. Never blank.
+        failure: Why it could not be read. ``None`` with no ``xml`` is absent.
+
+    Raises:
+        ValueError: On construction, if both are given or the XML is blank.
+    """
+
+    xml: str | None
+    failure: RequestFailure | None
+
+    def __post_init__(self) -> None:
+        """Refuse the states that would mean two things at once."""
+        if self.xml is not None and self.failure is not None:
+            raise ValueError("A bucket fetch is served or unreachable, never both")
+        if self.xml is not None and not self.xml.strip():
+            raise ValueError("A blank full text is an incomplete answer, not an absence")
+
+    @classmethod
+    def served(cls, xml: str) -> PmcOpenDataFetch:
+        """The bucket served the article's JATS."""
+        return cls(xml=xml, failure=None)
+
+    @classmethod
+    def absent(cls) -> PmcOpenDataFetch:
+        """The bucket holds no XML for this article."""
+        return cls(xml=None, failure=None)
+
+    @classmethod
+    def unreachable(cls, failure: RequestFailure) -> PmcOpenDataFetch:
+        """The bucket's answer is missing, of its real kind."""
+        return cls(xml=None, failure=failure)
+
+    @property
+    def is_unreachable(self) -> bool:
+        """Whether nothing about the article was established."""
+        return self.failure is not None
+
+
+class PmcOpenDataClient:
+    """Asks PMC's open-data bucket for an article's JATS, paced per host."""
+
+    def __init__(
+        self,
+        base_url: str = PMC_OPEN_DATA_BASE_URL,
+        max_retries: int = PMC_OPEN_DATA_MAX_RETRIES,
+    ) -> None:
+        """Create the client.
+
+        Args:
+            base_url: The bucket's address; tests point it at a local server.
+            max_retries: Retries for a 429 or 5xx; tests pass 0.
+        """
+        self._base_url = base_url.rstrip("/")
+        session = requests.Session()
+        session.headers.update({"User-Agent": EUROPEPMC_USER_AGENT})
+        retry = Retry(
+            total=max_retries,
+            backoff_factor=1,
+            status_forcelist=list(RETRYABLE_HTTP_STATUSES),
+            allowed_methods=["GET"],
+            raise_on_status=False,
+        )
+        self._session = mount_politely(session, retry=retry)
+
+    def _get(self, url: str, **params: str) -> requests.Response:
+        """One paced GET."""
+        return self._session.get(
+            url, params=params or None, timeout=PMC_OPEN_DATA_REQUEST_TIMEOUT_SECONDS
+        )
+
+    def fetch_xml(self, pmcid: str) -> PmcOpenDataFetch:
+        """Ask the bucket for the newest version of an article's JATS.
+
+        Args:
+            pmcid: A PMC ID, with or without its ``PMC`` prefix. Anything
+                else (a preprint, a DOI) is never asked: the bucket files by
+                PMC ID only.
+
+        Returns:
+            Served XML; absent (no record, a listing 404, or a record naming
+            no XML); or unreachable, of its real kind.
+        """
+        accession = pmc_accession(pmcid) if pmcid else None
+        if accession is None:
+            return PmcOpenDataFetch.absent()
+        try:
+            listing = self._get(
+                f"{self._base_url}/", **{"list-type": "2", "prefix": f"metadata/{accession}."}
+            )
+            if listing.status_code == HTTP_NOT_FOUND:
+                return PmcOpenDataFetch.absent()
+            if listing.status_code != _HTTP_OK:
+                return PmcOpenDataFetch.unreachable(
+                    RequestFailure(RequestFailureKind.HTTP_STATUS, listing.status_code)
+                )
+            try:
+                key = latest_metadata_key(listing.text, accession)
+            except ValueError:
+                return PmcOpenDataFetch.unreachable(
+                    RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+                )
+            if key is None:
+                return PmcOpenDataFetch.absent()
+
+            metadata = self._get(f"{self._base_url}/{key}")
+            if metadata.status_code != _HTTP_OK:
+                # The listing named it: a 404 here is the bucket disagreeing
+                # with itself, recorded as what we got (#432's rule).
+                return PmcOpenDataFetch.unreachable(
+                    RequestFailure(RequestFailureKind.HTTP_STATUS, metadata.status_code)
+                )
+            try:
+                record = PmcOpenDataRecord.from_metadata(metadata.json())
+            except ValueError:
+                return PmcOpenDataFetch.unreachable(
+                    RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+                )
+            if record.xml_url is None:
+                return PmcOpenDataFetch.absent()
+
+            article = self._get(record.xml_url)
+            if article.status_code != _HTTP_OK:
+                return PmcOpenDataFetch.unreachable(
+                    RequestFailure(RequestFailureKind.HTTP_STATUS, article.status_code)
+                )
+            if not article.text.strip():
+                return PmcOpenDataFetch.unreachable(
+                    RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)
+                )
+            return PmcOpenDataFetch.served(article.text)
+        except requests.exceptions.RequestException as error:
+            failure = request_failure_from_exception(error)
+            logger.warning(
+                "PMC's open-access collection could not be read for %s (%s).",
+                accession,
+                failure.describe(),
+            )
+            return PmcOpenDataFetch.unreachable(failure)
