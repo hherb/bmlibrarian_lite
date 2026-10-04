@@ -19,14 +19,11 @@ AWS bucket incl. author-manuscript text, every Unpaywall/OpenAlex location,
 CORE text and Elsevier with user-entered keys), then a real embedded browser
 (QtWebEngine got PMC hidden and every Cloudflare publisher once shown;
 ScienceDirect needs one tick, so a review queue), with a `challenged` failure
-kind; no client change; obscura stealth got 0/36, not adopted. Playwright is
-stopped by these walls, so never judge a wall by it. Also **#483** (the
-desktop's browser fallback never works; the embedded browser replaces it).
-**Next: implement
+kind; no client change; obscura stealth got 0/36, not adopted. Never judge a
+wall by Playwright. Also **#483** (the desktop's browser fallback never works;
+the embedded browser replaces it). **Next: implement
 `docs/superpowers/specs/2026-10-04-fulltext-machine-channels-design.md`**
-(written; awaiting the maintainer's review, then an implementation plan; stage
-A first). The survey script needs Playwright in the venv, deliberately
-undeclared.
+(awaiting review, then a plan; stage A first).
 
 ## Recently landed (context)
 
