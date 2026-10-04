@@ -50,6 +50,7 @@ from .constants import (
     HTTP_NOT_FOUND,
     SERVICE_EUROPE_PMC,
     SERVICE_CACHED_FULLTEXT,
+    SERVICE_PMC_OPEN_DATA,
     SERVICE_PDF_DOWNLOAD,
     SERVICE_RETRIEVED_PDF,
 )
@@ -75,6 +76,7 @@ from .pdf_utils import (
     save_fulltext_markdown,
     extract_pdf_text,
 )
+from .pmc_open_data import PmcOpenDataClient
 from .pdf_discovery import PDFDiscoverer, DiscoveryResult as PDFDiscoveryResult
 
 logger = logging.getLogger(__name__)
@@ -86,6 +88,7 @@ class FulltextSourceType(Enum):
     CACHED_FULLTEXT = "cached_fulltext"  # Previously cached markdown
     EUROPEPMC_XML = "europepmc_xml"  # Fresh from Europe PMC XML API
     EUROPEPMC_PDF = "europepmc_pdf"  # PDF from Europe PMC (when XML unavailable)
+    PMC_OPEN_DATA_XML = "pmc_open_data_xml"  # PMC's open-data bucket (JATS)
     CACHED_PDF = "cached_pdf"  # Previously cached PDF
     DOWNLOADED_PDF = "downloaded_pdf"  # Freshly downloaded PDF
     ABSTRACT_ONLY = "abstract_only"  # Only abstract available
@@ -193,6 +196,7 @@ class FulltextDiscoverer:
         progress_callback: Optional[Callable[[str, str], None]] = None,
         use_browser_fallback: bool = True,
         browser_headless: bool = False,
+        pmc_open_data: PmcOpenDataClient | None = None,
     ) -> None:
         """
         Initialize full-text discoverer.
@@ -203,6 +207,7 @@ class FulltextDiscoverer:
             progress_callback: Callback for progress updates (stage, status)
             use_browser_fallback: If True, use browser for bot-protected downloads
             browser_headless: If True, run browser without visible window
+            pmc_open_data: The bucket client; tests pass a stub
         """
         self.unpaywall_email = unpaywall_email
         self.openathens_url = openathens_url
@@ -211,6 +216,7 @@ class FulltextDiscoverer:
         self.browser_headless = browser_headless
 
         self._europepmc = EuropePMCClient()
+        self._pmc_open_data = pmc_open_data or PmcOpenDataClient()
         self._cancelled = False
 
     def _emit_progress(self, stage: str, status: str) -> None:
@@ -238,8 +244,9 @@ class FulltextDiscoverer:
         Tries sources in order of preference:
         1. Cached full-text markdown
         2. Europe PMC XML (converted to markdown)
-        3. Cached PDF (extracted to text)
-        4. PDF download (if not skip_pdf)
+        3. PMC's open-data bucket, by PMC ID (JATS, converted to markdown)
+        4. Cached PDF (extracted to text)
+        5. PDF download (if not skip_pdf)
 
         Args:
             doc_dict: Document dictionary with identifiers
@@ -318,6 +325,20 @@ class FulltextDiscoverer:
 
         if self._cancelled:
             return self._cancelled_result(lookups)
+
+        # 2a. PMC's open-data bucket, by PMC ID (#480). After Europe PMC,
+        # whose own text wins; before its PDF render, which answers 403 to
+        # every client (#453). ``_try_europepmc_xml`` writes a PMC ID it
+        # resolved into ``doc_dict``, so a DOI-only document gets here too.
+        bucket_pmcid = doc_dict.get("pmcid") or doc_dict.get("pmc_id")
+        if bucket_pmcid:
+            self._emit_progress("discovery", "checking_pmc_open_data")
+            bucket_result = self._try_pmc_open_data(doc_dict, bucket_pmcid)
+            lookups = lookups.merged(bucket_result.lookups)
+            if bucket_result.success:
+                return bucket_result.with_lookups(result.lookups)
+            if self._cancelled:
+                return self._cancelled_result(lookups)
 
         # 2b. Try Europe PMC PDF render (when XML unavailable but free PDF exists)
         if (result.article_info
@@ -630,6 +651,70 @@ class FulltextDiscoverer:
                     failures=(SourceLookupFailure(SERVICE_EUROPE_PMC, failure),)
                 ),
             )
+
+    def _try_pmc_open_data(
+        self, doc_dict: dict[str, Any], pmcid: str
+    ) -> FulltextResult:
+        """Try PMC's open-data bucket for the article's JATS (#480).
+
+        Args:
+            doc_dict: The document, for the cache path.
+            pmcid: The PMC ID to ask by.
+
+        Returns:
+            The converted text; or a failed result whose record names the
+            bucket when it could not be read or its XML not converted. An
+            absence records nothing: it is the bucket's answer about itself.
+        """
+        fetch = self._pmc_open_data.fetch_xml(pmcid)
+        if fetch.failure is not None:
+            return FulltextResult(
+                success=False,
+                source_type=FulltextSourceType.NOT_ASSESSED,
+                error=(
+                    f"PMC's open-access collection could not be read "
+                    f"({fetch.failure.describe()})."
+                ),
+                lookups=LookupRecord(
+                    failures=(SourceLookupFailure(SERVICE_PMC_OPEN_DATA, fetch.failure),)
+                ),
+            )
+        if fetch.xml is None:
+            return FulltextResult(
+                success=False,
+                source_type=FulltextSourceType.NOT_ASSESSED,
+                error="PMC's open-access collection holds no text for this article.",
+            )
+        markdown_content = self._europepmc.xml_to_markdown(fetch.xml)
+        if not markdown_content.strip():
+            return FulltextResult(
+                success=False,
+                source_type=FulltextSourceType.NOT_ASSESSED,
+                error=(
+                    "PMC's open-access collection's text for this article "
+                    "could not be converted."
+                ),
+                lookups=LookupRecord(
+                    failures=(
+                        SourceLookupFailure(
+                            SERVICE_PMC_OPEN_DATA,
+                            RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
+                        ),
+                    )
+                ),
+            )
+        cache_path: Path | None = None
+        try:
+            cache_path = save_fulltext_markdown(doc_dict, markdown_content)
+        except OSError as e:
+            logger.warning("Could not cache the full text of %s: %s", pmcid, e)
+        logger.info("Retrieved full text from PMC's open-access collection: %s", pmcid)
+        return FulltextResult(
+            success=True,
+            source_type=FulltextSourceType.PMC_OPEN_DATA_XML,
+            markdown_content=markdown_content,
+            file_path=cache_path,
+        )
 
     def _try_europepmc_pdf(
         self,

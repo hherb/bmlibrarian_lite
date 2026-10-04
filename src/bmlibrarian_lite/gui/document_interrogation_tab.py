@@ -940,6 +940,7 @@ class DocumentInterrogationTab(QWidget):
         source_labels = {
             "cached_fulltext": "Full Text (Europe PMC - cached)",
             "europepmc_xml": "Full Text (Europe PMC)",
+            "pmc_open_data_xml": "Full Text (PMC open-access collection)",
             "cached_pdf": "Full Text (PDF - cached)",
             "downloaded_pdf": "Full Text (PDF)",
         }

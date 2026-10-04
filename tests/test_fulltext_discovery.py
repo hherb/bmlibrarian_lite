@@ -40,6 +40,8 @@ from bmlibrarian_lite.fulltext_discovery import (
 )
 import requests
 
+from bmlibrarian_lite.pmc_open_data import PmcOpenDataFetch
+
 from bmlibrarian_lite.data_models import (
     LookupRecord,
     LookupSkipReason,
@@ -415,6 +417,14 @@ def _listed_article() -> ArticleInfo:
     return ArticleInfo(pmid="12345", pmcid="PMC67890", has_fulltext_xml=True)
 
 
+class _AbsentBucket:
+    """PMC's open-data bucket answering "not here"; no request is made."""
+
+    def fetch_xml(self, pmcid: str) -> PmcOpenDataFetch:
+        """Answer that the bucket holds nothing."""
+        return PmcOpenDataFetch.absent()
+
+
 def _discoverer_whose_xml_fetch(
     answer: object, info: ArticleInfo | None = None
 ) -> FulltextDiscoverer:
@@ -439,7 +449,7 @@ def _discoverer_whose_xml_fetch(
     )
     client._session = session_answering(answer)
     client._preprint_xml_session = client._session
-    discoverer = FulltextDiscoverer()
+    discoverer = FulltextDiscoverer(pmc_open_data=_AbsentBucket())  # type: ignore[arg-type]
     discoverer._europepmc = client
     return discoverer
 
@@ -655,7 +665,7 @@ def _discoverer_searching(
     client._session = MagicMock()
     client._preprint_xml_session = client._session
     client._session.get.side_effect = get
-    discoverer = FulltextDiscoverer()
+    discoverer = FulltextDiscoverer(pmc_open_data=_AbsentBucket())  # type: ignore[arg-type]
     discoverer._europepmc = client
     return discoverer
 
