@@ -85,6 +85,14 @@ public actor FullTextService {
     /// seconds (5 + 10 + 20 + 40) before giving up.
     private let europePMCRetry: RetryConfiguration
 
+    /// How each request to PMC's open-data bucket retries a throttle, a 5xx
+    /// or a transient transport failure.
+    ///
+    /// Injectable for the same reason as ``europePMCRetry``: a test pins what a
+    /// 503 that outlasts its retries becomes without sleeping through the
+    /// backoff. Defaults to ``RetryConfiguration/pmcOpenData``, Python's policy.
+    private let pmcOpenDataRetry: RetryConfiguration
+
     /// When the next request to PMC's open-data bucket may go, or `nil`
     /// before the first.
     ///
@@ -130,13 +138,17 @@ public actor FullTextService {
     ///     Defaults to `true`. Mirrors bmlib's `convert_pdfs`.
     ///   - europePMCRetry: How the full-text XML fetch retries a transient
     ///     failure. Defaults to ``RetryConfiguration/serverError``.
+    ///   - pmcOpenDataRetry: How each request to PMC's open-data bucket
+    ///     retries a transient failure. Defaults to
+    ///     ``RetryConfiguration/pmcOpenData``.
     public init(
         email: String,
         session: URLSession = FullTextService.makeSession(),
         europePMCService: EuropePMCService = EuropePMCService(),
         extractor: PDFTextExtracting = PDFKitTextExtractor(),
         extractPDFText: Bool = true,
-        europePMCRetry: RetryConfiguration = .serverError
+        europePMCRetry: RetryConfiguration = .serverError,
+        pmcOpenDataRetry: RetryConfiguration = .pmcOpenData
     ) {
         self.email = email
         self.europePMCService = europePMCService
@@ -144,11 +156,12 @@ public actor FullTextService {
         self.extractor = extractor
         self.extractPDFText = extractPDFText
         self.europePMCRetry = europePMCRetry
+        self.pmcOpenDataRetry = pmcOpenDataRetry
     }
 
     /// The transport production uses.
     ///
-    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:)``
+    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:)``
     /// so a test can
     /// substitute a stubbed `URLSession` without reproducing these timeouts.
     ///
@@ -986,6 +999,9 @@ public actor FullTextService {
             return .served(served)
         } catch where error.isCancellation {
             throw CancellationError()
+        } catch FullTextError.serverError(let statusCode) {
+            // A throttle or server error that outlasted its retries.
+            return .unreachable(.httpStatus(statusCode))
         } catch FullTextError.invalidResponse {
             return .unreachable(.malformedResponse)
         } catch {
@@ -997,15 +1013,35 @@ public actor FullTextService {
     /// S3's `ListObjectsV2` request, the `list-type` the listing asks for.
     private static let s3ListObjectsVersion = "2"
 
-    /// One request to the bucket, paced to `pmcOpenDataMinimumInterval`.
+    /// One request to the bucket, retried per ``pmcOpenDataRetry`` as Python's
+    /// client retries it (429 and 5xx, and transient transport failures).
     ///
     /// - Parameter url: The bucket URL.
-    /// - Returns: The status and body of the answer. Its redirects are
-    ///   followed (the bucket carries no credential), so every status is an
+    /// - Returns: The status and body of the first answer the retry policy
+    ///   does not treat as transient. Its redirects are followed (the bucket
+    ///   carries no credential), so every status is an
     ///   ``RequestFailure/httpStatus(_:)`` answer, as Python records it.
-    /// - Throws: `FullTextError.invalidResponse` when the answer is not HTTP,
-    ///   `CancellationError` from the pacing wait, and the transport's error.
+    /// - Throws: `FullTextError.serverError` for a status in
+    ///   `BioMedLitConstants.retryableStatusCodes` that outlasted its retries,
+    ///   `FullTextError.invalidResponse` when the answer is not HTTP,
+    ///   `CancellationError` from a wait, and the transport's error.
     private func bucketGET(_ url: URL) async throws -> (status: Int, body: Data) {
+        try await RetryHelper.retry(
+            config: pmcOpenDataRetry,
+            shouldRetry: RetryHelper.retryOnlyTransient
+        ) {
+            try await self.bucketAttempt(url)
+        }
+    }
+
+    /// One attempt at a bucket request, paced to `pmcOpenDataMinimumInterval`:
+    /// every attempt, a retry included, takes its own pacing slot.
+    ///
+    /// - Parameter url: The bucket URL.
+    /// - Returns: The status and body of an answer that is not transient.
+    /// - Throws: `FullTextError.serverError` for a retryable status, so the
+    ///   retry sees it; otherwise as ``bucketGET(_:)``.
+    private func bucketAttempt(_ url: URL) async throws -> (status: Int, body: Data) {
         let now = Date()
         let slot = max(now, nextBucketRequest ?? now)
         nextBucketRequest = slot.addingTimeInterval(BioMedLitConstants.pmcOpenDataMinimumInterval)
@@ -1018,6 +1054,9 @@ public actor FullTextService {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw FullTextError.invalidResponse("Not an HTTP response")
+        }
+        if BioMedLitConstants.retryableStatusCodes.contains(http.statusCode) {
+            throw FullTextError.serverError(statusCode: http.statusCode)
         }
         return (http.statusCode, data)
     }

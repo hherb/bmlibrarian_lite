@@ -45,15 +45,24 @@ final class FullTextServicePMCOpenDataTests: XCTestCase {
     override func setUp() { super.setUp(); StubURLProtocol.reset() }
     override func tearDown() { StubURLProtocol.reset(); super.tearDown() }
 
-    private func service() -> FullTextService {
+    /// Retries with no wait, so a test of the policy does not sleep.
+    private static func immediateRetry(attempts: Int) -> RetryConfiguration {
+        RetryConfiguration(maxAttempts: attempts, initialDelay: 0, maxDelay: 0,
+                           backoffMultiplier: 1, jitterFactor: 0)
+    }
+
+    private func service(bucketAttempts: Int = 1) -> FullTextService {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]
         let session = URLSession(configuration: config)
         return FullTextService(email: "reader@example.org", session: session,
                                europePMCService: EuropePMCService(session: session),
-                               europePMCRetry: RetryConfiguration(maxAttempts: 1, initialDelay: 0,
-                                                                  maxDelay: 0, backoffMultiplier: 1,
-                                                                  jitterFactor: 0))
+                               europePMCRetry: Self.immediateRetry(attempts: 1),
+                               pmcOpenDataRetry: Self.immediateRetry(attempts: bucketAttempts))
+    }
+
+    private func listingRequests() -> Int {
+        StubURLProtocol.requestedURLs.filter { $0.contains(listingRoute) }.count
     }
 
     private func routeBucket() {
@@ -331,6 +340,59 @@ final class FullTextServicePMCOpenDataTests: XCTestCase {
         let preprint = try await service().fetchPMCOpenDataXML(pmcid: "PPR1316954")
         XCTAssertEqual(preprint, .absent)
         XCTAssertTrue(StubURLProtocol.requestedURLs.isEmpty, "\(StubURLProtocol.requestedURLs)")
+    }
+
+    // MARK: - Retries
+
+    /// A transient 503 on the listing is retried, as Python's client does,
+    /// and the article is served; each attempt still takes a pacing slot.
+    func testATransient503IsRetriedAndServed() async throws {
+        routeBucket()
+        StubURLProtocol.sequences[listingRoute] = [(503, Data())]
+        let start = Date()
+        let fetch = try await service(bucketAttempts: 3).fetchPMCOpenDataXML(pmcid: pmcid)
+        guard case .served = fetch else { return XCTFail("got \(fetch)") }
+        XCTAssertEqual(listingRequests(), 2)
+        // Four requests (503, listing, record, XML): three paced gaps.
+        XCTAssertGreaterThanOrEqual(
+            Date().timeIntervalSince(start), 3 * BioMedLitConstants.pmcOpenDataMinimumInterval * 0.9)
+    }
+
+    /// A 503 that outlasts its retries reads as that 503, after every attempt.
+    func testA503ThatOutlastsItsRetriesIsUnreachable() async throws {
+        routeBucket()
+        StubURLProtocol.routes[listingRoute] = (503, Data())
+        let fetch = try await service(bucketAttempts: 3).fetchPMCOpenDataXML(pmcid: pmcid)
+        XCTAssertEqual(fetch, .unreachable(.httpStatus(503)))
+        XCTAssertEqual(listingRequests(), 3)
+    }
+
+    /// Every step retries: a 429 on the XML, then the article.
+    func testAThrottledXMLIsRetried() async throws {
+        routeBucket()
+        StubURLProtocol.sequences[xmlRoute] = [(429, Data())]
+        let fetch = try await service(bucketAttempts: 2).fetchPMCOpenDataXML(pmcid: pmcid)
+        guard case .served = fetch else { return XCTFail("got \(fetch)") }
+    }
+
+    /// The controls: an answer is not retried. A listing 404 is the bucket's
+    /// absence, and a 403 is unreachable, each after one request.
+    func testAnAnswerIsNotRetried() async throws {
+        for (status, expected) in [(404, PMCOpenDataFetch.absent),
+                                   (403, .unreachable(.httpStatus(403)))] {
+            StubURLProtocol.reset()
+            StubURLProtocol.routes[listingRoute] = (status, Data())
+            let fetch = try await service(bucketAttempts: 3).fetchPMCOpenDataXML(pmcid: pmcid)
+            XCTAssertEqual(fetch, expected, "\(status)")
+            XCTAssertEqual(listingRequests(), 1, "\(status)")
+        }
+    }
+
+    /// Production's default is Python's policy: three retries.
+    func testTheDefaultPolicyIsPythons() {
+        XCTAssertEqual(RetryConfiguration.pmcOpenData.maxAttempts, 4)
+        XCTAssertEqual(RetryConfiguration.pmcOpenData.initialDelay, 1)
+        XCTAssertEqual(RetryConfiguration.pmcOpenData.backoffMultiplier, 2)
     }
 
     func testRequestsArePaced() async throws {

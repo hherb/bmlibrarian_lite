@@ -79,6 +79,17 @@ public struct RetryConfiguration: Sendable {
         jitterFactor: 0.2
     )
 
+    /// Configuration for PMC's open-data bucket (#480), Python's policy for
+    /// it: `Retry(total=3, backoff_factor=1)`, so four attempts with a delay
+    /// of about one second, doubling.
+    public static let pmcOpenData = RetryConfiguration(
+        maxAttempts: 4,
+        initialDelay: 1.0,
+        maxDelay: 30.0,
+        backoffMultiplier: 2.0,
+        jitterFactor: 0.2
+    )
+
     /// Configuration for PDF downloads (longer timeouts).
     public static let pdfDownload = RetryConfiguration(
         maxAttempts: 3,
