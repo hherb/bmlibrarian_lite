@@ -336,7 +336,7 @@ class FulltextDiscoverer:
             bucket_result = self._try_pmc_open_data(doc_dict, bucket_pmcid)
             lookups = lookups.merged(bucket_result.lookups)
             if bucket_result.success:
-                return bucket_result.with_lookups(result.lookups)
+                return bucket_result.with_lookups(lookups)
             if self._cancelled:
                 return self._cancelled_result(lookups)
 

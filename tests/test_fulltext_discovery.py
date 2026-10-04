@@ -402,7 +402,7 @@ class TestFulltextDiscovererDiscover:
             mock_client.fetch_article_info.return_value = ArticleInfoFetch.served(mock_info)
             mock_client_class.return_value = mock_client
 
-            discoverer = FulltextDiscoverer()
+            discoverer = FulltextDiscoverer(pmc_open_data=_AbsentBucket())  # type: ignore[arg-type]
             discoverer._europepmc = mock_client
 
             doc_dict = {"pmid": "12345"}

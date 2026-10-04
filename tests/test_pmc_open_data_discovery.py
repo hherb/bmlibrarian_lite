@@ -197,3 +197,22 @@ def test_europe_pmcs_own_failure_still_travels(monkeypatch: pytest.MonkeyPatch, 
     result = discoverer.discover_fulltext(pmcid="PMC123", skip_pdf=True)
 
     assert europepmc_failure in result.lookups.failures
+
+
+def test_a_served_bucket_result_still_carries_europe_pmcs_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Text from the bucket does not erase what Europe PMC left unsettled."""
+    bucket = _StubBucket(PmcOpenDataFetch.served(_JATS))
+    discoverer = _discoverer(bucket, monkeypatch, tmp_path)
+    europepmc_failure = SourceLookupFailure(SERVICE_EUROPE_PMC, _THROTTLED)
+    discoverer._try_europepmc_xml = lambda *_a, **_k: FulltextResult(  # type: ignore[method-assign]
+        success=False,
+        source_type=FulltextSourceType.NOT_ASSESSED,
+        lookups=LookupRecord(failures=(europepmc_failure,)),
+    )
+
+    result = discoverer.discover_fulltext(pmcid="PMC123", skip_pdf=True)
+
+    assert result.success
+    assert europepmc_failure in result.lookups.failures
