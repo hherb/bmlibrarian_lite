@@ -1071,6 +1071,8 @@ PMC_OPEN_DATA_BASE_URL = f"https://{PMC_OPEN_DATA_HOST}"
 PMC_OPEN_DATA_BUCKET = "pmc-oa-opendata"
 PMC_OPEN_DATA_REQUEST_TIMEOUT_SECONDS = 45
 PMC_OPEN_DATA_MAX_RETRIES = 3
+# S3 serves the bucket as binary/octet-stream with no charset; JATS is UTF-8.
+PMC_OPEN_DATA_ENCODING = "utf-8"
 # The page Unpaywall names when it knows of an open-access copy but not of a
 # PDF URL for it, read for the PDF it declares (#464).
 SERVICE_UNPAYWALL_LANDING_PAGE = "the open-access copy's landing page"

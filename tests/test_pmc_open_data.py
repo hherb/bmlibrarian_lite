@@ -241,6 +241,51 @@ class TestFetchXml:
 
         assert parameters == {"list-type": ["2"], "prefix": ["metadata/PMC10358571."]}
 
+    def test_non_ascii_text_survives_an_unlabelled_body(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """S3 sends binary/octet-stream with no charset: the text is not guessed."""
+        article = "<article><body><p>Müller’s cohort — 95 % CI</p></body></article>"
+        answer = ScriptedAnswer(HTTPStatus.OK, article.encode("utf-8"), "binary/octet-stream")
+        with running(
+            {"/": [xml_answer(_LISTING)], _KEY_PATH: [_metadata()], _XML_PATH: [answer]}
+        ) as server:
+            monkeypatch.setattr(
+                "bmlibrarian_lite.pmc_open_data.PMC_OPEN_DATA_BASE_URL", server.url
+            )
+            fetch = _client(server.url).fetch_xml(_PMCID)
+
+        assert fetch == PmcOpenDataFetch.served(article)
+
+    def test_a_body_that_is_not_utf8_is_malformed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unreadable is not absent, and never mojibake."""
+        answer = ScriptedAnswer(
+            HTTPStatus.OK, b"<article>\xff\xfe</article>", "binary/octet-stream"
+        )
+        with running(
+            {"/": [xml_answer(_LISTING)], _KEY_PATH: [_metadata()], _XML_PATH: [answer]}
+        ) as server:
+            monkeypatch.setattr(
+                "bmlibrarian_lite.pmc_open_data.PMC_OPEN_DATA_BASE_URL", server.url
+            )
+            fetch = _client(server.url).fetch_xml(_PMCID)
+
+        assert fetch == PmcOpenDataFetch.unreachable(
+            RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+        )
+
+    def test_a_listing_that_is_not_utf8_is_malformed(self) -> None:
+        """The same rule for the listing."""
+        answer = ScriptedAnswer(HTTPStatus.OK, b"\xff\xfe", "binary/octet-stream")
+        with running({"/": [answer]}) as server:
+            fetch = _client(server.url).fetch_xml(_PMCID)
+
+        assert fetch == PmcOpenDataFetch.unreachable(
+            RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+        )
+
 
 class TestFetchInvariants:
     """The typed fetch refuses states that mean two things."""

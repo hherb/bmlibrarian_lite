@@ -30,6 +30,7 @@ from .constants import (
     HTTP_NOT_FOUND,
     PMC_OPEN_DATA_BASE_URL,
     PMC_OPEN_DATA_BUCKET,
+    PMC_OPEN_DATA_ENCODING,
     PMC_OPEN_DATA_MAX_RETRIES,
     PMC_OPEN_DATA_REQUEST_TIMEOUT_SECONDS,
     RETRYABLE_HTTP_STATUSES,
@@ -254,8 +255,10 @@ class PmcOpenDataClient:
                     RequestFailure(RequestFailureKind.HTTP_STATUS, listing.status_code)
                 )
             try:
-                key = latest_metadata_key(listing.text, accession)
-            except ValueError:
+                key = latest_metadata_key(
+                    listing.content.decode(PMC_OPEN_DATA_ENCODING), accession
+                )
+            except ValueError:  # includes UnicodeDecodeError
                 return PmcOpenDataFetch.unreachable(
                     RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
                 )
@@ -283,11 +286,18 @@ class PmcOpenDataClient:
                 return PmcOpenDataFetch.unreachable(
                     RequestFailure(RequestFailureKind.HTTP_STATUS, article.status_code)
                 )
-            if not article.text.strip():
+            # Decoded explicitly: S3 names no charset, so ``.text`` would guess.
+            try:
+                text = article.content.decode(PMC_OPEN_DATA_ENCODING)
+            except UnicodeDecodeError:
+                return PmcOpenDataFetch.unreachable(
+                    RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+                )
+            if not text.strip():
                 return PmcOpenDataFetch.unreachable(
                     RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE)
                 )
-            return PmcOpenDataFetch.served(article.text)
+            return PmcOpenDataFetch.served(text)
         except requests.exceptions.RequestException as error:
             failure = request_failure_from_exception(error)
             logger.warning(
