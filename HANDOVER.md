@@ -22,8 +22,11 @@ ScienceDirect needs one tick, so a review queue), with a `challenged` failure
 kind; no client change; obscura stealth got 0/36, not adopted. Playwright is
 stopped by these walls, so never judge a wall by it. Also **#483** (the
 desktop's browser fallback never works; the embedded browser replaces it).
-**Next: the machine-channels design spec.** The survey script needs Playwright
-in the venv, deliberately undeclared.
+**Next: implement
+`docs/superpowers/specs/2026-10-04-fulltext-machine-channels-design.md`**
+(written; awaiting the maintainer's review, then an implementation plan; stage
+A first). The survey script needs Playwright in the venv, deliberately
+undeclared.
 
 ## Recently landed (context)
 
