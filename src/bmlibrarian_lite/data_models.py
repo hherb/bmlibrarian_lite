@@ -337,6 +337,10 @@ class SourceLookupFailure:
         failure: Why, carrying the kind and HTTP status only -- never the
             provider's text, which for Unpaywall embeds the user's email
             address (#330).
+        address: The PDF a lookup tried, for a PDF a source named that we
+            could not obtain (#480, stage B); ``None`` for a service's own
+            lookup. Stripped on construction; blank is ``None``. The reader
+            is told its host (``analysis_failures.address_host``).
 
     Raises:
         ValueError: On construction, if the service is not named. A failure
@@ -345,12 +349,16 @@ class SourceLookupFailure:
 
     service: str
     failure: RequestFailure
+    address: str | None = None
 
     def __post_init__(self) -> None:
         """Refuse a failure that names no service, and normalise the name."""
         if not self.service or not self.service.strip():
             raise ValueError("A source lookup failure names the service it asked")
         object.__setattr__(self, "service", self.service.strip())
+        if self.address is not None:
+            stripped = self.address.strip()
+            object.__setattr__(self, "address", stripped or None)
 
 
 class LookupSkipReason(Enum):
@@ -386,6 +394,13 @@ class LookupSkipReason(Enum):
     #: the apps set no size limit.
     OVER_SIZE_LIMIT = "over_size_limit"
 
+    #: The source served the PDF and this application could not save it: a
+    #: fault of ours, not the source's answer. The copy exists, so it is told
+    #: as a caching note of its own (``analysis_failures.not_saved_note``),
+    #: never as an access shortfall; it is still unread, so it keeps the
+    #: discovery from concluding the article has no full text (#480).
+    NOT_SAVED = "not_saved"
+
 
 #: What each skip reason tells the reader, as a parenthetical in the clause.
 #: The wording is here rather than in the sentence builder so that the enum
@@ -395,6 +410,7 @@ _SKIP_REASONS: dict[LookupSkipReason, str] = {
     LookupSkipReason.NO_IDENTIFIER: "no identifier to ask it about",
     LookupSkipReason.NOT_REQUESTED: "not requested on this run",
     LookupSkipReason.OVER_SIZE_LIMIT: "larger than the download limit",
+    LookupSkipReason.NOT_SAVED: "served, but could not be saved on this device",
 }
 
 # The wording map is what :meth:`SourceLookupSkipped.describe` indexes, and
@@ -422,6 +438,10 @@ class SourceLookupSkipped:
             it, for example ``"Unpaywall"``. Stripped on construction,
             because equality of this string is the grouping contract.
         reason: Why it was not asked.
+        address: The PDF a lookup tried, for a PDF a source named that we
+            could not obtain (#480, stage B); ``None`` for a service's own
+            lookup. Stripped on construction; blank is ``None``. The reader
+            is told its host (``analysis_failures.address_host``).
 
     Raises:
         ValueError: On construction, if the service is not named. A skip the
@@ -430,12 +450,16 @@ class SourceLookupSkipped:
 
     service: str
     reason: LookupSkipReason
+    address: str | None = None
 
     def __post_init__(self) -> None:
         """Refuse a skip that names no service, and normalise the name."""
         if not self.service or not self.service.strip():
             raise ValueError("A skipped source lookup names the service it skipped")
         object.__setattr__(self, "service", self.service.strip())
+        if self.address is not None:
+            stripped = self.address.strip()
+            object.__setattr__(self, "address", stripped or None)
 
     def describe(self) -> str:
         """Say why this source was not asked, in the reader's words.

@@ -1,0 +1,430 @@
+{
+  "schema_version": 1,
+  "description": "What the reader is told once open-access PDFs were tried and none obtained (#480 stage B, maintainer's decision 2026-10-05), the caching note for a PDF served but not saved (decision 3), and the apps' stored list (schema 2). Read by tests/test_open_access_statement.py (Python: hosts, statements, not_saved_note), Packages/BioMedLit OpenAccessStatementContractTests and Android OpenAccessStatementContractTest (every table). The rules are in doc/cross_platform/fulltext_retrieval.md, 'Tried sources (#480)'. An entry is a lookup (source, kind and status_code, or skipped) or a tried PDF (unpaywall_pdf or openalex_pdf with an address). statements: with a tried PDF, 'Failed to obtain a PDF from the following tried sources: ' and each entry, in chain order (unpaywall, unpaywall_landing_page, unpaywall_pdf, openalex, openalex_pdf; stable), a PDF as '{host}, named by {Unpaywall|OpenAlex} ({reason})', a lookup once per service as '{name} ({reason})' (Python's _unsettled picks the reason), then the ending ('A freely available copy may exist. ' only if an entry could not be asked) and the configuration nudge; without one, Python's grouped unestablished_access_clause. hosts: the address's host, lower-cased, else the address trimmed. persisted.written: a single entry without an address keeps schema 1 (open_access_unsettled_notice.json); anything else is schema 2. persisted.read: every stored value reads as some shortfall. Add a row here, not a test on one platform.",
+  "lead": "Failed to obtain a PDF from the following tried sources: ",
+  "hosts": [
+    {
+      "address": "https://Walled.Example.org/a.pdf",
+      "host": "walled.example.org"
+    },
+    {
+      "address": "http://real.mtak.hu/138217/1/article-p187.pdf",
+      "host": "real.mtak.hu"
+    },
+    {
+      "address": "ftp://repo.example.org/x.pdf",
+      "host": "repo.example.org"
+    },
+    {
+      "address": " /bitstream/a.pdf ",
+      "host": "/bitstream/a.pdf"
+    },
+    {
+      "address": "https://repo.example.org:8443/a.pdf",
+      "host": "repo.example.org"
+    },
+    {
+      "address": "not a url",
+      "host": "not a url"
+    }
+  ],
+  "statements": [
+    {
+      "name": "one PDF refused",
+      "entries": [
+        {
+          "source": "unpaywall_pdf",
+          "kind": "http_status",
+          "status_code": 403,
+          "address": "https://walled.example.org/a.pdf"
+        }
+      ],
+      "statement": "Failed to obtain a PDF from the following tried sources: walled.example.org, named by Unpaywall (HTTP 403 Forbidden). Whether this document is open access was not established."
+    },
+    {
+      "name": "two Unpaywall PDFs and an unreachable OpenAlex",
+      "entries": [
+        {
+          "source": "unpaywall_pdf",
+          "kind": "http_status",
+          "status_code": 403,
+          "address": "https://walled.example.org/a.pdf"
+        },
+        {
+          "source": "unpaywall_pdf",
+          "kind": "malformed_response",
+          "status_code": null,
+          "address": "https://repo.example.org/b.pdf"
+        },
+        {
+          "source": "openalex",
+          "kind": "timeout",
+          "status_code": null
+        }
+      ],
+      "statement": "Failed to obtain a PDF from the following tried sources: walled.example.org, named by Unpaywall (HTTP 403 Forbidden); repo.example.org, named by Unpaywall (the response could not be read); OpenAlex (the request timed out). A freely available copy may exist. Whether this document is open access was not established."
+    },
+    {
+      "name": "chain order, whatever the order given",
+      "entries": [
+        {
+          "source": "openalex_pdf",
+          "kind": "http_status",
+          "status_code": 404,
+          "address": "https://oa.example.org/c.pdf"
+        },
+        {
+          "source": "unpaywall_pdf",
+          "kind": "http_status",
+          "status_code": 403,
+          "address": "https://walled.example.org/a.pdf"
+        }
+      ],
+      "statement": "Failed to obtain a PDF from the following tried sources: walled.example.org, named by Unpaywall (HTTP 403 Forbidden); oa.example.org, named by OpenAlex (HTTP 404 Not Found). Whether this document is open access was not established."
+    },
+    {
+      "name": "Unpaywall not configured, then OpenAlex's PDF refused",
+      "entries": [
+        {
+          "source": "unpaywall",
+          "skipped": "not_configured"
+        },
+        {
+          "source": "openalex_pdf",
+          "kind": "http_status",
+          "status_code": 403,
+          "address": "https://repo.example.org/b.pdf"
+        }
+      ],
+      "statement": "Failed to obtain a PDF from the following tried sources: Unpaywall (not configured); repo.example.org, named by OpenAlex (HTTP 403 Forbidden). A freely available copy may exist. Whether this document is open access was not established. Configuring Unpaywall would add an open-access route this search did not have."
+    },
+    {
+      "name": "an unread landing page, then OpenAlex's PDF not a PDF",
+      "entries": [
+        {
+          "source": "unpaywall_landing_page",
+          "kind": "http_status",
+          "status_code": 502
+        },
+        {
+          "source": "openalex_pdf",
+          "kind": "malformed_response",
+          "status_code": null,
+          "address": "https://oa.example.org/c.pdf"
+        }
+      ],
+      "statement": "Failed to obtain a PDF from the following tried sources: the open-access copy's landing page (HTTP 502 Bad Gateway); oa.example.org, named by OpenAlex (the response could not be read). A freely available copy may exist. Whether this document is open access was not established."
+    },
+    {
+      "name": "an address with no host is named as given",
+      "entries": [
+        {
+          "source": "unpaywall_pdf",
+          "kind": "request_failed",
+          "status_code": null,
+          "address": " /bitstream/a.pdf "
+        }
+      ],
+      "statement": "Failed to obtain a PDF from the following tried sources: /bitstream/a.pdf, named by Unpaywall (the request failed). A freely available copy may exist. Whether this document is open access was not established."
+    },
+    {
+      "name": "a lookup named once, by the failure that left it open",
+      "entries": [
+        {
+          "source": "openalex",
+          "kind": "http_status",
+          "status_code": 400
+        },
+        {
+          "source": "openalex",
+          "kind": "timeout",
+          "status_code": null
+        },
+        {
+          "source": "openalex_pdf",
+          "kind": "http_status",
+          "status_code": 403,
+          "address": "https://oa.example.org/c.pdf"
+        }
+      ],
+      "statement": "Failed to obtain a PDF from the following tried sources: OpenAlex (the request timed out); oa.example.org, named by OpenAlex (HTTP 403 Forbidden). A freely available copy may exist. Whether this document is open access was not established."
+    },
+    {
+      "name": "lookups only: Python's grouped sentence",
+      "entries": [
+        {
+          "source": "unpaywall",
+          "kind": "timeout",
+          "status_code": null
+        },
+        {
+          "source": "openalex",
+          "kind": "http_status",
+          "status_code": 503
+        }
+      ],
+      "statement": "Unpaywall (the request timed out) and OpenAlex (HTTP 503 Service Unavailable) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."
+    },
+    {
+      "name": "lookups only, one answered",
+      "entries": [
+        {
+          "source": "unpaywall",
+          "skipped": "not_configured"
+        },
+        {
+          "source": "openalex",
+          "kind": "http_status",
+          "status_code": 400
+        }
+      ],
+      "statement": "Unpaywall (not configured) could not be asked, and OpenAlex (HTTP 400 Bad Request) did not serve it, so a freely available copy may exist. Whether this document is open access was not established. Configuring Unpaywall would add an open-access route this search did not have."
+    },
+    {
+      "name": "one lookup: today's sentence",
+      "entries": [
+        {
+          "source": "openalex",
+          "kind": "timeout",
+          "status_code": null
+        }
+      ],
+      "statement": "OpenAlex (the request timed out) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."
+    }
+  ],
+  "not_saved_note": [
+    {
+      "address": "https://repo.example.org/b.pdf",
+      "link_kept": true,
+      "note": "A PDF of this article was found at repo.example.org but could not be saved on this device, so only its link is kept. Check the free storage space and try again."
+    },
+    {
+      "address": "https://repo.example.org/b.pdf",
+      "link_kept": false,
+      "note": "A PDF of this article was found at repo.example.org but could not be saved on this device, so it could not be read. Check the free storage space and try again."
+    }
+  ],
+  "persisted": {
+    "written": [
+      {
+        "name": "one lookup keeps schema 1",
+        "entries": [
+          {
+            "source": "openalex",
+            "kind": "timeout",
+            "status_code": null
+          }
+        ],
+        "stored": {
+          "schema_version": 1,
+          "source": "openalex",
+          "failure": {
+            "kind": "timeout",
+            "status_code": null
+          }
+        }
+      },
+      {
+        "name": "a tried PDF is schema 2",
+        "entries": [
+          {
+            "source": "unpaywall_pdf",
+            "kind": "http_status",
+            "status_code": 403,
+            "address": "https://walled.example.org/a.pdf"
+          }
+        ],
+        "stored": {
+          "schema_version": 2,
+          "entries": [
+            {
+              "source": "unpaywall_pdf",
+              "address": "https://walled.example.org/a.pdf",
+              "failure": {
+                "kind": "http_status",
+                "status_code": 403
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "a skip and a tried PDF",
+        "entries": [
+          {
+            "source": "unpaywall",
+            "skipped": "not_configured"
+          },
+          {
+            "source": "openalex_pdf",
+            "kind": "http_status",
+            "status_code": 403,
+            "address": "https://repo.example.org/b.pdf"
+          }
+        ],
+        "stored": {
+          "schema_version": 2,
+          "entries": [
+            {
+              "source": "unpaywall",
+              "skipped": "not_configured"
+            },
+            {
+              "source": "openalex_pdf",
+              "address": "https://repo.example.org/b.pdf",
+              "failure": {
+                "kind": "http_status",
+                "status_code": 403
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "two lookups are schema 2",
+        "entries": [
+          {
+            "source": "unpaywall",
+            "kind": "timeout",
+            "status_code": null
+          },
+          {
+            "source": "openalex",
+            "kind": "http_status",
+            "status_code": 503
+          }
+        ],
+        "stored": {
+          "schema_version": 2,
+          "entries": [
+            {
+              "source": "unpaywall",
+              "failure": {
+                "kind": "timeout",
+                "status_code": null
+              }
+            },
+            {
+              "source": "openalex",
+              "failure": {
+                "kind": "http_status",
+                "status_code": 503
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "read": [
+      {
+        "name": "a schema 1 record is one entry",
+        "stored": "{\"schema_version\":1,\"source\":\"unpaywall_pdf\",\"failure\":{\"kind\":\"http_status\",\"status_code\":403}}",
+        "entries": [
+          {
+            "source": "unpaywall_pdf",
+            "kind": "http_status",
+            "status_code": 403
+          }
+        ]
+      },
+      {
+        "name": "a schema 2 record",
+        "stored": "{\"schema_version\":2,\"entries\":[{\"source\":\"unpaywall_pdf\",\"address\":\"https://walled.example.org/a.pdf\",\"failure\":{\"kind\":\"http_status\",\"status_code\":403}},{\"source\":\"openalex\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}]}",
+        "entries": [
+          {
+            "source": "unpaywall_pdf",
+            "kind": "http_status",
+            "status_code": 403,
+            "address": "https://walled.example.org/a.pdf"
+          },
+          {
+            "source": "openalex",
+            "kind": "timeout",
+            "status_code": null
+          }
+        ]
+      },
+      {
+        "name": "an entry that is not an object reads as a failed request",
+        "stored": "{\"schema_version\":2,\"entries\":[7,{\"source\":\"openalex\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}]}",
+        "entries": [
+          {
+            "source": "unpaywall",
+            "kind": "request_failed",
+            "status_code": null
+          },
+          {
+            "source": "openalex",
+            "kind": "timeout",
+            "status_code": null
+          }
+        ]
+      },
+      {
+        "name": "an unknown source reads as Unpaywall's",
+        "stored": "{\"schema_version\":2,\"entries\":[{\"source\":\"quantum\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}]}",
+        "entries": [
+          {
+            "source": "unpaywall",
+            "kind": "timeout",
+            "status_code": null
+          }
+        ]
+      },
+      {
+        "name": "a blank address is no address",
+        "stored": "{\"schema_version\":2,\"entries\":[{\"source\":\"unpaywall_pdf\",\"address\":\"  \",\"failure\":{\"kind\":\"http_status\",\"status_code\":403}}]}",
+        "entries": [
+          {
+            "source": "unpaywall_pdf",
+            "kind": "http_status",
+            "status_code": 403
+          }
+        ]
+      },
+      {
+        "name": "no entries reads as a failed request",
+        "stored": "{\"schema_version\":2,\"entries\":[]}",
+        "entries": [
+          {
+            "source": "unpaywall",
+            "kind": "request_failed",
+            "status_code": null
+          }
+        ]
+      },
+      {
+        "name": "entries that are not a list read as a failed request",
+        "stored": "{\"schema_version\":2,\"entries\":{}}",
+        "entries": [
+          {
+            "source": "unpaywall",
+            "kind": "request_failed",
+            "status_code": null
+          }
+        ]
+      },
+      {
+        "name": "an unknown schema reads as a failed request",
+        "stored": "{\"schema_version\":3,\"entries\":[]}",
+        "entries": [
+          {
+            "source": "unpaywall",
+            "kind": "request_failed",
+            "status_code": null
+          }
+        ]
+      },
+      {
+        "name": "a stored skip in schema 2",
+        "stored": "{\"schema_version\":2,\"entries\":[{\"source\":\"unpaywall\",\"skipped\":\"not_configured\"}]}",
+        "entries": [
+          {
+            "source": "unpaywall",
+            "skipped": "not_configured"
+          }
+        ]
+      }
+    ]
+  }
+}
