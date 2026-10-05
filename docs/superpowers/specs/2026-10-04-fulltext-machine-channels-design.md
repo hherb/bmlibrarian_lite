@@ -163,6 +163,18 @@ audit say where it came from. The XML is not truncated (golden rule 13).
   not "no copy", under a new source, "OpenAlex's copy" (`openalex_pdf`). This
   mirrors `unpaywall_pdf` (#478).
 
+**As built.** The binding rules are in `doc/cross_platform/fulltext_retrieval.md`
+("OpenAlex's Locations", "Tried sources (#480)") and
+`fulltext_parity/openalex_locations.json`; where this section differs, they win.
+- Every `pdf_url` counts, whatever its `is_oa`.
+- OpenAlex is asked only once no Unpaywall PDF was served (Android through a
+  hook in its download step).
+- When no PDF is obtained, every source tried is told, each PDF by host and by
+  who named it; not only the earliest failure, as this section first said.
+- The first copy served ends the walk. One not saved is a caching note of its
+  own, stored on the document in the apps, never a shortfall.
+- `select=locations` is asked for.
+
 ## Stage C: CORE and Elsevier
 
 **CORE.**

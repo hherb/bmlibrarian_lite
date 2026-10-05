@@ -8,14 +8,18 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Machine channels, stage B: every Unpaywall location in the apps, then
-OpenAlex** (#480), branch `feat/machine-channels-stage-b-480`. Spec
-`docs/superpowers/specs/2026-10-04-fulltext-machine-channels-design.md`
-("Stage B"); plan `docs/superpowers/plans/2026-10-05-fulltext-machine-channels-stage-b.md`
-(15 tasks; maintainer's decisions of 2026-10-05 folded in: OpenAlex only when
-no Unpaywall copy was served, a composite "tried sources" statement listing
-each PDF by host, a caching note for a PDF served but not saved, one PR). Stage C (CORE, Elsevier, keys in settings) follows; then the
-embedded browser and review queue with the `challenged` kind.
+**Machine channels, stage B: every Unpaywall PDF in the apps, then OpenAlex's**
+(#480): done on `feat/machine-channels-stage-b-480`, PR to be opened (refs
+#480, never closes it). Contract `fulltext_retrieval.md` "Tried sources (#480)"
+and "OpenAlex's Locations"; fixtures `open_access_statement.json`,
+`openalex_locations.json`. **Binds:** with a tried PDF, every source tried is
+listed ("Failed to obtain a PDF from the following tried sources: …", each PDF
+by host and who named it, chain order); lookup-only keeps the grouped sentence.
+The first copy served ends the walk; one not saved is a caching note, never a
+shortfall (Python `NOT_SAVED`; apps `fullTextPDFNotSavedFrom`, Room 9).
+OpenAlex only when no Unpaywall PDF was served. Stored shortfall: v1 for one
+address-less entry, else v2 `entries`. **Next: stage C (CORE, Elsevier, keys
+in settings)**; then the embedded browser and review queue (`challenged`).
 
 ## Recently landed (context)
 
