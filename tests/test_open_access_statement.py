@@ -23,11 +23,14 @@ from bmlibrarian_lite.analysis_failures import (
     address_host,
     not_saved_note,
     paywall_message,
+    refused_access_sentence,
     tried_sources_statement,
     unestablished_access_clause,
+    unsettled_lookups_clause,
     with_unestablished_access,
 )
 from bmlibrarian_lite.constants import (
+    SERVICE_DOI_RESOLVER,
     SERVICE_OPENALEX,
     SERVICE_OPENALEX_PDF,
     SERVICE_UNPAYWALL,
@@ -151,3 +154,83 @@ def test_the_contract_has_rows() -> None:
     """The contract is not accidentally emptied."""
     assert len(CONTRACT["statements"]) >= 8
     assert len(CONTRACT["hosts"]) >= 5
+
+
+def _timeout(service: str, address: str | None = None) -> SourceLookupFailure:
+    """A timed-out lookup, of a PDF when an address is given."""
+    return SourceLookupFailure(service, RequestFailure(RequestFailureKind.TIMEOUT), address)
+
+
+def test_a_refusal_with_only_a_note_left_is_the_bare_refusal_and_the_note() -> None:
+    """No access shortfall remains, so no empty clause is built (#480)."""
+    record = _not_saved()
+    assert refused_access_sentence(record) == (
+        f"A source refused access to this document. {not_saved_note(record)}"
+    )
+
+
+def test_a_refusal_with_a_lookup_and_a_note() -> None:
+    """The grouped sentence, then the note."""
+    record = LookupRecord((_timeout(SERVICE_OPENALEX),)).merged(_not_saved())
+    sentence = refused_access_sentence(record)
+    assert sentence.startswith("A source refused access to this document, but OpenAlex")
+    assert sentence.endswith(not_saved_note(record))
+    assert sentence.count(not_saved_note(record)) == 1
+
+
+def test_a_paywall_message_carries_the_note_once() -> None:
+    """``paywall_message`` builds from the access part, so no doubling."""
+    record = _not_saved()
+    message = paywall_message("Behind a paywall.", record)
+    assert message.count(not_saved_note(record)) == 1
+    assert message == f"Behind a paywall. {not_saved_note(record)}"
+    both = LookupRecord((_timeout(SERVICE_OPENALEX),)).merged(record)
+    assert paywall_message("Behind a paywall.", both).count(not_saved_note(both)) == 1
+
+
+def test_the_lookups_clause_ignores_a_note() -> None:
+    """A PDF served but not saved is not a lookup that could not be asked."""
+    assert unsettled_lookups_clause(_not_saved()) == ""
+
+
+def test_the_transparency_caveat_has_the_note_not_a_lookup() -> None:
+    """The analyser's caveat tells a caching note, not 'could not be asked'."""
+    from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
+        _full_text_unassessed_caveat,
+    )
+
+    record = _not_saved()
+    caveat = _full_text_unassessed_caveat(record)
+    assert "could not be asked" not in caveat
+    assert caveat.count(not_saved_note(record)) == 1
+
+
+def test_a_source_outside_the_chain_is_listed_first() -> None:
+    """Chain order puts any other source before the chain's."""
+    record = LookupRecord((
+        _timeout(SERVICE_UNPAYWALL_PDF, "https://walled.example.org/a.pdf"),
+        _timeout(SERVICE_DOI_RESOLVER),
+    ))
+    statement = tried_sources_statement(record)
+    body = statement[len(TRIED_SOURCES_LEAD):]
+    assert body.startswith("doi.org (the request timed out); walled.example.org, named by Unpaywall")
+
+
+def test_a_tried_pdf_over_the_size_limit() -> None:
+    """A skipped tried PDF is told by host, with the unasked ending."""
+    record = LookupRecord(skipped=(
+        SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.OVER_SIZE_LIMIT, _PDF),
+    ))
+    assert tried_sources_statement(record) == (
+        f"{TRIED_SOURCES_LEAD}repo.example.org, named by Unpaywall "
+        "(larger than the download limit). A freely available copy may exist. "
+        "Whether this document is open access was not established."
+    )
+
+
+def test_a_skip_strips_its_address() -> None:
+    """The skip's address is stripped, and blank is none."""
+    reason = LookupSkipReason.OVER_SIZE_LIMIT
+    assert SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, reason, "  ").address is None
+    assert SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, reason, f" {_PDF} ").address == _PDF
+    assert SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, reason).address is None

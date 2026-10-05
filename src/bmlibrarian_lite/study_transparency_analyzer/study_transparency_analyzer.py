@@ -42,6 +42,7 @@ from ..analysis_failures import (
     COI_DISCLOSURE_SOUGHT,
     coi_not_assessed_caveat,
     configuration_nudge,
+    not_saved_note,
     refused_access_sentence,
     unsettled_lookups_clause,
     unassessed_caveat,
@@ -2162,8 +2163,9 @@ def _full_text_unassessed_caveat(lookups: LookupRecord) -> str:
             retrieval failed for a reason no lookup recorded.
 
     Returns:
-        Two or three sentences ending in a full stop, the third being the
-        configuration advice when there is any to give.
+        Two to four sentences ending in a full stop: a caching note (#480)
+        when a PDF went unsaved, then the configuration advice when there is
+        any to give.
     """
     clause = unsettled_lookups_clause(lookups)
     # A colon, not "and": the clause may hold two groups joined by ", and"
@@ -2174,6 +2176,9 @@ def _full_text_unassessed_caveat(lookups: LookupRecord) -> str:
         else "The article's full text was not retrieved"
     )
     sentences = unassessed_caveat(because, FULL_TEXT_SOUGHT)
+    note = not_saved_note(lookups)
+    if note:
+        sentences = f"{sentences} {note}"
     nudge = configuration_nudge(lookups)
     return f"{sentences} {nudge}" if nudge else sentences
 

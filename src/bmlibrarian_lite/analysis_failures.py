@@ -813,9 +813,10 @@ def unsettled_lookups_clause(record: LookupRecord) -> str:
         and Unpaywall (not configured) could not be asked, and Europe PMC
         (HTTP 404 Not Found) did not serve it"``. The unasked are named
         first, failures before skips. Empty when every lookup was made and
-        served.
+        served; a PDF served but not saved is not named (#480), it has
+        :func:`not_saved_note`.
     """
-    unasked, answered = _unsettled(record)
+    unasked, answered = _unsettled(_without_not_saved(record))
     clauses = []
     if unasked:
         clauses.append(f"{_joined(unasked)} could not be asked")
@@ -1081,7 +1082,8 @@ def tried_sources_statement(record: LookupRecord) -> str:
         record: What went unsettled; caching notes are ignored.
 
     Returns:
-        Two sentences ending in a full stop, or ``""`` when no PDF was tried:
+        Two or three sentences (the third is the configuration advice, when
+        the caller adds it), or ``""`` when no PDF was tried:
         a lookup-only record keeps :func:`_access_left_open`'s wording.
     """
     access = _without_not_saved(record)
@@ -1154,8 +1156,9 @@ def unestablished_access_clause(record: LookupRecord) -> str:
         record: What went unsettled; may be empty.
 
     Returns:
-        One to three sentences ending in a full stop, or empty when every
-        lookup was made and served. Never the bare denial "this is not
+        One to four sentences ending in a full stop (the statement is two
+        or three, with the advice; a caching note may follow), or empty when
+        every lookup was made and served. Never the bare denial "this is not
         evidence the document requires access": read on its own, that
         repeats the claim it means to withdraw. With tried PDFs, the
         tried-sources statement (#480); a caching note follows whatever is
@@ -1222,7 +1225,8 @@ def with_unestablished_access(claim: str, record: LookupRecord) -> str:
 
     Returns:
         ``claim`` when every lookup was made and served, else ``claim``
-        followed by :func:`unestablished_access_clause`.
+        followed by :func:`unestablished_access_clause`: with a PDF served
+        but not saved, ``claim`` and :func:`not_saved_note`.
     """
     clause = unestablished_access_clause(record)
     return f"{claim} {clause}" if clause else claim
@@ -1239,20 +1243,26 @@ def refused_access_sentence(record: LookupRecord) -> str:
         record: What went unsettled; not empty.
 
     Returns:
-        One or two sentences ending in a full stop, for example ``"A source
+        One to four sentences ending in a full stop (the bare refusal alone
+        when only a caching note is left; the note last), for example ``"A source
         refused access to this document, and Europe PMC (HTTP 404 Not Found)
         did not serve it, so whether this document is open access was not
         established."`` With tried PDFs (#480), the sentence is followed by
         the tried-sources statement.
     """
     access = _without_not_saved(record)
-    statement = tried_sources_statement(access)
-    if statement:
-        return f"A source refused access to this document. {statement}"
-    return (
-        f"A source refused access to this document{_set_against(access)}"
-        f"{_access_left_open(access)}"
-    )
+    refusal = "A source refused access to this document."
+    if not access.anything_unsettled:
+        sentence = refusal
+    else:
+        statement = tried_sources_statement(access)
+        sentence = (
+            f"{refusal} {statement}" if statement else
+            f"A source refused access to this document{_set_against(access)}"
+            f"{_access_left_open(access)}"
+        )
+    note = not_saved_note(record)
+    return f"{sentence} {note}" if note else sentence
 
 
 def paywall_message(claim: str, record: LookupRecord) -> str:
@@ -1279,7 +1289,7 @@ def paywall_message(claim: str, record: LookupRecord) -> str:
     text = (
         _with_nudge(refused_access_sentence(access), access)
         if access.anything_unsettled else claim
-    )
+    )  # the note is added once, below: ``access`` carries none
     note = not_saved_note(record)
     return f"{text} {note}" if note else text
 
