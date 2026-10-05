@@ -8,43 +8,14 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Why Unpaywall's PDFs cannot be downloaded: measured, and what recovers
-them** (#480), branch `survey/unpaywall-pdf-480`, PR #484. No code change:
-`scripts/unpaywall_pdf_survey.py`, rows and findings in
-`doc/developer/unpaywall_pdf_survey/` (**re-analyse, never re-fetch**), spikes
-in its `spikes/`. Our clients get 28% of 400 PDFs; 81% of failures are bot
-walls. **Decided (maintainer):** machine channels first, then a real embedded
-browser (QtWebEngine got PMC hidden and every Cloudflare publisher once shown;
-ScienceDirect needs one tick, so a review queue) with a `challenged` failure
-kind; obscura stealth got 0/36. Never judge a wall by Playwright. Spec
-`docs/superpowers/specs/2026-10-04-fulltext-machine-channels-design.md`.
-
-**Machine channels, stage A: PMC's open-data bucket** (#480), branch
-`feat/pmc-open-data-480` PR #487 (based on #484's branch, against master). The
-public S3 bucket `pmc-oa-opendata` is a JATS source on all three platforms,
-after Europe PMC's XML and before its PDF render, by PMC ID only (Python
-`pmc_open_data.py` + `fulltext_discovery.py` step 2a; Swift
-`PMCOpenData.swift` + `FullTextService`; Kotlin `PmcOpenData.kt`). Contract:
-`fulltext_retrieval.md` "PMC's Open-Data Bucket" +
-`fulltext_parity/pmc_open_data.json`. Rules: absent only for a 200 listing
-naming no version or a record whose `xml_url` is missing/null; **a listing 404
-is unreachable** (S3 answers a missing prefix with 200 + `KeyCount` 0, so a
-404 is `NoSuchBucket`); a 404 after the listing named it unreachable; an
-answer we cannot read (non-ASCII-digit version, `xml_url` not this bucket's
-`s3://` URL, body not UTF-8) is `malformed_response`; strict UTF-8 on every
-platform (Swift still honours a declared non-UTF-8 encoding on valid UTF-8
-bytes); namespace-strict listing; retry 429/500/502/503/504, 5/s per attempt,
-45 s per request (Android derives its own client: no OkHttp replay);
-the apps' not-established sentence names "PMC's open-access collection" after
-Europe PMC's (Kotlin `NotEstablishedSource`, no default). Deviations for
-sign-off: no bucket PDF fallback; no app asks after a body-less Europe PMC
-deposit (parity). Acceptance: 28 of 28 author manuscripts served live. Open
-follow-ups: #485 (desktop cache records no source), #488 (apps drop the
-bucket's shortfall on PDF/link fallbacks; Android drops Europe PMC's too),
-#489 (Swift paces per instance; apps lack Python's throttle response), #490
-(flaky Android PubMed redirect test). **Next: stage B** (every Unpaywall location in the apps, OpenAlex),
-**then stage C** (CORE, Elsevier, keys in settings): write their plans from
-the spec.
+**Machine channels, stage B: every Unpaywall location in the apps, then
+OpenAlex** (#480), branch `feat/machine-channels-stage-b-480`. Spec
+`docs/superpowers/specs/2026-10-04-fulltext-machine-channels-design.md`
+("Stage B"); plan `docs/superpowers/plans/2026-10-05-fulltext-machine-channels-stage-b.md`
+(15 tasks; maintainer's decisions of 2026-10-05 folded in: OpenAlex only when
+no Unpaywall copy was served, a composite "tried sources" statement listing
+each PDF by host, a caching note for a PDF served but not saved, one PR). Stage C (CORE, Elsevier, keys in settings) follows; then the
+embedded browser and review queue with the `challenged` kind.
 
 ## Recently landed (context)
 
@@ -52,6 +23,18 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **Machine channels, stage A: PMC's open-data bucket** (all three; PR #487,
+  survey PR #484, #480). Why: our clients get 28% of 400 Unpaywall PDFs, 81% of
+  failures are bot walls (`doc/developer/unpaywall_pdf_survey/`, **re-analyse,
+  never re-fetch**; spikes in its `spikes/`). **Decided (maintainer):** machine
+  channels first, then a real embedded browser; no stealth clients; never judge
+  a wall by Playwright. The bucket `pmc-oa-opendata` is a JATS source after
+  Europe PMC's XML, by PMC ID (`pmc_open_data.py`, `PMCOpenData.swift`,
+  `PmcOpenData.kt`); contract `fulltext_retrieval.md` "PMC's Open-Data Bucket"
+  + `fulltext_parity/pmc_open_data.json`. **Absent only for a 200 listing naming
+  no version or a record with no `xml_url`; a listing 404 is unreachable**
+  (`NoSuchBucket`); an answer we cannot read is `malformed_response`; strict
+  UTF-8 everywhere. Follow-ups: #485, #488, #489, #490.
 - **An Unpaywall PDF not obtained is refused** (all three; PR #482, #478):
   never a link; source `unpaywall_pdf`; a body not `%PDF` is
   `malformed_response`. **Our own stops are not the copy's answer** (served but
@@ -220,8 +203,8 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 - **Machine channels stages B and C** (above), then the **embedded browser and
   review queue** with the `challenged` kind (replaces **#483**); **#481**
-  follows it; **#485**, **#486** (stage A follow-ups); **#467**, **#468** /
-  **#470**, **#476**.
+  follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
+  **#467**, **#468** / **#470**, **#476**.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 
