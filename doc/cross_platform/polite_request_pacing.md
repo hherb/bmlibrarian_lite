@@ -15,8 +15,8 @@ Python (`rate_limit.py`, `polite_session.py`, the `POLITE_*` block in
 | Platform | Status |
 |----------|--------|
 | Python | Conforms |
-| Swift (BioMedLit) | **Unchecked.** `EuropePMCService`, `FullTextService` and `EutilsRequest` (`Packages/BioMedLit/Sources/BioMedLit/Services/`) make outbound requests with no pacing at all. `ClinicalTrialsService` and `CrossRefService` have `enforceRateLimit()`, but it is per service instance rather than per host: two services calling the same host each keep a full budget, and concurrent analysis multiplies it again |
-| Android | **Unchecked.** Only `PubMedService.kt` paces (a `delay(delayMs)` in its request path). Under `app/src/main/java/com/bmlibrarian/factchecker/data/remote/`: `pubmed/PubMedService.kt`, `europepmc/EuropePMCApi.kt`, `fulltext/UnpaywallApi.kt`, `fulltext/FullTextService.kt` — the last three have no pacing |
+| Swift (BioMedLit) | **Unchecked.** `EuropePMCService`, `FullTextService` and `EutilsRequest` (`Packages/BioMedLit/Sources/BioMedLit/Services/`) make outbound requests with no pacing at all, except `FullTextService`'s requests to PMC's open-data bucket (#480), paced at 5 per second per service instance rather than per host and without Python's throttle response (#489). `ClinicalTrialsService` and `CrossRefService` have `enforceRateLimit()`, but it is per service instance rather than per host: two services calling the same host each keep a full budget, and concurrent analysis multiplies it again |
+| Android | **Unchecked.** Only `PubMedService.kt` paces (a `delay(delayMs)` in its request path). Under `app/src/main/java/com/bmlibrarian/factchecker/data/remote/`: `pubmed/PubMedService.kt`, `europepmc/EuropePMCApi.kt`, `fulltext/UnpaywallApi.kt`, `fulltext/FullTextService.kt` — the last three have no pacing. `fulltext/PmcOpenData.kt` (PMC's open-data bucket, #480) paces every attempt at 5 per second app-wide (a `@Singleton`), without Python's throttle response (#489) |
 
 ## Why
 
@@ -89,6 +89,7 @@ neither. Python's table (`constants.POLITE_RATE_CEILINGS`, default
 | `api.crossref.org` | 5 |
 | `clinicaltrials.gov` | 1 (the default) |
 | `doi.org`, `dx.doi.org` | 1 |
+| `pmc-oa-opendata.s3.amazonaws.com` | 5 (S3 publishes no per-client limit; conservative choice, #480) |
 | any other host | 1 (the default) |
 
 Europe PMC's ceiling is a **deliberately conservative choice, not a measured

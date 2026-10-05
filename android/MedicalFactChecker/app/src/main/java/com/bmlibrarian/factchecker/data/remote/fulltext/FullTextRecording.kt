@@ -89,6 +89,13 @@ private fun DocumentEntity.recording(result: FullTextResult, pdfPath: String?): 
         fullTextFetchedAt = Date(),
         fullTextOpenAccessShortfallJson = null
     )
+    is FullTextResult.PmcOpenDataXml -> copy(
+        fullTextMarkdown = result.markdown,
+        fullTextHTML = result.html,
+        fullTextSource = Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA,
+        fullTextFetchedAt = Date(),
+        fullTextOpenAccessShortfallJson = null
+    )
     is FullTextResult.EuropePmcPdf -> copy(
         pdfPath = pdfPath,
         fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,

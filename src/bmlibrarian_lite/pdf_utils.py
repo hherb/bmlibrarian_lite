@@ -101,8 +101,8 @@ def get_fulltext_base_dir() -> Path:
     """
     Get the base directory for full-text markdown storage.
 
-    Full-text markdown files are generated from Europe PMC XML and cached
-    for faster subsequent access.
+    Full-text markdown files are generated from JATS XML (Europe PMC's, or
+    PMC's open-data bucket's) and cached for faster subsequent access.
 
     Returns:
         Path to full-text markdown base directory

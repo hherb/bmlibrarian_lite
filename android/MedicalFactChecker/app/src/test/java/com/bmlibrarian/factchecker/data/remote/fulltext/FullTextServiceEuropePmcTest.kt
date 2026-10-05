@@ -60,7 +60,8 @@ class FullTextServiceEuropePmcTest {
             context = mockk(relaxed = true),
             europePmcService = europePmc,
             unpaywallApi = mockk<UnpaywallApi>(),
-            httpClient = mockk(relaxed = true)
+            httpClient = mockk(relaxed = true),
+            pmcOpenData = absentBucket()
         )
     }
 
@@ -128,7 +129,9 @@ class FullTextServiceEuropePmcTest {
         val result = service.fetchFullText(pmcId = "PMC1", doi = null, pmid = null).getOrThrow()
 
         assertEquals(
-            FullTextService.FullTextResult.NotEstablished(RequestFailure(RequestFailureKind.HTTP_STATUS, 404)),
+            FullTextService.FullTextResult.NotEstablished(
+                RequestFailure(RequestFailureKind.HTTP_STATUS, 404), NotEstablishedSource.EUROPE_PMC
+            ),
             result
         )
     }
@@ -140,7 +143,7 @@ class FullTextServiceEuropePmcTest {
 
         val result = service.fetchFullText(pmcId = "PMC1", doi = null, pmid = null).getOrThrow()
 
-        assertEquals(FullTextService.FullTextResult.NotEstablished(throttled), result)
+        assertEquals(FullTextService.FullTextResult.NotEstablished(throttled, NotEstablishedSource.EUROPE_PMC), result)
     }
 
     @Test
@@ -151,7 +154,7 @@ class FullTextServiceEuropePmcTest {
 
         val result = service.fetchFullText(pmcId = null, doi = null, pmid = "123").getOrThrow()
 
-        assertEquals(FullTextService.FullTextResult.NotEstablished(outage), result)
+        assertEquals(FullTextService.FullTextResult.NotEstablished(outage, NotEstablishedSource.EUROPE_PMC), result)
     }
 
     /**
@@ -204,7 +207,7 @@ class FullTextServiceEuropePmcTest {
         assertTrue(FullTextService.FullTextResult.UnpaywallPdf("u", doi = "10.1/x").hasContent)
         assertTrue(FullTextService.FullTextResult.DoiUrl("u").hasContent)
         assertFalse(FullTextService.FullTextResult.Unavailable("r").hasContent)
-        assertFalse(FullTextService.FullTextResult.NotEstablished(failure).hasContent)
+        assertFalse(FullTextService.FullTextResult.NotEstablished(failure, NotEstablishedSource.EUROPE_PMC).hasContent)
     }
 
     /** The control: without it the three above pass against a chain that never says Unavailable. */

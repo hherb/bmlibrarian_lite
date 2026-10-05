@@ -53,9 +53,10 @@ import javax.inject.Singleton
  *
  * Implements a fallback chain:
  * 1. Europe PMC XML (JATS format) - preferred, machine-readable
- * 2. Europe PMC PDF render - a free PDF Europe PMC offers
- * 3. Unpaywall PDF - open access PDFs, or the PDF an open-access landing page declares
- * 4. DOI Resolution - link to publisher website
+ * 2. PMC's open-data bucket (JATS, by PMC ID) - when Europe PMC's XML gave no text (#480)
+ * 3. Europe PMC PDF render - a free PDF Europe PMC offers
+ * 4. Unpaywall PDF - open access PDFs, or the PDF an open-access landing page declares
+ * 5. DOI Resolution - link to publisher website
  *
  * Full-text content is cached locally after first retrieval.
  */
@@ -64,7 +65,8 @@ class FullTextService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val europePmcService: EuropePMCService,
     private val unpaywallApi: UnpaywallApi,
-    private val httpClient: OkHttpClient
+    private val httpClient: OkHttpClient,
+    private val pmcOpenData: PmcOpenDataService
 ) {
     companion object {
         private const val TAG = "FullTextService"
@@ -102,6 +104,21 @@ class FullTextService @Inject constructor(
          * @param html Parsed HTML content.
          */
         data class EuropePmcXml(
+            val xml: String,
+            val markdown: String,
+            val html: String
+        ) : FullTextResult(hasContent = true)
+
+        /**
+         * Full text retrieved from PMC's open-data bucket as JATS XML (#480),
+         * parsed as Europe PMC's is. Asked only when Europe PMC's XML gave no
+         * text; holds the author manuscripts Europe PMC does not serve.
+         *
+         * @param xml Raw XML content.
+         * @param markdown Parsed markdown content.
+         * @param html Parsed HTML content.
+         */
+        data class PmcOpenDataXml(
             val xml: String,
             val markdown: String,
             val html: String
@@ -172,8 +189,8 @@ class FullTextService @Inject constructor(
         data class Unavailable(val reason: String) : FullTextResult(hasContent = false)
 
         /**
-         * No source provided the full text, but Europe PMC did not settle whether
-         * it exists (#434).
+         * No source provided the full text, but Europe PMC or PMC's open-data
+         * bucket did not settle whether it exists (#434, #480).
          *
          * Europe PMC answered without serving the article (an HTTP status such
          * as `fullTextXML`'s 404 for text that is not open access (#432), from
@@ -181,17 +198,25 @@ class FullTextService @Inject constructor(
          * throttle (429), a 5xx that outlasted its retries (#445), a timeout, a
          * dropped connection, a blank body, an identifier never sent).
          * The reader's sentence follows the same split, by
-         * [RequestFailure.isAnswer]: see [absenceNotEstablishedMessage].
+         * [RequestFailure.isAnswer]: see [notEstablishedMessage].
          * Unlike [Unavailable], a claim about us: callers must not mark
          * the document unavailable for good on it, or a busy Europe PMC takes the
          * retry away.
          *
-         * @param failure What Europe PMC's side of the chain got instead of the article's text
+         * Europe PMC's shortfall is named first; the bucket's only when Europe
+         * PMC left nothing unsettled, as Python and BioMedLit do.
+         *
+         * @param failure What the named source got instead of the article's text
+         * @param source The source that did not settle it, and that the sentence
+         *   names; always given, so no source is named by default
          */
-        data class NotEstablished(val failure: RequestFailure) : FullTextResult(hasContent = false) {
+        data class NotEstablished(
+            val failure: RequestFailure,
+            val source: NotEstablishedSource
+        ) : FullTextResult(hasContent = false) {
             /** The sentence shown to the reader. */
             val reason: String
-                get() = absenceNotEstablishedMessage(failure)
+                get() = notEstablishedMessage(source.serviceName, failure)
         }
     }
 
@@ -278,8 +303,8 @@ class FullTextService @Inject constructor(
      *   blank or the placeholder skips Unpaywall as not configured.
      * @return The full text or a link to it; [FullTextResult.Unavailable] when every
      *   source answered without it (callers record this); or
-     *   [FullTextResult.NotEstablished] when Europe PMC did not settle it (never
-     *   recorded). No path here returns a failed [Result].
+     *   [FullTextResult.NotEstablished] when Europe PMC, or failing that PMC's
+     *   open-data bucket, did not settle it (never recorded). No path here returns a failed [Result].
      * @throws CancellationException if the caller cancelled.
      */
     suspend fun fetchFullText(
@@ -294,6 +319,11 @@ class FullTextService @Inject constructor(
         // end: a chain that found nothing must not call the article's full text
         // absent while this is set (#434)
         var europePmcShortfall: RequestFailure? = null
+
+        // What PMC's open-data bucket got instead of the article's JATS, when it
+        // could not be read or its XML would not parse (#480). Named only when
+        // Europe PMC left nothing unsettled
+        var pmcOpenDataShortfall: RequestFailure? = null
 
         // Resolve PMC ID and PDF render URL from PMID or DOI if not already available
         var resolvedPmcId = pmcId
@@ -318,7 +348,11 @@ class FullTextService @Inject constructor(
                 is FullTextXmlFetch.Served -> {
                     // Europe PMC answered, so a lost identifier search did not cost this source
                     europePmcShortfall = null
-                    parseEuropePmcXml(fetch.xml, accession)?.let { return@withContext Result.success(it) }
+                    parseJats(fetch.xml, accession)?.let { parsed ->
+                        return@withContext Result.success(
+                            FullTextResult.EuropePmcXml(xml = fetch.xml, markdown = parsed.markdown, html = parsed.html)
+                        )
+                    }
                 }
                 FullTextXmlFetch.Absent -> {
                     // Europe PMC's own answer, but not the article's absence:
@@ -330,6 +364,42 @@ class FullTextService @Inject constructor(
                 is FullTextXmlFetch.Unreachable -> {
                     Log.w(TAG, "Europe PMC XML could not be retrieved for $accession (${fetch.failure.describe()})")
                     europePmcShortfall = fetch.failure
+                }
+            }
+        }
+
+        // PMC's open-data bucket (#480), by PMC ID, when Europe PMC's XML gave no
+        // text. Before Europe PMC's PDF render, which answers 403 to every
+        // client (#453). `resolvedPmcId` is the caller's PMC ID or the one the
+        // search resolved; a PPR preprint accession is never asked, because the
+        // bucket files by PMC ID only
+        val bucketPmcId = resolvedPmcId?.let(FullTextAccession::normalized)
+            ?.takeIf { it.startsWith(FullTextAccession.PMC_PREFIX) }
+        if (bucketPmcId != null) {
+            Log.d(TAG, "Attempting PMC's open-access collection for $bucketPmcId")
+            when (val fetch = pmcOpenData.fetchXml(bucketPmcId)) {
+                is PmcOpenDataFetch.Served -> {
+                    val parsed = parseJats(fetch.xml, bucketPmcId)
+                    if (parsed != null) {
+                        Log.d(TAG, "Retrieved full text for $bucketPmcId from PMC's open-access collection")
+                        return@withContext Result.success(
+                            FullTextResult.PmcOpenDataXml(xml = fetch.xml, markdown = parsed.markdown, html = parsed.html)
+                        )
+                    }
+                    // Python and Swift record an unconvertible bucket XML as a
+                    // malformed answer, so the chain does not call the full text
+                    // absent on it
+                    pmcOpenDataShortfall = RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+                }
+                // The bucket's own answer about itself: nothing to record
+                PmcOpenDataFetch.Absent -> Unit
+                is PmcOpenDataFetch.Unreachable -> {
+                    Log.w(
+                        TAG,
+                        "PMC's open-access collection could not be read for $bucketPmcId " +
+                            "(${fetch.failure.describe()}); trying other sources"
+                    )
+                    pmcOpenDataShortfall = fetch.failure
                 }
             }
         }
@@ -370,7 +440,23 @@ class FullTextService @Inject constructor(
         // or closed Europe PMC (#434)
         europePmcShortfall?.let { failure ->
             Log.w(TAG, "No source served full text, and Europe PMC did not settle it (${failure.describe()})")
-            return@withContext Result.success(FullTextResult.NotEstablished(failure))
+            return@withContext Result.success(
+                FullTextResult.NotEstablished(failure, NotEstablishedSource.EUROPE_PMC)
+            )
+        }
+
+        // The same for PMC's open-data bucket, which holds the author manuscripts
+        // Europe PMC does not serve: one it could not read may have held the
+        // article (#480)
+        pmcOpenDataShortfall?.let { failure ->
+            Log.w(
+                TAG,
+                "No source served full text, and PMC's open-access collection could not be read " +
+                    "(${failure.describe()})"
+            )
+            return@withContext Result.success(
+                FullTextResult.NotEstablished(failure, NotEstablishedSource.PMC_OPEN_DATA)
+            )
         }
 
         // No full text available
@@ -380,16 +466,27 @@ class FullTextService @Inject constructor(
     }
 
     /**
+     * Markdown and HTML converted from served JATS XML.
+     *
+     * @property markdown The article as markdown
+     * @property html The article as HTML (body content only)
+     */
+    private data class ParsedJats(val markdown: String, val html: String)
+
+    /**
      * Convert served JATS XML to markdown and HTML.
      *
-     * @param xml The XML Europe PMC served.
+     * Shared by Europe PMC's XML and PMC's open-data bucket (#480), whose JATS is
+     * the same format.
+     *
+     * @param xml The XML the source served.
      * @param accession The accession it was served under. Passed to the parser for
      *   figure URLs only when it is a PMC ID: a preprint's figures are not filed
      *   under its PPR ID.
      * @return The parsed content, or null when the XML could not be parsed (logged:
      *   a defect in us, and the chain goes on to the other sources).
      */
-    private fun parseEuropePmcXml(xml: String, accession: String): FullTextResult.EuropePmcXml? {
+    private fun parseJats(xml: String, accession: String): ParsedJats? {
         val knownPmcId = FullTextAccession.normalized(accession)
             ?.takeIf { it.startsWith(FullTextAccession.PMC_PREFIX) }
         return try {
@@ -406,16 +503,16 @@ class FullTextService @Inject constructor(
             )
             val html = htmlParser.parseToHTML()
 
-            FullTextResult.EuropePmcXml(xml = xml, markdown = markdown, html = html)
+            ParsedJats(markdown = markdown, html = html)
         } catch (e: JATSParseError) {
-            Log.e(TAG, "Europe PMC XML for $accession was retrieved but could not be parsed: ${e.message}")
+            Log.e(TAG, "JATS XML for $accession was retrieved but could not be parsed: ${e.message}")
             null
         } catch (e: Exception) {
             // Only parse() wraps its errors as JATSParseError; buildMarkdown() and
             // buildHTML() run outside it. A crash there is as much a defect in us
             // as a parse failure, and must not skip the PDF, Unpaywall and DOI
             // sources. Nothing here suspends, so there is no cancellation to catch
-            Log.e(TAG, "Converting Europe PMC XML for $accession failed (a defect): $e")
+            Log.e(TAG, "Converting JATS XML for $accession failed (a defect): $e")
             null
         }
     }
@@ -852,6 +949,7 @@ class FullTextService @Inject constructor(
     fun getSourceConstant(result: FullTextResult): String? {
         return when (result) {
             is FullTextResult.EuropePmcXml -> Constants.FULLTEXT_SOURCE_EUROPE_PMC
+            is FullTextResult.PmcOpenDataXml -> Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA
             is FullTextResult.EuropePmcPdf -> Constants.FULLTEXT_SOURCE_EUROPE_PMC
             is FullTextResult.UnpaywallPdf -> Constants.FULLTEXT_SOURCE_UNPAYWALL
             is FullTextResult.DoiUrl -> Constants.FULLTEXT_SOURCE_DOI
@@ -890,22 +988,50 @@ class OpenAccessUnsettledException(val shortfall: OpenAccessShortfall) : Excepti
 class RetryableStatusException(val statusCode: Int) : IOException("HTTP $statusCode")
 
 /**
- * The sentence for a chain that found nothing while Europe PMC did not settle
- * whether the full text exists (#434).
+ * A source whose shortfall a [FullTextService.FullTextResult.NotEstablished] names.
+ *
+ * @property serviceName The source as the reader's sentence names it, verbatim on
+ *   every platform
+ */
+enum class NotEstablishedSource(val serviceName: String) {
+    /** Europe PMC: its XML fetch or identifier search did not settle it. */
+    EUROPE_PMC(Constants.EUROPE_PMC_SERVICE_NAME),
+
+    /** PMC's open-data bucket (#480): it could not be read. */
+    PMC_OPEN_DATA(Constants.PMC_OPEN_DATA_SERVICE_NAME)
+}
+
+/**
+ * The sentence for a chain that found nothing while [service] did not settle
+ * whether the full text exists (#434, #480).
  *
  * The verb follows #435's decision: an HTTP status other than a throttle or a 5xx
- * (#445) was an answer, so Europe PMC "did not serve it"; those and any other
- * failure mean it "could not be asked" ([RequestFailure.isAnswer]). Worded as
- * BioMedLit's `FullTextError.absenceNotEstablished` (iOS and macOS).
+ * (#445) was an answer, so the source "did not serve it"; those and any other
+ * failure mean it "could not be asked" ([RequestFailure.isAnswer]). Pinned by
+ * `doc/cross_platform/fulltext_parity/pmc_open_data.json`
+ * (`not_established_sentence`); worded as BioMedLit's
+ * `FullTextError.notEstablishedSentence` (iOS and macOS).
+ *
+ * @param service The source the sentence names: a [NotEstablishedSource.serviceName],
+ *   [Constants.EUROPE_PMC_SERVICE_NAME] or [Constants.PMC_OPEN_DATA_SERVICE_NAME]
+ * @param failure What that source got instead of the article's text
+ * @return The sentence
+ */
+fun notEstablishedMessage(service: String, failure: RequestFailure): String =
+    if (failure.isAnswer) {
+        "No source provided this article's full text. $service (${failure.describe()}) " +
+            "did not serve it, so it may still exist. Try again later."
+    } else {
+        "No source provided this article's full text. $service could not be asked " +
+            "(${failure.describe()}), so it may still exist. Try again later."
+    }
+
+/**
+ * Europe PMC's not-established sentence ([notEstablishedMessage]); kept for
+ * existing callers.
  *
  * @param failure What Europe PMC's side of the chain got instead of the article's text
  * @return The sentence
  */
 fun absenceNotEstablishedMessage(failure: RequestFailure): String =
-    if (failure.isAnswer) {
-        "No source provided this article's full text. Europe PMC (${failure.describe()}) " +
-            "did not serve it, so it may still exist. Try again later."
-    } else {
-        "No source provided this article's full text. Europe PMC could not be asked " +
-            "(${failure.describe()}), so it may still exist. Try again later."
-    }
+    notEstablishedMessage(Constants.EUROPE_PMC_SERVICE_NAME, failure)

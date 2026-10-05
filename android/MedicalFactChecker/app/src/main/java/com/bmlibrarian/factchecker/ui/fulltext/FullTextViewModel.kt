@@ -307,6 +307,15 @@ class FullTextViewModel @Inject constructor(
                     source = "Europe PMC"
                 )
             }
+            is FullTextResult.PmcOpenDataXml -> {
+                Log.d(TAG, "Got PMC open-access collection XML content for ${doc.id}")
+                // Displayed as Europe PMC's JATS is: as HTML
+                FullTextState.HtmlContent(
+                    html = wrapHtmlContent(result.html),
+                    title = doc.title,
+                    source = Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA_LABEL
+                )
+            }
             is FullTextResult.EuropePmcPdf -> {
                 Log.d(TAG, "Got Europe PMC PDF URL for ${doc.id}: ${result.pdfUrl}")
                 pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, "Europe PMC")

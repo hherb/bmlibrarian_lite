@@ -22,6 +22,7 @@ import android.content.Context
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCApi
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
+import com.bmlibrarian.factchecker.data.remote.fulltext.PmcOpenDataService
 import com.bmlibrarian.factchecker.data.remote.fulltext.UnpaywallApi
 import com.bmlibrarian.factchecker.data.remote.llm.AnthropicApi
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
@@ -328,12 +329,14 @@ object NetworkModule {
     /**
      * Provides the Full-Text service.
      *
-     * Orchestrates full-text retrieval from Europe PMC, Unpaywall, and DOI fallback.
+     * Orchestrates full-text retrieval from Europe PMC, PMC's open-data bucket,
+     * Unpaywall, and DOI fallback.
      *
      * @param context Application context for caching
      * @param europePmcService Europe PMC service
      * @param unpaywallApi Unpaywall API interface
      * @param okHttpClient HTTP client for PDF downloads
+     * @param pmcOpenDataService PMC's open-data bucket (#480), built by its `@Inject` constructor
      * @return Full-text service instance
      */
     @Provides
@@ -342,9 +345,10 @@ object NetworkModule {
         @ApplicationContext context: Context,
         europePmcService: EuropePMCService,
         unpaywallApi: UnpaywallApi,
-        okHttpClient: OkHttpClient
+        okHttpClient: OkHttpClient,
+        pmcOpenDataService: PmcOpenDataService
     ): FullTextService {
-        return FullTextService(context, europePmcService, unpaywallApi, okHttpClient)
+        return FullTextService(context, europePmcService, unpaywallApi, okHttpClient, pmcOpenDataService)
     }
 
     // ==================== Constants ====================

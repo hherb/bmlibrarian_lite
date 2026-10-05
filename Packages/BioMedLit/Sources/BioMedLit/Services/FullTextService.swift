@@ -21,15 +21,19 @@ import Foundation
 ///
 /// Attempts to retrieve full text from multiple sources in order:
 /// 1. **Europe PMC XML** - Preferred source, machine-readable, converts to HTML/markdown
+///    1a. **PMC's open-data bucket** - The same JATS by PMC ID, when Europe
+///    PMC's XML gave no article: absent, unreachable or unparseable (#480). Not
+///    asked after a body-less Europe PMC deposit, as Python and Kotlin do not
+///    ask it then. It holds the author manuscripts Europe PMC does not serve.
 /// 2. **Europe PMC PDF** - The free render URL, when the XML is unavailable or
 ///    carries no `<body>`
 /// 3. **Unpaywall PDF** - Open access PDFs via Unpaywall API, or the PDF an
 ///    open-access landing page declares (#464)
 /// 4. **DOI Resolution** - Falls back to opening publisher website
 ///
-/// A body-less Europe PMC deposit does not win at step 1. It is held back and
-/// returned only if every PDF tier came up empty, so an open-access PDF of the
-/// same paper is still reachable — see `fetchFullText`.
+/// A body-less deposit, Europe PMC's or the bucket's, does not win at step 1.
+/// It is held back and returned only if every PDF tier came up empty, so an
+/// open-access PDF of the same paper is still reachable — see `fetchFullText`.
 ///
 /// Thread-safe using Swift's actor model. Includes retry logic with
 /// exponential backoff for network operations.
@@ -83,6 +87,22 @@ public actor FullTextService {
     /// seconds (5 + 10 + 20 + 40) before giving up.
     private let europePMCRetry: RetryConfiguration
 
+    /// How each request to PMC's open-data bucket retries a throttle, a 5xx
+    /// or a transient transport failure.
+    ///
+    /// Injectable for the same reason as ``europePMCRetry``: a test pins what a
+    /// 503 that outlasts its retries becomes without sleeping through the
+    /// backoff. Defaults to ``RetryConfiguration/pmcOpenData``: four
+    /// attempts, as Python's; the backoff between them is BioMedLit's own.
+    private let pmcOpenDataRetry: RetryConfiguration
+
+    /// When the next request to PMC's open-data bucket may go, or `nil`
+    /// before the first.
+    ///
+    /// Reserved before a request waits, so two fetches interleaving on this
+    /// actor cannot both take the same slot.
+    private var nextBucketRequest: Date?
+
     /// Characters safe to leave unescaped inside a query-string *value*.
     ///
     /// `.urlQueryAllowed` describes a whole query, so of the characters removed
@@ -121,13 +141,17 @@ public actor FullTextService {
     ///     Defaults to `true`. Mirrors bmlib's `convert_pdfs`.
     ///   - europePMCRetry: How the full-text XML fetch retries a transient
     ///     failure. Defaults to ``RetryConfiguration/serverError``.
+    ///   - pmcOpenDataRetry: How each request to PMC's open-data bucket
+    ///     retries a transient failure. Defaults to
+    ///     ``RetryConfiguration/pmcOpenData``.
     public init(
         email: String,
         session: URLSession = FullTextService.makeSession(),
         europePMCService: EuropePMCService = EuropePMCService(),
         extractor: PDFTextExtracting = PDFKitTextExtractor(),
         extractPDFText: Bool = true,
-        europePMCRetry: RetryConfiguration = .serverError
+        europePMCRetry: RetryConfiguration = .serverError,
+        pmcOpenDataRetry: RetryConfiguration = .pmcOpenData
     ) {
         self.email = email
         self.europePMCService = europePMCService
@@ -135,11 +159,12 @@ public actor FullTextService {
         self.extractor = extractor
         self.extractPDFText = extractPDFText
         self.europePMCRetry = europePMCRetry
+        self.pmcOpenDataRetry = pmcOpenDataRetry
     }
 
     /// The transport production uses.
     ///
-    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:)``
+    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:)``
     /// so a test can
     /// substitute a stubbed `URLSession` without reproducing these timeouts.
     ///
@@ -157,10 +182,11 @@ public actor FullTextService {
 
     /// Attempt to retrieve full text for a document.
     ///
-    /// Tries sources in order: Europe PMC XML → Europe PMC PDF → Unpaywall PDF
-    /// → DOI website. Each source is tried with retry logic for transient
-    /// network failures. A body-less XML deposit is held back rather than
-    /// returned, so the PDF tiers still get their turn.
+    /// Tries sources in order: Europe PMC XML → PMC's open-data bucket (by PMC
+    /// ID, #480) → Europe PMC PDF → Unpaywall PDF → DOI website. Each source is
+    /// tried with retry logic for transient network failures. A body-less XML
+    /// deposit is held back rather than returned, so the PDF tiers still get
+    /// their turn.
     ///
     /// - Parameters:
     ///   - pmcId: PubMed Central ID (e.g., "PMC1234567").
@@ -178,10 +204,12 @@ public actor FullTextService {
     /// - Throws: When every source is exhausted, `FullTextError`:
     ///   `noFullTextAvailable` when every source answered without it (callers
     ///   record this on the document); `absenceNotEstablished` when Europe PMC
-    ///   did not settle it; `openAccessNotEstablished` when the Unpaywall tier
-    ///   did not; `identifierKindUnresolved` when the PubMed last resort could
-    ///   not be authorised. None of the last three may be recorded (see
-    ///   ``exhaustedChainError(primarySlot:primaryKind:europePMCShortfall:openAccessShortfall:articleName:)``).
+    ///   did not settle it; `pmcOpenDataNotEstablished` when PMC's open-data
+    ///   bucket could not be read; `openAccessNotEstablished` when the
+    ///   Unpaywall tier did not settle it; `identifierKindUnresolved` when the
+    ///   PubMed last resort could not be authorised. None of the last four may
+    ///   be recorded (see
+    ///   ``exhaustedChainError(primarySlot:primaryKind:europePMCShortfall:pmcOpenDataShortfall:openAccessShortfall:articleName:)``).
     ///   `CancellationError` if the caller cancelled: it propagates
     ///   rather than falling
     ///   through, so a link is never cached as this article's full text just
@@ -239,6 +267,10 @@ public actor FullTextService {
         // Read only at the very end: a chain that found nothing must not call
         // the article's full text absent while this is set (#434).
         var europePMCShortfall: RequestFailure?
+
+        // What PMC's open-data bucket got instead of the article's JATS, if it
+        // was asked and could not be read (#480). Its own absence sets nothing.
+        var pmcOpenDataShortfall: RequestFailure?
 
         // Resolve PMC ID and PDF render URL from PMID or DOI if not already available
         var resolvedPmcId = pmcId
@@ -351,6 +383,61 @@ public actor FullTextService {
                 BioMedLitLib.logger?.warning(
                     "Europe PMC XML could not be retrieved for \(accession) "
                         + "(\(failure.describe())); falling back to a PDF or publisher link",
+                    category: .fullText
+                )
+            }
+        }
+
+        // PMC's open-data bucket (#480), by PMC ID, when Europe PMC's XML gave
+        // no article. Not asked after a body-less Europe PMC deposit: Python
+        // and Kotlin have no content kind and read that deposit as served, so
+        // asking here alone would break parity. `resolvedPmcId` is the
+        // caller's PMC ID or the one the search resolved; a `PPR` preprint
+        // accession is never asked, because the bucket files by PMC ID only.
+        if abstractOnly == nil,
+           let bucketPMCID = Self.pmcAccession(resolvedPmcId) {
+            switch try await fetchPMCOpenDataXML(pmcid: bucketPMCID) {
+            case .served(let xml):
+                do {
+                    let content = try renderEuropePMCXML(xml.data, accession: bucketPMCID)
+                    BioMedLitLib.logger?.info(
+                        "Retrieved full text for \(bucketPMCID) from PMC's open-access collection",
+                        category: .fullText
+                    )
+                    // A parse of the bucket's JATS replaces whatever Europe PMC
+                    // lost: the machine-readable source was not lost after all.
+                    let parsed = FullTextResult(
+                        content: .pmcOpenData(html: content.html, markdown: content.markdown),
+                        warnings: content.warnings,
+                        contentKind: content.contentKind
+                    )
+                    // Held back like Europe PMC's, so a PDF tier still gets its
+                    // turn at the article body.
+                    if content.contentKind == .abstract {
+                        abstractOnly = parsed
+                    } else {
+                        return parsed
+                    }
+                } catch FullTextError.jatsParseFailure(let parseError) {
+                    // Python records an unconvertible bucket XML as a
+                    // malformed answer, so the chain does not call the full
+                    // text absent on it. No degradation: that names Europe
+                    // PMC's XML, which this is not.
+                    pmcOpenDataShortfall = .malformedResponse
+                    BioMedLitLib.logger?.error(
+                        "PMC's open-access collection's XML for \(bucketPMCID) could not be parsed "
+                            + "(\(parseError)); trying the PDF tiers",
+                        category: .fullText
+                    )
+                }
+            case .absent:
+                // The bucket's own answer about itself: nothing to record.
+                break
+            case .unreachable(let failure):
+                pmcOpenDataShortfall = failure
+                BioMedLitLib.logger?.warning(
+                    "PMC's open-access collection could not be read for \(bucketPMCID) "
+                        + "(\(failure.describe())); trying the PDF tiers",
                     category: .fullText
                 )
             }
@@ -549,6 +636,7 @@ public actor FullTextService {
             primarySlot: pmid,
             primaryKind: primaryKind,
             europePMCShortfall: europePMCShortfall,
+            pmcOpenDataShortfall: pmcOpenDataShortfall,
             openAccessShortfall: openAccessShortfall,
             articleName: articleName
         )
@@ -569,6 +657,10 @@ public actor FullTextService {
     ///   - primarySlot: The document's primary identifier slot.
     ///   - primaryKind: What the provider said that slot holds, if it said.
     ///   - europePMCShortfall: What Europe PMC's side got instead of the text.
+    ///   - pmcOpenDataShortfall: What PMC's open-data bucket got instead of
+    ///     the article's JATS, when it could not be read (#480). Consulted
+    ///     only when Europe PMC left no shortfall, so the reader is given one
+    ///     sentence.
     ///   - openAccessShortfall: Why the Unpaywall tier left a free copy
     ///     unassessed.
     ///   - articleName: How the log names the article.
@@ -577,6 +669,7 @@ public actor FullTextService {
         primarySlot: String,
         primaryKind: ArticleIdentifierKind?,
         europePMCShortfall: RequestFailure?,
+        pmcOpenDataShortfall: RequestFailure?,
         openAccessShortfall: OpenAccessShortfall?,
         articleName: String
     ) -> FullTextError {
@@ -622,6 +715,18 @@ public actor FullTextService {
                 category: .fullText
             )
             return .absenceNotEstablished(europePMCShortfall)
+        }
+
+        // The same for PMC's open-data bucket, which holds the author
+        // manuscripts Europe PMC does not serve: one it could not read may
+        // have held the article (#480).
+        if let pmcOpenDataShortfall {
+            BioMedLitLib.logger?.warning(
+                "No source served full text for \(articleName), and PMC's open-access "
+                    + "collection could not be read (\(pmcOpenDataShortfall.describe()))",
+                category: .fullText
+            )
+            return .pmcOpenDataNotEstablished(pmcOpenDataShortfall)
         }
 
         // The same for the Unpaywall tier: a free copy it could not assess is
@@ -818,6 +923,162 @@ public actor FullTextService {
         return (statusCode, data)
     }
 
+    // MARK: - PMC's open-data bucket
+
+    /// The PMC accession to ask PMC's open-data bucket by, if `pmcId` is one.
+    ///
+    /// - Parameter pmcId: The caller's PMC ID or the one the search resolved.
+    /// - Returns: For example `"PMC10358571"`; `nil` for a blank value, a
+    ///   preprint's `PPR` accession, or anything that is not an accession.
+    static func pmcAccession(_ pmcId: String?) -> String? {
+        guard let pmcId, let normalized = FullTextAccession.normalized(pmcId),
+              normalized.hasPrefix(BioMedLitConstants.pmcAccessionPrefix) else { return nil }
+        return normalized
+    }
+
+    /// Ask PMC's open-data bucket for the newest version of an article's JATS.
+    ///
+    /// Three paced requests: the listing, the metadata record, the XML.
+    /// Mirrors Python's `PmcOpenDataClient.fetch_xml`; the statuses are pinned
+    /// by `fulltext_parity/pmc_open_data.json` ("status"). Internal rather than
+    /// private so each outcome can be tested on its own.
+    ///
+    /// - Parameter pmcid: A PMC ID, with or without its `PMC` prefix. Anything
+    ///   else (a preprint, a DOI) is never asked.
+    /// - Returns: The XML; `.absent` for a listing naming nothing under the
+    ///   article's prefix, or a record whose `xml_url` is missing or `null`;
+    ///   otherwise `.unreachable`: any status but 200 (a listing 404 included,
+    ///   since S3 answers an article it does not hold with a 200 listing, and
+    ///   a 404 after the listing named the record, the bucket disagreeing
+    ///   with itself), a body that is not UTF-8 or does not parse, a listing
+    ///   naming only unreadable versions, or an `xml_url` that is not this
+    ///   bucket's (each ``RequestFailure/malformedResponse``), a blank XML
+    ///   (``RequestFailure/incompleteResponse``), or the transport's failure.
+    /// - Throws: `CancellationError` if the caller cancelled, and nothing else.
+    func fetchPMCOpenDataXML(pmcid: String) async throws -> PMCOpenDataFetch {
+        // Not a PMC ID: the bucket files by nothing else, as Python reads it.
+        guard let accession = Self.pmcAccession(pmcid) else { return .absent }
+        // A request we could not build was never sent: not an absence.
+        guard var listing = URLComponents(string: BioMedLitConstants.pmcOpenDataBaseURL + "/")
+        else { return .unreachable(.requestFailed) }
+        listing.queryItems = [
+            URLQueryItem(name: "list-type", value: Self.s3ListObjectsVersion),
+            URLQueryItem(name: "prefix", value: "metadata/\(accession)."),
+        ]
+        guard let listingURL = listing.url else { return .unreachable(.requestFailed) }
+        do {
+            let (listingStatus, listingBody) = try await bucketGET(listingURL)
+            // A 404 included: S3 answers an article it does not hold with a
+            // 200 listing naming no version, so a listing 404 is `NoSuchBucket`
+            // or something between us and it — never the article's absence.
+            guard listingStatus == BioMedLitConstants.httpStatusOK else {
+                return .unreachable(.httpStatus(listingStatus))
+            }
+            let key: String?
+            do {
+                key = try PMCOpenData.latestMetadataKey(listing: listingBody, pmcid: accession)
+            } catch {
+                return .unreachable(.malformedResponse)
+            }
+            guard let key else { return .absent }
+            guard let recordURL = URL(string: "\(BioMedLitConstants.pmcOpenDataBaseURL)/\(key)")
+            else { return .unreachable(.malformedResponse) }
+
+            let (recordStatus, recordBody) = try await bucketGET(recordURL)
+            guard recordStatus == BioMedLitConstants.httpStatusOK else {
+                // The listing named it: a 404 here is the bucket disagreeing
+                // with itself, recorded as what we got (#432's rule).
+                return .unreachable(.httpStatus(recordStatus))
+            }
+            let record: PMCOpenDataRecord
+            do {
+                record = try PMCOpenDataRecord(metadata: recordBody)
+            } catch {
+                return .unreachable(.malformedResponse)
+            }
+            guard let xmlURL = record.xmlURL else { return .absent }
+
+            let (xmlStatus, xmlBody) = try await bucketGET(xmlURL)
+            guard xmlStatus == BioMedLitConstants.httpStatusOK else {
+                return .unreachable(.httpStatus(xmlStatus))
+            }
+            // Strictly UTF-8, as Python decodes it. Without this the parser
+            // honours whatever encoding the XML declares and `ServedXML`'s
+            // blank test decodes lossily, so bytes we cannot read reached the
+            // reader as text.
+            guard PMCOpenData.strictUTF8(xmlBody) != nil else {
+                return .unreachable(.malformedResponse)
+            }
+            guard let served = ServedXML(xmlBody) else {
+                return .unreachable(.incompleteResponse)
+            }
+            return .served(served)
+        } catch where error.isCancellation {
+            throw CancellationError()
+        } catch FullTextError.serverError(let statusCode) {
+            // A throttle or server error that outlasted its retries.
+            return .unreachable(.httpStatus(statusCode))
+        } catch FullTextError.invalidResponse {
+            return .unreachable(.malformedResponse)
+        } catch {
+            // Logged by the chain, which knows what it falls through to.
+            return .unreachable(SearchTransport.failure(for: error))
+        }
+    }
+
+    /// S3's `ListObjectsV2` request, the `list-type` the listing asks for.
+    private static let s3ListObjectsVersion = "2"
+
+    /// One request to the bucket, retried per ``pmcOpenDataRetry``: 429 and
+    /// 5xx, and transient transport failures. Four attempts by default, as
+    /// Python's; the backoff is BioMedLit's own (Python's per-host pacer
+    /// paces its retries instead).
+    ///
+    /// - Parameter url: The bucket URL.
+    /// - Returns: The status and body of the first answer the retry policy
+    ///   does not treat as transient. Its redirects are followed (the bucket
+    ///   carries no credential), so every status is an
+    ///   ``RequestFailure/httpStatus(_:)`` answer, as Python records it.
+    /// - Throws: `FullTextError.serverError` for a status in
+    ///   `BioMedLitConstants.retryableStatusCodes` that outlasted its retries,
+    ///   `FullTextError.invalidResponse` when the answer is not HTTP,
+    ///   `CancellationError` from a wait, and the transport's error.
+    private func bucketGET(_ url: URL) async throws -> (status: Int, body: Data) {
+        try await RetryHelper.retry(
+            config: pmcOpenDataRetry,
+            shouldRetry: RetryHelper.retryOnlyTransient
+        ) {
+            try await self.bucketAttempt(url)
+        }
+    }
+
+    /// One attempt at a bucket request, paced to `pmcOpenDataMinimumInterval`:
+    /// every attempt, a retry included, takes its own pacing slot.
+    ///
+    /// - Parameter url: The bucket URL.
+    /// - Returns: The status and body of an answer that is not transient.
+    /// - Throws: `FullTextError.serverError` for a retryable status, so the
+    ///   retry sees it; otherwise as ``bucketGET(_:)``.
+    private func bucketAttempt(_ url: URL) async throws -> (status: Int, body: Data) {
+        let now = Date()
+        let slot = max(now, nextBucketRequest ?? now)
+        nextBucketRequest = slot.addingTimeInterval(BioMedLitConstants.pmcOpenDataMinimumInterval)
+        let wait = slot.timeIntervalSince(now)
+        if wait > 0 {
+            try await Task.sleep(nanoseconds: UInt64(wait * Double(BioMedLitConstants.nanosecondsPerSecond)))
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = BioMedLitConstants.defaultRequestTimeout
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw FullTextError.invalidResponse("Not an HTTP response")
+        }
+        if BioMedLitConstants.retryableStatusCodes.contains(http.statusCode) {
+            throw FullTextError.serverError(statusCode: http.statusCode)
+        }
+        return (http.statusCode, data)
+    }
+
     /// Convert served JATS XML to HTML and markdown.
     ///
     /// Separate from the fetch so a parse failure — a defect in us — can never
@@ -825,8 +1086,11 @@ public actor FullTextService {
     /// `fetchFullText` catches the parse failure and falls through to the PDF
     /// and DOI sources, so it never reaches a caller through it.
     ///
+    /// Renders the JATS of either source that serves it: Europe PMC's
+    /// `fullTextXML`, or PMC's open-data bucket (#480).
+    ///
     /// - Parameters:
-    ///   - xml: The JATS XML Europe PMC served.
+    ///   - xml: The JATS XML Europe PMC or PMC's open-data bucket served.
     ///   - accession: The accession it was served under. Passed to the parser
     ///     for figure URLs only when it is a PMC ID: a preprint's figures are
     ///     not filed under its `PPR` ID.

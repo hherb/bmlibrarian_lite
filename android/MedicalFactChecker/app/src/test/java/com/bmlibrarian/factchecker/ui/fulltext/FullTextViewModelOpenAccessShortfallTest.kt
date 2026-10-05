@@ -22,6 +22,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.bmlibrarian.factchecker.data.local.dao.DocumentDao
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
+import com.bmlibrarian.factchecker.data.remote.fulltext.NotEstablishedSource
 import com.bmlibrarian.factchecker.data.remote.fulltext.PdfDownload
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.domain.model.AppSettings
@@ -30,6 +31,7 @@ import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
 import com.bmlibrarian.factchecker.domain.model.OpenAccessSource
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
+import com.bmlibrarian.factchecker.util.Constants
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -42,6 +44,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -128,6 +131,7 @@ class FullTextViewModelOpenAccessShortfallTest {
         val pdfUrl = "https://repo.example.org/a.pdf"
         val answers = listOf(
             FullTextService.FullTextResult.EuropePmcXml(xml = "<a/>", markdown = "m", html = "<p>h</p>") to null,
+            FullTextService.FullTextResult.PmcOpenDataXml(xml = "<a/>", markdown = "m", html = "<p>h</p>") to null,
             FullTextService.FullTextResult.EuropePmcPdf(pdfUrl) to "/cache/a.pdf",
             FullTextService.FullTextResult.EuropePmcPdf(pdfUrl) to null,
             FullTextService.FullTextResult.UnpaywallPdf(pdfUrl, doi = "10.1/x") to "/cache/a.pdf",
@@ -144,6 +148,20 @@ class FullTextViewModelOpenAccessShortfallTest {
                 documentDao.update(match { it.fullTextOpenAccessShortfallJson == null && it.pdfPath == downloaded })
             }
         }
+    }
+
+    /** PMC's open-data bucket's JATS is shown as HTML, as Europe PMC's is, and named as its source (#480). */
+    @Test
+    fun `the bucket's text is shown as HTML under its own label`() {
+        val state = open(
+            document, FullTextService.FullTextResult.PmcOpenDataXml(xml = "<a/>", markdown = "m", html = "<p>h</p>")
+        ).state.value
+
+        assertTrue("$state", state is FullTextViewModel.FullTextState.HtmlContent)
+        state as FullTextViewModel.FullTextState.HtmlContent
+        assertEquals(Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA_LABEL, state.source)
+        assertEquals("t", state.title)
+        assertTrue(state.html, state.html.contains("<p>h</p>"))
     }
 
     /** A downloaded PDF is shown; one that could not be is offered by its URL. */
@@ -190,7 +208,9 @@ class FullTextViewModelOpenAccessShortfallTest {
     fun `an unestablished answer leaves the stored shortfall as it was`() {
         val unsettled = document.copy(fullTextOpenAccessShortfallJson = throttled.toJson())
 
-        open(unsettled, FullTextService.FullTextResult.NotEstablished(RequestFailure(RequestFailureKind.TIMEOUT)))
+        open(unsettled, FullTextService.FullTextResult.NotEstablished(
+            RequestFailure(RequestFailureKind.TIMEOUT), NotEstablishedSource.EUROPE_PMC
+        ))
 
         coVerify(exactly = 0) { documentDao.update(any()) }
     }

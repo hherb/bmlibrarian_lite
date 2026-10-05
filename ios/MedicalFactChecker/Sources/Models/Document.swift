@@ -318,7 +318,8 @@ final class Document {
     var fullTextTotalPages: Int?
 
     /// Source of the full text (for display and debugging).
-    /// Values: "europepmc", "unpaywall", "doi"
+    /// Values: the raw values of ``AppFullTextSource``, e.g. "europepmc",
+    /// "pmc_open_data", "unpaywall", "doi"
     var fullTextSource: String?
 
     /// When the full text was fetched.
@@ -903,13 +904,7 @@ final class Document {
     /// Display name for the full text source.
     var fullTextSourceDisplay: String? {
         guard let source = fullTextSource else { return nil }
-        switch source {
-        case "europepmc": return "Europe PMC"
-        case "unpaywall": return "Unpaywall"
-        case "doi": return "Publisher"
-        case "cached": return "Cached"
-        default: return source.capitalized
-        }
+        return AppFullTextSource(rawValue: source)?.displayName ?? source.capitalized
     }
 
     /// Full citation string for references section.

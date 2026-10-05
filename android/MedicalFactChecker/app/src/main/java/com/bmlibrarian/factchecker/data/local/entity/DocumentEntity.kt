@@ -306,6 +306,7 @@ data class DocumentEntity(
     val fullTextSourceDisplay: String?
         get() = when (fullTextSource) {
             Constants.FULLTEXT_SOURCE_EUROPE_PMC -> "Europe PMC"
+            Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA -> Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA_LABEL
             Constants.FULLTEXT_SOURCE_UNPAYWALL -> "Unpaywall"
             Constants.FULLTEXT_SOURCE_DOI -> "Publisher"
             Constants.FULLTEXT_SOURCE_CACHED -> "Cached"

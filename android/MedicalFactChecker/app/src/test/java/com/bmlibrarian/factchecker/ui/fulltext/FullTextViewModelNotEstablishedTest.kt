@@ -22,6 +22,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.bmlibrarian.factchecker.data.local.dao.DocumentDao
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
+import com.bmlibrarian.factchecker.data.remote.fulltext.NotEstablishedSource
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.domain.model.AppSettings
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
@@ -86,7 +87,9 @@ class FullTextViewModelNotEstablishedTest {
     @Test
     fun `a chain that did not establish the absence offers a retry and records nothing`() {
         val viewModel = open(
-            FullTextService.FullTextResult.NotEstablished(RequestFailure(RequestFailureKind.HTTP_STATUS, 429))
+            FullTextService.FullTextResult.NotEstablished(
+                RequestFailure(RequestFailureKind.HTTP_STATUS, 429), NotEstablishedSource.EUROPE_PMC
+            )
         )
 
         assertEquals(
@@ -104,7 +107,9 @@ class FullTextViewModelNotEstablishedTest {
     @Test
     fun `a 404 for a held article offers a retry and records nothing`() {
         val viewModel = open(
-            FullTextService.FullTextResult.NotEstablished(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
+            FullTextService.FullTextResult.NotEstablished(
+                RequestFailure(RequestFailureKind.HTTP_STATUS, 404), NotEstablishedSource.EUROPE_PMC
+            )
         )
 
         assertEquals(

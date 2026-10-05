@@ -75,6 +75,7 @@ class FullTextRecordingTest {
         val answers = listOf(
             FullTextResult.DoiUrl("https://doi.org/10.1/x"),
             FullTextResult.EuropePmcXml(xml = "<a/>", markdown = "m", html = "<p>h</p>"),
+            FullTextResult.PmcOpenDataXml(xml = "<a/>", markdown = "m", html = "<p>h</p>"),
             FullTextResult.EuropePmcPdf(pdfUrl = "https://europepmc.org/a.pdf"),
             FullTextResult.UnpaywallPdf(pdfUrl = "https://repo.example.org/a.pdf", doi = "10.1/x"),
             FullTextResult.Unavailable("No full text source available"),
@@ -82,6 +83,20 @@ class FullTextRecordingTest {
         for (answer in answers) {
             assertNull("$answer", record(answer).fullTextOpenAccessShortfallJson)
         }
+    }
+
+    /** PMC's open-data bucket's JATS is stored as Europe PMC's is, under its own source (#480). */
+    @Test
+    fun `the bucket's text is recorded under its own source`() = runTest {
+        val recorded = record(FullTextResult.PmcOpenDataXml(xml = "<a/>", markdown = "m", html = "<p>h</p>"))
+
+        assertEquals("m", recorded.fullTextMarkdown)
+        assertEquals("<p>h</p>", recorded.fullTextHTML)
+        assertEquals(Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA, recorded.fullTextSource)
+        assertEquals(Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA_LABEL, recorded.fullTextSourceDisplay)
+        assertEquals("PMC Open-Access Collection", Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA_LABEL)
+        assertNull(recorded.fullTextOpenAccessShortfallJson)
+        assertEquals(false, recorded.isLinkOnly)
     }
 
     /** Including when the Europe PMC PDF it found could not be downloaded: Europe PMC is not the open-access tier. */
@@ -150,7 +165,9 @@ class FullTextRecordingTest {
     /** A chain that settled nothing records nothing, the shortfall included (#434). */
     @Test
     fun `a chain that did not establish the absence leaves the document as it was`() = runTest {
-        val recorded = record(FullTextResult.NotEstablished(RequestFailure(RequestFailureKind.CONNECTION)))
+        val recorded = record(FullTextResult.NotEstablished(
+            RequestFailure(RequestFailureKind.CONNECTION), NotEstablishedSource.EUROPE_PMC
+        ))
 
         assertSame(document, recorded)
     }

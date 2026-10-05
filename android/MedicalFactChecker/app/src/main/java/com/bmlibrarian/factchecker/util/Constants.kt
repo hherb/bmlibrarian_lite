@@ -104,6 +104,48 @@ object Constants {
     /** Europe PMC REST API base URL. */
     const val EUROPE_PMC_BASE_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/"
 
+    /**
+     * Europe PMC as the reader's sentences name it, verbatim on every platform
+     * (BioMedLit's `europePMCServiceName`).
+     */
+    const val EUROPE_PMC_SERVICE_NAME = "Europe PMC"
+
+    /** PMC's open-data bucket (#480); pinned by fulltext_parity/pmc_open_data.json. */
+    const val PMC_OPEN_DATA_BASE_URL = "https://pmc-oa-opendata.s3.amazonaws.com"
+
+    /** The bucket's name, as `s3://` addresses spell it. */
+    const val PMC_OPEN_DATA_BUCKET = "pmc-oa-opendata"
+
+    /** The bucket as the reader knows it, verbatim on every platform. */
+    const val PMC_OPEN_DATA_SERVICE_NAME = "PMC's open-access collection"
+
+    /** Five requests per second, Python's POLITE_RATE_CEILINGS entry. */
+    const val PMC_OPEN_DATA_MIN_INTERVAL_MS = 200L
+
+    /**
+     * Further attempts after the first for the bucket (four in all, Python's
+     * attempt count), for a transport failure or a [PMC_OPEN_DATA_RETRYABLE_STATUSES]
+     * status. Only the count is Python's: Python retries a status through its
+     * per-host pacer, and Swift's RetryHelper waits 1, 2 and 4 seconds, as
+     * [PMC_OPEN_DATA_INITIAL_BACKOFF_MS] does here.
+     */
+    const val PMC_OPEN_DATA_MAX_RETRIES = 3
+
+    /** The bucket's wait before its first retry, doubling after (1, 2, 4 s: Swift's RetryHelper). */
+    const val PMC_OPEN_DATA_INITIAL_BACKOFF_MS = 1000L
+
+    /**
+     * Connect and read timeout for one bucket request, in seconds: Python's 45 s
+     * per-request timeout, rather than the shared client's LLM read timeout.
+     */
+    const val PMC_OPEN_DATA_REQUEST_TIMEOUT_SECONDS = 45L
+
+    /** Statuses retried for the bucket: Python's RETRYABLE_HTTP_STATUSES (no 408). */
+    val PMC_OPEN_DATA_RETRYABLE_STATUSES = setOf(429, 500, 502, 503, 504)
+
+    /** The XML namespace of an S3 ListObjectsV2 answer. */
+    const val S3_LISTING_NAMESPACE = "http://s3.amazonaws.com/doc/2006-03-01/"
+
     /** Unpaywall API base URL for open access PDF lookup. */
     const val UNPAYWALL_BASE_URL = "https://api.unpaywall.org/v2/"
 
@@ -293,6 +335,15 @@ object Constants {
 
     /** Full-text source: Europe PMC XML. */
     const val FULLTEXT_SOURCE_EUROPE_PMC = "europepmc"
+
+    /** Full-text source: PMC's open-data bucket. */
+    const val FULLTEXT_SOURCE_PMC_OPEN_DATA = "pmc_open_data"
+
+    /**
+     * How a stored [FULLTEXT_SOURCE_PMC_OPEN_DATA] is labelled for the reader:
+     * the iOS/macOS label for the same source.
+     */
+    const val FULLTEXT_SOURCE_PMC_OPEN_DATA_LABEL = "PMC Open-Access Collection"
 
     /** Full-text source: Unpaywall PDF. */
     const val FULLTEXT_SOURCE_UNPAYWALL = "unpaywall"

@@ -556,7 +556,7 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
     func testAnExhaustedChainWithAnUnsettledCopyIsNotAnAbsence() {
         let shortfall = OpenAccessShortfall(source: .unpaywall, failure: .httpStatus(429))
         let error = FullTextService.exhaustedChainError(
-            primarySlot: "", primaryKind: nil, europePMCShortfall: nil,
+            primarySlot: "", primaryKind: nil, europePMCShortfall: nil, pmcOpenDataShortfall: nil,
             openAccessShortfall: shortfall, articleName: "a test article"
         )
 
@@ -578,7 +578,7 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
     /// chain's answer is an absence: the controls.
     func testAnExhaustedChainNamesEuropePMCFirstAndOtherwiseIsAnAbsence() {
         let unclassified = FullTextService.exhaustedChainError(
-            primarySlot: "889149", primaryKind: nil, europePMCShortfall: .timeout,
+            primarySlot: "889149", primaryKind: nil, europePMCShortfall: .timeout, pmcOpenDataShortfall: nil,
             openAccessShortfall: .unpaywallNotConfigured, articleName: "a test article"
         )
         guard case .identifierKindUnresolved("889149") = unclassified else {
@@ -586,7 +586,7 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         }
 
         let both = FullTextService.exhaustedChainError(
-            primarySlot: "", primaryKind: nil, europePMCShortfall: .timeout,
+            primarySlot: "", primaryKind: nil, europePMCShortfall: .timeout, pmcOpenDataShortfall: nil,
             openAccessShortfall: .unpaywallNotConfigured, articleName: "a test article"
         )
         guard case .absenceNotEstablished(.timeout) = both else {
@@ -594,7 +594,7 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         }
 
         let neither = FullTextService.exhaustedChainError(
-            primarySlot: "", primaryKind: nil, europePMCShortfall: nil,
+            primarySlot: "", primaryKind: nil, europePMCShortfall: nil, pmcOpenDataShortfall: nil,
             openAccessShortfall: nil, articleName: "a test article"
         )
         guard case .noFullTextAvailable = neither else {

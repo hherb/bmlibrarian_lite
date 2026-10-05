@@ -93,7 +93,8 @@ bmlibrarian_lite/
 │   ├── analysis_failures.py # Analysis shortfalls → notice and advice
 │   ├── audit_records.py     # What became of each document, classified not inferred
 │   ├── query_translator.py  # Natural language → structured query
-│   ├── fulltext_discovery.py # Europe PMC XML → Unpaywall → DOI
+│   ├── fulltext_discovery.py # Europe PMC XML → PMC open-data bucket → Unpaywall → DOI
+│   ├── pmc_open_data.py     # PMC's open-data S3 bucket (JATS by PMC ID)
 │   ├── pdf_discovery.py     # PDF source discovery
 │   ├── chunking.py          # Text chunking utilities
 │   ├── pdf_utils.py         # PDF text extraction
@@ -556,6 +557,7 @@ Automatic full-text retrieval with fallback chain:
    served here, since its statements may be missing. The interrogation tab
    alone falls back to it, labelled, when the refresh fails.
 1. Europe PMC XML (converted via JATS parser)
+   1a. PMC's open-data bucket, by PMC ID (the same JATS; `pmc_open_data.py`)
 2. Europe PMC PDF
 3. Unpaywall PDF (open access)
 4. DOI resolution (publisher website)

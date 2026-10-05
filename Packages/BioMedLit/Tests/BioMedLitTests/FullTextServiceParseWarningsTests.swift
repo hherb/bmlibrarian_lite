@@ -35,6 +35,13 @@ final class StubURLProtocol: URLProtocol {
     /// Longest key wins, so a specific route beats a general one.
     static var routes: [String: (status: Int, body: Data)] = [:]
 
+    /// Answers served in order to requests whose URL contains the key, one
+    /// per request, before ``routes`` is consulted; once a queue is spent the
+    /// request falls through to ``routes`` and ``stubbed``. Longest key wins.
+    ///
+    /// Needed to show a retry: a 503 followed by a 200 on the same URL.
+    static var sequences: [String: [(status: Int, body: Data)]] = [:]
+
     /// Errors to fail matching requests with, instead of answering them.
     ///
     /// Needed because cancellation cannot be expressed as a status code: the
@@ -79,6 +86,7 @@ final class StubURLProtocol: URLProtocol {
     static func reset() {
         stubbed = (200, Data())
         routes = [:]
+        sequences = [:]
         failures = [:]
         headers = [:]
         redirects = [:]
@@ -107,10 +115,14 @@ final class StubURLProtocol: URLProtocol {
             )
             return
         }
+        let queued = Self.sequences
+            .filter { url.contains($0.key) && !$0.value.isEmpty }
+            .max { $0.key.count < $1.key.count }?.key
         let match = Self.routes
             .filter { url.contains($0.key) }
             .max { $0.key.count < $1.key.count }
-        let (status, body) = match?.value ?? Self.stubbed
+        let (status, body) = queued.map { Self.sequences[$0]!.removeFirst() }
+            ?? match?.value ?? Self.stubbed
         let headerFields = Self.headers
             .filter { url.contains($0.key) }
             .max { $0.key.count < $1.key.count }?.value

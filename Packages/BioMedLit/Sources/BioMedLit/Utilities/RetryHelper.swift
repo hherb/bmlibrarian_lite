@@ -79,6 +79,18 @@ public struct RetryConfiguration: Sendable {
         jitterFactor: 0.2
     )
 
+    /// Configuration for PMC's open-data bucket (#480): four attempts, as
+    /// Python's. The backoff is BioMedLit's own: Python retries a 429 or 5xx
+    /// through its per-host pacer (`PoliteAdapter`), which paces each
+    /// attempt, halves its rate on a throttle and honours `Retry-After`.
+    public static let pmcOpenData = RetryConfiguration(
+        maxAttempts: 4,
+        initialDelay: 1.0,
+        maxDelay: 30.0,
+        backoffMultiplier: 2.0,
+        jitterFactor: 0.2
+    )
+
     /// Configuration for PDF downloads (longer timeouts).
     public static let pdfDownload = RetryConfiguration(
         maxAttempts: 3,

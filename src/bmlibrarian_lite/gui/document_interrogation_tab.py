@@ -105,7 +105,7 @@ NO_FULLTEXT_IDENTIFIER = "the article has no DOI, PMID or PMC ID to find a full 
 # may be missing (#420), and the reader is told so rather than shown the
 # abstract with a readable copy on disk.
 STALE_CACHED_FULLTEXT_LABEL = (
-    "Full Text (Europe PMC - cached by an earlier version; statements may be missing)"
+    "Full Text (cached by an earlier version; statements may be missing)"
 )
 PDF_NO_TEXT = "no text could be extracted from the PDF"
 PDF_UNREADABLE = "the PDF was retrieved but could not be read"
@@ -824,7 +824,8 @@ class DocumentInterrogationTab(QWidget):
         logger.info(f"load_from_citation: doc_id={citation.document.id}, pmid={citation.document.pmid}, doi={citation.document.doi}, pmc_id={citation.document.pmc_id}")
         logger.info(f"load_from_citation: metadata={self._current_doc_metadata}")
 
-        # Check for cached full-text markdown first (from Europe PMC XML)
+        # Check for cached full-text markdown first (converted JATS, from
+        # Europe PMC or PMC's open-data bucket)
         cached_fulltext = find_existing_fulltext(self._current_doc_metadata)
         stale_fulltext: str | None = None
         if cached_fulltext:
@@ -835,7 +836,7 @@ class DocumentInterrogationTab(QWidget):
                 # only if neither yields a full text (#420).
                 content = read_cached_fulltext(cached_fulltext)
                 if content is not None:
-                    self._load_citation_fulltext(content, citation, "Full Text (Europe PMC - cached)")
+                    self._load_citation_fulltext(content, citation, "Full Text (cached)")
                     return
                 stale_fulltext = read_stale_cached_fulltext(cached_fulltext)
             except Exception as e:
@@ -938,8 +939,9 @@ class DocumentInterrogationTab(QWidget):
 
         # Map source type to user-friendly label
         source_labels = {
-            "cached_fulltext": "Full Text (Europe PMC - cached)",
+            "cached_fulltext": "Full Text (cached)",
             "europepmc_xml": "Full Text (Europe PMC)",
+            "pmc_open_data_xml": "Full Text (PMC open-access collection)",
             "cached_pdf": "Full Text (PDF - cached)",
             "downloaded_pdf": "Full Text (PDF)",
         }
