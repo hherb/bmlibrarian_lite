@@ -86,7 +86,10 @@ class FactCheckViewModelFullTextTest {
             every { configurationVersion } returns MutableStateFlow(0)
         }
         every { settingsRepository.settings } returns MutableStateFlow(AppSettings())
-        fullTextService = mockk(relaxed = true)
+        fullTextService = mockk(relaxed = true) {
+            // A relaxed MockK answers a suspend call with null, not an empty list
+            coEvery { openAlexSteps(any(), any()) } returns emptyList()
+        }
         documentRepository = mockk(relaxed = true)
         viewModel = FactCheckViewModel(
             workflow = workflow,

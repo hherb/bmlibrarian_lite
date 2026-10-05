@@ -207,7 +207,7 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
             return sentenceStart("${clauses.joinToString(", and ")}, $ending")
         }
 
-    /** Python's `tried_sources_statement`. */
+    /** Python's `tried_sources_statement`; identical entries are told once. */
     private val triedSourcesStatement: String
         get() {
             val lookups = entries.filter { it.address == null }
@@ -231,7 +231,10 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
             }
             val ordered = items.sortedWith(compareBy({ it.rank }, { it.position }))
             val ending = if (ordered.any { it.unasked }) TRIED_UNASKED_ENDING else TRIED_ANSWERED_ENDING
-            return TRIED_SOURCES_LEAD + ordered.joinToString("; ") { it.text } + ". " + ending
+            // Two PDFs on one host refused alike read the same: told once, the
+            // first after sorting, as Python's `dict.fromkeys` keeps it.
+            val texts = ordered.map { it.text }.distinct()
+            return TRIED_SOURCES_LEAD + texts.joinToString("; ") + ". " + ending
         }
 
     /** Python's `configuration_nudge`: only Unpaywall is ever not configured. */
@@ -311,8 +314,11 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
         /** What the reader is told of a PDF not saved on the device (Python's `not_saved_note`). */
         private const val NOT_SAVED_ADVICE = "Check the free storage space and try again."
 
-        /** Matches the scheme a URL begins with. */
-        private val SCHEME = Regex("^[A-Za-z][A-Za-z0-9+.-]*://")
+        /**
+         * Matches what precedes a URL's authority: `scheme://`, or a bare `//`
+         * (a scheme-relative address), as urlsplit reads both.
+         */
+        private val AUTHORITY_START = Regex("^(?:[A-Za-z][A-Za-z0-9+.-]*:)?//")
 
         /** Where a URL's authority ends. */
         private const val AUTHORITY_END = "/?#"
@@ -379,15 +385,16 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
 
         /**
          * Python's `address_host`: `urlsplit(address.strip()).hostname`, else the
-         * address trimmed. Not `java.net.URI`, which refuses what urlsplit reads.
+         * address trimmed; a scheme-relative `//host/…` names its host, as in
+         * urlsplit. Not `java.net.URI`, which refuses what urlsplit reads.
          *
          * @param address The PDF's address, as the source gave it
          * @return The name a tried PDF is told by
          */
         fun host(address: String): String {
             val trimmed = address.trim()
-            val scheme = SCHEME.find(trimmed) ?: return trimmed
-            val rest = trimmed.substring(scheme.range.last + 1)
+            val start = AUTHORITY_START.find(trimmed) ?: return trimmed
+            val rest = trimmed.substring(start.range.last + 1)
             var authority = rest.takeWhile { it !in AUTHORITY_END }
             authority = authority.substringAfterLast('@')
             val host = if (authority.startsWith("[") && ']' in authority) {

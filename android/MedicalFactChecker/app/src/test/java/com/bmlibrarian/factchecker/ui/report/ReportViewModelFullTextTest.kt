@@ -68,7 +68,10 @@ class ReportViewModelFullTextTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(UnconfinedTestDispatcher())
-        fullTextService = mockk(relaxed = true)
+        fullTextService = mockk(relaxed = true) {
+            // A relaxed MockK answers a suspend call with null, not an empty list
+            coEvery { openAlexSteps(any(), any()) } returns emptyList()
+        }
         documentRepository = mockk(relaxed = true)
     }
 
