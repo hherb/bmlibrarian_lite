@@ -171,3 +171,35 @@ def _forget_pacing_state() -> Generator[None, None, None]:
     reset_limiters()
     yield
     reset_limiters()
+
+
+class _OpenAlexKnowsNoWork:
+    """OpenAlex knowing no work by any DOI: the answer that adds nothing."""
+
+    mailto = None
+
+    def fetch_pdf_urls(self, doi: str) -> Any:
+        """Answer every DOI as unknown, without a request."""
+        from bmlibrarian_lite.openalex import OpenAlexWorkFetch
+
+        return OpenAlexWorkFetch.absent()
+
+
+@pytest.fixture(autouse=True)
+def _no_live_openalex(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep every PDF discovery off the real OpenAlex (#480, stage B).
+
+    A discovery that exhausts its sources now asks OpenAlex; dozens of
+    existing tests end there with a DOI. They get OpenAlex's "no such work",
+    which records nothing, so their outcomes are what they were. A test that
+    injects its own client is unaffected; one that needs the real default
+    marks itself ``real_openalex_client``.
+    """
+    if request.node.get_closest_marker("real_openalex_client"):
+        return
+    monkeypatch.setattr(
+        "bmlibrarian_lite.pdf_discovery.default_openalex_client",
+        lambda mailto: _OpenAlexKnowsNoWork(),
+    )

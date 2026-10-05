@@ -604,6 +604,7 @@ class DocumentInterrogationTab(QWidget):
             self.config.discovery.unpaywall_email or None,
             openathens_url,
             self,
+            openalex_email=self.config.pubmed.email or None,
         )
         self._pdf_worker.progress.connect(self._update_progress_dialog)
         self._pdf_worker.finished.connect(lambda p: self._on_pdf_ready(p, on_success))
@@ -912,6 +913,7 @@ class DocumentInterrogationTab(QWidget):
             self.config.discovery.unpaywall_email or None,
             openathens_url,
             self,
+            openalex_email=self.config.pubmed.email or None,
         )
         self._fulltext_worker.progress.connect(self._update_progress_dialog)
         self._fulltext_worker.finished.connect(

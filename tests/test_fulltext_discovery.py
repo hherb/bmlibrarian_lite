@@ -1001,7 +1001,7 @@ class TestDiscoverFulltextConvenience:
 
     @patch("bmlibrarian_lite.fulltext_discovery.FulltextDiscoverer")
     def test_passes_email(self, mock_discoverer_class: MagicMock) -> None:
-        """Test that unpaywall_email is passed to discoverer."""
+        """Test that the Unpaywall and OpenAlex emails are passed to discoverer (#480)."""
         mock_discoverer = MagicMock()
         mock_result = FulltextResult(
             success=False,
@@ -1010,8 +1010,13 @@ class TestDiscoverFulltextConvenience:
         mock_discoverer.discover_fulltext.return_value = mock_result
         mock_discoverer_class.return_value = mock_discoverer
 
-        discover_fulltext(pmid="12345", unpaywall_email="test@example.com")
+        discover_fulltext(
+            pmid="12345",
+            unpaywall_email="test@example.com",
+            openalex_email="researcher@example.org",
+        )
 
         mock_discoverer_class.assert_called_once_with(
-            unpaywall_email="test@example.com"
+            unpaywall_email="test@example.com",
+            openalex_email="researcher@example.org",
         )

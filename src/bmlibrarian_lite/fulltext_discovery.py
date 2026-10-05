@@ -199,6 +199,7 @@ class FulltextDiscoverer:
         use_browser_fallback: bool = True,
         browser_headless: bool = False,
         pmc_open_data: PmcOpenDataClient | None = None,
+        openalex_email: str | None = None,
     ) -> None:
         """
         Initialize full-text discoverer.
@@ -210,8 +211,10 @@ class FulltextDiscoverer:
             use_browser_fallback: If True, use browser for bot-protected downloads
             browser_headless: If True, run browser without visible window
             pmc_open_data: The bucket client; tests pass a stub
+            openalex_email: The contact email sent to OpenAlex (#480)
         """
         self.unpaywall_email = unpaywall_email
+        self.openalex_email = openalex_email
         self.openathens_url = openathens_url
         self.progress_callback = progress_callback
         self.use_browser_fallback = use_browser_fallback
@@ -865,6 +868,7 @@ class FulltextDiscoverer:
                 progress_callback=self.progress_callback,
                 use_browser_fallback=self.use_browser_fallback,
                 browser_headless=self.browser_headless,
+                openalex_email=self.openalex_email,
             )
 
             pdf_result = pdf_discoverer.discover_and_download(
@@ -960,6 +964,7 @@ def discover_fulltext(
     doi: Optional[str] = None,
     title: Optional[str] = None,
     unpaywall_email: Optional[str] = None,
+    openalex_email: str | None = None,
 ) -> FulltextResult:
     """
     Convenience function to discover full-text for an article.
@@ -970,11 +975,14 @@ def discover_fulltext(
         doi: Digital Object Identifier
         title: Document title
         unpaywall_email: Email for Unpaywall API
+        openalex_email: The contact email sent to OpenAlex (#480)
 
     Returns:
         FulltextResult with content and source information
     """
-    discoverer = FulltextDiscoverer(unpaywall_email=unpaywall_email)
+    discoverer = FulltextDiscoverer(
+        unpaywall_email=unpaywall_email, openalex_email=openalex_email
+    )
     return discoverer.discover_fulltext(
         pmid=pmid,
         pmcid=pmcid,

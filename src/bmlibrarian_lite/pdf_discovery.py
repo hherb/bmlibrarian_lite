@@ -19,6 +19,7 @@ PDF discovery and download functionality for BMLibrarian Lite.
 
 Provides multiple methods for discovering and downloading PDF files:
 - Unpaywall API for open access PDFs
+- OpenAlex's locations, for open access PDFs Unpaywall did not name
 - PubMed Central (PMC) for free full text
 - Direct DOI resolution via CrossRef/content negotiation
 - Browser-based download (Playwright) for bot-protected sites
@@ -39,7 +40,8 @@ import logging
 import re
 import time
 import threading
-from collections.abc import Iterator, Mapping
+from collections import deque
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
@@ -69,6 +71,8 @@ from .constants import (
     RETRYABLE_HTTP_STATUSES,
     SERVICE_DOI_PUBLISHER,
     SERVICE_DOI_RESOLVER,
+    SERVICE_OPENALEX,
+    SERVICE_OPENALEX_PDF,
     SERVICE_PDF_DOWNLOAD,
     SERVICE_PMC_ID_CONVERTER,
     SERVICE_UNPAYWALL,
@@ -96,6 +100,7 @@ from .oa_landing_page import (
     location_pdf_url,
     unpaywall_locations,
 )
+from .openalex import OpenAlexLocationsClient, untried_pdf_urls
 from .polite_session import is_loopback_host, mount_politely
 from .rate_limit import limiter_for
 from .search_failures import request_failure_from_exception
@@ -434,6 +439,7 @@ class PDFSourceType(Enum):
     PMC = "pmc"  # PubMed Central
     DOI_DIRECT = "doi_direct"  # Direct from DOI/publisher
     OPENATHENS = "openathens"  # Via institutional access
+    OPENALEX_OA = "openalex_oa"  # A PDF an OpenAlex location names (#480)
     UNKNOWN = "unknown"
 
 
@@ -625,7 +631,10 @@ def discard_partial_download(partial: Path) -> None:
 
 
 #: Whose PDF an unobtained open-access copy is recorded against (#478, #480).
-_UNOBTAINED_PDF_SERVICE = {PDFSourceType.UNPAYWALL_OA: SERVICE_UNPAYWALL_PDF}
+_UNOBTAINED_PDF_SERVICE = {
+    PDFSourceType.UNPAYWALL_OA: SERVICE_UNPAYWALL_PDF,
+    PDFSourceType.OPENALEX_OA: SERVICE_OPENALEX_PDF,
+}
 
 
 def unobtained_open_access_pdf(
@@ -683,6 +692,21 @@ def usable_unpaywall_email(email: str | None) -> str | None:
     return stripped
 
 
+def default_openalex_client(mailto: str | None) -> OpenAlexLocationsClient:
+    """The OpenAlex client a discoverer asks when none is injected.
+
+    A module-level seam so ``tests/conftest.py`` can keep every discovery in
+    the test suite off the real OpenAlex.
+
+    Args:
+        mailto: The contact email, already checked usable, or ``None``.
+
+    Returns:
+        A client on OpenAlex itself.
+    """
+    return OpenAlexLocationsClient(mailto=mailto)
+
+
 class PDFDiscoverer:
     """
     Discovers and downloads PDF files from various sources.
@@ -702,6 +726,8 @@ class PDFDiscoverer:
         progress_callback: Optional[Callable[[str, str], None]] = None,
         use_browser_fallback: bool = True,
         browser_headless: bool = False,
+        openalex_email: str | None = None,
+        openalex: OpenAlexLocationsClient | None = None,
     ) -> None:
         """
         Initialize PDF discoverer.
@@ -713,8 +739,20 @@ class PDFDiscoverer:
             progress_callback: Callback for progress updates (stage, status)
             use_browser_fallback: If True, use browser for bot-protected downloads
             browser_headless: If True, run browser without visible window
+            openalex_email: The contact email sent to OpenAlex, the one the
+                transparency analysis already sends it; the application's
+                placeholder counts as none, and OpenAlex is then asked
+                without one (#480)
+            openalex: The OpenAlex client; tests pass a stub
         """
         self.unpaywall_email = usable_unpaywall_email(unpaywall_email)
+        # The placeholder test is Unpaywall's: a blank or placeholder address
+        # is no contact, and OpenAlex is asked without one rather than skipped
+        self._openalex = (
+            openalex
+            if openalex is not None
+            else default_openalex_client(usable_unpaywall_email(openalex_email))
+        )
         self.openathens_url = openathens_url
         self.progress_callback = progress_callback
         self.use_browser_fallback = use_browser_fallback
@@ -764,6 +802,8 @@ class PDFDiscoverer:
         Tries multiple sources in order of reliability:
         1. PubMed Central (if PMID/PMCID available)
         2. Unpaywall (if DOI and email available)
+        2a. OpenAlex's locations not already found (if DOI), before any
+            source that is not open access
         3. Direct DOI resolution
 
         Args:
@@ -798,6 +838,17 @@ class PDFDiscoverer:
                 lookups=lookups,
             )
 
+        # OpenAlex is asked once, for the PDFs Unpaywall did not name (#480,
+        # stage B): at once when nothing else was found, otherwise when the
+        # next source to try is not an open-access copy (below).
+        openalex_doi = doi
+        if not sources and openalex_doi:
+            found, openalex_lookups = self._discover_openalex(openalex_doi, ())
+            openalex_doi = None
+            sources = found
+            lookups = lookups.merged(openalex_lookups)
+            told = told.merged(openalex_lookups)
+
         if not sources:
             self._emit_progress("discovery", "not_found")
             return DiscoveryResult(
@@ -830,7 +881,8 @@ class PDFDiscoverer:
         blocked_oa_sources: List[PDFSource] = []  # Track sources blocked by bot protection
         unobtained: list[tuple[int, LookupRecord]] = []
 
-        for source in sources:
+        pending = deque(sources)
+        while pending or openalex_doi:
             if self._cancelled:
                 return DiscoveryResult(
                     success=False,
@@ -838,6 +890,23 @@ class PDFDiscoverer:
                     lookups=lookups,
                 )
 
+            if openalex_doi and (not pending or not pending[0].is_open_access):
+                found, openalex_lookups = self._discover_openalex(
+                    openalex_doi, [s.url for s in sources]
+                )
+                openalex_doi = None
+                lookups = lookups.merged(openalex_lookups)
+                told = told.merged(openalex_lookups)
+                # After every earlier copy's rank: OpenAlex's PDFs are told
+                # after Unpaywall's, whatever order they were tried in
+                first_rank = max(copy_rank.values(), default=-1) + 1
+                for offset, found_source in enumerate(found):
+                    copy_rank[found_source.url] = first_rank + offset
+                sources.extend(found)
+                pending.extendleft(reversed(found))
+                continue
+
+            source = pending.popleft()
             self._emit_progress("discovery", "found_oa" if source.is_open_access else "found")
             result = self._try_download(source, output_path, expected_title or title)
 
@@ -1349,6 +1418,37 @@ class PDFDiscoverer:
             return sources, SourceLookupFailure(SERVICE_UNPAYWALL, failure)
 
         return sources, landing_failure
+
+    def _discover_openalex(
+        self, doi: str, known_urls: Iterable[str]
+    ) -> tuple[list[PDFSource], LookupRecord]:
+        """The PDFs OpenAlex's locations name that no earlier source did (#480).
+
+        Args:
+            doi: The article's DOI.
+            known_urls: Every address already found, tried or still to try.
+
+        Returns:
+            The new open-access sources, in OpenAlex's order, and the failure
+            that left OpenAlex unasked, if any. No work, or a work naming no
+            new PDF, is an answer: no source and nothing recorded.
+        """
+        fetch = self._openalex.fetch_pdf_urls(self._clean_doi(doi))
+        if fetch.failure is not None:
+            logger.warning(
+                "OpenAlex could not be asked about DOI %s (%s), so any open-access "
+                "copy it knows of is not assessed.",
+                doi,
+                fetch.failure.describe(),
+            )
+            return [], LookupRecord(
+                failures=(SourceLookupFailure(SERVICE_OPENALEX, fetch.failure),)
+            )
+        urls = untried_pdf_urls(fetch.pdf_urls or (), known_urls)
+        return [
+            PDFSource(url=url, source_type=PDFSourceType.OPENALEX_OA, is_open_access=True)
+            for url in urls
+        ], LookupRecord()
 
     def _resolve_landing_page(
         self, page_url: str, location: Mapping[str, Any]

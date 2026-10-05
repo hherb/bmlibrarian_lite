@@ -227,6 +227,7 @@ class PDFDiscoveryWorker(SingleOutcome, QThread):
         unpaywall_email: Optional[str] = None,
         openathens_url: Optional[str] = None,
         parent: Optional[QWidget] = None,
+        openalex_email: str | None = None,
     ) -> None:
         """
         Initialize PDF discovery worker.
@@ -237,12 +238,14 @@ class PDFDiscoveryWorker(SingleOutcome, QThread):
             unpaywall_email: Email for Unpaywall API
             openathens_url: OpenAthens institution URL for authenticated downloads
             parent: Optional parent widget
+            openalex_email: The contact email sent to OpenAlex (#480)
         """
         super().__init__(parent)
         self.doc_dict = doc_dict
         self.output_dir = output_dir
         self.unpaywall_email = unpaywall_email
         self.openathens_url = openathens_url
+        self.openalex_email = openalex_email
         self._cancelled = False
         self._discoverer: Optional[PDFDiscoverer] = None
 
@@ -290,6 +293,7 @@ class PDFDiscoveryWorker(SingleOutcome, QThread):
                 unpaywall_email=self.unpaywall_email,
                 openathens_url=self.openathens_url,
                 progress_callback=self._emit_progress,
+                openalex_email=self.openalex_email,
             )
 
             # Perform discovery and download
@@ -378,6 +382,7 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
         unpaywall_email: Optional[str] = None,
         openathens_url: Optional[str] = None,
         parent: Optional[QWidget] = None,
+        openalex_email: str | None = None,
     ) -> None:
         """
         Initialize full-text discovery worker.
@@ -387,11 +392,13 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
             unpaywall_email: Email for Unpaywall API
             openathens_url: OpenAthens institution URL for authenticated downloads
             parent: Optional parent widget
+            openalex_email: The contact email sent to OpenAlex (#480)
         """
         super().__init__(parent)
         self.doc_dict = doc_dict
         self.unpaywall_email = unpaywall_email
         self.openathens_url = openathens_url
+        self.openalex_email = openalex_email
         self._cancelled = False
         self._discoverer: Optional[FulltextDiscoverer] = None
 
@@ -436,6 +443,7 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
                 unpaywall_email=self.unpaywall_email,
                 openathens_url=self.openathens_url,
                 progress_callback=self._emit_progress,
+                openalex_email=self.openalex_email,
             )
 
             # Perform discovery

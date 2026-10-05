@@ -2984,6 +2984,7 @@ class StudyTransparencyAnalyzer:
                 unpaywall_email=self._unpaywall_email,
                 use_browser_fallback=self._use_browser_fallback,
                 browser_headless=self._browser_headless,
+                openalex_email=self.email,
             )
 
             result = discoverer.discover_fulltext(
