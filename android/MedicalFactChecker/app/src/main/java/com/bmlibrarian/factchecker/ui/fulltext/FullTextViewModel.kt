@@ -116,12 +116,15 @@ class FullTextViewModel @Inject constructor(
          *   could not be downloaded. The screen says which (#471).
          * @param openAccessNotice What an open-access lookup that went unsettled
          *   leaves open, shown above the link; null when nothing was (#466).
+         * @param pdfNotSavedNote The caching note, when the PDF linked was served
+         *   and could not be saved on this device; null otherwise (#480).
          */
         data class WebUrl(
             val url: String,
             val title: String,
             val kind: FullTextLinkKind,
-            val openAccessNotice: String? = null
+            val openAccessNotice: String? = null,
+            val pdfNotSavedNote: String? = null
         ) : FullTextState()
 
         /**
@@ -287,8 +290,9 @@ class FullTextViewModel @Inject constructor(
      * @param chainResult What the chain returned.
      */
     private suspend fun handleFullTextResult(doc: DocumentEntity, chainResult: FullTextResult) {
-        // The result as settled by the download: a PDF Unpaywall named that could
-        // not be downloaded is shown as the DOI link, with why (#478)
+        // The result as settled by the download: the open-access PDFs are tried
+        // in turn, and when none could be downloaded the DOI link is shown, with
+        // why (#478, #480)
         val (recorded, result) = doc.recordingFullTextFetch(chainResult) { url ->
             fullTextService.downloadPdf(url, doc.id)
         }
@@ -318,12 +322,13 @@ class FullTextViewModel @Inject constructor(
             }
             is FullTextResult.EuropePmcPdf -> {
                 Log.d(TAG, "Got Europe PMC PDF URL for ${doc.id}: ${result.pdfUrl}")
-                pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, "Europe PMC")
+                pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, "Europe PMC", recorded.pdfNotSavedNote)
             }
-            is FullTextResult.UnpaywallPdf -> {
-                Log.d(TAG, "Got Unpaywall PDF URL for ${doc.id}: ${result.pdfUrl}")
-                pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, "Unpaywall")
+            is FullTextResult.OpenAccessPdf -> {
+                Log.d(TAG, "Got ${result.namedBy.label} PDF URL for ${doc.id}: ${result.pdfUrl}")
+                pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, result.namedBy.label, recorded.pdfNotSavedNote)
             }
+            is FullTextResult.OpenAccessPdfs -> error("resolved by recording")
             is FullTextResult.DoiUrl -> {
                 Log.d(TAG, "Falling back to DOI URL for ${doc.id}: ${result.url}")
                 FullTextState.WebUrl(
@@ -352,13 +357,26 @@ class FullTextViewModel @Inject constructor(
      * @param pdfUrl The PDF's URL.
      * @param title The document's title.
      * @param source The source, as the reader is told of it.
+     * @param notSavedNote The caching note, when the PDF was served and could
+     *   not be saved (#480); shown beside the link.
      * @return The state to show.
      */
-    private fun pdfOrLink(localPath: String?, pdfUrl: String, title: String, source: String): FullTextState =
+    private fun pdfOrLink(
+        localPath: String?,
+        pdfUrl: String,
+        title: String,
+        source: String,
+        notSavedNote: String?
+    ): FullTextState =
         if (localPath != null) {
             FullTextState.PdfContent(pdfPath = localPath, title = title, source = source)
         } else {
-            FullTextState.WebUrl(url = pdfUrl, title = title, kind = FullTextLinkKind.UNDOWNLOADED_PDF)
+            FullTextState.WebUrl(
+                url = pdfUrl,
+                title = title,
+                kind = FullTextLinkKind.UNDOWNLOADED_PDF,
+                pdfNotSavedNote = notSavedNote
+            )
         }
 
     /**
@@ -383,7 +401,8 @@ class FullTextViewModel @Inject constructor(
                         pdfPath = null,
                         fullTextUnavailable = false,
                         fullTextFetchedAt = null,
-                        fullTextOpenAccessShortfallJson = null
+                        fullTextOpenAccessShortfallJson = null,
+                        fullTextPdfNotSavedFrom = null
                     )
                 )
 

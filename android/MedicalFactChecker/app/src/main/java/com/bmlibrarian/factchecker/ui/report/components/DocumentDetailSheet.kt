@@ -226,6 +226,11 @@ fun DocumentDetailSheet(
                 Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
                 OpenAccessShortfallNotice(notice = shortfall.notice)
             }
+            // A PDF served and not saved, told apart from the shortfall (#480)
+            document.pdfNotSavedNote?.let { note ->
+                Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
+                OpenAccessShortfallNotice(notice = note)
+            }
         }
 
         Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))

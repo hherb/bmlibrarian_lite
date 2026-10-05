@@ -348,6 +348,9 @@ object Constants {
     /** Full-text source: Unpaywall PDF. */
     const val FULLTEXT_SOURCE_UNPAYWALL = "unpaywall"
 
+    /** How a stored [FULLTEXT_SOURCE_UNPAYWALL] is labelled for the reader. */
+    const val FULLTEXT_SOURCE_UNPAYWALL_LABEL = "Unpaywall"
+
     /** Full-text source: DOI/Publisher. */
     const val FULLTEXT_SOURCE_DOI = "doi"
 

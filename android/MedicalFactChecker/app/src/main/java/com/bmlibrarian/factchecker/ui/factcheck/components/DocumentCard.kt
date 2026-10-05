@@ -701,6 +701,10 @@ private fun FullTextSection(
         document.openAccessShortfall?.let { shortfall ->
             OpenAccessShortfallNotice(notice = shortfall.notice)
         }
+        // A PDF served and not saved, told apart from the shortfall (#480)
+        document.pdfNotSavedNote?.let { note ->
+            OpenAccessShortfallNotice(notice = note)
+        }
     }
 }
 

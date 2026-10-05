@@ -48,6 +48,10 @@ class FullTextRecordingTest {
         fullTextOpenAccessShortfallJson = earlier.toJson()
     )
 
+    /** The chain's answer naming one Unpaywall PDF for 10.1/x. */
+    private fun unpaywallPdfs(pdfUrl: String) =
+        FullTextResult.OpenAccessPdfs(listOf(OpenAccessStep.Candidate(pdfUrl, PdfNamer.UNPAYWALL)), "10.1/x")
+
     private suspend fun record(result: FullTextResult, downloaded: String? = "/tmp/a.pdf") =
         recorded(result, downloaded).document
 
@@ -77,7 +81,7 @@ class FullTextRecordingTest {
             FullTextResult.EuropePmcXml(xml = "<a/>", markdown = "m", html = "<p>h</p>"),
             FullTextResult.PmcOpenDataXml(xml = "<a/>", markdown = "m", html = "<p>h</p>"),
             FullTextResult.EuropePmcPdf(pdfUrl = "https://europepmc.org/a.pdf"),
-            FullTextResult.UnpaywallPdf(pdfUrl = "https://repo.example.org/a.pdf", doi = "10.1/x"),
+            unpaywallPdfs("https://repo.example.org/a.pdf"),
             FullTextResult.Unavailable("No full text source available"),
         )
         for (answer in answers) {
@@ -110,55 +114,54 @@ class FullTextRecordingTest {
 
     /**
      * A PDF Unpaywall named that could not be downloaded is refused, not
-     * recorded as found (#478): the document is the DOI link, carrying why, and
-     * the result the screens are shown is that link too.
+     * recorded as found (#478): the document is the DOI link, carrying why and
+     * the PDF's address (#480), and the result the screens are shown is that
+     * link too.
      */
     @Test
     fun `an Unpaywall PDF that could not be downloaded is refused for the DOI link`() = runTest {
         val notFound = RequestFailure(RequestFailureKind.HTTP_STATUS, 404)
+        val pdfUrl = "https://repo.example.org/a.pdf"
 
-        val (doc, shown) = recorded(
-            FullTextResult.UnpaywallPdf(pdfUrl = "https://repo.example.org/a.pdf", doi = "10.1/x"),
-            downloaded = null
-        )
+        val (doc, shown) = recorded(unpaywallPdfs(pdfUrl), downloaded = null)
 
-        val expected = FullTextResult.DoiUrl(
-            "${Constants.DOI_URL_PREFIX}10.1/x", OpenAccessShortfall(OpenAccessSource.PDF, notFound)
-        )
-        assertEquals(expected, shown)
+        val shortfall = OpenAccessShortfall(OpenAccessSource.PDF, notFound, pdfUrl)
+        assertEquals(FullTextResult.DoiUrl("${Constants.DOI_URL_PREFIX}10.1/x", shortfall), shown)
         assertNull(doc.pdfPath)
         assertEquals(Constants.FULLTEXT_SOURCE_DOI, doc.fullTextSource)
-        assertEquals(OpenAccessShortfall(OpenAccessSource.PDF, notFound), doc.openAccessShortfall)
+        assertEquals(shortfall, doc.openAccessShortfall)
     }
 
-    /** The control: a downloaded Unpaywall PDF is recorded as found, its result unchanged. */
+    /** The control: a downloaded Unpaywall PDF is recorded as found. */
     @Test
     fun `a downloaded Unpaywall PDF is recorded as found`() = runTest {
-        val answer = FullTextResult.UnpaywallPdf(pdfUrl = "https://repo.example.org/a.pdf", doi = "10.1/x")
+        val pdfUrl = "https://repo.example.org/a.pdf"
 
-        val (doc, shown) = recorded(answer, downloaded = "/cache/a.pdf")
+        val (doc, shown) = recorded(unpaywallPdfs(pdfUrl), downloaded = "/cache/a.pdf")
 
-        assertSame(answer, shown)
+        assertEquals(FullTextResult.OpenAccessPdf(pdfUrl, "10.1/x", PdfNamer.UNPAYWALL), shown)
         assertEquals("/cache/a.pdf", doc.pdfPath)
         assertEquals(Constants.FULLTEXT_SOURCE_UNPAYWALL, doc.fullTextSource)
         assertNull(doc.fullTextOpenAccessShortfallJson)
+        assertNull(doc.fullTextPdfNotSavedFrom)
     }
 
     /**
      * A PDF the source served that could not be saved is our fault, not the
      * copy's: it stays the Unpaywall PDF's link, with no shortfall, as
-     * BioMedLit keeps its link (#478).
+     * BioMedLit keeps its link (#478), and a caching note of its own (#480).
      */
     @Test
     fun `an Unpaywall PDF that could not be saved keeps its link`() = runTest {
-        val answer = FullTextResult.UnpaywallPdf(pdfUrl = "https://repo.example.org/a.pdf", doi = "10.1/x")
+        val pdfUrl = "https://repo.example.org/a.pdf"
 
-        val (doc, shown) = document.recordingFullTextFetch(answer) { PdfDownload.NotSaved }
+        val (doc, shown) = document.recordingFullTextFetch(unpaywallPdfs(pdfUrl)) { PdfDownload.NotSaved }
 
-        assertSame(answer, shown)
+        assertEquals(FullTextResult.OpenAccessPdf(pdfUrl, "10.1/x", PdfNamer.UNPAYWALL, notSaved = true), shown)
         assertNull(doc.pdfPath)
         assertEquals(Constants.FULLTEXT_SOURCE_UNPAYWALL, doc.fullTextSource)
         assertNull(doc.fullTextOpenAccessShortfallJson)
+        assertEquals(pdfUrl, doc.fullTextPdfNotSavedFrom)
         assertEquals(FullTextLinkKind.UNDOWNLOADED_PDF, doc.linkOnlyKind)
     }
 
