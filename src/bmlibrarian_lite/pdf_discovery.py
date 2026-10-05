@@ -78,7 +78,7 @@ from .constants import (
 from .analysis_failures import (
     no_pdf_sources_message,
     paywall_message,
-    unestablished_access_clause,
+    not_saved_note,
     with_unestablished_access,
 )
 from .data_models import (
@@ -846,8 +846,10 @@ class PDFDiscoverer:
 
             if result.not_saved:
                 # Served, and not saved here: the copy exists, so nothing else
-                # is asked (saving is our problem) and nothing is an access
-                # shortfall; the reader gets the caching note (#480).
+                # is asked (saving is our problem) and the open-access
+                # question is settled (the maintainer's decision): the error
+                # is the caching note alone. Other unsettled lookups stay in
+                # ``lookups`` for the absence logic (#480).
                 saved_note = LookupRecord(skipped=(SourceLookupSkipped(
                     _UNOBTAINED_PDF_SERVICE.get(source.source_type, SERVICE_PDF_DOWNLOAD),
                     LookupSkipReason.NOT_SAVED,
@@ -855,7 +857,7 @@ class PDFDiscoverer:
                 ),))
                 return DiscoveryResult(
                     success=False,
-                    error=unestablished_access_clause(told.merged(saved_note)),
+                    error=not_saved_note(saved_note),
                     lookups=lookups.merged(saved_note),
                 )
 
@@ -882,10 +884,11 @@ class PDFDiscoverer:
                     # answer, not the document's licence: where the lookup
                     # that would have found a free copy could not be made,
                     # the claim is withheld rather than asserted (#347).
+                    not_obtained = self._ranked(unobtained)
                     return replace(
-                        result.with_lookups(lookups.merged(self._ranked(unobtained))),
+                        result.with_lookups(lookups.merged(not_obtained)),
                         error=paywall_message(
-                            result.error or "", told.merged(self._ranked(unobtained))
+                            result.error or "", told.merged(not_obtained)
                         ),
                     )
 
@@ -906,12 +909,14 @@ class PDFDiscoverer:
                 if result.success:
                     return result.with_lookups(lookups)
 
+        not_obtained = self._ranked(unobtained)
+
         # If we had a paywall result but no success, return it for OpenAthens option
         if last_paywall_result:
             return replace(
-                last_paywall_result.with_lookups(lookups.merged(self._ranked(unobtained))),
+                last_paywall_result.with_lookups(lookups.merged(not_obtained)),
                 error=paywall_message(
-                    last_paywall_result.error or "", told.merged(self._ranked(unobtained))
+                    last_paywall_result.error or "", told.merged(not_obtained)
                 ),
             )
 
@@ -921,9 +926,9 @@ class PDFDiscoverer:
             # cannot falsify -- so it is qualified rather than withheld.
             error=with_unestablished_access(
                 "Failed to download PDF from any available source.",
-                told.merged(self._ranked(unobtained)),
+                told.merged(not_obtained),
             ),
-            lookups=lookups.merged(self._ranked(unobtained)),
+            lookups=lookups.merged(not_obtained),
         )
 
     @staticmethod

@@ -546,7 +546,7 @@ class TestTheReaderIsTold:
             in result.error
         )
 
-    def test_the_publishers_name_starts_its_sentence_capitalised(
+    def test_the_publishers_name_is_told_among_the_tried_sources(
         self,
         discoverer: PDFDiscoverer,
         tmp_path: Path,

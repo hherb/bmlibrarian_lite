@@ -24,7 +24,12 @@ import pytest
 import requests
 
 from bmlibrarian_lite.analysis_failures import not_saved_note
-from bmlibrarian_lite.constants import PDF_PARTIAL_SUFFIX, SERVICE_UNPAYWALL_PDF
+from bmlibrarian_lite.constants import (
+    PDF_PARTIAL_SUFFIX,
+    SERVICE_DOI_RESOLVER,
+    SERVICE_PDF_DOWNLOAD,
+    SERVICE_UNPAYWALL_PDF,
+)
 from bmlibrarian_lite.data_models import (
     LookupRecord,
     LookupSkipReason,
@@ -405,6 +410,59 @@ def test_a_pdf_that_could_not_be_saved_is_a_caching_note_not_absent(tmp_path: Pa
         skipped=(SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.NOT_SAVED, UNPAYWALL_PDF),)
     )
     assert session.requested == [UNPAYWALL_PDF], "saving is our problem: no further copy asked"
+    assert result.error == not_saved_note(result.lookups)
+
+
+def _discover_unsaveable(
+    sources: list[PDFSource], tmp_path: Path, session: Any, looked_up: LookupRecord | None = None
+) -> DiscoveryResult:
+    """Run the download loop where the PDF is served but cannot be written."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a file where the cache directory should be")
+    discoverer = PDFDiscoverer(unpaywall_email="test@example.com", use_browser_fallback=False)
+    discoverer._discover_sources = lambda doi, pmid, pmcid: (list(sources), looked_up or LookupRecord())  # type: ignore[method-assign]
+    discoverer._session = session  # type: ignore[assignment]
+    return discoverer.discover_and_download(blocker / "a.pdf", doi="10.1/x")
+
+
+def test_a_copy_not_saved_is_the_note_alone_and_keeps_other_unsettled_lookups(tmp_path: Path) -> None:
+    """A served copy settles the open-access question; the other lookups stay recorded."""
+    doi_failure = SourceLookupFailure(SERVICE_DOI_RESOLVER, RequestFailure(RequestFailureKind.TIMEOUT))
+    session = _Session({UNPAYWALL_PDF: _response(200, PDF_BYTES, "application/pdf", UNPAYWALL_PDF)})
+
+    result = _discover_unsaveable([_unpaywall()], tmp_path, session, LookupRecord(failures=(doi_failure,)))
+
+    saved = SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.NOT_SAVED, UNPAYWALL_PDF)
+    assert result.lookups == LookupRecord(failures=(doi_failure,), skipped=(saved,))
+    assert result.error == not_saved_note(LookupRecord(skipped=(saved,)))
+    assert "not established" not in (result.error or "")
+
+
+def test_a_refused_copy_before_a_copy_not_saved_is_not_recorded(tmp_path: Path) -> None:
+    """The walk ends at the served copy: the earlier refusal is not told."""
+    accepted = _unpaywall(UNPAYWALL_PDF, version="acceptedVersion")
+    published = _unpaywall(PUBLISHER_PDF, version="publishedVersion")  # tried first
+    session = _Session({
+        PUBLISHER_PDF: _response(403, b"", "text/html", PUBLISHER_PDF),
+        UNPAYWALL_PDF: _response(200, PDF_BYTES, "application/pdf", UNPAYWALL_PDF),
+    })
+
+    result = _discover_unsaveable([accepted, published], tmp_path, session)
+
+    saved = SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.NOT_SAVED, UNPAYWALL_PDF)
+    assert session.requested == [PUBLISHER_PDF, UNPAYWALL_PDF]
+    assert result.lookups == LookupRecord(skipped=(saved,))
+    assert result.error == not_saved_note(result.lookups)
+
+
+def test_a_non_open_access_pdf_not_saved_is_recorded_under_the_download(tmp_path: Path) -> None:
+    """A source that is no open-access copy is recorded under the download, with its address."""
+    session = _Session({PUBLISHER_PDF: _response(200, PDF_BYTES, "application/pdf", PUBLISHER_PDF)})
+
+    result = _discover_unsaveable([_publisher()], tmp_path, session)
+
+    saved = SourceLookupSkipped(SERVICE_PDF_DOWNLOAD, LookupSkipReason.NOT_SAVED, PUBLISHER_PDF)
+    assert result.lookups == LookupRecord(skipped=(saved,))
     assert result.error == not_saved_note(result.lookups)
 
 
