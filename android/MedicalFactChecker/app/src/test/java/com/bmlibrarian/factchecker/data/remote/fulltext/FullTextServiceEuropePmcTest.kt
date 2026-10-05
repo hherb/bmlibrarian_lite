@@ -61,7 +61,8 @@ class FullTextServiceEuropePmcTest {
             europePmcService = europePmc,
             unpaywallApi = mockk<UnpaywallApi>(),
             httpClient = mockk(relaxed = true),
-            pmcOpenData = absentBucket()
+            pmcOpenData = absentBucket(),
+            openAlex = absentOpenAlex()
         )
     }
 

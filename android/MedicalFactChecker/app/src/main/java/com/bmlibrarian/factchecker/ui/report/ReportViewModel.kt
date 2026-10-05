@@ -441,9 +441,11 @@ class ReportViewModel @Inject constructor(
                     onSuccess = { chainResult ->
                         // The result as settled by the download: a PDF Unpaywall
                         // named that could not be downloaded is the DOI link (#478)
-                        val (updatedDoc, fullTextResult) = document.recordingFullTextFetch(chainResult) { url ->
-                            fullTextService.downloadPdf(url, document.id)
-                        }
+                        val (updatedDoc, fullTextResult) = document.recordingFullTextFetch(
+                            chainResult,
+                            downloadPdf = { url -> fullTextService.downloadPdf(url, document.id) },
+                            askOpenAlex = { doi, tried -> fullTextService.openAlexSteps(doi, tried) }
+                        )
 
                         documentRepository.updateDocument(updatedDoc)
 

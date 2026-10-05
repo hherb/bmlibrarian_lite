@@ -75,6 +75,8 @@ class FullTextViewModelOpenAccessShortfallTest {
         fullTextService = mockk(relaxed = true) {
             every { getCachedPdfPath(any()) } returns null
             coEvery { downloadPdf(any(), any()) } returns notFound
+            // A relaxed MockK answers a suspend call with null, not an empty list
+            coEvery { openAlexSteps(any(), any()) } returns emptyList()
         }
         documentDao = mockk(relaxed = true)
         settingsRepository = mockk(relaxed = true)
@@ -207,6 +209,28 @@ class FullTextViewModelOpenAccessShortfallTest {
             viewModel.state.value
         )
         coVerify { documentDao.update(match { it.openAccessShortfall == shortfall && it.pdfPath == null }) }
+    }
+
+    /**
+     * Once every Unpaywall PDF failed, the viewer asks OpenAlex through the
+     * service, with what was tried, and shows the copy it named (#480).
+     */
+    @Test
+    fun `OpenAlex is asked through the service once Unpaywall's PDFs failed`() {
+        val unpaywallPdf = "https://repo.example.org/a.pdf"
+        val openAlexPdf = "https://oa.example.org/b.pdf"
+        coEvery { fullTextService.downloadPdf(openAlexPdf, any()) } returns PdfDownload.Saved("/cache/b.pdf")
+        coEvery { fullTextService.openAlexSteps("10.1/x", listOf(unpaywallPdf)) } returns
+            listOf(OpenAccessStep.Candidate(openAlexPdf, PdfNamer.OPENALEX))
+
+        val viewModel = open(document, unpaywallPdfs(unpaywallPdf))
+
+        coVerify(exactly = 1) { fullTextService.openAlexSteps("10.1/x", listOf(unpaywallPdf)) }
+        assertEquals(
+            FullTextViewModel.FullTextState.PdfContent("/cache/b.pdf", "t", "OpenAlex"),
+            viewModel.state.value
+        )
+        coVerify { documentDao.update(match { it.fullTextSource == "openalex" && it.pdfPath == "/cache/b.pdf" }) }
     }
 
     /**

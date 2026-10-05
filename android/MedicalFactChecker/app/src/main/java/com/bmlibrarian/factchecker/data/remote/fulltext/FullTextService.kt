@@ -57,7 +57,9 @@ import javax.inject.Singleton
  * 3. Europe PMC PDF render - a free PDF Europe PMC offers
  * 4. Unpaywall PDFs - every PDF its locations name, tried in order when downloaded,
  *    or the PDF an open-access landing page declares
- * 5. DOI Resolution - link to publisher website
+ * 5. OpenAlex PDFs - the PDFs its locations name that Unpaywall did not, asked
+ *    only when no Unpaywall copy was served ([openAlexSteps])
+ * 6. DOI Resolution - link to publisher website
  *
  * Full-text content is cached locally after first retrieval.
  */
@@ -67,7 +69,8 @@ class FullTextService @Inject constructor(
     private val europePmcService: EuropePMCService,
     private val unpaywallApi: UnpaywallApi,
     private val httpClient: OkHttpClient,
-    private val pmcOpenData: PmcOpenDataService
+    private val pmcOpenData: PmcOpenDataService,
+    private val openAlex: OpenAlexService
 ) {
     companion object {
         private const val TAG = "FullTextService"
@@ -181,9 +184,10 @@ class FullTextService @Inject constructor(
          *
          * @param url URL to the publisher page.
          * @param openAccessShortfall Why the open-access copy went unassessed when
-         *   Unpaywall, the landing page it named, or the PDF it named could not
-         *   settle whether a free copy exists; null when nothing was left unsettled. Stored on the document and shown to the
-         *   reader (#466): the link alone reads as "no free copy".
+         *   Unpaywall, the landing page it named, OpenAlex, or a PDF either named
+         *   could not settle whether a free copy exists; null when nothing was
+         *   left unsettled. Stored on the document and shown to the reader
+         *   (#466): the link alone reads as "no free copy".
          */
         data class DoiUrl(
             val url: String,
@@ -427,20 +431,29 @@ class FullTextService @Inject constructor(
         }
 
         // Try Unpaywall if DOI is available: every PDF it names is a step, tried
-        // in order when the PDFs are downloaded (#480, stage B). A lookup that
-        // could not settle whether a free copy exists is carried on the
-        // fallback, so the reader is told so rather than shown the DOI link as
-        // though there were none (#466)
+        // in order when the PDFs are downloaded (#480, stage B). OpenAlex is
+        // asked only when it can raise the odds: here when Unpaywall named no
+        // candidate, otherwise by recording once every Unpaywall candidate
+        // failed. A lookup that could not settle whether a free copy exists is
+        // carried on the fallback, so the reader is told so rather than shown
+        // the DOI link as though there were none (#466)
         var openAccessShortfall: OpenAccessShortfall? = null
         if (!doi.isNullOrEmpty()) {
             Log.d(TAG, "Attempting Unpaywall PDF for $doi")
-            val steps = unpaywallSteps(doi, email, pmid)
+            val unpaywall = unpaywallSteps(doi, email, pmid)
+            if (unpaywall.any { it is OpenAccessStep.Candidate }) {
+                // OpenAlex waits: recording asks it only if none of these is served
+                return@withContext Result.success(FullTextResult.OpenAccessPdfs(unpaywall, doi))
+            }
+            Log.d(TAG, "Unpaywall named no PDF to try for $doi; asking OpenAlex")
+            // Unpaywall may still have named addresses that cannot be requested
+            val steps = unpaywall + openAlexSteps(doi, unpaywall.flatMap { it.addresses })
             if (steps.any { it is OpenAccessStep.Candidate }) {
-                return@withContext Result.success(FullTextResult.OpenAccessPdfs(steps, doi))
+                return@withContext Result.success(FullTextResult.OpenAccessPdfs(steps, doi, openAlexAsked = true))
             }
             openAccessShortfall = steps.filterIsInstance<OpenAccessStep.Unsettled>()
                 .fold(null as OpenAccessShortfall?) { held, step -> OpenAccessShortfall.adding(step.shortfall, held) }
-            Log.d(TAG, "Unpaywall named no PDF to try for $doi")
+            Log.d(TAG, "Neither Unpaywall nor OpenAlex named a PDF to try for $doi")
         }
 
         // Fall back to DOI URL if DOI is available
@@ -661,6 +674,31 @@ class FullTextService @Inject constructor(
             )
         }
     }
+
+    /**
+     * OpenAlex's steps, for the PDFs Unpaywall did not name (#480, stage B):
+     * its untried PDFs as candidates (an address that cannot be requested
+     * refused at once, with its address), or OpenAlex itself unsettled. Called
+     * by the chain when Unpaywall named no candidate, and by recording once
+     * every Unpaywall candidate failed; never otherwise, as it could not raise
+     * the odds.
+     *
+     * @param doi The DOI
+     * @param tried Addresses already named, tried or refused, which are dropped
+     * @return The steps in OpenAlex's order; empty when OpenAlex knows no work
+     *   by the DOI or names no PDF not already tried
+     * @throws CancellationException if the caller cancelled.
+     */
+    suspend fun openAlexSteps(doi: String, tried: Collection<String>): List<OpenAccessStep> =
+        when (val fetch = openAlex.fetchPdfUrls(doi)) {
+            is OpenAlexFetch.Served ->
+                OpenAlex.untried(fetch.pdfUrls, tried).map { candidateOrRefused(it, PdfNamer.OPENALEX) }
+            OpenAlexFetch.Absent -> emptyList()
+            is OpenAlexFetch.Unreachable -> {
+                Log.w(TAG, "OpenAlex could not be asked about $doi (${fetch.failure.describe()})")
+                listOf(OpenAccessStep.Unsettled(OpenAccessShortfall(OpenAccessSource.OPENALEX, fetch.failure)))
+            }
+        }
 
     /**
      * A PDF address as a step: a candidate, or refused at once, with its
@@ -1001,18 +1039,31 @@ class FullTextService @Inject constructor(
  */
 enum class PdfNamer(val fullTextSource: String, val label: String, val refusedAs: OpenAccessSource) {
     /** Unpaywall: a location's `url_for_pdf`, or the PDF its landing page declares. */
-    UNPAYWALL(Constants.FULLTEXT_SOURCE_UNPAYWALL, Constants.FULLTEXT_SOURCE_UNPAYWALL_LABEL, OpenAccessSource.PDF)
+    UNPAYWALL(Constants.FULLTEXT_SOURCE_UNPAYWALL, Constants.FULLTEXT_SOURCE_UNPAYWALL_LABEL, OpenAccessSource.PDF),
+
+    /** OpenAlex: a location's `pdf_url` that Unpaywall did not name (#480). */
+    OPENALEX(Constants.FULLTEXT_SOURCE_OPENALEX, Constants.FULLTEXT_SOURCE_OPENALEX_LABEL, OpenAccessSource.OPENALEX_PDF)
 }
 
 /** One step of the open-access phase, in chain order (#480, stage B). */
 sealed interface OpenAccessStep {
+    /**
+     * The PDF addresses this step names: a candidate's, or one refused before
+     * any request. OpenAlex is never asked to try one again, as Python's
+     * `known_urls` and BioMedLit's `triedPDFs` hold both.
+     */
+    val addresses: List<String>
+
     /**
      * A PDF to download.
      *
      * @property pdfUrl Its address, an absolute http(s) URL
      * @property namedBy Who named it
      */
-    data class Candidate(val pdfUrl: String, val namedBy: PdfNamer) : OpenAccessStep
+    data class Candidate(val pdfUrl: String, val namedBy: PdfNamer) : OpenAccessStep {
+        override val addresses: List<String>
+            get() = listOf(pdfUrl)
+    }
 
     /**
      * A lookup, or a PDF address, that went unsettled before any download: told
@@ -1020,7 +1071,10 @@ sealed interface OpenAccessStep {
      *
      * @property shortfall What went unsettled, and why
      */
-    data class Unsettled(val shortfall: OpenAccessShortfall) : OpenAccessStep
+    data class Unsettled(val shortfall: OpenAccessShortfall) : OpenAccessStep {
+        override val addresses: List<String>
+            get() = shortfall.entries.mapNotNull { it.address }
+    }
 }
 
 /**

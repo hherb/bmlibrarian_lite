@@ -22,6 +22,7 @@ import android.content.Context
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCApi
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
+import com.bmlibrarian.factchecker.data.remote.fulltext.OpenAlexService
 import com.bmlibrarian.factchecker.data.remote.fulltext.PmcOpenDataService
 import com.bmlibrarian.factchecker.data.remote.fulltext.UnpaywallApi
 import com.bmlibrarian.factchecker.data.remote.llm.AnthropicApi
@@ -337,6 +338,7 @@ object NetworkModule {
      * @param unpaywallApi Unpaywall API interface
      * @param okHttpClient HTTP client for PDF downloads
      * @param pmcOpenDataService PMC's open-data bucket (#480), built by its `@Inject` constructor
+     * @param openAlexService OpenAlex's PDF locations (#480), built by its `@Inject` constructor
      * @return Full-text service instance
      */
     @Provides
@@ -346,9 +348,10 @@ object NetworkModule {
         europePmcService: EuropePMCService,
         unpaywallApi: UnpaywallApi,
         okHttpClient: OkHttpClient,
-        pmcOpenDataService: PmcOpenDataService
+        pmcOpenDataService: PmcOpenDataService,
+        openAlexService: OpenAlexService
     ): FullTextService {
-        return FullTextService(context, europePmcService, unpaywallApi, okHttpClient, pmcOpenDataService)
+        return FullTextService(context, europePmcService, unpaywallApi, okHttpClient, pmcOpenDataService, openAlexService)
     }
 
     // ==================== Constants ====================

@@ -20,6 +20,9 @@ package com.bmlibrarian.factchecker.ui.report
 
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
+import com.bmlibrarian.factchecker.data.remote.fulltext.OpenAccessStep
+import com.bmlibrarian.factchecker.data.remote.fulltext.PdfDownload
+import com.bmlibrarian.factchecker.data.remote.fulltext.PdfNamer
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.domain.model.AppSettings
@@ -115,5 +118,31 @@ class ReportViewModelFullTextTest {
         val written = fetch(unsettled, FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1/x"))
 
         assertNull(written.fullTextOpenAccessShortfallJson)
+    }
+
+    /**
+     * Once every Unpaywall PDF failed, the sheet asks OpenAlex through the
+     * service, with what was tried, and records the copy it named (#480).
+     */
+    @Test
+    fun `OpenAlex is asked through the service once Unpaywall's PDFs failed`() {
+        val unpaywallPdf = "https://repo.example.org/a.pdf"
+        val openAlexPdf = "https://oa.example.org/b.pdf"
+        coEvery { fullTextService.downloadPdf(unpaywallPdf, any()) } returns
+            PdfDownload.Failed(RequestFailure.forHttpStatus(404))
+        coEvery { fullTextService.downloadPdf(openAlexPdf, any()) } returns PdfDownload.Saved("/cache/d.pdf")
+        coEvery { fullTextService.openAlexSteps("10.1/x", listOf(unpaywallPdf)) } returns
+            listOf(OpenAccessStep.Candidate(openAlexPdf, PdfNamer.OPENALEX))
+
+        val written = fetch(
+            document,
+            FullTextService.FullTextResult.OpenAccessPdfs(
+                listOf(OpenAccessStep.Candidate(unpaywallPdf, PdfNamer.UNPAYWALL)), "10.1/x"
+            )
+        )
+
+        coVerify(exactly = 1) { fullTextService.openAlexSteps("10.1/x", listOf(unpaywallPdf)) }
+        assertEquals("openalex", written.fullTextSource)
+        assertEquals("/cache/d.pdf", written.pdfPath)
     }
 }

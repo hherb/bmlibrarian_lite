@@ -48,9 +48,13 @@ class DocumentEntityLinkOnlyTest {
     private val fresh = DocumentEntity(id = "d", sessionId = "s", title = "t", doi = "10.1/x")
 
     private suspend fun recorded(result: FullTextResult, downloaded: String? = null) =
-        fresh.recordingFullTextFetch(result) {
-            downloaded?.let(PdfDownload::Saved) ?: PdfDownload.Failed(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
-        }.document
+        fresh.recordingFullTextFetch(
+            result,
+            downloadPdf = {
+                downloaded?.let(PdfDownload::Saved) ?: PdfDownload.Failed(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
+            },
+            askOpenAlex = { _, _ -> emptyList() }
+        ).document
 
     @Test
     fun `a record never fetched is not link-only`() {
@@ -79,6 +83,22 @@ class DocumentEntityLinkOnlyTest {
         val answer = FullTextResult.OpenAccessPdfs(listOf(OpenAccessStep.Candidate("https://repo.example.org/a.pdf", PdfNamer.UNPAYWALL)), "10.1/x")
 
         assertSame(FullTextLinkKind.PUBLISHER_PAGE, recorded(answer).linkOnlyKind)
+    }
+
+    /** An OpenAlex PDF served and not saved: a copy found, not held, named OpenAlex (#480). */
+    @Test
+    fun `an OpenAlex PDF that could not be saved is an undownloaded PDF, named OpenAlex`() = runTest {
+        val answer = FullTextResult.OpenAccessPdfs(
+            listOf(OpenAccessStep.Candidate("https://oa.example.org/a.pdf", PdfNamer.OPENALEX)), "10.1/x",
+            openAlexAsked = true
+        )
+        val doc = fresh.recordingFullTextFetch(
+            answer, downloadPdf = { PdfDownload.NotSaved }, askOpenAlex = { _, _ -> emptyList() }
+        ).document
+
+        assertSame(FullTextLinkKind.UNDOWNLOADED_PDF, doc.linkOnlyKind)
+        assertSame(FullTextLinkKind.UNDOWNLOADED_PDF, FullTextLinkKind.forStoredSource(Constants.FULLTEXT_SOURCE_OPENALEX))
+        assertEquals("OpenAlex", doc.fullTextSourceDisplay)
     }
 
     /** The controls: text in hand, a settled absence, and a fetch that settled nothing. */

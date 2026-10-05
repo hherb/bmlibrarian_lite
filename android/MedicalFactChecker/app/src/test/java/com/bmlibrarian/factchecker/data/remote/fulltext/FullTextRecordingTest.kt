@@ -57,9 +57,13 @@ class FullTextRecordingTest {
 
     /** The document and the settled result, the download answering [downloaded] or failing with a 404. */
     private suspend fun recorded(result: FullTextResult, downloaded: String? = "/tmp/a.pdf") =
-        document.recordingFullTextFetch(result) {
-            downloaded?.let(PdfDownload::Saved) ?: PdfDownload.Failed(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
-        }
+        document.recordingFullTextFetch(
+            result,
+            downloadPdf = {
+                downloaded?.let(PdfDownload::Saved) ?: PdfDownload.Failed(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
+            },
+            askOpenAlex = { _, _ -> emptyList() }
+        )
 
     @Test
     fun `a DOI link stores the shortfall it carries`() = runTest {
@@ -155,7 +159,9 @@ class FullTextRecordingTest {
     fun `an Unpaywall PDF that could not be saved keeps its link`() = runTest {
         val pdfUrl = "https://repo.example.org/a.pdf"
 
-        val (doc, shown) = document.recordingFullTextFetch(unpaywallPdfs(pdfUrl)) { PdfDownload.NotSaved }
+        val (doc, shown) = document.recordingFullTextFetch(
+            unpaywallPdfs(pdfUrl), downloadPdf = { PdfDownload.NotSaved }, askOpenAlex = { _, _ -> emptyList() }
+        )
 
         assertEquals(FullTextResult.OpenAccessPdf(pdfUrl, "10.1/x", PdfNamer.UNPAYWALL, notSaved = true), shown)
         assertNull(doc.pdfPath)

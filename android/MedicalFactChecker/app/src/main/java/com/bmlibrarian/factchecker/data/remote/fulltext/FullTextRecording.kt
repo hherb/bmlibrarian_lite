@@ -48,21 +48,27 @@ data class RecordedFetch(val document: DocumentEntity, val result: FullTextResul
  *
  * The PDFs are downloaded here. The open-access PDFs are walked in chain order
  * ([obtainingOpenAccessPdf]): a PDF a source named that it did not serve is
- * refused, not recorded as found (#478). A Europe PMC PDF that could not be
- * downloaded stays a link-only record of its own (#471); one served and not
- * saved also gets the caching note.
+ * refused, not recorded as found (#478), and once every Unpaywall PDF was
+ * refused OpenAlex is asked for the ones it names ([askOpenAlex]). A Europe PMC
+ * PDF that could not be downloaded stays a link-only record of its own (#471);
+ * one served and not saved also gets the caching note.
  *
  * @param result What the chain returned
  * @param downloadPdf Downloads a PDF URL
+ * @param askOpenAlex Asks OpenAlex for its steps, given the DOI and the
+ *   addresses tried or refused; called at most once, and only when no
+ *   Unpaywall copy was served (#480). Required: a caller that left it out
+ *   would never ask OpenAlex
  * @return The document to store, and the result to show; the document is
  *   unchanged for [FullTextResult.NotEstablished], which is not a fact about
  *   the article and leaves the fetch on offer (#434)
  */
 suspend fun DocumentEntity.recordingFullTextFetch(
     result: FullTextResult,
-    downloadPdf: suspend (String) -> PdfDownload
+    downloadPdf: suspend (String) -> PdfDownload,
+    askOpenAlex: suspend (doi: String, tried: List<String>) -> List<OpenAccessStep>
 ): RecordedFetch = when (result) {
-    is FullTextResult.OpenAccessPdfs -> obtainingOpenAccessPdf(result, downloadPdf)
+    is FullTextResult.OpenAccessPdfs -> obtainingOpenAccessPdf(result, downloadPdf, askOpenAlex)
     is FullTextResult.EuropePmcPdf -> when (val download = downloadPdf(result.pdfUrl)) {
         PdfDownload.NotSaved ->
             RecordedFetch(recording(result, pdfPath = null).copy(fullTextPdfNotSavedFrom = result.pdfUrl), result)
@@ -77,37 +83,58 @@ suspend fun DocumentEntity.recordingFullTextFetch(
  * The first candidate served ends the walk: saved, it is the result; served but
  * not saved, its link is kept with a caching note, and nothing further is asked
  * (saving is our problem, not the source's), and a served copy settles the
- * open-access question, so no shortfall is recorded. Otherwise the DOI link
- * carries every shortfall met, in order: an unsettled lookup, or a candidate
- * refused under its namer's source with its address (#478's rule, the
- * maintainer's decision of 2026-10-05).
+ * open-access question, so no shortfall is recorded. When no step was served
+ * and the chain had not yet asked OpenAlex, it is asked, once, with every
+ * address tried, and its steps are walked the same way (the maintainer's
+ * decision of 2026-10-05: no OpenAlex request that cannot raise the odds).
+ * Otherwise the DOI link carries every shortfall met, in chain order: an
+ * unsettled lookup, or a candidate refused under its namer's source with its
+ * address (#478's rule).
  *
  * @param result The steps the chain found
  * @param downloadPdf Downloads a PDF URL
+ * @param askOpenAlex Asks OpenAlex for its steps, given the DOI and the
+ *   addresses tried or refused, in chain order
  * @return The document to store, and the result to show
  */
 private suspend fun DocumentEntity.obtainingOpenAccessPdf(
     result: FullTextResult.OpenAccessPdfs,
-    downloadPdf: suspend (String) -> PdfDownload
+    downloadPdf: suspend (String) -> PdfDownload,
+    askOpenAlex: suspend (String, List<String>) -> List<OpenAccessStep>
 ): RecordedFetch {
     var shortfall: OpenAccessShortfall? = null
-    for (step in result.steps) {
-        when (step) {
-            is OpenAccessStep.Unsettled -> shortfall = OpenAccessShortfall.adding(step.shortfall, shortfall)
-            is OpenAccessStep.Candidate -> {
-                val found = FullTextResult.OpenAccessPdf(step.pdfUrl, result.doi, step.namedBy)
-                when (val download = downloadPdf(step.pdfUrl)) {
-                    is PdfDownload.Saved -> return RecordedFetch(recording(found, download.path), found)
-                    PdfDownload.NotSaved -> {
-                        val linked = found.copy(notSaved = true)
-                        return RecordedFetch(recording(linked, pdfPath = null), linked)
+    val tried = mutableListOf<String>()
+
+    /** Walk [steps]; the recorded fetch when a copy was served, else null. */
+    suspend fun walk(steps: List<OpenAccessStep>): RecordedFetch? {
+        for (step in steps) {
+            when (step) {
+                is OpenAccessStep.Unsettled -> {
+                    tried += step.addresses
+                    shortfall = OpenAccessShortfall.adding(step.shortfall, shortfall)
+                }
+                is OpenAccessStep.Candidate -> {
+                    tried += step.addresses
+                    val found = FullTextResult.OpenAccessPdf(step.pdfUrl, result.doi, step.namedBy)
+                    when (val download = downloadPdf(step.pdfUrl)) {
+                        is PdfDownload.Saved -> return RecordedFetch(recording(found, download.path), found)
+                        PdfDownload.NotSaved -> {
+                            val linked = found.copy(notSaved = true)
+                            return RecordedFetch(recording(linked, pdfPath = null), linked)
+                        }
+                        is PdfDownload.Failed -> shortfall = OpenAccessShortfall.adding(
+                            OpenAccessShortfall(step.namedBy.refusedAs, download.failure, step.pdfUrl), shortfall
+                        )
                     }
-                    is PdfDownload.Failed -> shortfall = OpenAccessShortfall.adding(
-                        OpenAccessShortfall(step.namedBy.refusedAs, download.failure, step.pdfUrl), shortfall
-                    )
                 }
             }
         }
+        return null
+    }
+
+    walk(result.steps)?.let { return it }
+    if (!result.openAlexAsked) {
+        walk(askOpenAlex(result.doi, tried.toList()))?.let { return it }
     }
     val refused = FullTextResult.DoiUrl(doiLink(result.doi), shortfall)
     return RecordedFetch(recording(refused, pdfPath = null), refused)

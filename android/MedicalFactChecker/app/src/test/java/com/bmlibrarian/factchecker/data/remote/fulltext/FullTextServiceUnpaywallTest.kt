@@ -104,7 +104,8 @@ class FullTextServiceUnpaywallTest {
             europePmcService = europePmc,
             unpaywallApi = unpaywallApi,
             httpClient = httpClient,
-            pmcOpenData = absentBucket()
+            pmcOpenData = absentBucket(),
+            openAlex = absentOpenAlex()
         )
     }
 

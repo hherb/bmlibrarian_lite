@@ -67,7 +67,8 @@ class FullTextServicePdfDownloadTest {
             europePmcService = mockk<EuropePMCService>(relaxed = true),
             unpaywallApi = mockk(relaxed = true),
             httpClient = OkHttpClient(),
-            pmcOpenData = absentBucket()
+            pmcOpenData = absentBucket(),
+            openAlex = absentOpenAlex()
         )
     }
 

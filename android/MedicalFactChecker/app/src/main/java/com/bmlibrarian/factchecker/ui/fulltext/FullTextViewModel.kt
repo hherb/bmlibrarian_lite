@@ -293,9 +293,11 @@ class FullTextViewModel @Inject constructor(
         // The result as settled by the download: the open-access PDFs are tried
         // in turn, and when none could be downloaded the DOI link is shown, with
         // why (#478, #480)
-        val (recorded, result) = doc.recordingFullTextFetch(chainResult) { url ->
-            fullTextService.downloadPdf(url, doc.id)
-        }
+        val (recorded, result) = doc.recordingFullTextFetch(
+            chainResult,
+            downloadPdf = { url -> fullTextService.downloadPdf(url, doc.id) },
+            askOpenAlex = { doi, tried -> fullTextService.openAlexSteps(doi, tried) }
+        )
         if (result !is FullTextResult.NotEstablished) {
             documentDao.update(recorded)
             _document.value = recorded
