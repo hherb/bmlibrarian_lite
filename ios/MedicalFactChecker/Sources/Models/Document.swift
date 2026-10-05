@@ -257,6 +257,14 @@ final class Document {
     /// next fetch. An optional scalar, so lightweight migration adds it.
     var fullTextOpenAccessShortfallJSON: String?
 
+    /// The PDF a source served that could not be saved on this device (#480),
+    /// told as a caching note beside the full text. Written by every fetch,
+    /// cleared by every fetch that does not leave one, as the shortfall is.
+    ///
+    /// An optional scalar, so lightweight migration adds it, and a record
+    /// written before it existed reads as having no note.
+    var fullTextPDFNotSavedFrom: String?
+
     /// What the stored full text actually is, as a ``FullTextContentKind`` raw
     /// value.
     ///
@@ -952,6 +960,7 @@ final class Document {
         // each call site is what let the cache and the live result drift apart.
         fullTextDegradedReasonRaw = result.degradation?.rawValue
         fullTextOpenAccessShortfallJSON = result.openAccessShortfall?.persisted()
+        fullTextPDFNotSavedFrom = result.pdfNotSavedFrom
         fullTextContentKindRaw = result.contentKind.rawValue
         storeExtractionCoverage(result.extractionCoverage)
 
@@ -1042,6 +1051,7 @@ final class Document {
         fullTextParseWarningsJSON = nil
         fullTextDegradedReasonRaw = nil
         fullTextOpenAccessShortfallJSON = nil
+        fullTextPDFNotSavedFrom = nil
         fullTextContentKindRaw = nil
         storeExtractionCoverage(nil)
     }
@@ -1058,6 +1068,7 @@ final class Document {
         fullTextParseWarningsJSON = nil
         fullTextDegradedReasonRaw = nil
         fullTextOpenAccessShortfallJSON = nil
+        fullTextPDFNotSavedFrom = nil
         fullTextContentKindRaw = nil
         storeExtractionCoverage(nil)
     }
@@ -1207,6 +1218,7 @@ final class Document {
             warnings: storedParseWarnings,
             degradation: storedDegradation,
             openAccessShortfall: storedOpenAccessShortfall,
+            pdfNotSavedFrom: fullTextPDFNotSavedFrom,
             contentKind: storedContentKind ?? .none,
             extractedText: storedContentKind == .extracted ? fullTextContent : nil,
             // Every stored path that is a file, not only the ones extraction
@@ -1343,6 +1355,18 @@ final class Document {
     /// ``OpenAccessShortfall/restored(fromPersisted:)``) rather than as silence.
     private var storedOpenAccessShortfall: OpenAccessShortfall? {
         fullTextOpenAccessShortfallJSON.map(OpenAccessShortfall.restored(fromPersisted:))
+    }
+
+    /// The caching note for this document, if a PDF was served and not saved
+    /// (#480): "only its link is kept" when the link stored is that PDF's,
+    /// "it could not be read" when something else (an abstract) was stored.
+    ///
+    /// Read straight from the stored fields, like ``cachedRetrievalNotice``,
+    /// so it speaks whether or not anything can be rendered.
+    var storedPDFNotSavedNote: String? {
+        fullTextPDFNotSavedFrom.map {
+            OpenAccessShortfall.notSavedNote(address: $0, linkKept: fullTextPDFPath == $0)
+        }
     }
 
     /// The persisted content kind, or `nil` for a record that predates it.

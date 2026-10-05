@@ -426,7 +426,8 @@ struct MacDocumentCard: View {
                 warnings: document.cachedRetrievalNotice.warnings,
                 degradation: document.cachedRetrievalNotice.degradation,
                 extractionCoverage: document.cachedRetrievalNotice.extractionCoverage,
-                openAccessShortfall: document.cachedRetrievalNotice.openAccessShortfall
+                openAccessShortfall: document.cachedRetrievalNotice.openAccessShortfall,
+                pdfNotSavedNote: document.storedPDFNotSavedNote
             )
 
             if let url = document.fullTextLinkDestination {

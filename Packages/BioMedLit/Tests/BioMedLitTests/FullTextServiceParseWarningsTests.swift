@@ -369,7 +369,9 @@ final class FullTextServiceParseWarningsTests: XCTestCase {
         XCTAssertEqual(result.degradation, .jatsParseFailed)
         XCTAssertEqual(
             result.openAccessShortfall,
-            OpenAccessShortfall(source: .pdf, failure: .httpStatus(404))
+            OpenAccessShortfall(
+                source: .pdf, failure: .httpStatus(404), address: "https://example.org/a.pdf"
+            )
         )
     }
 

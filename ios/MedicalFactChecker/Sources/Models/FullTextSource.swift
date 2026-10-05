@@ -195,6 +195,13 @@ struct AppFullTextResult: Equatable, Sendable {
     /// cases, because both can be true of one fetch.
     let openAccessShortfall: OpenAccessShortfall?
 
+    /// The PDF a source served that could not be saved on this device, or
+    /// `nil` when none was (#480).
+    ///
+    /// A fault of ours, not the source's, so it is told as a caching note of
+    /// its own (``pdfNotSavedNote``), never as part of ``openAccessShortfall``.
+    let pdfNotSavedFrom: String?
+
     /// What this result's text actually is.
     ///
     /// `nil`-free because a result always holds one of the four kinds, but note
@@ -240,6 +247,8 @@ struct AppFullTextResult: Equatable, Sendable {
     ///     the default — when it is.
     ///   - openAccessShortfall: Why the open-access copy went unassessed, or
     ///     `nil` — the default — when nothing was left unsettled.
+    ///   - pdfNotSavedFrom: The PDF served and not saved, or `nil` — the
+    ///     default — when none was.
     ///   - contentKind: What the text actually is. ``FullTextContentKind/none``
     ///     — the default — for a result that holds no text.
     ///   - extractedText: Prose recovered from a PDF, or `nil` — the default —
@@ -254,6 +263,7 @@ struct AppFullTextResult: Equatable, Sendable {
         warnings: JATSParseWarnings = JATSParseWarnings(),
         degradation: FullTextDegradation? = nil,
         openAccessShortfall: OpenAccessShortfall? = nil,
+        pdfNotSavedFrom: String? = nil,
         contentKind: FullTextContentKind = .none,
         extractedText: String? = nil,
         localPDFPath: String? = nil,
@@ -264,6 +274,7 @@ struct AppFullTextResult: Equatable, Sendable {
         self.warnings = warnings
         self.degradation = degradation
         self.openAccessShortfall = openAccessShortfall
+        self.pdfNotSavedFrom = pdfNotSavedFrom
         self.contentKind = contentKind
         self.extractedText = extractedText
         self.localPDFPath = localPDFPath
@@ -278,11 +289,21 @@ struct AppFullTextResult: Equatable, Sendable {
     /// Whether there is nothing to tell the reader before handing them this
     /// result's web link.
     ///
-    /// A degradation (#183) or an open-access shortfall (#466) is explained in
-    /// the card, beside an Open Publisher link; opening the browser first would
-    /// take the reader past it, the silent fallback both issues object to.
+    /// A degradation (#183), an open-access shortfall (#466) or a caching
+    /// note (#480) is explained in the card, beside an Open Publisher link;
+    /// opening the browser first would take the reader past it, the silent
+    /// fallback these issues object to.
     var hasNothingToExplain: Bool {
-        degradation == nil && openAccessShortfall == nil
+        degradation == nil && openAccessShortfall == nil && pdfNotSavedFrom == nil
+    }
+
+    /// The caching note for this result, if a PDF was served and not saved
+    /// (#480): "only its link is kept" when that PDF's link is this result,
+    /// "it could not be read" otherwise (an abstract was returned instead).
+    var pdfNotSavedNote: String? {
+        pdfNotSavedFrom.map {
+            OpenAccessShortfall.notSavedNote(address: $0, linkKept: pdfURL?.absoluteString == $0)
+        }
     }
 
     /// Get the HTML content if available.

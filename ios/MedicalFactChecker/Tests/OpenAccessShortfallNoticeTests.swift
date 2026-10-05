@@ -165,7 +165,8 @@ final class OpenAccessShortfallNoticeTests: XCTestCase {
                 warnings: JATSParseWarnings(),
                 degradation: nil,
                 extractionCoverage: nil,
-                openAccessShortfall: nil
+                openAccessShortfall: nil,
+                pdfNotSavedNote: nil
             )
         )
     }
@@ -178,7 +179,8 @@ final class OpenAccessShortfallNoticeTests: XCTestCase {
                 warnings: JATSParseWarnings(),
                 degradation: nil,
                 extractionCoverage: nil,
-                openAccessShortfall: Self.throttled
+                openAccessShortfall: Self.throttled,
+                pdfNotSavedNote: nil
             )
         )
 
@@ -194,7 +196,8 @@ final class OpenAccessShortfallNoticeTests: XCTestCase {
                 warnings: JATSParseWarnings(),
                 degradation: .europePMCUnreachable,
                 extractionCoverage: nil,
-                openAccessShortfall: Self.throttled
+                openAccessShortfall: Self.throttled,
+                pdfNotSavedNote: nil
             )
         )
 
@@ -209,12 +212,112 @@ final class OpenAccessShortfallNoticeTests: XCTestCase {
                 warnings: JATSParseWarnings(),
                 degradation: nil,
                 extractionCoverage: PDFExtractionCoverage(convertedPages: 3, pageCount: 9),
-                openAccessShortfall: Self.throttled
+                openAccessShortfall: Self.throttled,
+                pdfNotSavedNote: nil
             )
         )
 
         XCTAssertTrue(content.isWarning)
         XCTAssertNotNil(content.openAccessNotice)
+    }
+
+    // MARK: - The caching note (#480)
+
+    private static let unsavedPDF = URL(string: "https://repo.example.org/a.pdf")!
+
+    /// A PDF served and not saved, whose link is the result.
+    private func unsavedLink() -> AppFullTextResult {
+        AppFullTextResult(
+            content: .pdfURL(Self.unsavedPDF),
+            source: .unpaywall,
+            pdfNotSavedFrom: Self.unsavedPDF.absoluteString
+        )
+    }
+
+    func testTheAdapterCarriesTheUnsavedPDFOntoTheAppResult() {
+        let result = BioMedLitAdapters.toAppFullTextResult(
+            BMLFullTextResult(
+                content: .unpaywall(pdfURL: Self.unsavedPDF),
+                pdfNotSavedFrom: Self.unsavedPDF.absoluteString
+            )
+        )
+
+        XCTAssertEqual(result.pdfNotSavedFrom, Self.unsavedPDF.absoluteString)
+        XCTAssertEqual(
+            result.pdfNotSavedNote,
+            OpenAccessShortfall.notSavedNote(address: Self.unsavedPDF.absoluteString, linkKept: true)
+        )
+    }
+
+    /// The document holds the PDF's link as its own, so the note says only
+    /// the link is kept, and it survives a reopen.
+    func testAStoredUnsavedPDFWhoseLinkIsKeptSaysSo() throws {
+        let document = makeDocument()
+
+        document.applyFullTextResult(unsavedLink())
+
+        XCTAssertEqual(document.fullTextPDFNotSavedFrom, document.fullTextPDFPath)
+        let note = try XCTUnwrap(document.storedPDFNotSavedNote)
+        XCTAssertEqual(
+            note,
+            "A PDF of this article was found at repo.example.org but could not be saved on this "
+                + "device, so only its link is kept. Check the free storage space and try again."
+        )
+        XCTAssertEqual(document.cachedFullTextResult?.pdfNotSavedNote, note)
+    }
+
+    /// The control: an abstract returned instead holds no link, so the PDF
+    /// could not be read.
+    func testAStoredUnsavedPDFBesideAnAbstractCouldNotBeRead() throws {
+        let document = makeDocument()
+
+        document.applyFullTextResult(
+            AppFullTextResult(
+                content: .html(content: "<p>Abstract.</p>", markdown: "Abstract."),
+                source: .europePMC,
+                pdfNotSavedFrom: Self.unsavedPDF.absoluteString,
+                contentKind: .abstract
+            )
+        )
+
+        XCTAssertNil(document.fullTextPDFPath)
+        XCTAssertTrue(try XCTUnwrap(document.storedPDFNotSavedNote).contains("so it could not be read."))
+    }
+
+    /// Every fetch that leaves no note clears the last one, as the shortfall is.
+    func testTheUnsavedPDFIsClearedWhereTheShortfallIs() {
+        let document = makeDocument()
+        document.applyFullTextResult(unsavedLink())
+        document.applyFullTextResult(AppFullTextResult(content: .webURL(Self.doiLink), source: .doi))
+        XCTAssertNil(document.fullTextPDFNotSavedFrom)
+
+        document.applyFullTextResult(unsavedLink())
+        document.clearFullTextCache()
+        XCTAssertNil(document.fullTextPDFNotSavedFrom)
+
+        document.applyFullTextResult(unsavedLink())
+        document.markFullTextUnavailable()
+        XCTAssertNil(document.fullTextPDFNotSavedFrom)
+    }
+
+    /// Alone, the caching note is a note of its own, not a warning and not
+    /// the open-access notice.
+    func testACachingNoteAloneIsANote() throws {
+        let note = OpenAccessShortfall.notSavedNote(address: Self.unsavedPDF.absoluteString, linkKept: true)
+        let content = try XCTUnwrap(
+            ParseWarningBannerContent(
+                warnings: JATSParseWarnings(),
+                degradation: nil,
+                extractionCoverage: nil,
+                openAccessShortfall: nil,
+                pdfNotSavedNote: note
+            )
+        )
+
+        XCTAssertNil(content.message)
+        XCTAssertNil(content.openAccessNotice)
+        XCTAssertEqual(content.pdfNotSavedNote, note)
+        XCTAssertFalse(content.isWarning)
     }
 
     /// The sentence is the shared contract's (checked in BioMedLit): spot-check
@@ -225,7 +328,8 @@ final class OpenAccessShortfallNoticeTests: XCTestCase {
                 warnings: JATSParseWarnings(),
                 degradation: nil,
                 extractionCoverage: nil,
-                openAccessShortfall: Self.throttled
+                openAccessShortfall: Self.throttled,
+                pdfNotSavedNote: nil
             )
         )
 

@@ -257,6 +257,11 @@ public struct FullTextResult: Sendable, Equatable {
     /// can both be true of one fetch.
     public let openAccessShortfall: OpenAccessShortfall?
 
+    /// The PDF a source served that could not be saved on this device (#480):
+    /// a fault of ours, told as a note of its own, never as a shortfall
+    /// (`OpenAccessShortfall.notSavedNote`). `nil` when none was.
+    public let pdfNotSavedFrom: String?
+
     /// Create a retrieval result.
     ///
     /// - Parameters:
@@ -275,6 +280,8 @@ public struct FullTextResult: Sendable, Equatable {
     ///     or `nil` — the default — when no extraction was run.
     ///   - openAccessShortfall: Why the open-access copy went unassessed, or
     ///     `nil` — the default — when nothing was left unsettled.
+    ///   - pdfNotSavedFrom: The PDF a source served that could not be saved,
+    ///     or `nil` — the default — when none was.
     public init(
         content: FullTextContent,
         warnings: JATSParseWarnings = JATSParseWarnings(),
@@ -283,7 +290,8 @@ public struct FullTextResult: Sendable, Equatable {
         extractedText: String? = nil,
         localPDFPath: String? = nil,
         extractionCoverage: PDFExtractionCoverage? = nil,
-        openAccessShortfall: OpenAccessShortfall? = nil
+        openAccessShortfall: OpenAccessShortfall? = nil,
+        pdfNotSavedFrom: String? = nil
     ) {
         // Three combinations the fallback chain never emits, and which the reader
         // would be shown as fact if it ever did. They were unspellable while
@@ -375,13 +383,20 @@ public struct FullTextResult: Sendable, Equatable {
         self.localPDFPath = localPDFPath
         self.extractionCoverage = extractionCoverage
         self.openAccessShortfall = openAccessShortfall
+        self.pdfNotSavedFrom = pdfNotSavedFrom
     }
 
-    /// This result, noting why the open-access copy went unassessed.
+    /// This result, noting why the open-access copy went unassessed and which
+    /// PDF was served and not saved.
     ///
-    /// - Parameter openAccessShortfall: The failure, or `nil` for none.
-    /// - Returns: The same result with ``openAccessShortfall`` set.
-    func noting(openAccessShortfall: OpenAccessShortfall?) -> FullTextResult {
+    /// - Parameters:
+    ///   - openAccessShortfall: The failure, or `nil` for none.
+    ///   - pdfNotSavedFrom: The PDF served and not saved, or `nil` for none.
+    /// - Returns: The same result with ``openAccessShortfall`` and
+    ///   ``pdfNotSavedFrom`` set.
+    func noting(
+        openAccessShortfall: OpenAccessShortfall?, pdfNotSavedFrom: String?
+    ) -> FullTextResult {
         FullTextResult(
             content: content,
             warnings: warnings,
@@ -390,7 +405,8 @@ public struct FullTextResult: Sendable, Equatable {
             extractedText: extractedText,
             localPDFPath: localPDFPath,
             extractionCoverage: extractionCoverage,
-            openAccessShortfall: openAccessShortfall
+            openAccessShortfall: openAccessShortfall,
+            pdfNotSavedFrom: pdfNotSavedFrom
         )
     }
 

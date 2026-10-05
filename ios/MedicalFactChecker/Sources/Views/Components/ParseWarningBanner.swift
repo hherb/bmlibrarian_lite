@@ -186,6 +186,13 @@ struct ParseWarningBannerContent: Equatable {
     /// message chosen by precedence would hide one of the two.
     let openAccessNotice: String?
 
+    /// The caching note, when a PDF was served and could not be saved on this
+    /// device (#480).
+    ///
+    /// A line of its own, apart from ``openAccessNotice``: the copy was found,
+    /// so nothing about open access went unsettled, and the fault is ours.
+    let pdfNotSavedNote: String?
+
     /// Gather what the banner says.
     ///
     /// - Parameters:
@@ -193,28 +200,33 @@ struct ParseWarningBannerContent: Equatable {
     ///   - degradation: Why this is not the best source that existed, if it is not.
     ///   - extractionCoverage: How much of a PDF yielded text, when one was extracted.
     ///   - openAccessShortfall: Why the open-access copy went unassessed, if it did.
+    ///   - pdfNotSavedNote: The caching note, if a PDF was served and not saved.
     init?(
         warnings: JATSParseWarnings,
         degradation: FullTextDegradation?,
         extractionCoverage: PDFExtractionCoverage?,
-        openAccessShortfall: OpenAccessShortfall?
+        openAccessShortfall: OpenAccessShortfall?,
+        pdfNotSavedNote: String?
     ) {
         let message = ParseWarningMessage(
             warnings: warnings,
             degradation: degradation,
             extractionCoverage: extractionCoverage
         )
-        guard message != nil || openAccessShortfall != nil else { return nil }
+        guard message != nil || openAccessShortfall != nil || pdfNotSavedNote != nil else {
+            return nil
+        }
         self.message = message
         self.openAccessNotice = openAccessShortfall?.notice
+        self.pdfNotSavedNote = pdfNotSavedNote
     }
 
     /// Whether the banner is a warning or a note.
     ///
     /// Only the message can make it a warning. An unsettled open-access lookup
-    /// says nothing about the text on screen, which is complete in itself: a
-    /// warning over it is the false alarm ``ParseWarningMessage/isWarning``
-    /// rations.
+    /// or a caching note says nothing about the text on screen, which is
+    /// complete in itself: a warning over it is the false alarm
+    /// ``ParseWarningMessage/isWarning`` rations.
     var isWarning: Bool {
         message?.isWarning ?? false
     }
@@ -246,7 +258,9 @@ struct ParseWarningBannerContent: Equatable {
 /// - an open-access lookup went unsettled — an informational line of its own,
 ///   beside any of the above or alone (#466): whether the article has a free
 ///   copy was not established, because Unpaywall, the landing page it named, or the PDF it named (#478)
-///   could not be asked or did not serve it.
+///   could not be asked or did not serve it;
+/// - a PDF was served and could not be saved on this device — an informational
+///   caching note of its own (#480), naming where it was found.
 ///
 /// The last two groups are deliberately *not* warnings. A fallback PDF or publisher link is
 /// complete in itself, and a warning triangle over content that is fine is the
@@ -283,6 +297,12 @@ struct ParseWarningBanner: View {
     /// need not name it.
     var openAccessShortfall: OpenAccessShortfall? = nil
 
+    /// The caching note, if a PDF was served and not saved (#480).
+    ///
+    /// Defaulted like `openAccessShortfall`, so callers with no retrieval to
+    /// describe need not name it.
+    var pdfNotSavedNote: String? = nil
+
     @State private var showingDetail = false
 
     var body: some View {
@@ -290,7 +310,8 @@ struct ParseWarningBanner: View {
             warnings: warnings,
             degradation: degradation,
             extractionCoverage: extractionCoverage,
-            openAccessShortfall: openAccessShortfall
+            openAccessShortfall: openAccessShortfall,
+            pdfNotSavedNote: pdfNotSavedNote
         ) {
             VStack(alignment: .leading, spacing: ParseWarningBannerConstants.spacing) {
                 if let message = content.message {
@@ -304,6 +325,17 @@ struct ParseWarningBanner: View {
                 if let notice = content.openAccessNotice {
                     Label {
                         Text(verbatim: notice)
+                    } icon: {
+                        Image(systemName: "info.circle.fill")
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.primary)
+                }
+
+                // Verbatim, as the notice above: the shared contract's sentence
+                if let note = content.pdfNotSavedNote {
+                    Label {
+                        Text(verbatim: note)
                     } icon: {
                         Image(systemName: "info.circle.fill")
                     }
@@ -365,12 +397,21 @@ struct ParseWarningBanner: View {
         ParseWarningBanner(warnings: JATSParseWarnings(), degradation: .unspecified)
         ParseWarningBanner(
             warnings: JATSParseWarnings(),
-            openAccessShortfall: OpenAccessShortfall(source: .unpaywall, failure: .timeout)
+            openAccessShortfall: OpenAccessShortfall(source: .unpaywall, failure: .timeout),
+            pdfNotSavedNote: OpenAccessShortfall.notSavedNote(
+                address: "https://repo.example.org/a.pdf", linkKept: false
+            )
         )
         ParseWarningBanner(
             warnings: JATSParseWarnings(),
             degradation: .europePMCUnreachable,
             openAccessShortfall: OpenAccessShortfall(source: .landingPage, failure: .httpStatus(503))
+        )
+        ParseWarningBanner(
+            warnings: JATSParseWarnings(),
+            pdfNotSavedNote: OpenAccessShortfall.notSavedNote(
+                address: "https://repo.example.org/a.pdf", linkKept: true
+            )
         )
         ParseWarningBanner(
             warnings: JATSParseWarnings(),

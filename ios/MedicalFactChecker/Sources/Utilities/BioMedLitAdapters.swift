@@ -446,13 +446,15 @@ enum BioMedLitAdapters {
         // same reasoning carries them across too: Task 8 reads them off the
         // document regardless of which case produced the result. So does
         // `openAccessShortfall`, which is what the reader is told about a
-        // fallback Unpaywall could not rule out a free copy behind (#466).
+        // fallback Unpaywall could not rule out a free copy behind (#466), and
+        // `pdfNotSavedFrom`, the PDF served and not saved (#480).
         AppFullTextResult(
             content: content(of: result.content, localPDFPath: result.localPDFPath),
             source: appSource(of: result.content),
             warnings: result.warnings,
             degradation: result.degradation,
             openAccessShortfall: result.openAccessShortfall,
+            pdfNotSavedFrom: result.pdfNotSavedFrom,
             contentKind: result.contentKind,
             extractedText: result.extractedText,
             localPDFPath: result.localPDFPath,
