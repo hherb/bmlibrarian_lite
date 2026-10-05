@@ -464,8 +464,13 @@ and Android records the DOI link (`FullTextResult.UnpaywallPdf.refused`, applied
 where the download happens, `recordingFullTextFetch`). Python tries every
 Unpaywall location, in its own priority order; it keeps one failure, that of the
 PDF earliest in Unpaywall's order (the best location's, the one PDF the apps
-try), and records it only when no source served the PDF. Whether these failures
-are genuinely unfetchable addresses or bot walls a browser would pass is #480.
+try), and records it only when no source served the PDF. **Most of these
+failures are bot walls, not missing copies** (#480; measured in
+`doc/developer/unpaywall_pdf_survey/`). Our clients obtained 28% of 400 Unpaywall
+PDFs; 81% of the rest were walls, 12% addresses that serve no PDF. A failure
+whose answer was a challenge page, or a 403/503 from Cloudflare itself, was a wall
+89% of the time. Whether such a failure gets its own kind, or a link to open in
+the browser, is the maintainer's decision, not yet made.
 
 **Our own stops are not the copy's answer**, and none of them is "no copy":
 
