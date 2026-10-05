@@ -209,6 +209,7 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **Machine channels stages B and C** (above), then the **embedded browser and
   review queue** with the `challenged` kind (replaces **#483**); **#481**
   follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
+  **#492** (stage B follow-ups);
   **#467**, **#468** / **#470**, **#476**.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
