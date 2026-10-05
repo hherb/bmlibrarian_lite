@@ -1,6 +1,6 @@
 {
-  "schema_version": 2,
-  "description": "Which URL the Unpaywall tier tries, the PDF a landing page declares, the character references decoded in the tag's value, and which error statuses leave a landing page unread (#464). Read by tests/test_oa_landing_page.py, Packages/BioMedLit UnpaywallLandingPageContractTests and Android UnpaywallLandingPageContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, 'Unpaywall PDF' > 'Landing Pages (#464)'. Every case is asserted on all three platforms, and each platform asserts it reads every table: add a row here, not a test on one platform.",
+  "schema_version": 3,
+  "description": "Which URL the Unpaywall tier tries, every PDF URL it tries in turn (unpaywall_pdf_urls, #480 stage B), the PDF a landing page declares, the character references decoded in the tag's value, and which error statuses leave a landing page unread (#464). Read by tests/test_oa_landing_page.py, Packages/BioMedLit UnpaywallLandingPageContractTests and Android UnpaywallLandingPageContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, 'Unpaywall PDF' > 'Landing Pages (#464)'. Every case is asserted on all three platforms, and each platform asserts it reads every table: add a row here, not a test on one platform.",
   "unpaywall_choice": [
     {
       "name": "the best location's url_for_pdf",
@@ -118,6 +118,35 @@
       "pdf_url": null,
       "landing_page": null
     }
+  ],
+  "unpaywall_pdf_urls": [
+    {"name": "the best location repeated in oa_locations is tried once",
+     "response": {"best_oa_location": {"url_for_pdf": "https://pub.example.org/a.pdf"},
+                  "oa_locations": [{"url_for_pdf": "https://pub.example.org/a.pdf"}, {"url_for_pdf": "https://repo.example.org/b.pdf"}]},
+     "expected": ["https://pub.example.org/a.pdf", "https://repo.example.org/b.pdf"]},
+    {"name": "Unpaywall's order, not the version's",
+     "response": {"best_oa_location": {"url_for_pdf": "https://repo.example.org/accepted.pdf", "version": "acceptedVersion"},
+                  "oa_locations": [{"url_for_pdf": "https://pub.example.org/published.pdf", "version": "publishedVersion"}]},
+     "expected": ["https://repo.example.org/accepted.pdf", "https://pub.example.org/published.pdf"]},
+    {"name": "a location without a PDF URL is passed over",
+     "response": {"best_oa_location": {"url": "https://repo.example.org/item/1", "url_for_landing_page": "https://repo.example.org/item/1"},
+                  "oa_locations": [{"url_for_pdf": "https://other.example.org/c.pdf"}]},
+     "expected": ["https://other.example.org/c.pdf"]},
+    {"name": "a blank url_for_pdf is no PDF, and a padded one is trimmed",
+     "response": {"oa_locations": [{"url_for_pdf": "   "}, {"url_for_pdf": " https://repo.example.org/d.pdf "}]},
+     "expected": ["https://repo.example.org/d.pdf"]},
+    {"name": "a padded duplicate is the same PDF",
+     "response": {"oa_locations": [{"url_for_pdf": " https://repo.example.org/e.pdf"}, {"url_for_pdf": "https://repo.example.org/e.pdf"}]},
+     "expected": ["https://repo.example.org/e.pdf"]},
+    {"name": "no location names a PDF",
+     "response": {"best_oa_location": {"url_for_landing_page": "https://hdl.handle.net/2115/95934"}},
+     "expected": []},
+    {"name": "null locations",
+     "response": {"best_oa_location": null, "oa_locations": null},
+     "expected": []},
+    {"name": "fields absent altogether",
+     "response": {},
+     "expected": []}
   ],
   "citation_pdf_url": [
     {

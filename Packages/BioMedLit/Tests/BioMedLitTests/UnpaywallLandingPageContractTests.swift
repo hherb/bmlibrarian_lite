@@ -92,6 +92,22 @@ final class UnpaywallLandingPageContractTests: XCTestCase {
         }
     }
 
+    func testEachUnpaywallPDFURLsRow() throws {
+        let rows = try loadTable("unpaywall_pdf_urls")
+        XCTAssertGreaterThanOrEqual(rows.count, 5, "an empty table would pass vacuously")
+        for row in rows {
+            let name = string(row, "name") ?? "?"
+            let json = try JSONSerialization.data(withJSONObject: row["response"] ?? [:])
+            let response = try JSONDecoder().decode(UnpaywallResponse.self, from: json)
+
+            XCTAssertEqual(
+                UnpaywallLandingPage.pdfURLs(from: response),
+                row["expected"] as? [String],
+                name
+            )
+        }
+    }
+
     func testEachCitationPDFURLRow() throws {
         let rows = try loadTable("citation_pdf_url")
         XCTAssertGreaterThanOrEqual(rows.count, 10, "an empty table would pass vacuously")
@@ -137,7 +153,7 @@ final class UnpaywallLandingPageContractTests: XCTestCase {
         XCTAssertEqual(
             Set(try loadContract().keys),
             [
-                "schema_version", "description", "unpaywall_choice", "citation_pdf_url",
+                "schema_version", "description", "unpaywall_choice", "unpaywall_pdf_urls", "citation_pdf_url",
                 "character_references", "landing_page_status",
             ]
         )
