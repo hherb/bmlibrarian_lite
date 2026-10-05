@@ -42,6 +42,10 @@
     {
       "address": "repo.example.org/a.pdf",
       "host": "repo.example.org/a.pdf"
+    },
+    {
+      "address": "//CDN.example.org/a.pdf",
+      "host": "cdn.example.org"
     }
   ],
   "statements": [
@@ -142,6 +146,24 @@
         }
       ],
       "statement": "Failed to obtain a PDF from the following tried sources: /bitstream/a.pdf, named by Unpaywall (the request failed). A freely available copy may exist. Whether this document is open access was not established."
+    },
+    {
+      "name": "two PDFs refused alike on one host are told once",
+      "entries": [
+        {
+          "source": "unpaywall_pdf",
+          "kind": "http_status",
+          "status_code": 403,
+          "address": "https://europepmc.org/a.pdf"
+        },
+        {
+          "source": "unpaywall_pdf",
+          "kind": "http_status",
+          "status_code": 403,
+          "address": "https://europepmc.org/b.pdf"
+        }
+      ],
+      "statement": "Failed to obtain a PDF from the following tried sources: europepmc.org, named by Unpaywall (HTTP 403 Forbidden). Whether this document is open access was not established."
     },
     {
       "name": "a lookup named once, by the failure that left it open",

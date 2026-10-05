@@ -1075,7 +1075,8 @@ def tried_sources_statement(record: LookupRecord) -> str:
     The maintainer's decision of 2026-10-05: each PDF a source named that we
     could not obtain is told by its host and by who named it; each lookup
     that went unsettled once, with the reason :func:`_unsettled` picks; in
-    chain order, any source outside the chain first. The ending follows the
+    chain order, any source outside the chain first. Identical entries (two
+    PDFs on one host refused alike) are told once. The ending follows the
     verbs, as :func:`_access_left_open`'s does.
 
     Args:
@@ -1118,7 +1119,10 @@ def tried_sources_statement(record: LookupRecord) -> str:
     ending = (
         _TRIED_UNASKED_ENDING if any(entry[3] for entry in entries) else _TRIED_ANSWERED_ENDING
     )
-    return f"{TRIED_SOURCES_LEAD}{'; '.join(entry[2] for entry in entries)}. {ending}"
+    # Two PDFs on one host refused alike read the same; told once, the first
+    # after sorting, so the list does not stutter.
+    texts = list(dict.fromkeys(entry[2] for entry in entries))
+    return f"{TRIED_SOURCES_LEAD}{'; '.join(texts)}. {ending}"
 
 
 def not_saved_note(record: LookupRecord, link_kept: bool = False) -> str:

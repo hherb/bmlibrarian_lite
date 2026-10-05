@@ -28,6 +28,7 @@ from bmlibrarian_lite.constants import (
     PDF_PARTIAL_SUFFIX,
     SERVICE_DOI_RESOLVER,
     SERVICE_PDF_DOWNLOAD,
+    SERVICE_UNPAYWALL,
     SERVICE_UNPAYWALL_PDF,
 )
 from bmlibrarian_lite.data_models import (
@@ -195,10 +196,33 @@ def test_the_reader_is_told_the_copy_went_unassessed(tmp_path: Path) -> None:
     result = _discover([_unpaywall()], tmp_path, session)
 
     assert result.error == (
-        "Failed to download PDF from any available source. Failed to obtain a "
-        "PDF from the following tried sources: repo.example.org, named by "
-        "Unpaywall (HTTP 404 Not Found). Whether this document is open access "
-        "was not established."
+        "Failed to obtain a PDF from the following tried sources: "
+        "repo.example.org, named by Unpaywall (HTTP 404 Not Found). Whether "
+        "this document is open access was not established."
+    )
+
+
+def test_control_without_a_tried_pdf_the_claim_is_qualified(tmp_path: Path) -> None:
+    """No open-access PDF tried: the claim about our attempts, then the clause.
+
+    The tried-sources statement replaces the claim only when it is said; a
+    lookup-only record keeps today's wording.
+    """
+    discoverer = PDFDiscoverer(unpaywall_email="test@example.com", use_browser_fallback=False)
+    unasked = LookupRecord(failures=(
+        SourceLookupFailure(SERVICE_UNPAYWALL, RequestFailure(RequestFailureKind.TIMEOUT)),
+    ))
+    discoverer._discover_sources = lambda doi, pmid, pmcid: ([_publisher()], unasked)  # type: ignore[method-assign]
+    discoverer._session = _Session(  # type: ignore[assignment]
+        {PUBLISHER_PDF: _response(404, b"", "text/html", PUBLISHER_PDF)}
+    )
+
+    result = discoverer.discover_and_download(tmp_path / "a.pdf", doi="10.1/x")
+
+    assert result.error == (
+        "Failed to download PDF from any available source. Unpaywall (the "
+        "request timed out) could not be asked, so a freely available copy "
+        "may exist. Whether this document is open access was not established."
     )
 
 
@@ -303,10 +327,10 @@ def test_a_pdf_refused_for_its_size_is_unassessed_not_absent(tmp_path: Path) -> 
         skipped=(SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.OVER_SIZE_LIMIT, UNPAYWALL_PDF),)
     )
     assert result.error == (
-        "Failed to download PDF from any available source. Failed to obtain a "
-        "PDF from the following tried sources: repo.example.org, named by "
-        "Unpaywall (larger than the download limit). A freely available copy "
-        "may exist. Whether this document is open access was not established."
+        "Failed to obtain a PDF from the following tried sources: "
+        "repo.example.org, named by Unpaywall (larger than the download "
+        "limit). A freely available copy may exist. Whether this document is "
+        "open access was not established."
     )
 
 
@@ -469,7 +493,9 @@ def test_a_non_open_access_pdf_not_saved_is_recorded_under_the_download(tmp_path
 def test_every_copy_refused_is_recorded_in_unpaywalls_order(tmp_path: Path) -> None:
     """Both refusals, each with its address, in Unpaywall's order.
 
-    Whatever the priority order tried them in (the maintainer's decision,
+    The desktop tries Unpaywall's PDFs by its own priority, so the
+    published version here is tried first; the record keeps Unpaywall's
+    order whatever order they were tried in (the maintainer's decision,
     2026-10-05).
     """
     accepted = _unpaywall(UNPAYWALL_PDF, version="acceptedVersion")

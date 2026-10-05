@@ -145,10 +145,10 @@ audit say where it came from. The XML is not truncated (golden rule 13).
   (`PDFDiscoverer._discover_unpaywall`). Try every location's `url_for_pdf`,
   deduplicated, in Unpaywall's order. Read a landing page (the first location
   without a PDF URL, as `choose_unpaywall_url` picks it) only when no location
-  names a PDF. Keep one failure, that of the PDF earliest in Unpaywall's
-  order, and record it only when no source served the PDF. That rule is
-  already in the contract (#478); the apps currently try the best location
-  alone.
+  names a PDF. Record every PDF that could not be obtained, in Unpaywall's
+  order, and only when no source served the PDF (superseding the first
+  draft's "one failure, the earliest"; see the as-built note below). The apps
+  currently try the best location alone.
   - **Not ported.** The desktop's derived PMC addresses (`ptpmcrender.fcgi`,
     `/pmc/articles/{id}/pdf/`), which are walled and which stage A supersedes.
     Its publisher-specific URL guesses, which are a desktop heuristic outside

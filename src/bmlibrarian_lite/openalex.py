@@ -227,6 +227,15 @@ class OpenAlexLocationsClient:
             )
         except requests.exceptions.RequestException as error:
             return OpenAlexWorkFetch.unreachable(request_failure_from_exception(error))
+        except ValueError:
+            # A redirect whose Location will not parse ("http://[::1/x", or
+            # bytes that are not UTF-8) raises a bare ValueError from inside
+            # requests, as in ``pdf_discovery._discover_doi_direct`` and
+            # ``_resolve_landing_page``. Escaping, it would abort the
+            # discovery chain and lose what the earlier tiers had found.
+            return OpenAlexWorkFetch.unreachable(
+                RequestFailure(RequestFailureKind.REQUEST_FAILED)
+            )
         if response.status_code == HTTP_NOT_FOUND:
             return OpenAlexWorkFetch.absent()
         if response.status_code != _HTTP_OK:

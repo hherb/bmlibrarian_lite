@@ -83,6 +83,8 @@ from .analysis_failures import (
     no_pdf_sources_message,
     paywall_message,
     not_saved_note,
+    tried_sources_statement,
+    unestablished_access_clause,
     with_unestablished_access,
 )
 from .data_models import (
@@ -989,13 +991,20 @@ class PDFDiscoverer:
                 ),
             )
 
+        unsettled = told.merged(not_obtained)
         return DiscoveryResult(
             success=False,
-            # A claim about our own attempts, which the unasked sources
-            # cannot falsify -- so it is qualified rather than withheld.
-            error=with_unestablished_access(
-                "Failed to download PDF from any available source.",
-                told.merged(not_obtained),
+            # With tried PDFs the tried-sources statement says it all and
+            # opens "Failed to obtain a PDF ..."; the claim beside it would
+            # say "Failed" twice. Otherwise the claim about our own attempts,
+            # which the unasked sources cannot falsify, is qualified rather
+            # than withheld.
+            error=(
+                unestablished_access_clause(unsettled)
+                if tried_sources_statement(unsettled)
+                else with_unestablished_access(
+                    "Failed to download PDF from any available source.", unsettled
+                )
             ),
             lookups=lookups.merged(not_obtained),
         )

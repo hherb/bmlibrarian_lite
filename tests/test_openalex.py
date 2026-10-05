@@ -170,6 +170,17 @@ class TestFetchPdfUrls:
         assert fetch.failure is not None
         assert fetch.failure.kind is not RequestFailureKind.HTTP_STATUS
 
+    def test_a_redirect_that_will_not_parse_is_unreachable(self) -> None:
+        """A Location requests cannot parse raises a bare ValueError.
+
+        It is a failed request, not an exception escaping the discovery chain
+        and throwing away what the earlier tiers found.
+        """
+        redirect = ScriptedAnswer(HTTPStatus.MOVED_PERMANENTLY, headers=(("Location", "http://[::1/x"),))
+        with running({_PATH: [redirect]}) as server:
+            fetch = _client(server.url).fetch_pdf_urls(_DOI)
+        assert fetch == OpenAlexWorkFetch.unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
+
     def test_the_request_asks_for_locations_and_names_the_contact(self) -> None:
         """select=locations, and mailto only when there is a contact."""
         with running({_PATH: [json_answer(_WORK)]}) as server:
