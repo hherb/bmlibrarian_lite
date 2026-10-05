@@ -1080,6 +1080,12 @@ SERVICE_UNPAYWALL_LANDING_PAGE = "the open-access copy's landing page"
 # download that failed, or a body that is not a PDF. Unpaywall answered; the
 # copy it pointed at is what went unassessed, so it is never "no copy" (#478).
 SERVICE_UNPAYWALL_PDF = "the open-access copy's PDF"
+# OpenAlex's record of a work, asked by DOI for the PDFs its locations name
+# that Unpaywall did not (#480, stage B). Named as the reader knows it.
+SERVICE_OPENALEX = "OpenAlex"
+# A PDF OpenAlex named that we could not obtain. OpenAlex answered; the copy
+# it pointed at went unassessed, so it is never "no copy" (#478's rule).
+SERVICE_OPENALEX_PDF = "OpenAlex's copy"
 
 # What a PDF file begins with. A body that does not is not the PDF, whatever
 # it was served as -- a login page or a bot wall's challenge (#478, #480).

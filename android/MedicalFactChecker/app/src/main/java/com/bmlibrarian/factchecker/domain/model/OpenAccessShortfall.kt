@@ -49,7 +49,13 @@ enum class OpenAccessSource(val persistedValue: String, val serviceName: String)
      * requested, a download that failed, or a body that is not a PDF (#478).
      * Unpaywall answered; the copy it pointed at went unassessed.
      */
-    PDF("unpaywall_pdf", "the open-access copy's PDF");
+    PDF("unpaywall_pdf", "the open-access copy's PDF"),
+
+    /** OpenAlex's record of the work, asked for the PDFs Unpaywall did not name (#480, stage B). */
+    OPENALEX("openalex", "OpenAlex"),
+
+    /** A PDF OpenAlex named that could not be obtained: OpenAlex answered, the copy went unassessed. */
+    OPENALEX_PDF("openalex_pdf", "OpenAlex's copy");
 
     companion object {
         /**

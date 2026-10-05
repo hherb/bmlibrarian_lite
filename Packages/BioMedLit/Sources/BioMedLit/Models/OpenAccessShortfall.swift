@@ -35,15 +35,25 @@ public enum OpenAccessSource: String, Sendable, CaseIterable {
     /// Unpaywall answered; the copy it pointed at went unassessed.
     case pdf = "unpaywall_pdf"
 
+    /// OpenAlex's record of the work, asked for the PDFs Unpaywall did not
+    /// name (#480, stage B).
+    case openAlex = "openalex"
+
+    /// A PDF OpenAlex named that could not be obtained: OpenAlex answered, the
+    /// copy went unassessed (#478's rule).
+    case openAlexPDF = "openalex_pdf"
+
     /// The source as the reader is told of it, worded to sit mid-sentence.
     ///
     /// Python's `SERVICE_UNPAYWALL`, `SERVICE_UNPAYWALL_LANDING_PAGE` and
-    /// `SERVICE_UNPAYWALL_PDF`.
+    /// `SERVICE_UNPAYWALL_PDF`, `SERVICE_OPENALEX` and `SERVICE_OPENALEX_PDF`.
     public var serviceName: String {
         switch self {
         case .unpaywall: return "Unpaywall"
         case .landingPage: return "the open-access copy's landing page"
         case .pdf: return "the open-access copy's PDF"
+        case .openAlex: return "OpenAlex"
+        case .openAlexPDF: return "OpenAlex's copy"
         }
     }
 }
