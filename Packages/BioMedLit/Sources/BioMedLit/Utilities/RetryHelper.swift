@@ -91,6 +91,15 @@ public struct RetryConfiguration: Sendable {
         jitterFactor: 0.2
     )
 
+    /// Configuration for OpenAlex (#480, stage B): four attempts, as Python's.
+    public static let openAlex = RetryConfiguration(
+        maxAttempts: 4,
+        initialDelay: 1.0,
+        maxDelay: 30.0,
+        backoffMultiplier: 2.0,
+        jitterFactor: 0.2
+    )
+
     /// Configuration for PDF downloads (longer timeouts).
     public static let pdfDownload = RetryConfiguration(
         maxAttempts: 3,

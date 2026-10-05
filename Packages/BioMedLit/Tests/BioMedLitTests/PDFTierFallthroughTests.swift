@@ -150,6 +150,7 @@ final class PDFTierFallthroughTests: XCTestCase {
 
         XCTAssertEqual(result.source, .europePMCPDF)
         XCTAssertNil(result.localPDFPath)
+        XCTAssertFalse(StubURLProtocol.requested("api.openalex.org"), "a link in hand asks nothing more")
     }
 
     /// The tier the extraction slice was built for was unreachable on its most

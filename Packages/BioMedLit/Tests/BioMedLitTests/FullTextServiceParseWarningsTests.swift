@@ -35,6 +35,17 @@ final class StubURLProtocol: URLProtocol {
     /// Longest key wins, so a specific route beats a general one.
     static var routes: [String: (status: Int, body: Data)] = [:]
 
+    /// Answers consulted after ``routes`` and before ``stubbed``: sources a
+    /// test did not mention get these, not the catch-all. OpenAlex is asked
+    /// at the end of every chain with a DOI (#480, stage B); without this a
+    /// catch-all 200 would read as an unreadable OpenAlex and put a shortfall
+    /// on results that never asked about it. A test that wants OpenAlex sets
+    /// a route for it, which wins.
+    static var fallbackRoutes: [String: (status: Int, body: Data)] = defaultFallbackRoutes
+    static let defaultFallbackRoutes: [String: (status: Int, body: Data)] = [
+        "api.openalex.org": (404, Data()),
+    ]
+
     /// Answers served in order to requests whose URL contains the key, one
     /// per request, before ``routes`` is consulted; once a queue is spent the
     /// request falls through to ``routes`` and ``stubbed``. Longest key wins.
@@ -86,6 +97,7 @@ final class StubURLProtocol: URLProtocol {
     static func reset() {
         stubbed = (200, Data())
         routes = [:]
+        fallbackRoutes = defaultFallbackRoutes
         sequences = [:]
         failures = [:]
         headers = [:]
@@ -121,8 +133,11 @@ final class StubURLProtocol: URLProtocol {
         let match = Self.routes
             .filter { url.contains($0.key) }
             .max { $0.key.count < $1.key.count }
+        let fallback = Self.fallbackRoutes
+            .filter { url.contains($0.key) }
+            .max { $0.key.count < $1.key.count }
         let (status, body) = queued.map { Self.sequences[$0]!.removeFirst() }
-            ?? match?.value ?? Self.stubbed
+            ?? match?.value ?? fallback?.value ?? Self.stubbed
         let headerFields = Self.headers
             .filter { url.contains($0.key) }
             .max { $0.key.count < $1.key.count }?.value

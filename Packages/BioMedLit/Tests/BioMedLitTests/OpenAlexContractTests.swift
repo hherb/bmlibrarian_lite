@@ -44,6 +44,7 @@ final class OpenAlexContractTests: XCTestCase {
         XCTAssertEqual(contract["pdf_service_name"] as? String, OpenAccessSource.openAlexPDF.serviceName)
         XCTAssertEqual(contract["base_url"] as? String, BioMedLitConstants.openAlexBaseURL)
         XCTAssertEqual(BioMedLitConstants.openAlexServiceName, OpenAccessSource.openAlex.serviceName)
+        XCTAssertEqual(contract["source"] as? String, FullTextSource.openAlex.rawValue)
     }
 
     func testEachWorkURLRow() throws {

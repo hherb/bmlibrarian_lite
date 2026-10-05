@@ -96,12 +96,31 @@ public actor FullTextService {
     /// attempts, as Python's; the backoff between them is BioMedLit's own.
     private let pmcOpenDataRetry: RetryConfiguration
 
-    /// When the next request to PMC's open-data bucket may go, or `nil`
-    /// before the first.
+    /// How each request to OpenAlex retries a throttle, a 5xx or a transient
+    /// transport failure (#480, stage B).
     ///
-    /// Reserved before a request waits, so two fetches interleaving on this
-    /// actor cannot both take the same slot.
-    private var nextBucketRequest: Date?
+    /// Injectable for the same reason as ``pmcOpenDataRetry``. Defaults to
+    /// ``RetryConfiguration/openAlex``: four attempts, as Python's.
+    private let openAlexRetry: RetryConfiguration
+
+    /// Hosts this service paces itself on: one slot each (#489 tracks making
+    /// it per host across instances, as Python's).
+    private enum PacedHost: Hashable {
+        case pmcOpenData
+        case openAlex
+
+        var minimumInterval: TimeInterval {
+            switch self {
+            case .pmcOpenData: return BioMedLitConstants.pmcOpenDataMinimumInterval
+            case .openAlex: return BioMedLitConstants.openAlexMinimumInterval
+            }
+        }
+    }
+
+    /// When the next request to each paced host may go; reserved before a
+    /// request waits, so two fetches interleaving on this actor cannot both
+    /// take the same slot.
+    private var nextRequest: [PacedHost: Date] = [:]
 
     /// Characters safe to leave unescaped inside a query-string *value*.
     ///
@@ -144,6 +163,8 @@ public actor FullTextService {
     ///   - pmcOpenDataRetry: How each request to PMC's open-data bucket
     ///     retries a transient failure. Defaults to
     ///     ``RetryConfiguration/pmcOpenData``.
+    ///   - openAlexRetry: How each request to OpenAlex retries a transient
+    ///     failure. Defaults to ``RetryConfiguration/openAlex``.
     public init(
         email: String,
         session: URLSession = FullTextService.makeSession(),
@@ -151,7 +172,8 @@ public actor FullTextService {
         extractor: PDFTextExtracting = PDFKitTextExtractor(),
         extractPDFText: Bool = true,
         europePMCRetry: RetryConfiguration = .serverError,
-        pmcOpenDataRetry: RetryConfiguration = .pmcOpenData
+        pmcOpenDataRetry: RetryConfiguration = .pmcOpenData,
+        openAlexRetry: RetryConfiguration = .openAlex
     ) {
         self.email = email
         self.europePMCService = europePMCService
@@ -160,11 +182,12 @@ public actor FullTextService {
         self.extractPDFText = extractPDFText
         self.europePMCRetry = europePMCRetry
         self.pmcOpenDataRetry = pmcOpenDataRetry
+        self.openAlexRetry = openAlexRetry
     }
 
     /// The transport production uses.
     ///
-    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:)``
+    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:openAlexRetry:)``
     /// so a test can
     /// substitute a stubbed `URLSession` without reproducing these timeouts.
     ///
@@ -183,10 +206,10 @@ public actor FullTextService {
     /// Attempt to retrieve full text for a document.
     ///
     /// Tries sources in order: Europe PMC XML → PMC's open-data bucket (by PMC
-    /// ID, #480) → Europe PMC PDF → Unpaywall PDF → DOI website. Each source is
-    /// tried with retry logic for transient network failures. A body-less XML
-    /// deposit is held back rather than returned, so the PDF tiers still get
-    /// their turn.
+    /// ID, #480) → Europe PMC PDF → Unpaywall PDFs → OpenAlex PDFs → DOI
+    /// website. Each source is tried with retry logic for transient network
+    /// failures. A body-less XML deposit is held back rather than returned, so
+    /// the PDF tiers still get their turn.
     ///
     /// - Parameters:
     ///   - pmcId: PubMed Central ID (e.g., "PMC1234567").
@@ -511,10 +534,11 @@ public actor FullTextService {
         // about the same input: a whitespace-only DOI keys nothing, and it must
         // not reach Unpaywall either.
         let unpaywallDOI = doi?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        // Why the open-access copy Unpaywall may know of went unassessed, if it
-        // did: Unpaywall or the landing page it named could not settle whether a
-        // free copy exists, a PDF it named could not be obtained (#478; every
-        // one is listed, #480), or Unpaywall was not configured. Carried
+        // Why the open-access copy Unpaywall or OpenAlex may know of went
+        // unassessed, if it did: Unpaywall, the landing page it named or
+        // OpenAlex could not settle whether a free copy exists, a PDF either
+        // named could not be obtained (#478; every one is listed, #480), or
+        // Unpaywall was not configured. Carried
         // on whatever fallback is returned, so a caller holding a better link
         // than that fallback knows not to trade it away (#464).
         var openAccessShortfall: OpenAccessShortfall?
@@ -564,6 +588,42 @@ public actor FullTextService {
                 tried: &triedPDFs
             ) {
                 return result
+            }
+            // OpenAlex, for the PDFs Unpaywall did not name (#480, stage B);
+            // never once a copy was served: it cannot raise the odds then
+            // (the maintainer's decision, 2026-10-05)
+            if openAccessNotSavedFrom == nil {
+                switch try await fetchOpenAlexPDFURLs(doi: doi) {
+                case .served(let urls):
+                    if let result = try await tryOpenAccessPDFs(
+                        OpenAlex.untried(urls, tried: triedPDFs),
+                        refusedAs: .openAlexPDF,
+                        content: { .openAlex(pdfURL: $0) },
+                        cacheKey: cacheKey,
+                        degradation: degradation,
+                        holdingAbstract: abstractOnly != nil,
+                        articleName: articleName,
+                        linkFallback: &pdfLinkFallback,
+                        shortfall: &openAccessShortfall,
+                        notSavedFrom: &openAccessNotSavedFrom,
+                        tried: &triedPDFs
+                    ) {
+                        return result
+                    }
+                case .absent:
+                    BioMedLitLib.logger?.info(
+                        "OpenAlex knows no work by DOI \(doi)", category: .fullText
+                    )
+                case .unreachable(let failure):
+                    openAccessShortfall = .adding(
+                        OpenAccessShortfall(source: .openAlex, failure: failure), to: openAccessShortfall
+                    )
+                    BioMedLitLib.logger?.warning(
+                        "OpenAlex could not be asked about DOI \(doi) (\(failure.describe())), so any "
+                            + "open-access copy it knows of is not assessed",
+                        category: .fullText
+                    )
+                }
             }
         }
         openAccessShortfall = Self.settledOpenAccessShortfall(
@@ -1059,21 +1119,24 @@ public actor FullTextService {
             config: pmcOpenDataRetry,
             shouldRetry: RetryHelper.retryOnlyTransient
         ) {
-            try await self.bucketAttempt(url)
+            try await self.pacedAttempt(url, host: .pmcOpenData)
         }
     }
 
-    /// One attempt at a bucket request, paced to `pmcOpenDataMinimumInterval`:
-    /// every attempt, a retry included, takes its own pacing slot.
+    /// One attempt at a request to a paced host, paced to its
+    /// ``PacedHost/minimumInterval``: every attempt, a retry included, takes
+    /// its own pacing slot.
     ///
-    /// - Parameter url: The bucket URL.
+    /// - Parameters:
+    ///   - url: The URL to ask.
+    ///   - host: Whose pacing slot the request takes.
     /// - Returns: The status and body of an answer that is not transient.
     /// - Throws: `FullTextError.serverError` for a retryable status, so the
     ///   retry sees it; otherwise as ``bucketGET(_:)``.
-    private func bucketAttempt(_ url: URL) async throws -> (status: Int, body: Data) {
+    private func pacedAttempt(_ url: URL, host: PacedHost) async throws -> (status: Int, body: Data) {
         let now = Date()
-        let slot = max(now, nextBucketRequest ?? now)
-        nextBucketRequest = slot.addingTimeInterval(BioMedLitConstants.pmcOpenDataMinimumInterval)
+        let slot = max(now, nextRequest[host] ?? now)
+        nextRequest[host] = slot.addingTimeInterval(host.minimumInterval)
         let wait = slot.timeIntervalSince(now)
         if wait > 0 {
             try await Task.sleep(nanoseconds: UInt64(wait * Double(BioMedLitConstants.nanosecondsPerSecond)))
@@ -1088,6 +1151,61 @@ public actor FullTextService {
             throw FullTextError.serverError(statusCode: http.statusCode)
         }
         return (http.statusCode, data)
+    }
+
+    // MARK: - OpenAlex (#480, stage B)
+
+    /// Ask OpenAlex which PDFs a work's locations name.
+    ///
+    /// The contact email is the service's `email`, the one CrossRef already
+    /// receives; a blank one asks without `mailto`. The statuses are pinned
+    /// by `fulltext_parity/openalex_locations.json` ("status"). Internal
+    /// rather than private so each outcome can be tested on its own.
+    ///
+    /// - Parameter doi: The DOI, trimmed and non-empty.
+    /// - Returns: Served URLs (possibly none); absent for a 404; or
+    ///   unreachable, of its real kind (a body we cannot read is
+    ///   `malformedResponse`).
+    /// - Throws: `CancellationError` only.
+    func fetchOpenAlexPDFURLs(doi: String) async throws -> OpenAlexFetch {
+        let contact = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A request we could not build was never sent: not an absence.
+        guard let url = OpenAlex.workURL(doi: doi, mailto: contact.isEmpty ? nil : contact) else {
+            return .unreachable(.requestFailed)
+        }
+        let answer: (status: Int, body: Data)
+        do {
+            answer = try await RetryHelper.retry(
+                config: openAlexRetry,
+                shouldRetry: RetryHelper.retryOnlyTransient
+            ) {
+                try await self.pacedAttempt(url, host: .openAlex)
+            }
+        } catch where error.isCancellation {
+            throw CancellationError()
+        } catch FullTextError.serverError(let statusCode) {
+            // A throttle or server error that outlasted its retries.
+            return .unreachable(.httpStatus(statusCode))
+        } catch FullTextError.invalidResponse {
+            // As the bucket maps it: an answer that is not HTTP
+            return .unreachable(.malformedResponse)
+        } catch {
+            // Logged by the chain, which knows what it falls through to.
+            return .unreachable(SearchTransport.failure(for: error))
+        }
+        switch answer.status {
+        case BioMedLitConstants.httpStatusOK:
+            do {
+                return .served(try OpenAlex.pdfURLs(fromWork: answer.body))
+            } catch {
+                return .unreachable(.malformedResponse)
+            }
+        case BioMedLitConstants.httpStatusNotFound:
+            // OpenAlex knows no work by this DOI (it answers with HTML)
+            return .absent
+        default:
+            return .unreachable(.httpStatus(answer.status))
+        }
     }
 
     /// Convert served JATS XML to HTML and markdown.

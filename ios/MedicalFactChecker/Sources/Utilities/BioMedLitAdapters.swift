@@ -476,7 +476,7 @@ enum BioMedLitAdapters {
         case .europePMC(let html, let markdown), .pmcOpenData(let html, let markdown):
             // Both HTML (for rendering) and markdown (for search/export fallback)
             return .html(content: html, markdown: markdown)
-        case .europePMCPDF(let pdfURL), .unpaywall(let pdfURL):
+        case .europePMCPDF(let pdfURL), .unpaywall(let pdfURL), .openAlex(let pdfURL):
             // The cached file wins over the remote URL. The iOS viewers render
             // the live result rather than the stored document, so mapping this
             // to the remote URL sent them back over the network for bytes
@@ -504,6 +504,7 @@ enum BioMedLitAdapters {
         case .pmcOpenData: return .pmcOpenData
         case .europePMCPDF: return .europePMCPDF
         case .unpaywall: return .unpaywall
+        case .openAlex: return .openAlex
         case .doi: return .doi
         case .cached: return .cached
         }

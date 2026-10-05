@@ -32,6 +32,10 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
     /// Open access PDF via Unpaywall.
     case unpaywall = "unpaywall"
 
+    /// Open access PDF an OpenAlex location names, Unpaywall having named
+    /// none that served (#480, stage B).
+    case openAlex = "openalex"
+
     /// DOI resolution (publisher website).
     case doi = "doi"
 
@@ -49,6 +53,8 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
             return "Europe PMC PDF"
         case .unpaywall:
             return "Unpaywall"
+        case .openAlex:
+            return "OpenAlex"
         case .doi:
             return "Publisher"
         case .cached:
@@ -364,12 +370,14 @@ public struct FullTextResult: Sendable, Equatable {
             extractionCoverage == nil || content.pdfURL != nil,
             "extraction coverage on \(content.source), which carries no PDF"
         )
-        // An open-access shortfall rides only on a fallback. Unpaywall's own PDF
-        // settles the question it would raise, and text in hand (parsed or
-        // extracted) is no fallback the reader needs warning about.
+        // An open-access shortfall rides only on a fallback. An open-access
+        // copy's own PDF (Unpaywall's or OpenAlex's) settles the question it
+        // would raise, and text in hand (parsed or extracted) is no fallback
+        // the reader needs warning about.
         assert(
-            openAccessShortfall == nil || content.source != .unpaywall,
-            "an open-access shortfall on Unpaywall's own PDF, which settles it"
+            openAccessShortfall == nil
+                || (content.source != .unpaywall && content.source != .openAlex),
+            "an open-access shortfall on Unpaywall's or OpenAlex's own PDF, which settles it"
         )
         assert(
             openAccessShortfall == nil || (contentKind != .fulltext && contentKind != .extracted),
@@ -419,7 +427,7 @@ public struct FullTextResult: Sendable, Equatable {
     /// Markdown content if available (parsed JATS: Europe PMC or PMC's bucket).
     public var markdown: String? { content.markdown }
 
-    /// PDF URL if available (Europe PMC PDF, Unpaywall, or cached).
+    /// PDF URL if available (Europe PMC PDF, Unpaywall, OpenAlex, or cached).
     public var pdfURL: URL? { content.pdfURL }
 
     /// Web URL if available (DOI resolution).
@@ -440,6 +448,10 @@ public enum FullTextContent: Sendable, Equatable {
     /// Open access PDF URL from Unpaywall.
     case unpaywall(pdfURL: URL)
 
+    /// A PDF an OpenAlex location names, Unpaywall having named none that
+    /// served (#480, stage B).
+    case openAlex(pdfURL: URL)
+
     /// DOI resolution URL (opens publisher website).
     case doi(webURL: URL)
 
@@ -457,6 +469,8 @@ public enum FullTextContent: Sendable, Equatable {
             return .europePMCPDF
         case .unpaywall:
             return .unpaywall
+        case .openAlex:
+            return .openAlex
         case .doi:
             return .doi
         case .cached:
@@ -484,12 +498,12 @@ public enum FullTextContent: Sendable, Equatable {
         }
     }
 
-    /// PDF URL if available (Europe PMC PDF, Unpaywall, or cached).
+    /// PDF URL if available (Europe PMC PDF, Unpaywall, OpenAlex, or cached).
     public var pdfURL: URL? {
         switch self {
         case .europePMCPDF(let url):
             return url
-        case .unpaywall(let url):
+        case .unpaywall(let url), .openAlex(let url):
             return url
         case .cached(let path):
             return URL(fileURLWithPath: path)
