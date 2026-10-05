@@ -143,6 +143,27 @@ object Constants {
     /** Statuses retried for the bucket: Python's RETRYABLE_HTTP_STATUSES (no 408). */
     val PMC_OPEN_DATA_RETRYABLE_STATUSES = setOf(429, 500, 502, 503, 504)
 
+    /** OpenAlex's API (#480, stage B); pinned by fulltext_parity/openalex_locations.json. */
+    const val OPENALEX_BASE_URL = "https://api.openalex.org"
+
+    /** OpenAlex as the reader's sentences name it, verbatim on every platform. */
+    const val OPENALEX_SERVICE_NAME = "OpenAlex"
+
+    /** Ten requests a second, OpenAlex's published limit and Python's POLITE_RATE_CEILINGS entry. */
+    const val OPENALEX_MIN_INTERVAL_MS = 100L
+
+    /** Further attempts after the first for OpenAlex, for a transport failure or a retryable status. */
+    const val OPENALEX_MAX_RETRIES = 3
+
+    /** OpenAlex's wait before its first retry, doubling after; the bucket's value. */
+    const val OPENALEX_INITIAL_BACKOFF_MS = PMC_OPEN_DATA_INITIAL_BACKOFF_MS
+
+    /** Connect and read timeout for one OpenAlex request, in seconds. */
+    const val OPENALEX_REQUEST_TIMEOUT_SECONDS = 30L
+
+    /** Statuses retried for OpenAlex: Python's RETRYABLE_HTTP_STATUSES (no 408). */
+    val OPENALEX_RETRYABLE_STATUSES = setOf(429, 500, 502, 503, 504)
+
     /** The XML namespace of an S3 ListObjectsV2 answer. */
     const val S3_LISTING_NAMESPACE = "http://s3.amazonaws.com/doc/2006-03-01/"
 
@@ -350,6 +371,12 @@ object Constants {
 
     /** How a stored [FULLTEXT_SOURCE_UNPAYWALL] is labelled for the reader. */
     const val FULLTEXT_SOURCE_UNPAYWALL_LABEL = "Unpaywall"
+
+    /** Source of a PDF one of OpenAlex's locations named (#480). */
+    const val FULLTEXT_SOURCE_OPENALEX = "openalex"
+
+    /** How a stored [FULLTEXT_SOURCE_OPENALEX] is labelled for the reader. */
+    const val FULLTEXT_SOURCE_OPENALEX_LABEL = "OpenAlex"
 
     /** Full-text source: DOI/Publisher. */
     const val FULLTEXT_SOURCE_DOI = "doi"
