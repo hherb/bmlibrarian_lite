@@ -533,7 +533,9 @@ source tried is told** (see "Tried sources (#480)"). One difference is
 deliberate: in Swift, a copy downloaded and cached that yields no text while
 an abstract is held does not end the walk or the OpenAlex ask, since a
 textless copy is no full text obtained; Python stops at any PDF it downloads
-(extraction comes later).
+(extraction comes later). A copy was obtained all the same, so the
+open-access question is settled: as for a copy not cached, no shortfall is
+told beside the abstract, whatever was refused before or after it.
 
 Once every copy was refused, the chain goes on as though none had been named:
 Python tries its remaining sources, and Swift falls back past them (no link
@@ -661,14 +663,16 @@ The maintainer's decisions of 2026-10-05. Pinned by
   - A PDF entry reads `{host}, named by {Unpaywall|OpenAlex} ({reason})`.
     The host is the address's host, lower-cased, else the address trimmed:
     Python's `urlsplit(address).hostname` (userinfo and port dropped; a space
-    in the path does not hide it). The apps parse `scheme://authority` to the
-    same result rather than use `URLComponents` or `java.net.URI` (rows under
+    in the path does not hide it; a scheme-relative `//host/…` names its
+    host). The apps parse `scheme://authority` or `//authority` to the same
+    result rather than use `URLComponents` or `java.net.URI` (rows under
     `hosts`).
   - A lookup entry reads `{name} ({reason})`, once per service, with the
     reason Python's `_unsettled` picks.
   - Entries come in chain order: other sources first, then `unpaywall`,
     `unpaywall_landing_page`, `unpaywall_pdf`, `openalex`, `openalex_pdf`
-    (stable).
+    (stable). Entries that read the same (two PDFs on one host refused
+    alike) are told once, the first after sorting.
   - An address is tried once, under the source that tried it first: one that
     both Unpaywall and OpenAlex name is listed once. This holds for an address
     refused before any request (not an absolute http(s) URL) too: Python's
@@ -678,6 +682,10 @@ The maintainer's decisions of 2026-10-05. Pinned by
     is open access was not established." if any entry could not be asked,
     else "Whether this document is open access was not established." The
     configuration nudge follows.
+  - Python's discovery, once nothing was obtained, gives this statement
+    alone as its error, not after "Failed to download PDF from any available
+    source.", which would say "Failed" twice. Without a tried PDF it keeps
+    that claim and qualifies it.
 - **Without a tried PDF, today's grouped sentence is kept**
   (`unestablished_access_clause`; one lookup reads exactly as before).
 - **A PDF served but not saved is a caching note, never a shortfall:**
