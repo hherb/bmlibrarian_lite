@@ -69,6 +69,7 @@ from .constants import (
     RETRYABLE_HTTP_STATUSES,
     SERVICE_DOI_PUBLISHER,
     SERVICE_DOI_RESOLVER,
+    SERVICE_PDF_DOWNLOAD,
     SERVICE_PMC_ID_CONVERTER,
     SERVICE_UNPAYWALL,
     SERVICE_UNPAYWALL_LANDING_PAGE,
@@ -77,6 +78,7 @@ from .constants import (
 from .analysis_failures import (
     no_pdf_sources_message,
     paywall_message,
+    unestablished_access_clause,
     with_unestablished_access,
 )
 from .data_models import (
@@ -492,8 +494,8 @@ class DiscoveryResult:
         failure: Why one download attempt got no PDF, as a typed failure
             safe to show: the status, the transport failure,
             ``MALFORMED_RESPONSE`` for a body that is not the PDF, or
-            ``REQUEST_FAILED`` for an address that cannot be requested or a
-            fault of our own, such as a file that could not be written.
+            ``REQUEST_FAILED`` for an address that cannot be requested or an
+            unexpected fault of our own.
             ``None`` on success, on a cancel, and for a PDF refused for its
             size. Set only by :meth:`PDFDiscoverer._try_download`, so the
             discovery can record an Unpaywall PDF it could not obtain (#478).
@@ -502,10 +504,13 @@ class DiscoveryResult:
             so it is no ``failure``; but the copy exists and went unread,
             so an Unpaywall PDF refused for its size is still recorded as
             unassessed (#478).
+        not_saved: The source served the PDF and it could not be written
+            here: a fault of ours, told as a caching note (#480). Not a
+            ``failure``: the source answered.
 
     Raises:
         ValueError: On construction, if a successful result carries a
-            failure or a size refusal.
+            failure, a size refusal or a not-saved flag.
     """
 
     success: bool
@@ -518,10 +523,13 @@ class DiscoveryResult:
     lookups: LookupRecord = LookupRecord()
     failure: RequestFailure | None = None
     refused_for_size: bool = False
+    not_saved: bool = False
 
     def __post_init__(self) -> None:
         """Refuse a success that also says why no PDF was obtained."""
-        if self.success and (self.failure is not None or self.refused_for_size):
+        if self.success and (
+            self.failure is not None or self.refused_for_size or self.not_saved
+        ):
             raise ValueError("A downloaded PDF carries no download failure")
 
     def with_lookups(self, record: LookupRecord) -> "DiscoveryResult":
@@ -616,40 +624,38 @@ def discard_partial_download(partial: Path) -> None:
         logger.warning(f"Could not remove the partial download {partial}: {e}")
 
 
-def unobtained_unpaywall_pdf(
+#: Whose PDF an unobtained open-access copy is recorded against (#478, #480).
+_UNOBTAINED_PDF_SERVICE = {PDFSourceType.UNPAYWALL_OA: SERVICE_UNPAYWALL_PDF}
+
+
+def unobtained_open_access_pdf(
     source: "PDFSource", result: "DiscoveryResult"
 ) -> LookupRecord:
-    """Record an Unpaywall PDF we could not obtain, or nothing.
+    """Record an open-access PDF we could not obtain, with its address.
 
-    Unpaywall answered with a copy; that we could not then obtain it is not
-    an article without one, and the discovery must not conclude it has no
-    full text (#478). A PDF refused for its size is our limit, not the
-    source's answer, so it is recorded as a lookup not made rather than as
-    a failure; it is unassessed all the same. A cancel records nothing: the
-    caller walked away from the question.
+    A source answered with a copy; that we could not then obtain it is not an
+    article without one (#478). It is recorded under the copy's own name, not
+    the service's, which answered, and with its address, so the reader is
+    told each copy tried by its host (#480). A PDF refused for its size is
+    our limit, recorded as a lookup not made; a cancel records nothing.
 
     Args:
         source: The source the download tried.
         result: What the attempt came to.
 
     Returns:
-        A record under :data:`SERVICE_UNPAYWALL_PDF` when ``source`` is a
-        PDF Unpaywall named and the attempt did not obtain it; empty
+        A record under the copy's service when ``source`` is a PDF an
+        open-access source named and the attempt did not obtain it; empty
         otherwise.
     """
-    if result.success or source.source_type is not PDFSourceType.UNPAYWALL_OA:
+    service = _UNOBTAINED_PDF_SERVICE.get(source.source_type)
+    if result.success or service is None:
         return LookupRecord()
     if result.failure is not None:
-        return LookupRecord(
-            failures=(SourceLookupFailure(SERVICE_UNPAYWALL_PDF, result.failure),)
-        )
+        return LookupRecord(failures=(SourceLookupFailure(service, result.failure, source.url),))
     if result.refused_for_size:
         return LookupRecord(
-            skipped=(
-                SourceLookupSkipped(
-                    SERVICE_UNPAYWALL_PDF, LookupSkipReason.OVER_SIZE_LIMIT
-                ),
-            )
+            skipped=(SourceLookupSkipped(service, LookupSkipReason.OVER_SIZE_LIMIT, source.url),)
         )
     return LookupRecord()
 
@@ -803,13 +809,12 @@ class PDFDiscoverer:
                 lookups=lookups,
             )
 
-        # Unpaywall's own order, best location first, before the priority
-        # sort reorders its PDFs: the failure kept for the reader is the best
-        # location's, the one PDF the apps try (#478).
-        unpaywall_rank = {
+        # Unpaywall's own order, then OpenAlex's (#480), before the priority
+        # sort reorders them: every copy not obtained is told, in this order.
+        copy_rank = {
             s.url: rank
             for rank, s in enumerate(
-                s for s in sources if s.source_type is PDFSourceType.UNPAYWALL_OA
+                s for s in sources if s.source_type in _UNOBTAINED_PDF_SERVICE
             )
         }
 
@@ -823,8 +828,7 @@ class PDFDiscoverer:
         # Try to download from each source
         last_paywall_result: Optional[DiscoveryResult] = None
         blocked_oa_sources: List[PDFSource] = []  # Track sources blocked by bot protection
-        unobtained_pdf = LookupRecord()
-        unobtained_rank: int | None = None
+        unobtained: list[tuple[int, LookupRecord]] = []
 
         for source in sources:
             if self._cancelled:
@@ -840,19 +844,29 @@ class PDFDiscoverer:
             if result.success:
                 return result.with_lookups(lookups)
 
-            # An Unpaywall PDF we could not obtain leaves the open-access copy
+            if result.not_saved:
+                # Served, and not saved here: the copy exists, so nothing else
+                # is asked (saving is our problem) and nothing is an access
+                # shortfall; the reader gets the caching note (#480).
+                saved_note = LookupRecord(skipped=(SourceLookupSkipped(
+                    _UNOBTAINED_PDF_SERVICE.get(source.source_type, SERVICE_PDF_DOWNLOAD),
+                    LookupSkipReason.NOT_SAVED,
+                    source.url,
+                ),))
+                return DiscoveryResult(
+                    success=False,
+                    error=unestablished_access_clause(told.merged(saved_note)),
+                    lookups=lookups.merged(saved_note),
+                )
+
+            # An open-access PDF we could not obtain leaves that copy
             # unassessed (#478). Held apart from ``lookups`` and merged only
             # where the discovery gives up: a later source that serves the
-            # PDF settles the question. One is kept, the PDF earliest in
-            # Unpaywall's order, as the apps try the best location's alone.
-            unobtained = unobtained_unpaywall_pdf(source, result)
-            rank = unpaywall_rank.get(source.url)
-            if (
-                unobtained.anything_unsettled
-                and rank is not None
-                and (unobtained_rank is None or rank < unobtained_rank)
-            ):
-                unobtained_pdf, unobtained_rank = unobtained, rank
+            # PDF settles the question. Every one is kept, in chain order.
+            record = unobtained_open_access_pdf(source, result)
+            rank = copy_rank.get(source.url)
+            if record.anything_unsettled and rank is not None:
+                unobtained.append((rank, record))
 
             if result.is_paywall:
                 # For open access sources, a 403 might be bot protection, not paywall
@@ -869,9 +883,9 @@ class PDFDiscoverer:
                     # that would have found a free copy could not be made,
                     # the claim is withheld rather than asserted (#347).
                     return replace(
-                        result.with_lookups(lookups.merged(unobtained_pdf)),
+                        result.with_lookups(lookups.merged(self._ranked(unobtained))),
                         error=paywall_message(
-                            result.error or "", told.merged(unobtained_pdf)
+                            result.error or "", told.merged(self._ranked(unobtained))
                         ),
                     )
 
@@ -895,9 +909,9 @@ class PDFDiscoverer:
         # If we had a paywall result but no success, return it for OpenAthens option
         if last_paywall_result:
             return replace(
-                last_paywall_result.with_lookups(lookups.merged(unobtained_pdf)),
+                last_paywall_result.with_lookups(lookups.merged(self._ranked(unobtained))),
                 error=paywall_message(
-                    last_paywall_result.error or "", told.merged(unobtained_pdf)
+                    last_paywall_result.error or "", told.merged(self._ranked(unobtained))
                 ),
             )
 
@@ -907,10 +921,18 @@ class PDFDiscoverer:
             # cannot falsify -- so it is qualified rather than withheld.
             error=with_unestablished_access(
                 "Failed to download PDF from any available source.",
-                told.merged(unobtained_pdf),
+                told.merged(self._ranked(unobtained)),
             ),
-            lookups=lookups.merged(unobtained_pdf),
+            lookups=lookups.merged(self._ranked(unobtained)),
         )
+
+    @staticmethod
+    def _ranked(unobtained: list[tuple[int, LookupRecord]]) -> LookupRecord:
+        """Every copy not obtained, in chain order whatever order they were tried in."""
+        merged = LookupRecord()
+        for _rank, record in sorted(unobtained, key=lambda pair: pair[0]):
+            merged = merged.merged(record)
+        return merged
 
     def _discover_sources(
         self,
@@ -1859,15 +1881,15 @@ class PDFDiscoverer:
         except OSError as e:
             # After the ``requests`` handlers, whose exceptions are OSErrors
             # too: what is left is ours, a file that could not be written.
-            # The source served the PDF, so this is no answer about the copy;
-            # but with no link to fall back on, recording nothing would let
-            # the discovery conclude the article has no full text. It is
-            # recorded as REQUEST_FAILED: the copy went unassessed (#478).
+            # The source served the PDF, so it is no answer about the copy.
+            # It is recorded as a NOT_SAVED skip with its address, which keeps
+            # the discovery from concluding there is no full text and is told
+            # as a caching note (#480).
             logger.error(f"Could not save the PDF from {source.url}: {e}")
             return DiscoveryResult(
                 success=False,
                 error=f"The PDF could not be saved: {e}",
-                failure=RequestFailure(RequestFailureKind.REQUEST_FAILED),
+                not_saved=True,
             )
 
         except Exception as e:

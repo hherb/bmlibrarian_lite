@@ -552,7 +552,7 @@ class TestTheReaderIsTold:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """After "Failed to download…", the phrase begins a sentence."""
+        """The publisher's name is told inside the tried-sources list (#480)."""
         found = PDFSource(
             url=f"https://{PUBLISHER_HOST}/article.pdf",
             source_type=PDFSourceType.UNPAYWALL_OA,
@@ -569,7 +569,7 @@ class TestTheReaderIsTold:
 
         assert not result.success
         assert (
-            f"source. The {SERVICE_DOI_PUBLISHER[len('the '):]} (HTTP 503"
+            f"tried sources: {SERVICE_DOI_PUBLISHER} (HTTP 503"
             in result.error
         )
 
