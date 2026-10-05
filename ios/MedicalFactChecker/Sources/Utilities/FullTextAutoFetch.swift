@@ -86,7 +86,7 @@ enum FullTextAutoFetch {
         /// and "try again later" only where waiting can help: not for a source
         /// that answered, nor for one that was not configured.
         var errorDescription: String? {
-            let retrying = shortfall.failure.map { !$0.isAnswer } ?? false
+            let retrying = shortfall.entries.contains { $0.failure.map { !$0.isAnswer } ?? false }
             return "\(shortfall.notice) The PDF link already stored was kept."
                 + (retrying ? " Try again later." : "")
         }

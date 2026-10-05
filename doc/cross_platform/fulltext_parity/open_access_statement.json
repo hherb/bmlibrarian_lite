@@ -26,6 +26,22 @@
     {
       "address": "not a url",
       "host": "not a url"
+    },
+    {
+      "address": "https://Repo.example.org/a b.pdf",
+      "host": "repo.example.org"
+    },
+    {
+      "address": "https://user:pw@Repo.example.org:8443/x",
+      "host": "repo.example.org"
+    },
+    {
+      "address": "http://[::1]:80/a.pdf",
+      "host": "::1"
+    },
+    {
+      "address": "repo.example.org/a.pdf",
+      "host": "repo.example.org/a.pdf"
     }
   ],
   "statements": [

@@ -193,6 +193,17 @@ final class FullTextAutoFetchTests: XCTestCase {
         )
     }
 
+    /// Waiting can help when any entry could not be asked, not only the first.
+    func testTheRefusalSaysTryAgainWhenALaterEntryCouldNotBeAsked() {
+        let shortfall = OpenAccessShortfall(
+            source: .pdf, failure: .httpStatus(404), address: "https://repo.example.org/a.pdf"
+        ).appending(OpenAccessShortfall(source: .openAlex, failure: .timeout))
+
+        let refusal = FullTextAutoFetch.StoredLinkKept(shortfall: shortfall)
+
+        XCTAssertTrue(refusal.errorDescription?.hasSuffix(" Try again later.") ?? false)
+    }
+
     /// Controls: a fallback with nothing unsettled is the chain's answer, and
     /// a document holding no link has nothing to keep.
     func testAnAnsweredFallbackOrADocumentWithNoLinkIsApplied() {

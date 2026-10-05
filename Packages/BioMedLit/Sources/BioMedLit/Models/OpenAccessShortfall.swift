@@ -207,7 +207,11 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
 
     /// Who named a tried PDF.
     private static func namedBy(_ source: OpenAccessSource) -> String {
-        source == .openAlexPDF ? OpenAccessSource.openAlex.serviceName : OpenAccessSource.unpaywall.serviceName
+        switch source {
+        case .pdf: return OpenAccessSource.unpaywall.serviceName
+        case .openAlexPDF: return OpenAccessSource.openAlex.serviceName
+        default: return source.serviceName
+        }
     }
 
     private static let triedSourcesLead = "Failed to obtain a PDF from the following tried sources: "
@@ -317,10 +321,21 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
     /// - Returns: The name a tried PDF is told by.
     public static func host(of address: String) -> String {
         let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let host = URLComponents(string: trimmed)?.host, !host.isEmpty {
-            return host.lowercased()
+        guard let scheme = trimmed.range(of: "^[A-Za-z][A-Za-z0-9+.-]*://", options: .regularExpression) else {
+            return trimmed
         }
-        return trimmed
+        let rest = trimmed[scheme.upperBound...]
+        var authority = rest[..<(rest.firstIndex { "/?#".contains($0) } ?? rest.endIndex)]
+        if let at = authority.lastIndex(of: "@") { authority = authority[authority.index(after: at)...] }
+        var host: Substring
+        if authority.hasPrefix("["), let close = authority.firstIndex(of: "]") {
+            host = authority[authority.index(after: authority.startIndex)..<close]
+        } else if let colon = authority.firstIndex(of: ":") {
+            host = authority[..<colon]
+        } else {
+            host = authority
+        }
+        return host.isEmpty ? trimmed : host.lowercased()
     }
 
     /// Python's `not_saved_note` (#480): a PDF served and not saved is ours to
