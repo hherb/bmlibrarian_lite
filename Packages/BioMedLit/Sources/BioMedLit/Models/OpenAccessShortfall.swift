@@ -83,8 +83,11 @@ public enum OpenAccessUnsettledReason: Sendable, Equatable, Hashable {
 ///
 /// The contract is `doc/cross_platform/fulltext_parity/open_access_unsettled_notice.json`.
 public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
-    /// The stored form's schema version.
+    /// The stored form's schema version for one lookup without an address.
     private static let schemaVersion: Int64 = 1
+
+    /// The stored form's schema version for a list (#480).
+    private static let schemaVersionList: Int64 = 2
 
     /// The key holding the stored form's schema version.
     private static let keySchemaVersion = "schema_version"
@@ -98,80 +101,239 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
     /// The key holding why, for a lookup that was not made.
     private static let keySkipped = "skipped"
 
+    /// The key holding the list of entries (schema 2).
+    private static let keyEntries = "entries"
+
+    /// The key holding a tried PDF's address.
+    private static let keyAddress = "address"
+
     /// Python's `LookupSkipReason.NOT_CONFIGURED`, as stored.
     private static let skippedNotConfigured = "not_configured"
 
     /// Python's `SourceLookupSkipped.describe()` for that reason.
-    private static let notConfiguredDescription = "not configured"
+    fileprivate static let notConfiguredDescription = "not configured"
+
+    /// One lookup, or one PDF a source named, that left the question open.
+    public struct Entry: Sendable, Equatable, Hashable {
+        /// Which lookup, or whose PDF.
+        public let source: OpenAccessSource
+
+        /// Why: a failed lookup, or an Unpaywall that was not configured.
+        public let reason: OpenAccessUnsettledReason
+
+        /// The PDF's address, for a PDF a source named (#480); `nil` for a
+        /// service's own lookup. Trimmed; blank is `nil`.
+        public let address: String?
+
+        /// Create an entry for a lookup or a PDF that was tried and failed.
+        ///
+        /// - Parameters:
+        ///   - source: Which lookup, or whose PDF.
+        ///   - failure: Why.
+        ///   - address: The PDF's address, if it is a PDF's entry.
+        public init(source: OpenAccessSource, failure: RequestFailure, address: String? = nil) {
+            self.init(source: source, reason: .failed(failure), address: address)
+        }
+
+        fileprivate init(source: OpenAccessSource, reason: OpenAccessUnsettledReason, address: String?) {
+            self.source = source
+            self.reason = reason
+            let trimmed = address?.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.address = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        }
+
+        /// The failure, or `nil` for a lookup that was never made.
+        public var failure: RequestFailure? {
+            if case .failed(let failure) = reason { return failure }
+            return nil
+        }
+
+        /// Whether it could not be asked (#435), which decides the ending.
+        fileprivate var couldNotBeAsked: Bool { failure.map { !$0.isAnswer } ?? true }
+
+        /// Its reason as the reader is told it.
+        fileprivate var described: String {
+            failure?.describe() ?? OpenAccessShortfall.notConfiguredDescription
+        }
+    }
+
+    /// What went unsettled, in the order it was met; never empty.
+    public let entries: [Entry]
+
+    /// Create a shortfall of one lookup, or one PDF, that failed.
+    ///
+    /// - Parameters:
+    ///   - source: Which lookup, or whose PDF.
+    ///   - failure: Why.
+    ///   - address: The PDF's address, if it is a PDF's entry.
+    public init(source: OpenAccessSource, failure: RequestFailure, address: String? = nil) {
+        self.init(entries: [Entry(source: source, failure: failure, address: address)])
+    }
+
+    private init(entries: [Entry]) {
+        precondition(!entries.isEmpty, "a shortfall names what went unsettled")
+        self.entries = entries
+    }
 
     /// Unpaywall, never asked for want of a contact email it would accept.
     public static let unpaywallNotConfigured = OpenAccessShortfall(
-        source: .unpaywall, reason: .notConfigured
+        entries: [Entry(source: .unpaywall, reason: .notConfigured, address: nil)]
     )
 
-    /// Which lookup could not settle it.
-    public let source: OpenAccessSource
+    /// The first entry's source, for callers that log one.
+    public var source: OpenAccessSource { entries[0].source }
 
-    /// Why: a failed lookup, or an Unpaywall that was not configured.
-    public let reason: OpenAccessUnsettledReason
+    /// The first entry's reason, for callers that log one.
+    public var reason: OpenAccessUnsettledReason { entries[0].reason }
 
-    /// The failure, or `nil` for a lookup that was never made.
-    public var failure: RequestFailure? {
-        if case .failed(let failure) = reason { return failure }
-        return nil
+    /// The first entry's failure, for callers that log one.
+    public var failure: RequestFailure? { entries[0].failure }
+
+    /// This shortfall, then `other`'s entries.
+    public func appending(_ other: OpenAccessShortfall) -> OpenAccessShortfall {
+        OpenAccessShortfall(entries: entries + other.entries)
     }
 
-    /// Create a shortfall for a lookup that was made and failed.
-    ///
-    /// - Parameters:
-    ///   - source: Which lookup could not settle it.
-    ///   - failure: Why.
-    public init(source: OpenAccessSource, failure: RequestFailure) {
-        self.init(source: source, reason: .failed(failure))
-    }
-
-    /// Create a shortfall from its parts; ``unpaywallNotConfigured`` is the only
-    /// skip, so this stays private.
-    ///
-    /// - Parameters:
-    ///   - source: Which lookup could not settle it.
-    ///   - reason: Why.
-    private init(source: OpenAccessSource, reason: OpenAccessUnsettledReason) {
-        self.source = source
-        self.reason = reason
+    /// `next` added after whatever is held: how the chain records each lookup
+    /// and each PDF that went unsettled, in the order met.
+    public static func adding(_ next: OpenAccessShortfall, to existing: OpenAccessShortfall?) -> OpenAccessShortfall {
+        existing?.appending(next) ?? next
     }
 
     // MARK: - Telling the reader
 
-    /// What the reader is told: which lookup went unsettled, and what that
-    /// leaves open about access.
-    ///
-    /// The verb follows #435 (``RequestFailure/isAnswer``). A lookup that could
-    /// not be asked may have missed a free copy, and the reader is told so; one
-    /// that answered without serving the copy is no reason to think one exists.
-    /// An Unpaywall that was not configured could not be asked, and the reader
-    /// is also told that configuring it would help, the one cause they can
-    /// change. Python's `analysis_failures.unestablished_access_clause`, word
-    /// for word.
+    /// The open-access chain's sources in the order they are tried (#480).
+    private static let chainOrder: [OpenAccessSource] = [.unpaywall, .landingPage, .pdf, .openAlex, .openAlexPDF]
+
+    /// Who named a tried PDF.
+    private static func namedBy(_ source: OpenAccessSource) -> String {
+        source == .openAlexPDF ? OpenAccessSource.openAlex.serviceName : OpenAccessSource.unpaywall.serviceName
+    }
+
+    private static let triedSourcesLead = "Failed to obtain a PDF from the following tried sources: "
+    private static let mayExistEnding =
+        "so a freely available copy may exist. Whether this document is open access was not established."
+    private static let answeredEnding = "so whether this document is open access was not established."
+    private static let triedUnaskedEnding =
+        "A freely available copy may exist. Whether this document is open access was not established."
+    private static let triedAnsweredEnding = "Whether this document is open access was not established."
+
+    /// What the reader is told (Python's `unestablished_access_clause`, word
+    /// for word): with a tried PDF, every source tried (#480); otherwise each
+    /// lookup grouped by its verb (#435). One lookup reads as it always has.
+    /// An unconfigured Unpaywall adds the one cause the reader can change.
     public var notice: String {
-        let name = Self.sentenceStart(source.serviceName)
-        let mayExist = """
-            could not be asked, so a freely available copy may exist. \
-            Whether this document is open access was not established.
-            """
-        switch reason {
-        case .failed(let failure):
-            let named = "\(name) (\(failure.describe()))"
-            if failure.isAnswer {
-                return "\(named) did not serve it, so whether this document is open access was not established."
+        withNudge(entries.contains { $0.address != nil } ? triedSourcesStatement : groupedStatement)
+    }
+
+    /// Python's `_unsettled`: each service once, by its first failure unless
+    /// a later one could not be asked; a skipped service is named only if it
+    /// never failed.
+    private static func unsettled(
+        _ lookups: [Entry]
+    ) -> (unasked: [(String, String)], answered: [(String, String)]) {
+        var unasked: [(String, String)] = []
+        var answered: [(String, String)] = []
+        for entry in lookups where entry.failure != nil {
+            let name = entry.source.serviceName
+            if unasked.contains(where: { $0.0 == name }) { continue }
+            if entry.couldNotBeAsked {
+                answered.removeAll { $0.0 == name }
+                unasked.append((name, entry.described))
+            } else if !answered.contains(where: { $0.0 == name }) {
+                answered.append((name, entry.described))
             }
-            return "\(named) \(mayExist)"
-        case .notConfigured:
-            return """
-                \(name) (\(Self.notConfiguredDescription)) \(mayExist) \
-                Configuring \(source.serviceName) would add an open-access route this search did not have.
-                """
         }
+        for entry in lookups where entry.failure == nil {
+            let name = entry.source.serviceName
+            if !answered.contains(where: { $0.0 == name }), !unasked.contains(where: { $0.0 == name }) {
+                unasked.append((name, entry.described))
+            }
+        }
+        return (unasked, answered)
+    }
+
+    /// Python's `_joined`: "A (x)", "A (x) and B (y)", "A (x), B (y) and C (z)".
+    private static func joined(_ named: [(String, String)]) -> String {
+        let clauses = named.map { "\($0.0) (\($0.1))" }
+        guard let last = clauses.last, clauses.count > 1 else { return clauses.first ?? "" }
+        return clauses.dropLast().joined(separator: ", ") + " and " + last
+    }
+
+    /// Lookups only: each grouped by the verb it earns.
+    private var groupedStatement: String {
+        let (unasked, answered) = Self.unsettled(entries)
+        var clauses: [String] = []
+        if !unasked.isEmpty { clauses.append("\(Self.joined(unasked)) could not be asked") }
+        if !answered.isEmpty { clauses.append("\(Self.joined(answered)) did not serve it") }
+        let ending = unasked.isEmpty ? Self.answeredEnding : Self.mayExistEnding
+        return Self.sentenceStart("\(clauses.joined(separator: ", and ")), \(ending)")
+    }
+
+    /// Python's `tried_sources_statement`.
+    private var triedSourcesStatement: String {
+        let lookups = entries.filter { $0.address == nil }
+        let (unasked, answered) = Self.unsettled(lookups)
+        let reasons = Dictionary(
+            (answered + unasked).map { ($0.0, $0.1) }, uniquingKeysWith: { _, last in last }
+        )
+        var services: [OpenAccessSource] = []
+        for entry in lookups.filter({ $0.failure != nil }) + lookups.filter({ $0.failure == nil })
+        where !services.contains(entry.source) {
+            services.append(entry.source)
+        }
+        var items: [(rank: Int, position: Int, text: String, unasked: Bool)] = []
+        for (position, service) in services.enumerated() {
+            let name = service.serviceName
+            items.append((
+                Self.chainOrder.firstIndex(of: service) ?? -1, position,
+                "\(name) (\(reasons[name] ?? ""))", unasked.contains { $0.0 == name }
+            ))
+        }
+        for (offset, entry) in entries.filter({ $0.address != nil }).enumerated() {
+            let host = Self.host(of: entry.address ?? "")
+            items.append((
+                Self.chainOrder.firstIndex(of: entry.source) ?? -1, services.count + offset,
+                "\(host), named by \(Self.namedBy(entry.source)) (\(entry.described))",
+                entry.couldNotBeAsked
+            ))
+        }
+        items.sort { ($0.rank, $0.position) < ($1.rank, $1.position) }
+        let ending = items.contains { $0.unasked } ? Self.triedUnaskedEnding : Self.triedAnsweredEnding
+        return Self.triedSourcesLead + items.map(\.text).joined(separator: "; ") + ". " + ending
+    }
+
+    /// Python's `configuration_nudge`: only Unpaywall is ever not configured.
+    private func withNudge(_ sentence: String) -> String {
+        guard entries.contains(where: { $0.reason == .notConfigured }) else { return sentence }
+        return "\(sentence) Configuring \(OpenAccessSource.unpaywall.serviceName) "
+            + "would add an open-access route this search did not have."
+    }
+
+    /// Python's `address_host`: the host, lower-cased and without a port;
+    /// else the address trimmed.
+    ///
+    /// - Parameter address: The PDF's address, as the source gave it.
+    /// - Returns: The name a tried PDF is told by.
+    public static func host(of address: String) -> String {
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let host = URLComponents(string: trimmed)?.host, !host.isEmpty {
+            return host.lowercased()
+        }
+        return trimmed
+    }
+
+    /// Python's `not_saved_note` (#480): a PDF served and not saved is ours to
+    /// fix, so it is a note of its own, never in the tried-sources list.
+    ///
+    /// - Parameters:
+    ///   - address: The PDF's address.
+    ///   - linkKept: Whether the PDF's link is what the reader is given.
+    /// - Returns: The sentence and its advice.
+    public static func notSavedNote(address: String, linkKept: Bool) -> String {
+        let outcome = linkKept ? "only its link is kept" : "it could not be read"
+        return "A PDF of this article was found at \(host(of: address)) but could not be saved on this device, "
+            + "so \(outcome). Check the free storage space and try again."
     }
 
     /// Capitalise a leading "the", as Python's `_sentence_start` does; a name
@@ -189,21 +351,24 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
 
     /// The value a document stores for this shortfall.
     ///
-    /// `{"failure":{"kind":…,"status_code":…},"schema_version":1,"source":…}`,
-    /// the failure in the shape a search shortfall stores it; for a lookup that
-    /// was not configured, `{"schema_version":1,"skipped":"not_configured","source":"unpaywall"}`.
+    /// One lookup without an address keeps schema 1:
+    /// `{"failure":{"kind":…,"status_code":…},"schema_version":1,"source":…}`
+    /// (for a lookup not made, `"skipped":"not_configured"` in its place).
+    /// Anything else is schema 2: `{"entries":[…],"schema_version":2}`, each
+    /// entry in the same shape plus the PDF's `address`.
     ///
     /// - Returns: JSON text.
     public func persisted() -> String {
-        var object: [String: Any] = [
-            Self.keySchemaVersion: Self.schemaVersion,
-            Self.keySource: source.rawValue,
-        ]
-        switch reason {
-        case .failed(let failure):
-            object[Self.keyFailure] = SearchFailureReporting.failureObject(failure)
-        case .notConfigured:
-            object[Self.keySkipped] = Self.skippedNotConfigured
+        let object: [String: Any]
+        if entries.count == 1, entries[0].address == nil {
+            var single = Self.storedEntry(entries[0])
+            single[Self.keySchemaVersion] = Self.schemaVersion
+            object = single
+        } else {
+            object = [
+                Self.keySchemaVersion: Self.schemaVersionList,
+                Self.keyEntries: entries.map(Self.storedEntry),
+            ]
         }
         guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
               let text = String(data: data, encoding: .utf8) else {
@@ -218,32 +383,62 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         return text
     }
 
+    /// One entry as stored: its source, address if any, and why.
+    private static func storedEntry(_ entry: Entry) -> [String: Any] {
+        var object: [String: Any] = [keySource: entry.source.rawValue]
+        if let address = entry.address { object[keyAddress] = address }
+        switch entry.reason {
+        case .failed(let failure): object[keyFailure] = SearchFailureReporting.failureObject(failure)
+        case .notConfigured: object[keySkipped] = skippedNotConfigured
+        }
+        return object
+    }
+
     /// Read back what a document stored, degrading rather than refusing.
     ///
     /// The field is written only when something went unsettled, so every stored
     /// value is some shortfall and none reads as "nothing to say". What cannot
-    /// be interpreted, a schema this build does not know included, reads as a
-    /// failed request to Unpaywall, the tier every open-access lookup belongs
-    /// to. An unknown source reads as Unpaywall too; the failure degrades as a
-    /// search shortfall's does (`search_failure_reporting.md`, "Persisted form").
-    /// A stored skip is Unpaywall's, whatever source it names: only Unpaywall is
+    /// be interpreted, a schema this build does not know and an `entries` that
+    /// is not a non-empty list included, reads as a failed request to
+    /// Unpaywall, the tier every open-access lookup belongs to. An unknown
+    /// source reads as Unpaywall too; the failure degrades as a search
+    /// shortfall's does (`search_failure_reporting.md`, "Persisted form"). A
+    /// stored skip is Unpaywall's, whatever source it names: only Unpaywall is
     /// skipped.
     ///
     /// - Parameter stored: The stored value, untrusted.
     /// - Returns: The shortfall, as specific as the stored value allows.
     public static func restored(fromPersisted stored: String) -> OpenAccessShortfall {
         let uninterpretable = OpenAccessShortfall(source: .unpaywall, failure: .requestFailed)
-        guard let fields = SearchFailureReporting.decodedJSON(stored) as? [String: Any],
-              SearchFailureReporting.wholeNumber(fields[keySchemaVersion]) == schemaVersion else {
+        guard let fields = SearchFailureReporting.decodedJSON(stored) as? [String: Any] else {
             return uninterpretable
         }
+        switch SearchFailureReporting.wholeNumber(fields[keySchemaVersion]) {
+        case schemaVersion:
+            return OpenAccessShortfall(entries: [restoredEntry(fields)])
+        case schemaVersionList:
+            guard let stored = fields[keyEntries] as? [Any], !stored.isEmpty else { return uninterpretable }
+            return OpenAccessShortfall(entries: stored.map { element in
+                guard let object = element as? [String: Any] else {
+                    return Entry(source: .unpaywall, failure: .requestFailed)
+                }
+                return restoredEntry(object)
+            })
+        default:
+            return uninterpretable
+        }
+    }
+
+    /// One stored entry, as specific as it allows.
+    private static func restoredEntry(_ fields: [String: Any]) -> Entry {
         if fields[keySkipped] as? String == skippedNotConfigured {
-            return unpaywallNotConfigured
+            return Entry(source: .unpaywall, reason: .notConfigured, address: nil)
         }
         let source = (fields[keySource] as? String).flatMap(OpenAccessSource.init(rawValue:)) ?? .unpaywall
-        return OpenAccessShortfall(
+        return Entry(
             source: source,
-            failure: SearchFailureReporting.restoredFailure(fields[keyFailure])
+            failure: SearchFailureReporting.restoredFailure(fields[keyFailure]),
+            address: fields[keyAddress] as? String
         )
     }
 }
