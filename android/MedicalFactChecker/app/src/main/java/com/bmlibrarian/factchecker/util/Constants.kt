@@ -122,8 +122,23 @@ object Constants {
     /** Five requests per second, Python's POLITE_RATE_CEILINGS entry. */
     const val PMC_OPEN_DATA_MIN_INTERVAL_MS = 200L
 
-    /** Retries for a 429 or 5xx from the bucket (four attempts), as Python and Swift do. */
+    /**
+     * Further attempts after the first for the bucket (four in all, Python's
+     * attempt count), for a transport failure or a [PMC_OPEN_DATA_RETRYABLE_STATUSES]
+     * status. Only the count is Python's: Python retries a status through its
+     * per-host pacer, and Swift's RetryHelper waits 1, 2 and 4 seconds, as
+     * [PMC_OPEN_DATA_INITIAL_BACKOFF_MS] does here.
+     */
     const val PMC_OPEN_DATA_MAX_RETRIES = 3
+
+    /** The bucket's wait before its first retry, doubling after (1, 2, 4 s: Swift's RetryHelper). */
+    const val PMC_OPEN_DATA_INITIAL_BACKOFF_MS = 1000L
+
+    /**
+     * Connect and read timeout for one bucket request, in seconds: Python's 45 s
+     * per-request timeout, rather than the shared client's LLM read timeout.
+     */
+    const val PMC_OPEN_DATA_REQUEST_TIMEOUT_SECONDS = 45L
 
     /** Statuses retried for the bucket: Python's RETRYABLE_HTTP_STATUSES (no 408). */
     val PMC_OPEN_DATA_RETRYABLE_STATUSES = setOf(429, 500, 502, 503, 504)

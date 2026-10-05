@@ -221,7 +221,12 @@ class FullTextServicePmcOpenDataTest {
 
         val result = service().fetchFullText(pmcId = "PMC1", doi = null, pmid = null).getOrThrow()
 
-        assertEquals(FullTextResult.NotEstablished(RequestFailure.forHttpStatus(Constants.HTTP_NOT_FOUND)), result)
+        assertEquals(
+            FullTextResult.NotEstablished(
+                RequestFailure.forHttpStatus(Constants.HTTP_NOT_FOUND), NotEstablishedSource.EUROPE_PMC
+            ),
+            result
+        )
     }
 
     @Test
@@ -233,7 +238,7 @@ class FullTextServicePmcOpenDataTest {
         val result = service().fetchFullText(pmcId = "PMC1", doi = null, pmid = null).getOrThrow()
 
         val expected = FullTextResult.NotEstablished(
-            RequestFailure.forHttpStatus(503), Constants.PMC_OPEN_DATA_SERVICE_NAME
+            RequestFailure.forHttpStatus(503), NotEstablishedSource.PMC_OPEN_DATA
         )
         assertEquals(expected, result)
         assertEquals(notEstablishedMessage(Constants.PMC_OPEN_DATA_SERVICE_NAME, expected.failure), expected.reason)
@@ -249,7 +254,7 @@ class FullTextServicePmcOpenDataTest {
 
         assertEquals(
             FullTextResult.NotEstablished(
-                RequestFailure(RequestFailureKind.MALFORMED_RESPONSE), Constants.PMC_OPEN_DATA_SERVICE_NAME
+                RequestFailure(RequestFailureKind.MALFORMED_RESPONSE), NotEstablishedSource.PMC_OPEN_DATA
             ),
             result
         )
@@ -288,11 +293,19 @@ class FullTextServicePmcOpenDataTest {
     }
 
     @Test
-    fun `Europe PMC is the default not-established service`() {
+    fun `each not-established source names itself in the reader's sentence`() {
         val failure = RequestFailure(RequestFailureKind.TIMEOUT)
 
-        assertEquals(Constants.EUROPE_PMC_SERVICE_NAME, FullTextResult.NotEstablished(failure).service)
-        assertEquals(absenceNotEstablishedMessage(failure), FullTextResult.NotEstablished(failure).reason)
+        assertEquals(Constants.EUROPE_PMC_SERVICE_NAME, NotEstablishedSource.EUROPE_PMC.serviceName)
+        assertEquals(Constants.PMC_OPEN_DATA_SERVICE_NAME, NotEstablishedSource.PMC_OPEN_DATA.serviceName)
+        assertEquals(
+            absenceNotEstablishedMessage(failure),
+            FullTextResult.NotEstablished(failure, NotEstablishedSource.EUROPE_PMC).reason
+        )
+        assertEquals(
+            notEstablishedMessage(Constants.PMC_OPEN_DATA_SERVICE_NAME, failure),
+            FullTextResult.NotEstablished(failure, NotEstablishedSource.PMC_OPEN_DATA).reason
+        )
         assertEquals(notEstablishedMessage("Europe PMC", failure), absenceNotEstablishedMessage(failure))
     }
 }

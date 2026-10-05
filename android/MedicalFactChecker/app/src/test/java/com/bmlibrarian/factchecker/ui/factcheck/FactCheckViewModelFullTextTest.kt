@@ -20,6 +20,7 @@ package com.bmlibrarian.factchecker.ui.factcheck
 
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
+import com.bmlibrarian.factchecker.data.remote.fulltext.NotEstablishedSource
 import com.bmlibrarian.factchecker.data.repository.DocumentRepository
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.domain.model.AppSettings
@@ -118,7 +119,9 @@ class FactCheckViewModelFullTextTest {
     @Test
     fun `a chain that did not establish the absence records nothing`() {
         val (stored, reported) = fetch(
-            FullTextService.FullTextResult.NotEstablished(RequestFailure(RequestFailureKind.HTTP_STATUS, 429))
+            FullTextService.FullTextResult.NotEstablished(
+                RequestFailure(RequestFailureKind.HTTP_STATUS, 429), NotEstablishedSource.EUROPE_PMC
+            )
         )
 
         assertFalse("the fetch must stay on offer", stored.fullTextUnavailable)

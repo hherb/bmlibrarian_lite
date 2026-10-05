@@ -824,7 +824,8 @@ class DocumentInterrogationTab(QWidget):
         logger.info(f"load_from_citation: doc_id={citation.document.id}, pmid={citation.document.pmid}, doi={citation.document.doi}, pmc_id={citation.document.pmc_id}")
         logger.info(f"load_from_citation: metadata={self._current_doc_metadata}")
 
-        # Check for cached full-text markdown first (from Europe PMC XML)
+        # Check for cached full-text markdown first (converted JATS, from
+        # Europe PMC or PMC's open-data bucket)
         cached_fulltext = find_existing_fulltext(self._current_doc_metadata)
         stale_fulltext: str | None = None
         if cached_fulltext:

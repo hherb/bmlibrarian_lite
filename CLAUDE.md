@@ -50,7 +50,8 @@ analysis_failures.py  # AnalysisShortfall → notice, advice (the stages after t
 audit_records.py      # What became of each document: accepted/rejected/failed/not scored
 search_merger.py      # Deduplication (PMID/DOI/PMC/title)
 query_translator.py   # Natural language → structured query
-fulltext_discovery.py # Europe PMC XML → Unpaywall PDF → DOI fallback
+fulltext_discovery.py # Europe PMC XML → PMC open-data bucket → Europe PMC PDF → Unpaywall PDF → DOI fallback
+pmc_open_data.py      # PmcOpenDataClient: PMC's open-data S3 bucket (JATS by PMC ID)
 pdf_discovery.py      # PDF source discovery
 rate_limit.py         # Host-keyed, thread-safe pacing for outbound requests
 polite_session.py     # PoliteAdapter + mount_politely for requests.Session
@@ -71,7 +72,7 @@ exceptions.py         # Custom exception hierarchy
 
 **Android** (`android/MedicalFactChecker/`):
 - data/local: Room DB + DAOs
-- data/remote: PubMed, Europe PMC, LLM, Unpaywall, FullText APIs
+- data/remote: PubMed, Europe PMC, LLM, Unpaywall, FullText APIs (incl. PmcOpenData, PMC's open-data bucket)
 - domain: Models, WorkflowState, workflow/ (scoring, searching, reporting)
 - ui: Compose screens + ViewModels (factcheck, report, history, settings, fulltext, onboarding)
 - ui/components: DocumentCard (with transparency), FullTextSourceBadge, SortingControls
@@ -82,7 +83,7 @@ exceptions.py         # Custom exception hierarchy
 
 Shared iOS/macOS components:
 - `JATS/`: XML parsing → HTML/Markdown (JATSXMLParser, JATSModels)
-- `Services/`: EuropePMCService, PubMedService, FullTextService
+- `Services/`: EuropePMCService, PubMedService, FullTextService, PMCOpenData (PMC's open-data bucket)
 - `Transparency/`: Study transparency analysis
   - `Analysis/`: TransparencyScorer, FundingAnalyzer, COIAnalyzer, DataAvailabilityAnalyzer, TrialComplianceAnalyzer
   - `Models/`: TransparencyModels, TransparencyConstants

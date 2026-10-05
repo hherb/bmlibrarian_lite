@@ -1065,7 +1065,6 @@ SERVICE_EUROPE_PMC = "Europe PMC"
 # fullTextXML: it holds the author manuscripts Europe PMC answers 500 for
 # (#432, #480). Named as the reader knows it.
 SERVICE_PMC_OPEN_DATA = "PMC's open-access collection"
-FULLTEXT_SOURCE_PMC_OPEN_DATA = "pmc_open_data"
 PMC_OPEN_DATA_HOST = "pmc-oa-opendata.s3.amazonaws.com"
 PMC_OPEN_DATA_BASE_URL = f"https://{PMC_OPEN_DATA_HOST}"
 PMC_OPEN_DATA_BUCKET = "pmc-oa-opendata"

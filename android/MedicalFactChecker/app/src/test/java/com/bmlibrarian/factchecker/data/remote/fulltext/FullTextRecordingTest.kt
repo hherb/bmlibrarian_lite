@@ -165,7 +165,9 @@ class FullTextRecordingTest {
     /** A chain that settled nothing records nothing, the shortfall included (#434). */
     @Test
     fun `a chain that did not establish the absence leaves the document as it was`() = runTest {
-        val recorded = record(FullTextResult.NotEstablished(RequestFailure(RequestFailureKind.CONNECTION)))
+        val recorded = record(FullTextResult.NotEstablished(
+            RequestFailure(RequestFailureKind.CONNECTION), NotEstablishedSource.EUROPE_PMC
+        ))
 
         assertSame(document, recorded)
     }

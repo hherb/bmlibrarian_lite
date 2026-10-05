@@ -7,14 +7,17 @@ This document describes the cross-platform algorithm for retrieving full-text ar
 Not all biomedical articles have freely available full text. We implement a fallback chain to maximize availability:
 
 1. **Europe PMC XML** - Best quality, machine-readable JATS format
-2. **Unpaywall PDF** - Open access PDFs via API
-3. **DOI Resolution** - Fall back to publisher website
+2. **PMC's open-data bucket** - The same JATS by PMC ID, including the author
+   manuscripts Europe PMC does not serve (#480)
+3. **Europe PMC's PDF render, then Unpaywall PDF** - Open access PDFs
+4. **DOI Resolution** - Fall back to publisher website
 
 ## Retrieval Priority
 
 | Source | Format | Quality | Coverage |
 |--------|--------|---------|----------|
 | Europe PMC XML | JATS XML | Excellent (structured) | ~5M articles with full XML |
+| PMC open-data bucket | JATS XML | Excellent (structured) | PMC's open-access and author-manuscript collections, by PMC ID |
 | Unpaywall | PDF URL | Good (requires parsing) | ~30M open access articles |
 | DOI Resolution | Web URL | Variable | Nearly all articles with DOI |
 
@@ -241,22 +244,30 @@ text (a body-less deposit Europe PMC served counts as text on every platform:
 Swift holds it back but does not ask the bucket, for parity with Python and
 Kotlin, which have no content kind), by PMC ID only** (a preprint has none), and before Europe PMC's
 PDF render. Service name: **"PMC's open-access collection"**; source
-`pmc_open_data`. Pinned by `fulltext_parity/pmc_open_data.json`.
+`pmc_open_data` in the apps (the desktop's `FulltextSourceType` spells it
+`pmc_open_data_xml`, as it spells Europe PMC's `europepmc_xml`). Pinned by
+`fulltext_parity/pmc_open_data.json`.
 
 ```pseudocode
 # SERVED(xml) | ABSENT | UNREACHABLE(failure of its real kind)
 function fetch_pmc_open_data(pmcid) -> PmcOpenDataFetch:
     listing = GET {base}/?list-type=2&prefix=metadata/{pmcid}.
-    if listing.status == 404: return ABSENT            # an answer
     if listing.status != 200: return UNREACHABLE(http_status)
-    key = latest_metadata_key(listing.body, pmcid)     # numeric max of .{N}.json
+                                                       # a 404 included: S3 answers a prefix naming
+                                                       # nothing with a 200; a 404 is NoSuchBucket
+    key = latest_metadata_key(listing.body, pmcid)     # numeric max of .{N}.json, N ASCII digits
                                                        # raises on a body that is not an S3 listing
-                                                       # (or not UTF-8): UNREACHABLE(malformed_response)
-    if key == null: return ABSENT                      # KeyCount 0
+                                                       # (or not UTF-8), or that names this article
+                                                       # only under versions it cannot read:
+                                                       # UNREACHABLE(malformed_response)
+    if key == null: return ABSENT                      # no version of this article listed
     record = GET {base}/{key}                          # 404 here: UNREACHABLE(404)
-                                                       # unparseable JSON or not an object: UNREACHABLE(malformed_response)
+                                                       # not UTF-8, unparseable JSON or not an object:
+                                                       # UNREACHABLE(malformed_response)
+    if record.xml_url is missing or null: return ABSENT  # no XML named
     xml_url = https_url(record.xml_url)                # s3://pmc-oa-opendata/k?md5= -> https://…/k
-    if xml_url == null: return ABSENT                  # no XML named
+    if xml_url == null: return UNREACHABLE(malformed_response)
+                                                       # XML named where we cannot read (#486)
     xml = GET xml_url                                  # 404: UNREACHABLE(404); blank: incomplete_response
     return SERVED(xml)
 ```
@@ -265,17 +276,25 @@ The bucket serves its objects as `binary/octet-stream` with no charset, so
 every body is decoded as UTF-8; a body that is not valid UTF-8 is
 `malformed_response`. The served XML goes through the platform's JATS
 converter, under the same rules as Europe PMC's (Swift's abstract holdback
-included); XML whose conversion yields no text is recorded as
-`malformed_response`, not an absence. An unreachable bucket is recorded under
+included); XML whose conversion yields no text, or that the converter fails
+on, is recorded as `malformed_response`, not an absence. Unlike Europe PMC's
+own parse failure, which does not yet count (#436), the bucket's counts
+towards "not established" on every platform. An unreachable bucket is recorded under
 its service name, so a chain that then finds nothing has **not established**
 an absence; in the apps the sentence names the bucket
 (`not_established_sentence` rows). Paced at 5 requests per second. Only XML
 is read: a record without `xml_url` is an answer, and the chain goes on to
 the PDF tiers.
 
-Only a listing 404 or `KeyCount` 0 is an absence. A 404 on the metadata record
-or on the XML *after the listing named it* is **unreachable**, not an absence:
-the bucket is disagreeing with itself, and that is a lookup that failed.
+Only two answers are an absence: a listing that names no version of this PMC
+ID, and a record whose `xml_url` is missing or null. A listing 404 is not one
+of them: S3 answers a prefix that matches nothing with a 200 and `KeyCount` 0,
+so a 404 is `NoSuchBucket` (or something in between), which says nothing about
+the article. A 404 on the metadata record or on the XML *after the listing
+named it* is **unreachable** too: the bucket is disagreeing with itself, and
+that is a lookup that failed. An answer we cannot read (a version that is not
+ASCII digits, an `xml_url` that is not this bucket's `s3://` URL) is
+`malformed_response`, never an absence.
 
 ## Unpaywall PDF
 
@@ -798,10 +817,14 @@ async function fetch_fulltext(
     #     matches them.
     if pmc_id and held_abstract == null:
         bucket = await fetch_pmc_open_data(pmc_id)
-        if bucket is SERVED: (same parse and holdback as step 2, source pmc_open_data)
-        if bucket is UNREACHABLE and europe_pmc_shortfall == null:
+        if bucket is SERVED: (same parse and holdback as step 2, source pmc_open_data;
+                              a parse failure sets failure = malformed_response)
+        if bucket failed (UNREACHABLE, or its XML did not parse)
+                and europe_pmc_shortfall == null:
             # The apps keep one not-established sentence, so Europe PMC's shortfall
             # takes precedence; Python records both in its lookup record.
+            # Read only at 6b: the PDF and link exits below do not carry it
+            # yet in the apps (#488); Python carries it on every result.
             pmc_open_data_shortfall = bucket.failure   # blocks "no full text"
 
     # 3. Try a free PDF tier (Europe PMC's own render, then Unpaywall).
@@ -865,9 +888,9 @@ async function fetch_fulltext(
 
     # 6b. (apps) Europe PMC or the bucket recorded a lost search, a failed fetch
     #     or a 404, and no later fetch was served: the absence is not established,
-    #     and callers persist Unavailable (#434). A JATS parse failure does not
-    #     yet count here (#436). Europe PMC's shortfall takes precedence in the
-    #     sentence shown.
+    #     and callers persist Unavailable (#434). Europe PMC's JATS parse
+    #     failure does not yet count here (#436); the bucket's does. Europe PMC's
+    #     shortfall takes precedence in the sentence shown.
     if europe_pmc_shortfall != null:
         return FullTextResult.NotEstablished(europe_pmc_shortfall)
     if pmc_open_data_shortfall != null:
@@ -1211,8 +1234,8 @@ which is why fixing the cache key alone does not fix it.
 
 ### Abstract Holdback
 
-An abstract-only Europe PMC rendering (`content_kind == ABSTRACT`) must not
-be returned as soon as it is found. Returning it immediately makes it beat
+An abstract-only JATS rendering (`content_kind == ABSTRACT`), Europe PMC's or
+PMC's open-data bucket's, must not be returned as soon as it is found. Returning it immediately makes it beat
 every remaining tier, so an open-access PDF of the same paper becomes
 unreachable and the abstract is cached and analysed as though it were the
 article. Instead, hold it in a local and let the PDF tiers run; only return

@@ -38,13 +38,17 @@ final class PMCOpenDataContractTests: XCTestCase {
     }
 
     func testLatestMetadataKey() throws {
-        for row in try XCTUnwrap(contract()["latest_metadata_key"] as? [[String: Any]]) {
+        let rows = try XCTUnwrap(contract()["latest_metadata_key"] as? [[String: Any]])
+        XCTAssertTrue(rows.contains { $0["error"] != nil }, "control: the error form is run")
+        for row in rows {
             let name = row["name"] as? String ?? "?"
             let listing = Data((row["listing"] as? String ?? "").utf8)
             let pmcid = row["pmcid"] as? String ?? ""
-            if row["error"] != nil {
+            if let error = row["error"] {
+                XCTAssertEqual(error as? String, Self.malformed, name)
                 XCTAssertThrowsError(
-                    try PMCOpenData.latestMetadataKey(listing: listing, pmcid: pmcid), name)
+                    try PMCOpenData.latestMetadataKey(listing: listing, pmcid: pmcid), name
+                ) { XCTAssertTrue($0 is PMCOpenData.UnreadableAnswer, "\(name): \($0)") }
             } else {
                 XCTAssertEqual(
                     try PMCOpenData.latestMetadataKey(listing: listing, pmcid: pmcid),
@@ -62,9 +66,18 @@ final class PMCOpenDataContractTests: XCTestCase {
     }
 
     func testRecord() throws {
-        for row in try XCTUnwrap(contract()["record"] as? [[String: Any]]) {
+        let rows = try XCTUnwrap(contract()["record"] as? [[String: Any]])
+        XCTAssertTrue(rows.contains { $0["error"] != nil }, "control: the error form is run")
+        for row in rows {
             let name = row["name"] as? String ?? "?"
             let metadata = try JSONSerialization.data(withJSONObject: row["metadata"] as Any)
+            if let error = row["error"] {
+                XCTAssertEqual(error as? String, Self.malformed, name)
+                XCTAssertThrowsError(try PMCOpenDataRecord(metadata: metadata), name) {
+                    XCTAssertEqual($0 as? PMCOpenData.UnreadableAnswer, .unreadableXMLURL, name)
+                }
+                continue
+            }
             let record = try PMCOpenDataRecord(metadata: metadata)
             XCTAssertEqual(record.xmlURL?.absoluteString, row["xml_url"] as? String, name)
             XCTAssertEqual(record.isOpenAccess, row["is_open_access"] as? Bool, name)
@@ -74,8 +87,91 @@ final class PMCOpenDataContractTests: XCTestCase {
     }
 
     func testARecordThatIsNotAnObjectIsRefused() {
-        XCTAssertThrowsError(try PMCOpenDataRecord(metadata: Data("[]".utf8)))
-        XCTAssertThrowsError(try PMCOpenDataRecord(metadata: Data("not json".utf8)))
+        for body in ["[]", "not json"] {
+            XCTAssertThrowsError(try PMCOpenDataRecord(metadata: Data(body.utf8)), body) {
+                XCTAssertEqual($0 as? PMCOpenData.UnreadableAnswer, .notARecord, body)
+            }
+        }
+    }
+
+    /// A missing `xml_url` and a JSON `null` both name no XML; the record is
+    /// read, not refused. The control for the contract's malformed rows.
+    func testAMissingOrNullXMLURLNamesNoXML() throws {
+        for body in [#"{"pmcid": "PMC7"}"#, #"{"pmcid": "PMC7", "xml_url": null}"#] {
+            XCTAssertNil(try PMCOpenDataRecord(metadata: Data(body.utf8)).xmlURL, body)
+        }
+    }
+
+    /// Bytes that are not UTF-8, in a body that is otherwise readable.
+    private static let latin1Byte: UInt8 = 0xE9
+
+    func testStrictUTF8() {
+        XCTAssertEqual(PMCOpenData.strictUTF8(Data("Müller – β".utf8)), "Müller – β")
+        XCTAssertEqual(PMCOpenData.strictUTF8(Data()), "")
+        XCTAssertNil(PMCOpenData.strictUTF8(Data([0x61, Self.latin1Byte, 0x62])))
+        // A truncated multi-byte sequence.
+        XCTAssertNil(PMCOpenData.strictUTF8(Data("β".utf8).prefix(1)))
+    }
+
+    /// A listing that declares Latin-1 is still read as UTF-8: the bytes are
+    /// not UTF-8, so it is unreadable, whatever the declaration says.
+    func testAListingThatIsNotUTF8IsUnreadable() {
+        var listing = Data("""
+            <?xml version="1.0" encoding="ISO-8859-1"?>\
+            <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">\
+            <Contents><Key>metadata/PMC1.1.json</Key></Contents><Name>
+            """.utf8)
+        listing.append(Self.latin1Byte)
+        listing.append(Data("</Name></ListBucketResult>".utf8))
+        XCTAssertThrowsError(try PMCOpenData.latestMetadataKey(listing: listing, pmcid: "PMC1")) {
+            XCTAssertEqual($0 as? PMCOpenData.UnreadableAnswer, .notUTF8)
+        }
+    }
+
+    func testARecordThatIsNotUTF8IsUnreadable() {
+        var record = Data(#"{"license_code": ""#.utf8)
+        record.append(Self.latin1Byte)
+        record.append(Data(#"", "xml_url": "s3://pmc-oa-opendata/PMC1.1/PMC1.1.xml"}"#.utf8))
+        XCTAssertThrowsError(try PMCOpenDataRecord(metadata: record)) {
+            XCTAssertEqual($0 as? PMCOpenData.UnreadableAnswer, .notUTF8)
+        }
+    }
+
+    /// A key under the prefix that does not end in `.json` is unreadable,
+    /// and refuses the listing when nothing else is readable.
+    func testAKeyUnderThePrefixWithAnotherSuffixIsUnreadable() throws {
+        let listing = Data("""
+            <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">\
+            <Contents><Key>metadata/PMC1.1.xml</Key></Contents></ListBucketResult>
+            """.utf8)
+        XCTAssertThrowsError(try PMCOpenData.latestMetadataKey(listing: listing, pmcid: "PMC1")) {
+            XCTAssertEqual($0 as? PMCOpenData.UnreadableAnswer, .noReadableVersion)
+        }
+    }
+
+    /// A combining mark after the prefix's `.` joins it in one `Character`;
+    /// the key is still under the prefix, byte for byte, and unreadable.
+    func testACombiningMarkAfterThePrefixIsUnreadableNotIgnored() throws {
+        let listing = Data("""
+            <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">\
+            <Contents><Key>metadata/PMC1.\u{0301}1.json</Key></Contents></ListBucketResult>
+            """.utf8)
+        XCTAssertThrowsError(try PMCOpenData.latestMetadataKey(listing: listing, pmcid: "PMC1")) {
+            XCTAssertEqual($0 as? PMCOpenData.UnreadableAnswer, .noReadableVersion)
+        }
+    }
+
+    /// Equal versions: the key that sorts last, as Python's `max` over
+    /// `(version, key)` picks it.
+    func testEqualVersionsGoToTheKeyThatSortsLast() throws {
+        let listing = Data("""
+            <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">\
+            <Contents><Key>metadata/PMC1.2.json</Key></Contents>\
+            <Contents><Key>metadata/PMC1.0002.json</Key></Contents>\
+            <Contents><Key>metadata/PMC1.0.json</Key></Contents></ListBucketResult>
+            """.utf8)
+        XCTAssertEqual(try PMCOpenData.latestMetadataKey(listing: listing, pmcid: "PMC1"),
+                       "metadata/PMC1.2.json")
     }
 
     /// A prefixed root in the S3 namespace is the same element, as Python's
@@ -125,6 +221,9 @@ final class PMCOpenDataContractTests: XCTestCase {
             FullTextError.absenceNotEstablished(.httpStatus(404)).errorDescription,
             FullTextError.notEstablishedSentence(service: "Europe PMC", failure: .httpStatus(404)))
     }
+
+    /// The contract's spelling of an answer we cannot read.
+    private static let malformed = "malformed"
 
     private static func failure(kind: RequestFailureKind, statusCode: Int?) throws -> RequestFailure {
         switch kind {

@@ -451,12 +451,15 @@ final class FullTextAutoFetchTests: XCTestCase {
 
     /// The chain's answers that were not established are not absences, though
     /// none of them is retryable either: each is reported and leaves the
-    /// document for the next run (#434, #475). The rule must stay keyed on
-    /// `noFullTextAvailable` itself: `isRetryable` is false for all three, as
-    /// it is for an absence, so it cannot tell them apart.
+    /// document for the next run (#434, #475, #480). The rule must stay keyed
+    /// on `noFullTextAvailable` itself: `isRetryable` is false for all of
+    /// them, as it is for an absence, so it cannot tell them apart. The
+    /// control is ``testNoFullTextIsRecordedAndIsNotAFailure``.
     func testAnAnswerThatWasNotEstablishedLeavesTheDocumentForARetry() async throws {
         let notEstablished: [FullTextError] = [
             .absenceNotEstablished(.timeout),
+            .pmcOpenDataNotEstablished(.httpStatus(503)),
+            .pmcOpenDataNotEstablished(.malformedResponse),
             .openAccessNotEstablished(.unpaywallNotConfigured),
             .identifierKindUnresolved("1287966"),
         ]

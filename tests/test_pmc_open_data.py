@@ -17,13 +17,13 @@ from typing import Any
 import pytest
 
 from bmlibrarian_lite.constants import (
-    FULLTEXT_SOURCE_PMC_OPEN_DATA,
     PMC_OPEN_DATA_BASE_URL,
     PMC_OPEN_DATA_HOST,
     POLITE_RATE_CEILINGS,
     SERVICE_PMC_OPEN_DATA,
 )
 from bmlibrarian_lite.data_models import RequestFailure, RequestFailureKind
+from bmlibrarian_lite.fulltext_discovery import FulltextSourceType
 from bmlibrarian_lite.pmc_open_data import (
     PmcOpenDataClient,
     PmcOpenDataFetch,
@@ -51,9 +51,9 @@ CONTRACT: dict[str, Any] = json.loads(
 
 
 def test_the_names_are_the_contracts() -> None:
-    """Service name, source value and base URL, verbatim."""
+    """Service name, the source value the desktop emits, and base URL, verbatim."""
     assert SERVICE_PMC_OPEN_DATA == CONTRACT["service_name"]
-    assert FULLTEXT_SOURCE_PMC_OPEN_DATA == CONTRACT["source"]
+    assert FulltextSourceType.PMC_OPEN_DATA_XML.value == CONTRACT["desktop_source_type"]
     assert PMC_OPEN_DATA_BASE_URL == CONTRACT["base_url"]
 
 
@@ -77,7 +77,11 @@ def test_https_url(row: dict[str, Any]) -> None:
 
 @pytest.mark.parametrize("row", CONTRACT["record"], ids=lambda row: row["name"])
 def test_record(row: dict[str, Any]) -> None:
-    """What a metadata record says; a field of the wrong type says nothing."""
+    """What a metadata record says; an unreadable xml_url is not "no XML"."""
+    if "error" in row:
+        with pytest.raises(ValueError):
+            PmcOpenDataRecord.from_metadata(row["metadata"])
+        return
     record = PmcOpenDataRecord.from_metadata(row["metadata"])
 
     assert record.xml_url == row["xml_url"]
@@ -152,7 +156,11 @@ class TestFetchXml:
     def test_each_status_settles_what_the_contract_says(
         self, row: dict[str, Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A listing 404 is absent; every other non-200 is unreachable with its status."""
+        """Every non-200 is unreachable with its status, a listing 404 included.
+
+        S3 answers a prefix naming nothing with a 200 and no keys; a listing
+        404 is ``NoSuchBucket``, which says nothing about the article.
+        """
         script: dict[str, list[ScriptedAnswer]] = {
             "/": [xml_answer(_LISTING)],
             _KEY_PATH: [_metadata()],
@@ -173,6 +181,29 @@ class TestFetchXml:
                 RequestFailure(RequestFailureKind.HTTP_STATUS, row["status"])
             )
 
+    def test_a_throttle_is_asked_again(self) -> None:
+        """The client's own policy: a 503 is retried, and the answer read."""
+        empty = CONTRACT["latest_metadata_key"][2]["listing"]
+        with running(
+            {"/": [status_answer(HTTPStatus.SERVICE_UNAVAILABLE), xml_answer(empty)]}
+        ) as server:
+            fetch = PmcOpenDataClient(base_url=server.url, max_retries=1).fetch_xml(_PMCID)
+            asked = len(server.requests_to("/"))
+
+        assert fetch == PmcOpenDataFetch.absent()
+        assert asked == 2
+
+    def test_control_a_404_is_an_answer_and_not_asked_again(self) -> None:
+        """The same client: a listing 404 is not retried, and stays unreachable."""
+        with running({"/": [status_answer(HTTPStatus.NOT_FOUND)]}) as server:
+            fetch = PmcOpenDataClient(base_url=server.url, max_retries=1).fetch_xml(_PMCID)
+            asked = len(server.requests_to("/"))
+
+        assert fetch == PmcOpenDataFetch.unreachable(
+            RequestFailure(RequestFailureKind.HTTP_STATUS, HTTPStatus.NOT_FOUND)
+        )
+        assert asked == 1
+
     def test_a_jats_body_where_a_listing_should_be_is_malformed(self) -> None:
         """A catch-all stub's article reads as an unreadable answer, not a crash."""
         with running({"/": [xml_answer(_ARTICLE)]}) as server:
@@ -190,6 +221,52 @@ class TestFetchXml:
             fetch = _client(server.url).fetch_xml(_PMCID)
 
         assert fetch == PmcOpenDataFetch.absent()
+
+    def test_a_record_naming_xml_elsewhere_is_malformed(self) -> None:
+        """It named XML and we cannot read where: unreadable, not absent (#486)."""
+        record = json_answer({"xml_url": "s3://some-other-bucket/PMC1.1/PMC1.1.xml"})
+        with running({"/": [xml_answer(_LISTING)], _KEY_PATH: [record]}) as server:
+            fetch = _client(server.url).fetch_xml(_PMCID)
+
+        assert fetch == PmcOpenDataFetch.unreachable(
+            RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+        )
+
+    def test_a_listing_naming_only_unreadable_versions_is_malformed(self) -> None:
+        """The article is listed and we cannot read which version: not absent."""
+        listing = next(
+            row["listing"]
+            for row in CONTRACT["latest_metadata_key"]
+            if row["name"].startswith("unparseable version")
+        )
+        with running({"/": [xml_answer(listing)]}) as server:
+            fetch = _client(server.url).fetch_xml("PMC123")
+
+        assert fetch == PmcOpenDataFetch.unreachable(
+            RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+        )
+
+    def test_a_record_that_is_not_utf8_is_malformed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The record is decoded as the listing and the XML are, never guessed."""
+        # The bad byte is in a field we do not need: guessing a charset
+        # would read past it and serve the article.
+        body = (
+            f'{{"xml_url": "s3://pmc-oa-opendata{_XML_PATH}", "license_code": "'
+        ).encode() + b'\xff"}'
+        answer = ScriptedAnswer(HTTPStatus.OK, body, "binary/octet-stream")
+        with running(
+            {"/": [xml_answer(_LISTING)], _KEY_PATH: [answer], _XML_PATH: [xml_answer(_ARTICLE)]}
+        ) as server:
+            monkeypatch.setattr(
+                "bmlibrarian_lite.pmc_open_data.PMC_OPEN_DATA_BASE_URL", server.url
+            )
+            fetch = _client(server.url).fetch_xml(_PMCID)
+
+        assert fetch == PmcOpenDataFetch.unreachable(
+            RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+        )
 
     def test_a_record_that_is_not_json_is_malformed(self) -> None:
         """Unreadable is not absent."""

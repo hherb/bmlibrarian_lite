@@ -22,7 +22,8 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
     case europePMC = "europepmc"
 
     /// PMC's open-data bucket's JATS converted to HTML/markdown (#480), asked
-    /// when Europe PMC's XML gave no body.
+    /// when Europe PMC's XML gave no article (absent, unreachable or
+    /// unparseable), not after a body-less Europe PMC deposit.
     case pmcOpenData = "pmc_open_data"
 
     /// Europe PMC PDF (when XML is unavailable but free PDF exists).
@@ -547,13 +548,13 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
     /// open-data bucket could not be read (#480).
     ///
     /// Carries what the bucket's side got instead of the article's JATS: any
-    /// status but the listing's 200 or 404 (a 404 for a record the listing
-    /// named included), a body that did not parse, a blank XML, or no answer
-    /// at all. A listing 404, a listing naming no version, or a record naming
-    /// no XML is the bucket's answer that it holds nothing, and never lands
-    /// here. Named
-    /// only when Europe PMC left no shortfall of its own, so the reader is
-    /// given one sentence. Like ``absenceNotEstablished(_:)``, a claim about
+    /// status but 200 (a listing 404, and a 404 for a record the listing
+    /// named, included), a body that is not UTF-8 or did not parse, an
+    /// `xml_url` that is not the bucket's, a blank XML, or no answer at all.
+    /// A listing naming nothing under the article's prefix, or a record
+    /// naming no XML, is the bucket's answer that it holds nothing, and never
+    /// lands here. Named only when Europe PMC left no shortfall of its own,
+    /// so the reader is given one sentence. Like ``absenceNotEstablished(_:)``, a claim about
     /// *us*, and callers must **not** mark the document permanently
     /// unavailable on it.
     case pmcOpenDataNotEstablished(RequestFailure)

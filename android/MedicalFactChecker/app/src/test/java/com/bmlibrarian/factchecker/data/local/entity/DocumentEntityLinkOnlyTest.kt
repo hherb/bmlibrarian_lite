@@ -19,6 +19,7 @@
 package com.bmlibrarian.factchecker.data.local.entity
 
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService.FullTextResult
+import com.bmlibrarian.factchecker.data.remote.fulltext.NotEstablishedSource
 import com.bmlibrarian.factchecker.data.remote.fulltext.PdfDownload
 import com.bmlibrarian.factchecker.data.remote.fulltext.recordingFullTextFetch
 import com.bmlibrarian.factchecker.domain.model.FullTextLinkKind
@@ -86,7 +87,9 @@ class DocumentEntityLinkOnlyTest {
             recorded(FullTextResult.EuropePmcXml(xml = "<a/>", markdown = "m", html = "<p>h</p>")),
             recorded(FullTextResult.PmcOpenDataXml(xml = "<a/>", markdown = "m", html = "<p>h</p>")),
             recorded(FullTextResult.Unavailable("No full text source available")),
-            recorded(FullTextResult.NotEstablished(RequestFailure(RequestFailureKind.TIMEOUT))),
+            recorded(FullTextResult.NotEstablished(
+                RequestFailure(RequestFailureKind.TIMEOUT), NotEstablishedSource.EUROPE_PMC
+            )),
         )
         for (doc in notLinkOnly) {
             assertFalse("$doc", doc.isLinkOnly)

@@ -22,6 +22,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.bmlibrarian.factchecker.data.local.dao.DocumentDao
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
+import com.bmlibrarian.factchecker.data.remote.fulltext.NotEstablishedSource
 import com.bmlibrarian.factchecker.data.remote.fulltext.PdfDownload
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.domain.model.AppSettings
@@ -207,7 +208,9 @@ class FullTextViewModelOpenAccessShortfallTest {
     fun `an unestablished answer leaves the stored shortfall as it was`() {
         val unsettled = document.copy(fullTextOpenAccessShortfallJson = throttled.toJson())
 
-        open(unsettled, FullTextService.FullTextResult.NotEstablished(RequestFailure(RequestFailureKind.TIMEOUT)))
+        open(unsettled, FullTextService.FullTextResult.NotEstablished(
+            RequestFailure(RequestFailureKind.TIMEOUT), NotEstablishedSource.EUROPE_PMC
+        ))
 
         coVerify(exactly = 0) { documentDao.update(any()) }
     }

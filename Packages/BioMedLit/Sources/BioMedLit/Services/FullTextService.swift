@@ -21,17 +21,19 @@ import Foundation
 ///
 /// Attempts to retrieve full text from multiple sources in order:
 /// 1. **Europe PMC XML** - Preferred source, machine-readable, converts to HTML/markdown
-///    1a. **PMC's open-data bucket** - The same JATS by PMC ID, when Europe PMC
-///    served no body (#480); it holds the author manuscripts Europe PMC does not
+///    1a. **PMC's open-data bucket** - The same JATS by PMC ID, when Europe
+///    PMC's XML gave no article: absent, unreachable or unparseable (#480). Not
+///    asked after a body-less Europe PMC deposit, as Python and Kotlin do not
+///    ask it then. It holds the author manuscripts Europe PMC does not serve.
 /// 2. **Europe PMC PDF** - The free render URL, when the XML is unavailable or
 ///    carries no `<body>`
 /// 3. **Unpaywall PDF** - Open access PDFs via Unpaywall API, or the PDF an
 ///    open-access landing page declares (#464)
 /// 4. **DOI Resolution** - Falls back to opening publisher website
 ///
-/// A body-less Europe PMC deposit does not win at step 1. It is held back and
-/// returned only if every PDF tier came up empty, so an open-access PDF of the
-/// same paper is still reachable — see `fetchFullText`.
+/// A body-less deposit, Europe PMC's or the bucket's, does not win at step 1.
+/// It is held back and returned only if every PDF tier came up empty, so an
+/// open-access PDF of the same paper is still reachable — see `fetchFullText`.
 ///
 /// Thread-safe using Swift's actor model. Includes retry logic with
 /// exponential backoff for network operations.
@@ -90,7 +92,8 @@ public actor FullTextService {
     ///
     /// Injectable for the same reason as ``europePMCRetry``: a test pins what a
     /// 503 that outlasts its retries becomes without sleeping through the
-    /// backoff. Defaults to ``RetryConfiguration/pmcOpenData``, Python's policy.
+    /// backoff. Defaults to ``RetryConfiguration/pmcOpenData``: four
+    /// attempts, as Python's; the backoff between them is BioMedLit's own.
     private let pmcOpenDataRetry: RetryConfiguration
 
     /// When the next request to PMC's open-data bucket may go, or `nil`
@@ -655,8 +658,9 @@ public actor FullTextService {
     ///   - primaryKind: What the provider said that slot holds, if it said.
     ///   - europePMCShortfall: What Europe PMC's side got instead of the text.
     ///   - pmcOpenDataShortfall: What PMC's open-data bucket got instead of
-    ///     the article's JATS, when it could not be read (#480). Named after
-    ///     Europe PMC's, so the reader is given one sentence.
+    ///     the article's JATS, when it could not be read (#480). Consulted
+    ///     only when Europe PMC left no shortfall, so the reader is given one
+    ///     sentence.
     ///   - openAccessShortfall: Why the Unpaywall tier left a free copy
     ///     unassessed.
     ///   - articleName: How the log names the article.
@@ -941,11 +945,14 @@ public actor FullTextService {
     ///
     /// - Parameter pmcid: A PMC ID, with or without its `PMC` prefix. Anything
     ///   else (a preprint, a DOI) is never asked.
-    /// - Returns: The XML; `.absent` for a listing 404, a listing naming no
-    ///   version, or a record naming no XML; otherwise `.unreachable`: a 404
-    ///   after the listing named the record (the bucket disagreeing with
-    ///   itself), any other status, a body that does not parse
-    ///   (``RequestFailure/malformedResponse``), a blank XML
+    /// - Returns: The XML; `.absent` for a listing naming nothing under the
+    ///   article's prefix, or a record whose `xml_url` is missing or `null`;
+    ///   otherwise `.unreachable`: any status but 200 (a listing 404 included,
+    ///   since S3 answers an article it does not hold with a 200 listing, and
+    ///   a 404 after the listing named the record, the bucket disagreeing
+    ///   with itself), a body that is not UTF-8 or does not parse, a listing
+    ///   naming only unreadable versions, or an `xml_url` that is not this
+    ///   bucket's (each ``RequestFailure/malformedResponse``), a blank XML
     ///   (``RequestFailure/incompleteResponse``), or the transport's failure.
     /// - Throws: `CancellationError` if the caller cancelled, and nothing else.
     func fetchPMCOpenDataXML(pmcid: String) async throws -> PMCOpenDataFetch {
@@ -961,7 +968,9 @@ public actor FullTextService {
         guard let listingURL = listing.url else { return .unreachable(.requestFailed) }
         do {
             let (listingStatus, listingBody) = try await bucketGET(listingURL)
-            if listingStatus == BioMedLitConstants.httpStatusNotFound { return .absent }
+            // A 404 included: S3 answers an article it does not hold with a
+            // 200 listing naming no version, so a listing 404 is `NoSuchBucket`
+            // or something between us and it — never the article's absence.
             guard listingStatus == BioMedLitConstants.httpStatusOK else {
                 return .unreachable(.httpStatus(listingStatus))
             }
@@ -993,6 +1002,13 @@ public actor FullTextService {
             guard xmlStatus == BioMedLitConstants.httpStatusOK else {
                 return .unreachable(.httpStatus(xmlStatus))
             }
+            // Strictly UTF-8, as Python decodes it. Without this the parser
+            // honours whatever encoding the XML declares and `ServedXML`'s
+            // blank test decodes lossily, so bytes we cannot read reached the
+            // reader as text.
+            guard PMCOpenData.strictUTF8(xmlBody) != nil else {
+                return .unreachable(.malformedResponse)
+            }
             guard let served = ServedXML(xmlBody) else {
                 return .unreachable(.incompleteResponse)
             }
@@ -1013,8 +1029,10 @@ public actor FullTextService {
     /// S3's `ListObjectsV2` request, the `list-type` the listing asks for.
     private static let s3ListObjectsVersion = "2"
 
-    /// One request to the bucket, retried per ``pmcOpenDataRetry`` as Python's
-    /// client retries it (429 and 5xx, and transient transport failures).
+    /// One request to the bucket, retried per ``pmcOpenDataRetry``: 429 and
+    /// 5xx, and transient transport failures. Four attempts by default, as
+    /// Python's; the backoff is BioMedLit's own (Python's per-host pacer
+    /// paces its retries instead).
     ///
     /// - Parameter url: The bucket URL.
     /// - Returns: The status and body of the first answer the retry policy
@@ -1068,8 +1086,11 @@ public actor FullTextService {
     /// `fetchFullText` catches the parse failure and falls through to the PDF
     /// and DOI sources, so it never reaches a caller through it.
     ///
+    /// Renders the JATS of either source that serves it: Europe PMC's
+    /// `fullTextXML`, or PMC's open-data bucket (#480).
+    ///
     /// - Parameters:
-    ///   - xml: The JATS XML Europe PMC served.
+    ///   - xml: The JATS XML Europe PMC or PMC's open-data bucket served.
     ///   - accession: The accession it was served under. Passed to the parser
     ///     for figure URLs only when it is a PMC ID: a preprint's figures are
     ///     not filed under its `PPR` ID.

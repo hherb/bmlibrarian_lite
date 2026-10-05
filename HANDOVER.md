@@ -26,15 +26,23 @@ after Europe PMC's XML and before its PDF render, by PMC ID only (Python
 `pmc_open_data.py` + `fulltext_discovery.py` step 2a; Swift
 `PMCOpenData.swift` + `FullTextService`; Kotlin `PmcOpenData.kt`). Contract:
 `fulltext_retrieval.md` "PMC's Open-Data Bucket" +
-`fulltext_parity/pmc_open_data.json`. Rules: listing 404 / KeyCount 0 / no
-`xml_url` absent; a 404 after the listing named it unreachable; strict UTF-8
-(S3 sends `binary/octet-stream`); namespace-strict listing; retry
-429/500/502/503/504, 5/s per attempt; the apps' not-established sentence names
-"PMC's open-access collection" after Europe PMC's. Deviations for sign-off: no
-bucket PDF fallback; Swift does not ask after a body-less Europe PMC deposit
-(parity). Acceptance: 28 of 28 author manuscripts served live. Follow-ups #485
-(desktop cache records no source), #486 (an unmappable `xml_url` reads as
-absent). **Next: stage B** (every Unpaywall location in the apps, OpenAlex),
+`fulltext_parity/pmc_open_data.json`. Rules: absent only for a 200 listing
+naming no version or a record whose `xml_url` is missing/null; **a listing 404
+is unreachable** (S3 answers a missing prefix with 200 + `KeyCount` 0, so a
+404 is `NoSuchBucket`); a 404 after the listing named it unreachable; an
+answer we cannot read (non-ASCII-digit version, `xml_url` not this bucket's
+`s3://` URL, body not UTF-8) is `malformed_response`; strict UTF-8 on every
+platform (Swift still honours a declared non-UTF-8 encoding on valid UTF-8
+bytes); namespace-strict listing; retry 429/500/502/503/504, 5/s per attempt,
+45 s per request (Android derives its own client: no OkHttp replay);
+the apps' not-established sentence names "PMC's open-access collection" after
+Europe PMC's (Kotlin `NotEstablishedSource`, no default). Deviations for
+sign-off: no bucket PDF fallback; no app asks after a body-less Europe PMC
+deposit (parity). Acceptance: 28 of 28 author manuscripts served live. Open
+follow-ups: #485 (desktop cache records no source), #488 (apps drop the
+bucket's shortfall on PDF/link fallbacks; Android drops Europe PMC's too),
+#489 (Swift paces per instance; apps lack Python's throttle response), #490
+(flaky Android PubMed redirect test). **Next: stage B** (every Unpaywall location in the apps, OpenAlex),
 **then stage C** (CORE, Elsevier, keys in settings): write their plans from
 the spec.
 

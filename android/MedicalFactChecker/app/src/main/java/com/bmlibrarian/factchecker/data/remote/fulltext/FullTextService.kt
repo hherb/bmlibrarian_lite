@@ -207,17 +207,16 @@ class FullTextService @Inject constructor(
          * PMC left nothing unsettled, as Python and BioMedLit do.
          *
          * @param failure What the named source got instead of the article's text
-         * @param service The source the sentence names: Europe PMC
-         *   ([Constants.EUROPE_PMC_SERVICE_NAME]) or PMC's open-data bucket
-         *   ([Constants.PMC_OPEN_DATA_SERVICE_NAME])
+         * @param source The source that did not settle it, and that the sentence
+         *   names; always given, so no source is named by default
          */
         data class NotEstablished(
             val failure: RequestFailure,
-            val service: String = Constants.EUROPE_PMC_SERVICE_NAME
+            val source: NotEstablishedSource
         ) : FullTextResult(hasContent = false) {
             /** The sentence shown to the reader. */
             val reason: String
-                get() = notEstablishedMessage(service, failure)
+                get() = notEstablishedMessage(source.serviceName, failure)
         }
     }
 
@@ -441,7 +440,9 @@ class FullTextService @Inject constructor(
         // or closed Europe PMC (#434)
         europePmcShortfall?.let { failure ->
             Log.w(TAG, "No source served full text, and Europe PMC did not settle it (${failure.describe()})")
-            return@withContext Result.success(FullTextResult.NotEstablished(failure))
+            return@withContext Result.success(
+                FullTextResult.NotEstablished(failure, NotEstablishedSource.EUROPE_PMC)
+            )
         }
 
         // The same for PMC's open-data bucket, which holds the author manuscripts
@@ -454,7 +455,7 @@ class FullTextService @Inject constructor(
                     "(${failure.describe()})"
             )
             return@withContext Result.success(
-                FullTextResult.NotEstablished(failure, Constants.PMC_OPEN_DATA_SERVICE_NAME)
+                FullTextResult.NotEstablished(failure, NotEstablishedSource.PMC_OPEN_DATA)
             )
         }
 
@@ -987,6 +988,20 @@ class OpenAccessUnsettledException(val shortfall: OpenAccessShortfall) : Excepti
 class RetryableStatusException(val statusCode: Int) : IOException("HTTP $statusCode")
 
 /**
+ * A source whose shortfall a [FullTextService.FullTextResult.NotEstablished] names.
+ *
+ * @property serviceName The source as the reader's sentence names it, verbatim on
+ *   every platform
+ */
+enum class NotEstablishedSource(val serviceName: String) {
+    /** Europe PMC: its XML fetch or identifier search did not settle it. */
+    EUROPE_PMC(Constants.EUROPE_PMC_SERVICE_NAME),
+
+    /** PMC's open-data bucket (#480): it could not be read. */
+    PMC_OPEN_DATA(Constants.PMC_OPEN_DATA_SERVICE_NAME)
+}
+
+/**
  * The sentence for a chain that found nothing while [service] did not settle
  * whether the full text exists (#434, #480).
  *
@@ -997,8 +1012,8 @@ class RetryableStatusException(val statusCode: Int) : IOException("HTTP $statusC
  * (`not_established_sentence`); worded as BioMedLit's
  * `FullTextError.notEstablishedSentence` (iOS and macOS).
  *
- * @param service The source the sentence names, e.g. [Constants.EUROPE_PMC_SERVICE_NAME]
- *   or [Constants.PMC_OPEN_DATA_SERVICE_NAME]
+ * @param service The source the sentence names: a [NotEstablishedSource.serviceName],
+ *   [Constants.EUROPE_PMC_SERVICE_NAME] or [Constants.PMC_OPEN_DATA_SERVICE_NAME]
  * @param failure What that source got instead of the article's text
  * @return The sentence
  */

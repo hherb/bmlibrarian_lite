@@ -1,8 +1,9 @@
 {
   "schema_version": 1,
-  "description": "PMC's open-data bucket (pmc-oa-opendata) as a JATS source: which metadata key a listing names, how an s3:// URL becomes an https:// one, what a metadata record says, which statuses settle what, and the sentence an unreachable bucket earns in the apps. Read by tests/test_pmc_open_data.py, Packages/BioMedLit PMCOpenDataContractTests and Android PmcOpenDataContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, 'PMC's open-data bucket'.",
+  "description": "PMC's open-data bucket (pmc-oa-opendata) as a JATS source: which metadata key a listing names, how an s3:// URL becomes an https:// one, what a metadata record says, which statuses settle what, and the sentence an unreachable bucket earns in the apps. An article missing from the collection is a 200 listing that names no version of it; a listing 404 is S3's NoSuchBucket (or something in between), so it is unreachable. An answer that names something we cannot read (a version that is not ASCII digits, an xml_url that is not this bucket's s3:// URL) is malformed, never an absence. Read by tests/test_pmc_open_data.py, Packages/BioMedLit PMCOpenDataContractTests and FullTextServicePMCOpenDataTests (status rows), and Android PmcOpenDataContractTest and PmcOpenDataServiceTest (status rows). `source` is the value the apps store; `desktop_source_type` is the desktop's FulltextSourceType for the same source, spelled as it spells Europe PMC's europepmc_xml. The rules are in doc/cross_platform/fulltext_retrieval.md, 'PMC's open-data bucket'.",
   "service_name": "PMC's open-access collection",
   "source": "pmc_open_data",
+  "desktop_source_type": "pmc_open_data_xml",
   "base_url": "https://pmc-oa-opendata.s3.amazonaws.com",
   "latest_metadata_key": [
     {
@@ -26,8 +27,32 @@
     {
       "name": "longer PMC ID in listing",
       "pmcid": "PMC123",
-      "listing": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><KeyCount>2</KeyCount><Contents><Key>metadata/PMC1234.1.json</Key></Contents><Contents><Key>metadata/PMC123.x.json</Key></Contents></ListBucketResult>",
+      "listing": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><KeyCount>1</KeyCount><Contents><Key>metadata/PMC1234.1.json</Key></Contents></ListBucketResult>",
       "key": null
+    },
+    {
+      "name": "unparseable version: an answer we cannot read, not an absence",
+      "pmcid": "PMC123",
+      "listing": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><KeyCount>1</KeyCount><Contents><Key>metadata/PMC123.x.json</Key></Contents></ListBucketResult>",
+      "error": "malformed"
+    },
+    {
+      "name": "non-ASCII digits are not a version",
+      "pmcid": "PMC123",
+      "listing": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><KeyCount>1</KeyCount><Contents><Key>metadata/PMC123.١.json</Key></Contents></ListBucketResult>",
+      "error": "malformed"
+    },
+    {
+      "name": "a readable version beside an unreadable one",
+      "pmcid": "PMC123",
+      "listing": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><KeyCount>2</KeyCount><Contents><Key>metadata/PMC123.2.json</Key></Contents><Contents><Key>metadata/PMC123.3.v2.json</Key></Contents></ListBucketResult>",
+      "key": "metadata/PMC123.2.json"
+    },
+    {
+      "name": "a version beyond 64 bits",
+      "pmcid": "PMC9",
+      "listing": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><KeyCount>3</KeyCount><Contents><Key>metadata/PMC9.9223372036854775807.json</Key></Contents><Contents><Key>metadata/PMC9.18446744073709551616.json</Key></Contents><Contents><Key>metadata/PMC9.0002.json</Key></Contents></ListBucketResult>",
+      "key": "metadata/PMC9.18446744073709551616.json"
     },
     {
       "name": "a JATS article where a listing should be",
@@ -82,17 +107,45 @@
       "license_code": null
     },
     {
-      "name": "fields of the wrong type",
-      "metadata": {"is_pmc_openaccess": "yes", "is_manuscript": 1, "license_code": 7, "xml_url": 42},
+      "name": "flags of the wrong type say nothing",
+      "metadata": {"is_pmc_openaccess": "yes", "is_manuscript": 1, "license_code": 7, "xml_url": "s3://pmc-oa-opendata/PMC6.1/PMC6.1.xml"},
+      "xml_url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC6.1/PMC6.1.xml",
+      "is_open_access": null,
+      "is_manuscript": null,
+      "license_code": null
+    },
+    {
+      "name": "xml_url null: no XML named",
+      "metadata": {"pmcid": "PMC7", "version": 1, "xml_url": null},
       "xml_url": null,
       "is_open_access": null,
       "is_manuscript": null,
       "license_code": null
+    },
+    {
+      "name": "xml_url of the wrong type: unreadable, not absent",
+      "metadata": {"xml_url": 42},
+      "error": "malformed"
+    },
+    {
+      "name": "xml_url in another bucket: unreadable, not absent",
+      "metadata": {"xml_url": "s3://some-other-bucket/PMC1.1/PMC1.1.xml"},
+      "error": "malformed"
+    },
+    {
+      "name": "xml_url already https: unreadable, not absent",
+      "metadata": {"xml_url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC1.1/PMC1.1.xml"},
+      "error": "malformed"
+    },
+    {
+      "name": "xml_url blank: unreadable, not absent",
+      "metadata": {"xml_url": ""},
+      "error": "malformed"
     }
   ],
   "status": [
     {"step": "listing", "status": 200, "outcome": "read"},
-    {"step": "listing", "status": 404, "outcome": "absent"},
+    {"step": "listing", "status": 404, "outcome": "unreachable"},
     {"step": "listing", "status": 403, "outcome": "unreachable"},
     {"step": "listing", "status": 429, "outcome": "unreachable"},
     {"step": "listing", "status": 503, "outcome": "unreachable"},

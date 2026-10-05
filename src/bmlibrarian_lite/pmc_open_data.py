@@ -17,6 +17,7 @@ The pure functions here are pinned with the Swift and Kotlin ports by
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import xml.etree.ElementTree as ET
@@ -27,7 +28,6 @@ from urllib3.util.retry import Retry
 
 from .constants import (
     EUROPEPMC_USER_AGENT,
-    HTTP_NOT_FOUND,
     PMC_OPEN_DATA_BASE_URL,
     PMC_OPEN_DATA_BUCKET,
     PMC_OPEN_DATA_ENCODING,
@@ -53,7 +53,9 @@ def latest_metadata_key(listing_xml: str, pmcid: str) -> str | None:
 
     Versions compare as numbers: ``.10`` is newer than ``.2``. A key for any
     other identifier (``PMC1234`` in a listing for ``PMC123``) is not this
-    article's and is ignored.
+    article's and is ignored. A key that is this article's but whose version
+    is not ASCII digits is an answer we cannot read: it is ignored beside a
+    version we can read, and makes the listing unreadable on its own.
 
     Args:
         listing_xml: A ``ListObjectsV2`` answer for the prefix
@@ -65,8 +67,9 @@ def latest_metadata_key(listing_xml: str, pmcid: str) -> str | None:
         the article is in neither collection.
 
     Raises:
-        ValueError: If the body is not an S3 listing. That is an unreadable
-            answer, never an absence.
+        ValueError: If the body is not an S3 listing, or names this article
+            only under versions we cannot read. That is an unreadable answer,
+            never an absence.
     """
     try:
         root = ET.fromstring(listing_xml)
@@ -74,13 +77,24 @@ def latest_metadata_key(listing_xml: str, pmcid: str) -> str | None:
         raise ValueError("not an S3 listing") from error
     if root.tag != _LISTING_TAG:
         raise ValueError(f"not an S3 listing: root element {root.tag!r}")
-    pattern = re.compile(rf"metadata/{re.escape(pmcid)}\.(\d+)\.json")
+    prefix = f"metadata/{pmcid}."
+    # ``[0-9]``, not ``\d``: ``\d`` also matches other scripts' digits,
+    # which the Swift and Kotlin ports do not read as a version.
+    pattern = re.compile(rf"{re.escape(prefix)}([0-9]+)\.json")
     versions: list[tuple[int, str]] = []
+    unreadable = False
     for key in root.iter(f"{_S3_NAMESPACE}Key"):
-        match = pattern.fullmatch((key.text or "").strip())
+        text = (key.text or "").strip()
+        match = pattern.fullmatch(text)
         if match:
             versions.append((int(match.group(1)), match.group(0)))
-    return max(versions)[1] if versions else None
+        elif text.startswith(prefix):
+            unreadable = True
+    if versions:
+        return max(versions)[1]
+    if unreadable:
+        raise ValueError(f"the listing names {pmcid} only under versions we cannot read")
+    return None
 
 
 def https_url(s3_url: str) -> str | None:
@@ -112,7 +126,7 @@ class PmcOpenDataRecord:
 
     Attributes:
         xml_url: The JATS XML's HTTPS address, or ``None`` when the record
-            names none (or names one outside the bucket).
+            names none.
         is_open_access: Whether PMC lists it as open access; ``None`` when
             the record does not say.
         is_manuscript: Whether it is an author manuscript; ``None`` when the
@@ -127,23 +141,34 @@ class PmcOpenDataRecord:
 
     @classmethod
     def from_metadata(cls, obj: object) -> PmcOpenDataRecord:
-        """Read a decoded metadata record; a field of the wrong type says nothing.
+        """Read a decoded metadata record.
+
+        A flag of the wrong type says nothing. An ``xml_url`` that is there
+        but cannot be read is different: the record named XML and we do not
+        know where, so it is an unreadable answer, never "no XML" (#486).
 
         Args:
             obj: The decoded JSON, untrusted.
 
         Returns:
-            The record.
+            The record; ``xml_url`` is ``None`` only when the record names no
+            XML (the key is missing or null).
 
         Raises:
-            ValueError: If ``obj`` is not a JSON object.
+            ValueError: If ``obj`` is not a JSON object, or its ``xml_url``
+                is not an ``s3://`` URL of an object in this bucket.
         """
         if not isinstance(obj, dict):
             raise ValueError("a metadata record is a JSON object")
         xml = obj.get("xml_url")
+        xml_url = None
+        if xml is not None:
+            xml_url = https_url(xml) if isinstance(xml, str) else None
+            if xml_url is None:
+                raise ValueError("the record's xml_url names nothing in this bucket")
         licence = obj.get("license_code")
         return cls(
-            xml_url=https_url(xml) if isinstance(xml, str) else None,
+            xml_url=xml_url,
             is_open_access=_bool_or_none(obj.get("is_pmc_openaccess")),
             is_manuscript=_bool_or_none(obj.get("is_manuscript")),
             license_code=licence if isinstance(licence, str) else None,
@@ -238,8 +263,8 @@ class PmcOpenDataClient:
                 PMC ID only.
 
         Returns:
-            Served XML; absent (no record, a listing 404, or a record naming
-            no XML); or unreachable, of its real kind.
+            Served XML; absent (a listing naming no version of the article,
+            or a record naming no XML); or unreachable, of its real kind.
         """
         accession = pmc_accession(pmcid) if pmcid else None
         if accession is None:
@@ -248,8 +273,9 @@ class PmcOpenDataClient:
             listing = self._get(
                 f"{self._base_url}/", **{"list-type": "2", "prefix": f"metadata/{accession}."}
             )
-            if listing.status_code == HTTP_NOT_FOUND:
-                return PmcOpenDataFetch.absent()
+            # A missing article is a 200 listing naming no version of it. A
+            # listing 404 is S3's NoSuchBucket, or something in between: the
+            # source is gone, which says nothing about the article.
             if listing.status_code != _HTTP_OK:
                 return PmcOpenDataFetch.unreachable(
                     RequestFailure(RequestFailureKind.HTTP_STATUS, listing.status_code)
@@ -273,8 +299,12 @@ class PmcOpenDataClient:
                     RequestFailure(RequestFailureKind.HTTP_STATUS, metadata.status_code)
                 )
             try:
-                record = PmcOpenDataRecord.from_metadata(metadata.json())
-            except ValueError:
+                # Decoded explicitly, as the listing and the XML are:
+                # ``.json()`` would guess at a charset S3 does not name.
+                record = PmcOpenDataRecord.from_metadata(
+                    json.loads(metadata.content.decode(PMC_OPEN_DATA_ENCODING))
+                )
+            except ValueError:  # includes UnicodeDecodeError, JSONDecodeError
                 return PmcOpenDataFetch.unreachable(
                     RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
                 )

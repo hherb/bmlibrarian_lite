@@ -13,6 +13,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
@@ -47,6 +48,7 @@ class PmcOpenDataContractTest {
         contract["latest_metadata_key"]!!.jsonArray.map { it.jsonObject }.forEach { row ->
             val name = row.text("name")
             if (row.containsKey("error")) {
+                assertEquals(name, "malformed", row.text("error"))
                 assertThrows(name, IllegalArgumentException::class.java) {
                     PmcOpenData.latestMetadataKey(row.text("listing")!!, row.text("pmcid")!!)
                 }
@@ -67,10 +69,28 @@ class PmcOpenDataContractTest {
     }
 
     @Test
+    fun `the contract pins unreadable answers as well as readable ones`() {
+        // Without these rows the error branches below would pass vacuously
+        for (section in listOf("latest_metadata_key", "record")) {
+            val rows = contract[section]!!.jsonArray.map { it.jsonObject }
+            assertTrue(section, rows.any { it.text("error") == "malformed" })
+            assertTrue(section, rows.any { !it.containsKey("error") })
+        }
+    }
+
+    @Test
     fun record() {
         contract["record"]!!.jsonArray.map { it.jsonObject }.forEach { row ->
-            val record = PmcOpenDataRecord.fromMetadata(row["metadata"].toString())
             val name = row.text("name")
+            if (row.containsKey("error")) {
+                // An answer we cannot read: the fetch reports it as malformed, never as absent
+                assertEquals(name, "malformed", row.text("error"))
+                assertThrows(name, IllegalArgumentException::class.java) {
+                    PmcOpenDataRecord.fromMetadata(row["metadata"].toString())
+                }
+                return@forEach
+            }
+            val record = PmcOpenDataRecord.fromMetadata(row["metadata"].toString())
             assertEquals(name, row.text("xml_url"), record.xmlUrl)
             assertEquals(name, row["is_open_access"]?.jsonPrimitive?.booleanOrNull, record.isOpenAccess)
             assertEquals(name, row["is_manuscript"]?.jsonPrimitive?.booleanOrNull, record.isManuscript)

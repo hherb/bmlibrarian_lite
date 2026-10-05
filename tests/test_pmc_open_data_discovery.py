@@ -22,6 +22,7 @@ from bmlibrarian_lite.data_models import (
     RequestFailureKind,
     SourceLookupFailure,
 )
+from bmlibrarian_lite.europepmc import ArticleInfo
 from bmlibrarian_lite.fulltext_discovery import (
     FulltextDiscoverer,
     FulltextResult,
@@ -126,11 +127,13 @@ def test_control_a_clean_chain_still_establishes_an_absence(
     assert result.absence_established
 
 
-@pytest.mark.parametrize("ids", [{"doi": "10.1/x"}, {"pmid": "123"}])
+@pytest.mark.parametrize(
+    "ids", [{"doi": "10.1/x"}, {"pmid": "123"}, {"pmcid": "PPR1316954"}]
+)
 def test_without_a_pmc_id_the_bucket_is_not_asked(
     ids: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The bucket files by PMC ID only."""
+    """The bucket files by PMC ID only; a preprint's PPR ID is never sent."""
     bucket = _StubBucket(PmcOpenDataFetch.served(_JATS))
 
     _discoverer(bucket, monkeypatch, tmp_path).discover_fulltext(skip_pdf=True, **ids)
@@ -266,3 +269,45 @@ def test_a_served_bucket_result_still_carries_europe_pmcs_failure(
 
     assert result.success
     assert europepmc_failure in result.lookups.failures
+
+
+def test_a_served_bucket_result_keeps_europe_pmcs_metadata(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The title the reader sees comes from Europe PMC's record, as for its PDF."""
+    bucket = _StubBucket(PmcOpenDataFetch.served(_JATS))
+    discoverer = _discoverer(bucket, monkeypatch, tmp_path)
+    info = ArticleInfo(pmcid="PMC123", title="A trial")
+    discoverer._try_europepmc_xml = lambda *_a, **_k: FulltextResult(  # type: ignore[method-assign]
+        success=False, source_type=FulltextSourceType.NOT_ASSESSED, article_info=info
+    )
+
+    result = discoverer.discover_fulltext(pmcid="PMC123", skip_pdf=True)
+
+    assert result.success
+    assert result.article_info == info
+
+
+def test_a_served_pdf_render_still_carries_the_buckets_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Text from the PDF render does not erase the bucket we could not read."""
+    bucket = _StubBucket(PmcOpenDataFetch.unreachable(_THROTTLED))
+    discoverer = _discoverer(bucket, monkeypatch, tmp_path)
+    info = ArticleInfo(
+        pmcid="PMC123", has_pdf=True, pdf_render_url="https://example.org/render"
+    )
+    discoverer._try_europepmc_xml = lambda *_a, **_k: FulltextResult(  # type: ignore[method-assign]
+        success=False, source_type=FulltextSourceType.NOT_ASSESSED, article_info=info
+    )
+    discoverer._try_europepmc_pdf = lambda *_a, **_k: FulltextResult(  # type: ignore[method-assign]
+        success=True,
+        source_type=FulltextSourceType.EUROPEPMC_PDF,
+        markdown_content="We randomised 40 patients.",
+    )
+
+    result = discoverer.discover_fulltext(pmcid="PMC123", skip_pdf=True)
+
+    assert result.success
+    assert result.source_type is FulltextSourceType.EUROPEPMC_PDF
+    assert SourceLookupFailure(SERVICE_PMC_OPEN_DATA, _THROTTLED) in result.lookups.failures

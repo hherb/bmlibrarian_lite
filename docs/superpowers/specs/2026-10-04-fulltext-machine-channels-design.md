@@ -123,6 +123,22 @@ answers 404.
 The cached text records its source (`pmc_open_data`), so the reader and the
 audit say where it came from. The XML is not truncated (golden rule 13).
 
+**As built (PR #487).** The binding rules are in
+`doc/cross_platform/fulltext_retrieval.md` and
+`fulltext_parity/pmc_open_data.json`; where this section differs, they win:
+
+- No bucket PDF fallback: a record without `xml_url` is an absence for this
+  source, and the chain goes on to the PDF tiers.
+- The bucket is not asked after a body-less Europe PMC deposit, on any
+  platform; only Swift holds back a body-less *bucket* deposit (Python and
+  Kotlin have no content kind).
+- An absence is a listing naming no version of the article, or a record with
+  no `xml_url`. A listing 404 is S3's `NoSuchBucket`, and a 404 after the
+  listing named the object is the bucket disagreeing with itself: both are
+  unreachable. An answer we cannot read is `malformed_response`.
+- The desktop's cache does not yet record its source (#485), so a cached text
+  is labelled neutrally.
+
 ## Stage B: every location, and OpenAlex
 
 - **Unpaywall, every location (apps).** Port the desktop's behaviour

@@ -20,6 +20,8 @@ Full-text discovery module for BMLibrarian Lite.
 Provides unified full-text retrieval that tries multiple sources:
 1. Cached full-text markdown (fastest)
 2. Europe PMC XML full-text (best quality, machine-readable)
+   2a. PMC's open-data bucket, by PMC ID (the same JATS; #480)
+   2b. Europe PMC's PDF render
 3. Cached PDF
 4. PDF download via traditional sources
 
@@ -63,7 +65,7 @@ from .data_models import (
     SourceLookupSkipped,
 )
 from .analysis_failures import with_unestablished_access
-from .europepmc import EuropePMCClient, ArticleInfo
+from .europepmc import EuropePMCClient, ArticleInfo, pmc_accession
 from .search_failures import request_failure_from_exception
 from .pdf_utils import (
     find_existing_fulltext,
@@ -241,12 +243,13 @@ class FulltextDiscoverer:
         """
         Discover and retrieve full-text content for a document.
 
-        Tries sources in order of preference:
+        Tries sources in order of preference (numbered as the steps below):
         1. Cached full-text markdown
         2. Europe PMC XML (converted to markdown)
-        3. PMC's open-data bucket, by PMC ID (JATS, converted to markdown)
-        4. Cached PDF (extracted to text)
-        5. PDF download (if not skip_pdf)
+           2a. PMC's open-data bucket, by PMC ID (JATS, converted to markdown)
+           2b. Europe PMC's PDF render (when it lists a free PDF)
+        3. Cached PDF (extracted to text)
+        4. PDF download (if not skip_pdf)
 
         Args:
             doc_dict: Document dictionary with identifiers
@@ -292,8 +295,9 @@ class FulltextDiscoverer:
             logger.info(f"Found cached full-text: {cached_fulltext}")
             try:
                 # None means an earlier converter wrote it, or the file is
-                # empty: Europe PMC is asked again below and, if it serves
-                # the XML, the file is rewritten. A stale file is never used
+                # empty: Europe PMC (and then PMC's open-data bucket) is
+                # asked again below and, if one serves the XML, the file is
+                # rewritten. A stale file is never used
                 # as a fallback here, since its statements are missing (#420).
                 content = read_cached_fulltext(cached_fulltext)
                 if content is not None:
@@ -330,13 +334,22 @@ class FulltextDiscoverer:
         # whose own text wins; before its PDF render, which answers 403 to
         # every client (#453). ``_try_europepmc_xml`` writes a PMC ID it
         # resolved into ``doc_dict``, so a DOI-only document gets here too.
-        bucket_pmcid = doc_dict.get("pmcid") or doc_dict.get("pmc_id")
+        # Normalised here, not only in the client: an identifier that is
+        # not a PMC ID (a preprint's PPR ID) is a lookup we do not make, not
+        # one the bucket answered.
+        bucket_pmcid = pmc_accession(
+            doc_dict.get("pmcid") or doc_dict.get("pmc_id") or ""
+        )
         if bucket_pmcid:
             self._emit_progress("discovery", "checking_pmc_open_data")
             bucket_result = self._try_pmc_open_data(doc_dict, bucket_pmcid)
             lookups = lookups.merged(bucket_result.lookups)
             if bucket_result.success:
-                return bucket_result.with_lookups(lookups)
+                # Europe PMC's metadata travels with the bucket's text, as it
+                # does with its own PDF render's: the title comes from it.
+                return replace(
+                    bucket_result, article_info=result.article_info
+                ).with_lookups(lookups)
             if self._cancelled:
                 return self._cancelled_result(lookups)
 
@@ -348,7 +361,7 @@ class FulltextDiscoverer:
             pdf_result = self._try_europepmc_pdf(doc_dict, result.article_info)
             lookups = lookups.merged(pdf_result.lookups)
             if pdf_result.success:
-                return pdf_result.with_lookups(result.lookups)
+                return pdf_result.with_lookups(lookups)
 
         if self._cancelled:
             return self._cancelled_result(lookups)

@@ -26,21 +26,6 @@ public enum BioMedLitConstants {
     /// Europe PMC search endpoint.
     public static let europePMCSearchURL = "\(europePMCBaseURL)/search"
 
-    // MARK: - PMC open data
-
-    /// PMC's open-access and author-manuscript collections, a public S3
-    /// bucket asked after Europe PMC's `fullTextXML` (#480). Pinned by
-    /// `fulltext_parity/pmc_open_data.json`.
-    public static let pmcOpenDataBaseURL = "https://pmc-oa-opendata.s3.amazonaws.com"
-    public static let pmcOpenDataBucket = "pmc-oa-opendata"
-    /// The bucket as the reader knows it, verbatim on every platform.
-    public static let pmcOpenDataServiceName = "PMC's open-access collection"
-    /// Five requests per second, Python's `POLITE_RATE_CEILINGS` entry.
-    public static let pmcOpenDataMinimumInterval: TimeInterval = 0.2
-    /// The S3 namespace a bucket listing's elements must be in, as Python's
-    /// `latest_metadata_key` requires: a `ListBucketResult` outside it is
-    /// not a listing.
-    public static let s3ListingNamespace = "http://s3.amazonaws.com/doc/2006-03-01/"
     /// Europe PMC as the reader's not-established sentence names it.
     public static let europePMCServiceName = "Europe PMC"
 
@@ -132,6 +117,23 @@ public enum BioMedLitConstants {
     /// measured on 2026-09-10, `src:pmc` and `src:med` both return no hits for
     /// one, with or without the `PMC` prefix, while `PMCID:PMC1082889` matches.
     public static let europePMCPMCIDField = "PMCID"
+
+    // MARK: - PMC open data
+
+    /// PMC's open-access and author-manuscript collections, a public S3
+    /// bucket asked after Europe PMC's `fullTextXML` (#480). Pinned by
+    /// `fulltext_parity/pmc_open_data.json`.
+    public static let pmcOpenDataBaseURL = "https://pmc-oa-opendata.s3.amazonaws.com"
+    /// The bucket's name, as a metadata record's `s3://` URLs spell it.
+    public static let pmcOpenDataBucket = "pmc-oa-opendata"
+    /// The bucket as the reader knows it, verbatim on every platform.
+    public static let pmcOpenDataServiceName = "PMC's open-access collection"
+    /// Five requests per second, Python's `POLITE_RATE_CEILINGS` entry.
+    public static let pmcOpenDataMinimumInterval: TimeInterval = 0.2
+    /// The S3 namespace a bucket listing's elements must be in, as Python's
+    /// `latest_metadata_key` requires: a `ListBucketResult` outside it is
+    /// not a listing.
+    public static let s3ListingNamespace = "http://s3.amazonaws.com/doc/2006-03-01/"
 
     // MARK: - PubMed API
 
