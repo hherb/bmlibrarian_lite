@@ -9,14 +9,15 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **Machine channels, stage B: every Unpaywall PDF in the apps, then OpenAlex's**
-(#480): done on `feat/machine-channels-stage-b-480`, PR to be opened (refs
-#480, never closes it). Contract `fulltext_retrieval.md` "Tried sources (#480)"
+(#480): done on `feat/machine-channels-stage-b-480`, **PR #491** (refs #480,
+which stays open for stage C). Contract `fulltext_retrieval.md` "Tried sources (#480)"
 and "OpenAlex's Locations"; fixtures `open_access_statement.json`,
 `openalex_locations.json`. **Binds:** with a tried PDF, every source tried is
 listed ("Failed to obtain a PDF from the following tried sources: …", each PDF
 by host and who named it, chain order); lookup-only keeps the grouped sentence.
 The first copy served ends the walk; one not saved is a caching note, never a
-shortfall (Python `NOT_SAVED`; apps `fullTextPDFNotSavedFrom`, Room 9).
+shortfall (Python `NOT_SAVED`; apps `fullTextPDFNotSavedFrom`, Room 9); in
+Swift a textless copy settles the question too. Identical entries are told once.
 OpenAlex only when no Unpaywall PDF was served. Stored shortfall: v1 for one
 address-less entry, else v2 `entries`. **Next: stage C (CORE, Elsevier, keys
 in settings)**; then the embedded browser and review queue (`challenged`).
