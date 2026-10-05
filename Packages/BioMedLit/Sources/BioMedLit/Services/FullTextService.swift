@@ -80,6 +80,14 @@ public actor FullTextService {
     /// prose and loses the figures, tables and layout.
     private let extractPDFText: Bool
 
+    /// Writes a verified PDF's bytes to its cache file.
+    ///
+    /// Injectable so a test can make the write fail: `pdfCacheDirectory` is a
+    /// fixed location, so without this seam a copy served but not cached
+    /// (#480) could be tested only at helper level, never through the chain.
+    /// Defaults to ``writeAtomically(_:to:)``.
+    private let writeCachedPDF: @Sendable (Data, URL) throws -> Void
+
     /// How the Europe PMC full-text XML fetch retries a transient failure.
     ///
     /// Injectable so a test can pin what a throttle that outlasts its retries
@@ -165,6 +173,9 @@ public actor FullTextService {
     ///     ``RetryConfiguration/pmcOpenData``.
     ///   - openAlexRetry: How each request to OpenAlex retries a transient
     ///     failure. Defaults to ``RetryConfiguration/openAlex``.
+    ///   - writeCachedPDF: Writes a verified PDF to its cache file. Defaults
+    ///     to ``writeAtomically(_:to:)``; injectable so a test can make the
+    ///     write fail.
     public init(
         email: String,
         session: URLSession = FullTextService.makeSession(),
@@ -173,7 +184,8 @@ public actor FullTextService {
         extractPDFText: Bool = true,
         europePMCRetry: RetryConfiguration = .serverError,
         pmcOpenDataRetry: RetryConfiguration = .pmcOpenData,
-        openAlexRetry: RetryConfiguration = .openAlex
+        openAlexRetry: RetryConfiguration = .openAlex,
+        writeCachedPDF: @escaping @Sendable (Data, URL) throws -> Void = FullTextService.writeAtomically
     ) {
         self.email = email
         self.europePMCService = europePMCService
@@ -183,11 +195,23 @@ public actor FullTextService {
         self.europePMCRetry = europePMCRetry
         self.pmcOpenDataRetry = pmcOpenDataRetry
         self.openAlexRetry = openAlexRetry
+        self.writeCachedPDF = writeCachedPDF
+    }
+
+    /// The production cache write: the whole file or none, so a write that
+    /// fails midway leaves no partial PDF a later lookup could serve.
+    ///
+    /// - Parameters:
+    ///   - data: The verified PDF bytes.
+    ///   - url: The cache file to write.
+    /// - Throws: The write's error.
+    public static func writeAtomically(_ data: Data, to url: URL) throws {
+        try data.write(to: url, options: .atomic)
     }
 
     /// The transport production uses.
     ///
-    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:openAlexRetry:)``
+    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:openAlexRetry:writeCachedPDF:)``
     /// so a test can
     /// substitute a stubbed `URLSession` without reproducing these timeouts.
     ///
@@ -545,6 +569,11 @@ public actor FullTextService {
         // An open-access copy served but not cached (#480): it ends the walk,
         // settles the question, and is the caching note's address
         var openAccessNotSavedFrom: String?
+        // Whether any open-access copy was served: not cached, or cached
+        // without text while an abstract is held. Either settles the
+        // question; only the first ends the walk (a textless copy lets
+        // another, OpenAlex's included, be tried for text)
+        var openAccessCopyServed = false
         var triedPDFs = Set<String>()
         if let cacheKey, !unpaywallDOI.isEmpty {
             let doi = unpaywallDOI
@@ -585,6 +614,7 @@ public actor FullTextService {
                 linkFallback: &pdfLinkFallback,
                 shortfall: &openAccessShortfall,
                 notSavedFrom: &openAccessNotSavedFrom,
+                copyServed: &openAccessCopyServed,
                 tried: &triedPDFs
             ) {
                 return result
@@ -606,6 +636,7 @@ public actor FullTextService {
                         linkFallback: &pdfLinkFallback,
                         shortfall: &openAccessShortfall,
                         notSavedFrom: &openAccessNotSavedFrom,
+                        copyServed: &openAccessCopyServed,
                         tried: &triedPDFs
                     ) {
                         return result
@@ -627,7 +658,7 @@ public actor FullTextService {
             }
         }
         openAccessShortfall = Self.settledOpenAccessShortfall(
-            openAccessShortfall, copyServed: openAccessNotSavedFrom != nil
+            openAccessShortfall, copyServed: openAccessCopyServed
         )
         // The note names the copy that settled it, else a render not saved
         let pdfNotSavedFrom = openAccessNotSavedFrom ?? renderNotSavedFrom
@@ -2367,6 +2398,8 @@ public actor FullTextService {
     /// is the result; served but not cached, its link becomes the link
     /// fallback (it beats any held), its address is the caching note, and no
     /// further candidate is asked, saving being our problem, not the source's.
+    /// A copy cached without text while an abstract is held settles the
+    /// question too, but the walk goes on for a copy with text.
     ///
     /// The caching note's address is the URL the link is kept under
     /// (`absoluteString`), so the app can tell whether the link it stored is
@@ -2383,6 +2416,8 @@ public actor FullTextService {
     ///   - linkFallback: The chain's link fallback.
     ///   - shortfall: What went unsettled so far; added to.
     ///   - notSavedFrom: Set to the address of a copy served but not cached.
+    ///   - copyServed: Set when a copy is served, whether not cached or
+    ///     cached without text: either settles the open-access question.
     ///   - tried: Addresses already asked, across sources; updated.
     /// - Returns: The result to return, or `nil` to go on down the chain.
     /// - Throws: `CancellationError`.
@@ -2397,6 +2432,7 @@ public actor FullTextService {
         linkFallback: inout FullTextResult?,
         shortfall: inout OpenAccessShortfall?,
         notSavedFrom: inout String?,
+        copyServed: inout Bool,
         tried: inout Set<String>
     ) async throws -> FullTextResult? {
         for address in addresses where tried.insert(address).inserted {
@@ -2433,8 +2469,23 @@ public actor FullTextService {
             case .notCached:
                 linkFallback = FullTextResult(content: content(pdfURL), degradation: degradation)
                 notSavedFrom = pdfURL.absoluteString
+                copyServed = true
                 return nil
-            case .notAttempted, .noText, .extracted:
+            case .noText:
+                // Obtained, so the question is settled; with an abstract held
+                // the walk goes on for a copy with text
+                copyServed = true
+                if let result = pdfTierResult(
+                    outcome: outcome,
+                    content: content(pdfURL),
+                    degradation: degradation,
+                    holdingAbstract: holdingAbstract,
+                    articleName: articleName,
+                    linkFallback: &linkFallback
+                ) {
+                    return result
+                }
+            case .notAttempted, .extracted:
                 if let result = pdfTierResult(
                     outcome: outcome,
                     content: content(pdfURL),
@@ -2450,13 +2501,14 @@ public actor FullTextService {
         return nil
     }
 
-    /// The shortfall the fallbacks carry (#480): a copy served but not cached
-    /// settles the open-access question, so nothing that went unsettled is
-    /// told then. `FullTextResult.init` asserts the same of the link itself.
+    /// The shortfall the fallbacks carry (#480): a copy served, whether not
+    /// cached or cached without text, settles the open-access question, so
+    /// nothing that went unsettled is told then. `FullTextResult.init` asserts the same of the link itself.
     ///
     /// - Parameters:
     ///   - shortfall: What went unsettled in the open-access tiers.
-    ///   - copyServed: Whether an open-access copy was served and not cached.
+    ///   - copyServed: Whether an open-access copy was served: not cached, or
+    ///     cached without text while an abstract is held.
     /// - Returns: The shortfall to carry, or `nil` when the question is settled.
     static func settledOpenAccessShortfall(
         _ shortfall: OpenAccessShortfall?, copyServed: Bool
@@ -2479,7 +2531,7 @@ public actor FullTextService {
         let fileURL = cacheDir.appendingPathComponent(Self.cacheFilename(key: key, url: url))
 
         do {
-            try data.write(to: fileURL, options: .atomic)
+            try writeCachedPDF(data, fileURL)
             return fileURL.path
         } catch {
             BioMedLitLib.logger?.error("Failed to cache PDF: \(error.localizedDescription)", category: .fullText)

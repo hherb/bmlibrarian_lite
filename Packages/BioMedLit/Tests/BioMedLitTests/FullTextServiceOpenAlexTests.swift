@@ -63,7 +63,9 @@ final class FullTextServiceOpenAlexTests: XCTestCase {
     }
 
     private func makeService(
-        retry: RetryConfiguration = .noRetry, email: String = "test@example.org"
+        retry: RetryConfiguration = .noRetry,
+        email: String = "test@example.org",
+        writeCachedPDF: @escaping @Sendable (Data, URL) throws -> Void = FullTextService.writeAtomically
     ) -> FullTextService {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]
@@ -75,7 +77,8 @@ final class FullTextServiceOpenAlexTests: XCTestCase {
             extractor: ExtractingStub(),
             europePMCRetry: .noRetry,
             pmcOpenDataRetry: .noRetry,
-            openAlexRetry: retry
+            openAlexRetry: retry,
+            writeCachedPDF: writeCachedPDF
         )
     }
 
@@ -110,6 +113,21 @@ final class FullTextServiceOpenAlexTests: XCTestCase {
         XCTAssertEqual(result.content, .openAlex(pdfURL: URL(string: repo)!))
         XCTAssertEqual(result.source, .openAlex)
         XCTAssertNil(result.openAccessShortfall)
+    }
+
+    /// OpenAlex's copy served and not cached settles the question as
+    /// Unpaywall's does: its link is kept, Unpaywall's refusal is not told.
+    func testAnOpenAlexCopyNotCachedSettlesTheQuestion() async throws {
+        StubURLProtocol.routes["unpaywall"] = (200, unpaywall([walled]))
+        StubURLProtocol.routes["walled.example.org"] = (403, Data())
+        StubURLProtocol.routes["api.openalex.org"] = (200, openAlex([repo]))
+        StubURLProtocol.routes["repo.example.org"] = (200, pdfBody)
+        let result = try await makeService(writeCachedPDF: { _, _ in
+            throw CocoaError(.fileWriteOutOfSpace)
+        }).fetchFullText(pmcId: nil, doi: doi, pmid: "")
+        XCTAssertEqual(result.content, .openAlex(pdfURL: URL(string: repo)!))
+        XCTAssertNil(result.openAccessShortfall)
+        XCTAssertEqual(result.pdfNotSavedFrom, repo)
     }
 
     func testAPDFBothNameIsRequestedOnce() async throws {
@@ -180,7 +198,9 @@ final class FullTextServiceOpenAlexTests: XCTestCase {
     }
 
     func testTheContractsStatuses() async throws {
-        for row in try XCTUnwrap(OpenAlexContract.load()["status"] as? [[String: Any]]) {
+        let rows = try XCTUnwrap(OpenAlexContract.load()["status"] as? [[String: Any]])
+        XCTAssertFalse(rows.isEmpty, "an empty table would pass vacuously")
+        for row in rows {
             StubURLProtocol.reset()
             let status = row["status"] as! Int
             StubURLProtocol.routes["api.openalex.org"] = (

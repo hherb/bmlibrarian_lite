@@ -25,6 +25,18 @@ private struct ExtractingStub: PDFTextExtracting {
     }
 }
 
+/// Holds no text: a scan, say.
+private struct TextlessStub: PDFTextExtracting {
+    func extract(from fileURL: URL) -> PDFExtractionResult {
+        PDFExtractionResult(text: "", success: true, pageCount: 1, convertedPages: 0, warnings: [])
+    }
+}
+
+/// A cache write that always fails, as on a full disk.
+private let failingWrite: @Sendable (Data, URL) throws -> Void = { _, _ in
+    throw CocoaError(.fileWriteOutOfSpace)
+}
+
 /// Every PDF Unpaywall names is tried, in Unpaywall's order; every failure is
 /// told; a copy served but not saved ends the walk with a caching note
 /// (#480, stage B; the maintainer's decisions of 2026-10-05).
@@ -39,10 +51,39 @@ final class FullTextServiceUnpaywallLocationsTests: XCTestCase {
         ArticleCacheKey(pmid: "", pmcId: nil, doi: doi)!
     }
 
+    /// A PMC accession no article has yet, for the test that needs Europe
+    /// PMC's abstract held: the PDF cache is the real user directory, so a
+    /// real accession's entries would be deleted by this suite.
+    private let unassignedPMCID = "PMC99999992"
+
+    /// The cache key of a fetch that passes ``unassignedPMCID``.
+    private var pmcCacheKey: ArticleCacheKey {
+        ArticleCacheKey(pmid: "", pmcId: unassignedPMCID, doi: doi)!
+    }
+
+    /// Europe PMC's render of the article, resolved by the search below.
+    private let render = "https://europepmc.org/articles/PMC1/pdf"
+
+    /// An S3 listing naming nothing: PMC's open-data bucket holds no copy.
+    private let emptyListing = Data("""
+        <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><KeyCount>0</KeyCount>\
+        </ListBucketResult>
+        """.utf8)
+    private let listingRoute = "pmc-oa-opendata.s3.amazonaws.com/?list-type"
+
+    /// Europe PMC's XML with an abstract and no body: the abstract is held.
+    private let bodyless = Data("""
+        <article><front><article-meta>
+          <title-group><article-title>A trial</article-title></title-group>
+          <abstract><p>Background and findings only.</p></abstract>
+        </article-meta></front></article>
+        """.utf8)
+
     override func setUp() {
         super.setUp()
         StubURLProtocol.reset()
         FullTextService.deleteCachedPDF(for: cacheKey)
+        FullTextService.deleteCachedPDF(for: pmcCacheKey)
         // Europe PMC knows no record, so the Unpaywall tier decides the outcome
         StubURLProtocol.routes["search"] = (200, Data(#"{"resultList": {"result": []}}"#.utf8))
     }
@@ -50,10 +91,15 @@ final class FullTextServiceUnpaywallLocationsTests: XCTestCase {
     override func tearDown() {
         StubURLProtocol.reset()
         FullTextService.deleteCachedPDF(for: cacheKey)
+        FullTextService.deleteCachedPDF(for: pmcCacheKey)
         super.tearDown()
     }
 
-    private func fetch() async throws -> FullTextResult {
+    private func fetch(
+        pmcId: String? = nil,
+        extractor: PDFTextExtracting = ExtractingStub(),
+        writeCachedPDF: @escaping @Sendable (Data, URL) throws -> Void = FullTextService.writeAtomically
+    ) async throws -> FullTextResult {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]
         let session = URLSession(configuration: config)
@@ -61,8 +107,9 @@ final class FullTextServiceUnpaywallLocationsTests: XCTestCase {
             email: "test@example.org",
             session: session,
             europePMCService: EuropePMCService(session: session),
-            extractor: ExtractingStub()
-        ).fetchFullText(pmcId: nil, doi: doi, pmid: "")
+            extractor: extractor,
+            writeCachedPDF: writeCachedPDF
+        ).fetchFullText(pmcId: pmcId, doi: doi, pmid: "")
     }
 
     private func unpaywall(_ pdfs: [String]) -> Data {
@@ -134,9 +181,8 @@ final class FullTextServiceUnpaywallLocationsTests: XCTestCase {
         )
     }
 
-    /// `.notCached` needs a cache write that fails, which no test can cause
-    /// (`pdfCacheDirectory` is a fixed location), so the rules are pinned
-    /// where the chain applies them.
+    /// The rules the chain applies, pinned where it applies them; the tests
+    /// below drive them through the chain with a failing cache write.
     func testAServedButUncachedCopySettlesTheQuestion() {
         let refused = OpenAccessShortfall(source: .pdf, failure: .httpStatus(403), address: first)
         XCTAssertNil(FullTextService.settledOpenAccessShortfall(refused, copyServed: true))
@@ -145,5 +191,95 @@ final class FullTextServiceUnpaywallLocationsTests: XCTestCase {
             .noting(openAccessShortfall: nil, pdfNotSavedFrom: second)
         XCTAssertNil(link.openAccessShortfall, "the init's assert holds")
         XCTAssertEqual(link.pdfNotSavedFrom, second)
+    }
+    /// The first copy served ends the walk even unsaved: saving is our
+    /// problem, not the source's, so no later candidate and no OpenAlex.
+    func testAServedCopyNotCachedEndsTheWalk() async throws {
+        StubURLProtocol.routes["unpaywall"] = (200, unpaywall([first, second]))
+        StubURLProtocol.routes["walled.example.org"] = (200, pdfBody)
+        StubURLProtocol.routes["repo.example.org"] = (200, pdfBody)
+
+        let result = try await fetch(writeCachedPDF: failingWrite)
+
+        XCTAssertEqual(result.content, .unpaywall(pdfURL: URL(string: first)!), "its link is kept")
+        XCTAssertNil(result.openAccessShortfall, "a served copy settles it")
+        XCTAssertEqual(result.pdfNotSavedFrom, first)
+        XCTAssertFalse(StubURLProtocol.requested("repo.example.org"), "\(StubURLProtocol.requestedURLs)")
+        XCTAssertFalse(StubURLProtocol.requested("api.openalex.org"))
+    }
+
+    /// A refusal before the copy not cached is not told: the copy settles it.
+    func testARefusalBeforeACopyNotCachedIsNotTold() async throws {
+        StubURLProtocol.routes["unpaywall"] = (200, unpaywall([first, second]))
+        StubURLProtocol.routes["walled.example.org"] = (403, Data())
+        StubURLProtocol.routes["repo.example.org"] = (200, pdfBody)
+
+        let result = try await fetch(writeCachedPDF: failingWrite)
+
+        XCTAssertEqual(result.content, .unpaywall(pdfURL: URL(string: second)!))
+        XCTAssertNil(result.openAccessShortfall)
+        XCTAssertEqual(result.pdfNotSavedFrom, second)
+        XCTAssertFalse(StubURLProtocol.requested("api.openalex.org"))
+    }
+
+    /// The control: the same chain with the write succeeding reads the copy.
+    func testControlTheSameCopyCachedIsRead() async throws {
+        StubURLProtocol.routes["unpaywall"] = (200, unpaywall([first, second]))
+        StubURLProtocol.routes["walled.example.org"] = (403, Data())
+        StubURLProtocol.routes["repo.example.org"] = (200, pdfBody)
+
+        let result = try await fetch()
+
+        XCTAssertEqual(result.content, .unpaywall(pdfURL: URL(string: second)!))
+        XCTAssertEqual(result.contentKind, .extracted)
+        XCTAssertNil(result.pdfNotSavedFrom)
+    }
+
+    /// Europe PMC's render is no open-access copy: unsaved, it is the note's
+    /// address, but Unpaywall's walk still runs and its refusal is told.
+    func testARenderNotCachedLetsTheUnpaywallWalkRun() async throws {
+        StubURLProtocol.routes["search"] = (200, Data(#"""
+            {"resultList": {"result": [{
+              "id": "1", "pmcid": "PMC1", "inPMC": "Y", "doi": "10.1/locations",
+              "fullTextUrlList": {"fullTextUrl": [
+                {"documentStyle": "pdf", "site": "Europe_PMC",
+                 "url": "https://europepmc.org/articles/PMC1/pdf",
+                 "availability": "Open access", "availabilityCode": "OA"}
+              ]}
+            }]}}
+            """#.utf8))
+        StubURLProtocol.routes["fullTextXML"] = (404, Data())
+        StubURLProtocol.routes[listingRoute] = (200, emptyListing)
+        StubURLProtocol.routes["articles/PMC1/pdf"] = (200, pdfBody)
+        StubURLProtocol.routes["unpaywall"] = (200, unpaywall([second]))
+        StubURLProtocol.routes["repo.example.org"] = (403, Data())
+
+        let result = try await fetch(writeCachedPDF: failingWrite)
+
+        XCTAssertTrue(StubURLProtocol.requested("articles/PMC1/pdf"), "the render tier was reached")
+        XCTAssertTrue(StubURLProtocol.requested("repo.example.org"), "the walk ran")
+        XCTAssertEqual(result.pdfNotSavedFrom, render)
+        XCTAssertEqual(
+            result.openAccessShortfall,
+            OpenAccessShortfall(source: .pdf, failure: .httpStatus(403), address: second),
+            "a render not saved settles nothing"
+        )
+    }
+
+    /// A copy obtained without text, the abstract held, settles the question
+    /// though the walk goes on for text: no "Failed to obtain" beside it.
+    func testATextlessCopyWithTheAbstractHeldSettlesTheQuestion() async throws {
+        StubURLProtocol.routes["fullTextXML"] = (200, bodyless)
+        StubURLProtocol.routes[listingRoute] = (200, emptyListing)
+        StubURLProtocol.routes["unpaywall"] = (200, unpaywall([first, second]))
+        StubURLProtocol.routes["walled.example.org"] = (403, Data())
+        StubURLProtocol.routes["repo.example.org"] = (200, pdfBody)
+
+        let result = try await fetch(pmcId: unassignedPMCID, extractor: TextlessStub())
+
+        XCTAssertEqual(result.contentKind, .abstract, "a textless copy does not beat the abstract")
+        XCTAssertNil(result.openAccessShortfall, "a copy was obtained")
+        XCTAssertNil(result.pdfNotSavedFrom, "it was saved")
+        XCTAssertTrue(StubURLProtocol.requested("api.openalex.org"), "OpenAlex may still have text")
     }
 }

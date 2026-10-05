@@ -274,7 +274,7 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         return Self.sentenceStart("\(clauses.joined(separator: ", and ")), \(ending)")
     }
 
-    /// Python's `tried_sources_statement`.
+    /// Python's `tried_sources_statement`; identical entries are told once.
     private var triedSourcesStatement: String {
         let lookups = entries.filter { $0.address == nil }
         let (unasked, answered) = Self.unsettled(lookups)
@@ -304,7 +304,11 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         }
         items.sort { ($0.rank, $0.position) < ($1.rank, $1.position) }
         let ending = items.contains { $0.unasked } ? Self.triedUnaskedEnding : Self.triedAnsweredEnding
-        return Self.triedSourcesLead + items.map(\.text).joined(separator: "; ") + ". " + ending
+        // Two PDFs on one host refused alike read the same: told once, the
+        // first after sorting, as Python's `dict.fromkeys` keeps it.
+        var texts: [String] = []
+        for item in items where !texts.contains(item.text) { texts.append(item.text) }
+        return Self.triedSourcesLead + texts.joined(separator: "; ") + ". " + ending
     }
 
     /// Python's `configuration_nudge`: only Unpaywall is ever not configured.
@@ -315,16 +319,20 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
     }
 
     /// Python's `address_host`: the host, lower-cased and without a port;
-    /// else the address trimmed.
+    /// else the address trimmed. A scheme-relative `//host/…` names its host,
+    /// as in urlsplit.
     ///
     /// - Parameter address: The PDF's address, as the source gave it.
     /// - Returns: The name a tried PDF is told by.
     public static func host(of address: String) -> String {
         let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let scheme = trimmed.range(of: "^[A-Za-z][A-Za-z0-9+.-]*://", options: .regularExpression) else {
+        // `scheme://`, or a bare `//` (scheme-relative), as urlsplit reads both.
+        guard let start = trimmed.range(
+            of: "^(?:[A-Za-z][A-Za-z0-9+.-]*:)?//", options: .regularExpression
+        ) else {
             return trimmed
         }
-        let rest = trimmed[scheme.upperBound...]
+        let rest = trimmed[start.upperBound...]
         var authority = rest[..<(rest.firstIndex { "/?#".contains($0) } ?? rest.endIndex)]
         if let at = authority.lastIndex(of: "@") { authority = authority[authority.index(after: at)...] }
         var host: Substring

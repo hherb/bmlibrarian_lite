@@ -257,15 +257,19 @@ struct ParseWarningBannerContent: Equatable {
 ///   record from a newer build names a reason this one does not know (#186);
 /// - an open-access lookup went unsettled — an informational line of its own,
 ///   beside any of the above or alone (#466): whether the article has a free
-///   copy was not established, because Unpaywall, the landing page it named, or the PDF it named (#478)
-///   could not be asked or did not serve it;
+///   copy was not established. With a PDF tried and none obtained it lists
+///   every source tried, each PDF by host and by who named it (Unpaywall or
+///   OpenAlex), each unsettled lookup by name (#480); otherwise it names the
+///   lookups that could not be asked or did not serve it;
 /// - a PDF was served and could not be saved on this device — an informational
-///   caching note of its own (#480), naming where it was found.
+///   caching note of its own (#480), naming where it was found; never part of
+///   the shortfall list, since a copy served settles the open-access question.
 ///
-/// The last two groups are deliberately *not* warnings. A fallback PDF or publisher link is
-/// complete in itself, and a warning triangle over content that is fine is the
-/// false alarm that trains a reader to dismiss the banner on the article where
-/// text really was discarded (#183).
+/// The shortfall line and the caching note are deliberately *not* warnings. A
+/// fallback PDF or publisher link is complete in itself, and a warning
+/// triangle over content that is fine is the false alarm that trains a reader
+/// to dismiss the banner on the article where text really was discarded
+/// (#183).
 ///
 /// The sentences are composed here rather than in `BioMedLit` because they are
 /// clinician-facing copy: the package emits typed losses and developer
