@@ -901,20 +901,22 @@ class LiteConfig:
         return data
 
     def _to_dict_without_secrets(self) -> dict[str, Any]:
-        """Build the configuration dictionary without the PubMed API key.
+        """Build the configuration dictionary without its secrets.
 
         The shared body of :meth:`to_dict` and :meth:`to_redacted_dict`. Keeping
-        the key out of it and letting each caller fill it in is what makes the
-        redacted view provably free of *that* secret.
+        the keys out of it and letting each caller fill them in is what makes
+        the redacted view provably free of *those* secrets
+        (``pubmed.api_key`` and ``discovery.core_api_key``).
 
-        The scope of the guarantee is exactly one field. The nested ``to_dict()``
+        The scope of the guarantee is exactly two fields. The nested ``to_dict()``
         calls below (``models``, ``benchmark``, ``transparency``) are trusted to
         carry no credentials -- true of their current schemas, but not enforced.
         A new secret in any of them must be excluded here too, or
         :meth:`to_redacted_dict` will leak it.
 
         Returns:
-            Configuration dictionary with no ``pubmed.api_key`` entry
+            Configuration dictionary with no ``pubmed.api_key`` or
+            ``discovery.core_api_key`` entry
         """
         return {
             "models": self.models.to_dict(),

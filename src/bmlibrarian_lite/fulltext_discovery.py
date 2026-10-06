@@ -24,6 +24,7 @@ Provides unified full-text retrieval that tries multiple sources:
    2b. Europe PMC's PDF render
 3. Cached PDF
 4. PDF download via traditional sources
+5. CORE's extracted text, last and only with a CORE key (#480)
 
 Usage:
     from bmlibrarian_lite.fulltext_discovery import FulltextDiscoverer

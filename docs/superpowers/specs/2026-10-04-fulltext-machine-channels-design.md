@@ -219,6 +219,7 @@ audit say where it came from. The XML is not truncated (golden rule 13).
   5xx "could not be asked"; a 403 or 404 from a download "did not serve it").
 - **A settled "no full text" still needs** every non-optional source answered.
   The optional channels (CORE, Elsevier) never block it (decision 4).
+  **As built (C1, maintainer 2026-10-06):** this holds only for a channel without a key. A configured CORE that could not be asked is an unsettled lookup and blocks a settled absence; C2 should rule on Elsevier the same way.
 - **Keys never appear in reader-facing text.** `RequestFailure.describe()`
   carries no provider text, and no key ever appears in a URL, a log line or a
   stored record.

@@ -919,6 +919,8 @@ request is a search, and its results are not guaranteed to be this article.
   open-access sentence ("CORE (HTTP 503 Service Unavailable) could not be
   asked, …") and last in "Tried sources" order. It blocks a settled absence
   (the maintainer's decision of 2026-10-06), as any unanswered source does.
+  A rejected key (HTTP 401/403) is told today as 'did not serve it' for each
+  article; a session-wide 'key refused' is planned with stage C2 (#498).
 - **A missing key is silent** (spec decision 4). It is not recorded as a
   `NOT_CONFIGURED` skip, which on the desktop would block every settled
   absence and add a configuration nudge to every sentence; the settings
@@ -938,7 +940,9 @@ request is a search, and its results are not guaranteed to be this article.
   Android asks in `fetchFullText` when no open-access candidate exists, and
   otherwise in recording, through its `askCore` hook, once every candidate
   failed. Android shows the text as plain text, never through its
-  JavaScript-enabled WebView.
+  JavaScript-enabled WebView. Android's Europe PMC render tier returns before
+  Unpaywall (#493), so when Europe PMC lists a render Android asks neither
+  Unpaywall, OpenAlex nor CORE.
 
 ## DOI Resolution
 
