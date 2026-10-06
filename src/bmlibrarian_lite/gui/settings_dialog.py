@@ -63,6 +63,7 @@ from ..config import (
 from ..embeddings import LiteEmbedder
 from ..constants import (
     CORE_API_KEY_EXPLANATION,
+    UNPAYWALL_EMAIL_EXPLANATION,
     DEFAULT_LLM_MODEL,
     DEFAULT_LLM_TEMPERATURE,
     DEFAULT_LLM_MAX_TOKENS,
@@ -678,6 +679,14 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(scaled(12), scaled(12), scaled(12), scaled(12))
         layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
+        self.unpaywall_email_input = QLineEdit()
+        self.unpaywall_email_input.setPlaceholderText("your.email@example.com")
+        self.unpaywall_email_input.setToolTip(UNPAYWALL_EMAIL_EXPLANATION)
+        layout.addRow("Unpaywall Email:", self.unpaywall_email_input)
+        unpaywall_note = QLabel(f"<small>{UNPAYWALL_EMAIL_EXPLANATION}</small>")
+        unpaywall_note.setWordWrap(True)
+        layout.addRow(unpaywall_note)
+
         self.core_api_key_input = QLineEdit()
         self.core_api_key_input.setPlaceholderText("Optional")
         self.core_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
@@ -1055,6 +1064,7 @@ class SettingsDialog(QDialog):
             self.api_key_input.setText(self.config.pubmed.api_key)
 
         # Full Text
+        self.unpaywall_email_input.setText(self.config.discovery.unpaywall_email)
         if self.config.discovery.core_api_key:
             self.core_api_key_input.setText(self.config.discovery.core_api_key)
 
@@ -1155,6 +1165,9 @@ class SettingsDialog(QDialog):
         self.config.pubmed.api_key = api_key if api_key else None
 
         # Save Full Text keys
+        self.config.discovery.unpaywall_email = (
+            self.unpaywall_email_input.text().strip()
+        )
         core_key = self.core_api_key_input.text().strip()
         self.config.discovery.core_api_key = core_key or None
 

@@ -1123,6 +1123,10 @@ CORE_ENCODING = "utf-8"
 # The environment variable a CORE key may be given in, as NCBI_API_KEY is.
 ENV_CORE_API_KEY = "CORE_API_KEY"
 # What the settings say a CORE key is for.
+UNPAYWALL_EMAIL_EXPLANATION = (
+    "Unpaywall asks for an email with every request. Without one, "
+    "Unpaywall's open-access copies are not looked for."
+)
 CORE_API_KEY_EXPLANATION = (
     "Optional. A free CORE API key (core.ac.uk/services/api) lets the app "
     "read the text CORE extracted from repository copies when no other "

@@ -332,7 +332,7 @@ BMLibrarian Lite can automatically find and retrieve full-text content through a
 
 JATS XML articles are rendered with full support for tables, figures, references, and anchor navigation.
 
-Configure your email in Settings to enable Unpaywall access.
+Set the Unpaywall email under Settings → Full Text to enable Unpaywall access.
 
 ### Document Interrogation
 

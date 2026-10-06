@@ -91,6 +91,30 @@ def test_the_dialog_shows_a_saved_key(qapp) -> None:
     assert SettingsDialog(config).core_api_key_input.text() == KEY
 
 
+def test_the_dialog_shows_a_saved_unpaywall_email(qapp) -> None:
+    """Opening the dialog loads the Unpaywall email into its field (#497)."""
+    from bmlibrarian_lite.gui.settings_dialog import SettingsDialog
+
+    config = LiteConfig()
+    config.discovery.unpaywall_email = "a@b.org"
+    assert SettingsDialog(config).unpaywall_email_input.text() == "a@b.org"
+
+
+def test_the_dialog_saves_the_unpaywall_email_stripped(qapp, monkeypatch) -> None:
+    """Saving writes the email stripped; an empty field saves the default."""
+    from bmlibrarian_lite.gui.settings_dialog import SettingsDialog
+
+    config = LiteConfig()
+    monkeypatch.setattr(LiteConfig, "save", lambda self, *a, **k: None)
+    dialog = SettingsDialog(config)
+    dialog.unpaywall_email_input.setText("  a@b.org  ")
+    dialog._save_config()
+    assert config.discovery.unpaywall_email == "a@b.org"
+    dialog.unpaywall_email_input.setText("")
+    dialog._save_config()
+    assert config.discovery.unpaywall_email == ""
+
+
 @pytest.mark.parametrize(
     ("key", "expected"),
     [(KEY, REDACTED_SECRET_PLACEHOLDER), (None, "(not set)")],
