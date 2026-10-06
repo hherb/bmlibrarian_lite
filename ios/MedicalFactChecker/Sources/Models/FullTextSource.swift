@@ -194,8 +194,8 @@ struct AppFullTextResult: Equatable, Sendable {
     /// record written by a newer build.
     let degradation: FullTextDegradation?
 
-    /// Why the open-access copy Unpaywall may know of went unassessed, or `nil`
-    /// when nothing was left unsettled (#466).
+    /// Why the open-access copy Unpaywall or OpenAlex may know of went
+    /// unassessed, or `nil` when nothing was left unsettled (#466, #480).
     ///
     /// Carried for the reader, beside ``degradation`` rather than as one of its
     /// cases, because both can be true of one fetch.
@@ -206,6 +206,12 @@ struct AppFullTextResult: Equatable, Sendable {
     ///
     /// A fault of ours, not the source's, so it is told as a caching note of
     /// its own (``pdfNotSavedNote``), never as part of ``openAccessShortfall``.
+    ///
+    /// ``pdfNotSavedNote`` tells "only its link is kept" by comparing this with
+    /// ``pdfURL``'s `absoluteString`. That holds only because `FullTextService`
+    /// stores the fetched URL's `absoluteString` here, the same `URL` the
+    /// link-only content carries, never the address as the source gave it
+    /// (which `URL(string:)` may re-encode and a shortfall entry keeps).
     let pdfNotSavedFrom: String?
 
     /// What this result's text actually is.

@@ -68,6 +68,16 @@ final class OpenAccessShortfallNoticeTests: XCTestCase {
         XCTAssertFalse(link(.europePMCUnreachable, Self.throttled).hasNothingToExplain)
     }
 
+    /// A caching note holds the gate back too (#480): opening the browser
+    /// first would take the reader past it.
+    func testACachingNoteAloneHoldsTheWebLinkBack() {
+        let noted = AppFullTextResult(
+            content: .webURL(Self.doiLink), source: .doi, pdfNotSavedFrom: Self.unsavedPDF.absoluteString
+        )
+
+        XCTAssertFalse(noted.hasNothingToExplain)
+    }
+
     /// The control: an Unpaywall that answered leaves nothing to say.
     func testASettledFallbackCarriesNoShortfall() {
         let result = BioMedLitAdapters.toAppFullTextResult(
@@ -247,6 +257,69 @@ final class OpenAccessShortfallNoticeTests: XCTestCase {
             result.pdfNotSavedNote,
             OpenAccessShortfall.notSavedNote(address: Self.unsavedPDF.absoluteString, linkKept: true)
         )
+    }
+
+    /// OpenAlex's PDF, served and cached, maps as Unpaywall's does: the local
+    /// file wins over the remote URL, and the source and its badge are
+    /// OpenAlex's.
+    func testTheAdapterMapsACachedOpenAlexPDFToTheLocalFile() {
+        let localPath = "/tmp/bmlibrarian-test/openalex.pdf"
+        let result = BioMedLitAdapters.toAppFullTextResult(
+            BMLFullTextResult(
+                content: .openAlex(pdfURL: Self.unsavedPDF),
+                contentKind: .extracted,
+                extractedText: "The article.",
+                localPDFPath: localPath,
+                extractionCoverage: PDFExtractionCoverage(convertedPages: 1, pageCount: 1)
+            )
+        )
+
+        XCTAssertEqual(result.content, .pdfURL(URL(fileURLWithPath: localPath)))
+        XCTAssertEqual(result.source, .openAlex)
+        XCTAssertEqual(result.source.displayName, "OpenAlex")
+        XCTAssertEqual(result.source.iconName, "lock.open")
+        XCTAssertNil(result.pdfNotSavedNote)
+    }
+
+    /// OpenAlex's PDF served and not saved: its remote link is the result,
+    /// and the caching note says only that link is kept.
+    func testTheAdapterCarriesAnUnsavedOpenAlexPDFOntoTheAppResult() {
+        let result = BioMedLitAdapters.toAppFullTextResult(
+            BMLFullTextResult(
+                content: .openAlex(pdfURL: Self.unsavedPDF),
+                pdfNotSavedFrom: Self.unsavedPDF.absoluteString
+            )
+        )
+
+        XCTAssertEqual(result.content, .pdfURL(Self.unsavedPDF))
+        XCTAssertEqual(result.source, .openAlex)
+        XCTAssertEqual(result.pdfNotSavedFrom, Self.unsavedPDF.absoluteString)
+        XCTAssertEqual(
+            result.pdfNotSavedNote,
+            OpenAccessShortfall.notSavedNote(address: Self.unsavedPDF.absoluteString, linkKept: true)
+        )
+    }
+
+    /// An address `URL(string:)` re-encodes (a space, a non-ASCII letter)
+    /// still reads "only its link is kept": the service hands over the
+    /// fetched URL's `absoluteString` as the note's address (pinned in
+    /// BioMedLit's `testTheNoteAddressIsTheKeptLinkEvenWhenReEncoded`), and
+    /// the document stores that URL's `absoluteString` as its link.
+    func testAReEncodedAddressStillKeepsItsLink() throws {
+        let raw = "https://repo.example.org/my paper \u{00FC}.pdf"
+        let pdfURL = try XCTUnwrap(URL(string: raw))
+        XCTAssertNotEqual(pdfURL.absoluteString, raw, "the address must be one URL(string:) re-encodes")
+        let result = BioMedLitAdapters.toAppFullTextResult(
+            BMLFullTextResult(content: .unpaywall(pdfURL: pdfURL), pdfNotSavedFrom: pdfURL.absoluteString)
+        )
+        let document = makeDocument()
+
+        document.applyFullTextResult(result)
+
+        XCTAssertTrue(document.holdsOnlyUndownloadedPDFLink)
+        XCTAssertEqual(document.fullTextPDFPath, document.fullTextPDFNotSavedFrom)
+        XCTAssertTrue(try XCTUnwrap(result.pdfNotSavedNote).contains("so only its link is kept."))
+        XCTAssertTrue(try XCTUnwrap(document.storedPDFNotSavedNote).contains("so only its link is kept."))
     }
 
     /// The document holds the PDF's link as its own, so the note says only

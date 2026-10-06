@@ -135,6 +135,17 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
             self.init(source: source, reason: .failed(failure), address: address)
         }
 
+        /// Create an entry from any reason, a skipped lookup's included.
+        ///
+        /// Kept to this file so that only ``OpenAccessShortfall`` makes a
+        /// `.notConfigured` entry, and only for Unpaywall. The address is
+        /// trimmed, and a blank one becomes `nil`, so an entry with an address
+        /// is always a tried PDF.
+        ///
+        /// - Parameters:
+        ///   - source: Which lookup, or whose PDF.
+        ///   - reason: Why it left the question open.
+        ///   - address: The PDF's address, if it is a PDF's entry.
         fileprivate init(source: OpenAccessSource, reason: OpenAccessUnsettledReason, address: String?) {
             self.source = source
             self.reason = reason
@@ -170,6 +181,16 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         self.init(entries: [Entry(source: source, failure: failure, address: address)])
     }
 
+    /// Create a shortfall of the given entries, in the order they were met.
+    ///
+    /// The precondition guards the invariant every reader relies on: a
+    /// shortfall always names at least one thing that went unsettled, so
+    /// ``notice`` never has nothing to say and the first-entry accessors
+    /// (``source``, ``reason``, ``failure``) never index an empty list. The
+    /// callers keep it: the public initialiser passes one entry, `appending`
+    /// two non-empty lists, and `restored(fromPersisted:)` a non-empty list.
+    ///
+    /// - Parameter entries: What went unsettled; must not be empty.
     private init(entries: [Entry]) {
         precondition(!entries.isEmpty, "a shortfall names what went unsettled")
         self.entries = entries
@@ -180,13 +201,25 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         entries: [Entry(source: .unpaywall, reason: .notConfigured, address: nil)]
     )
 
-    /// The first entry's source, for callers that log one.
+    /// The first entry's source, for callers that log one; decide nothing from
+    /// it alone.
+    ///
+    /// A shortfall may hold several entries (#480); what the reader is told,
+    /// and whether a copy may exist, depends on all of them (``entries``).
     public var source: OpenAccessSource { entries[0].source }
 
-    /// The first entry's reason, for callers that log one.
+    /// The first entry's reason, for callers that log one; decide nothing from
+    /// it alone.
+    ///
+    /// A shortfall may hold several entries (#480); what the reader is told,
+    /// and whether a copy may exist, depends on all of them (``entries``).
     public var reason: OpenAccessUnsettledReason { entries[0].reason }
 
-    /// The first entry's failure, for callers that log one.
+    /// The first entry's failure, for callers that log one; decide nothing from
+    /// it alone.
+    ///
+    /// A shortfall may hold several entries (#480); what the reader is told,
+    /// and whether a copy may exist, depends on all of them (``entries``).
     public var failure: RequestFailure? { entries[0].failure }
 
     /// This shortfall, then `other`'s entries.
@@ -214,12 +247,21 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         }
     }
 
+    /// How the tried-sources statement begins (the contract's `lead`).
     private static let triedSourcesLead = "Failed to obtain a PDF from the following tried sources: "
+
+    /// The grouped statement's ending when some lookup could not be asked.
     private static let mayExistEnding =
         "so a freely available copy may exist. Whether this document is open access was not established."
+
+    /// The grouped statement's ending when every lookup answered.
     private static let answeredEnding = "so whether this document is open access was not established."
+
+    /// The tried-sources statement's ending when some entry could not be asked.
     private static let triedUnaskedEnding =
         "A freely available copy may exist. Whether this document is open access was not established."
+
+    /// The tried-sources statement's ending when every entry answered.
     private static let triedAnsweredEnding = "Whether this document is open access was not established."
 
     /// What the reader is told (Python's `unestablished_access_clause`, word
@@ -320,7 +362,8 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
 
     /// Python's `address_host`: the host, lower-cased and without a port;
     /// else the address trimmed. A scheme-relative `//host/…` names its host,
-    /// as in urlsplit.
+    /// as in urlsplit; an authority with an unbalanced '[' or ']' has none, as
+    /// urlsplit refuses it, while a well-formed `[…]` names the address within.
     ///
     /// - Parameter address: The PDF's address, as the source gave it.
     /// - Returns: The name a tried PDF is told by.
@@ -334,6 +377,9 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         }
         let rest = trimmed[start.upperBound...]
         var authority = rest[..<(rest.firstIndex { "/?#".contains($0) } ?? rest.endIndex)]
+        // urlsplit refuses an authority (user info included) with a '[' and
+        // no ']', or a ']' and no '[': such an address has no host.
+        if authority.contains("[") != authority.contains("]") { return trimmed }
         if let at = authority.lastIndex(of: "@") { authority = authority[authority.index(after: at)...] }
         var host: Substring
         if authority.hasPrefix("["), let close = authority.firstIndex(of: "]") {

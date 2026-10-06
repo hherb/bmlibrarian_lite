@@ -19,10 +19,20 @@ public enum OpenAlex {
 
     /// Why an answer could not be read.
     enum ParseError: Error {
+        /// The body is not a JSON object, so it is no work record.
         case notAWork
+
+        /// The work's `locations` is neither a list nor null.
         case locationsNotAList
     }
 
+    /// Escape a value as Python's `quote(value, safe="")` does: every
+    /// character but the unreserved ones, `/` included, as UTF-8 bytes, so a
+    /// DOI is one path segment and a `+` in an email is not read as a space.
+    ///
+    /// - Parameter value: The DOI or the contact email.
+    /// - Returns: The escaped text; empty in the case Foundation cannot encode
+    ///   it, which a Swift `String` (always valid Unicode) does not reach.
     private static func escaped(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? ""
     }
@@ -33,13 +43,16 @@ public enum OpenAlex {
     /// - Parameters:
     ///   - doi: The DOI; surrounding whitespace is not part of it.
     ///   - mailto: The contact email, or `nil` (or empty) to ask without one.
-    ///   - baseURL: OpenAlex's address.
+    ///   - baseURL: OpenAlex's address; trailing `/`s are dropped, as Python's
+    ///     `base_url.rstrip('/')` drops them, so the path never doubles one.
     /// - Returns: The URL, or `nil` if it cannot be formed.
     public static func workURL(
         doi: String, mailto: String?, baseURL: String = BioMedLitConstants.openAlexBaseURL
     ) -> URL? {
         let trimmed = doi.trimmingCharacters(in: .whitespacesAndNewlines)
-        var text = "\(baseURL)/works/doi:\(escaped(trimmed))?select=locations"
+        var base = Substring(baseURL)
+        while base.hasSuffix("/") { base = base.dropLast() }
+        var text = "\(base)/works/doi:\(escaped(trimmed))?select=locations"
         if let mailto, !mailto.isEmpty {
             text += "&mailto=\(escaped(mailto))"
         }
@@ -83,7 +96,13 @@ public enum OpenAlex {
 /// ``PMCOpenDataFetch``. `absent` is OpenAlex knowing no work by the DOI;
 /// `served([])` a work naming no PDF. Both are answers.
 enum OpenAlexFetch: Equatable {
+    /// OpenAlex answered with the work: the PDF URLs its locations name.
     case served([String])
+
+    /// OpenAlex answered 404: it knows no work by the DOI.
     case absent
+
+    /// OpenAlex could not settle it: no answer, an error status other than
+    /// 404, or a body that could not be read.
     case unreachable(RequestFailure)
 }

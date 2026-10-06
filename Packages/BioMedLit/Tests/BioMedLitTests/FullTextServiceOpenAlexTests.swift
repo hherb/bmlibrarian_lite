@@ -31,10 +31,18 @@ fileprivate extension RetryConfiguration {
     static let noRetry = RetryConfiguration(
         maxAttempts: 1, initialDelay: 0, maxDelay: 0, backoffMultiplier: 1, jitterFactor: 0
     )
+
+    /// Two attempts, no backoff wait: enough to show a retry without sleeping
+    /// through ``RetryConfiguration/openAlex``'s delays. Pacing still applies.
+    static let oneRetry = RetryConfiguration(
+        maxAttempts: 2, initialDelay: 0, maxDelay: 0, backoffMultiplier: 1, jitterFactor: 0
+    )
 }
 
-/// OpenAlex is asked for the PDFs Unpaywall did not name, only when no
-/// Unpaywall copy was served; each PDF it names is tried once; what it could
+/// OpenAlex is asked for the PDFs Unpaywall did not name, unless an Unpaywall
+/// copy was served (with text, or not cached; a cached copy without text
+/// while an abstract is held does not stop it); each PDF it names is tried
+/// once; what it could
 /// not settle is told in chain order (#480, stage B; the maintainer's
 /// decisions of 2026-10-05).
 final class FullTextServiceOpenAlexTests: XCTestCase {
@@ -225,6 +233,60 @@ final class FullTextServiceOpenAlexTests: XCTestCase {
         StubURLProtocol.failures["api.openalex.org"] = URLError(.timedOut)
         let fetch = try await makeService(retry: .noRetry).fetchOpenAlexPDFURLs(doi: doi)
         XCTAssertEqual(fetch, .unreachable(.timeout))
+    }
+
+    /// A 503 is transient: retried, and the second answer is the outcome
+    /// (Python's and Android's retry tests do the same).
+    func testAThrottledOpenAlexIsRetriedAndServes() async throws {
+        StubURLProtocol.sequences["api.openalex.org"] = [(503, Data()), (200, openAlex([repo]))]
+        let fetch = try await makeService(retry: .oneRetry).fetchOpenAlexPDFURLs(doi: doi)
+        XCTAssertEqual(fetch, .served([repo]))
+        XCTAssertEqual(StubURLProtocol.requestedURLs.filter { $0.contains("api.openalex.org") }.count, 2)
+    }
+
+    /// The control: without a retry the same 503 is the outcome, so the test
+    /// above is what the retry earns.
+    func testWithoutARetryTheThrottleIsTheOutcome() async throws {
+        StubURLProtocol.sequences["api.openalex.org"] = [(503, Data()), (200, openAlex([repo]))]
+        let fetch = try await makeService(retry: .noRetry).fetchOpenAlexPDFURLs(doi: doi)
+        XCTAssertEqual(fetch, .unreachable(.httpStatus(503)))
+        XCTAssertEqual(StubURLProtocol.requestedURLs.filter { $0.contains("api.openalex.org") }.count, 1)
+    }
+
+    /// Requests to api.openalex.org are paced at ``BioMedLitConstants/openAlexMinimumInterval``
+    /// (10 per second, the contract's "OpenAlex's Locations"). A lower bound
+    /// only, so a slow machine cannot fail it.
+    func testRequestsArePaced() async throws {
+        StubURLProtocol.routes["api.openalex.org"] = (200, openAlex([repo]))
+        let service = makeService()
+        let start = Date()
+        for _ in 0..<3 {
+            let fetch = try await service.fetchOpenAlexPDFURLs(doi: doi)
+            XCTAssertEqual(fetch, .served([repo]))
+        }
+        // Three requests: two paced gaps at the least.
+        XCTAssertGreaterThanOrEqual(
+            Date().timeIntervalSince(start), 2 * BioMedLitConstants.openAlexMinimumInterval * 0.9
+        )
+    }
+
+    /// A PDF address `URL(string:)` re-encodes (a space, a non-ASCII letter)
+    /// keeps its link test: the caching note's address is the kept link's
+    /// `absoluteString`, not the raw address, so the app's
+    /// `pdfNotSavedFrom == pdfURL.absoluteString` still says "only its link
+    /// is kept" (#480).
+    func testTheNoteAddressIsTheKeptLinkEvenWhenReEncoded() async throws {
+        let raw = "https://repo.example.org/my paper \u{00FC}.pdf"
+        StubURLProtocol.routes["unpaywall"] = (200, unpaywall([raw]))
+        StubURLProtocol.routes["repo.example.org"] = (200, pdfBody)
+        let result = try await makeService(writeCachedPDF: { _, _ in
+            throw CocoaError(.fileWriteOutOfSpace)
+        }).fetchFullText(pmcId: nil, doi: doi, pmid: "")
+        guard case .unpaywall(let pdfURL) = result.content else {
+            return XCTFail("got \(result.content)")
+        }
+        XCTAssertNotEqual(pdfURL.absoluteString, raw, "the address must be one URL(string:) re-encodes")
+        XCTAssertEqual(result.pdfNotSavedFrom, pdfURL.absoluteString)
     }
 
     func testNoDOINoOpenAlex() async throws {

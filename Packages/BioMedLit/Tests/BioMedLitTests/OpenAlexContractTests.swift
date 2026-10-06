@@ -57,6 +57,18 @@ final class OpenAlexContractTests: XCTestCase {
         }
     }
 
+    /// A base URL with trailing slashes builds the same URL, as Python's
+    /// `base_url.rstrip('/')` does; never `//works`.
+    func testATrailingSlashOnTheBaseURLIsDropped() throws {
+        let plain = OpenAlex.workURL(doi: "10.1/x", mailto: "a@b.org", baseURL: "https://api.openalex.org")
+        XCTAssertEqual(
+            plain?.absoluteString, "https://api.openalex.org/works/doi:10.1%2Fx?select=locations&mailto=a%40b.org"
+        )
+        for base in ["https://api.openalex.org/", "https://api.openalex.org//"] {
+            XCTAssertEqual(OpenAlex.workURL(doi: "10.1/x", mailto: "a@b.org", baseURL: base), plain, base)
+        }
+    }
+
     func testEachPDFURLsRow() throws {
         let rows = try table("pdf_urls")
         XCTAssertGreaterThanOrEqual(rows.count, 8)

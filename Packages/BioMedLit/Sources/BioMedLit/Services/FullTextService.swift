@@ -27,8 +27,10 @@ import Foundation
 ///    ask it then. It holds the author manuscripts Europe PMC does not serve.
 /// 2. **Europe PMC PDF** - The free render URL, when the XML is unavailable or
 ///    carries no `<body>`
-/// 3. **Unpaywall PDF** - Open access PDFs via Unpaywall API, or the PDF an
-///    open-access landing page declares (#464)
+/// 3. **Unpaywall PDF** - Open access PDFs via Unpaywall API, every one it
+///    names (#480), or the PDF an open-access landing page declares (#464)
+///    3a. **OpenAlex PDF** - The PDFs OpenAlex's locations name that Unpaywall
+///    did not, unless an Unpaywall copy was served and not cached (#480)
 /// 4. **DOI Resolution** - Falls back to opening publisher website
 ///
 /// A body-less deposit, Europe PMC's or the bucket's, does not win at step 1.
@@ -253,8 +255,9 @@ public actor FullTextService {
     ///   record this on the document); `absenceNotEstablished` when Europe PMC
     ///   did not settle it; `pmcOpenDataNotEstablished` when PMC's open-data
     ///   bucket could not be read; `openAccessNotEstablished` when the
-    ///   Unpaywall tier did not settle it; `identifierKindUnresolved` when the
-    ///   PubMed last resort could not be authorised. None of the last four may
+    ///   open-access PDFs (Unpaywall's, then OpenAlex's) did not settle it;
+    ///   `identifierKindUnresolved` when the PubMed last resort could not be
+    ///   authorised. None of the last four may
     ///   be recorded (see
     ///   ``exhaustedChainError(primarySlot:primaryKind:europePMCShortfall:pmcOpenDataShortfall:openAccessShortfall:articleName:)``).
     ///   `CancellationError` if the caller cancelled: it propagates
@@ -620,8 +623,13 @@ public actor FullTextService {
                 return result
             }
             // OpenAlex, for the PDFs Unpaywall did not name (#480, stage B);
-            // never once a copy was served: it cannot raise the odds then
-            // (the maintainer's decision, 2026-10-05)
+            // not once an Unpaywall copy was served and not cached: that copy
+            // ends the walk, its link kept, and asking further cannot raise the
+            // odds (the maintainer's decision, 2026-10-05). A copy cached that
+            // yielded no text while an abstract is held does not stop it
+            // (`openAccessCopyServed` alone): a textless copy is no full text
+            // obtained, so OpenAlex's may still give it (fulltext_retrieval.md,
+            // "Every platform tries every PDF Unpaywall names")
             if openAccessNotSavedFrom == nil {
                 switch try await fetchOpenAlexPDFURLs(doi: doi) {
                 case .served(let urls):
@@ -752,7 +760,8 @@ public actor FullTextService {
     /// source left the question unsettled and no last resort was refused.
     /// Static, and independent of the service's state, so the rule is testable:
     /// the open-access arm is all but unreachable through the chain, because
-    /// every fallback returned after the Unpaywall tier carries the shortfall
+    /// every fallback returned after the open-access PDFs (Unpaywall's, then
+    /// OpenAlex's) carries the shortfall
     /// and the DOI link among them always builds (#475).
     ///
     /// - Parameters:
@@ -763,8 +772,8 @@ public actor FullTextService {
     ///     the article's JATS, when it could not be read (#480). Consulted
     ///     only when Europe PMC left no shortfall, so the reader is given one
     ///     sentence.
-    ///   - openAccessShortfall: Why the Unpaywall tier left a free copy
-    ///     unassessed.
+    ///   - openAccessShortfall: Why the open-access PDFs (Unpaywall's, then
+    ///     OpenAlex's) left a free copy unassessed.
     ///   - articleName: How the log names the article.
     /// - Returns: The error to throw.
     static func exhaustedChainError(
@@ -831,8 +840,8 @@ public actor FullTextService {
             return .pmcOpenDataNotEstablished(pmcOpenDataShortfall)
         }
 
-        // The same for the Unpaywall tier: a free copy it could not assess is
-        // not a copy that does not exist (#475).
+        // The same for the open-access PDFs, Unpaywall's and OpenAlex's: a free
+        // copy they could not assess is not a copy that does not exist (#475).
         if let openAccessShortfall {
             BioMedLitLib.logger?.warning(
                 "No source served full text for \(articleName), and the open-access copy "
@@ -2307,9 +2316,10 @@ public actor FullTextService {
     /// Turn a PDF tier's outcome into the result to return, or `nil` to let the
     /// chain try the next tier.
     ///
-    /// Shared by the Europe PMC PDF and Unpaywall tiers so the two cannot decide
-    /// this differently — they already had one copy of the rule each, and only
-    /// one of them was ever updated.
+    /// Shared by the Europe PMC PDF tier and, through ``tryOpenAccessPDFs``,
+    /// every open-access PDF Unpaywall or OpenAlex names, so they cannot decide
+    /// this differently — the render and Unpaywall tiers once had one copy of
+    /// the rule each, and only one of them was ever updated.
     ///
     /// - Parameters:
     ///   - outcome: What the download and extraction produced.

@@ -251,11 +251,13 @@ public struct FullTextResult: Sendable, Equatable {
     /// text whatsoever.
     public let extractionCoverage: PDFExtractionCoverage?
 
-    /// Why the open-access copy Unpaywall may know of went unassessed, or `nil`
-    /// when Unpaywall settled it (a PDF, or a 404) or was never reached because
-    /// an earlier tier served the article.
+    /// Why the open-access copy Unpaywall or OpenAlex may know of went
+    /// unassessed, or `nil` when they settled it (a copy served, or answers
+    /// naming none) or were never reached because an earlier tier served the
+    /// article.
     ///
-    /// Set only on a fallback returned after the Unpaywall tier: a caller that
+    /// Set only on a fallback returned after the open-access PDFs (Unpaywall's,
+    /// then OpenAlex's): a caller that
     /// already holds a PDF link must not trade it for a fallback the chain
     /// settled on only because the copy went unassessed (#464), and the reader
     /// is told what it leaves open (``OpenAccessShortfall/notice``, #466). Not a
@@ -266,6 +268,14 @@ public struct FullTextResult: Sendable, Equatable {
     /// The PDF a source served that could not be saved on this device (#480):
     /// a fault of ours, told as a note of its own, never as a shortfall
     /// (`OpenAccessShortfall.notSavedNote`). `nil` when none was.
+    ///
+    /// Always the `absoluteString` of the `URL` the PDF was fetched by, the
+    /// one a link-only result's content carries, never the address as the
+    /// source gave it (which a shortfall entry keeps): `URL(string:)` may
+    /// re-encode that (a space, a non-ASCII letter). The app tells "only its
+    /// link is kept" by comparing this with the stored link
+    /// (`AppFullTextResult.pdfNotSavedNote`, `Document.storedPDFNotSavedNote`),
+    /// so the two must stay one string.
     public let pdfNotSavedFrom: String?
 
     /// Create a retrieval result.
@@ -589,8 +599,9 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
     /// unavailable on it.
     case pmcOpenDataNotEstablished(RequestFailure)
 
-    /// Every source was exhausted, but the Unpaywall tier did not settle
-    /// whether a free copy exists, and no link was left to fall back on.
+    /// Every source was exhausted, but the open-access PDFs (Unpaywall's, then
+    /// OpenAlex's) did not settle whether a free copy exists, and no link was
+    /// left to fall back on.
     ///
     /// Every fallback the chain returns after the tier (the abstract, a PDF
     /// link it could not download, the DOI link, the PubMed record) carries

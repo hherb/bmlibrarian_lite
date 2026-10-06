@@ -238,13 +238,14 @@ final class Document {
     /// not a guarantee. Those records are rewritten on the next fetch.
     var fullTextDegradedReasonRaw: String?
 
-    /// Why the open-access copy Unpaywall may know of went unassessed, as the
-    /// JSON ``OpenAccessShortfall/persisted()`` writes, or `nil` when nothing
-    /// was left unsettled (#466).
+    /// Why the open-access copy Unpaywall or OpenAlex may know of went
+    /// unassessed, as the JSON ``OpenAccessShortfall/persisted()`` writes, or
+    /// `nil` when nothing was left unsettled (#466).
     ///
-    /// Unpaywall, the landing page it named, or the PDF it named (#478) could not settle whether a free
-    /// copy exists (or Unpaywall was not configured), so the chain settled on a
-    /// fallback without learning it. Kept
+    /// Unpaywall, the landing page it named, OpenAlex, or a PDF either named
+    /// (#478, #480) could not settle whether a free copy exists (or Unpaywall
+    /// was not configured), so the chain settled on a fallback without
+    /// learning it. Kept
     /// apart from ``fullTextDegradedReasonRaw`` because both can be true of one
     /// fetch: Europe PMC unreachable *and* Unpaywall throttled. Persisted for
     /// the reason that field is: the cards and viewers render from this model,
@@ -260,6 +261,13 @@ final class Document {
     /// The PDF a source served that could not be saved on this device (#480),
     /// told as a caching note beside the full text. Written by every fetch,
     /// cleared by every fetch that does not leave one, as the shortfall is.
+    ///
+    /// ``storedPDFNotSavedNote`` tells "only its link is kept" by comparing
+    /// this with ``fullTextPDFPath``. That holds only because
+    /// `FullTextService` stores the fetched URL's `absoluteString` as this,
+    /// and ``applyFullTextResult(_:)`` stores the same URL's `absoluteString`
+    /// as the link, never the address as the source gave it (which
+    /// `URL(string:)` may re-encode and a shortfall entry keeps).
     ///
     /// An optional scalar, so lightweight migration adds it, and a record
     /// written before it existed reads as having no note.
@@ -1257,7 +1265,7 @@ final class Document {
     /// be shown exactly like a whole article.
     ///
     /// The open-access shortfall joins them for #466: a fallback the chain
-    /// settled on because Unpaywall left the copy unassessed is the outcome a link-only
+    /// settled on because the open-access copy went unassessed is the outcome a link-only
     /// card exists to explain, and nothing else on the record says it.
     var cachedRetrievalNotice: (
         warnings: JATSParseWarnings,
