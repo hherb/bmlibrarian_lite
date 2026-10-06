@@ -174,6 +174,13 @@ private suspend fun DocumentEntity.obtainingOpenAccessPdf(
  * Every answer clears the caching note an earlier fetch left, except an
  * open-access PDF served and not saved, which writes its own.
  *
+ * An answer that brings no text (a PDF, the DOI link, unavailable) clears the
+ * text an earlier fetch stored (#495), so no text is ever shown under another
+ * answer's source: CORE's text, untrusted, is kept out of the JavaScript-enabled
+ * WebView by its source label alone. No flow re-fetches over a stored text
+ * today (the cards offer a fetch only without one, and the full-text screen's
+ * refresh clears it first), so this guards the record, not a current path.
+ *
  * @param result What the chain came to
  * @param pdfPath Where its PDF was saved; null when nothing was
  * @return The document to store
@@ -206,6 +213,8 @@ private fun DocumentEntity.recording(result: FullTextResult, pdfPath: String?): 
     )
     is FullTextResult.EuropePmcPdf -> copy(
         pdfPath = pdfPath,
+        fullTextMarkdown = null,
+        fullTextHTML = null,
         fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
         fullTextFetchedAt = Date(),
         fullTextOpenAccessShortfallJson = null,
@@ -214,18 +223,24 @@ private fun DocumentEntity.recording(result: FullTextResult, pdfPath: String?): 
     is FullTextResult.OpenAccessPdfs -> error("resolved by obtainingOpenAccessPdf before recording")
     is FullTextResult.OpenAccessPdf -> copy(
         pdfPath = pdfPath,
+        fullTextMarkdown = null,
+        fullTextHTML = null,
         fullTextSource = result.namedBy.fullTextSource,
         fullTextFetchedAt = Date(),
         fullTextOpenAccessShortfallJson = null,
         fullTextPdfNotSavedFrom = if (result.notSaved) result.pdfUrl else null
     )
     is FullTextResult.DoiUrl -> copy(
+        fullTextMarkdown = null,
+        fullTextHTML = null,
         fullTextSource = Constants.FULLTEXT_SOURCE_DOI,
         fullTextFetchedAt = Date(),
         fullTextOpenAccessShortfallJson = result.openAccessShortfall?.toJson(),
         fullTextPdfNotSavedFrom = null
     )
     is FullTextResult.Unavailable -> copy(
+        fullTextMarkdown = null,
+        fullTextHTML = null,
         fullTextUnavailable = true,
         fullTextFetchedAt = Date(),
         fullTextOpenAccessShortfallJson = null,

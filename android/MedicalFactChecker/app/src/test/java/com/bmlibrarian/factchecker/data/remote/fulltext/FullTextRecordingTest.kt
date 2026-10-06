@@ -174,6 +174,80 @@ class FullTextRecordingTest {
         assertEquals(pdfUrl, doc.linkOnlyPdfUrl)
     }
 
+    /**
+     * An answer that brings no text clears the text an earlier fetch stored
+     * (#495): otherwise CORE's text, untrusted and kept out of the WebView only
+     * by its source label, would be shown under the new answer's source, and a
+     * JATS text under a PDF's or the DOI link's.
+     */
+    @Test
+    fun `an answer without text clears the text an earlier fetch stored`() = runTest {
+        val core = document.copy(
+            fullTextMarkdown = "<script>alert(1)</script>", fullTextSource = Constants.FULLTEXT_SOURCE_CORE
+        )
+        val jats = document.copy(
+            fullTextMarkdown = "m", fullTextHTML = "<p>h</p>", fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC
+        )
+        val answers = listOf(
+            FullTextResult.DoiUrl("https://doi.org/10.1/x"),
+            FullTextResult.EuropePmcPdf(pdfUrl = "https://europepmc.org/a.pdf"),
+            unpaywallPdfs("https://repo.example.org/a.pdf"),
+            FullTextResult.Unavailable("No full text source available"),
+        )
+        for (stored in listOf(core, jats)) {
+            for (answer in answers) {
+                for (downloaded in listOf("/tmp/a.pdf", null)) {
+                    val recorded = stored.recordingFullTextFetch(
+                        answer,
+                        downloadPdf = {
+                            downloaded?.let(PdfDownload::Saved)
+                                ?: PdfDownload.Failed(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
+                        },
+                        askOpenAlex = { _, _ -> emptyList() },
+                        askCore = { null }
+                    ).document
+                    val case = "${stored.fullTextSource} then $answer, downloaded $downloaded"
+                    assertNull(case, recorded.fullTextMarkdown)
+                    assertNull(case, recorded.fullTextHTML)
+                }
+            }
+        }
+    }
+
+    /** The control: an answer with text stores it, replacing the earlier one. */
+    @Test
+    fun `an answer with text replaces the text an earlier fetch stored`() = runTest {
+        val core = document.copy(fullTextMarkdown = "core text", fullTextSource = Constants.FULLTEXT_SOURCE_CORE)
+
+        val recorded = core.recordingFullTextFetch(
+            FullTextResult.EuropePmcXml(xml = "<a/>", markdown = "m", html = "<p>h</p>"),
+            downloadPdf = { PdfDownload.NotSaved }, askOpenAlex = { _, _ -> emptyList() }, askCore = { null }
+        ).document
+
+        assertEquals("m", recorded.fullTextMarkdown)
+        assertEquals("<p>h</p>", recorded.fullTextHTML)
+        assertEquals(Constants.FULLTEXT_SOURCE_EUROPE_PMC, recorded.fullTextSource)
+    }
+
+    /** CORE's text over a JATS record leaves no JATS HTML behind it, shown in its place. */
+    @Test
+    fun `CORE's text clears the HTML an earlier fetch stored`() = runTest {
+        val jats = document.copy(
+            fullTextMarkdown = "m", fullTextHTML = "<p>h</p>", fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC
+        )
+
+        val recorded = jats.recordingFullTextFetch(
+            unpaywallPdfs("https://repo.example.org/a.pdf"),
+            downloadPdf = { PdfDownload.Failed(RequestFailure(RequestFailureKind.HTTP_STATUS, 404)) },
+            askOpenAlex = { _, _ -> emptyList() },
+            askCore = { CoreFetch.Served("core text") }
+        ).document
+
+        assertEquals("core text", recorded.fullTextMarkdown)
+        assertNull(recorded.fullTextHTML)
+        assertEquals(Constants.FULLTEXT_SOURCE_CORE, recorded.fullTextSource)
+    }
+
     /** A chain that settled nothing records nothing, the shortfall included (#434). */
     @Test
     fun `a chain that did not establish the absence leaves the document as it was`() = runTest {
