@@ -240,6 +240,14 @@
         }
       ],
       "statement": "OpenAlex (the request timed out) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."
+    },
+    {
+      "name": "CORE is told after every PDF",
+      "entries": [
+        {"source": "core", "kind": "http_status", "status_code": 503},
+        {"source": "unpaywall_pdf", "kind": "http_status", "status_code": 403, "address": "https://www.sciencedirect.com/x.pdf"}
+      ],
+      "statement": "Failed to obtain a PDF from the following tried sources: www.sciencedirect.com, named by Unpaywall (HTTP 403 Forbidden); CORE (HTTP 503 Service Unavailable). A freely available copy may exist. Whether this document is open access was not established."
     }
   ],
   "not_saved_note": [

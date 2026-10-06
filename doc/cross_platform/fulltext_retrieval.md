@@ -9,7 +9,7 @@ Not all biomedical articles have freely available full text. We implement a fall
 1. **Europe PMC XML** - Best quality, machine-readable JATS format
 2. **PMC's open-data bucket** - The same JATS by PMC ID, including the author
    manuscripts Europe PMC does not serve (#480)
-3. **Europe PMC's PDF render, then every Unpaywall PDF, then OpenAlex's** - Open access PDFs
+3. **Europe PMC's PDF render, then every Unpaywall PDF, then OpenAlex's, then CORE's extracted text** - Open access copies
 4. **DOI Resolution** - Fall back to publisher website
 
 ## Retrieval Priority
@@ -20,6 +20,7 @@ Not all biomedical articles have freely available full text. We implement a fall
 | PMC open-data bucket | JATS XML | Excellent (structured) | PMC's open-access and author-manuscript collections, by PMC ID |
 | Unpaywall | PDF URL | Good (requires parsing) | ~30M open access articles |
 | OpenAlex | PDF URLs | Good (requires parsing) | locations Unpaywall does not list, by DOI |
+| CORE | Plain text | Fair (no structure) | text CORE extracted from repository copies, by DOI, with a key |
 | DOI Resolution | Web URL | Variable | Nearly all articles with DOI |
 
 ## Content Kind
@@ -679,7 +680,7 @@ The maintainer's decisions of 2026-10-05. Pinned by
   - A lookup entry reads `{name} ({reason})`, once per service, with the
     reason Python's `_unsettled` picks.
   - Entries come in chain order: other sources first, then `unpaywall`,
-    `unpaywall_landing_page`, `unpaywall_pdf`, `openalex`, `openalex_pdf`
+    `unpaywall_landing_page`, `unpaywall_pdf`, `openalex`, `openalex_pdf`, `core`
     (stable). Entries that read the same (two PDFs on one host refused
     alike) are told once, the first after sorting.
   - An address is tried once, under the source that tried it first: one that
@@ -877,6 +878,65 @@ stage B.
 - **Android** asks in `FullTextService.fetchFullText` when Unpaywall named no
   candidate it can request, and otherwise in recording, through its
   `askOpenAlex` hook, once every Unpaywall candidate failed.
+
+## CORE's Extracted Text (#480, stage C)
+
+CORE aggregates open-access repositories and serves the text it extracted
+from their copies. Its v3 search is asked by DOI with **the user's own key**,
+last in the chain: only when nothing earlier obtained the article (no JATS
+body, no PDF downloaded, no copy served but not saved), at most once per
+fetch, and never without a DOI. Service name **"CORE"**, source `core`
+(desktop `core_text`), shown as **"CORE (extracted text)"**. Pinned by
+`fulltext_parity/core_fulltext.json`.
+
+```pseudocode
+GET https://api.core.ac.uk/v3/search/works/?q={escape('doi:"' + lucene(trim(doi)) + '"')}&limit=3
+    Authorization: Bearer {key}        # the key travels here and nowhere else
+# lucene: \ → \\, then " → \"; escape: as OpenAlex's. The slash after works is
+# required: without it CORE answers an HTML meta-refresh page.
+
+no key            → no request, nothing recorded, nothing told (a debug log line)
+paused (below)    → UNREACHABLE(http_status 429), no request
+200               → the first result that is an object, whose string doi
+                    normalises to this DOI's, and whose string fullText,
+                    trimmed, holds ≥ 5,000 code points: SERVED(that text);
+                    none → ABSENT; an answer that is not an object, or whose
+                    results are not a list → UNREACHABLE(malformed_response)
+any other status (after 429/5xx retries), transport failure → UNREACHABLE(failure)
+```
+
+`normalise(doi)` trims, lower-cases, removes one leading `https://doi.org/`,
+`http://doi.org/`, `https://dx.doi.org/`, `http://dx.doi.org/` or `doi:`, and
+trims again. **The DOI check is what keeps another article's text out**: the
+request is a search, and its results are not guaranteed to be this article.
+
+- **Served** text is the article's full text, content kind `extracted`. It
+  settles the open-access question, as a copy obtained does: no shortfall is
+  stored with it, and it wins over a held abstract. It has no sections, so
+  statement checks read "not assessed" (#428's "no marker, no charge"), as
+  for a PDF's text.
+- **Unreachable** is an unsettled lookup under **CORE** (`core`), told in the
+  open-access sentence ("CORE (HTTP 503 Service Unavailable) could not be
+  asked, …") and last in "Tried sources" order. It blocks a settled absence
+  (the maintainer's decision of 2026-10-06), as any unanswered source does.
+- **A missing key is silent** (spec decision 4). It is not recorded as a
+  `NOT_CONFIGURED` skip, which on the desktop would block every settled
+  absence and add a configuration nudge to every sentence; the settings
+  screens say what a key adds instead.
+- **Two consecutive fetches ending in HTTP 429 pause CORE for the rest of the
+  process.** CORE's personal key buys a daily token budget, not a rate, and
+  the #480 spike saw 429s at 25 requests a minute. A paused fetch makes no
+  request and is told as a 429. Any other ending resets the count.
+- **Paced at 0.4 requests per second** (`polite_request_pacing.md`).
+- **Where:** Python asks at each exit of `PDFDiscoverer.discover_and_download`
+  that obtained no PDF, through a hook `FulltextDiscoverer` passes in, which
+  reads the cached CORE text (`*.core.txt`, stamp `core-text v1`, never
+  returned by `find_existing_fulltext`) before asking. Swift asks in
+  `FullTextService` after OpenAlex, unless a copy was served and not cached.
+  Android asks in `fetchFullText` when no open-access candidate exists, and
+  otherwise in recording, through its `askCore` hook, once every candidate
+  failed. Android shows the text as plain text, never through its
+  JavaScript-enabled WebView.
 
 ## DOI Resolution
 

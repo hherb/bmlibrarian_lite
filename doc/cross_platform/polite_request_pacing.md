@@ -90,6 +90,7 @@ neither. Python's table (`constants.POLITE_RATE_CEILINGS`, default
 | `clinicaltrials.gov` | 1 (the default) |
 | `doi.org`, `dx.doi.org` | 1 |
 | `pmc-oa-opendata.s3.amazonaws.com` | 5 (S3 publishes no per-client limit; conservative choice, #480) |
+| `api.core.ac.uk` | 0.4 (CORE's personal key allows 25 a minute, and a search can cost more than one token; #480) |
 | any other host | 1 (the default) |
 
 Europe PMC's ceiling is a **deliberately conservative choice, not a measured
