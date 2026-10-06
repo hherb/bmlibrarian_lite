@@ -223,6 +223,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         print("\n[PubMed]")
         print(f"  Email: {config.pubmed.email or '(not set)'}")
         print(f"  API key: {REDACTED_SECRET_PLACEHOLDER if config.pubmed.api_key else '(not set)'}")
+        print(f"  CORE API key: {REDACTED_SECRET_PLACEHOLDER if config.discovery.core_api_key else '(not set)'}")
         print("\n[Search]")
         print(f"  Chunk size: {config.search.chunk_size}")
         print(f"  Chunk overlap: {config.search.chunk_overlap}")

@@ -62,6 +62,7 @@ from ..config import (
 )
 from ..embeddings import LiteEmbedder
 from ..constants import (
+    CORE_API_KEY_EXPLANATION,
     DEFAULT_LLM_MODEL,
     DEFAULT_LLM_TEMPERATURE,
     DEFAULT_LLM_MAX_TOKENS,
@@ -261,6 +262,7 @@ class SettingsDialog(QDialog):
         self._setup_search_tab()
         self._setup_embeddings_tab()
         self._setup_pubmed_tab()
+        self._setup_fulltext_tab()
         self._setup_api_keys_tab()
         self._setup_openathens_tab()
         self._setup_quality_tab()
@@ -669,6 +671,24 @@ class SettingsDialog(QDialog):
 
         self.tab_widget.addTab(tab, "PubMed")
 
+    def _setup_fulltext_tab(self) -> None:
+        """Set up the Full Text tab: keys for optional full-text sources (#480)."""
+        tab = QWidget()
+        layout = QFormLayout(tab)
+        layout.setContentsMargins(scaled(12), scaled(12), scaled(12), scaled(12))
+        layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+
+        self.core_api_key_input = QLineEdit()
+        self.core_api_key_input.setPlaceholderText("Optional")
+        self.core_api_key_input.setEchoMode(QLineEdit.Password)
+        self.core_api_key_input.setToolTip(CORE_API_KEY_EXPLANATION)
+        layout.addRow("CORE API Key:", self.core_api_key_input)
+        explanation = QLabel(f"<small>{CORE_API_KEY_EXPLANATION}</small>")
+        explanation.setWordWrap(True)
+        layout.addRow(explanation)
+
+        self.tab_widget.addTab(tab, "Full Text")
+
     def _setup_api_keys_tab(self) -> None:
         """Set up the API Keys tab."""
         tab = QWidget()
@@ -1034,6 +1054,10 @@ class SettingsDialog(QDialog):
         if self.config.pubmed.api_key:
             self.api_key_input.setText(self.config.pubmed.api_key)
 
+        # Full Text
+        if self.config.discovery.core_api_key:
+            self.core_api_key_input.setText(self.config.discovery.core_api_key)
+
         # Search Provider
         provider_value = self.config.search.search_provider.value
         for i in range(self.search_provider_combo.count()):
@@ -1129,6 +1153,10 @@ class SettingsDialog(QDialog):
         self.config.pubmed.email = self.email_input.text().strip()
         api_key = self.api_key_input.text().strip()
         self.config.pubmed.api_key = api_key if api_key else None
+
+        # Save Full Text keys
+        core_key = self.core_api_key_input.text().strip()
+        self.config.discovery.core_api_key = core_key or None
 
         # Save Search Provider settings
         provider_value = self.search_provider_combo.currentData()

@@ -62,6 +62,18 @@ Set your email for PubMed API access to avoid rate limiting:
 export NCBI_EMAIL="your@email.com"
 ```
 
+#### CORE API Key (Optional)
+
+CORE (core.ac.uk) holds the text it extracted from open-access repository
+copies. With a free key, BMLibrarian Lite reads that text when no other
+source has the article. Register at https://core.ac.uk/services/api, then
+enter the key under Settings → Full Text, or set it in the environment:
+```bash
+export CORE_API_KEY="your-key"
+```
+The key is stored only in your configuration file (readable by you alone)
+and sent only to CORE. Without one, CORE is simply not asked.
+
 ### Launching the Application
 
 ```bash
@@ -309,10 +321,12 @@ for re-analysis.
 BMLibrarian Lite can automatically find and retrieve full-text content through a fallback chain:
 
 1. **Europe PMC XML**: Free full-text articles in structured JATS format
-2. **Europe PMC PDF**: PDF versions from Europe PMC
-3. **Unpaywall**: Open access versions of paywalled articles
-4. **DOI Resolution**: Direct publisher links
-5. **Manual Upload**: Upload PDFs for documents not found automatically
+2. **PMC open-access collection**: The same JATS, by PMC ID, including author manuscripts
+3. **Europe PMC PDF**: PDF versions from Europe PMC
+4. **Unpaywall and OpenAlex**: Every Unpaywall PDF, then OpenAlex's
+5. **CORE extracted text**: With a key; plain text, so statement checks are "not assessed"
+6. **DOI Resolution**: Direct publisher links
+7. **Manual Upload**: Upload PDFs for documents not found automatically
 
 JATS XML articles are rendered with full support for tables, figures, references, and anchor navigation.
 

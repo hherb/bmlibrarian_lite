@@ -1122,6 +1122,12 @@ CORE_BACKOFF_FACTOR = 1
 CORE_ENCODING = "utf-8"
 # The environment variable a CORE key may be given in, as NCBI_API_KEY is.
 ENV_CORE_API_KEY = "CORE_API_KEY"
+# What the settings say a CORE key is for.
+CORE_API_KEY_EXPLANATION = (
+    "Optional. A free CORE API key (core.ac.uk/services/api) lets the app "
+    "read the text CORE extracted from repository copies when no other "
+    "source has the article."
+)
 # How the desktop labels CORE's text, and the line opening its cache file.
 CORE_SOURCE_LABEL = "CORE (extracted text)"
 CORE_TEXT_CACHE_STAMP = "<!-- bmlibrarian-lite core-text v1 -->"

@@ -36,6 +36,7 @@ import stat
 import tempfile
 
 from .constants import (
+    ENV_CORE_API_KEY,
     CONFIG_DIR_PERMISSIONS,
     CONFIG_FILE_PERMISSIONS,
     DEFAULT_DATA_DIR,
@@ -67,7 +68,11 @@ from .transparency import TransparencySettings, get_default_settings
 logger = logging.getLogger(__name__)
 
 
-def _reject_redaction_placeholder(value: str | None) -> str | None:
+def _reject_redaction_placeholder(
+    value: str | None,
+    field: str = "pubmed.api_key",
+    env_var: str = "NCBI_API_KEY",
+) -> str | None:
     """Discard a secret that is really the redaction placeholder, not a secret.
 
     ``bmll config --json`` prints :data:`REDACTED_SECRET_PLACEHOLDER` where the
@@ -79,18 +84,22 @@ def _reject_redaction_placeholder(value: str | None) -> str | None:
 
     Args:
         value: Candidate secret as read from the configuration file
+        field: Dotted name of the configuration field, for the warning
+        env_var: Environment variable to fall back to, for the warning
 
     Returns:
         ``value`` unchanged, or ``None`` if it is the redaction placeholder
     """
     if value == REDACTED_SECRET_PLACEHOLDER:
         logger.warning(
-            "Ignoring pubmed.api_key: the config file holds the redaction "
+            "Ignoring %s: the config file holds the redaction "
             "placeholder %r rather than a key. This happens when the output of "
             "`bmll config --json` is saved back as config.json. Put the real "
             "key in the config file, or remove the entry to fall back to the "
-            "NCBI_API_KEY environment variable.",
+            "%s environment variable.",
+            field,
             REDACTED_SECRET_PLACEHOLDER,
+            env_var,
         )
         return None
     return value
@@ -413,6 +422,7 @@ class DiscoveryConfig:
     """PDF discovery and download configuration."""
 
     unpaywall_email: str = ""  # Email for Unpaywall API (enables additional PDF sources)
+    core_api_key: Optional[str] = None  # CORE's API key (#480): CORE's extracted text when no other source has the article
 
 
 @dataclass
@@ -790,6 +800,11 @@ class LiteConfig:
             discovery_data = data["discovery"]
             config.discovery = DiscoveryConfig(
                 unpaywall_email=discovery_data.get("unpaywall_email", ""),
+                core_api_key=_reject_redaction_placeholder(
+                    discovery_data.get("core_api_key"),
+                    "discovery.core_api_key",
+                    ENV_CORE_API_KEY,
+                ),
             )
 
         if "europepmc" in data:
@@ -862,6 +877,7 @@ class LiteConfig:
         """
         data = self._to_dict_without_secrets()
         data["pubmed"]["api_key"] = self.pubmed.api_key
+        data["discovery"]["core_api_key"] = self.discovery.core_api_key
         return data
 
     def to_redacted_dict(self) -> dict[str, Any]:
@@ -878,6 +894,9 @@ class LiteConfig:
         data = self._to_dict_without_secrets()
         data["pubmed"]["api_key"] = (
             REDACTED_SECRET_PLACEHOLDER if self.pubmed.api_key else None
+        )
+        data["discovery"]["core_api_key"] = (
+            REDACTED_SECRET_PLACEHOLDER if self.discovery.core_api_key else None
         )
         return data
 
