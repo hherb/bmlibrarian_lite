@@ -8,29 +8,33 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Machine channels, stage B: every Unpaywall PDF in the apps, then OpenAlex's**
-(#480): done on `feat/machine-channels-stage-b-480`, **PR #491** (refs #480,
-which stays open for stage C). Contract `fulltext_retrieval.md` "Tried sources (#480)"
-and "OpenAlex's Locations"; fixtures `open_access_statement.json`,
-`openalex_locations.json`. **Binds:** with a tried PDF, every source tried is
-listed ("Failed to obtain a PDF from the following tried sources: …", each PDF
-by host and who named it, chain order); lookup-only keeps the grouped sentence.
-The first copy served ends the walk; one not saved is a caching note, never a
-shortfall (Python `NOT_SAVED`; apps `fullTextPDFNotSavedFrom`, Room 9); in
-Swift a textless copy settles the question too. Identical entries are told once.
-OpenAlex only when no Unpaywall copy was served and kept (a textless Swift copy
-or a Python size refusal does not count); it newly receives the contact email.
-Android tells a copy not saved as `PDF_NOT_SAVED` and offers its address.
-Stored shortfall: v1 for one address-less entry, else v2 `entries`. Follow-ups:
-#492, #493 (Android's render ends its chain before Unpaywall). **Next: stage C
-(CORE, Elsevier, keys in settings)**; then the embedded browser and review
-queue (`challenged`).
+**Machine channels, stage C1: CORE's extracted text, and the key settings**
+(#480): on `feat/machine-channels-stage-c1-core-480`. Spec
+`docs/superpowers/specs/2026-10-04-fulltext-machine-channels-design.md`
+"Stage C"; plan `docs/superpowers/plans/2026-10-06-fulltext-machine-channels-stage-c1.md`.
+**Decided (maintainer, 2026-10-06):** stage C is two PRs, **C1 CORE plus the
+settings plumbing, then C2 Elsevier** on top of it. Live CORE and Elsevier keys
+are available for the acceptance replay (ask the maintainer to export them;
+they are not in the environment or `config.json`). Refs #480, which stays open
+until C2.
 
 ## Recently landed (context)
 
 Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
+
+- **Machine channels, stage B: every Unpaywall PDF in the apps, then OpenAlex's**
+  (all three; PR #491, #480). Contract `fulltext_retrieval.md` "Tried sources
+  (#480)" and "OpenAlex's Locations"; fixtures `open_access_statement.json`,
+  `openalex_locations.json`. With a tried PDF, every source tried is listed
+  ("Failed to obtain a PDF from the following tried sources: …", each PDF by
+  host and who named it, chain order); lookup-only keeps the grouped sentence.
+  **The first copy served ends the walk; one not saved is a caching note,
+  never a shortfall** (Python `NOT_SAVED`; apps `fullTextPDFNotSavedFrom`, Room
+  9). OpenAlex only when no Unpaywall copy was served and kept; it receives the
+  contact email. Stored shortfall: v1 for one address-less entry, else v2
+  `entries`. Follow-ups: #492, #493.
 
 - **Machine channels, stage A: PMC's open-data bucket** (all three; PR #487,
   survey PR #484, #480). Why: our clients get 28% of 400 Unpaywall PDFs, 81% of
@@ -210,7 +214,7 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **Machine channels stages B and C** (above), then the **embedded browser and
+- **Machine channels stage C1 (above), then C2 (Elsevier)**, then the **embedded browser and
   review queue** with the `challenged` kind (replaces **#483**); **#481**
   follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
   **#492** (stage B follow-ups);
