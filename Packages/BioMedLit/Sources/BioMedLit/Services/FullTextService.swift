@@ -113,16 +113,37 @@ public actor FullTextService {
     /// ``RetryConfiguration/openAlex``: four attempts, as Python's.
     private let openAlexRetry: RetryConfiguration
 
+    /// The user's CORE API key, trimmed; `nil` when none or blank, and then
+    /// CORE is never asked and nothing is recorded (#480, stage C). It travels
+    /// in the `Authorization` header alone, never in a URL or a log line.
+    private let coreAPIKey: String?
+
+    /// How each request to CORE retries a throttle, a 5xx or a transient
+    /// transport failure. Injectable for the same reason as
+    /// ``openAlexRetry``. Defaults to ``RetryConfiguration/core``: four
+    /// attempts, as Python's.
+    private let coreRetry: RetryConfiguration
+
+    /// CORE's session pause, shared by every service in the process (two
+    /// consecutive fetches ending in 429 stop CORE being asked). Injectable so
+    /// a test owns its own.
+    private let coreThrottle: CoreThrottle
+
+    /// Whether this service asks CORE: a non-blank key was given.
+    public nonisolated var asksCore: Bool { coreAPIKey != nil }
+
     /// Hosts this service paces itself on: one slot each (#489 tracks making
     /// it per host across instances, as Python's).
     private enum PacedHost: Hashable {
         case pmcOpenData
         case openAlex
+        case core
 
         var minimumInterval: TimeInterval {
             switch self {
             case .pmcOpenData: return BioMedLitConstants.pmcOpenDataMinimumInterval
             case .openAlex: return BioMedLitConstants.openAlexMinimumInterval
+            case .core: return BioMedLitConstants.coreMinimumInterval
             }
         }
     }
@@ -175,6 +196,12 @@ public actor FullTextService {
     ///     ``RetryConfiguration/pmcOpenData``.
     ///   - openAlexRetry: How each request to OpenAlex retries a transient
     ///     failure. Defaults to ``RetryConfiguration/openAlex``.
+    ///   - coreAPIKey: The user's CORE API key. `nil` — the default — or
+    ///     blank means CORE is never asked (#480, stage C).
+    ///   - coreRetry: How each request to CORE retries a transient failure.
+    ///     Defaults to ``RetryConfiguration/core``.
+    ///   - coreThrottle: CORE's session pause. Defaults to
+    ///     ``CoreThrottle/shared``, the one every service in the process uses.
     ///   - writeCachedPDF: Writes a verified PDF to its cache file. Defaults
     ///     to ``writeAtomically(_:to:)``; injectable so a test can make the
     ///     write fail.
@@ -187,6 +214,9 @@ public actor FullTextService {
         europePMCRetry: RetryConfiguration = .serverError,
         pmcOpenDataRetry: RetryConfiguration = .pmcOpenData,
         openAlexRetry: RetryConfiguration = .openAlex,
+        coreAPIKey: String? = nil,
+        coreRetry: RetryConfiguration = .core,
+        coreThrottle: CoreThrottle = .shared,
         writeCachedPDF: @escaping @Sendable (Data, URL) throws -> Void = FullTextService.writeAtomically
     ) {
         self.email = email
@@ -197,6 +227,10 @@ public actor FullTextService {
         self.europePMCRetry = europePMCRetry
         self.pmcOpenDataRetry = pmcOpenDataRetry
         self.openAlexRetry = openAlexRetry
+        let trimmedKey = coreAPIKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.coreAPIKey = trimmedKey.isEmpty ? nil : trimmedKey
+        self.coreRetry = coreRetry
+        self.coreThrottle = coreThrottle
         self.writeCachedPDF = writeCachedPDF
     }
 
@@ -213,7 +247,7 @@ public actor FullTextService {
 
     /// The transport production uses.
     ///
-    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:openAlexRetry:writeCachedPDF:)``
+    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:openAlexRetry:coreAPIKey:coreRetry:coreThrottle:writeCachedPDF:)``
     /// so a test can
     /// substitute a stubbed `URLSession` without reproducing these timeouts.
     ///
@@ -232,8 +266,8 @@ public actor FullTextService {
     /// Attempt to retrieve full text for a document.
     ///
     /// Tries sources in order: Europe PMC XML → PMC's open-data bucket (by PMC
-    /// ID, #480) → Europe PMC PDF → Unpaywall PDFs → OpenAlex PDFs → DOI
-    /// website. Each source is tried with retry logic for transient network
+    /// ID, #480) → Europe PMC PDF → Unpaywall PDFs → OpenAlex PDFs → CORE's
+    /// extracted text (with the user's key, #480 stage C) → DOI website. Each source is tried with retry logic for transient network
     /// failures. A body-less XML deposit is held back rather than returned, so
     /// the PDF tiers still get their turn.
     ///
@@ -660,6 +694,47 @@ public actor FullTextService {
                     BioMedLitLib.logger?.warning(
                         "OpenAlex could not be asked about DOI \(doi) (\(failure.describe())), so any "
                             + "open-access copy it knows of is not assessed",
+                        category: .fullText
+                    )
+                }
+            }
+            // CORE's extracted text (#480, stage C): the poorest form, so last,
+            // only with the user's key and only when no copy was served. A
+            // failure is an unsettled lookup, as OpenAlex's is (the
+            // maintainer's decision, 2026-10-06). No key: never asked, nothing
+            // recorded.
+            if openAccessNotSavedFrom == nil {
+                if let coreAPIKey {
+                    switch try await fetchCoreText(doi: doi, apiKey: coreAPIKey) {
+                    case .served(let text):
+                        BioMedLitLib.logger?.info(
+                            "Retrieved CORE's extracted text for DOI \(doi)", category: .fullText
+                        )
+                        // Text in hand: it beats a held abstract and a link,
+                        // and settles the open-access question.
+                        return FullTextResult(
+                            content: .core(text: text),
+                            degradation: degradation,
+                            contentKind: .extracted,
+                            extractedText: text
+                        )
+                    case .absent:
+                        BioMedLitLib.logger?.info(
+                            "CORE holds no text for DOI \(doi)", category: .fullText
+                        )
+                    case .unreachable(let failure):
+                        openAccessShortfall = .adding(
+                            OpenAccessShortfall(source: .core, failure: failure), to: openAccessShortfall
+                        )
+                        BioMedLitLib.logger?.warning(
+                            "CORE could not be asked about DOI \(doi) (\(failure.describe())), so any "
+                                + "text it holds is not assessed",
+                            category: .fullText
+                        )
+                    }
+                } else {
+                    BioMedLitLib.logger?.debug(
+                        "No CORE API key configured; CORE not asked about DOI \(doi)",
                         category: .fullText
                     )
                 }
@@ -1170,10 +1245,13 @@ public actor FullTextService {
     /// - Parameters:
     ///   - url: The URL to ask.
     ///   - host: Whose pacing slot the request takes.
+    ///   - headers: Header fields to set on the request; none by default.
     /// - Returns: The status and body of an answer that is not transient.
     /// - Throws: `FullTextError.serverError` for a retryable status, so the
     ///   retry sees it; otherwise as ``bucketGET(_:)``.
-    private func pacedAttempt(_ url: URL, host: PacedHost) async throws -> (status: Int, body: Data) {
+    private func pacedAttempt(
+        _ url: URL, host: PacedHost, headers: [String: String] = [:]
+    ) async throws -> (status: Int, body: Data) {
         let now = Date()
         let slot = max(now, nextRequest[host] ?? now)
         nextRequest[host] = slot.addingTimeInterval(host.minimumInterval)
@@ -1183,6 +1261,9 @@ public actor FullTextService {
         }
         var request = URLRequest(url: url)
         request.timeoutInterval = BioMedLitConstants.defaultRequestTimeout
+        for (field, value) in headers {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw FullTextError.invalidResponse("Not an HTTP response")
@@ -1245,6 +1326,68 @@ public actor FullTextService {
             return .absent
         default:
             return .unreachable(.httpStatus(answer.status))
+        }
+    }
+
+    // MARK: - CORE (#480, stage C)
+
+    /// CORE's extracted text for a DOI (#480, stage C). The key travels in the
+    /// `Authorization` header alone. A fetch ending in 429 counts towards the
+    /// session pause; any other ending resets it. The statuses are pinned by
+    /// `fulltext_parity/core_fulltext.json` ("status"). Internal rather than
+    /// private so each outcome can be tested on its own.
+    ///
+    /// - Parameters:
+    ///   - doi: The DOI, trimmed and non-empty.
+    ///   - apiKey: The user's CORE key, trimmed and non-empty.
+    /// - Returns: Served text when a result is this article's and long enough;
+    ///   absent when none is; or unreachable, of its real kind: any status but
+    ///   200 (a 404 included: a search's 404 says nothing about the article),
+    ///   an answer we cannot read (`malformedResponse`), a transport failure,
+    ///   or a session pause (`httpStatus(429)`, no request made).
+    /// - Throws: `CancellationError` only.
+    func fetchCoreText(doi: String, apiKey: String) async throws -> COREFetch {
+        guard !doi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .absent }
+        if coreThrottle.isPaused {
+            return .unreachable(.httpStatus(BioMedLitConstants.httpStatusRateLimited))
+        }
+        // A request we could not build was never sent: not an absence.
+        guard let url = CORE.searchURL(doi: doi) else { return .unreachable(.requestFailed) }
+        let headers = ["Authorization": "Bearer \(apiKey)", "Accept": "application/json"]
+        let answer: (status: Int, body: Data)
+        do {
+            answer = try await RetryHelper.retry(
+                config: coreRetry,
+                shouldRetry: RetryHelper.retryOnlyTransient
+            ) {
+                try await self.pacedAttempt(url, host: .core, headers: headers)
+            }
+        } catch where error.isCancellation {
+            throw CancellationError()
+        } catch FullTextError.serverError(let statusCode) {
+            // A throttle or server error that outlasted its retries.
+            coreThrottle.record(endedOn: statusCode)
+            return .unreachable(.httpStatus(statusCode))
+        } catch FullTextError.invalidResponse {
+            // As OpenAlex maps it: an answer that is not HTTP
+            coreThrottle.record(endedOn: nil)
+            return .unreachable(.malformedResponse)
+        } catch {
+            // Logged by the chain, which knows what it falls through to.
+            coreThrottle.record(endedOn: nil)
+            return .unreachable(SearchTransport.failure(for: error))
+        }
+        coreThrottle.record(endedOn: answer.status)
+        guard answer.status == BioMedLitConstants.httpStatusOK else {
+            return .unreachable(.httpStatus(answer.status))
+        }
+        do {
+            if let text = try CORE.fullText(fromAnswer: answer.body, doi: doi) {
+                return .served(text)
+            }
+            return .absent
+        } catch {
+            return .unreachable(.malformedResponse)
         }
     }
 
