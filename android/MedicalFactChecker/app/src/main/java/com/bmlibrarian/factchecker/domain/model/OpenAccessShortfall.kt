@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.domain.model
 
+import com.bmlibrarian.factchecker.util.Constants
 import java.util.Locale
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -56,7 +57,7 @@ enum class OpenAccessSource(val persistedValue: String, val serviceName: String)
     PDF("unpaywall_pdf", "the open-access copy's PDF"),
 
     /** OpenAlex's record of the work, asked for the PDFs Unpaywall did not name (#480, stage B). */
-    OPENALEX("openalex", "OpenAlex"),
+    OPENALEX("openalex", Constants.OPENALEX_SERVICE_NAME),
 
     /** A PDF OpenAlex named that could not be obtained: OpenAlex answered, the copy went unassessed. */
     OPENALEX_PDF("openalex_pdf", "OpenAlex's copy");
@@ -127,6 +128,15 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
         address: String? = null
     ) {
         val address: String? = address?.trim()?.ifEmpty { null }
+
+        init {
+            // Only Unpaywall's own lookup is ever skipped, as in Swift; any other
+            // skip would be written as one that reads back as Unpaywall's
+            require(
+                reason !is OpenAccessUnsettledReason.NotConfigured ||
+                    (source == OpenAccessSource.UNPAYWALL && this.address == null)
+            ) { "a not-configured skip is Unpaywall's own lookup, not $source with address ${this.address}" }
+        }
 
         /** The failure, or null for a lookup that was never made. */
         val failure: RequestFailure?
@@ -388,6 +398,10 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
          * address trimmed; a scheme-relative `//host/…` names its host, as in
          * urlsplit. Not `java.net.URI`, which refuses what urlsplit reads.
          *
+         * An authority with a `[` and no `]`, or a `]` and no `[`, has no host:
+         * urlsplit refuses it ("Invalid IPv6 URL"), so Python tells the address
+         * trimmed, and so does this.
+         *
          * @param address The PDF's address, as the source gave it
          * @return The name a tried PDF is told by
          */
@@ -396,6 +410,8 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
             val start = AUTHORITY_START.find(trimmed) ?: return trimmed
             val rest = trimmed.substring(start.range.last + 1)
             var authority = rest.takeWhile { it !in AUTHORITY_END }
+            // urlsplit checks the whole netloc, userinfo included
+            if (('[' in authority) != (']' in authority)) return trimmed
             authority = authority.substringAfterLast('@')
             val host = if (authority.startsWith("[") && ']' in authority) {
                 authority.substring(1, authority.indexOf(']'))

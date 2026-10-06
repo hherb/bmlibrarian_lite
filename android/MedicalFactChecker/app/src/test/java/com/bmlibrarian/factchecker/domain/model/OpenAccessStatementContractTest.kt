@@ -96,7 +96,7 @@ class OpenAccessStatementContractTest {
     @Test
     fun `each host row`() {
         val rows = table("hosts")
-        assertTrue("an empty table would pass vacuously", rows.size >= 9)
+        assertTrue("an empty table would pass vacuously", rows.size >= 14)
         for (row in rows) {
             assertEquals("$row", str(row, "host"), OpenAccessShortfall.host(str(row, "address")))
         }
@@ -136,7 +136,7 @@ class OpenAccessStatementContractTest {
     @Test
     fun `each read row`() {
         val rows = persisted("read")
-        assertTrue("an empty table would pass vacuously", rows.size >= 9)
+        assertTrue("an empty table would pass vacuously", rows.size >= 13)
         for (row in rows) {
             assertEquals(str(row, "name"), shortfall(row), OpenAccessShortfall.fromJson(str(row, "stored")))
         }

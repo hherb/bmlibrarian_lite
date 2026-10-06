@@ -70,6 +70,8 @@ import com.bmlibrarian.factchecker.util.Constants
  * @param onGetFullText Callback to fetch full text for this document
  * @param onViewFullText Callback to navigate to full text viewer
  * @param onOpenPublisher Callback to open publisher website (DOI link)
+ * @param onOpenUrl Callback to open an address: a PDF served and not saved,
+ *   whose link is all the record keeps (#480)
  * @param onOpenInPubMed Callback when "Open in PubMed" is clicked
  * @param onDismiss Callback when the sheet should be dismissed
  * @param modifier Modifier for customizing the component
@@ -81,6 +83,7 @@ fun DocumentDetailSheet(
     onGetFullText: (() -> Unit)? = null,
     onViewFullText: (() -> Unit)? = null,
     onOpenPublisher: ((String) -> Unit)? = null,
+    onOpenUrl: ((String) -> Unit)? = null,
     onOpenInPubMed: (String) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
@@ -218,7 +221,8 @@ fun DocumentDetailSheet(
                 isLoading = isLoadingFullText,
                 onGetFullText = onGetFullText,
                 onViewFullText = onViewFullText,
-                onOpenPublisher = onOpenPublisher
+                onOpenPublisher = onOpenPublisher,
+                onOpenUrl = onOpenUrl
             )
 
             // What an unsettled open-access lookup leaves open (#466)
@@ -283,6 +287,7 @@ fun DocumentDetailSheet(
  * @param onGetFullText Callback to fetch full text
  * @param onViewFullText Callback to navigate to full text viewer
  * @param onOpenPublisher Callback to open publisher website
+ * @param onOpenUrl Callback to open the PDF address a link-only record keeps
  */
 @Composable
 private fun FullTextSection(
@@ -290,7 +295,8 @@ private fun FullTextSection(
     isLoading: Boolean,
     onGetFullText: (() -> Unit)?,
     onViewFullText: (() -> Unit)?,
-    onOpenPublisher: ((String) -> Unit)?
+    onOpenPublisher: ((String) -> Unit)?,
+    onOpenUrl: ((String) -> Unit)?
 ) {
     val linkOnlyKind = document.linkOnlyKind
     when {
@@ -338,10 +344,12 @@ private fun FullTextSection(
             LinkOnlyFullTextSection(
                 kind = linkOnlyKind,
                 doi = document.doi,
+                pdfUrl = document.linkOnlyPdfUrl,
                 isLoading = isLoading,
                 retryEnabled = true,
                 onRetry = onGetFullText,
-                onOpenPublisher = onOpenPublisher
+                onOpenPublisher = onOpenPublisher,
+                onOpenUrl = onOpenUrl
             )
         }
 

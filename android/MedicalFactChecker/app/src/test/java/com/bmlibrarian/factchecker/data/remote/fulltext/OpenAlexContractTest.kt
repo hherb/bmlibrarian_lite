@@ -30,6 +30,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
@@ -49,7 +50,15 @@ class OpenAlexContractTest {
         Json.parseToJsonElement(contractFile().readText()).jsonObject
     }
 
-    private fun table(name: String) = contract.getValue(name).jsonArray.map { it.jsonObject }
+    /**
+     * A contract table's rows, at least [minimum] of them: an emptied table
+     * would otherwise pass every row loop vacuously.
+     */
+    private fun table(name: String, minimum: Int): List<JsonObject> {
+        val rows = contract.getValue(name).jsonArray.map { it.jsonObject }
+        assertTrue("$name has ${rows.size} rows; an emptied table would pass vacuously", rows.size >= minimum)
+        return rows
+    }
 
     private fun JsonObject.string(key: String) =
         (this[key] as? JsonPrimitive)?.takeUnless { it is JsonNull }?.contentOrNull
@@ -76,14 +85,14 @@ class OpenAlexContractTest {
 
     @Test
     fun `each work_url row`() {
-        for (row in table("work_url")) {
+        for (row in table("work_url", MIN_WORK_URL_ROWS)) {
             assertEquals(row.string("name"), row.string("url"), OpenAlex.workUrl(row.string("doi")!!, row.string("mailto")))
         }
     }
 
     @Test
     fun `each pdf_urls row`() {
-        for (row in table("pdf_urls")) {
+        for (row in table("pdf_urls", MIN_PDF_URLS_ROWS)) {
             val name = row.string("name")
             val work = row.getValue("work")
             if ((row["malformed"] as? JsonPrimitive)?.booleanOrNull == true) {
@@ -97,5 +106,18 @@ class OpenAlexContractTest {
                 OpenAlex.untried(OpenAlex.pdfUrls(work), tried)
             )
         }
+    }
+
+    /** The status table is walked by `OpenAlexServiceTest`; its floor is checked here too. */
+    @Test
+    fun `the status table is not empty`() {
+        table("status", MIN_STATUS_ROWS)
+    }
+
+    private companion object {
+        /** The contract's row counts when these tests were written (#480). */
+        const val MIN_WORK_URL_ROWS = 6
+        const val MIN_PDF_URLS_ROWS = 9
+        const val MIN_STATUS_ROWS = 8
     }
 }

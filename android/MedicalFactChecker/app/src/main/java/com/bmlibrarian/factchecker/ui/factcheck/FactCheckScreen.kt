@@ -282,6 +282,9 @@ fun FactCheckScreen(
                             val url = "${Constants.DOI_URL_PREFIX}$doi"
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                             context.startActivity(intent)
+                        },
+                        onOpenUrl = { url ->
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                         }
                     )
                 }

@@ -376,7 +376,7 @@ object Constants {
     const val FULLTEXT_SOURCE_OPENALEX = "openalex"
 
     /** How a stored [FULLTEXT_SOURCE_OPENALEX] is labelled for the reader. */
-    const val FULLTEXT_SOURCE_OPENALEX_LABEL = "OpenAlex"
+    const val FULLTEXT_SOURCE_OPENALEX_LABEL = OPENALEX_SERVICE_NAME
 
     /** Full-text source: DOI/Publisher. */
     const val FULLTEXT_SOURCE_DOI = "doi"

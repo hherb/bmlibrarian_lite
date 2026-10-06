@@ -241,10 +241,11 @@ data class DocumentEntity(
      * (#480).
      *
      * It says only the link is kept when the link is what the reader is given:
-     * the record is link-only ([isLinkOnly]), which the cards show as an
-     * undownloaded PDF and the full-text screen as the PDF's link. A record with
-     * text in hand is not shown the link, so the note says the PDF could not be
-     * read instead.
+     * the record is link-only ([isLinkOnly]), which the cards show as
+     * [FullTextLinkKind.PDF_NOT_SAVED] offering that PDF's link
+     * ([linkOnlyPdfUrl]), and the full-text screen as the PDF's link. A record
+     * with text in hand is not shown the link, so the note says the PDF could
+     * not be read instead.
      */
     val pdfNotSavedNote: String?
         get() = fullTextPdfNotSavedFrom?.let { OpenAccessShortfall.notSavedNote(it, linkKept = isLinkOnly) }
@@ -308,9 +309,30 @@ data class DocumentEntity(
 
     /**
      * The kind of link a link-only record holds, or null when it is not one.
+     *
+     * A PDF served and not saved ([fullTextPdfNotSavedFrom]) is
+     * [FullTextLinkKind.PDF_NOT_SAVED], whose words agree with the caching note
+     * shown beside it ([pdfNotSavedNote]); any other link-only record is read
+     * from its stored source ([FullTextLinkKind.forStoredSource]).
      */
     val linkOnlyKind: FullTextLinkKind?
-        get() = if (isLinkOnly) FullTextLinkKind.forStoredSource(fullTextSource) else null
+        get() = when {
+            !isLinkOnly -> null
+            fullTextPdfNotSavedFrom != null -> FullTextLinkKind.PDF_NOT_SAVED
+            else -> FullTextLinkKind.forStoredSource(fullTextSource)
+        }
+
+    /**
+     * The PDF address a link-only record's card offers, or null when it offers
+     * the publisher's page (by DOI) instead.
+     *
+     * A PDF served and not saved keeps only its address (#480): its `pdfPath`
+     * is null, and the caching note tells the reader "only its link is kept",
+     * so that link, not the DOI, is the one offered. iOS/macOS keep the same
+     * address as the record's link (`Document.fullTextPDFPath`).
+     */
+    val linkOnlyPdfUrl: String?
+        get() = if (isLinkOnly) fullTextPdfNotSavedFrom else null
 
     /**
      * Check if this document has an embedding score.

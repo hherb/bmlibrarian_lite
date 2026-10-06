@@ -69,7 +69,11 @@ object NetworkModule {
      *
      * Configuration:
      * - BASIC-level logging interceptor in debug builds; never HEADERS or BODY,
-     *   which would log credentials (see [debugHttpLoggingInterceptor])
+     *   which would log credentials (see [debugHttpLoggingInterceptor]). BASIC
+     *   still logs every request's full URL, so debug logcat holds the user's
+     *   contact email wherever it travels in a query: Unpaywall's `email=` and
+     *   OpenAlex's `mailto=` (OpenAlex's client is derived from this one and
+     *   keeps its interceptors). No credential may travel in a URL (#243)
      * - Connection timeout: 30 seconds
      * - Read timeout: 120 seconds (allows for slow LLM responses)
      * - Write timeout: 60 seconds
@@ -87,7 +91,9 @@ object NetworkModule {
             .retryOnConnectionFailure(true)
 
         // Only add logging interceptor in debug builds, at BASIC level: bodies
-        // and headers carry credentials (see debugHttpLoggingInterceptor)
+        // and headers carry credentials (see debugHttpLoggingInterceptor).
+        // BASIC still logs full URLs, the contact email in Unpaywall's and
+        // OpenAlex's queries included
         if (BuildConfig.DEBUG) {
             builder.addInterceptor(debugHttpLoggingInterceptor())
         }

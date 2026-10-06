@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.data.remote.fulltext
 
+import android.util.Log
 import com.bmlibrarian.factchecker.data.remote.transparency.RequestPacer
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
@@ -25,6 +26,7 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -168,24 +170,31 @@ class OpenAlexService internal constructor(
     /**
      * Ask OpenAlex for the PDFs a work's locations name.
      *
+     * Never throws but for cancellation: an unexpected error (a
+     * `SecurityException` from the platform, say) is logged and answered as
+     * OpenAlex unreachable, so the caller keeps every refusal it already
+     * collected and the reader is told OpenAlex could not be asked, as
+     * Unpaywall's lookup does.
+     *
      * @param doi The DOI; a blank one is never asked
      * @return Served URLs (possibly none); absent for a 404; or unreachable, of
-     *   its real kind (a body that is not UTF-8 JSON of a work is malformed)
+     *   its real kind (a body that is not UTF-8 JSON of a work is malformed;
+     *   an unexpected error is a failed request)
      * @throws kotlinx.coroutines.CancellationException if the caller cancelled
      */
     suspend fun fetchPdfUrls(doi: String): OpenAlexFetch {
         if (doi.isBlank()) return OpenAlexFetch.Absent
-        val url = OpenAlex.workUrl(doi, contactEmail(), baseUrl).toHttpUrlOrNull()
-            ?: return OpenAlexFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
         return try {
+            val url = OpenAlex.workUrl(doi, contactEmail(), baseUrl).toHttpUrlOrNull()
+                ?: return OpenAlexFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
             val (code, bytes) = get(url)
             when (code) {
                 HTTP_OK -> {
-                    val text = bytes.strictUtf8() ?: return malformed()
+                    val text = bytes.strictUtf8() ?: return malformed(doi, null)
                     try {
                         OpenAlexFetch.Served(OpenAlex.pdfUrls(text))
                     } catch (e: IllegalArgumentException) {
-                        malformed() // SerializationException is one
+                        malformed(doi, e) // SerializationException is one
                     }
                 }
                 Constants.HTTP_NOT_FOUND -> OpenAlexFetch.Absent
@@ -195,6 +204,13 @@ class OpenAlexService internal constructor(
             OpenAlexFetch.Unreachable(RequestFailure.forHttpStatus(e.statusCode))
         } catch (e: IOException) {
             OpenAlexFetch.Unreachable(RequestFailure.fromException(e))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Not an answer about the work: OpenAlex went unasked, and the
+            // Unpaywall refusals the caller holds must survive it
+            Log.e(TAG, "OpenAlex lookup of $doi failed unexpectedly", e)
+            OpenAlexFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
         }
     }
 
@@ -217,9 +233,25 @@ class OpenAlexService internal constructor(
         }
     }
 
-    private fun malformed() = OpenAlexFetch.Unreachable(RequestFailure(RequestFailureKind.MALFORMED_RESPONSE))
+    /**
+     * OpenAlex's answer could not be read as a work: logged with its cause,
+     * and told as a malformed response.
+     *
+     * @param doi The DOI asked about
+     * @param cause Why the body could not be read; null for a body that is not UTF-8
+     * @return The fetch, unreachable as malformed
+     */
+    private fun malformed(doi: String, cause: Exception?): OpenAlexFetch.Unreachable {
+        if (cause != null) {
+            Log.w(TAG, "OpenAlex's answer about $doi could not be read as a work", cause)
+        } else {
+            Log.w(TAG, "OpenAlex's answer about $doi is not UTF-8")
+        }
+        return OpenAlexFetch.Unreachable(RequestFailure(RequestFailureKind.MALFORMED_RESPONSE))
+    }
 
     private companion object {
         const val HTTP_OK = 200
+        const val TAG = "OpenAlexService"
     }
 }

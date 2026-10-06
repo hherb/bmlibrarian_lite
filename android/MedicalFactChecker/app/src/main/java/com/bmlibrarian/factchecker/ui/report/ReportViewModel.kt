@@ -510,4 +510,16 @@ class ReportViewModel @Inject constructor(
             _events.send(ReportUiEvent.OpenUrl(url))
         }
     }
+
+    /**
+     * Open an address in the browser: the PDF a link-only record keeps when it
+     * was served and could not be saved on this device (#480).
+     *
+     * @param url The address to open
+     */
+    fun openUrl(url: String) {
+        viewModelScope.launch {
+            _events.send(ReportUiEvent.OpenUrl(url))
+        }
+    }
 }

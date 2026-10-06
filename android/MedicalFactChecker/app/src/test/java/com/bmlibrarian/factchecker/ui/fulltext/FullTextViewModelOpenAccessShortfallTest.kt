@@ -247,13 +247,67 @@ class FullTextViewModelOpenAccessShortfallTest {
 
         assertEquals(
             FullTextViewModel.FullTextState.WebUrl(
-                pdfUrl, "t", FullTextLinkKind.UNDOWNLOADED_PDF, openAccessNotice = null, pdfNotSavedNote = note
+                pdfUrl, "t", FullTextLinkKind.PDF_NOT_SAVED, openAccessNotice = null, pdfNotSavedNote = note
             ),
             viewModel.state.value
         )
         coVerify {
             documentDao.update(match { it.fullTextPdfNotSavedFrom == pdfUrl && it.fullTextOpenAccessShortfallJson == null })
         }
+    }
+
+    /** Europe PMC's render served and not saved is told the same way (#480). */
+    @Test
+    fun `a Europe PMC PDF not saved is linked with the caching note`() {
+        val pdfUrl = "https://europepmc.org/render/a.pdf"
+        coEvery { fullTextService.downloadPdf(any(), any()) } returns PdfDownload.NotSaved
+
+        assertEquals(
+            FullTextViewModel.FullTextState.WebUrl(
+                pdfUrl, "t", FullTextLinkKind.PDF_NOT_SAVED,
+                pdfNotSavedNote = OpenAccessShortfall.notSavedNote(pdfUrl, linkKept = true)
+            ),
+            open(document, FullTextService.FullTextResult.EuropePmcPdf(pdfUrl)).state.value
+        )
+    }
+
+    /**
+     * Opened on a stored link-only record carrying the caching note, the screen
+     * fetches again (it holds no text to show), and the link it offers is the
+     * one its note speaks of: the newly served PDF's, never the stored address
+     * or the DOI beside a note naming another host (#480).
+     */
+    @Test
+    fun `a stored PDF not saved is fetched again, and the link offered matches the note`() {
+        val stored = "https://old.example.org/a.pdf"
+        val served = "https://new.example.org/b.pdf"
+        val linkOnly = document.copy(
+            fullTextSource = Constants.FULLTEXT_SOURCE_UNPAYWALL,
+            fullTextFetchedAt = java.util.Date(),
+            fullTextPdfNotSavedFrom = stored
+        )
+        coEvery { fullTextService.downloadPdf(any(), any()) } returns PdfDownload.NotSaved
+
+        val state = open(linkOnly, unpaywallPdfs(served)).state.value
+
+        assertEquals(
+            FullTextViewModel.FullTextState.WebUrl(
+                served, "t", FullTextLinkKind.PDF_NOT_SAVED,
+                pdfNotSavedNote = OpenAccessShortfall.notSavedNote(served, linkKept = true)
+            ),
+            state
+        )
+        state as FullTextViewModel.FullTextState.WebUrl
+        assertTrue(state.pdfNotSavedNote!!, state.pdfNotSavedNote!!.contains("found at new.example.org"))
+        coVerify { documentDao.update(match { it.fullTextPdfNotSavedFrom == served && it.linkOnlyPdfUrl == served }) }
+
+        // The control: a fetch that ends on the DOI shows no caching note and clears it
+        documentDao = mockk(relaxed = true)
+        assertEquals(
+            FullTextViewModel.FullTextState.WebUrl("https://doi.org/10.1/x", "t", FullTextLinkKind.PUBLISHER_PAGE, null),
+            open(linkOnly, FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1/x")).state.value
+        )
+        coVerify { documentDao.update(match { it.fullTextPdfNotSavedFrom == null && it.linkOnlyPdfUrl == null }) }
     }
 
     /** A chain that settled nothing records nothing, the stored shortfall included (#434). */

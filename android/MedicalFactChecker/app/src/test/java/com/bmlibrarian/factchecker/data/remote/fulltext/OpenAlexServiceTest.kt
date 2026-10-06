@@ -17,16 +17,19 @@
  */
 package com.bmlibrarian.factchecker.data.remote.fulltext
 
+import android.util.Log
 import com.bmlibrarian.factchecker.data.remote.transparency.RequestPacer
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.util.Constants
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -35,6 +38,8 @@ import okhttp3.mockwebserver.RecordedRequest
 import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -88,6 +93,7 @@ class OpenAlexServiceTest {
     @Test
     fun `every status row of the fixture gets its outcome`() = runBlocking {
         val rows = Json.parseToJsonElement(contractFile().readText()).jsonObject.getValue("status").jsonArray
+        assertTrue("${rows.size} status rows; an emptied table would pass vacuously", rows.size >= MIN_STATUS_ROWS)
         for (row in rows.map { it.jsonObject }) {
             val status = row.getValue("status").jsonPrimitive.int
             val outcome = row.getValue("outcome").jsonPrimitive.content
@@ -146,6 +152,70 @@ class OpenAlexServiceTest {
         server.shutdown()
         val fetch = service().fetchPdfUrls("10.1/x")
         assertTrue(fetch.toString(), fetch is OpenAlexFetch.Unreachable)
+        // A transport failure, of its own kind: never told as a status OpenAlex answered
+        assertNotEquals(fetch.toString(), RequestFailureKind.HTTP_STATUS, (fetch as OpenAlexFetch.Unreachable).failure.kind)
+    }
+
+    /**
+     * An unexpected error (here a `SecurityException` thrown by the client) is
+     * logged and answered as OpenAlex unreachable, a failed request, rather than
+     * thrown: a throw would lose every Unpaywall refusal the caller holds.
+     */
+    @Test
+    fun `an unexpected error is a failed request, logged`() = runBlocking {
+        Log.clear()
+        val throwing = OkHttpClient.Builder()
+            .addInterceptor(Interceptor { throw SecurityException("no network permission") })
+            .build()
+        val service = OpenAlexService(throwing, server.url("").toString().trimEnd('/'), { null }, RequestPacer(0L), 0, 0L)
+
+        assertEquals(
+            OpenAlexFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED)),
+            service.fetchPdfUrls("10.1/x")
+        )
+        assertTrue(Log.lines.toString(), Log.lines.any { "SecurityException" in it && "10.1/x" in it })
+    }
+
+    /** So is a contact email that cannot be read. */
+    @Test
+    fun `a contact that cannot be read is a failed request`() = runBlocking {
+        val service = OpenAlexService(
+            PmcOpenDataService.bucketClient(OkHttpClient(), Constants.OPENALEX_REQUEST_TIMEOUT_SECONDS),
+            server.url("").toString().trimEnd('/'),
+            { throw IllegalStateException("settings unreadable") },
+            RequestPacer(0L),
+            0,
+            0L
+        )
+
+        assertEquals(
+            OpenAlexFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED)),
+            service.fetchPdfUrls("10.1/x")
+        )
+        assertEquals(0, server.requestCount)
+    }
+
+    /** Cancellation is not an error: it reaches the caller. */
+    @Test
+    fun `cancellation still propagates`() {
+        val cancelling = OkHttpClient.Builder()
+            .addInterceptor(Interceptor { throw CancellationException("cancelled") })
+            .build()
+        val service = OpenAlexService(cancelling, server.url("").toString().trimEnd('/'), { null }, RequestPacer(0L), 0, 0L)
+
+        assertThrows(CancellationException::class.java) {
+            runBlocking { service.fetchPdfUrls("10.1/x") }
+        }
+    }
+
+    /** A body that cannot be read as a work is logged with why. */
+    @Test
+    fun `an unreadable answer is logged with its cause`() = runBlocking {
+        Log.clear()
+        routes[path] = MockResponse().setBody("[]")
+
+        assertEquals(malformed, service().fetchPdfUrls("10.1/x"))
+        assertTrue(Log.lines.toString(), Log.lines.any { "10.1/x" in it && "IllegalArgumentException" in it })
     }
 
     @Test
@@ -182,5 +252,8 @@ class OpenAlexServiceTest {
     private companion object {
         const val PACER_INTERVAL_MS = 150L
         const val REQUEST_WAIT_SECONDS = 5L
+
+        /** The contract's status rows when this test was written (#480). */
+        const val MIN_STATUS_ROWS = 8
     }
 }

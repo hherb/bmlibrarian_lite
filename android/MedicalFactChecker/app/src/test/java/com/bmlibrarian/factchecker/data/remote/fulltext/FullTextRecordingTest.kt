@@ -168,7 +168,8 @@ class FullTextRecordingTest {
         assertEquals(Constants.FULLTEXT_SOURCE_UNPAYWALL, doc.fullTextSource)
         assertNull(doc.fullTextOpenAccessShortfallJson)
         assertEquals(pdfUrl, doc.fullTextPdfNotSavedFrom)
-        assertEquals(FullTextLinkKind.UNDOWNLOADED_PDF, doc.linkOnlyKind)
+        assertEquals(FullTextLinkKind.PDF_NOT_SAVED, doc.linkOnlyKind)
+        assertEquals(pdfUrl, doc.linkOnlyPdfUrl)
     }
 
     /** A chain that settled nothing records nothing, the shortfall included (#434). */

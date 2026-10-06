@@ -127,6 +127,39 @@ class FullTextServiceOpenAlexTest {
         )
     }
 
+    /**
+     * A blank DOI is no DOI, as in Swift: neither Unpaywall nor OpenAlex is
+     * asked, so OpenAlex's never-made lookup is not read as the work's absence,
+     * and no DOI link is offered. The chain ends as it does without a DOI.
+     */
+    @Test
+    fun `a blank DOI is no DOI`() = runTest {
+        for (blank in listOf("", "   ", "\t\n")) {
+            assertEquals(
+                blank,
+                Result.success(FullTextResult.Unavailable("No full text source available")),
+                service.fetchFullText(null, blank, null, "researcher@example.org")
+            )
+        }
+        coVerify(exactly = 0) { unpaywallApi.getWorkByDoi(any(), any()) }
+        coVerify(exactly = 0) { openAlex.fetchPdfUrls(any()) }
+        coVerify(exactly = 0) { europePmc.search(any(), any(), any(), any(), any()) }
+    }
+
+    /** The control: a DOI with whitespace around it is that DOI, trimmed, in every branch. */
+    @Test
+    fun `a padded DOI is asked and linked trimmed`() = runTest {
+        unpaywallKnowsNothing()
+        coEvery { openAlex.fetchPdfUrls(doi) } returns OpenAlexFetch.Absent
+        assertEquals(
+            Result.success(FullTextResult.DoiUrl(doiLink(doi), null)),
+            service.fetchFullText(null, "  $doi\n", null, "researcher@example.org")
+        )
+        coVerify(exactly = 1) { unpaywallApi.getWorkByDoi(doi, any()) }
+        coVerify(exactly = 1) { openAlex.fetchPdfUrls(doi) }
+        coVerify(exactly = 1) { europePmc.search(match { it == "DOI:\"$doi\"" }, any(), any(), any(), any()) }
+    }
+
     @Test
     fun `with no candidate anywhere, the DOI link carries every shortfall`() = runTest {
         unpaywallKnowsNothing()

@@ -543,7 +543,8 @@ private fun PdfViewer(
  *
  * Says what the link is, and nothing it does not know (#471): a DOI link is
  * the publisher's page, which may be paywalled, and a PDF link is a copy that
- * was found but could not be downloaded.
+ * was found but could not be downloaded, or one served and not saved on this
+ * device (#480), told beside the caching note it agrees with.
  *
  * @param kind What the link is
  * @param openAccessNotice What an unsettled open-access lookup leaves open, or

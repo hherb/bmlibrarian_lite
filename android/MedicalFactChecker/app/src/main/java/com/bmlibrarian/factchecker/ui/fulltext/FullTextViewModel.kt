@@ -29,6 +29,7 @@ import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService.FullText
 import com.bmlibrarian.factchecker.data.remote.fulltext.recordingFullTextFetch
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.domain.model.FullTextLinkKind
+import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
 import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
 import com.bmlibrarian.factchecker.util.Constants
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -112,8 +113,9 @@ class FullTextViewModel @Inject constructor(
          *
          * @param url URL to open.
          * @param title Document title.
-         * @param kind What the link is: the publisher's page, or a PDF that
-         *   could not be downloaded. The screen says which (#471).
+         * @param kind What the link is: the publisher's page, a PDF that
+         *   could not be downloaded, or one served and not saved. The screen
+         *   says which (#471, #480).
          * @param openAccessNotice What an open-access lookup that went unsettled
          *   leaves open, shown above the link; null when nothing was (#466).
          * @param pdfNotSavedNote The caching note, when the PDF linked was served
@@ -324,11 +326,11 @@ class FullTextViewModel @Inject constructor(
             }
             is FullTextResult.EuropePmcPdf -> {
                 Log.d(TAG, "Got Europe PMC PDF URL for ${doc.id}: ${result.pdfUrl}")
-                pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, "Europe PMC", recorded.pdfNotSavedNote)
+                pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, "Europe PMC", recorded.fullTextPdfNotSavedFrom)
             }
             is FullTextResult.OpenAccessPdf -> {
                 Log.d(TAG, "Got ${result.namedBy.label} PDF URL for ${doc.id}: ${result.pdfUrl}")
-                pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, result.namedBy.label, recorded.pdfNotSavedNote)
+                pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, result.namedBy.label, recorded.fullTextPdfNotSavedFrom)
             }
             is FullTextResult.OpenAccessPdfs -> error("resolved by recording")
             is FullTextResult.DoiUrl -> {
@@ -359,8 +361,10 @@ class FullTextViewModel @Inject constructor(
      * @param pdfUrl The PDF's URL.
      * @param title The document's title.
      * @param source The source, as the reader is told of it.
-     * @param notSavedNote The caching note, when the PDF was served and could
-     *   not be saved (#480); shown beside the link.
+     * @param notSavedFrom The PDF served and not saved, as recorded (#480), or
+     *   null. The link shown is then that PDF's, so it is told as
+     *   [FullTextLinkKind.PDF_NOT_SAVED] with the caching note saying only its
+     *   link is kept: the two agree, and agree with the link offered.
      * @return The state to show.
      */
     private fun pdfOrLink(
@@ -368,7 +372,7 @@ class FullTextViewModel @Inject constructor(
         pdfUrl: String,
         title: String,
         source: String,
-        notSavedNote: String?
+        notSavedFrom: String?
     ): FullTextState =
         if (localPath != null) {
             FullTextState.PdfContent(pdfPath = localPath, title = title, source = source)
@@ -376,8 +380,8 @@ class FullTextViewModel @Inject constructor(
             FullTextState.WebUrl(
                 url = pdfUrl,
                 title = title,
-                kind = FullTextLinkKind.UNDOWNLOADED_PDF,
-                pdfNotSavedNote = notSavedNote
+                kind = if (notSavedFrom != null) FullTextLinkKind.PDF_NOT_SAVED else FullTextLinkKind.UNDOWNLOADED_PDF,
+                pdfNotSavedNote = notSavedFrom?.let { OpenAccessShortfall.notSavedNote(it, linkKept = true) }
             )
         }
 

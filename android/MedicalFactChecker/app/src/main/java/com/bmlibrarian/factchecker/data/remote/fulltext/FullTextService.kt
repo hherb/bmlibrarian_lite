@@ -315,7 +315,8 @@ class FullTextService @Inject constructor(
      * Fetch full text for a document using the fallback chain.
      *
      * @param pmcId PubMed Central ID (if available).
-     * @param doi Digital Object Identifier (if available).
+     * @param doi Digital Object Identifier (if available); trimmed, and a
+     *   blank one is no DOI: Unpaywall, OpenAlex and the DOI link are skipped.
      * @param pmid PubMed ID (if available, used for caching).
      * @param email Email to ask Unpaywall with ([UnpaywallContact.emailFor]); null,
      *   blank or the placeholder skips Unpaywall as not configured.
@@ -331,6 +332,11 @@ class FullTextService @Inject constructor(
         pmid: String?,
         email: String? = null
     ): Result<FullTextResult> = withContext(Dispatchers.IO) {
+        // The DOI trimmed, and a blank one is no DOI, as Swift trims it first.
+        // Every DOI branch reads this: asking with a blank one would read
+        // OpenAlex's never-made lookup as the work's absence
+        val usableDoi = doi?.trim()?.takeIf { it.isNotEmpty() }
+
         // What Europe PMC's side of the chain got instead of the article's text,
         // if anything. Set by a lost identifier search, a failed fetch and
         // a fullTextXML 404; cleared by a fetch that was served. Read only at the
@@ -348,7 +354,7 @@ class FullTextService @Inject constructor(
         var preprintAccession: String? = null
         var pdfRenderUrl: String? = null
         if (resolvedPmcId.isNullOrBlank()) {
-            val resolution = resolvePmcIdAndPdfUrl(pmid = pmid, doi = doi)
+            val resolution = resolvePmcIdAndPdfUrl(pmid = pmid, doi = usableDoi)
             resolvedPmcId = resolution.pmcId
             preprintAccession = resolution.preprintAccession
             pdfRenderUrl = resolution.pdfRenderUrl
@@ -438,29 +444,29 @@ class FullTextService @Inject constructor(
         // carried on the fallback, so the reader is told so rather than shown
         // the DOI link as though there were none (#466)
         var openAccessShortfall: OpenAccessShortfall? = null
-        if (!doi.isNullOrEmpty()) {
-            Log.d(TAG, "Attempting Unpaywall PDF for $doi")
-            val unpaywall = unpaywallSteps(doi, email, pmid)
+        if (usableDoi != null) {
+            Log.d(TAG, "Attempting Unpaywall PDF for $usableDoi")
+            val unpaywall = unpaywallSteps(usableDoi, email, pmid)
             if (unpaywall.any { it is OpenAccessStep.Candidate }) {
                 // OpenAlex waits: recording asks it only if none of these is served
-                return@withContext Result.success(FullTextResult.OpenAccessPdfs(unpaywall, doi))
+                return@withContext Result.success(FullTextResult.OpenAccessPdfs(unpaywall, usableDoi))
             }
-            Log.d(TAG, "Unpaywall named no PDF to try for $doi; asking OpenAlex")
+            Log.d(TAG, "Unpaywall named no PDF to try for $usableDoi; asking OpenAlex")
             // Unpaywall may still have named addresses that cannot be requested
-            val steps = unpaywall + openAlexSteps(doi, unpaywall.flatMap { it.addresses })
+            val steps = unpaywall + openAlexSteps(usableDoi, unpaywall.flatMap { it.addresses })
             if (steps.any { it is OpenAccessStep.Candidate }) {
-                return@withContext Result.success(FullTextResult.OpenAccessPdfs(steps, doi, openAlexAsked = true))
+                return@withContext Result.success(FullTextResult.OpenAccessPdfs(steps, usableDoi, openAlexAsked = true))
             }
             openAccessShortfall = steps.filterIsInstance<OpenAccessStep.Unsettled>()
                 .fold(null as OpenAccessShortfall?) { held, step -> OpenAccessShortfall.adding(step.shortfall, held) }
-            Log.d(TAG, "Neither Unpaywall nor OpenAlex named a PDF to try for $doi")
+            Log.d(TAG, "Neither Unpaywall nor OpenAlex named a PDF to try for $usableDoi")
         }
 
         // Fall back to DOI URL if DOI is available
-        if (!doi.isNullOrEmpty()) {
-            Log.d(TAG, "Falling back to DOI URL for $doi")
+        if (usableDoi != null) {
+            Log.d(TAG, "Falling back to DOI URL for $usableDoi")
             return@withContext Result.success(
-                FullTextResult.DoiUrl(doiLink(doi), openAccessShortfall)
+                FullTextResult.DoiUrl(doiLink(usableDoi), openAccessShortfall)
             )
         }
 

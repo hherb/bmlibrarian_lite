@@ -29,6 +29,10 @@ import okhttp3.logging.HttpLoggingInterceptor
  * be raised to `HEADERS` or `BODY` without redaction, since LLM keys travel in
  * headers and the NCBI key in the E-utilities request body.
  *
+ * What a URL does carry is logged in debug builds: the user's contact email,
+ * which Unpaywall takes as `email=` and OpenAlex as `mailto=`. It is not a
+ * credential, but it is personal, and debug logcat holds it.
+ *
  * @param logger Where the lines go; the platform log by default
  * @return A logging interceptor at `BASIC` level
  */
