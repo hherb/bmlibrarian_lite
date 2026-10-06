@@ -843,8 +843,6 @@ GET https://api.openalex.org/works/doi:{escape(doi)}?select=locations[&mailto={e
                                # unreadable body, a non-object work, or locations not
                                # a list → UNREACHABLE(malformed_response)
 404 → ABSENT                   # OpenAlex knows no such work (an HTML body)
-401               → KEY_REFUSED, and the key is refused for the rest of the
-                    process (session-wide, shared by every client)
 any other status (after 429/5xx retries), transport failure → UNREACHABLE(failure)
 ```
 
@@ -902,15 +900,16 @@ GET https://api.core.ac.uk/v3/search/works/?q={escape('doi:"' + lucene(trim(doi)
 # required: without it CORE answers an HTML meta-refresh page.
 
 no key            → no request, nothing recorded, nothing told (a debug log line)
-key refused (below) → KEY_REFUSED, no request
+this key refused (below) → KEY_REFUSED, no request
 paused (below)    → UNREACHABLE(http_status 429), no request
 200               → the first result that is an object, whose string doi
                     normalises to this DOI's, and whose string fullText,
                     trimmed, holds ≥ 5,000 code points: SERVED(that text);
                     none → ABSENT; an answer that is not an object, or whose
                     results are not a list → UNREACHABLE(malformed_response)
-401               → KEY_REFUSED, and the key is refused for the rest of the
-                    process (session-wide, shared by every client)
+401               → KEY_REFUSED, and this key is refused for the rest of the
+                    process (shared by every client; held as sha256(trim(key)),
+                    never the key); another key is asked as usual
 any other status (after 429/5xx retries), transport failure → UNREACHABLE(failure)
 ```
 
@@ -930,10 +929,15 @@ request is a search, and its results are not guaranteed to be this article.
   (the maintainer's decision of 2026-10-06), as any unanswered source does.
 - **A refused key (#498).** Only HTTP 401 means CORE refused the key; a 403
   stays an ordinary unreachable answer for that article (Cloudflare can answer
-  403 to a valid key). The first 401 marks the key refused for the rest of the
-  process, on the same session object as the 429 pause (Python `CoreThrottle`,
-  Swift `CoreThrottle`, Android `CoreService`); every later fetch makes no
-  request. That 401, and every fetch after it, is `KEY_REFUSED`: recorded as a
+  403 to a valid key). The first 401 marks **that key** refused for the rest of
+  the process, on the same session object as the 429 pause (Python
+  `CoreThrottle`, Swift `CoreThrottle`, Android `CoreService`); every later
+  fetch with that key makes no request. The refusal is scoped to the key
+  (`core_fulltext.json`'s `key_refusal_scope`): the session object holds the
+  SHA-256 digest (hex) of the trimmed key, never the key itself, and a fetch is
+  refused without a request only when the current key's digest is the refused
+  one. A key corrected in the settings is asked again; a 401 for it refuses that
+  key instead. That 401, and every later fetch with the key, is `KEY_REFUSED`: recorded as a
   **skip** of CORE with reason `key_refused`, worded "the key in the settings
   was refused" (`core_fulltext.json`'s `key_refused_reason`), so the reader
   reads "CORE (the key in the settings was refused) could not be asked, so a
@@ -941,8 +945,8 @@ request is a search, and its results are not guaranteed to be this article.
   not established." and, in "Tried sources", "CORE (the key in the settings
   was refused)". It blocks a settled absence, as any source not asked does,
   and adds no configuration nudge. A 401 ending resets the 429 count, as any
-  other ending does; once the key is refused, that is what a fetch is told,
-  paused or not.
+  other ending does; once a key is refused, that is what a fetch with it is
+  told, paused or not.
 - **A missing key is silent** (spec decision 4). It is not recorded as a
   `NOT_CONFIGURED` skip, which on the desktop would block every settled
   absence and add a configuration nudge to every sentence; the settings

@@ -73,8 +73,9 @@ export CORE_API_KEY="your-key"
 ```
 The key is stored only in your configuration file (readable by you alone)
 and sent only to CORE. Without one, CORE is simply not asked. If CORE refuses
-the key, the app stops asking CORE for the rest of the session and says 'the
-key in the settings was refused'; check the key under Settings → Full Text.
+the key, the app stops asking CORE with that key for the rest of the session
+and says 'the key in the settings was refused'; correct the key under
+Settings → Full Text and CORE is asked again.
 
 ### Launching the Application
 
