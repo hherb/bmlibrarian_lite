@@ -232,6 +232,25 @@ final class FullTextServiceCORETests: XCTestCase {
         XCTAssertEqual(result.contentKind, .abstract)
     }
 
+    /// Every row of the shared contract's status table gets its outcome here:
+    /// 200 serves the text, every other status (404 included) is unreachable.
+    func testEveryStatusRowOfTheContractGetsItsOutcome() async throws {
+        let rows = try XCTUnwrap(COREContract.load()["status"] as? [[String: Any]])
+        XCTAssertGreaterThanOrEqual(rows.count, 9, "status table lost rows")
+        for row in rows {
+            let status = try XCTUnwrap(row["status"] as? Int)
+            StubURLProtocol.reset()
+            StubURLProtocol.routes[coreHost] = (status, status == 200 ? hit(longText) : Data())
+            let fetch = try await makeService(coreThrottle: CoreThrottle())
+                .fetchCoreText(doi: doi, apiKey: "test-core-key")
+            if status == 200 {
+                XCTAssertEqual(fetch, .served(longText), "status \(status)")
+            } else {
+                XCTAssertEqual(fetch, .unreachable(.httpStatus(status)), "status \(status)")
+            }
+        }
+    }
+
     /// Requests to api.core.ac.uk are paced at ``BioMedLitConstants/coreMinimumInterval``
     /// (0.4 per second), a retry included. A lower bound only, so a slow machine
     /// cannot fail it.

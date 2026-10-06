@@ -162,6 +162,24 @@ def test_the_key_travels_in_the_header_alone(caplog: pytest.LogCaptureFixture) -
     assert KEY not in repr(_client(server.url))
 
 
+def test_a_redirect_to_another_host_drops_the_key() -> None:
+    """The bearer key follows no redirect off the host it was sent to."""
+    with running({PATH: [json_answer(HIT)]}) as server:
+        port = server.server_address[1]
+        target = f"http://localhost:{port}{PATH}"
+        redirect = ScriptedAnswer(HTTPStatus.FOUND, headers=(("Location", target),))
+        server.script[PATH] = [redirect, json_answer(HIT)]
+        fetch = _client(server.url).fetch_full_text(DOI)
+        received = list(server.received)
+    # The control: the redirect was followed, to the other host name
+    assert len(received) == 2
+    assert received[0].headers["Host"].startswith("127.0.0.1")
+    assert received[1].headers["Host"].startswith("localhost")
+    assert fetch.text is not None
+    assert received[0].headers["Authorization"] == f"Bearer {KEY}"
+    assert not any(name.lower() == "authorization" for name in received[1].headers)
+
+
 def test_a_blank_doi_is_never_asked() -> None:
     """No DOI, no search: an absence for this source, nothing sent."""
     with running({PATH: [json_answer(HIT)]}) as server:

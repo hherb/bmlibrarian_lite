@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import stat
 from pathlib import Path
 
 import pytest
 
+from bmlibrarian_lite import cli
 from bmlibrarian_lite.config import LiteConfig
 from bmlibrarian_lite.constants import REDACTED_SECRET_PLACEHOLDER
 
@@ -87,3 +89,25 @@ def test_the_dialog_shows_a_saved_key(qapp) -> None:
     config = LiteConfig()
     config.discovery.core_api_key = KEY
     assert SettingsDialog(config).core_api_key_input.text() == KEY
+
+
+@pytest.mark.parametrize(
+    ("key", "expected"),
+    [(KEY, REDACTED_SECRET_PLACEHOLDER), (None, "(not set)")],
+)
+def test_the_cli_config_view_never_prints_the_key(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    key: str | None,
+    expected: str,
+) -> None:
+    """The human view says whether a CORE key is set, never what it is."""
+    config = LiteConfig()
+    config.discovery.core_api_key = key
+    monkeypatch.setattr(
+        LiteConfig, "load", classmethod(lambda cls, path=None: config)
+    )
+    assert cli.cmd_config(argparse.Namespace(json=False)) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert f"  CORE API key: {expected}" in lines
+    assert not any(KEY in line for line in lines)

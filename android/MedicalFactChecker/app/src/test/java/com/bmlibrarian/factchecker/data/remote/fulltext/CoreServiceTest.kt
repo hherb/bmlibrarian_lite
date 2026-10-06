@@ -142,6 +142,16 @@ class CoreServiceTest {
     }
 
     @Test
+    fun `another article's text is never served`() = runBlocking {
+        routes[path] = MockResponse().setBody(
+            """{"results":[{"doi":"10.1159/999999","fullText":"$hitText"}]}"""
+        )
+        assertEquals(CoreFetch.Absent, service().fetchText(doi))
+        // The control that CORE was asked, once, and its answer read
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
     fun `a blank DOI is never asked`() = runBlocking {
         assertEquals(CoreFetch.Absent, service().fetchText("  "))
         assertEquals(0, server.requestCount)
