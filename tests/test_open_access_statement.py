@@ -30,6 +30,7 @@ from bmlibrarian_lite.analysis_failures import (
     with_unestablished_access,
 )
 from bmlibrarian_lite.constants import (
+    SERVICE_CORE,
     SERVICE_DOI_RESOLVER,
     SERVICE_OPENALEX,
     SERVICE_OPENALEX_PDF,
@@ -62,6 +63,7 @@ SERVICES = {
     "unpaywall_pdf": SERVICE_UNPAYWALL_PDF,
     "openalex": SERVICE_OPENALEX,
     "openalex_pdf": SERVICE_OPENALEX_PDF,
+    "core": SERVICE_CORE,
 }
 _PDF = "https://repo.example.org/b.pdf"
 

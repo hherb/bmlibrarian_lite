@@ -1019,4 +1019,5 @@ class TestDiscoverFulltextConvenience:
         mock_discoverer_class.assert_called_once_with(
             unpaywall_email="test@example.com",
             openalex_email="researcher@example.org",
+            core_api_key=None,
         )

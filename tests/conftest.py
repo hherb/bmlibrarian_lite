@@ -203,3 +203,25 @@ def _no_live_openalex(
         "bmlibrarian_lite.pdf_discovery.default_openalex_client",
         lambda mailto: _OpenAlexKnowsNoWork(),
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_live_core(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep every discovery off the real CORE (#480, stage C).
+
+    No key means no client, which is what a user without one has; a test
+    that wants CORE passes its own client. A CORE_API_KEY in the developer's
+    environment must not reach the network from the suite.
+    """
+    from bmlibrarian_lite.core_api import reset_core_throttle
+
+    reset_core_throttle()
+    monkeypatch.delenv("CORE_API_KEY", raising=False)
+    if request.node.get_closest_marker("real_core_client"):
+        return
+    monkeypatch.setattr(
+        "bmlibrarian_lite.fulltext_discovery.default_core_client",
+        lambda api_key: None,
+    )

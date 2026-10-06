@@ -1417,6 +1417,7 @@ class TestTheGapsTheReviewFound:
         pdf_result = MagicMock(
             success=True,
             file_path="/tmp/x.pdf",
+            text=None,
             is_paywall=False,
             error=None,
             paywall_url=None,
@@ -1449,6 +1450,7 @@ class TestTheGapsTheReviewFound:
         pdf_result = MagicMock(
             success=True,
             file_path="/tmp/x.pdf",
+            text=None,
             is_paywall=False,
             error=None,
             paywall_url=None,

@@ -96,6 +96,7 @@ class TransparencyManager(QObject):
             email,
             pubmed_api_key,
             unpaywall_email=config.discovery.unpaywall_email or None,
+            core_api_key=config.discovery.core_api_key or None,
         )
 
         # Thread pool for background analysis, and the worker count it was

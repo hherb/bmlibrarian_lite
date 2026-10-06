@@ -820,6 +820,7 @@ def _make_server(config: LiteConfig) -> tuple[Server, _AgentsContext]:
             unpaywall_email=config.pubmed.email,
             openalex_email=config.pubmed.email,
             use_browser_fallback=False,
+            core_api_key=config.discovery.core_api_key,
         ),
     )
 

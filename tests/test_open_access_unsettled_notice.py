@@ -24,6 +24,7 @@ import pytest
 
 from bmlibrarian_lite.analysis_failures import unestablished_access_clause
 from bmlibrarian_lite.constants import (
+    SERVICE_CORE,
     SERVICE_OPENALEX,
     SERVICE_OPENALEX_PDF,
     SERVICE_UNPAYWALL,
@@ -56,6 +57,7 @@ SERVICES = {
     "unpaywall_pdf": SERVICE_UNPAYWALL_PDF,
     "openalex": SERVICE_OPENALEX,
     "openalex_pdf": SERVICE_OPENALEX_PDF,
+    "core": SERVICE_CORE,
 }
 
 

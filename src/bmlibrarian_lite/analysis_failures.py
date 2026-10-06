@@ -80,6 +80,7 @@ from collections.abc import Iterable, Sequence
 from urllib.parse import urlsplit
 
 from .constants import (
+    SERVICE_CORE,
     SERVICE_OPENALEX,
     SERVICE_OPENALEX_PDF,
     SERVICE_UNPAYWALL,
@@ -1022,6 +1023,8 @@ _OPEN_ACCESS_CHAIN = (
     SERVICE_UNPAYWALL_PDF,
     SERVICE_OPENALEX,
     SERVICE_OPENALEX_PDF,
+    # CORE's extracted text, last before the link (#480, stage C)
+    SERVICE_CORE,
 )
 
 #: Who named a tried PDF, by the service it is recorded under.

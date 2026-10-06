@@ -914,6 +914,7 @@ class DocumentInterrogationTab(QWidget):
             openathens_url,
             self,
             openalex_email=self.config.pubmed.email or None,
+            core_api_key=self.config.discovery.core_api_key or None,
         )
         self._fulltext_worker.progress.connect(self._update_progress_dialog)
         self._fulltext_worker.finished.connect(
@@ -946,6 +947,7 @@ class DocumentInterrogationTab(QWidget):
             "pmc_open_data_xml": "Full Text (PMC open-access collection)",
             "cached_pdf": "Full Text (PDF - cached)",
             "downloaded_pdf": "Full Text (PDF)",
+            "core_text": "Full Text (CORE, extracted text)",
         }
         source_label = source_labels.get(source_type, f"Full Text ({source_type})")
 
