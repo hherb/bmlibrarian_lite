@@ -20,6 +20,7 @@ package com.bmlibrarian.factchecker.util.jats
 
 import android.util.Log
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.escapeHtml
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.ByteArrayInputStream
@@ -1217,15 +1218,6 @@ class JATSXMLParser(
                 if (pmid.isEmpty()) pmid = text
             }
         }
-    }
-
-    private fun escapeHtml(text: String): String {
-        return text
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\"", "&quot;")
-            .replace("'", "&#39;")
     }
 }
 
