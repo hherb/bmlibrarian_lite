@@ -19,6 +19,7 @@
 package com.bmlibrarian.factchecker.ui.fulltext
 
 import com.bmlibrarian.factchecker.util.escapeHtml
+import com.bmlibrarian.factchecker.util.isSafeUrl
 import com.bmlibrarian.factchecker.util.unescapeHtml
 
 /**
@@ -215,9 +216,10 @@ internal fun markdownToBasicHtml(markdown: String): String {
  * - A link's or image's URL cannot contain `<`, `>` or `"`. Escaped article
  *   text has none, so a URL never runs into a tag an earlier pass wrote.
  *
- * Links and images keep their URL only when [isSafeUrl] allows it: http,
- * https, an anchor, or a relative URL. Any other scheme (`javascript:`,
- * `data:`, …) leaves the link's text, or the image's alt text, alone.
+ * Links and images keep their URL only when [isSafeUrl] allows it, judged on
+ * the URL the browser reads (the captured URL, unescaped): http, https, an
+ * anchor, or a relative URL. Any other scheme (`javascript:`, `data:`, …)
+ * leaves the link's text, or the image's alt text, alone.
  *
  * The one raw-HTML construct the JATS→markdown converter writes, the
  * `<!-- anchor:id -->` comment ahead of a figure or table, is recognised in its
@@ -251,7 +253,7 @@ internal fun markdownBodyHtml(markdown: String): String {
     // to prevent the link regex from matching ![alt](url) as [alt](url))
     html = IMAGE.replace(html) { match ->
         val (alt, url) = match.destructured
-        if (isSafeUrl(url)) {
+        if (isSafeUrl(unescapeHtml(url))) {
             "<figure><img src=\"${attributeValue(url)}\" alt=\"${attributeValue(alt)}\" " +
                 "onerror=\"$FIGURE_ONERROR\" loading=\"lazy\"></figure>"
         } else {
@@ -262,7 +264,7 @@ internal fun markdownBodyHtml(markdown: String): String {
     // Links
     html = LINK.replace(html) { match ->
         val (text, url) = match.destructured
-        if (isSafeUrl(url)) "<a href=\"${attributeValue(url)}\">$text</a>" else text
+        if (isSafeUrl(unescapeHtml(url))) "<a href=\"${attributeValue(url)}\">$text</a>" else text
     }
 
     // Markdown tables
@@ -279,23 +281,43 @@ internal fun markdownBodyHtml(markdown: String): String {
     return html
 }
 
+/**
+ * The longest anchor id recognised. The id's match is bounded so that a line
+ * of anchor openings with no `-->` costs time in proportion to its length, not
+ * its square: an unbounded lazy match runs to the end of the line from every
+ * opening (#495). JATS ids are short; a longer "id" stays text.
+ */
+private const val ANCHOR_ID_MAX_LENGTH = 256
+
+/**
+ * The longest link or image URL recognised, bounded for the same reason as
+ * [ANCHOR_ID_MAX_LENGTH]: many `[a](` with no `)` would otherwise each scan to
+ * the end of the text.
+ */
+private const val LINK_URL_MAX_LENGTH = 2048
+
 /** An escaped `<!-- anchor:id -->` comment and the `###` heading that follows it. */
-private val ANCHORED_HEADING = Regex("&lt;!-- anchor:([^\\n]+?) --&gt;\\s*\\n\\s*### (.+)")
+private val ANCHORED_HEADING =
+    Regex("&lt;!-- anchor:([^\\n]{1,$ANCHOR_ID_MAX_LENGTH}?) --&gt;\\s*\\n\\s*### (.+)")
 
 /** An escaped `<!-- anchor:id -->` comment standing alone. */
-private val ANCHOR = Regex("&lt;!-- anchor:([^\\n]+?) --&gt;")
+private val ANCHOR = Regex("&lt;!-- anchor:([^\\n]{1,$ANCHOR_ID_MAX_LENGTH}?) --&gt;")
 
-/** `![alt](url)`, its URL free of markup another pass wrote. */
-private val IMAGE = Regex("!\\[([^\\]]*)]\\(([^)<>\"]+)\\)")
+/**
+ * `![alt](url)`, its URL free of markup another pass wrote. The alt text holds
+ * no `[`, so a run of `![` with no `]` is scanned once, not once per opening.
+ */
+private val IMAGE = Regex("!\\[([^\\[\\]]*)]\\(([^)<>\"]{1,$LINK_URL_MAX_LENGTH})\\)")
 
-/** `[text](url)`, its URL free of markup another pass wrote. */
-private val LINK = Regex("\\[([^\\]]+)]\\(([^)<>\"]+)\\)")
+/**
+ * `[text](url)`, its URL free of markup another pass wrote. The text holds no
+ * `[` (the innermost brackets are the link, as in CommonMark), so a run of `[`
+ * with no `]` is scanned once, not once per opening.
+ */
+private val LINK = Regex("\\[([^\\[\\]]+)]\\(([^)<>\"]{1,$LINK_URL_MAX_LENGTH})\\)")
 
 /** The figure image's fallback to other extensions, the one script an element carries. */
 private const val FIGURE_ONERROR = "this.onerror=null; tryAlternativeExtensions(this);"
-
-/** The only schemes a link or image may name; an anchor or a relative URL names none. */
-private val SAFE_URL_SCHEMES = setOf("http", "https")
 
 /**
  * The characters a later pass matches on, with the references that stand for
@@ -325,29 +347,6 @@ private val ATTRIBUTE_REFERENCES = mapOf(
  */
 private fun attributeValue(escaped: String): String = buildString {
     for (char in escaped) append(ATTRIBUTE_REFERENCES[char] ?: char)
-}
-
-/**
- * Whether a link's or image's URL may be written: http, https, an anchor, or a
- * relative URL.
- *
- * Judged on the URL the browser will see: [escaped] unescaped, then cleaned as
- * a browser cleans a URL (leading and trailing control characters and spaces
- * dropped, tabs and line breaks removed anywhere). A colon before any `/`, `?`
- * or `#` makes what precedes it a scheme, which must be http or https.
- *
- * @param escaped The URL as captured from escaped text
- * @return True when the URL names no scheme, or http or https
- */
-internal fun isSafeUrl(escaped: String): Boolean {
-    val url = unescapeHtml(escaped)
-        .filterNot { it == '\t' || it == '\n' || it == '\r' }
-        .trim { it <= ' ' }
-    val colon = url.indexOf(':')
-    if (colon < 0) return true
-    val beforeColon = url.substring(0, colon)
-    if (beforeColon.any { it == '/' || it == '?' || it == '#' }) return true
-    return beforeColon.lowercase() in SAFE_URL_SCHEMES
 }
 
 /**

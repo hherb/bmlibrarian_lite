@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.ui.fulltext
 
+import com.bmlibrarian.factchecker.util.escapeHtml
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -250,6 +251,37 @@ class MarkdownHtmlTest {
         assertTrue(heading, heading.contains("<h3 id=\"b\">H)</h3>"))
     }
 
+    /**
+     * A line of anchor openings with no `-->`, or of link and image openings with
+     * no close, renders as text, and in time proportional to its length: the
+     * renderer runs on the main thread. Unbounded, these took 6 to 35 seconds.
+     */
+    @Test
+    fun `pathological lines render quickly and as text`() {
+        val lines = listOf(
+            "<!-- anchor:".repeat(PATHOLOGICAL_LENGTH / "<!-- anchor:".length),
+            "[".repeat(PATHOLOGICAL_LENGTH),
+            "![".repeat(PATHOLOGICAL_LENGTH / 2),
+            "[a](".repeat(PATHOLOGICAL_LENGTH / 4),
+        )
+        for (line in lines) {
+            val started = System.nanoTime()
+            val html = markdownBodyHtml(line)
+            val elapsedMs = (System.nanoTime() - started) / NANOS_PER_MILLI
+
+            assertTrue("${line.take(12)}…: $elapsedMs ms", elapsedMs < PATHOLOGICAL_LIMIT_MS)
+            assertEquals(line.take(12), "<p>${escapeHtml(line)}\n</p>", html)
+        }
+    }
+
+    /** An anchor id past the bound is not an anchor, and stays text. */
+    @Test
+    fun `an anchor id past the bound stays text`() {
+        val id = "a".repeat(ANCHOR_ID_PAST_BOUND)
+
+        assertEquals("<p>&lt;!-- anchor:$id --&gt;\n</p>", markdownBodyHtml("<!-- anchor:$id -->"))
+    }
+
     /** The hostile corpus, rendered as a whole page too. */
     @Test
     fun `the page carries no markup but its own`() {
@@ -353,6 +385,17 @@ class MarkdownHtmlTest {
         }
 
     private companion object {
+        /** The length of a pathological line: 100k characters. */
+        const val PATHOLOGICAL_LENGTH = 100_000
+
+        /** A generous limit on rendering one; bounded, each takes well under half a second. */
+        const val PATHOLOGICAL_LIMIT_MS = 2_000L
+
+        const val NANOS_PER_MILLI = 1_000_000L
+
+        /** One past the longest anchor id the renderer recognises (256). */
+        const val ANCHOR_ID_PAST_BOUND = 257
+
         /** The radix of a hexadecimal character reference. */
         const val HEX_RADIX = 16
 

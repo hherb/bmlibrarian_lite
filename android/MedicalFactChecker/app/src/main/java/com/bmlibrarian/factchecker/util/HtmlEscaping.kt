@@ -61,3 +61,32 @@ private val ESCAPED_CHARACTER = Regex("&(?:amp|lt|gt|quot|#39);")
  */
 internal fun unescapeHtml(text: String): String =
     ESCAPED_CHARACTER.replace(text) { match -> ESCAPED_CHARACTERS.getValue(match.value) }
+
+/** The only schemes a link or image may name; an anchor or a relative URL names none. */
+private val SAFE_URL_SCHEMES = setOf("http", "https")
+
+/**
+ * Whether a URL may be written into an `href` or `src` of a page shown in the
+ * JavaScript-enabled WebView: http, https, an anchor, or a relative URL (#495).
+ *
+ * Judged as a browser reads a URL: leading and trailing control characters and
+ * spaces dropped, tabs and line breaks removed anywhere. A colon before any
+ * `/`, `?` or `#` makes what precedes it a scheme, which must be http or https;
+ * so `javascript:`, `data:`, `vbscript:` and the like, in any case, are refused.
+ * The stored-markdown renderer and the JATS renderer's inline links both ask
+ * this.
+ *
+ * @param url The URL as the browser will read it: unescaped text, not an
+ *   attribute value with character references
+ * @return True when the URL names no scheme, or http or https
+ */
+internal fun isSafeUrl(url: String): Boolean {
+    val cleaned = url
+        .filterNot { it == '\t' || it == '\n' || it == '\r' }
+        .trim { it <= ' ' }
+    val colon = cleaned.indexOf(':')
+    if (colon < 0) return true
+    val beforeColon = cleaned.substring(0, colon)
+    if (beforeColon.any { it == '/' || it == '?' || it == '#' }) return true
+    return beforeColon.lowercase() in SAFE_URL_SCHEMES
+}
