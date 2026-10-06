@@ -204,6 +204,10 @@ object Constants {
     const val CORE_API_KEY_EXPLANATION =
         "Optional. A free CORE API key (core.ac.uk/services/api) lets the app read the text CORE extracted from repository copies when no other source has the article."
 
+    /** The settings screen's one line on what an NCBI API key adds (#496). */
+    const val NCBI_API_KEY_EXPLANATION =
+        "Raises PubMed's rate limit from 3 to 10 requests a second."
+
     /** The XML namespace of an S3 ListObjectsV2 answer. */
     const val S3_LISTING_NAMESPACE = "http://s3.amazonaws.com/doc/2006-03-01/"
 
