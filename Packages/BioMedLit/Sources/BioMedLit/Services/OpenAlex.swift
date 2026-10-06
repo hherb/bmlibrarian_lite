@@ -33,7 +33,8 @@ public enum OpenAlex {
     /// - Parameter value: The DOI or the contact email.
     /// - Returns: The escaped text; empty in the case Foundation cannot encode
     ///   it, which a Swift `String` (always valid Unicode) does not reach.
-    private static func escaped(_ value: String) -> String {
+    /// Also CORE's (#480, stage C).
+    static func escaped(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? ""
     }
 

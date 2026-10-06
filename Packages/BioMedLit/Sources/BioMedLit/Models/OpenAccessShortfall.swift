@@ -43,6 +43,9 @@ public enum OpenAccessSource: String, Sendable, CaseIterable {
     /// copy went unassessed (#478's rule).
     case openAlexPDF = "openalex_pdf"
 
+    /// CORE's extracted text, asked last by DOI with the user's own key (#480, stage C).
+    case core = "core"
+
     /// The source as the reader is told of it, worded to sit mid-sentence.
     ///
     /// Python's `SERVICE_UNPAYWALL`, `SERVICE_UNPAYWALL_LANDING_PAGE` and
@@ -54,6 +57,7 @@ public enum OpenAccessSource: String, Sendable, CaseIterable {
         case .pdf: return "the open-access copy's PDF"
         case .openAlex: return "OpenAlex"
         case .openAlexPDF: return "OpenAlex's copy"
+        case .core: return BioMedLitConstants.coreServiceName
         }
     }
 }
@@ -236,7 +240,9 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
     // MARK: - Telling the reader
 
     /// The open-access chain's sources in the order they are tried (#480).
-    private static let chainOrder: [OpenAccessSource] = [.unpaywall, .landingPage, .pdf, .openAlex, .openAlexPDF]
+    static let chainOrder: [OpenAccessSource] = [
+        .unpaywall, .landingPage, .pdf, .openAlex, .openAlexPDF, .core,
+    ]
 
     /// Who named a tried PDF.
     private static func namedBy(_ source: OpenAccessSource) -> String {
