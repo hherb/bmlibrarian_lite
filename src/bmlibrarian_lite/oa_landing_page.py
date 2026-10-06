@@ -139,8 +139,10 @@ def location_pdf_url(location: Mapping[str, Any]) -> str | None:
 def unpaywall_pdf_urls(response: Mapping[str, Any]) -> list[str]:
     """Every PDF URL an Unpaywall answer names, best location first.
 
-    The candidates every platform tries (#480, stage B): the desktop already
-    tried every location, the apps only the best one's. A URL named by more
+    The candidates every platform tries (#480, stage B; before it the apps
+    tried only the best location's). The desktop's chain reads the locations
+    itself (``pdf_discovery``); this is the shared contract's helper, pinned
+    against that chain by the tests. A URL named by more
     than one location -- the best location is usually repeated in
     ``oa_locations`` -- is kept once, where it first appears.
 

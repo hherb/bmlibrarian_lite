@@ -54,7 +54,11 @@ _PATH = "/works/doi:10.1%2Fx"
 
 
 def test_every_contract_table_is_read_here() -> None:
-    """A table added to the contract and asserted nowhere would pin nothing."""
+    """A table added to the contract and asserted nowhere would pin nothing.
+
+    ``source`` is the full-text source the apps store for OpenAlex's copy; the
+    desktop stores none, so only the Swift and Kotlin contract tests assert it.
+    """
     assert set(CONTRACT) == {
         "schema_version", "description", "service_name", "pdf_service_name",
         "source", "base_url", "work_url", "pdf_urls", "status",

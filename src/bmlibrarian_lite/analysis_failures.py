@@ -1083,8 +1083,9 @@ def tried_sources_statement(record: LookupRecord) -> str:
         record: What went unsettled; caching notes are ignored.
 
     Returns:
-        Two or three sentences (the third is the configuration advice, when
-        the caller adds it), or ``""`` when no PDF was tried:
+        The lead sentence listing every entry, then its ending (whether a
+        free copy may exist, and whether open access was established); the
+        caller adds any configuration advice. ``""`` when no PDF was tried:
         a lookup-only record keeps :func:`_access_left_open`'s wording.
     """
     access = _without_not_saved(record)
@@ -1160,9 +1161,10 @@ def unestablished_access_clause(record: LookupRecord) -> str:
         record: What went unsettled; may be empty.
 
     Returns:
-        One to four sentences ending in a full stop (the statement is two
-        or three, with the advice; a caching note may follow), or empty when
-        every lookup was made and served. Never the bare denial "this is not
+        Sentences ending in a full stop: what was left open (with tried PDFs,
+        the tried-sources statement), then any configuration advice, then
+        any caching note; or empty when every lookup was made and served
+        and no PDF went unsaved. Never the bare denial "this is not
         evidence the document requires access": read on its own, that
         repeats the claim it means to withdraw. With tried PDFs, the
         tried-sources statement (#480); a caching note follows whatever is
@@ -1247,8 +1249,9 @@ def refused_access_sentence(record: LookupRecord) -> str:
         record: What went unsettled; not empty.
 
     Returns:
-        One to four sentences ending in a full stop (the bare refusal alone
-        when only a caching note is left; the note last), for example ``"A source
+        Sentences ending in a full stop: the refusal, with what was left
+        open (the bare refusal alone when only a caching note is left), then
+        any caching note, for example ``"A source
         refused access to this document, and Europe PMC (HTTP 404 Not Found)
         did not serve it, so whether this document is open access was not
         established."`` With tried PDFs (#480), the sentence is followed by
@@ -1286,8 +1289,10 @@ def paywall_message(claim: str, record: LookupRecord) -> str:
         record: What went unsettled; may be empty.
 
     Returns:
-        One to three sentences for the reader, ending in a full stop; a
-        caching note (#480) follows when a PDF went unsaved.
+        Sentences for the reader, ending in a full stop: ``claim`` when
+        nothing was left open, else :func:`refused_access_sentence` and any
+        configuration advice; then a caching note (#480) when a PDF went
+        unsaved.
     """
     access = _without_not_saved(record)
     text = (
@@ -1312,9 +1317,9 @@ def no_pdf_sources_message(record: LookupRecord) -> str:
         record: What went unsettled; may be empty.
 
     Returns:
-        Two or three sentences for the reader, ending in a full stop: the
-        third is the configuration advice, when there is any to give; a
-        caching note (#480) follows when a PDF went unsaved.
+        Sentences for the reader, ending in a full stop: why no source was
+        found, then any configuration advice, then a caching note (#480)
+        when a PDF went unsaved.
     """
     access = _without_not_saved(record)
     if not access.anything_unsettled:

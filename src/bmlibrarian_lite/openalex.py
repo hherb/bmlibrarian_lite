@@ -6,7 +6,9 @@
 
 OpenAlex lists, for each work, the places a copy is hosted, some with a PDF
 URL Unpaywall does not name: the #480 spike recovered 6 of the 290 failed
-Unpaywall PDFs this way. Every ``locations[].pdf_url`` is a candidate,
+Unpaywall PDFs this way, though once every Unpaywall location is tried, only
+1 of those 6 needed OpenAlex in the stage B acceptance run. Every
+``locations[].pdf_url`` is a candidate,
 whatever the location's ``is_oa``: the spike's ``real.mtak.hu`` copy is one
 OpenAlex marks closed.
 
@@ -186,7 +188,8 @@ class OpenAlexLocationsClient:
             mailto: The contact email for OpenAlex's polite pool, the one the
                 transparency analysis already sends it; ``None`` asks without.
             base_url: OpenAlex's address; tests point it at a local server.
-            max_retries: Retries for a 429 or 5xx; tests pass 0.
+            max_retries: Retries for a 429 or 5xx, and for a failed connect
+                or read (urllib3's ``Retry(total=...)``); tests pass 0.
         """
         self._mailto = mailto
         self._base_url = base_url

@@ -440,6 +440,45 @@ class TestDiscoveryDoesNotCallAFailureAnAbsence:
         assert result.lookups.skipped == record.skipped
         assert not result.absence_established
 
+    def test_a_pdf_served_and_not_saved_is_not_an_absence(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A copy served and not saved here exists: no absence (#480).
+
+        The caching note is left out of every access sentence, which must not
+        carry over to the absence this caller reads.
+        """
+        from bmlibrarian_lite import pdf_discovery
+        from bmlibrarian_lite.constants import SERVICE_UNPAYWALL_PDF
+
+        record = LookupRecord(
+            skipped=(
+                SourceLookupSkipped(
+                    SERVICE_UNPAYWALL_PDF,
+                    LookupSkipReason.NOT_SAVED,
+                    "https://repo.example.org/a.pdf",
+                ),
+            )
+        )
+        monkeypatch.setattr(
+            pdf_discovery.PDFDiscoverer,
+            "discover_and_download",
+            lambda *_a, **_k: pdf_discovery.DiscoveryResult(
+                success=False,
+                error="The PDF could not be saved.",
+                lookups=record,
+                not_saved=True,
+            ),
+        )
+        discoverer = self._discoverer(tmp_path)
+        discoverer._try_europepmc_xml = lambda *_a, **_k: _not_found()
+
+        result = discoverer.discover_fulltext(doi="10.1/abc")
+
+        assert not result.success
+        assert result.lookups.skipped == record.skipped
+        assert not result.absence_established
+
 
 def _not_found():
     """A full-text result that established there is none.
@@ -1989,9 +2028,12 @@ class TestTheGapsTheReviewFound:
     # ---- the skip-reason wording map ------------------------------------
 
     def test_every_skip_reason_has_the_words_the_reader_is_told(self) -> None:
-        """``describe()`` indexed a map nothing kept in step with the enum."""
+        """``describe()`` indexed a map nothing kept in step with the enum.
+
+        Each is given an address, which a ``NOT_SAVED`` note requires (#480).
+        """
         for reason in LookupSkipReason:
-            assert SourceLookupSkipped("X", reason).describe()
+            assert SourceLookupSkipped("X", reason, "https://x.example/a.pdf").describe()
 
 
 class _RaisingSession:

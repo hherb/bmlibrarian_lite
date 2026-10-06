@@ -444,8 +444,10 @@ class SourceLookupSkipped:
             is told its host (``analysis_failures.address_host``).
 
     Raises:
-        ValueError: On construction, if the service is not named. A skip the
-            reader cannot attribute is not reportable.
+        ValueError: On construction, if the service is not named, or if a
+            ``NOT_SAVED`` skip names no PDF. A skip the reader cannot
+            attribute is not reportable, and a caching note without its
+            address is told nowhere while still keeping absence unestablished.
     """
 
     service: str
@@ -453,13 +455,15 @@ class SourceLookupSkipped:
     address: str | None = None
 
     def __post_init__(self) -> None:
-        """Refuse a skip that names no service, and normalise the name."""
+        """Refuse a skip that names no service, or an unattributable note."""
         if not self.service or not self.service.strip():
             raise ValueError("A skipped source lookup names the service it skipped")
         object.__setattr__(self, "service", self.service.strip())
         if self.address is not None:
             stripped = self.address.strip()
             object.__setattr__(self, "address", stripped or None)
+        if self.reason is LookupSkipReason.NOT_SAVED and self.address is None:
+            raise ValueError("A PDF not saved names the PDF's address")
 
     def describe(self) -> str:
         """Say why this source was not asked, in the reader's words.
@@ -496,12 +500,17 @@ class LookupRecord:
 
     @property
     def anything_unsettled(self) -> bool:
-        """Whether any lookup left the article's access open.
+        """Whether any lookup left the article's access or retrieval open.
+
+        A ``NOT_SAVED`` caching note counts: the copy was served but is not
+        held, so absence is not established. It is not an access shortfall,
+        though, and the sentences in ``analysis_failures`` leave it out of
+        theirs (#480).
 
         Returns:
             ``True`` when at least one source was not asked, did not
-            answer, or answered without serving the article, so no claim
-            about this article's access can be made.
+            answer, answered without serving the article, or served a PDF
+            that could not be saved, so no claim of absence can be made.
         """
         return bool(self.failures) or bool(self.skipped)
 

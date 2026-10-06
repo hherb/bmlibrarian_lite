@@ -544,3 +544,26 @@ def test_a_success_cannot_say_why_no_pdf_was_obtained(contradiction: dict[str, A
     """A downloaded PDF with a download failure is a state no reader could be told."""
     with pytest.raises(ValueError):
         DiscoveryResult(success=True, **contradiction)
+
+
+@pytest.mark.parametrize(
+    "whys",
+    [
+        {"failure": RequestFailure(RequestFailureKind.TIMEOUT), "refused_for_size": True},
+        {"failure": RequestFailure(RequestFailureKind.TIMEOUT), "not_saved": True},
+        {"refused_for_size": True, "not_saved": True},
+    ],
+    ids=["failure-and-size", "failure-and-not-saved", "size-and-not-saved"],
+)
+def test_a_result_gives_one_reason_no_pdf_was_obtained(whys: dict[str, Any]) -> None:
+    """Each is a different answer, and only one can be recorded for the copy."""
+    with pytest.raises(ValueError):
+        DiscoveryResult(success=False, **whys)
+
+
+def test_a_copy_not_saved_names_its_pdf() -> None:
+    """A caching note with no address would be told nowhere yet unmake an absence."""
+    with pytest.raises(ValueError):
+        SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.NOT_SAVED)
+    with pytest.raises(ValueError):
+        SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.NOT_SAVED, "   ")

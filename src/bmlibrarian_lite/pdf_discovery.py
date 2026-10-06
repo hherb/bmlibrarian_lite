@@ -487,9 +487,12 @@ class DiscoveryResult:
         paywall_url: Where, so the caller can offer authentication.
         verification_warning: What the content check doubted.
         lookups: The lookups that went unanswered, whether they failed
-            (#347) or were never made (#355), and an Unpaywall PDF that could
-            not be obtained (#478). Empty means every lookup this discovery
-            could make was made and answered. Independent of
+            (#347) or were never made (#355), every open-access PDF
+            (Unpaywall's or OpenAlex's) that could not be obtained (#478,
+            #480), and a PDF served but not saved (a ``NOT_SAVED`` caching
+            note, #480). Empty means every lookup this discovery could make
+            was made and answered, and every copy tried was saved.
+            Independent of
             ``success``, which says only whether a PDF arrived: a download
             can succeed while Unpaywall was throttled, and that is worth
             knowing.
@@ -506,11 +509,12 @@ class DiscoveryResult:
             unexpected fault of our own.
             ``None`` on success, on a cancel, and for a PDF refused for its
             size. Set only by :meth:`PDFDiscoverer._try_download`, so the
-            discovery can record an Unpaywall PDF it could not obtain (#478).
+            discovery can record an open-access PDF it could not obtain
+            (#478, #480).
         refused_for_size: Whether the source offered a PDF larger than
             :data:`MAX_PDF_SIZE`. Our limit rather than the source's answer,
             so it is no ``failure``; but the copy exists and went unread,
-            so an Unpaywall PDF refused for its size is still recorded as
+            so an open-access PDF refused for its size is still recorded as
             unassessed (#478).
         not_saved: The source served the PDF and it could not be written
             here: a fault of ours, told as a caching note (#480). Not a
@@ -518,7 +522,10 @@ class DiscoveryResult:
 
     Raises:
         ValueError: On construction, if a successful result carries a
-            failure, a size refusal or a not-saved flag.
+            failure, a size refusal or a not-saved flag, or if more than one
+            of those three is set: each is a different answer to why no PDF
+            was obtained, and :func:`unobtained_open_access_pdf` records
+            only one.
     """
 
     success: bool
@@ -534,11 +541,15 @@ class DiscoveryResult:
     not_saved: bool = False
 
     def __post_init__(self) -> None:
-        """Refuse a success that also says why no PDF was obtained."""
-        if self.success and (
-            self.failure is not None or self.refused_for_size or self.not_saved
-        ):
+        """Refuse a success that says why no PDF was obtained, or two whys."""
+        whys = sum((self.failure is not None, self.refused_for_size, self.not_saved))
+        if self.success and whys:
             raise ValueError("A downloaded PDF carries no download failure")
+        if whys > 1:
+            raise ValueError(
+                "A download failure, a size refusal and a copy not saved "
+                "exclude one another"
+            )
 
     def with_lookups(self, record: LookupRecord) -> "DiscoveryResult":
         """Add the lookups that went unanswered to this result.
@@ -828,6 +839,12 @@ class PDFDiscoverer:
         self._cancelled = False
         self._emit_progress("discovery", "starting")
 
+        # A DOI that cleans to nothing ("doi:", a bare resolver URL) is no
+        # DOI: asked with it, Unpaywall and OpenAlex answer nothing, which
+        # read as an absence where no lookup was made, and the NO_IDENTIFIER
+        # skip below never recorded (#480 review).
+        doi = (self._clean_doi(doi) or None) if doi else None
+
         # Find all available PDF sources, and what could not be asked at all
         sources, lookups = self._discover_sources(doi, pmid, pmcid)
         # What the reader is told about: everything unasked so far.
@@ -919,8 +936,10 @@ class PDFDiscoverer:
                 # Served, and not saved here: the copy exists, so nothing else
                 # is asked (saving is our problem) and the open-access
                 # question is settled (the maintainer's decision): the error
-                # is the caching note alone. Other unsettled lookups stay in
-                # ``lookups`` for the absence logic (#480).
+                # is the caching note alone. Other unsettled service lookups
+                # stay in ``lookups`` for the absence logic; the refused
+                # copies held in ``unobtained`` are dropped on purpose, as a
+                # served copy answers what they left open (#480).
                 saved_note = LookupRecord(skipped=(SourceLookupSkipped(
                     _UNOBTAINED_PDF_SERVICE.get(source.source_type, SERVICE_PDF_DOWNLOAD),
                     LookupSkipReason.NOT_SAVED,

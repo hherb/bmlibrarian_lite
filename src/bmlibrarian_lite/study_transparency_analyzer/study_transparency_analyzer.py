@@ -2163,9 +2163,9 @@ def _full_text_unassessed_caveat(lookups: LookupRecord) -> str:
             retrieval failed for a reason no lookup recorded.
 
     Returns:
-        Two to four sentences ending in a full stop: a caching note (#480)
-        when a PDF went unsaved, then the configuration advice when there is
-        any to give.
+        Sentences ending in a full stop: the caveat, then a caching note
+        (#480) when a PDF went unsaved, then the configuration advice when
+        there is any to give.
     """
     clause = unsettled_lookups_clause(lookups)
     # A colon, not "and": the clause may hold two groups joined by ", and"

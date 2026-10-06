@@ -6,8 +6,8 @@
 
 OpenAlex is asked once, for the PDFs Unpaywall did not name: after every
 open-access source failed and before any source that is not open access,
-or at once when nothing else was found. The first copy that went
-unassessed, in chain order, is the one recorded.
+or at once when nothing else was found. Every copy that went unassessed is
+recorded, in chain order.
 """
 
 from pathlib import Path
@@ -16,20 +16,25 @@ from typing import Any
 import pytest
 import requests
 
+from bmlibrarian_lite.analysis_failures import not_saved_note
 from bmlibrarian_lite.constants import (
     FALLBACK_CONTACT_EMAIL,
     SERVICE_OPENALEX,
     SERVICE_OPENALEX_PDF,
+    SERVICE_UNPAYWALL,
     SERVICE_UNPAYWALL_PDF,
 )
 from bmlibrarian_lite.data_models import (
     LookupRecord,
+    LookupSkipReason,
     RequestFailure,
     RequestFailureKind,
     SourceLookupFailure,
+    SourceLookupSkipped,
 )
 from bmlibrarian_lite.openalex import OpenAlexLocationsClient, OpenAlexWorkFetch
 from bmlibrarian_lite.pdf_discovery import (
+    MAX_PDF_SIZE,
     DiscoveryResult,
     PDFDiscoverer,
     PDFSource,
@@ -53,19 +58,22 @@ def _response(status: int, body: bytes = b"", content_type: str = "application/p
 
 
 class _Session:
-    """Answers each URL with a canned status; records what was asked."""
+    """Answers each URL with a canned status or response; records what was asked."""
 
-    def __init__(self, answers: dict[str, int], on_get: Any = None) -> None:
+    def __init__(self, answers: dict[str, int | requests.Response], on_get: Any = None) -> None:
         self.answers = answers
         self.requested: list[str] = []
         self.on_get = on_get
 
     def get(self, url: str, **kwargs: Any) -> requests.Response:
-        """Route one GET by URL: a 200 serves the PDF."""
+        """Route one GET by URL: a 200 serves the PDF; a response is returned as is."""
         self.requested.append(url)
         if self.on_get:
             self.on_get()
-        status = self.answers[url]
+        answer = self.answers[url]
+        if isinstance(answer, requests.Response):
+            return answer
+        status = answer
         response = _response(status, PDF_BYTES if status == 200 else b"")
         response.url = url
         return response
@@ -97,20 +105,22 @@ def _discover(
     tmp_path: Path,
     sources: list[PDFSource],
     openalex: _OpenAlex,
-    answers: dict[str, int],
+    answers: dict[str, int | requests.Response],
     doi: str | None = "10.1/x",
     on_get: Any = None,
+    looked_up: LookupRecord | None = None,
+    output_path: Path | None = None,
 ) -> tuple[DiscoveryResult, _Session]:
-    """Run discovery over ``sources``, every other lookup answered."""
+    """Run discovery over ``sources``; the other lookups left ``looked_up``."""
     discoverer = PDFDiscoverer(
         unpaywall_email="test@example.com",
         use_browser_fallback=False,
         openalex=openalex,  # type: ignore[arg-type]
     )
-    discoverer._discover_sources = lambda d, p, c: (list(sources), LookupRecord())  # type: ignore[method-assign]
+    discoverer._discover_sources = lambda d, p, c: (list(sources), looked_up or LookupRecord())  # type: ignore[method-assign]
     session = _Session(answers, on_get)
     discoverer._session = session  # type: ignore[assignment]
-    return discoverer.discover_and_download(tmp_path / "a.pdf", doi=doi), session
+    return discoverer.discover_and_download(output_path or tmp_path / "a.pdf", doi=doi), session
 
 
 def test_openalex_is_not_asked_when_an_unpaywall_pdf_serves(tmp_path: Path) -> None:
@@ -134,7 +144,8 @@ def test_a_pdf_unpaywall_named_is_not_asked_again(tmp_path: Path) -> None:
     """A PDF both name is requested once, as Unpaywall's."""
     openalex = _OpenAlex(OpenAlexWorkFetch.served([UNPAYWALL_PDF, OPENALEX_PDF]))
     _, session = _discover(tmp_path, [_unpaywall()], openalex, {UNPAYWALL_PDF: 403, OPENALEX_PDF: 403})
-    assert session.requested.count(UNPAYWALL_PDF) == 1
+    assert openalex.asked == ["10.1/x"], "else the single request proves nothing"
+    assert session.requested == [UNPAYWALL_PDF, OPENALEX_PDF]
 
 
 def test_with_no_source_at_all_openalex_is_asked_at_once(tmp_path: Path) -> None:
@@ -308,3 +319,97 @@ def test_openalex_refusals_are_told_after_every_unpaywall_one(tmp_path: Path) ->
     )
     assert session.requested == [second, UNPAYWALL_PDF, OPENALEX_PDF]
     assert [f.address for f in result.lookups.failures] == [UNPAYWALL_PDF, second, OPENALEX_PDF]
+
+
+def test_an_unreachable_openalex_asked_mid_chain_is_recorded_not_an_absence(tmp_path: Path) -> None:
+    """OpenAlex asked before a publisher's copy and unreachable is still recorded.
+
+    The publisher's 404 records nothing of its own, so without OpenAlex's
+    failure the record would be empty and the discovery read as having
+    established there is no copy.
+    """
+    failure = RequestFailure(RequestFailureKind.HTTP_STATUS, 503)
+    openalex = _OpenAlex(OpenAlexWorkFetch.unreachable(failure))
+    result, session = _discover(tmp_path, [_publisher()], openalex, {PUBLISHER_PDF: 404})
+    assert openalex.asked == ["10.1/x"]
+    assert session.requested == [PUBLISHER_PDF]
+    assert not result.success
+    assert result.lookups.failures == (SourceLookupFailure(SERVICE_OPENALEX, failure),)
+    assert "OpenAlex" in (result.error or "")
+
+
+def test_an_unconfigured_unpaywall_still_asks_openalex(tmp_path: Path) -> None:
+    """Unpaywall not asked leaves OpenAlex's copies to try; the skip is told first."""
+    skip = SourceLookupSkipped(SERVICE_UNPAYWALL, LookupSkipReason.NOT_CONFIGURED)
+    openalex = _OpenAlex(OpenAlexWorkFetch.served([OPENALEX_PDF]))
+    result, _ = _discover(
+        tmp_path, [], openalex, {OPENALEX_PDF: 404}, looked_up=LookupRecord(skipped=(skip,))
+    )
+    assert openalex.asked == ["10.1/x"]
+    assert result.lookups.skipped == (skip,)
+    error = result.error or ""
+    assert error.startswith("Failed to obtain a PDF from the following tried sources: ")
+    assert error.index(SERVICE_UNPAYWALL) < error.index("repo.example.org, named by OpenAlex")
+
+
+def test_a_copy_refused_for_its_size_still_asks_openalex(tmp_path: Path) -> None:
+    """Our size limit obtained nothing, so OpenAlex can still raise the odds.
+
+    The maintainer's decision 1 rules out an OpenAlex request only once a copy
+    was served and kept or settled; a copy refused for its size is neither
+    (the apps have no size limit, so this is the desktop's alone).
+    """
+    walled = _response(200, PDF_BYTES)
+    walled.url = UNPAYWALL_PDF
+    walled.headers["Content-Length"] = str(MAX_PDF_SIZE + 1)
+    openalex = _OpenAlex(OpenAlexWorkFetch.served([OPENALEX_PDF]))
+    result, session = _discover(tmp_path, [_unpaywall()], openalex, {UNPAYWALL_PDF: walled, OPENALEX_PDF: 200})
+    assert openalex.asked == ["10.1/x"]
+    assert session.requested == [UNPAYWALL_PDF, OPENALEX_PDF]
+    assert result.success
+
+
+def test_an_openalex_copy_not_saved_is_the_caching_note(tmp_path: Path) -> None:
+    """OpenAlex's copy served and not saved settles it, as Unpaywall's does."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a file where the cache directory should be")
+    openalex = _OpenAlex(OpenAlexWorkFetch.served([OPENALEX_PDF]))
+    result, session = _discover(
+        tmp_path, [_unpaywall()], openalex, {UNPAYWALL_PDF: 403, OPENALEX_PDF: 200},
+        output_path=blocker / "a.pdf",
+    )
+    saved = SourceLookupSkipped(SERVICE_OPENALEX_PDF, LookupSkipReason.NOT_SAVED, OPENALEX_PDF)
+    assert session.requested == [UNPAYWALL_PDF, OPENALEX_PDF]
+    assert result.lookups == LookupRecord(skipped=(saved,)), "the refusal before it is settled too"
+    assert result.error == not_saved_note(result.lookups)
+
+
+def test_openalex_is_asked_by_the_cleaned_doi(tmp_path: Path) -> None:
+    """A resolver URL is cleaned to the bare DOI before OpenAlex is asked."""
+    openalex = _OpenAlex(OpenAlexWorkFetch.absent())
+    _discover(tmp_path, [], openalex, {}, doi="https://doi.org/10.1/x")
+    assert openalex.asked == ["10.1/x"]
+
+
+@pytest.mark.parametrize("doi", ["doi:", "https://doi.org/", "   "])
+def test_a_doi_that_cleans_to_nothing_is_no_doi(tmp_path: Path, doi: str) -> None:
+    """Nothing is asked by an empty DOI, and the reader is told none was held.
+
+    Asked with it, Unpaywall's and OpenAlex's "no such work" read as an
+    absence where no lookup was made.
+    """
+    openalex = _OpenAlex(OpenAlexWorkFetch.served([OPENALEX_PDF]))
+    discoverer = PDFDiscoverer(
+        unpaywall_email="test@example.com",
+        use_browser_fallback=False,
+        openalex=openalex,  # type: ignore[arg-type]
+    )
+    session = _Session({})
+    discoverer._session = session  # type: ignore[assignment]
+    result = discoverer.discover_and_download(tmp_path / "a.pdf", doi=doi)
+    assert openalex.asked == []
+    assert session.requested == []
+    assert not result.success
+    assert result.lookups.skipped == (
+        SourceLookupSkipped(SERVICE_UNPAYWALL, LookupSkipReason.NO_IDENTIFIER),
+    )
