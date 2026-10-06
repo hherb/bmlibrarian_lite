@@ -1115,9 +1115,10 @@ CORE_MIN_FULLTEXT_CHARS = 5000
 # Consecutive fetches ending in HTTP 429 after which CORE is not asked again
 # this session: its key buys a daily budget, which no pacing can express.
 CORE_PAUSE_AFTER_CONSECUTIVE_429 = 2
-# The one status that means CORE refused the key (#498): the first marks the
-# key refused for the rest of the process. A 403 is not it -- Cloudflare can
-# answer 403 to a valid key -- and stays an ordinary answer for the article.
+# The one status that means CORE refused the key (#498): the first marks that
+# key refused for the rest of the process (a corrected key is asked again).
+# A 403 is not it -- Cloudflare can answer 403 to a valid key -- and stays an
+# ordinary answer for the article.
 CORE_KEY_REFUSED_STATUS = 401
 CORE_REQUEST_TIMEOUT_SECONDS = 30
 CORE_MAX_RETRIES = 3

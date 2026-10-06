@@ -16,6 +16,7 @@ URL, a log line or a ``repr``.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -84,6 +85,22 @@ def core_search_url(doi: str, base_url: str = CORE_API_BASE_URL) -> str:
         f"{base_url.rstrip('/')}{CORE_SEARCH_PATH}"
         f"?q={query}&limit={CORE_SEARCH_LIMIT}"
     )
+
+
+def core_key_digest(api_key: str) -> str:
+    """The fingerprint a refused key is remembered by (#498).
+
+    A refusal is scoped to the key CORE refused, so a key corrected in the
+    settings is asked again. The key itself is never held for that: only this
+    digest is, and it is never logged.
+
+    Args:
+        api_key: A CORE key; trimmed here, so padding names the same key.
+
+    Returns:
+        The SHA-256 digest of the trimmed key's UTF-8 bytes, as hex.
+    """
+    return hashlib.sha256(api_key.strip().encode("utf-8")).hexdigest()
 
 
 def normalise_doi(doi: str) -> str:
@@ -224,8 +241,11 @@ class CoreThrottle:
     the reader's time, so CORE is not asked again until the process ends.
 
     A fetch ending in HTTP 401 means CORE refused the key (#498). Every
-    article would be refused alike, so the key is marked refused for the
-    rest of the process and CORE is not asked again; nothing lifts it.
+    article would be refused alike, so that key is marked refused for the
+    rest of the process and CORE is not asked with it again. The refusal is
+    the key's, held as its :func:`core_key_digest`: another key, such as one
+    corrected in the settings, is asked as usual, and a 401 for it refuses
+    that key instead.
     """
 
     def __init__(self, pause_after: int = CORE_PAUSE_AFTER_CONSECUTIVE_429) -> None:
@@ -237,7 +257,7 @@ class CoreThrottle:
         self._pause_after = pause_after
         self._consecutive = 0
         self._paused = False
-        self._key_refused = False
+        self._refused_key_digest: str | None = None
         self._lock = threading.Lock()
 
     @property
@@ -246,27 +266,36 @@ class CoreThrottle:
         with self._lock:
             return self._paused
 
-    @property
-    def key_refused(self) -> bool:
-        """Whether CORE refused the key this session (#498)."""
-        with self._lock:
-            return self._key_refused
+    def refuses(self, key_digest: str) -> bool:
+        """Whether CORE refused this key this session (#498).
 
-    def record(self, status: int | None) -> None:
+        Args:
+            key_digest: The key's :func:`core_key_digest`.
+
+        Returns:
+            ``True`` when a fetch with this key ended in 401: it is then not
+            asked again. Any other key is asked as usual.
+        """
+        with self._lock:
+            return self._refused_key_digest == key_digest
+
+    def record(self, status: int | None, key_digest: str) -> None:
         """Note how one fetch ended.
 
-        A 401 marks the key refused for good; like any ending but a 429, it
-        also resets the 429 count.
+        A 401 marks the key it was sent with refused, in place of any key
+        refused before; like any ending but a 429, it also resets the 429
+        count.
 
         Args:
             status: The HTTP status it ended on, or ``None`` when it got none.
+            key_digest: The :func:`core_key_digest` of the key it was sent with.
         """
         with self._lock:
-            if status == CORE_KEY_REFUSED_STATUS and not self._key_refused:
-                self._key_refused = True
+            if status == CORE_KEY_REFUSED_STATUS and self._refused_key_digest != key_digest:
+                self._refused_key_digest = key_digest
                 logger.warning(
                     "CORE refused the configured key (HTTP %d); it is not asked "
-                    "again this session.",
+                    "with that key again this session.",
                     status,
                 )
             if status != HTTP_TOO_MANY_REQUESTS:
@@ -321,6 +350,8 @@ class CoreTextClient:
         if not key:
             raise ValueError("CORE is asked only with a key")
         self._base_url = base_url
+        # The key's fingerprint, for its refusal: never in the repr or a log
+        self._key_digest = core_key_digest(key)
         self._throttle = throttle if throttle is not None else session_core_throttle()
         session = requests.Session()
         session.headers.update({
@@ -350,12 +381,13 @@ class CoreTextClient:
         Returns:
             Served text, an absence (CORE answered and holds none of this
             article, or there is no DOI), a refused key (this fetch ended in
-            401, or an earlier one did; then nothing is sent), or the failure.
+            401, or an earlier one with this key did; then nothing is sent),
+            or the failure.
         """
         if not doi.strip():
             return CoreFetch.absent()
         # The key before the pause: it is the cause the reader can act on.
-        if self._throttle.key_refused:
+        if self._throttle.refuses(self._key_digest):
             return CoreFetch.key_refused()
         if self._throttle.paused:
             return CoreFetch.unreachable(
@@ -367,13 +399,13 @@ class CoreTextClient:
                 timeout=CORE_REQUEST_TIMEOUT_SECONDS,
             )
         except requests.exceptions.RequestException as error:
-            self._throttle.record(None)
+            self._throttle.record(None, self._key_digest)
             return CoreFetch.unreachable(request_failure_from_exception(error))
         except ValueError:
             # A redirect that will not parse, as OpenAlex's.
-            self._throttle.record(None)
+            self._throttle.record(None, self._key_digest)
             return CoreFetch.unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
-        self._throttle.record(response.status_code)
+        self._throttle.record(response.status_code, self._key_digest)
         if response.status_code == CORE_KEY_REFUSED_STATUS:
             return CoreFetch.key_refused()
         if response.status_code != HTTP_OK:
