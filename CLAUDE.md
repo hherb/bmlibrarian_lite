@@ -50,8 +50,9 @@ analysis_failures.py  # AnalysisShortfall → notice, advice (the stages after t
 audit_records.py      # What became of each document: accepted/rejected/failed/not scored
 search_merger.py      # Deduplication (PMID/DOI/PMC/title)
 query_translator.py   # Natural language → structured query
-fulltext_discovery.py # Europe PMC XML → PMC open-data bucket → Europe PMC PDF → Unpaywall PDF → DOI fallback
+fulltext_discovery.py # Europe PMC XML → PMC open-data bucket → Europe PMC PDF → Unpaywall PDFs → OpenAlex PDFs → DOI fallback
 pmc_open_data.py      # PmcOpenDataClient: PMC's open-data S3 bucket (JATS by PMC ID)
+openalex.py           # OpenAlexLocationsClient: the PDFs OpenAlex's locations name (by DOI)
 pdf_discovery.py      # PDF source discovery
 rate_limit.py         # Host-keyed, thread-safe pacing for outbound requests
 polite_session.py     # PoliteAdapter + mount_politely for requests.Session

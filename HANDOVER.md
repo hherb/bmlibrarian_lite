@@ -18,9 +18,13 @@ by host and who named it, chain order); lookup-only keeps the grouped sentence.
 The first copy served ends the walk; one not saved is a caching note, never a
 shortfall (Python `NOT_SAVED`; apps `fullTextPDFNotSavedFrom`, Room 9); in
 Swift a textless copy settles the question too. Identical entries are told once.
-OpenAlex only when no Unpaywall PDF was served. Stored shortfall: v1 for one
-address-less entry, else v2 `entries`. **Next: stage C (CORE, Elsevier, keys
-in settings)**; then the embedded browser and review queue (`challenged`).
+OpenAlex only when no Unpaywall copy was served and kept (a textless Swift copy
+or a Python size refusal does not count); it newly receives the contact email.
+Android tells a copy not saved as `PDF_NOT_SAVED` and offers its address.
+Stored shortfall: v1 for one address-less entry, else v2 `entries`. Follow-ups:
+#492, #493 (Android's render ends its chain before Unpaywall). **Next: stage C
+(CORE, Elsevier, keys in settings)**; then the embedded browser and review
+queue (`challenged`).
 
 ## Recently landed (context)
 

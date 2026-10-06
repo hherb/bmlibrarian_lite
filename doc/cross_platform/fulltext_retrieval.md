@@ -329,9 +329,11 @@ GET https://api.unpaywall.org/v2/{doi}?email={your_email}
 ```pseudocode
 const UNPAYWALL_API_URL = "https://api.unpaywall.org/v2"
 
-async function fetch_unpaywall_pdf_url(doi: string, email: string) -> string | null:
+# Every PDF the answer names, best location first (#480, stage B): the
+# candidates "Tried sources (#480)" walks. Empty when it names none.
+async function fetch_unpaywall_pdf_urls(doi: string, email: string) -> list[string]:
     if not doi:
-        return null
+        return []
     if not usable_email(email):       # blank, or the app's own placeholder,
         raise Unsettled(NOT_CONFIGURED)  # which Unpaywall refuses with 422 (#466)
 
@@ -341,7 +343,7 @@ async function fetch_unpaywall_pdf_url(doi: string, email: string) -> string | n
         response = await http_get(url)
 
         if response.status == 404:
-            return null  # DOI not found
+            return []  # DOI not found
 
         response.raise_for_status()   # a 429, 500, 502, 503 or 504 is retried
                                       # first; any status of 400 or above but
@@ -349,15 +351,16 @@ async function fetch_unpaywall_pdf_url(doi: string, email: string) -> string | n
                                       # body is decoded
         data = response.json()
 
+        pdf_urls = unpaywall_pdf_urls(data)   # every url_for_pdf, kept once
+        if pdf_urls:
+            return pdf_urls
         choice = choose_unpaywall_url(data)
-        if choice.pdf_url:
-            return choice.pdf_url
         if choice.landing_page:
             match await read_landing_page(choice.landing_page):
-                case Declared(pdf_url): return pdf_url
-                case DeclaresNone: return null
+                case Declared(pdf_url): return [pdf_url]
+                case DeclaresNone: return []
                 case Unreachable(failure): raise Unsettled(failure)
-        return null
+        return []
 
     except HttpError, Timeout, ConnectionError, UnreadableJson as e:
         # Not "no copy": Unpaywall did not settle it (see "Landing Pages")
@@ -523,8 +526,8 @@ answered. The failure is:
   login page, a bot wall's challenge, #480). Python's check was "a PDF
   Content-Type *or* `%PDF`" until #478 and now matches the apps.
 
-**Every platform tries every PDF Unpaywall names; then, only if none was
-served, OpenAlex's** (#480, stage B; `unpaywall_pdf_urls` in
+**Every platform tries every PDF Unpaywall names; then, only if no copy was
+served and kept, OpenAlex's** (#480, stage B; `unpaywall_pdf_urls` in
 `unpaywall_landing_page.json`, and `openalex_locations.json`). The apps try
 them in Unpaywall's order; Python by its own priority. **The first copy served
 ends the walk.** Saved, it is read. Not saved, its link is kept (apps) with a
@@ -535,7 +538,9 @@ an abstract is held does not end the walk or the OpenAlex ask, since a
 textless copy is no full text obtained; Python stops at any PDF it downloads
 (extraction comes later). A copy was obtained all the same, so the
 open-access question is settled: as for a copy not cached, no shortfall is
-told beside the abstract, whatever was refused before or after it.
+told beside the abstract, whatever was refused before or after it. A copy
+refused for its size (Python alone has a limit) was not kept and settles
+nothing, so OpenAlex is still asked after it.
 
 Once every copy was refused, the chain goes on as though none had been named:
 Python tries its remaining sources, and Swift falls back past them (no link
@@ -647,10 +652,13 @@ absence, is link-only (`Document.isLinkOnly` / `DocumentEntity.isLinkOnly`).
 Its card shows the link and why it is only one, never the "Get Full Text"
 button of a record never fetched; a retry stays on offer. Nothing says full text
 "is available" behind a link the chain did not read: a DOI resolves to the
-publisher's landing page, which is often paywalled. Android names the two kinds
-it can hold (`FullTextLinkKind`): the publisher's page ("This article's full
-text was not retrieved; the publisher's page may offer it.") and a PDF that was
-found but could not be downloaded.
+publisher's landing page, which is often paywalled. Android names the three
+kinds it can hold (`FullTextLinkKind`): the publisher's page ("This article's
+full text was not retrieved; the publisher's page may offer it."), a PDF that
+was found but could not be downloaded, and a PDF served but not saved ("A PDF
+of this article was found and can be opened from its link.", #480), whose card
+offers that PDF's address (`DocumentEntity.linkOnlyPdfUrl`) rather than the
+publisher's page, as iOS/macOS keep the PDF's address as the record's link.
 
 #### Tried sources (#480)
 
@@ -664,8 +672,9 @@ The maintainer's decisions of 2026-10-05. Pinned by
     The host is the address's host, lower-cased, else the address trimmed:
     Python's `urlsplit(address).hostname` (userinfo and port dropped; a space
     in the path does not hide it; a scheme-relative `//host/…` names its
-    host). The apps parse `scheme://authority` or `//authority` to the same
-    result rather than use `URLComponents` or `java.net.URI` (rows under
+    host; an authority with an unbalanced `[` or `]` has none, as `urlsplit`
+    refuses it). The apps parse `scheme://authority` or `//authority` to the
+    same result rather than use `URLComponents` or `java.net.URI` (rows under
     `hosts`).
   - A lookup entry reads `{name} ({reason})`, once per service, with the
     reason Python's `_unsettled` picks.
@@ -707,9 +716,18 @@ The maintainer's decisions of 2026-10-05. Pinned by
     refused access to this document." when only the note is left) never say
     a served copy "could not be asked".
   - The apps say "only its link is kept" when the link is what the reader is
-    given: Swift when the stored link is the PDF's, Android when the record is
-    link-only (`DocumentEntity.isLinkOnly`). Otherwise, an abstract returned
-    instead, "it could not be read".
+    given: Swift when the stored link is the PDF's; Android when the record is
+    link-only (`DocumentEntity.isLinkOnly`), whose card and sheet then offer
+    the PDF's address (`linkOnlyPdfUrl`) and say `PDF_NOT_SAVED`'s words, never
+    "could not be downloaded". Otherwise, an abstract returned instead, "it
+    could not be read".
+  - The rule is stated for open-access copies; other PDFs differ by
+    platform. Python records a `NOT_SAVED` skip for a PDF from any source (a
+    PMC render, a publisher's or DOI-resolved copy under the PDF download)
+    and ends the walk there. Swift keeps a Europe PMC render's address as
+    the note, but the render neither ends the walk nor settles the
+    open-access question: Unpaywall is still asked. Android's chain returns
+    the render before Unpaywall, so its note ends the fetch.
   - The apps store it as `Document.fullTextPDFNotSavedFrom` and
     `documents.full_text_pdf_not_saved_from` (Room 9). It is written and
     cleared by every fetch, as the shortfall is, and shown beside it
@@ -802,7 +820,9 @@ function get_cached_pdf_path(article_id: string, url: string) -> string | null:
 ## OpenAlex's Locations (#480)
 
 OpenAlex lists the places a work is hosted, some with a PDF URL Unpaywall
-does not name (6 of 290 failed Unpaywall PDFs in the #480 spike). It is asked
+does not name (6 of 290 failed Unpaywall PDFs in the #480 spike; once every
+Unpaywall location is tried, 1 of those 6 needed OpenAlex in the stage B
+acceptance run). It is asked
 once, by DOI, after every Unpaywall PDF failed and before the publisher and
 DOI fallbacks (Python: before the first source that is not open access).
 Pinned by `fulltext_parity/openalex_locations.json`.
@@ -821,8 +841,12 @@ GET https://api.openalex.org/works/doi:{escape(doi)}?select=locations[&mailto={e
 any other status (after 429/5xx retries), transport failure → UNREACHABLE(failure)
 ```
 
-It is asked only when no Unpaywall PDF was served: it could not raise the
-odds otherwise (the maintainer's decision, 2026-10-05). Candidates already in
+It is asked only when no Unpaywall copy was served and kept (in Swift, a
+textless copy does not count; a copy refused for its size never does): it
+could not raise the odds otherwise (the maintainer's decision, 2026-10-05).
+It is never asked without a DOI, and a DOI that cleans to nothing (`doi:`, a
+bare resolver URL, blanks) is none (Python cleans it once on entry; Swift
+trims it first; Android treats a blank DOI as none). Candidates already in
 Unpaywall's list are dropped (Python drops every address already found,
 its PMC renders and publisher guesses too). Each is tried as an Unpaywall PDF
 is: `%PDF`, `.part`, and refused, never offered as a link, under **OpenAlex's
@@ -831,10 +855,16 @@ under **OpenAlex** (`openalex`). An absence or a work naming no new PDF adds
 nothing. Requests to `api.openalex.org` are paced at 10 per second
 (`polite_request_pacing.md`).
 
-The contact email is the one each platform already sends OpenAlex and
-CrossRef for the transparency analysis (Python: the PubMed email; iOS/macOS:
-the NCBI email or the app's own address; Android: the NCBI email), the
-application placeholder excluded, so no new party receives the user's address.
+The contact email is the one each platform already sends CrossRef for the
+transparency analysis (Python: the PubMed email; iOS/macOS: the NCBI email,
+or the app's own address `user@medicalfactchecker.app` when none is set;
+Android: the NCBI email). Python and Android send no address when only their
+placeholder is configured (`FALLBACK_CONTACT_EMAIL`,
+`UnpaywallContact.usableEmail`). OpenAlex is a new recipient of the user's
+address: before #480 no platform contacted OpenAlex (the transparency
+analysers name its base URL but never call it). The maintainer chose
+`mailto` = each platform's existing contact email in the first draft of
+stage B.
 
 - **Python** asks in `PDFDiscoverer` (`_discover_openalex`), lazily: at once
   when no other source was found, otherwise when the next source to try is not
@@ -842,7 +872,8 @@ application placeholder excluded, so no new party receives the user's address.
   `DOI_DIRECT` but marked open access) come before it; the apps have no such
   guesses.
 - **Swift** asks in `FullTextService` after the Unpaywall tier, unless a copy
-  was served (`openAccessNotSavedFrom`).
+  was served and not cached (`openAccessNotSavedFrom`); a textless copy
+  cached does not stop it (above).
 - **Android** asks in `FullTextService.fetchFullText` when Unpaywall named no
   candidate it can request, and otherwise in recording, through its
   `askOpenAlex` hook, once every Unpaywall candidate failed.
@@ -982,7 +1013,15 @@ async function fetch_fulltext(
     #    and "we downloaded and it failed" used to be indistinguishable, so a
     #    render URL that 404s ended the chain and an open-access copy of the
     #    same paper was never requested.
-    for pdf_url in [europe_pmc_pdf_url, await fetch_unpaywall_pdf_url(doi, email)]:
+    #
+    #    After the render, every PDF Unpaywall names, then, only if no copy was
+    #    served, OpenAlex's, asked once with every address already tried
+    #    (#480, stage B). An open-access copy refused is recorded with its
+    #    address and is never the link (#478); a copy served but not cached
+    #    ends the walk with a caching note. "Tried sources (#480)" has the
+    #    rules, and each platform's differences.
+    for pdf_url in [europe_pmc_pdf_url, *await fetch_unpaywall_pdf_urls(doi, email),
+                    *openalex_pdf_urls_once_none_served(doi, tried)]:
         if pdf_url == null:
             continue
         outcome = await download_and_extract(pdf_url, cache_key)
@@ -994,7 +1033,9 @@ async function fetch_fulltext(
                 return FullTextResult.PDF(pdf_url, NONE, null, null, null)
 
             case DOWNLOAD_FAILED:        # 404, server error, not a PDF
-                # Keep the URL in reserve and try the next tier. A link we
+                # Europe PMC's render: keep the URL in reserve and try the
+                # next tier (an open-access copy refused is recorded instead,
+                # #478, and is never kept as the link). A link we
                 # could not fetch still names the article, so it beats a
                 # publisher landing page — and loses to any copy a later tier
                 # actually retrieves. First writer wins: earlier tiers are
@@ -1547,11 +1588,10 @@ async function fetch_fulltext_resilient(
         except Error as e:
             errors.append(("Europe PMC", e))
 
-    # Try Unpaywall
+    # Try Unpaywall: every PDF it names (then OpenAlex's, #480)
     if doi:
         try:
-            pdf_url = await fetch_unpaywall_pdf_url(doi, email)
-            if pdf_url:
+            for pdf_url in await fetch_unpaywall_pdf_urls(doi, email):
                 return (FullTextResult.PDF(pdf_url, ...), errors)
         except Error as e:
             errors.append(("Unpaywall", e))
