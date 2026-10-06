@@ -9,14 +9,36 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **Machine channels, stage C1: CORE's extracted text, and the key settings**
-(#480): on `feat/machine-channels-stage-c1-core-480`. Spec
+(all three; #480, which stays open until C2): PR on
+`feat/machine-channels-stage-c1-core-480`, which also fixes #495–#499. Spec
 `docs/superpowers/specs/2026-10-04-fulltext-machine-channels-design.md`
-"Stage C"; plan `docs/superpowers/plans/2026-10-06-fulltext-machine-channels-stage-c1.md`.
-**Decided (maintainer, 2026-10-06):** stage C is two PRs, **C1 CORE plus the
-settings plumbing, then C2 Elsevier** on top of it. Live CORE and Elsevier keys
-are available for the acceptance replay (ask the maintainer to export them;
-they are not in the environment or `config.json`). Refs #480, which stays open
-until C2.
+"Stage C" (its as-built notes win); plan
+`docs/superpowers/plans/2026-10-06-fulltext-machine-channels-stage-c1.md`;
+contract `fulltext_retrieval.md` "CORE's Extracted Text" +
+`fulltext_parity/core_fulltext.json`. **Still to do: the live acceptance
+replay**: the maintainer puts the CORE key in `config.json`
+(`discovery.core_api_key`), then `python scripts/core_acceptance_replay.py
+--out tmp/core_acceptance.jsonl`. The bar is ≥ 14 of the spike's 149
+not-open-access rows; record the counts in the spikes README and the contract.
+**Binds:**
+- **A search hit counts only if its own DOI is this article's.**
+  Code points ≥ 5,000, trimmed.
+- **Asked last and once, only with a key and a DOI**, never after a copy was
+  served. Python asks inside `PDFDiscoverer` (hook), including after a PDF
+  with no text (#499), as Swift does. Android's render tier skips it (#493).
+- **No key: no request, nothing recorded** (spec decision 4, as built).
+- **A configured CORE that could not be asked is an unsettled lookup** that
+  blocks absence (maintainer, 2026-10-06), last in chain order.
+- **Two 429s in a row pause CORE for the process.**
+- **A 401 refuses that key** (SHA-256 digest, never the key), told as a
+  `key_refused` skip "CORE (the key in the settings was refused) …".
+  A corrected key is asked again; a 403 is an ordinary answer (#498).
+- **Desktop cache** `*.core.txt`, read only at CORE's place.
+- **Android shows CORE text as plain text**, and escapes every stored markdown
+  before the WebView (#495).
+
+Follow-ups: #500. **Next: C2 (Elsevier)**: copy C1's settings plumbing and
+the `key_refused` mechanism for Elsevier's 403.
 
 ## Recently landed (context)
 
@@ -48,48 +70,32 @@ the rest.
   no version or a record with no `xml_url`; a listing 404 is unreachable**
   (`NoSuchBucket`); an answer we cannot read is `malformed_response`; strict
   UTF-8 everywhere. Follow-ups: #485, #488, #489, #490.
-- **An Unpaywall PDF not obtained is refused** (all three; PR #482, #478):
-  never a link; source `unpaywall_pdf`; a body not `%PDF` is
-  `malformed_response`. **Our own stops are not the copy's answer** (served but
-  not cached keeps its link; Python's oversized PDF is an `OVER_SIZE_LIMIT`
-  skip). **A link-only record explains itself** (apps; PR #479). Both rules:
-  `fulltext_retrieval.md`.
-- **An address the tier cannot fetch is not "no copy"** (apps; PR #477,
-  #474, #475). A landing URL that is not an absolute http(s) URL is an unread
-  page (`request_failed`), as Python's `requests` refuses it (Swift
-  `UnpaywallLandingPage.fetchableURL`, Android `readLandingPage`; schemes in
-  `BioMedLitConstants.unpaywallFetchableSchemes`). BioMedLit's closing throw
-  is `FullTextService.exhaustedChainError`: **no absence while an open-access
-  shortfall is set**.
-- **Apps: an unsettled open-access copy is told** (PR #473): an
-  **`OpenAccessShortfall`** stored with the full text, shown in **Python's
-  sentence**; **every fetch that settles it writes or clears it**; no usable
-  email is "not configured", never a 422. Room migrations register from
-  `AppDatabase.ALL_MIGRATIONS`.
-- **iOS/macOS: a working cancel** (PR #469): one stop path, `stopWork(_:)`;
-  **a stop is never written to `errorMessage`**.
-- **Unpaywall landing pages are read, never downloaded as the PDF** (PR #465):
-  `citation_pdf_url`, 2 MiB cap; unreachable is not "declares none".
-- **iOS/macOS workflow notices** (PRs #458, #460, #463): **`session.errorMessage`
-  means a failure and nothing else**; per-document misses are notices.
-- **A preprint's `fullTextXML` 500 is asked once** (#451); PMC accessions and
-  429/502/503/504 keep the full budget.
-- **`fullTextXML` is asked only when Europe PMC's record allows it** (Python;
-  PR #452): it answers **500, not 404**, for held closed-access text;
-  `europepmc.offers_fulltext_xml` skips only a record that *states* it is not
-  available (user's call). Survey rows pinned by
-  `tests/test_europepmc_xml_survey.py` (re-analyse, never re-fetch).
-- **doi.org's HEAD status is read** (Python; PR #448), named by host.
-  **`mount_politely` turns off urllib3's `respect_retry_after_header`**
-  (`polite_request_pacing.md` rule 6).
-- **An answered lookup "did not serve it"** (all three; PRs #444, #449). An
-  `HTTP_STATUS` is an answer **except a 429 or any 5xx** ("could not be
-  asked"); one predicate, `RequestFailure.is_answer`, pinned by
-  `request_failure_parity/answered_lookup_verb.json` (every kind needs a row).
-- **Typed full-text XML fetch, all three** (PRs #433, #438). Served / absent
-  (404) / unreachable; **preprints are fetched by their `PPR` ID**; a chain
-  ending while Europe PMC did not settle it is **not** "no full text" (Swift
-  `absenceNotEstablished`, Android `NotEstablished`, never recorded).
+- **Unpaywall, compressed** (PRs #465–#482; rules in `fulltext_retrieval.md`):
+  - An Unpaywall PDF not obtained is refused, never a link (`unpaywall_pdf`).
+  - A body that is not `%PDF` is `malformed_response`.
+  - Our own stops are not the copy's answer (`OVER_SIZE_LIMIT`, not cached).
+  - A landing URL that is not an absolute http(s) URL is an unread page.
+  - Landing pages are read for `citation_pdf_url` (2 MiB cap).
+  - Apps store an **`OpenAccessShortfall`** with the full text, in Python's
+    sentence. Every fetch that settles it writes or clears it.
+  - No usable email is "not configured".
+  - **No absence while a shortfall is set** (`exhaustedChainError`).
+  - Room migrations register from `AppDatabase.ALL_MIGRATIONS`.
+- **iOS/macOS workflow** (PRs #458–#469): one stop path, `stopWork(_:)`;
+  **`session.errorMessage` means a failure and nothing else** (a stop never
+  writes it; per-document misses are notices).
+- **Europe PMC fetches, compressed** (PRs #433–#452):
+  - **Typed XML fetch** on all three: served, absent (404) or unreachable.
+  - **Preprints are fetched by their `PPR` ID.** A preprint's 500 is asked once.
+  - A chain that Europe PMC did not settle is **not** "no full text" (Swift
+    `absenceNotEstablished`, Android `NotEstablished`).
+  - Python asks `fullTextXML` only when the record allows it: closed text
+    answers **500, not 404** (`tests/test_europepmc_xml_survey.py`).
+  - **An `HTTP_STATUS` is an answer ("did not serve it") except a 429 or
+    5xx.** One predicate, `RequestFailure.is_answer`, is pinned by
+    `answered_lookup_verb.json`.
+  - doi.org's HEAD status is read, and `mount_politely` turns off
+    `respect_retry_after_header`.
 - **A missing statement is charged only when the end matter is known**
   (Python; PR #431, #428). The converter writes `END_MATTER_MARKER` where end
   matter begins (converter version **5**); a COI/data charge needs every
@@ -109,36 +115,24 @@ the rest.
   `JATS_MARKDOWN_CONVERTER_VERSION`** whenever the same XML converts
   differently (cached markdown carries the stamp). **No full text, no
   data-availability request** (#421, user's call). Survey scratch: `tmp/jats-*`.
-- **Desktop certainty and high-risk explanation** (Python; PR #419, #386).
-  Every no-full-text rating says "Limited certainty because of lack of full
-  text access"; badge tooltip and report name the rules that made a study
-  High. **"Without full text" means nothing in it was recognised**; analyser
-  **2.3**. **Score = clamped sum of `score_components`; High iff
-  `high_risk_triggers` is non-empty**, under the **user's settings, one shared
-  object**; a stored breakdown that will not decode, is empty or does not sum
-  to the score reads as `None`. Contract: `transparency_parity/risk_explanation_strings.json`.
-  **No Unassessed rule on the desktop** (user's call), pinned by
-  `test_no_high_rests_on_unread_text.py`.
-- **An unreachable source is provisional** (all three; PR #410, #385): the
-  apps store `sourcesUnreachable` when a source fails *or answers
-  unreadably*; Python needs **every cited trial answered** before "without
-  detected registration". Trial titles match by whole word.
-- **Never `findtext` a mixed-content element** (#405). **Funders by brand**
-  (PR #395): `sponsor_patterns.json` schema 4; the funder corpus **differs
-  from bmlib's copy**. Apps: a High resting only on unsearched text shows
-  **Unassessed** (PR #388). An unlisted Claude ID gets its family's dearest
-  rate (PR #383). Release 0.5.0 / apps 1.6.0 (PR #393).
-- **Stored transparency rows** (Python; PRs #379, #366, #375). A row
-  **strictly newer** than this build is never overwritten; **bump
-  `TRANSPARENCY_ANALYZER_VERSION`** whenever the same inputs could move a
-  score, level, indicator or caveat; every surface reading a stored row is
-  gated. Contract: `analysis_failure_reporting.md`.
-- **A source nobody asked is not a source that answered "nothing"** (Python;
-  PRs #358, #365). Only a text we read and segmented can produce
-  `NOT_STATED`; a skip is a third state (`SourceLookupSkipped`); a
-  three-state value needs three arms; a withheld claim stays withheld at
-  every surface. **Assert the built sentence, never a substring another
-  caveat shares.**
+- **Transparency, compressed** (PRs #358–#419):
+  - Every no-full-text rating says "Limited certainty because of lack of full
+    text access". "Without full text" means nothing in it was recognised.
+  - **Score = clamped sum of `score_components`; High iff `high_risk_triggers`
+    is non-empty**, under the user's settings, one shared object. A broken
+    stored breakdown reads as `None` (`risk_explanation_strings.json`).
+  - No Unassessed rule on the desktop; the apps show an unread-text High as
+    **Unassessed** (PR #388).
+  - **Unreachable is provisional**: the apps' `sourcesUnreachable`, and
+    Python needs every cited trial answered.
+  - A row **strictly newer** than this build is never overwritten. **Bump
+    `TRANSPARENCY_ANALYZER_VERSION`** whenever a score could move.
+  - **A skip is a third state** (`SourceLookupSkipped`): only text we read can
+    say `NOT_STATED`. Assert the built sentence, not a shared substring.
+  - Never `findtext` a mixed-content element.
+  - Funders by brand: `sponsor_patterns.json` schema 4, which differs from
+    bmlib's copy.
+  - Release 0.5.0 / apps 1.6.0 (PR #393).
 - **Older rounds, compressed to the rules that still bind.** Each cost a
   defect; the archaeology is in git history and the `doc/cross_platform/`
   READMEs, which these point at.
@@ -214,10 +208,10 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **Machine channels stage C1 (above), then C2 (Elsevier)**, then the **embedded browser and
+- **C1's acceptance replay, then C2 (Elsevier)**, then the **embedded browser and
   review queue** with the `challenged` kind (replaces **#483**); **#481**
   follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
-  **#492** (stage B follow-ups);
+  **#492**, **#493** (stage B follow-ups); **#500** (C1 follow-up);
   **#467**, **#468** / **#470**, **#476**.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
