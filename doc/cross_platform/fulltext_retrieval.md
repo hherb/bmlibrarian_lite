@@ -932,7 +932,9 @@ request is a search, and its results are not guaranteed to be this article.
   that obtained no PDF, through a hook `FulltextDiscoverer` passes in, which
   reads the cached CORE text (`*.core.txt`, stamp `core-text v1`, never
   returned by `find_existing_fulltext`) before asking. Swift asks in
-  `FullTextService` after OpenAlex, unless a copy was served and not cached.
+  `FullTextService` after OpenAlex, unless a copy was served and not cached. In Swift a copy cached that
+  yields no text (a scan) while an abstract is held does not stop CORE being
+  asked, as it does not stop OpenAlex: a textless copy is no full text obtained.
   Android asks in `fetchFullText` when no open-access candidate exists, and
   otherwise in recording, through its `askCore` hook, once every candidate
   failed. Android shows the text as plain text, never through its
