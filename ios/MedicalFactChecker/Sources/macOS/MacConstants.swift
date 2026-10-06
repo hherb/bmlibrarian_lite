@@ -351,6 +351,7 @@ enum MacFullTextColors {
         case .europePMCPDF: return europePMCTint
         case .unpaywall: return unpaywallTint
         case .openAlex: return unpaywallTint
+        case .core: return unpaywallTint
         case .doi: return doiTint
         case .cached: return cachedTint
         case .uploaded: return uploadedTint

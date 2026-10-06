@@ -132,6 +132,27 @@ final class AppSettings {
         }
     }
 
+    /// Cached CORE API key.
+    private var _coreAPIKeyCache: String?
+
+    /// CORE API key (optional), which lets the app read the text CORE extracted (#480).
+    ///
+    /// Cached in memory after first access to avoid Keychain latency.
+    var coreAPIKey: String {
+        get {
+            if let cached = _coreAPIKeyCache {
+                return cached
+            }
+            let loaded = KeychainHelper.load(key: Keys.coreAPIKey) ?? ""
+            _coreAPIKeyCache = loaded
+            return loaded
+        }
+        set {
+            _coreAPIKeyCache = newValue
+            KeychainHelper.save(key: Keys.coreAPIKey, value: newValue)
+        }
+    }
+
     // MARK: - Search Settings
 
     /// Number of documents to fetch per batch.
@@ -297,6 +318,7 @@ final class AppSettings {
         static let apiKeyMigrated = "api_key_migrated_v1"
         static let ncbiEmail = "ncbi_email"
         static let ncbiAPIKey = "ncbi_api_key"
+        static let coreAPIKey = "core_api_key"
         static let batchSize = "batch_size"
         static let minRelevantDocuments = "min_relevant_documents"
         static let minScoreThreshold = "min_score_threshold"
@@ -351,6 +373,7 @@ final class AppSettings {
         clearAllAPIKeys()
         ncbiEmail = ""
         ncbiAPIKey = ""
+        coreAPIKey = ""
         batchSize = 20
         minRelevantDocuments = 5
         minScoreThreshold = 3

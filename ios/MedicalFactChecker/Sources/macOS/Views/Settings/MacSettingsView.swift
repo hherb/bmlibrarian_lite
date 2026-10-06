@@ -798,7 +798,9 @@ struct PubMedSettingsTab: View {
     @Environment(AppSettings.self) private var settings
 
     @State private var ncbiAPIKey = ""
+    @State private var coreAPIKey = ""
     @State private var showingSaveConfirmation = false
+    @State private var showingCoreSaveConfirmation = false
 
     var body: some View {
         @Bindable var settings = settings
@@ -835,16 +837,45 @@ struct PubMedSettingsTab: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+
+            Section("CORE API Key (Optional)") {
+                SecureField("CORE API Key", text: $coreAPIKey)
+                    .textFieldStyle(.roundedBorder)
+
+                HStack {
+                    Button("Save API Key") {
+                        settings.coreAPIKey = coreAPIKey
+                        showingCoreSaveConfirmation = true
+                    }
+                    .disabled(coreAPIKey == settings.coreAPIKey)
+
+                    Button("Get API Key") {
+                        if let url = URL(string: "https://core.ac.uk/services/api") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+
+                Text("Optional. A free CORE API key (core.ac.uk/services/api) lets the app read the text CORE extracted from repository copies when no other source has the article.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding()
         .onAppear {
             ncbiAPIKey = settings.ncbiAPIKey
+            coreAPIKey = settings.coreAPIKey
         }
         .alert("Saved", isPresented: $showingSaveConfirmation) {
             Button("OK", role: .cancel) { }
         } message: {
             Text("NCBI API key saved securely to Keychain")
+        }
+        .alert("Saved", isPresented: $showingCoreSaveConfirmation) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("CORE API key saved securely to Keychain")
         }
     }
 }

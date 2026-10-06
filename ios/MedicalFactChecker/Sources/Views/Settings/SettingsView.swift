@@ -27,6 +27,7 @@ struct SettingsView: View {
     @State private var apiKey = ""
     @State private var showingAPIKey = false
     @State private var ncbiAPIKey = ""
+    @State private var coreAPIKey = ""
     @State private var showingSaveConfirmation = false
     @State private var monthlyUsage: Double = 0
     @State private var showingCustomConfig = false
@@ -370,10 +371,17 @@ struct SettingsView: View {
                 // Full-text retrieval
                 Section {
                     Toggle("Fetch Full Text for Top Papers", isOn: $settings.autoFetchFullTextEnabled)
+                    SecureField("CORE API Key (optional)", text: $coreAPIKey)
+                        .textContentType(.password)
+                    Button("Save CORE API Key") {
+                        settings.coreAPIKey = coreAPIKey
+                        showingSaveConfirmation = true
+                    }
+                    .disabled(coreAPIKey == settings.coreAPIKey)
                 } header: {
                     Text("Full Text")
                 } footer: {
-                    Text("Automatically retrieve the full text of papers scored 4 or 5 before extracting citations and analysing transparency. Slower, and uses more tokens per paper; papers with no open full text fall back to the abstract.")
+                    Text("Automatically retrieve the full text of papers scored 4 or 5 before extracting citations and analysing transparency. Slower, and uses more tokens per paper; papers with no open full text fall back to the abstract. Optional. A free CORE API key (core.ac.uk/services/api) lets the app read the text CORE extracted from repository copies when no other source has the article.")
                 }
 
                 // Budget Settings
@@ -490,6 +498,7 @@ struct SettingsView: View {
                         settings.resetToDefaults()
                         apiKey = ""
                         ncbiAPIKey = ""
+                        coreAPIKey = ""
                         showingCustomConfig = false
                     }
 
@@ -575,6 +584,7 @@ struct SettingsView: View {
     private func loadCurrentValues() {
         apiKey = settings.llmAPIKey
         ncbiAPIKey = settings.ncbiAPIKey
+        coreAPIKey = settings.coreAPIKey
         loadMonthlyUsage()
         // Auto-expand custom config for custom provider
         showingCustomConfig = settings.selectedProvider == .custom
