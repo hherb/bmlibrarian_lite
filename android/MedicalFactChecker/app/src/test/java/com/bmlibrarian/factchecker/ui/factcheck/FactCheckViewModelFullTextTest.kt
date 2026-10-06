@@ -19,6 +19,7 @@
 package com.bmlibrarian.factchecker.ui.factcheck
 
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
+import com.bmlibrarian.factchecker.data.remote.fulltext.CoreFetch
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.remote.fulltext.NotEstablishedSource
 import com.bmlibrarian.factchecker.data.remote.fulltext.OpenAccessStep
@@ -89,6 +90,8 @@ class FactCheckViewModelFullTextTest {
         fullTextService = mockk(relaxed = true) {
             // A relaxed MockK answers a suspend call with null, not an empty list
             coEvery { openAlexSteps(any(), any()) } returns emptyList()
+            // CORE with no key, as for a user without one: a relaxed mock would invent an answer
+            coEvery { askCore(any()) } returns null
         }
         documentRepository = mockk(relaxed = true)
         viewModel = FactCheckViewModel(
@@ -200,6 +203,30 @@ class FactCheckViewModelFullTextTest {
         coVerify(exactly = 1) { fullTextService.openAlexSteps("10.1/x", listOf(unpaywallPdf)) }
         assertEquals("openalex", stored.fullTextSource)
         assertEquals("/cache/d.pdf", stored.pdfPath)
+        assertEquals(true, reported)
+    }
+
+    /**
+     * Once every open-access PDF failed, OpenAlex's included, the screen asks
+     * CORE through the service, and records its text as CORE's, plain (#480).
+     */
+    @Test
+    fun `CORE is asked through the service once every PDF failed`() {
+        val unpaywallPdf = "https://repo.example.org/a.pdf"
+        coEvery { fullTextService.downloadPdf(unpaywallPdf, any()) } returns
+            PdfDownload.Failed(RequestFailure.forHttpStatus(404))
+        coEvery { fullTextService.askCore("10.1/x") } returns CoreFetch.Served("core text")
+
+        val (stored, reported) = fetch(
+            FullTextService.FullTextResult.OpenAccessPdfs(
+                listOf(OpenAccessStep.Candidate(unpaywallPdf, PdfNamer.UNPAYWALL)), "10.1/x"
+            )
+        )
+
+        coVerify(exactly = 1) { fullTextService.askCore("10.1/x") }
+        assertEquals("core", stored.fullTextSource)
+        assertEquals("core text", stored.fullTextMarkdown)
+        assertEquals(null, stored.fullTextHTML)
         assertEquals(true, reported)
     }
 

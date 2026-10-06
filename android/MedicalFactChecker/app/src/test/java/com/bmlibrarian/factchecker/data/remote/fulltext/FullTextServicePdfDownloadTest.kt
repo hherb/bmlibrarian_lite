@@ -68,7 +68,8 @@ class FullTextServicePdfDownloadTest {
             unpaywallApi = mockk(relaxed = true),
             httpClient = OkHttpClient(),
             pmcOpenData = absentBucket(),
-            openAlex = absentOpenAlex()
+            openAlex = absentOpenAlex(),
+            core = absentCore()
         )
     }
 

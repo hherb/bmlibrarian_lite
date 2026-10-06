@@ -353,6 +353,7 @@ data class DocumentEntity(
             Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA -> Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA_LABEL
             Constants.FULLTEXT_SOURCE_UNPAYWALL -> Constants.FULLTEXT_SOURCE_UNPAYWALL_LABEL
             Constants.FULLTEXT_SOURCE_OPENALEX -> Constants.FULLTEXT_SOURCE_OPENALEX_LABEL
+            Constants.FULLTEXT_SOURCE_CORE -> Constants.FULLTEXT_SOURCE_CORE_LABEL
             Constants.FULLTEXT_SOURCE_DOI -> "Publisher"
             Constants.FULLTEXT_SOURCE_CACHED -> "Cached"
             Constants.FULLTEXT_SOURCE_UPLOADED -> "Uploaded"

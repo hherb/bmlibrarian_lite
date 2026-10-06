@@ -21,6 +21,8 @@ package com.bmlibrarian.factchecker.data.remote.fulltext
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService.FullTextResult
 import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
+import com.bmlibrarian.factchecker.domain.model.OpenAccessSource
+import com.bmlibrarian.factchecker.domain.model.OpenAccessUnsettledReason
 import com.bmlibrarian.factchecker.util.Constants
 import java.util.Date
 
@@ -49,7 +51,9 @@ data class RecordedFetch(val document: DocumentEntity, val result: FullTextResul
  * The PDFs are downloaded here. The open-access PDFs are walked in chain order
  * ([obtainingOpenAccessPdf]): a PDF a source named that it did not serve is
  * refused, not recorded as found (#478), and once every Unpaywall PDF was
- * refused OpenAlex is asked for the ones it names ([askOpenAlex]). A Europe PMC
+ * refused OpenAlex is asked for the ones it names ([askOpenAlex]); once every
+ * candidate, OpenAlex's included, was refused, CORE is asked for its extracted
+ * text ([askCore]), last before the DOI link. A Europe PMC
  * PDF that could not be downloaded stays a link-only record of its own (#471);
  * one served and not saved also gets the caching note.
  *
@@ -59,6 +63,10 @@ data class RecordedFetch(val document: DocumentEntity, val result: FullTextResul
  *   addresses tried or refused; called at most once, and only when no
  *   Unpaywall copy was served (#480). Required: a caller that left it out
  *   would never ask OpenAlex
+ * @param askCore Asks CORE for its extracted text, given the DOI; called at most
+ *   once, only when every open-access candidate failed and none was served
+ *   (#480, stage C). Null is no key: nothing asked, nothing recorded. Required,
+ *   with no default, for the same reason as [askOpenAlex]
  * @return The document to store, and the result to show; the document is
  *   unchanged for [FullTextResult.NotEstablished], which is not a fact about
  *   the article and leaves the fetch on offer (#434)
@@ -66,9 +74,10 @@ data class RecordedFetch(val document: DocumentEntity, val result: FullTextResul
 suspend fun DocumentEntity.recordingFullTextFetch(
     result: FullTextResult,
     downloadPdf: suspend (String) -> PdfDownload,
-    askOpenAlex: suspend (doi: String, tried: List<String>) -> List<OpenAccessStep>
+    askOpenAlex: suspend (doi: String, tried: List<String>) -> List<OpenAccessStep>,
+    askCore: suspend (doi: String) -> CoreFetch?
 ): RecordedFetch = when (result) {
-    is FullTextResult.OpenAccessPdfs -> obtainingOpenAccessPdf(result, downloadPdf, askOpenAlex)
+    is FullTextResult.OpenAccessPdfs -> obtainingOpenAccessPdf(result, downloadPdf, askOpenAlex, askCore)
     is FullTextResult.EuropePmcPdf -> when (val download = downloadPdf(result.pdfUrl)) {
         PdfDownload.NotSaved ->
             RecordedFetch(recording(result, pdfPath = null).copy(fullTextPdfNotSavedFrom = result.pdfUrl), result)
@@ -87,6 +96,9 @@ suspend fun DocumentEntity.recordingFullTextFetch(
  * and the chain had not yet asked OpenAlex, it is asked, once, with every
  * address tried, and its steps are walked the same way (the maintainer's
  * decision of 2026-10-05: no OpenAlex request that cannot raise the odds).
+ * When still nothing was served, CORE is asked, once, for its extracted text
+ * (#480, stage C): served, it is the result, recorded as plain text; unreachable,
+ * it is the last shortfall; absent, or without a key, it adds nothing.
  * Otherwise the DOI link carries every shortfall met, in chain order: an
  * unsettled lookup, or a candidate refused under its namer's source with its
  * address (#478's rule).
@@ -95,12 +107,14 @@ suspend fun DocumentEntity.recordingFullTextFetch(
  * @param downloadPdf Downloads a PDF URL
  * @param askOpenAlex Asks OpenAlex for its steps, given the DOI and the
  *   addresses tried or refused, in chain order
+ * @param askCore Asks CORE for its extracted text, given the DOI
  * @return The document to store, and the result to show
  */
 private suspend fun DocumentEntity.obtainingOpenAccessPdf(
     result: FullTextResult.OpenAccessPdfs,
     downloadPdf: suspend (String) -> PdfDownload,
-    askOpenAlex: suspend (String, List<String>) -> List<OpenAccessStep>
+    askOpenAlex: suspend (String, List<String>) -> List<OpenAccessStep>,
+    askCore: suspend (String) -> CoreFetch?
 ): RecordedFetch {
     var shortfall: OpenAccessShortfall? = null
     val tried = mutableListOf<String>()
@@ -136,6 +150,20 @@ private suspend fun DocumentEntity.obtainingOpenAccessPdf(
     if (!result.openAlexAsked) {
         walk(askOpenAlex(result.doi, tried.toList()))?.let { return it }
     }
+    // CORE's extracted text (#480, stage C): every candidate failed, so it can
+    // raise the odds. Reached only when no copy was served: a Saved or NotSaved
+    // download has already returned above
+    when (val fetched = askCore(result.doi)) {
+        is CoreFetch.Served -> {
+            val text = FullTextResult.CoreText(fetched.text)
+            return RecordedFetch(recording(text, pdfPath = null), text)
+        }
+        is CoreFetch.Unreachable -> shortfall = OpenAccessShortfall.adding(
+            OpenAccessShortfall(OpenAccessSource.CORE, OpenAccessUnsettledReason.Failed(fetched.failure)),
+            shortfall
+        )
+        CoreFetch.Absent, null -> Unit
+    }
     val refused = FullTextResult.DoiUrl(doiLink(result.doi), shortfall)
     return RecordedFetch(recording(refused, pdfPath = null), refused)
 }
@@ -163,6 +191,15 @@ private fun DocumentEntity.recording(result: FullTextResult, pdfPath: String?): 
         fullTextMarkdown = result.markdown,
         fullTextHTML = result.html,
         fullTextSource = Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA,
+        fullTextFetchedAt = Date(),
+        fullTextOpenAccessShortfallJson = null,
+        fullTextPdfNotSavedFrom = null
+    )
+    // Plain text, untrusted: no HTML is stored, so nothing renders it as HTML
+    is FullTextResult.CoreText -> copy(
+        fullTextMarkdown = result.text,
+        fullTextHTML = null,
+        fullTextSource = Constants.FULLTEXT_SOURCE_CORE,
         fullTextFetchedAt = Date(),
         fullTextOpenAccessShortfallJson = null,
         fullTextPdfNotSavedFrom = null

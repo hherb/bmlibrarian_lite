@@ -41,6 +41,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronLeft
@@ -133,6 +136,9 @@ fun FullTextScreen(
                             is FullTextState.MarkdownContent -> {
                                 FullTextSourceBadge(source = currentState.source)
                             }
+                            is FullTextState.PlainTextContent -> {
+                                FullTextSourceBadge(source = currentState.source)
+                            }
                             is FullTextState.PdfContent -> {
                                 FullTextSourceBadge(source = currentState.source)
                             }
@@ -196,6 +202,11 @@ fun FullTextScreen(
                 is FullTextState.MarkdownContent -> {
                     // For now, render markdown as HTML in WebView
                     HtmlViewer(html = markdownToBasicHtml(currentState.markdown))
+                }
+
+                is FullTextState.PlainTextContent -> {
+                    // Untrusted text (CORE's, #480): a text view, never the WebView
+                    PlainTextViewer(text = currentState.text)
                 }
 
                 is FullTextState.PdfContent -> {
@@ -285,6 +296,30 @@ private fun LoadingContent() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+}
+
+/**
+ * Plain-text viewer: selectable, scrolling text in a Compose [Text].
+ *
+ * For text from an untrusted source (CORE's extracted text, #480, stage C).
+ * Nothing here interprets markup: the text is shown exactly as stored, so it is
+ * never passed to [markdownToBasicHtml] or [HtmlViewer], whose WebView runs
+ * JavaScript and does not escape.
+ *
+ * @param text The text to show.
+ */
+@Composable
+private fun PlainTextViewer(text: String) {
+    SelectionContainer {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(Constants.UI_SCREEN_PADDING.dp)
+        )
     }
 }
 

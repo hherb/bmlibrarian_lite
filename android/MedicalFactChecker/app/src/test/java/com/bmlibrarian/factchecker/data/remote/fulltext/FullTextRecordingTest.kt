@@ -62,7 +62,8 @@ class FullTextRecordingTest {
             downloadPdf = {
                 downloaded?.let(PdfDownload::Saved) ?: PdfDownload.Failed(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
             },
-            askOpenAlex = { _, _ -> emptyList() }
+            askOpenAlex = { _, _ -> emptyList() },
+            askCore = { null }
         )
 
     @Test
@@ -160,7 +161,8 @@ class FullTextRecordingTest {
         val pdfUrl = "https://repo.example.org/a.pdf"
 
         val (doc, shown) = document.recordingFullTextFetch(
-            unpaywallPdfs(pdfUrl), downloadPdf = { PdfDownload.NotSaved }, askOpenAlex = { _, _ -> emptyList() }
+            unpaywallPdfs(pdfUrl), downloadPdf = { PdfDownload.NotSaved }, askOpenAlex = { _, _ -> emptyList() },
+            askCore = { null }
         )
 
         assertEquals(FullTextResult.OpenAccessPdf(pdfUrl, "10.1/x", PdfNamer.UNPAYWALL, notSaved = true), shown)

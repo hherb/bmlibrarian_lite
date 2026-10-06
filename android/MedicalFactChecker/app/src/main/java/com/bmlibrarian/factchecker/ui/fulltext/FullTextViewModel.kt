@@ -96,6 +96,22 @@ class FullTextViewModel @Inject constructor(
         ) : FullTextState()
 
         /**
+         * Plain text, shown as such: CORE's extracted text (#480, stage C).
+         *
+         * Untrusted, so it is rendered in a Compose text view, never through the
+         * HTML viewer (a JavaScript-enabled WebView that does not escape).
+         *
+         * @param text The text, exactly as stored.
+         * @param title Document title.
+         * @param source Source of the content.
+         */
+        data class PlainTextContent(
+            val text: String,
+            val title: String,
+            val source: String
+        ) : FullTextState()
+
+        /**
          * PDF content available.
          *
          * @param pdfPath Local path to PDF file.
@@ -182,6 +198,19 @@ class FullTextViewModel @Inject constructor(
                 }
 
                 _document.value = doc
+
+                // CORE's text is untrusted plain text (#480, stage C): checked
+                // first, so neither the HTML nor the markdown path, both shown in
+                // a JavaScript-enabled WebView, ever renders it
+                if (doc.fullTextSource == Constants.FULLTEXT_SOURCE_CORE && !doc.fullTextMarkdown.isNullOrEmpty()) {
+                    Log.d(TAG, "Using cached CORE text for ${doc.id}")
+                    _state.value = FullTextState.PlainTextContent(
+                        text = doc.fullTextMarkdown,
+                        title = doc.title,
+                        source = Constants.FULLTEXT_SOURCE_CORE_LABEL
+                    )
+                    return@launch
+                }
 
                 // Check if we already have cached content
                 // Prefer HTML (from JATS parsing) as it has proper figure/table rendering
@@ -298,7 +327,8 @@ class FullTextViewModel @Inject constructor(
         val (recorded, result) = doc.recordingFullTextFetch(
             chainResult,
             downloadPdf = { url -> fullTextService.downloadPdf(url, doc.id) },
-            askOpenAlex = { doi, tried -> fullTextService.openAlexSteps(doi, tried) }
+            askOpenAlex = { doi, tried -> fullTextService.openAlexSteps(doi, tried) },
+            askCore = { doi -> fullTextService.askCore(doi) }
         )
         if (result !is FullTextResult.NotEstablished) {
             documentDao.update(recorded)
@@ -322,6 +352,15 @@ class FullTextViewModel @Inject constructor(
                     html = wrapHtmlContent(result.html),
                     title = doc.title,
                     source = Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA_LABEL
+                )
+            }
+            is FullTextResult.CoreText -> {
+                Log.d(TAG, "Got CORE's extracted text for ${doc.id}")
+                // Untrusted plain text: never through the HTML viewer
+                FullTextState.PlainTextContent(
+                    text = result.text,
+                    title = doc.title,
+                    source = Constants.FULLTEXT_SOURCE_CORE_LABEL
                 )
             }
             is FullTextResult.EuropePmcPdf -> {

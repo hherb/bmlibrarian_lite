@@ -67,7 +67,8 @@ class FullTextServicePmcOpenDataTest {
         unpaywallApi = mockk<UnpaywallApi>(),
         httpClient = mockk(relaxed = true),
         pmcOpenData = bucket,
-        openAlex = absentOpenAlex()
+        openAlex = absentOpenAlex(),
+        core = absentCore()
     )
 
     /** Europe PMC's search answers with these records. */

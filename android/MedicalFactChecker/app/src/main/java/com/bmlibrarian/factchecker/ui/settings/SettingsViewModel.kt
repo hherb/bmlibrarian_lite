@@ -80,6 +80,10 @@ class SettingsViewModel @Inject constructor(
     private val _ncbiApiKeyInput = MutableStateFlow("")
     val ncbiApiKeyInput: StateFlow<String> = _ncbiApiKeyInput.asStateFlow()
 
+    /** Current CORE API key input field value (#480, stage C). */
+    private val _coreApiKeyInput = MutableStateFlow("")
+    val coreApiKeyInput: StateFlow<String> = _coreApiKeyInput.asStateFlow()
+
     /** Status message for user feedback. */
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
@@ -189,6 +193,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _apiKeyInput.value = settingsRepository.getApiKey(settings.value.llmProviderId)
             _ncbiApiKeyInput.value = settingsRepository.getNcbiApiKey()
+            _coreApiKeyInput.value = settingsRepository.getCoreApiKey()
         }
     }
 
@@ -448,6 +453,25 @@ class SettingsViewModel @Inject constructor(
         showStatus(if (apiKey.isNotEmpty()) "NCBI API key saved" else "NCBI API key cleared")
     }
 
+    /**
+     * Update the CORE API key input field (#480, stage C).
+     *
+     * @param value The new input value
+     */
+    fun updateCoreApiKeyInput(value: String) {
+        _coreApiKeyInput.value = value
+    }
+
+    /**
+     * Save the CORE API key, trimmed; an empty field clears it, so CORE is no
+     * longer asked.
+     */
+    fun saveCoreApiKey() {
+        val trimmed = _coreApiKeyInput.value.trim()
+        settingsRepository.saveCoreApiKey(trimmed)
+        showStatus(if (trimmed.isEmpty()) "CORE API key cleared" else "CORE API key saved")
+    }
+
     // ==================== Search Settings Actions ====================
 
     /**
@@ -592,6 +616,7 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.resetToDefaults()
         _apiKeyInput.value = ""
         _ncbiApiKeyInput.value = ""
+        _coreApiKeyInput.value = ""
         showStatus("Settings reset to defaults")
     }
 

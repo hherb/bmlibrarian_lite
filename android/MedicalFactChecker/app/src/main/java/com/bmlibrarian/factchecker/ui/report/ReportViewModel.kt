@@ -444,7 +444,8 @@ class ReportViewModel @Inject constructor(
                         val (updatedDoc, fullTextResult) = document.recordingFullTextFetch(
                             chainResult,
                             downloadPdf = { url -> fullTextService.downloadPdf(url, document.id) },
-                            askOpenAlex = { doi, tried -> fullTextService.openAlexSteps(doi, tried) }
+                            askOpenAlex = { doi, tried -> fullTextService.openAlexSteps(doi, tried) },
+                            askCore = { doi -> fullTextService.askCore(doi) }
                         )
 
                         documentRepository.updateDocument(updatedDoc)

@@ -21,6 +21,7 @@ package com.bmlibrarian.factchecker.ui.fulltext
 import androidx.lifecycle.SavedStateHandle
 import com.bmlibrarian.factchecker.data.local.dao.DocumentDao
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
+import com.bmlibrarian.factchecker.data.remote.fulltext.CoreFetch
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.remote.fulltext.NotEstablishedSource
 import com.bmlibrarian.factchecker.data.remote.fulltext.OpenAccessStep
@@ -77,6 +78,8 @@ class FullTextViewModelOpenAccessShortfallTest {
             coEvery { downloadPdf(any(), any()) } returns notFound
             // A relaxed MockK answers a suspend call with null, not an empty list
             coEvery { openAlexSteps(any(), any()) } returns emptyList()
+            // CORE with no key, as for a user without one: a relaxed mock would invent an answer
+            coEvery { askCore(any()) } returns null
         }
         documentDao = mockk(relaxed = true)
         settingsRepository = mockk(relaxed = true)
@@ -350,5 +353,78 @@ class FullTextViewModelOpenAccessShortfallTest {
                 }
             )
         }
+    }
+
+    // ==================== CORE's text, untrusted, shown as plain text (#480, stage C) ====================
+
+    /**
+     * CORE's text is untrusted: the viewer's HTML path is a JavaScript-enabled
+     * WebView with no escaping, so a stored CORE record must never reach it.
+     * Even a stale HTML column on the row does not take it there.
+     */
+    @Test
+    fun `a stored CORE text is shown as plain text, never as HTML`() {
+        val hostile = "<script>alert(1)</script>"
+        val stored = document.copy(fullTextSource = Constants.FULLTEXT_SOURCE_CORE, fullTextMarkdown = hostile)
+
+        val viewModel = open(stored, FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1/x"))
+
+        assertEquals(
+            FullTextViewModel.FullTextState.PlainTextContent(hostile, "t", Constants.FULLTEXT_SOURCE_CORE_LABEL),
+            viewModel.state.value
+        )
+        coVerify(exactly = 0) { fullTextService.fetchFullText(any(), any(), any(), any()) }
+
+        val withStaleHtml = stored.copy(fullTextHTML = "<p>stale</p>")
+        assertEquals(
+            FullTextViewModel.FullTextState.PlainTextContent(hostile, "t", Constants.FULLTEXT_SOURCE_CORE_LABEL),
+            open(withStaleHtml, FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1/x")).state.value
+        )
+    }
+
+    /** The control: markdown from any other source still takes the markdown path. */
+    @Test
+    fun `stored markdown from another source is not shown as plain text`() {
+        val stored = document.copy(fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC, fullTextMarkdown = "m")
+
+        assertEquals(
+            FullTextViewModel.FullTextState.MarkdownContent("m", "t", "Europe PMC"),
+            open(stored, FullTextService.FullTextResult.DoiUrl("https://doi.org/10.1/x")).state.value
+        )
+    }
+
+    @Test
+    fun `CORE's text fetched now is shown as plain text and stored as CORE's`() {
+        val hostile = "<img src=x onerror=alert(1)>"
+
+        val viewModel = open(document, FullTextService.FullTextResult.CoreText(hostile))
+
+        assertEquals(
+            FullTextViewModel.FullTextState.PlainTextContent(hostile, "t", Constants.FULLTEXT_SOURCE_CORE_LABEL),
+            viewModel.state.value
+        )
+        coVerify {
+            documentDao.update(
+                match {
+                    it.fullTextMarkdown == hostile && it.fullTextHTML == null &&
+                        it.fullTextSource == Constants.FULLTEXT_SOURCE_CORE
+                }
+            )
+        }
+    }
+
+    /** Recording asks CORE through the service once the open-access candidates failed. */
+    @Test
+    fun `the viewer asks CORE through the service once every candidate failed`() {
+        val text = "plain"
+        coEvery { fullTextService.askCore("10.1/x") } returns CoreFetch.Served(text)
+
+        val viewModel = open(document, unpaywallPdfs("https://repo.example.org/a.pdf"))
+
+        assertEquals(
+            FullTextViewModel.FullTextState.PlainTextContent(text, "t", Constants.FULLTEXT_SOURCE_CORE_LABEL),
+            viewModel.state.value
+        )
+        coVerify(exactly = 1) { fullTextService.askCore("10.1/x") }
     }
 }
