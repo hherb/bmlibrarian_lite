@@ -284,6 +284,29 @@ class SettingsRepository @Inject constructor(
         apiKeyCache[KEY_NCBI_API_KEY] = apiKey
     }
 
+    // ==================== CORE API Key ====================
+
+    /**
+     * Get the CORE API key, which lets the app read CORE's extracted text.
+     *
+     * @return The stored CORE API key, or empty string if not set
+     */
+    fun getCoreApiKey(): String {
+        return apiKeyCache.getOrPut(KEY_CORE_API_KEY) {
+            encryptedPrefs.getString(KEY_CORE_API_KEY, "") ?: ""
+        }
+    }
+
+    /**
+     * Save the CORE API key.
+     *
+     * @param apiKey The CORE API key
+     */
+    fun saveCoreApiKey(apiKey: String) {
+        encryptedPrefs.edit().putString(KEY_CORE_API_KEY, apiKey).apply()
+        apiKeyCache[KEY_CORE_API_KEY] = apiKey
+    }
+
     /**
      * The NCBI API key and email as saved, for the PubMed service to send.
      *
@@ -603,6 +626,7 @@ class SettingsRepository @Inject constructor(
         // Encrypted keys prefix
         private const val KEY_API_KEY_PREFIX = "api_key_"
         private const val KEY_NCBI_API_KEY = "ncbi_api_key"
+        private const val KEY_CORE_API_KEY = "core_api_key"
 
         // Regular keys
         private const val KEY_LLM_PROVIDER = "llm_provider"

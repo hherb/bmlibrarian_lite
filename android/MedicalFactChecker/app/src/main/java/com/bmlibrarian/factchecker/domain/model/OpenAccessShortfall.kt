@@ -60,7 +60,10 @@ enum class OpenAccessSource(val persistedValue: String, val serviceName: String)
     OPENALEX("openalex", Constants.OPENALEX_SERVICE_NAME),
 
     /** A PDF OpenAlex named that could not be obtained: OpenAlex answered, the copy went unassessed. */
-    OPENALEX_PDF("openalex_pdf", "OpenAlex's copy");
+    OPENALEX_PDF("openalex_pdf", "OpenAlex's copy"),
+
+    /** CORE's extracted text, asked by DOI with the user's key (#480, stage C). */
+    CORE("core", Constants.CORE_SERVICE_NAME);
 
     companion object {
         /**
@@ -305,12 +308,13 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
         private const val NOT_CONFIGURED_DESCRIPTION = "not configured"
 
         /** The open-access chain's sources in the order they are tried (#480). */
-        private val CHAIN_ORDER = listOf(
+        internal val CHAIN_ORDER = listOf(
             OpenAccessSource.UNPAYWALL,
             OpenAccessSource.LANDING_PAGE,
             OpenAccessSource.PDF,
             OpenAccessSource.OPENALEX,
-            OpenAccessSource.OPENALEX_PDF
+            OpenAccessSource.OPENALEX_PDF,
+            OpenAccessSource.CORE
         )
 
         private const val TRIED_SOURCES_LEAD = "Failed to obtain a PDF from the following tried sources: "

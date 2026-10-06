@@ -56,6 +56,9 @@ object Constants {
      */
     const val HTTP_NOT_FOUND = 404
 
+    /** HTTP 200: OK. */
+    const val HTTP_OK = 200
+
     /**
      * The lowest status that means the request did not succeed. Python's
      * `HTTP_ERROR_STATUS_MIN`.
@@ -163,6 +166,43 @@ object Constants {
 
     /** Statuses retried for OpenAlex: Python's RETRYABLE_HTTP_STATUSES (no 408). */
     val OPENALEX_RETRYABLE_STATUSES = setOf(429, 500, 502, 503, 504)
+
+    /** CORE's API root (#480, stage C); pinned by fulltext_parity/core_fulltext.json. */
+    const val CORE_BASE_URL = "https://api.core.ac.uk"
+
+    /** The search path; its trailing slash matters (without it CORE answers an HTML page). */
+    const val CORE_SEARCH_PATH = "/v3/search/works/"
+
+    /** Results asked for: a DOI query can match more than one record. */
+    const val CORE_SEARCH_LIMIT = 3
+
+    /** CORE as the reader's sentences name it, verbatim on every platform. */
+    const val CORE_SERVICE_NAME = "CORE"
+
+    /** The fewest Unicode code points CORE's text holds to count as a full text. */
+    const val CORE_MIN_FULLTEXT_CHARS = 5000
+
+    /** Consecutive fetches ending in 429 after which CORE is not asked again this session. */
+    const val CORE_PAUSE_AFTER_CONSECUTIVE_429 = 2
+
+    /** 0.4 requests a second, Python's POLITE_RATE_CEILINGS entry. */
+    const val CORE_MIN_INTERVAL_MS = 2500L
+
+    /** Further attempts after the first, for a transport failure or a retryable status. */
+    const val CORE_MAX_RETRIES = 3
+
+    /** CORE's wait before its first retry, doubling after; the bucket's value. */
+    const val CORE_INITIAL_BACKOFF_MS = PMC_OPEN_DATA_INITIAL_BACKOFF_MS
+
+    /** Connect and read timeout for one CORE request, in seconds. */
+    const val CORE_REQUEST_TIMEOUT_SECONDS = 30L
+
+    /** Statuses retried for CORE: Python's RETRYABLE_HTTP_STATUSES. */
+    val CORE_RETRYABLE_STATUSES = setOf(429, 500, 502, 503, 504)
+
+    /** The settings screen's one line on what a CORE key adds. */
+    const val CORE_API_KEY_EXPLANATION =
+        "Optional. A free CORE API key (core.ac.uk/services/api) lets the app read the text CORE extracted from repository copies when no other source has the article."
 
     /** The XML namespace of an S3 ListObjectsV2 answer. */
     const val S3_LISTING_NAMESPACE = "http://s3.amazonaws.com/doc/2006-03-01/"
@@ -377,6 +417,12 @@ object Constants {
 
     /** How a stored [FULLTEXT_SOURCE_OPENALEX] is labelled for the reader. */
     const val FULLTEXT_SOURCE_OPENALEX_LABEL = OPENALEX_SERVICE_NAME
+
+    /** Source of the text CORE extracted from a repository copy (#480). */
+    const val FULLTEXT_SOURCE_CORE = "core"
+
+    /** How a stored [FULLTEXT_SOURCE_CORE] is labelled for the reader. */
+    const val FULLTEXT_SOURCE_CORE_LABEL = "CORE (extracted text)"
 
     /** Full-text source: DOI/Publisher. */
     const val FULLTEXT_SOURCE_DOI = "doi"
