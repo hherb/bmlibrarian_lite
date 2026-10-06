@@ -22,6 +22,7 @@ import android.content.Context
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCApi
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
+import com.bmlibrarian.factchecker.data.remote.fulltext.OpenAlexService
 import com.bmlibrarian.factchecker.data.remote.fulltext.PmcOpenDataService
 import com.bmlibrarian.factchecker.data.remote.fulltext.UnpaywallApi
 import com.bmlibrarian.factchecker.data.remote.llm.AnthropicApi
@@ -68,7 +69,11 @@ object NetworkModule {
      *
      * Configuration:
      * - BASIC-level logging interceptor in debug builds; never HEADERS or BODY,
-     *   which would log credentials (see [debugHttpLoggingInterceptor])
+     *   which would log credentials (see [debugHttpLoggingInterceptor]). BASIC
+     *   still logs every request's full URL, so debug logcat holds the user's
+     *   contact email wherever it travels in a query: Unpaywall's `email=` and
+     *   OpenAlex's `mailto=` (OpenAlex's client is derived from this one and
+     *   keeps its interceptors). No credential may travel in a URL (#243)
      * - Connection timeout: 30 seconds
      * - Read timeout: 120 seconds (allows for slow LLM responses)
      * - Write timeout: 60 seconds
@@ -86,7 +91,9 @@ object NetworkModule {
             .retryOnConnectionFailure(true)
 
         // Only add logging interceptor in debug builds, at BASIC level: bodies
-        // and headers carry credentials (see debugHttpLoggingInterceptor)
+        // and headers carry credentials (see debugHttpLoggingInterceptor).
+        // BASIC still logs full URLs, the contact email in Unpaywall's and
+        // OpenAlex's queries included
         if (BuildConfig.DEBUG) {
             builder.addInterceptor(debugHttpLoggingInterceptor())
         }
@@ -337,6 +344,7 @@ object NetworkModule {
      * @param unpaywallApi Unpaywall API interface
      * @param okHttpClient HTTP client for PDF downloads
      * @param pmcOpenDataService PMC's open-data bucket (#480), built by its `@Inject` constructor
+     * @param openAlexService OpenAlex's PDF locations (#480), built by its `@Inject` constructor
      * @return Full-text service instance
      */
     @Provides
@@ -346,9 +354,10 @@ object NetworkModule {
         europePmcService: EuropePMCService,
         unpaywallApi: UnpaywallApi,
         okHttpClient: OkHttpClient,
-        pmcOpenDataService: PmcOpenDataService
+        pmcOpenDataService: PmcOpenDataService,
+        openAlexService: OpenAlexService
     ): FullTextService {
-        return FullTextService(context, europePmcService, unpaywallApi, okHttpClient, pmcOpenDataService)
+        return FullTextService(context, europePmcService, unpaywallApi, okHttpClient, pmcOpenDataService, openAlexService)
     }
 
     // ==================== Constants ====================

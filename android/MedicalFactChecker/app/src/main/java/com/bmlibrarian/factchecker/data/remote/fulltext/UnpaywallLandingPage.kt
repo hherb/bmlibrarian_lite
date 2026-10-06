@@ -201,6 +201,20 @@ object UnpaywallLandingPage {
     }
 
     /**
+     * Every PDF URL an Unpaywall answer names, best location first (#480,
+     * stage B): each location's `url_for_pdf`, trimmed, kept once where it
+     * first appears. The chain tries them in this order; Python's
+     * `unpaywall_pdf_urls`, pinned by `unpaywall_landing_page.json`.
+     *
+     * @param response Unpaywall's answer for one DOI
+     * @return The PDF URLs, possibly none
+     */
+    fun pdfUrls(response: UnpaywallResponse): List<String> =
+        (listOfNotNull(response.best_oa_location) + response.oa_locations.orEmpty())
+            .mapNotNull { present(it.url_for_pdf) }
+            .distinct()
+
+    /**
      * Return the PDF a landing page declares, or null when it declares none.
      *
      * Flow: every `<meta>` tag is read in document order; its attributes are

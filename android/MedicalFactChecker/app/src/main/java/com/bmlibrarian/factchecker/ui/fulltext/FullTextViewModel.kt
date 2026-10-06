@@ -29,6 +29,7 @@ import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService.FullText
 import com.bmlibrarian.factchecker.data.remote.fulltext.recordingFullTextFetch
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.domain.model.FullTextLinkKind
+import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
 import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
 import com.bmlibrarian.factchecker.util.Constants
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -112,16 +113,20 @@ class FullTextViewModel @Inject constructor(
          *
          * @param url URL to open.
          * @param title Document title.
-         * @param kind What the link is: the publisher's page, or a PDF that
-         *   could not be downloaded. The screen says which (#471).
+         * @param kind What the link is: the publisher's page, a PDF that
+         *   could not be downloaded, or one served and not saved. The screen
+         *   says which (#471, #480).
          * @param openAccessNotice What an open-access lookup that went unsettled
          *   leaves open, shown above the link; null when nothing was (#466).
+         * @param pdfNotSavedNote The caching note, when the PDF linked was served
+         *   and could not be saved on this device; null otherwise (#480).
          */
         data class WebUrl(
             val url: String,
             val title: String,
             val kind: FullTextLinkKind,
-            val openAccessNotice: String? = null
+            val openAccessNotice: String? = null,
+            val pdfNotSavedNote: String? = null
         ) : FullTextState()
 
         /**
@@ -287,11 +292,14 @@ class FullTextViewModel @Inject constructor(
      * @param chainResult What the chain returned.
      */
     private suspend fun handleFullTextResult(doc: DocumentEntity, chainResult: FullTextResult) {
-        // The result as settled by the download: a PDF Unpaywall named that could
-        // not be downloaded is shown as the DOI link, with why (#478)
-        val (recorded, result) = doc.recordingFullTextFetch(chainResult) { url ->
-            fullTextService.downloadPdf(url, doc.id)
-        }
+        // The result as settled by the download: the open-access PDFs are tried
+        // in turn, and when none could be downloaded the DOI link is shown, with
+        // why (#478, #480)
+        val (recorded, result) = doc.recordingFullTextFetch(
+            chainResult,
+            downloadPdf = { url -> fullTextService.downloadPdf(url, doc.id) },
+            askOpenAlex = { doi, tried -> fullTextService.openAlexSteps(doi, tried) }
+        )
         if (result !is FullTextResult.NotEstablished) {
             documentDao.update(recorded)
             _document.value = recorded
@@ -318,12 +326,13 @@ class FullTextViewModel @Inject constructor(
             }
             is FullTextResult.EuropePmcPdf -> {
                 Log.d(TAG, "Got Europe PMC PDF URL for ${doc.id}: ${result.pdfUrl}")
-                pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, "Europe PMC")
+                pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, "Europe PMC", recorded.fullTextPdfNotSavedFrom)
             }
-            is FullTextResult.UnpaywallPdf -> {
-                Log.d(TAG, "Got Unpaywall PDF URL for ${doc.id}: ${result.pdfUrl}")
-                pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, "Unpaywall")
+            is FullTextResult.OpenAccessPdf -> {
+                Log.d(TAG, "Got ${result.namedBy.label} PDF URL for ${doc.id}: ${result.pdfUrl}")
+                pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, result.namedBy.label, recorded.fullTextPdfNotSavedFrom)
             }
+            is FullTextResult.OpenAccessPdfs -> error("resolved by recording")
             is FullTextResult.DoiUrl -> {
                 Log.d(TAG, "Falling back to DOI URL for ${doc.id}: ${result.url}")
                 FullTextState.WebUrl(
@@ -352,13 +361,28 @@ class FullTextViewModel @Inject constructor(
      * @param pdfUrl The PDF's URL.
      * @param title The document's title.
      * @param source The source, as the reader is told of it.
+     * @param notSavedFrom The PDF served and not saved, as recorded (#480), or
+     *   null. The link shown is then that PDF's, so it is told as
+     *   [FullTextLinkKind.PDF_NOT_SAVED] with the caching note saying only its
+     *   link is kept: the two agree, and agree with the link offered.
      * @return The state to show.
      */
-    private fun pdfOrLink(localPath: String?, pdfUrl: String, title: String, source: String): FullTextState =
+    private fun pdfOrLink(
+        localPath: String?,
+        pdfUrl: String,
+        title: String,
+        source: String,
+        notSavedFrom: String?
+    ): FullTextState =
         if (localPath != null) {
             FullTextState.PdfContent(pdfPath = localPath, title = title, source = source)
         } else {
-            FullTextState.WebUrl(url = pdfUrl, title = title, kind = FullTextLinkKind.UNDOWNLOADED_PDF)
+            FullTextState.WebUrl(
+                url = pdfUrl,
+                title = title,
+                kind = if (notSavedFrom != null) FullTextLinkKind.PDF_NOT_SAVED else FullTextLinkKind.UNDOWNLOADED_PDF,
+                pdfNotSavedNote = notSavedFrom?.let { OpenAccessShortfall.notSavedNote(it, linkKept = true) }
+            )
         }
 
     /**
@@ -383,7 +407,8 @@ class FullTextViewModel @Inject constructor(
                         pdfPath = null,
                         fullTextUnavailable = false,
                         fullTextFetchedAt = null,
-                        fullTextOpenAccessShortfallJson = null
+                        fullTextOpenAccessShortfallJson = null,
+                        fullTextPdfNotSavedFrom = null
                     )
                 )
 

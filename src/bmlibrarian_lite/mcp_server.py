@@ -818,6 +818,7 @@ def _make_server(config: LiteConfig) -> tuple[Server, _AgentsContext]:
         interrogation_agent=LiteInterrogationAgent(storage=storage, config=config, llm_client=llm_client),
         fulltext_discoverer=FulltextDiscoverer(
             unpaywall_email=config.pubmed.email,
+            openalex_email=config.pubmed.email,
             use_browser_fallback=False,
         ),
     )

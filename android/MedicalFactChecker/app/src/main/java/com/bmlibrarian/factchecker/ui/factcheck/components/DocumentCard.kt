@@ -109,6 +109,8 @@ private object ReasoningColors {
  * @param onGetFullText Callback to fetch full text for this document
  * @param onViewFullText Callback to navigate to full text viewer
  * @param onOpenPublisher Callback to open publisher website (DOI link)
+ * @param onOpenUrl Callback to open an address: a PDF served and not saved,
+ *   whose link is all the record keeps (#480)
  * @param onUploadFullText Callback to upload full text for this document
  * @param modifier Modifier for the component
  */
@@ -121,6 +123,7 @@ fun DocumentCard(
     onGetFullText: ((DocumentEntity) -> Unit)? = null,
     onViewFullText: ((DocumentEntity) -> Unit)? = null,
     onOpenPublisher: ((String) -> Unit)? = null,
+    onOpenUrl: ((String) -> Unit)? = null,
     onUploadFullText: ((DocumentEntity) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -267,6 +270,7 @@ fun DocumentCard(
                         onGetFullText = onGetFullText,
                         onViewFullText = onViewFullText,
                         onOpenPublisher = onOpenPublisher,
+                        onOpenUrl = onOpenUrl,
                         onUploadFullText = onUploadFullText
                     )
                     Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
@@ -537,6 +541,7 @@ private fun KeyPassageBox(
  * @param onGetFullText Callback to fetch full text
  * @param onViewFullText Callback to navigate to full text viewer
  * @param onOpenPublisher Callback to open publisher website
+ * @param onOpenUrl Callback to open the PDF address a link-only record keeps
  * @param onUploadFullText Callback to upload full text manually
  */
 @Composable
@@ -547,6 +552,7 @@ private fun FullTextSection(
     onGetFullText: ((DocumentEntity) -> Unit)?,
     onViewFullText: ((DocumentEntity) -> Unit)?,
     onOpenPublisher: ((String) -> Unit)?,
+    onOpenUrl: ((String) -> Unit)?,
     onUploadFullText: ((DocumentEntity) -> Unit)?
 ) {
     Column(
@@ -598,10 +604,12 @@ private fun FullTextSection(
                 LinkOnlyFullTextSection(
                     kind = linkOnlyKind,
                     doi = document.doi,
+                    pdfUrl = document.linkOnlyPdfUrl,
                     isLoading = isLoading,
                     retryEnabled = !isUploading,
                     onRetry = onGetFullText?.let { fetch -> { fetch(document) } },
-                    onOpenPublisher = onOpenPublisher
+                    onOpenPublisher = onOpenPublisher,
+                    onOpenUrl = onOpenUrl
                 )
 
                 UploadFullTextButton(
@@ -700,6 +708,10 @@ private fun FullTextSection(
         // fallback stores no content to say it with
         document.openAccessShortfall?.let { shortfall ->
             OpenAccessShortfallNotice(notice = shortfall.notice)
+        }
+        // A PDF served and not saved, told apart from the shortfall (#480)
+        document.pdfNotSavedNote?.let { note ->
+            OpenAccessShortfallNotice(notice = note)
         }
     }
 }

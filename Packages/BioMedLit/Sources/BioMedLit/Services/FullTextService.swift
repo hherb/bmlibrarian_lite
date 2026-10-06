@@ -27,8 +27,10 @@ import Foundation
 ///    ask it then. It holds the author manuscripts Europe PMC does not serve.
 /// 2. **Europe PMC PDF** - The free render URL, when the XML is unavailable or
 ///    carries no `<body>`
-/// 3. **Unpaywall PDF** - Open access PDFs via Unpaywall API, or the PDF an
-///    open-access landing page declares (#464)
+/// 3. **Unpaywall PDF** - Open access PDFs via Unpaywall API, every one it
+///    names (#480), or the PDF an open-access landing page declares (#464)
+///    3a. **OpenAlex PDF** - The PDFs OpenAlex's locations name that Unpaywall
+///    did not, unless an Unpaywall copy was served and not cached (#480)
 /// 4. **DOI Resolution** - Falls back to opening publisher website
 ///
 /// A body-less deposit, Europe PMC's or the bucket's, does not win at step 1.
@@ -80,6 +82,14 @@ public actor FullTextService {
     /// prose and loses the figures, tables and layout.
     private let extractPDFText: Bool
 
+    /// Writes a verified PDF's bytes to its cache file.
+    ///
+    /// Injectable so a test can make the write fail: `pdfCacheDirectory` is a
+    /// fixed location, so without this seam a copy served but not cached
+    /// (#480) could be tested only at helper level, never through the chain.
+    /// Defaults to ``writeAtomically(_:to:)``.
+    private let writeCachedPDF: @Sendable (Data, URL) throws -> Void
+
     /// How the Europe PMC full-text XML fetch retries a transient failure.
     ///
     /// Injectable so a test can pin what a throttle that outlasts its retries
@@ -96,12 +106,31 @@ public actor FullTextService {
     /// attempts, as Python's; the backoff between them is BioMedLit's own.
     private let pmcOpenDataRetry: RetryConfiguration
 
-    /// When the next request to PMC's open-data bucket may go, or `nil`
-    /// before the first.
+    /// How each request to OpenAlex retries a throttle, a 5xx or a transient
+    /// transport failure (#480, stage B).
     ///
-    /// Reserved before a request waits, so two fetches interleaving on this
-    /// actor cannot both take the same slot.
-    private var nextBucketRequest: Date?
+    /// Injectable for the same reason as ``pmcOpenDataRetry``. Defaults to
+    /// ``RetryConfiguration/openAlex``: four attempts, as Python's.
+    private let openAlexRetry: RetryConfiguration
+
+    /// Hosts this service paces itself on: one slot each (#489 tracks making
+    /// it per host across instances, as Python's).
+    private enum PacedHost: Hashable {
+        case pmcOpenData
+        case openAlex
+
+        var minimumInterval: TimeInterval {
+            switch self {
+            case .pmcOpenData: return BioMedLitConstants.pmcOpenDataMinimumInterval
+            case .openAlex: return BioMedLitConstants.openAlexMinimumInterval
+            }
+        }
+    }
+
+    /// When the next request to each paced host may go; reserved before a
+    /// request waits, so two fetches interleaving on this actor cannot both
+    /// take the same slot.
+    private var nextRequest: [PacedHost: Date] = [:]
 
     /// Characters safe to leave unescaped inside a query-string *value*.
     ///
@@ -144,6 +173,11 @@ public actor FullTextService {
     ///   - pmcOpenDataRetry: How each request to PMC's open-data bucket
     ///     retries a transient failure. Defaults to
     ///     ``RetryConfiguration/pmcOpenData``.
+    ///   - openAlexRetry: How each request to OpenAlex retries a transient
+    ///     failure. Defaults to ``RetryConfiguration/openAlex``.
+    ///   - writeCachedPDF: Writes a verified PDF to its cache file. Defaults
+    ///     to ``writeAtomically(_:to:)``; injectable so a test can make the
+    ///     write fail.
     public init(
         email: String,
         session: URLSession = FullTextService.makeSession(),
@@ -151,7 +185,9 @@ public actor FullTextService {
         extractor: PDFTextExtracting = PDFKitTextExtractor(),
         extractPDFText: Bool = true,
         europePMCRetry: RetryConfiguration = .serverError,
-        pmcOpenDataRetry: RetryConfiguration = .pmcOpenData
+        pmcOpenDataRetry: RetryConfiguration = .pmcOpenData,
+        openAlexRetry: RetryConfiguration = .openAlex,
+        writeCachedPDF: @escaping @Sendable (Data, URL) throws -> Void = FullTextService.writeAtomically
     ) {
         self.email = email
         self.europePMCService = europePMCService
@@ -160,11 +196,24 @@ public actor FullTextService {
         self.extractPDFText = extractPDFText
         self.europePMCRetry = europePMCRetry
         self.pmcOpenDataRetry = pmcOpenDataRetry
+        self.openAlexRetry = openAlexRetry
+        self.writeCachedPDF = writeCachedPDF
+    }
+
+    /// The production cache write: the whole file or none, so a write that
+    /// fails midway leaves no partial PDF a later lookup could serve.
+    ///
+    /// - Parameters:
+    ///   - data: The verified PDF bytes.
+    ///   - url: The cache file to write.
+    /// - Throws: The write's error.
+    public static func writeAtomically(_ data: Data, to url: URL) throws {
+        try data.write(to: url, options: .atomic)
     }
 
     /// The transport production uses.
     ///
-    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:)``
+    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:openAlexRetry:writeCachedPDF:)``
     /// so a test can
     /// substitute a stubbed `URLSession` without reproducing these timeouts.
     ///
@@ -183,10 +232,10 @@ public actor FullTextService {
     /// Attempt to retrieve full text for a document.
     ///
     /// Tries sources in order: Europe PMC XML → PMC's open-data bucket (by PMC
-    /// ID, #480) → Europe PMC PDF → Unpaywall PDF → DOI website. Each source is
-    /// tried with retry logic for transient network failures. A body-less XML
-    /// deposit is held back rather than returned, so the PDF tiers still get
-    /// their turn.
+    /// ID, #480) → Europe PMC PDF → Unpaywall PDFs → OpenAlex PDFs → DOI
+    /// website. Each source is tried with retry logic for transient network
+    /// failures. A body-less XML deposit is held back rather than returned, so
+    /// the PDF tiers still get their turn.
     ///
     /// - Parameters:
     ///   - pmcId: PubMed Central ID (e.g., "PMC1234567").
@@ -206,8 +255,9 @@ public actor FullTextService {
     ///   record this on the document); `absenceNotEstablished` when Europe PMC
     ///   did not settle it; `pmcOpenDataNotEstablished` when PMC's open-data
     ///   bucket could not be read; `openAccessNotEstablished` when the
-    ///   Unpaywall tier did not settle it; `identifierKindUnresolved` when the
-    ///   PubMed last resort could not be authorised. None of the last four may
+    ///   open-access PDFs (Unpaywall's, then OpenAlex's) did not settle it;
+    ///   `identifierKindUnresolved` when the PubMed last resort could not be
+    ///   authorised. None of the last four may
     ///   be recorded (see
     ///   ``exhaustedChainError(primarySlot:primaryKind:europePMCShortfall:pmcOpenDataShortfall:openAccessShortfall:articleName:)``).
     ///   `CancellationError` if the caller cancelled: it propagates
@@ -481,12 +531,19 @@ public actor FullTextService {
                 category: .fullText
             )
         }
+        // A render served and not cached (#480). Not an open-access copy, so it
+        // neither settles the shortfall nor stops the Unpaywall walk: a copy
+        // Unpaywall names may still be saved. Told only if none is.
+        var renderNotSavedFrom: String?
         if let cacheKey, let urlString = pdfRenderURL, let pdfURL = URL(string: urlString) {
             BioMedLitLib.logger?.info(
                 "Using Europe PMC PDF render: \(urlString)",
                 category: .fullText
             )
             let outcome = try await downloadAndExtract(from: pdfURL, key: cacheKey)
+            if case .notCached = outcome {
+                renderNotSavedFrom = pdfURL.absoluteString
+            }
             if let result = pdfTierResult(
                 outcome: outcome,
                 content: .europePMCPDF(pdfURL: pdfURL),
@@ -504,28 +561,42 @@ public actor FullTextService {
         // about the same input: a whitespace-only DOI keys nothing, and it must
         // not reach Unpaywall either.
         let unpaywallDOI = doi?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        // Why the open-access copy Unpaywall may know of went unassessed, if it
-        // did: Unpaywall or the landing page it named could not settle whether a
-        // free copy exists, the PDF it named could not be obtained (#478), or
+        // Why the open-access copy Unpaywall or OpenAlex may know of went
+        // unassessed, if it did: Unpaywall, the landing page it named or
+        // OpenAlex could not settle whether a free copy exists, a PDF either
+        // named could not be obtained (#478; every one is listed, #480), or
         // Unpaywall was not configured. Carried
         // on whatever fallback is returned, so a caller holding a better link
         // than that fallback knows not to trade it away (#464).
         var openAccessShortfall: OpenAccessShortfall?
+        // An open-access copy served but not cached (#480): it ends the walk,
+        // settles the question, and is the caching note's address
+        var openAccessNotSavedFrom: String?
+        // Whether any open-access copy was served: not cached, or cached
+        // without text while an abstract is held. Either settles the
+        // question; only the first ends the walk (a textless copy lets
+        // another, OpenAlex's included, be tried for text)
+        var openAccessCopyServed = false
+        var triedPDFs = Set<String>()
         if let cacheKey, !unpaywallDOI.isEmpty {
             let doi = unpaywallDOI
-            var unpaywallPDF: URL?
+            var candidates: [String] = []
             do {
-                unpaywallPDF = try await fetchUnpaywallPDFWithRetry(doi: doi)
+                candidates = try await fetchUnpaywallPDFCandidates(doi: doi)
+                if candidates.isEmpty {
+                    BioMedLitLib.logger?.info(
+                        "Unpaywall offers no PDF for DOI \(doi)", category: .fullText
+                    )
+                }
             } catch where error.isCancellation {
                 // As above: a cancelled fetch must not be read as an absent PDF.
                 throw CancellationError()
-            } catch FullTextError.noFullTextAvailable {
-                BioMedLitLib.logger?.info(
-                    "Unpaywall offers no PDF for DOI \(doi)", category: .fullText
-                )
             } catch {
                 let shortfall = Self.openAccessShortfall(for: error)
-                openAccessShortfall = shortfall
+                // Before any PDF's, so the list keeps the chain's order
+                if let shortfall {
+                    openAccessShortfall = .adding(shortfall, to: openAccessShortfall)
+                }
                 // The tier's own failure type carries no description, so the
                 // shortfall names what went unsettled and why
                 let cause = shortfall.map {
@@ -535,37 +606,70 @@ public actor FullTextService {
                     "Unpaywall failed for DOI \(doi) (\(cause))", category: .fullText
                 )
             }
-            if let pdfURL = unpaywallPDF {
-                BioMedLitLib.logger?.info(
-                    "Successfully found Unpaywall PDF for DOI \(doi)",
-                    category: .fullText
-                )
-                let outcome = try await downloadAndExtract(from: pdfURL, key: cacheKey)
-                if case .downloadFailed(let failure) = outcome {
-                    // Refused, not offered (#478): a PDF Unpaywall named that
-                    // we could not obtain leaves the open-access copy
-                    // unassessed. It is not held as a link fallback, and the
-                    // reader is told why on whatever the chain falls back to.
-                    // Whether a bot wall is behind such failures is #480.
-                    openAccessShortfall = OpenAccessShortfall(source: .pdf, failure: failure)
+            if let result = try await tryOpenAccessPDFs(
+                candidates,
+                refusedAs: .pdf,
+                content: { .unpaywall(pdfURL: $0) },
+                cacheKey: cacheKey,
+                degradation: degradation,
+                holdingAbstract: abstractOnly != nil,
+                articleName: articleName,
+                linkFallback: &pdfLinkFallback,
+                shortfall: &openAccessShortfall,
+                notSavedFrom: &openAccessNotSavedFrom,
+                copyServed: &openAccessCopyServed,
+                tried: &triedPDFs
+            ) {
+                return result
+            }
+            // OpenAlex, for the PDFs Unpaywall did not name (#480, stage B);
+            // not once an Unpaywall copy was served and not cached: that copy
+            // ends the walk, its link kept, and asking further cannot raise the
+            // odds (the maintainer's decision, 2026-10-05). A copy cached that
+            // yielded no text while an abstract is held does not stop it
+            // (`openAccessCopyServed` alone): a textless copy is no full text
+            // obtained, so OpenAlex's may still give it (fulltext_retrieval.md,
+            // "Every platform tries every PDF Unpaywall names")
+            if openAccessNotSavedFrom == nil {
+                switch try await fetchOpenAlexPDFURLs(doi: doi) {
+                case .served(let urls):
+                    if let result = try await tryOpenAccessPDFs(
+                        OpenAlex.untried(urls, tried: triedPDFs),
+                        refusedAs: .openAlexPDF,
+                        content: { .openAlex(pdfURL: $0) },
+                        cacheKey: cacheKey,
+                        degradation: degradation,
+                        holdingAbstract: abstractOnly != nil,
+                        articleName: articleName,
+                        linkFallback: &pdfLinkFallback,
+                        shortfall: &openAccessShortfall,
+                        notSavedFrom: &openAccessNotSavedFrom,
+                        copyServed: &openAccessCopyServed,
+                        tried: &triedPDFs
+                    ) {
+                        return result
+                    }
+                case .absent:
+                    BioMedLitLib.logger?.info(
+                        "OpenAlex knows no work by DOI \(doi)", category: .fullText
+                    )
+                case .unreachable(let failure):
+                    openAccessShortfall = .adding(
+                        OpenAccessShortfall(source: .openAlex, failure: failure), to: openAccessShortfall
+                    )
                     BioMedLitLib.logger?.warning(
-                        "The open-access PDF Unpaywall named for DOI \(doi) could not be "
-                            + "obtained (\(failure.describe())), so the open-access copy is "
-                            + "not assessed",
+                        "OpenAlex could not be asked about DOI \(doi) (\(failure.describe())), so any "
+                            + "open-access copy it knows of is not assessed",
                         category: .fullText
                     )
-                } else if let result = pdfTierResult(
-                    outcome: outcome,
-                    content: .unpaywall(pdfURL: pdfURL),
-                    degradation: degradation,
-                    holdingAbstract: abstractOnly != nil,
-                    articleName: articleName,
-                    linkFallback: &pdfLinkFallback
-                ) {
-                    return result
                 }
             }
         }
+        openAccessShortfall = Self.settledOpenAccessShortfall(
+            openAccessShortfall, copyServed: openAccessCopyServed
+        )
+        // The note names the copy that settled it, else a render not saved
+        let pdfNotSavedFrom = openAccessNotSavedFrom ?? renderNotSavedFrom
 
         // The reader gets the abstract rather than a bare link. No web URL is
         // attached to it: `Document.fullTextLinkDestination` already resolves
@@ -576,7 +680,9 @@ public actor FullTextService {
                 "No tier beat the abstract-only rendering for \(articleName); returning it",
                 category: .fullText
             )
-            return abstractOnly.noting(openAccessShortfall: openAccessShortfall)
+            return abstractOnly.noting(
+                openAccessShortfall: openAccessShortfall, pdfNotSavedFrom: pdfNotSavedFrom
+            )
         }
 
         // Then a PDF whose bytes we could not fetch. Below the abstract, which
@@ -588,7 +694,9 @@ public actor FullTextService {
                     + "download",
                 category: .fullText
             )
-            return pdfLinkFallback.noting(openAccessShortfall: openAccessShortfall)
+            return pdfLinkFallback.noting(
+                openAccessShortfall: openAccessShortfall, pdfNotSavedFrom: pdfNotSavedFrom
+            )
         }
 
         // Fallback to DOI or PubMed URL
@@ -601,7 +709,8 @@ public actor FullTextService {
             return FullTextResult(
                 content: .doi(webURL: url),
                 degradation: degradation,
-                openAccessShortfall: openAccessShortfall
+                openAccessShortfall: openAccessShortfall,
+                pdfNotSavedFrom: pdfNotSavedFrom
             )
         }
 
@@ -628,7 +737,8 @@ public actor FullTextService {
             return FullTextResult(
                 content: .doi(webURL: url),
                 degradation: degradation,
-                openAccessShortfall: openAccessShortfall
+                openAccessShortfall: openAccessShortfall,
+                pdfNotSavedFrom: pdfNotSavedFrom
             )
         }
 
@@ -650,7 +760,8 @@ public actor FullTextService {
     /// source left the question unsettled and no last resort was refused.
     /// Static, and independent of the service's state, so the rule is testable:
     /// the open-access arm is all but unreachable through the chain, because
-    /// every fallback returned after the Unpaywall tier carries the shortfall
+    /// every fallback returned after the open-access PDFs (Unpaywall's, then
+    /// OpenAlex's) carries the shortfall
     /// and the DOI link among them always builds (#475).
     ///
     /// - Parameters:
@@ -661,8 +772,8 @@ public actor FullTextService {
     ///     the article's JATS, when it could not be read (#480). Consulted
     ///     only when Europe PMC left no shortfall, so the reader is given one
     ///     sentence.
-    ///   - openAccessShortfall: Why the Unpaywall tier left a free copy
-    ///     unassessed.
+    ///   - openAccessShortfall: Why the open-access PDFs (Unpaywall's, then
+    ///     OpenAlex's) left a free copy unassessed.
     ///   - articleName: How the log names the article.
     /// - Returns: The error to throw.
     static func exhaustedChainError(
@@ -729,8 +840,8 @@ public actor FullTextService {
             return .pmcOpenDataNotEstablished(pmcOpenDataShortfall)
         }
 
-        // The same for the Unpaywall tier: a free copy it could not assess is
-        // not a copy that does not exist (#475).
+        // The same for the open-access PDFs, Unpaywall's and OpenAlex's: a free
+        // copy they could not assess is not a copy that does not exist (#475).
         if let openAccessShortfall {
             BioMedLitLib.logger?.warning(
                 "No source served full text for \(articleName), and the open-access copy "
@@ -1048,21 +1159,24 @@ public actor FullTextService {
             config: pmcOpenDataRetry,
             shouldRetry: RetryHelper.retryOnlyTransient
         ) {
-            try await self.bucketAttempt(url)
+            try await self.pacedAttempt(url, host: .pmcOpenData)
         }
     }
 
-    /// One attempt at a bucket request, paced to `pmcOpenDataMinimumInterval`:
-    /// every attempt, a retry included, takes its own pacing slot.
+    /// One attempt at a request to a paced host, paced to its
+    /// ``PacedHost/minimumInterval``: every attempt, a retry included, takes
+    /// its own pacing slot.
     ///
-    /// - Parameter url: The bucket URL.
+    /// - Parameters:
+    ///   - url: The URL to ask.
+    ///   - host: Whose pacing slot the request takes.
     /// - Returns: The status and body of an answer that is not transient.
     /// - Throws: `FullTextError.serverError` for a retryable status, so the
     ///   retry sees it; otherwise as ``bucketGET(_:)``.
-    private func bucketAttempt(_ url: URL) async throws -> (status: Int, body: Data) {
+    private func pacedAttempt(_ url: URL, host: PacedHost) async throws -> (status: Int, body: Data) {
         let now = Date()
-        let slot = max(now, nextBucketRequest ?? now)
-        nextBucketRequest = slot.addingTimeInterval(BioMedLitConstants.pmcOpenDataMinimumInterval)
+        let slot = max(now, nextRequest[host] ?? now)
+        nextRequest[host] = slot.addingTimeInterval(host.minimumInterval)
         let wait = slot.timeIntervalSince(now)
         if wait > 0 {
             try await Task.sleep(nanoseconds: UInt64(wait * Double(BioMedLitConstants.nanosecondsPerSecond)))
@@ -1077,6 +1191,61 @@ public actor FullTextService {
             throw FullTextError.serverError(statusCode: http.statusCode)
         }
         return (http.statusCode, data)
+    }
+
+    // MARK: - OpenAlex (#480, stage B)
+
+    /// Ask OpenAlex which PDFs a work's locations name.
+    ///
+    /// The contact email is the service's `email`, the one CrossRef already
+    /// receives; a blank one asks without `mailto`. The statuses are pinned
+    /// by `fulltext_parity/openalex_locations.json` ("status"). Internal
+    /// rather than private so each outcome can be tested on its own.
+    ///
+    /// - Parameter doi: The DOI, trimmed and non-empty.
+    /// - Returns: Served URLs (possibly none); absent for a 404; or
+    ///   unreachable, of its real kind (a body we cannot read is
+    ///   `malformedResponse`).
+    /// - Throws: `CancellationError` only.
+    func fetchOpenAlexPDFURLs(doi: String) async throws -> OpenAlexFetch {
+        let contact = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A request we could not build was never sent: not an absence.
+        guard let url = OpenAlex.workURL(doi: doi, mailto: contact.isEmpty ? nil : contact) else {
+            return .unreachable(.requestFailed)
+        }
+        let answer: (status: Int, body: Data)
+        do {
+            answer = try await RetryHelper.retry(
+                config: openAlexRetry,
+                shouldRetry: RetryHelper.retryOnlyTransient
+            ) {
+                try await self.pacedAttempt(url, host: .openAlex)
+            }
+        } catch where error.isCancellation {
+            throw CancellationError()
+        } catch FullTextError.serverError(let statusCode) {
+            // A throttle or server error that outlasted its retries.
+            return .unreachable(.httpStatus(statusCode))
+        } catch FullTextError.invalidResponse {
+            // As the bucket maps it: an answer that is not HTTP
+            return .unreachable(.malformedResponse)
+        } catch {
+            // Logged by the chain, which knows what it falls through to.
+            return .unreachable(SearchTransport.failure(for: error))
+        }
+        switch answer.status {
+        case BioMedLitConstants.httpStatusOK:
+            do {
+                return .served(try OpenAlex.pdfURLs(fromWork: answer.body))
+            } catch {
+                return .unreachable(.malformedResponse)
+            }
+        case BioMedLitConstants.httpStatusNotFound:
+            // OpenAlex knows no work by this DOI (it answers with HTML)
+            return .absent
+        default:
+            return .unreachable(.httpStatus(answer.status))
+        }
     }
 
     /// Convert served JATS XML to HTML and markdown.
@@ -1561,58 +1730,61 @@ public actor FullTextService {
         case unsettled(OpenAccessShortfall)
     }
 
-    /// Fetch the PDF URL Unpaywall offers, reading a landing page for one when
-    /// that is all it offers (#464).
+    /// What Unpaywall's answer offers: every PDF URL it names, and the choice
+    /// that picks the landing page when it names none.
+    private struct UnpaywallFetch {
+        /// Every location's `url_for_pdf`, deduplicated, best location first.
+        let pdfURLs: [String]
+
+        /// The landing page to read when ``pdfURLs`` is empty.
+        let choice: UnpaywallLandingPage.Choice
+    }
+
+    /// Every PDF address Unpaywall offers for a DOI, best location first,
+    /// reading a landing page only when no location names a PDF (#464, #480).
     ///
-    /// The landing page is read outside the Unpaywall retry, with its own: a
-    /// slow repository must not send the same question to Unpaywall again.
+    /// Addresses are returned as given: one the chain cannot fetch is refused
+    /// by ``tryOpenAccessPDFs``, per address, so it no longer stops the
+    /// locations after it. The landing page is read outside the Unpaywall
+    /// retry, with its own: a slow repository must not send the same question
+    /// to Unpaywall again.
     ///
     /// - Parameter doi: Digital Object Identifier.
-    /// - Returns: URL to a downloadable PDF.
-    /// - Throws: `FullTextError.noFullTextAvailable` when Unpaywall answers 404
-    ///   or offers no PDF and no landing page declares one; `UnpaywallTierFailure`
-    ///   when Unpaywall was not configured, answered with any other error status
-    ///   or in a form that could not be read, named an address that cannot be
-    ///   fetched, or the landing page could not be read; `CancellationError`
-    ///   when cancelled; whatever else the Unpaywall request throws.
-    private func fetchUnpaywallPDFWithRetry(doi: String) async throws -> URL {
-        let choice = try await RetryHelper.retry(
-            config: .networkDefault,
-            shouldRetry: RetryHelper.retryOnlyTransient
-        ) {
-            try await self.fetchUnpaywallChoice(doi: doi)
+    /// - Returns: The PDF addresses; empty when Unpaywall answered 404, named
+    ///   no PDF, and no landing page declared one.
+    /// - Throws: `UnpaywallTierFailure` when Unpaywall was not configured,
+    ///   answered with any other error status or unreadably, or its landing
+    ///   page could not be read or fetched; `CancellationError`; whatever else
+    ///   the Unpaywall request throws.
+    private func fetchUnpaywallPDFCandidates(doi: String) async throws -> [String] {
+        let fetched: UnpaywallFetch
+        do {
+            fetched = try await RetryHelper.retry(
+                config: .networkDefault,
+                shouldRetry: RetryHelper.retryOnlyTransient
+            ) {
+                try await self.fetchUnpaywallChoice(doi: doi)
+            }
+        } catch FullTextError.noFullTextAvailable {
+            return []
         }
-        switch choice {
-        case .pdf(let pdf):
-            // Unpaywall named a copy; an address we cannot fetch leaves it
-            // unassessed, not absent (#474). It is refused, not offered as a
-            // link, and recorded against the PDF, not Unpaywall, which
-            // answered (#478). Python's `requests` refuses the same addresses.
-            guard let pdfURL = UnpaywallLandingPage.fetchableURL(pdf) else {
-                throw Self.unfetchableAddress(pdf, source: .pdf)
-            }
-            BioMedLitLib.logger?.debug("Found OA PDF location: \(pdf)", category: .fullText)
-            return pdfURL
-        case .page(let landing):
-            // Python's `requests` refuses the same addresses, and the page is
-            // recorded as unread (#474)
-            guard let pageURL = UnpaywallLandingPage.fetchableURL(landing) else {
-                throw Self.unfetchableAddress(landing, source: .landingPage)
-            }
-            switch try await readLandingPage(pageURL) {
-            case .declared(let pdfURL):
-                return pdfURL
-            case .declaresNone:
-                break
-            case .unreachable(let failure):
-                throw UnpaywallTierFailure.unsettled(
-                    OpenAccessShortfall(source: .landingPage, failure: failure)
-                )
-            }
-        case .nothing:
-            break
+        if !fetched.pdfURLs.isEmpty { return fetched.pdfURLs }
+        guard case .page(let landing) = fetched.choice else { return [] }
+        // Python's `requests` refuses the same addresses, and the page is
+        // recorded as unread (#474)
+        guard let pageURL = UnpaywallLandingPage.fetchableURL(landing) else {
+            throw Self.unfetchableAddress(landing, source: .landingPage)
         }
-        throw FullTextError.noFullTextAvailable
+        switch try await readLandingPage(pageURL) {
+        case .declared(let pdfURL):
+            return [pdfURL.absoluteString]
+        case .declaresNone:
+            return []
+        case .unreachable(let failure):
+            throw UnpaywallTierFailure.unsettled(
+                OpenAccessShortfall(source: .landingPage, failure: failure)
+            )
+        }
     }
 
     /// The failure for an address Unpaywall gave that the tier cannot fetch.
@@ -1635,8 +1807,8 @@ public actor FullTextService {
 
     /// What an Unpaywall tier failure left unsettled, if anything.
     ///
-    /// - Parameter error: What `fetchUnpaywallPDFWithRetry` threw, other than
-    ///   cancellation and `noFullTextAvailable`.
+    /// - Parameter error: What `fetchUnpaywallPDFCandidates` threw, other than
+    ///   cancellation.
     /// - Returns: The lookup that went unsettled and why; `nil` for an error
     ///   that is no source failing to answer: a fault in our own request
     ///   (`invalidResponse`: the base URL or the email could not be encoded), or
@@ -1793,15 +1965,16 @@ public actor FullTextService {
         return body
     }
 
-    /// Ask Unpaywall which URL it offers for a DOI.
+    /// Ask Unpaywall which URLs it offers for a DOI.
     ///
     /// - Parameter doi: Digital Object Identifier.
-    /// - Returns: The PDF URL, the landing page, or neither.
+    /// - Returns: Every PDF URL it names, and the choice of PDF, landing page,
+    ///   or neither.
     /// - Throws: `FullTextError.noFullTextAvailable` for a 404;
     ///   `FullTextError.serverError` for a 429, 500, 502, 503 or 504, so it is
     ///   retried; `UnpaywallTierFailure` for no configured email, any other
     ///   status of 400 or above, and an answer that will not decode.
-    private func fetchUnpaywallChoice(doi: String) async throws -> UnpaywallLandingPage.Choice {
+    private func fetchUnpaywallChoice(doi: String) async throws -> UnpaywallFetch {
         guard let encodedDOI = doi.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
             throw FullTextError.noIdentifiers
         }
@@ -1913,12 +2086,16 @@ public actor FullTextService {
             )
         }
 
-        // The PDF is `url_for_pdf` only. A location's `url` is its landing page
+        // A PDF is `url_for_pdf` only. A location's `url` is its landing page
         // whenever `url_for_pdf` is missing, and is returned as a page to read,
         // never as the PDF: downloading it stored a repository page as the
-        // article (#464). An answer offering neither falls to
-        // `fetchUnpaywallPDFWithRetry`'s `noFullTextAvailable`.
-        return UnpaywallLandingPage.choose(from: result)
+        // article (#464). Every location's PDF is offered, best first, so one
+        // copy refused does not end the tier (#480). An answer offering
+        // neither leaves `fetchUnpaywallPDFCandidates` nothing to try.
+        return UnpaywallFetch(
+            pdfURLs: UnpaywallLandingPage.pdfURLs(from: result),
+            choice: UnpaywallLandingPage.choose(from: result)
+        )
     }
 
     // MARK: - PDF Caching
@@ -2139,9 +2316,10 @@ public actor FullTextService {
     /// Turn a PDF tier's outcome into the result to return, or `nil` to let the
     /// chain try the next tier.
     ///
-    /// Shared by the Europe PMC PDF and Unpaywall tiers so the two cannot decide
-    /// this differently — they already had one copy of the rule each, and only
-    /// one of them was ever updated.
+    /// Shared by the Europe PMC PDF tier and, through ``tryOpenAccessPDFs``,
+    /// every open-access PDF Unpaywall or OpenAlex names, so they cannot decide
+    /// this differently — the render and Unpaywall tiers once had one copy of
+    /// the rule each, and only one of them was ever updated.
     ///
     /// - Parameters:
     ///   - outcome: What the download and extraction produced.
@@ -2171,8 +2349,10 @@ public actor FullTextService {
             // copy of the same paper was never tried. Held in reserve instead:
             // a link we could not download is still better than a publisher
             // page, and still worse than a copy a later tier actually retrieves.
-            // A PDF Unpaywall named arrives here only as `.notCached`: one its
-            // source did not serve is refused before this, never kept (#478).
+            // Only the render tier arrives here with either: a PDF an
+            // open-access source named is handled by `tryOpenAccessPDFs`,
+            // which refuses one not served (#478) and keeps one not cached
+            // with its caching note (#480).
             if linkFallback == nil {
                 linkFallback = FullTextResult(content: content, degradation: degradation)
             }
@@ -2219,6 +2399,133 @@ public actor FullTextService {
         }
     }
 
+    /// Try each PDF a source named, in order, until one is served (#480).
+    ///
+    /// An address already tried is skipped. An address the chain cannot
+    /// fetch, or a download the source refused, is added to the shortfall
+    /// under `source`, with its address: the reader is told every copy that
+    /// went unassessed. **The first copy served ends the walk:** extracted, it
+    /// is the result; served but not cached, its link becomes the link
+    /// fallback (it beats any held), its address is the caching note, and no
+    /// further candidate is asked, saving being our problem, not the source's.
+    /// A copy cached without text while an abstract is held settles the
+    /// question too, but the walk goes on for a copy with text.
+    ///
+    /// The caching note's address is the URL the link is kept under
+    /// (`absoluteString`), so the app can tell whether the link it stored is
+    /// that copy's.
+    ///
+    /// - Parameters:
+    ///   - addresses: The PDF addresses, as the source gave them.
+    ///   - source: Whose PDF a failure is recorded against (`.pdf`, `.openAlexPDF`).
+    ///   - content: The result content for an address.
+    ///   - cacheKey: Names the article, and so the cached file.
+    ///   - degradation: As ``pdfTierResult(outcome:content:degradation:holdingAbstract:articleName:linkFallback:)``.
+    ///   - holdingAbstract: As ``pdfTierResult(outcome:content:degradation:holdingAbstract:articleName:linkFallback:)``.
+    ///   - articleName: How to name this article in the log.
+    ///   - linkFallback: The chain's link fallback.
+    ///   - shortfall: What went unsettled so far; added to.
+    ///   - notSavedFrom: Set to the address of a copy served but not cached.
+    ///   - copyServed: Set when a copy is served, whether not cached or
+    ///     cached without text: either settles the open-access question.
+    ///   - tried: Addresses already asked, across sources; updated.
+    /// - Returns: The result to return, or `nil` to go on down the chain.
+    /// - Throws: `CancellationError`.
+    private func tryOpenAccessPDFs(
+        _ addresses: [String],
+        refusedAs source: OpenAccessSource,
+        content: (URL) -> FullTextContent,
+        cacheKey: ArticleCacheKey,
+        degradation: FullTextDegradation?,
+        holdingAbstract: Bool,
+        articleName: String,
+        linkFallback: inout FullTextResult?,
+        shortfall: inout OpenAccessShortfall?,
+        notSavedFrom: inout String?,
+        copyServed: inout Bool,
+        tried: inout Set<String>
+    ) async throws -> FullTextResult? {
+        for address in addresses where tried.insert(address).inserted {
+            // An address we cannot fetch leaves that copy unassessed, not
+            // absent (#474): refused, recorded against the PDF, not the source
+            // that answered (#478). Python's `requests` refuses the same.
+            guard let pdfURL = UnpaywallLandingPage.fetchableURL(address) else {
+                shortfall = .adding(
+                    OpenAccessShortfall(source: source, failure: .requestFailed, address: address),
+                    to: shortfall
+                )
+                BioMedLitLib.logger?.warning(
+                    "\(source.serviceName) for \(articleName) is at an address that cannot be "
+                        + "fetched ('\(address)'), so that copy is not assessed",
+                    category: .fullText
+                )
+                continue
+            }
+            let outcome = try await downloadAndExtract(from: pdfURL, key: cacheKey)
+            switch outcome {
+            case .downloadFailed(let failure):
+                // Refused, not offered (#478): not held as a link fallback,
+                // and the reader is told of it on whatever the chain returns
+                shortfall = .adding(
+                    OpenAccessShortfall(source: source, failure: failure, address: address),
+                    to: shortfall
+                )
+                BioMedLitLib.logger?.warning(
+                    "\(source.serviceName) at \(OpenAccessShortfall.host(of: address)) could not be "
+                        + "obtained for \(articleName) (\(failure.describe()))",
+                    category: .fullText
+                )
+                continue
+            case .notCached:
+                linkFallback = FullTextResult(content: content(pdfURL), degradation: degradation)
+                notSavedFrom = pdfURL.absoluteString
+                copyServed = true
+                return nil
+            case .noText:
+                // Obtained, so the question is settled; with an abstract held
+                // the walk goes on for a copy with text
+                copyServed = true
+                if let result = pdfTierResult(
+                    outcome: outcome,
+                    content: content(pdfURL),
+                    degradation: degradation,
+                    holdingAbstract: holdingAbstract,
+                    articleName: articleName,
+                    linkFallback: &linkFallback
+                ) {
+                    return result
+                }
+            case .notAttempted, .extracted:
+                if let result = pdfTierResult(
+                    outcome: outcome,
+                    content: content(pdfURL),
+                    degradation: degradation,
+                    holdingAbstract: holdingAbstract,
+                    articleName: articleName,
+                    linkFallback: &linkFallback
+                ) {
+                    return result
+                }
+            }
+        }
+        return nil
+    }
+
+    /// The shortfall the fallbacks carry (#480): a copy served, whether not
+    /// cached or cached without text, settles the open-access question, so
+    /// nothing that went unsettled is told then. `FullTextResult.init` asserts the same of the link itself.
+    ///
+    /// - Parameters:
+    ///   - shortfall: What went unsettled in the open-access tiers.
+    ///   - copyServed: Whether an open-access copy was served: not cached, or
+    ///     cached without text while an abstract is held.
+    /// - Returns: The shortfall to carry, or `nil` when the question is settled.
+    static func settledOpenAccessShortfall(
+        _ shortfall: OpenAccessShortfall?, copyServed: Bool
+    ) -> OpenAccessShortfall? {
+        copyServed ? nil : shortfall
+    }
+
     /// Save PDF data to the cache directory.
     ///
     /// - Parameters:
@@ -2234,7 +2541,7 @@ public actor FullTextService {
         let fileURL = cacheDir.appendingPathComponent(Self.cacheFilename(key: key, url: url))
 
         do {
-            try data.write(to: fileURL, options: .atomic)
+            try writeCachedPDF(data, fileURL)
             return fileURL.path
         } catch {
             BioMedLitLib.logger?.error("Failed to cache PDF: \(error.localizedDescription)", category: .fullText)

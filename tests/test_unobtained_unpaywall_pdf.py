@@ -23,7 +23,14 @@ from typing import Any
 import pytest
 import requests
 
-from bmlibrarian_lite.constants import PDF_PARTIAL_SUFFIX, SERVICE_UNPAYWALL_PDF
+from bmlibrarian_lite.analysis_failures import not_saved_note
+from bmlibrarian_lite.constants import (
+    PDF_PARTIAL_SUFFIX,
+    SERVICE_DOI_RESOLVER,
+    SERVICE_PDF_DOWNLOAD,
+    SERVICE_UNPAYWALL,
+    SERVICE_UNPAYWALL_PDF,
+)
 from bmlibrarian_lite.data_models import (
     LookupRecord,
     LookupSkipReason,
@@ -40,7 +47,7 @@ from bmlibrarian_lite.pdf_discovery import (
     PDFSourceType,
     read_body_prefix,
     refused_download_failure,
-    unobtained_unpaywall_pdf,
+    unobtained_open_access_pdf,
 )
 
 UNPAYWALL_PDF = "https://repo.example.org/bitstream/a.pdf"
@@ -127,9 +134,9 @@ def _discover(
     return discoverer.discover_and_download(tmp_path / "a.pdf", doi="10.1/x")
 
 
-def _pdf_failure(failure: RequestFailure) -> LookupRecord:
+def _pdf_failure(failure: RequestFailure, address: str = UNPAYWALL_PDF) -> LookupRecord:
     """The record of an Unpaywall PDF that failed for ``failure``."""
-    return LookupRecord(failures=(SourceLookupFailure(SERVICE_UNPAYWALL_PDF, failure),))
+    return LookupRecord(failures=(SourceLookupFailure(SERVICE_UNPAYWALL_PDF, failure, address),))
 
 
 @pytest.mark.parametrize(
@@ -143,7 +150,7 @@ def test_an_address_requests_will_not_send_is_recorded_unasked(
     result = _discover([_unpaywall(address)], tmp_path)
 
     assert not result.success
-    assert result.lookups == _pdf_failure(RequestFailure(RequestFailureKind.REQUEST_FAILED))
+    assert result.lookups == _pdf_failure(RequestFailure(RequestFailureKind.REQUEST_FAILED), address)
 
 
 @pytest.mark.parametrize(
@@ -189,9 +196,33 @@ def test_the_reader_is_told_the_copy_went_unassessed(tmp_path: Path) -> None:
     result = _discover([_unpaywall()], tmp_path, session)
 
     assert result.error == (
-        "Failed to download PDF from any available source. The open-access "
-        "copy's PDF (HTTP 404 Not Found) did not serve it, so whether this "
-        "document is open access was not established."
+        "Failed to obtain a PDF from the following tried sources: "
+        "repo.example.org, named by Unpaywall (HTTP 404 Not Found). Whether "
+        "this document is open access was not established."
+    )
+
+
+def test_control_without_a_tried_pdf_the_claim_is_qualified(tmp_path: Path) -> None:
+    """No open-access PDF tried: the claim about our attempts, then the clause.
+
+    The tried-sources statement replaces the claim only when it is said; a
+    lookup-only record keeps today's wording.
+    """
+    discoverer = PDFDiscoverer(unpaywall_email="test@example.com", use_browser_fallback=False)
+    unasked = LookupRecord(failures=(
+        SourceLookupFailure(SERVICE_UNPAYWALL, RequestFailure(RequestFailureKind.TIMEOUT)),
+    ))
+    discoverer._discover_sources = lambda doi, pmid, pmcid: ([_publisher()], unasked)  # type: ignore[method-assign]
+    discoverer._session = _Session(  # type: ignore[assignment]
+        {PUBLISHER_PDF: _response(404, b"", "text/html", PUBLISHER_PDF)}
+    )
+
+    result = discoverer.discover_and_download(tmp_path / "a.pdf", doi="10.1/x")
+
+    assert result.error == (
+        "Failed to download PDF from any available source. Unpaywall (the "
+        "request timed out) could not be asked, so a freely available copy "
+        "may exist. Whether this document is open access was not established."
     )
 
 
@@ -228,8 +259,11 @@ def test_another_source_failing_is_not_recorded_as_unpaywalls(tmp_path: Path) ->
     assert result.lookups == LookupRecord()
 
 
-def test_only_the_best_locations_failure_is_kept(tmp_path: Path) -> None:
-    """Two Unpaywall PDFs that both failed name one, the first tried, as the apps do."""
+def test_every_failed_location_is_recorded_in_unpaywalls_order(tmp_path: Path) -> None:
+    """Two Unpaywall PDFs that both failed are both recorded, in Unpaywall's order.
+
+    Each carries its address (#480).
+    """
     second = "https://mirror.example.org/a.pdf"
     session = _Session({
         UNPAYWALL_PDF: requests.exceptions.Timeout("read timed out"),
@@ -238,7 +272,10 @@ def test_only_the_best_locations_failure_is_kept(tmp_path: Path) -> None:
 
     result = _discover([_unpaywall(), _unpaywall(second)], tmp_path, session)
 
-    assert result.lookups == _pdf_failure(RequestFailure(RequestFailureKind.TIMEOUT))
+    assert result.lookups.failures == (
+        SourceLookupFailure(SERVICE_UNPAYWALL_PDF, RequestFailure(RequestFailureKind.TIMEOUT), UNPAYWALL_PDF),
+        SourceLookupFailure(SERVICE_UNPAYWALL_PDF, RequestFailure(RequestFailureKind.HTTP_STATUS, 404), second),
+    )
 
 
 def test_a_refused_pdf_withholds_the_paywall_claim(tmp_path: Path) -> None:
@@ -249,9 +286,10 @@ def test_a_refused_pdf_withholds_the_paywall_claim(tmp_path: Path) -> None:
 
     assert result.is_paywall
     assert result.error == (
-        "A source refused access to this document, and the open-access copy's "
-        "PDF (HTTP 403 Forbidden) did not serve it, so whether this document "
-        "is open access was not established."
+        "A source refused access to this document. Failed to obtain a PDF from "
+        "the following tried sources: repo.example.org, named by Unpaywall "
+        "(HTTP 403 Forbidden). Whether this document is open access was not "
+        "established."
     )
 
 
@@ -274,7 +312,7 @@ def test_a_cancel_records_nothing() -> None:
     """The caller walked away from the question; nothing is blamed on the copy."""
     cancelled = DiscoveryResult(success=False, error="Cancelled")
 
-    assert unobtained_unpaywall_pdf(_unpaywall(), cancelled) == LookupRecord()
+    assert unobtained_open_access_pdf(_unpaywall(), cancelled) == LookupRecord()
 
 
 def test_a_pdf_refused_for_its_size_is_unassessed_not_absent(tmp_path: Path) -> None:
@@ -286,20 +324,20 @@ def test_a_pdf_refused_for_its_size_is_unassessed_not_absent(tmp_path: Path) -> 
 
     assert not result.success
     assert result.lookups == LookupRecord(
-        skipped=(SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.OVER_SIZE_LIMIT),)
+        skipped=(SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.OVER_SIZE_LIMIT, UNPAYWALL_PDF),)
     )
     assert result.error == (
-        "Failed to download PDF from any available source. The open-access "
-        "copy's PDF (larger than the download limit) could not be asked, so a "
-        "freely available copy may exist. Whether this document is open access "
-        "was not established."
+        "Failed to obtain a PDF from the following tried sources: "
+        "repo.example.org, named by Unpaywall (larger than the download "
+        "limit). A freely available copy may exist. Whether this document is "
+        "open access was not established."
     )
 
 
-def test_the_best_locations_failure_is_kept_though_another_is_tried_first(
+def test_every_failure_is_kept_in_unpaywalls_order_though_another_is_tried_first(
     tmp_path: Path,
 ) -> None:
-    """The priority sort tries a published copy first; the best location's failure is kept."""
+    """The priority sort tries a published copy first; both failures are kept, in Unpaywall's order."""
     later = "https://publisher.example.org/oa/a.pdf"
     session = _Session({
         UNPAYWALL_PDF: requests.exceptions.Timeout("read timed out"),
@@ -312,7 +350,10 @@ def test_the_best_locations_failure_is_kept_though_another_is_tried_first(
     result = _discover([best, published], tmp_path, session)
 
     assert session.requested == [later, UNPAYWALL_PDF]
-    assert result.lookups == _pdf_failure(RequestFailure(RequestFailureKind.TIMEOUT))
+    assert result.lookups.failures == (
+        SourceLookupFailure(SERVICE_UNPAYWALL_PDF, RequestFailure(RequestFailureKind.TIMEOUT), UNPAYWALL_PDF),
+        SourceLookupFailure(SERVICE_UNPAYWALL_PDF, RequestFailure(RequestFailureKind.HTTP_STATUS, 403), later),
+    )
 
 
 def test_a_paywalled_publisher_after_a_failed_unpaywall_pdf_withholds_the_claim(
@@ -330,9 +371,10 @@ def test_a_paywalled_publisher_after_a_failed_unpaywall_pdf_withholds_the_claim(
     assert result.paywall_url == PUBLISHER_PDF
     assert result.lookups == _pdf_failure(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
     assert result.error == (
-        "A source refused access to this document, and the open-access copy's "
-        "PDF (HTTP 404 Not Found) did not serve it, so whether this document "
-        "is open access was not established."
+        "A source refused access to this document. Failed to obtain a PDF from "
+        "the following tried sources: repo.example.org, named by Unpaywall "
+        "(HTTP 404 Not Found). Whether this document is open access was not "
+        "established."
     )
 
 
@@ -372,20 +414,104 @@ def test_a_body_that_fails_at_its_first_read_is_the_transports_failure(tmp_path:
     assert list(tmp_path.iterdir()) == []
 
 
-def test_a_pdf_that_could_not_be_saved_is_unassessed_not_absent(tmp_path: Path) -> None:
-    """Our own fault after the PDF was served still leaves the copy open, not absent."""
+def test_a_pdf_that_could_not_be_saved_is_a_caching_note_not_absent(tmp_path: Path) -> None:
+    """A PDF served and not saved is a note, never an access shortfall.
+
+    Our fault after the PDF was served: the copy exists, so it is still not an
+    absence (#480).
+    """
     blocker = tmp_path / "blocker"
     blocker.write_text("a file where the cache directory should be")
     discoverer = PDFDiscoverer(unpaywall_email="test@example.com", use_browser_fallback=False)
-    discoverer._discover_sources = lambda doi, pmid, pmcid: ([_unpaywall()], LookupRecord())  # type: ignore[method-assign]
-    discoverer._session = _Session({  # type: ignore[assignment]
-        UNPAYWALL_PDF: _response(200, PDF_BYTES, "application/pdf", UNPAYWALL_PDF)
-    })
+    discoverer._discover_sources = lambda doi, pmid, pmcid: ([_unpaywall(), _unpaywall(PUBLISHER_PDF)], LookupRecord())  # type: ignore[method-assign]
+    session = _Session({UNPAYWALL_PDF: _response(200, PDF_BYTES, "application/pdf", UNPAYWALL_PDF)})
+    discoverer._session = session  # type: ignore[assignment]
 
     result = discoverer.discover_and_download(blocker / "a.pdf", doi="10.1/x")
 
     assert not result.success
-    assert result.lookups == _pdf_failure(RequestFailure(RequestFailureKind.REQUEST_FAILED))
+    assert result.lookups == LookupRecord(
+        skipped=(SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.NOT_SAVED, UNPAYWALL_PDF),)
+    )
+    assert session.requested == [UNPAYWALL_PDF], "saving is our problem: no further copy asked"
+    assert result.error == not_saved_note(result.lookups)
+
+
+def _discover_unsaveable(
+    sources: list[PDFSource], tmp_path: Path, session: Any, looked_up: LookupRecord | None = None
+) -> DiscoveryResult:
+    """Run the download loop where the PDF is served but cannot be written."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a file where the cache directory should be")
+    discoverer = PDFDiscoverer(unpaywall_email="test@example.com", use_browser_fallback=False)
+    discoverer._discover_sources = lambda doi, pmid, pmcid: (list(sources), looked_up or LookupRecord())  # type: ignore[method-assign]
+    discoverer._session = session  # type: ignore[assignment]
+    return discoverer.discover_and_download(blocker / "a.pdf", doi="10.1/x")
+
+
+def test_a_copy_not_saved_is_the_note_alone_and_keeps_other_unsettled_lookups(tmp_path: Path) -> None:
+    """A served copy settles the open-access question; the other lookups stay recorded."""
+    doi_failure = SourceLookupFailure(SERVICE_DOI_RESOLVER, RequestFailure(RequestFailureKind.TIMEOUT))
+    session = _Session({UNPAYWALL_PDF: _response(200, PDF_BYTES, "application/pdf", UNPAYWALL_PDF)})
+
+    result = _discover_unsaveable([_unpaywall()], tmp_path, session, LookupRecord(failures=(doi_failure,)))
+
+    saved = SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.NOT_SAVED, UNPAYWALL_PDF)
+    assert result.lookups == LookupRecord(failures=(doi_failure,), skipped=(saved,))
+    assert result.error == not_saved_note(LookupRecord(skipped=(saved,)))
+    assert "not established" not in (result.error or "")
+
+
+def test_a_refused_copy_before_a_copy_not_saved_is_not_recorded(tmp_path: Path) -> None:
+    """The walk ends at the served copy: the earlier refusal is not told."""
+    accepted = _unpaywall(UNPAYWALL_PDF, version="acceptedVersion")
+    published = _unpaywall(PUBLISHER_PDF, version="publishedVersion")  # tried first
+    session = _Session({
+        PUBLISHER_PDF: _response(403, b"", "text/html", PUBLISHER_PDF),
+        UNPAYWALL_PDF: _response(200, PDF_BYTES, "application/pdf", UNPAYWALL_PDF),
+    })
+
+    result = _discover_unsaveable([accepted, published], tmp_path, session)
+
+    saved = SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.NOT_SAVED, UNPAYWALL_PDF)
+    assert session.requested == [PUBLISHER_PDF, UNPAYWALL_PDF]
+    assert result.lookups == LookupRecord(skipped=(saved,))
+    assert result.error == not_saved_note(result.lookups)
+
+
+def test_a_non_open_access_pdf_not_saved_is_recorded_under_the_download(tmp_path: Path) -> None:
+    """A source that is no open-access copy is recorded under the download, with its address."""
+    session = _Session({PUBLISHER_PDF: _response(200, PDF_BYTES, "application/pdf", PUBLISHER_PDF)})
+
+    result = _discover_unsaveable([_publisher()], tmp_path, session)
+
+    saved = SourceLookupSkipped(SERVICE_PDF_DOWNLOAD, LookupSkipReason.NOT_SAVED, PUBLISHER_PDF)
+    assert result.lookups == LookupRecord(skipped=(saved,))
+    assert result.error == not_saved_note(result.lookups)
+
+
+def test_every_copy_refused_is_recorded_in_unpaywalls_order(tmp_path: Path) -> None:
+    """Both refusals, each with its address, in Unpaywall's order.
+
+    The desktop tries Unpaywall's PDFs by its own priority, so the
+    published version here is tried first; the record keeps Unpaywall's
+    order whatever order they were tried in (the maintainer's decision,
+    2026-10-05).
+    """
+    accepted = _unpaywall(UNPAYWALL_PDF, version="acceptedVersion")
+    published = _unpaywall(PUBLISHER_PDF, version="publishedVersion")  # tried first: higher priority
+    session = _Session({
+        UNPAYWALL_PDF: _response(403, b"", "text/html", UNPAYWALL_PDF),
+        PUBLISHER_PDF: _response(503, b"", "text/html", PUBLISHER_PDF),
+    })
+
+    result = _discover([accepted, published], tmp_path, session)
+
+    assert result.lookups.failures == (
+        SourceLookupFailure(SERVICE_UNPAYWALL_PDF, RequestFailure(RequestFailureKind.HTTP_STATUS, 403), UNPAYWALL_PDF),
+        SourceLookupFailure(SERVICE_UNPAYWALL_PDF, RequestFailure(RequestFailureKind.HTTP_STATUS, 503), PUBLISHER_PDF),
+    )
+    assert "Failed to obtain a PDF from the following tried sources:" in (result.error or "")
 
 
 def test_a_downloaded_pdf_is_written_whole_and_no_partial_file_is_left(tmp_path: Path) -> None:
@@ -410,10 +536,34 @@ def test_the_sniffed_prefix_joins_short_chunks() -> None:
     [
         {"failure": RequestFailure(RequestFailureKind.TIMEOUT)},
         {"refused_for_size": True},
+        {"not_saved": True},
     ],
-    ids=["failure", "size-refusal"],
+    ids=["failure", "size-refusal", "not-saved"],
 )
 def test_a_success_cannot_say_why_no_pdf_was_obtained(contradiction: dict[str, Any]) -> None:
     """A downloaded PDF with a download failure is a state no reader could be told."""
     with pytest.raises(ValueError):
         DiscoveryResult(success=True, **contradiction)
+
+
+@pytest.mark.parametrize(
+    "whys",
+    [
+        {"failure": RequestFailure(RequestFailureKind.TIMEOUT), "refused_for_size": True},
+        {"failure": RequestFailure(RequestFailureKind.TIMEOUT), "not_saved": True},
+        {"refused_for_size": True, "not_saved": True},
+    ],
+    ids=["failure-and-size", "failure-and-not-saved", "size-and-not-saved"],
+)
+def test_a_result_gives_one_reason_no_pdf_was_obtained(whys: dict[str, Any]) -> None:
+    """Each is a different answer, and only one can be recorded for the copy."""
+    with pytest.raises(ValueError):
+        DiscoveryResult(success=False, **whys)
+
+
+def test_a_copy_not_saved_names_its_pdf() -> None:
+    """A caching note with no address would be told nowhere yet unmake an absence."""
+    with pytest.raises(ValueError):
+        SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.NOT_SAVED)
+    with pytest.raises(ValueError):
+        SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.NOT_SAVED, "   ")

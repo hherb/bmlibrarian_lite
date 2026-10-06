@@ -437,7 +437,9 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         XCTAssertEqual(result.content, .doi(webURL: Self.doiLink))
         XCTAssertEqual(
             result.openAccessShortfall,
-            OpenAccessShortfall(source: .pdf, failure: .requestFailed)
+            OpenAccessShortfall(
+                source: .pdf, failure: .requestFailed, address: "ftp://repo.example.org/a.pdf"
+            )
         )
         XCTAssertFalse(StubURLProtocol.requested("repo.example.org/a.pdf"))
     }
@@ -466,7 +468,7 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
             XCTAssertEqual(result.content, .doi(webURL: Self.doiLink), "\(served.status)")
             XCTAssertEqual(
                 result.openAccessShortfall,
-                OpenAccessShortfall(source: .pdf, failure: served.failure),
+                OpenAccessShortfall(source: .pdf, failure: served.failure, address: Self.pdf),
                 "\(served.status)"
             )
         }
@@ -484,7 +486,7 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         XCTAssertEqual(result.content, .doi(webURL: Self.doiLink))
         XCTAssertEqual(
             result.openAccessShortfall,
-            OpenAccessShortfall(source: .pdf, failure: .connection)
+            OpenAccessShortfall(source: .pdf, failure: .connection, address: Self.pdf)
         )
     }
 
@@ -500,7 +502,7 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         XCTAssertEqual(result.content, .doi(webURL: Self.doiLink))
         XCTAssertEqual(
             result.openAccessShortfall,
-            OpenAccessShortfall(source: .pdf, failure: .httpStatus(404))
+            OpenAccessShortfall(source: .pdf, failure: .httpStatus(404), address: Self.pdf)
         )
     }
 
@@ -532,7 +534,7 @@ final class UnpaywallLandingPageServiceTests: XCTestCase {
         XCTAssertEqual(pdfURL.absoluteString, render)
         XCTAssertEqual(
             result.openAccessShortfall,
-            OpenAccessShortfall(source: .pdf, failure: .httpStatus(503))
+            OpenAccessShortfall(source: .pdf, failure: .httpStatus(503), address: Self.pdf)
         )
     }
 

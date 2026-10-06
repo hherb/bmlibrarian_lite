@@ -115,7 +115,8 @@ interface DocumentDao {
      * Update full text content for a document.
      *
      * Clears any open-access shortfall a link-only fetch left (#466): the text
-     * is in hand, so there is no longer a free copy to wonder about.
+     * is in hand, so there is no longer a free copy to wonder about. Clears the
+     * caching note too (#480): no PDF is left unsaved.
      *
      * @param id Document ID
      * @param markdown Full text as markdown
@@ -127,7 +128,8 @@ interface DocumentDao {
             full_text_markdown = :markdown,
             full_text_source = :source,
             full_text_fetched_at = :fetchedAt,
-            full_text_open_access_shortfall_json = NULL
+            full_text_open_access_shortfall_json = NULL,
+            full_text_pdf_not_saved_from = NULL
         WHERE id = :id
     """)
     suspend fun updateFullTextMarkdown(
@@ -140,7 +142,7 @@ interface DocumentDao {
     /**
      * Update PDF path for a document.
      *
-     * Clears any open-access shortfall, as [updateFullTextMarkdown] does.
+     * Clears any open-access shortfall and caching note, as [updateFullTextMarkdown] does.
      *
      * @param id Document ID
      * @param pdfPath Local path to the PDF file
@@ -152,7 +154,8 @@ interface DocumentDao {
             pdf_path = :pdfPath,
             full_text_source = :source,
             full_text_fetched_at = :fetchedAt,
-            full_text_open_access_shortfall_json = NULL
+            full_text_open_access_shortfall_json = NULL,
+            full_text_pdf_not_saved_from = NULL
         WHERE id = :id
     """)
     suspend fun updatePdfPath(
@@ -168,7 +171,8 @@ interface DocumentDao {
      * @param id Document ID
      */
     @Query(
-        "UPDATE documents SET full_text_unavailable = 1, full_text_open_access_shortfall_json = NULL WHERE id = :id"
+        "UPDATE documents SET full_text_unavailable = 1, full_text_open_access_shortfall_json = NULL, " +
+            "full_text_pdf_not_saved_from = NULL WHERE id = :id"
     )
     suspend fun markFullTextUnavailable(id: String)
 

@@ -1,10 +1,12 @@
 {
   "schema_version": 1,
-  "description": "What the reader is told when Unpaywall, the landing page it named, or the PDF it named (#478) could not settle whether an open-access copy exists, and how the apps store that on a document (#466). Read by tests/test_open_access_unsettled_notice.py (Python: notices only), Packages/BioMedLit OpenAccessShortfallContractTests and Android OpenAccessShortfallContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, under the heading 'An unsettled open-access copy (#466)'. A row names a failed lookup by kind and status_code, or a lookup that was never made by skipped (Python's LookupSkipReason; only Unpaywall's not_configured), kind and status_code then null. notices: the sentence for one shortfall; Python builds it with analysis_failures.unestablished_access_clause, the apps with their own port. persisted.written: the stored value for a shortfall, compared as parsed JSON. persisted.read: a stored value and the shortfall it reads as; the field is written only when something went unsettled, so every stored value reads as some shortfall, never as none. Add a row here, not a test on one platform.",
+  "description": "What the reader is told when Unpaywall, the landing page it named, the PDF it named (#478), OpenAlex, or the PDF OpenAlex named (#480 stage B) could not settle whether an open-access copy exists, and how the apps store that on a document (#466). Read by tests/test_open_access_unsettled_notice.py (Python: notices only), Packages/BioMedLit OpenAccessShortfallContractTests and Android OpenAccessShortfallContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, under the heading 'An unsettled open-access copy (#466)'. A row names a failed lookup by kind and status_code, or a lookup that was never made by skipped (Python's LookupSkipReason; only Unpaywall's not_configured), kind and status_code then null. notices: the sentence for one shortfall; Python builds it with analysis_failures.unestablished_access_clause, the apps with their own port. persisted.written: the stored value for a shortfall, compared as parsed JSON. persisted.read: a stored value and the shortfall it reads as; the field is written only when something went unsettled, so every stored value reads as some shortfall, never as none. Add a row here, not a test on one platform.",
   "sources": {
     "unpaywall": "Unpaywall",
     "unpaywall_landing_page": "the open-access copy's landing page",
-    "unpaywall_pdf": "the open-access copy's PDF"
+    "unpaywall_pdf": "the open-access copy's PDF",
+    "openalex": "OpenAlex",
+    "openalex_pdf": "OpenAlex's copy"
   },
   "notices": [
     {"source": "unpaywall", "kind": "timeout", "status_code": null, "notice": "Unpaywall (the request timed out) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
@@ -31,7 +33,13 @@
     {"source": "unpaywall_pdf", "kind": "malformed_response", "status_code": null, "notice": "The open-access copy's PDF (the response could not be read) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
     {"source": "unpaywall_pdf", "kind": "http_status", "status_code": 503, "notice": "The open-access copy's PDF (HTTP 503 Service Unavailable) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
     {"source": "unpaywall_pdf", "kind": "timeout", "status_code": null, "notice": "The open-access copy's PDF (the request timed out) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
-    {"source": "unpaywall_pdf", "kind": "connection", "status_code": null, "notice": "The open-access copy's PDF (the connection failed) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."}
+    {"source": "unpaywall_pdf", "kind": "connection", "status_code": null, "notice": "The open-access copy's PDF (the connection failed) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "openalex", "kind": "timeout", "status_code": null, "notice": "OpenAlex (the request timed out) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "openalex", "kind": "http_status", "status_code": 503, "notice": "OpenAlex (HTTP 503 Service Unavailable) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "openalex", "kind": "malformed_response", "status_code": null, "notice": "OpenAlex (the response could not be read) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "openalex_pdf", "kind": "http_status", "status_code": 403, "notice": "OpenAlex's copy (HTTP 403 Forbidden) did not serve it, so whether this document is open access was not established."},
+    {"source": "openalex_pdf", "kind": "malformed_response", "status_code": null, "notice": "OpenAlex's copy (the response could not be read) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "openalex_pdf", "kind": "request_failed", "status_code": null, "notice": "OpenAlex's copy (the request failed) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."}
   ],
   "persisted": {
     "written": [
@@ -39,12 +47,16 @@
       {"source": "unpaywall_landing_page", "kind": "http_status", "status_code": 408, "stored": {"schema_version": 1, "source": "unpaywall_landing_page", "failure": {"kind": "http_status", "status_code": 408}}},
       {"source": "unpaywall_landing_page", "kind": "redirect_refused", "status_code": null, "stored": {"schema_version": 1, "source": "unpaywall_landing_page", "failure": {"kind": "redirect_refused", "status_code": null}}},
       {"source": "unpaywall", "skipped": "not_configured", "kind": null, "status_code": null, "stored": {"schema_version": 1, "source": "unpaywall", "skipped": "not_configured"}},
-      {"source": "unpaywall_pdf", "kind": "http_status", "status_code": 403, "stored": {"schema_version": 1, "source": "unpaywall_pdf", "failure": {"kind": "http_status", "status_code": 403}}}
+      {"source": "unpaywall_pdf", "kind": "http_status", "status_code": 403, "stored": {"schema_version": 1, "source": "unpaywall_pdf", "failure": {"kind": "http_status", "status_code": 403}}},
+      {"source": "openalex", "kind": "http_status", "status_code": 429, "stored": {"schema_version": 1, "source": "openalex", "failure": {"kind": "http_status", "status_code": 429}}},
+      {"source": "openalex_pdf", "kind": "http_status", "status_code": 403, "stored": {"schema_version": 1, "source": "openalex_pdf", "failure": {"kind": "http_status", "status_code": 403}}}
     ],
     "read": [
       {"name": "a stored shortfall", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "unpaywall", "kind": "timeout", "status_code": null},
       {"name": "a landing page's status", "stored": "{\"schema_version\":1,\"source\":\"unpaywall_landing_page\",\"failure\":{\"kind\":\"http_status\",\"status_code\":502}}", "source": "unpaywall_landing_page", "kind": "http_status", "status_code": 502},
       {"name": "the PDF Unpaywall named", "stored": "{\"schema_version\":1,\"source\":\"unpaywall_pdf\",\"failure\":{\"kind\":\"malformed_response\",\"status_code\":null}}", "source": "unpaywall_pdf", "kind": "malformed_response", "status_code": null},
+      {"name": "OpenAlex's own lookup", "stored": "{\"schema_version\":1,\"source\":\"openalex\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "openalex", "kind": "timeout", "status_code": null},
+      {"name": "the PDF OpenAlex named", "stored": "{\"schema_version\":1,\"source\":\"openalex_pdf\",\"failure\":{\"kind\":\"malformed_response\",\"status_code\":null}}", "source": "openalex_pdf", "kind": "malformed_response", "status_code": null},
       {"name": "an unknown kind reads as a failed request", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"failure\":{\"kind\":\"quantum\",\"status_code\":null}}", "source": "unpaywall", "kind": "request_failed", "status_code": null},
       {"name": "a status outside 100-999 reads as none", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"failure\":{\"kind\":\"http_status\",\"status_code\":1000}}", "source": "unpaywall", "kind": "http_status", "status_code": null},
       {"name": "a status on a kind that carries none reads as none", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"failure\":{\"kind\":\"timeout\",\"status_code\":503}}", "source": "unpaywall", "kind": "timeout", "status_code": null},

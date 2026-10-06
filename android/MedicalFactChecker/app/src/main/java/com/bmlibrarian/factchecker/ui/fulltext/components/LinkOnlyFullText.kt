@@ -49,23 +49,32 @@ import com.bmlibrarian.factchecker.util.Constants
  * "not yet attempted" fetch button, which read as though the chain had never
  * run. The retry stays, labelled as one: an open-access lookup that went
  * unsettled invites it, and a PDF that failed to download may download now.
- * The publisher link is offered when there is a DOI to open.
+ * The link offered is the one the record keeps: the PDF's address when a PDF
+ * was served and not saved (#480), which the caching note beside it says is
+ * all that was kept; otherwise the publisher's page, when there is a DOI to
+ * open.
  *
  * @param kind What the record's link is
  * @param doi The record's DOI, or null when it has none
+ * @param pdfUrl The PDF address the record keeps
+ *   ([com.bmlibrarian.factchecker.data.local.entity.DocumentEntity.linkOnlyPdfUrl]),
+ *   offered in place of the publisher's page; null when it keeps none
  * @param isLoading Whether a fetch is running
  * @param retryEnabled Whether the retry may start (false while another action runs)
  * @param onRetry Runs the full-text chain again
  * @param onOpenPublisher Opens the publisher's page for a DOI
+ * @param onOpenUrl Opens an address, here the kept PDF's
  */
 @Composable
 fun LinkOnlyFullTextSection(
     kind: FullTextLinkKind,
     doi: String?,
+    pdfUrl: String?,
     isLoading: Boolean,
     retryEnabled: Boolean,
     onRetry: (() -> Unit)?,
-    onOpenPublisher: ((String) -> Unit)?
+    onOpenPublisher: ((String) -> Unit)?,
+    onOpenUrl: ((String) -> Unit)?
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)) {
         Row(
@@ -110,7 +119,20 @@ fun LinkOnlyFullTextSection(
                 Text(if (isLoading) "Fetching..." else "Try Again")
             }
 
-            doi?.takeIf { it.isNotBlank() }?.let { publisherDoi ->
+            if (pdfUrl != null) {
+                OutlinedButton(
+                    onClick = { onOpenUrl?.invoke(pdfUrl) },
+                    contentPadding = ButtonDefaults.ButtonWithIconContentPadding
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.OpenInBrowser,
+                        contentDescription = null,
+                        modifier = Modifier.size(Constants.UI_ICON_SIZE.dp)
+                    )
+                    Spacer(modifier = Modifier.width(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                    Text("Open PDF")
+                }
+            } else doi?.takeIf { it.isNotBlank() }?.let { publisherDoi ->
                 OutlinedButton(
                     onClick = { onOpenPublisher?.invoke(publisherDoi) },
                     contentPadding = ButtonDefaults.ButtonWithIconContentPadding

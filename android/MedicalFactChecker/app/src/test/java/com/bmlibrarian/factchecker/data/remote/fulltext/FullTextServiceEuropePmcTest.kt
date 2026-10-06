@@ -61,7 +61,8 @@ class FullTextServiceEuropePmcTest {
             europePmcService = europePmc,
             unpaywallApi = mockk<UnpaywallApi>(),
             httpClient = mockk(relaxed = true),
-            pmcOpenData = absentBucket()
+            pmcOpenData = absentBucket(),
+            openAlex = absentOpenAlex()
         )
     }
 
@@ -204,7 +205,12 @@ class FullTextServiceEuropePmcTest {
         val failure = RequestFailure(RequestFailureKind.TIMEOUT)
         assertTrue(FullTextService.FullTextResult.EuropePmcXml("x", "m", "h").hasContent)
         assertTrue(FullTextService.FullTextResult.EuropePmcPdf("u").hasContent)
-        assertTrue(FullTextService.FullTextResult.UnpaywallPdf("u", doi = "10.1/x").hasContent)
+        assertTrue(
+            FullTextService.FullTextResult.OpenAccessPdfs(
+                listOf(OpenAccessStep.Candidate("u", PdfNamer.UNPAYWALL)), doi = "10.1/x"
+            ).hasContent
+        )
+        assertTrue(FullTextService.FullTextResult.OpenAccessPdf("u", doi = "10.1/x", PdfNamer.UNPAYWALL).hasContent)
         assertTrue(FullTextService.FullTextResult.DoiUrl("u").hasContent)
         assertFalse(FullTextService.FullTextResult.Unavailable("r").hasContent)
         assertFalse(FullTextService.FullTextResult.NotEstablished(failure, NotEstablishedSource.EUROPE_PMC).hasContent)

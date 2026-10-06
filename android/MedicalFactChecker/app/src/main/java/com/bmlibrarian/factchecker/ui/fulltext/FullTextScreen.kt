@@ -232,6 +232,7 @@ fun FullTextScreen(
                     WebUrlContent(
                         kind = currentState.kind,
                         openAccessNotice = currentState.openAccessNotice,
+                        pdfNotSavedNote = currentState.pdfNotSavedNote,
                         onOpenInBrowser = {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentState.url))
                             context.startActivity(intent)
@@ -542,17 +543,21 @@ private fun PdfViewer(
  *
  * Says what the link is, and nothing it does not know (#471): a DOI link is
  * the publisher's page, which may be paywalled, and a PDF link is a copy that
- * was found but could not be downloaded.
+ * was found but could not be downloaded, or one served and not saved on this
+ * device (#480), told beside the caching note it agrees with.
  *
  * @param kind What the link is
  * @param openAccessNotice What an unsettled open-access lookup leaves open, or
  *   null when nothing was left unsettled (#466)
+ * @param pdfNotSavedNote The caching note for a PDF served and not saved, or
+ *   null when there was none (#480)
  * @param onOpenInBrowser Opens the link
  */
 @Composable
 private fun WebUrlContent(
     kind: FullTextLinkKind,
     openAccessNotice: String?,
+    pdfNotSavedNote: String?,
     onOpenInBrowser: () -> Unit
 ) {
     Box(
@@ -582,7 +587,8 @@ private fun WebUrlContent(
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            openAccessNotice?.let { notice ->
+            // The shortfall and the caching note are told apart (#480)
+            listOfNotNull(openAccessNotice, pdfNotSavedNote).forEach { notice ->
                 Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
                 OpenAccessShortfallNotice(notice = notice)
             }

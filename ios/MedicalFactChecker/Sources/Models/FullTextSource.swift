@@ -35,6 +35,10 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
     /// Unpaywall open access PDF.
     case unpaywall = "unpaywall"
 
+    /// A PDF an OpenAlex location names, Unpaywall having named none that
+    /// served (#480, stage B).
+    case openAlex = "openalex"
+
     /// DOI resolution to publisher website.
     case doi = "doi"
 
@@ -51,6 +55,7 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
         case .pmcOpenData: return "PMC Open-Access Collection"
         case .europePMCPDF: return "Europe PMC PDF"
         case .unpaywall: return "Unpaywall"
+        case .openAlex: return "OpenAlex"
         case .doi: return "Publisher"
         case .cached: return "Cached"
         case .uploaded: return "Uploaded"
@@ -64,6 +69,7 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
         case .pmcOpenData: return "building.columns"
         case .europePMCPDF: return "doc.richtext"
         case .unpaywall: return "lock.open"
+        case .openAlex: return "lock.open"
         case .doi: return "link"
         case .cached: return "arrow.down.circle"
         case .uploaded: return "square.and.arrow.up"
@@ -72,11 +78,11 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
 
     /// Whether this source provides in-app viewable content.
     ///
-    /// Europe PMC, PMC's open-access collection and Unpaywall provide content that can be displayed
-    /// within the app. DOI sources require opening in an external browser.
+    /// Europe PMC, PMC's open-access collection, Unpaywall and OpenAlex provide content that can
+    /// be displayed within the app. DOI sources require opening in an external browser.
     var canDisplayInApp: Bool {
         switch self {
-        case .europePMC, .pmcOpenData, .europePMCPDF, .unpaywall, .cached, .uploaded:
+        case .europePMC, .pmcOpenData, .europePMCPDF, .unpaywall, .openAlex, .cached, .uploaded:
             return true
         case .doi:
             return false
@@ -188,12 +194,25 @@ struct AppFullTextResult: Equatable, Sendable {
     /// record written by a newer build.
     let degradation: FullTextDegradation?
 
-    /// Why the open-access copy Unpaywall may know of went unassessed, or `nil`
-    /// when nothing was left unsettled (#466).
+    /// Why the open-access copy Unpaywall or OpenAlex may know of went
+    /// unassessed, or `nil` when nothing was left unsettled (#466, #480).
     ///
     /// Carried for the reader, beside ``degradation`` rather than as one of its
     /// cases, because both can be true of one fetch.
     let openAccessShortfall: OpenAccessShortfall?
+
+    /// The PDF a source served that could not be saved on this device, or
+    /// `nil` when none was (#480).
+    ///
+    /// A fault of ours, not the source's, so it is told as a caching note of
+    /// its own (``pdfNotSavedNote``), never as part of ``openAccessShortfall``.
+    ///
+    /// ``pdfNotSavedNote`` tells "only its link is kept" by comparing this with
+    /// ``pdfURL``'s `absoluteString`. That holds only because `FullTextService`
+    /// stores the fetched URL's `absoluteString` here, the same `URL` the
+    /// link-only content carries, never the address as the source gave it
+    /// (which `URL(string:)` may re-encode and a shortfall entry keeps).
+    let pdfNotSavedFrom: String?
 
     /// What this result's text actually is.
     ///
@@ -240,6 +259,8 @@ struct AppFullTextResult: Equatable, Sendable {
     ///     the default — when it is.
     ///   - openAccessShortfall: Why the open-access copy went unassessed, or
     ///     `nil` — the default — when nothing was left unsettled.
+    ///   - pdfNotSavedFrom: The PDF served and not saved, or `nil` — the
+    ///     default — when none was.
     ///   - contentKind: What the text actually is. ``FullTextContentKind/none``
     ///     — the default — for a result that holds no text.
     ///   - extractedText: Prose recovered from a PDF, or `nil` — the default —
@@ -254,6 +275,7 @@ struct AppFullTextResult: Equatable, Sendable {
         warnings: JATSParseWarnings = JATSParseWarnings(),
         degradation: FullTextDegradation? = nil,
         openAccessShortfall: OpenAccessShortfall? = nil,
+        pdfNotSavedFrom: String? = nil,
         contentKind: FullTextContentKind = .none,
         extractedText: String? = nil,
         localPDFPath: String? = nil,
@@ -264,6 +286,7 @@ struct AppFullTextResult: Equatable, Sendable {
         self.warnings = warnings
         self.degradation = degradation
         self.openAccessShortfall = openAccessShortfall
+        self.pdfNotSavedFrom = pdfNotSavedFrom
         self.contentKind = contentKind
         self.extractedText = extractedText
         self.localPDFPath = localPDFPath
@@ -278,11 +301,21 @@ struct AppFullTextResult: Equatable, Sendable {
     /// Whether there is nothing to tell the reader before handing them this
     /// result's web link.
     ///
-    /// A degradation (#183) or an open-access shortfall (#466) is explained in
-    /// the card, beside an Open Publisher link; opening the browser first would
-    /// take the reader past it, the silent fallback both issues object to.
+    /// A degradation (#183), an open-access shortfall (#466) or a caching
+    /// note (#480) is explained in the card, beside an Open Publisher link;
+    /// opening the browser first would take the reader past it, the silent
+    /// fallback these issues object to.
     var hasNothingToExplain: Bool {
-        degradation == nil && openAccessShortfall == nil
+        degradation == nil && openAccessShortfall == nil && pdfNotSavedFrom == nil
+    }
+
+    /// The caching note for this result, if a PDF was served and not saved
+    /// (#480): "only its link is kept" when that PDF's link is this result,
+    /// "it could not be read" otherwise (an abstract was returned instead).
+    var pdfNotSavedNote: String? {
+        pdfNotSavedFrom.map {
+            OpenAccessShortfall.notSavedNote(address: $0, linkKept: pdfURL?.absoluteString == $0)
+        }
     }
 
     /// Get the HTML content if available.

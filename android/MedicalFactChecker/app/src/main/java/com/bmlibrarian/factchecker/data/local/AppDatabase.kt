@@ -123,7 +123,7 @@ abstract class AppDatabase : RoomDatabase() {
         const val DATABASE_NAME = "medical_factchecker.db"
 
         /** The schema version; [ALL_MIGRATIONS] must reach it. */
-        const val DATABASE_VERSION = 8
+        const val DATABASE_VERSION = 9
 
         /**
          * Migration from version 1 to 2.
@@ -277,6 +277,20 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 8 to 9.
+         *
+         * Adds the PDF a source served that could not be saved on the device
+         * (#480), told to the reader as a caching note. Existing documents have
+         * none recorded, which reads as no note: their next fetch writes or
+         * clears it.
+         */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE documents ADD COLUMN full_text_pdf_not_saved_from TEXT")
+            }
+        }
+
+        /**
          * Every migration, in order, as the database is built with them.
          *
          * One list, so a migration added here is registered and one left out is
@@ -291,7 +305,8 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_4_5,
             MIGRATION_5_6,
             MIGRATION_6_7,
-            MIGRATION_7_8
+            MIGRATION_7_8,
+            MIGRATION_8_9
         )
     }
 }

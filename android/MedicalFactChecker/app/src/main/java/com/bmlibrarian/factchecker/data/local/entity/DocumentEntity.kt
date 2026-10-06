@@ -184,6 +184,15 @@ data class DocumentEntity(
     @ColumnInfo(name = "full_text_open_access_shortfall_json")
     val fullTextOpenAccessShortfallJson: String? = null,
 
+    /**
+     * The PDF a source served that could not be saved on this device (#480);
+     * told as a caching note ([pdfNotSavedNote]), never as part of the
+     * open-access shortfall. Written by the fetch that met it and cleared by
+     * every later fetch.
+     */
+    @ColumnInfo(name = "full_text_pdf_not_saved_from")
+    val fullTextPdfNotSavedFrom: String? = null,
+
     // ==================== Transparency Analysis ====================
 
     /**
@@ -226,6 +235,20 @@ data class DocumentEntity(
      */
     val openAccessShortfall: OpenAccessShortfall?
         get() = fullTextOpenAccessShortfallJson?.let(OpenAccessShortfall::fromJson)
+
+    /**
+     * The caching note for this document, if a PDF was served and not saved
+     * (#480).
+     *
+     * It says only the link is kept when the link is what the reader is given:
+     * the record is link-only ([isLinkOnly]), which the cards show as
+     * [FullTextLinkKind.PDF_NOT_SAVED] offering that PDF's link
+     * ([linkOnlyPdfUrl]), and the full-text screen as the PDF's link. A record
+     * with text in hand is not shown the link, so the note says the PDF could
+     * not be read instead.
+     */
+    val pdfNotSavedNote: String?
+        get() = fullTextPdfNotSavedFrom?.let { OpenAccessShortfall.notSavedNote(it, linkKept = isLinkOnly) }
 
     /**
      * Format authors for display.
@@ -286,9 +309,30 @@ data class DocumentEntity(
 
     /**
      * The kind of link a link-only record holds, or null when it is not one.
+     *
+     * A PDF served and not saved ([fullTextPdfNotSavedFrom]) is
+     * [FullTextLinkKind.PDF_NOT_SAVED], whose words agree with the caching note
+     * shown beside it ([pdfNotSavedNote]); any other link-only record is read
+     * from its stored source ([FullTextLinkKind.forStoredSource]).
      */
     val linkOnlyKind: FullTextLinkKind?
-        get() = if (isLinkOnly) FullTextLinkKind.forStoredSource(fullTextSource) else null
+        get() = when {
+            !isLinkOnly -> null
+            fullTextPdfNotSavedFrom != null -> FullTextLinkKind.PDF_NOT_SAVED
+            else -> FullTextLinkKind.forStoredSource(fullTextSource)
+        }
+
+    /**
+     * The PDF address a link-only record's card offers, or null when it offers
+     * the publisher's page (by DOI) instead.
+     *
+     * A PDF served and not saved keeps only its address (#480): its `pdfPath`
+     * is null, and the caching note tells the reader "only its link is kept",
+     * so that link, not the DOI, is the one offered. iOS/macOS keep the same
+     * address as the record's link (`Document.fullTextPDFPath`).
+     */
+    val linkOnlyPdfUrl: String?
+        get() = if (isLinkOnly) fullTextPdfNotSavedFrom else null
 
     /**
      * Check if this document has an embedding score.
@@ -307,7 +351,8 @@ data class DocumentEntity(
         get() = when (fullTextSource) {
             Constants.FULLTEXT_SOURCE_EUROPE_PMC -> "Europe PMC"
             Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA -> Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA_LABEL
-            Constants.FULLTEXT_SOURCE_UNPAYWALL -> "Unpaywall"
+            Constants.FULLTEXT_SOURCE_UNPAYWALL -> Constants.FULLTEXT_SOURCE_UNPAYWALL_LABEL
+            Constants.FULLTEXT_SOURCE_OPENALEX -> Constants.FULLTEXT_SOURCE_OPENALEX_LABEL
             Constants.FULLTEXT_SOURCE_DOI -> "Publisher"
             Constants.FULLTEXT_SOURCE_CACHED -> "Cached"
             Constants.FULLTEXT_SOURCE_UPLOADED -> "Uploaded"

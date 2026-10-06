@@ -31,6 +31,21 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * These bytes as strict UTF-8, or null when they are not valid UTF-8.
+ *
+ * The services that name no charset decode with this, so nothing is guessed and
+ * a replacement character never enters text that is then read as an answer.
+ */
+internal fun ByteArray.strictUtf8(): String? = try {
+    Charsets.UTF_8.newDecoder()
+        .onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)
+        .decode(ByteBuffer.wrap(this)).toString()
+} catch (e: CharacterCodingException) {
+    null
+}
+
 /** PMC's open-data bucket as a JATS source (#480); pinned by fulltext_parity/pmc_open_data.json. */
 object PmcOpenData {
     private const val LISTING_ROOT = "ListBucketResult"
@@ -227,14 +242,7 @@ class PmcOpenDataService internal constructor(
     /** A response's status and its raw bytes: the bucket names no charset, so nothing is guessed. */
     private class Answer(val code: Int, val bytes: ByteArray) {
         /** The body as strict UTF-8, or null when it is not valid UTF-8. */
-        fun text(): String? = try {
-            Charsets.UTF_8.newDecoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT)
-                .decode(ByteBuffer.wrap(bytes)).toString()
-        } catch (e: CharacterCodingException) {
-            null
-        }
+        fun text(): String? = bytes.strictUtf8()
     }
 
     private suspend fun get(url: HttpUrl): Answer {

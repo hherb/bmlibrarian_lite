@@ -238,13 +238,14 @@ final class Document {
     /// not a guarantee. Those records are rewritten on the next fetch.
     var fullTextDegradedReasonRaw: String?
 
-    /// Why the open-access copy Unpaywall may know of went unassessed, as the
-    /// JSON ``OpenAccessShortfall/persisted()`` writes, or `nil` when nothing
-    /// was left unsettled (#466).
+    /// Why the open-access copy Unpaywall or OpenAlex may know of went
+    /// unassessed, as the JSON ``OpenAccessShortfall/persisted()`` writes, or
+    /// `nil` when nothing was left unsettled (#466).
     ///
-    /// Unpaywall, the landing page it named, or the PDF it named (#478) could not settle whether a free
-    /// copy exists (or Unpaywall was not configured), so the chain settled on a
-    /// fallback without learning it. Kept
+    /// Unpaywall, the landing page it named, OpenAlex, or a PDF either named
+    /// (#478, #480) could not settle whether a free copy exists (or Unpaywall
+    /// was not configured), so the chain settled on a fallback without
+    /// learning it. Kept
     /// apart from ``fullTextDegradedReasonRaw`` because both can be true of one
     /// fetch: Europe PMC unreachable *and* Unpaywall throttled. Persisted for
     /// the reason that field is: the cards and viewers render from this model,
@@ -256,6 +257,21 @@ final class Document {
     /// written before this existed, which keeps its earlier silence until the
     /// next fetch. An optional scalar, so lightweight migration adds it.
     var fullTextOpenAccessShortfallJSON: String?
+
+    /// The PDF a source served that could not be saved on this device (#480),
+    /// told as a caching note beside the full text. Written by every fetch,
+    /// cleared by every fetch that does not leave one, as the shortfall is.
+    ///
+    /// ``storedPDFNotSavedNote`` tells "only its link is kept" by comparing
+    /// this with ``fullTextPDFPath``. That holds only because
+    /// `FullTextService` stores the fetched URL's `absoluteString` as this,
+    /// and ``applyFullTextResult(_:)`` stores the same URL's `absoluteString`
+    /// as the link, never the address as the source gave it (which
+    /// `URL(string:)` may re-encode and a shortfall entry keeps).
+    ///
+    /// An optional scalar, so lightweight migration adds it, and a record
+    /// written before it existed reads as having no note.
+    var fullTextPDFNotSavedFrom: String?
 
     /// What the stored full text actually is, as a ``FullTextContentKind`` raw
     /// value.
@@ -952,6 +968,7 @@ final class Document {
         // each call site is what let the cache and the live result drift apart.
         fullTextDegradedReasonRaw = result.degradation?.rawValue
         fullTextOpenAccessShortfallJSON = result.openAccessShortfall?.persisted()
+        fullTextPDFNotSavedFrom = result.pdfNotSavedFrom
         fullTextContentKindRaw = result.contentKind.rawValue
         storeExtractionCoverage(result.extractionCoverage)
 
@@ -1042,6 +1059,7 @@ final class Document {
         fullTextParseWarningsJSON = nil
         fullTextDegradedReasonRaw = nil
         fullTextOpenAccessShortfallJSON = nil
+        fullTextPDFNotSavedFrom = nil
         fullTextContentKindRaw = nil
         storeExtractionCoverage(nil)
     }
@@ -1058,6 +1076,7 @@ final class Document {
         fullTextParseWarningsJSON = nil
         fullTextDegradedReasonRaw = nil
         fullTextOpenAccessShortfallJSON = nil
+        fullTextPDFNotSavedFrom = nil
         fullTextContentKindRaw = nil
         storeExtractionCoverage(nil)
     }
@@ -1207,6 +1226,7 @@ final class Document {
             warnings: storedParseWarnings,
             degradation: storedDegradation,
             openAccessShortfall: storedOpenAccessShortfall,
+            pdfNotSavedFrom: fullTextPDFNotSavedFrom,
             contentKind: storedContentKind ?? .none,
             extractedText: storedContentKind == .extracted ? fullTextContent : nil,
             // Every stored path that is a file, not only the ones extraction
@@ -1245,7 +1265,7 @@ final class Document {
     /// be shown exactly like a whole article.
     ///
     /// The open-access shortfall joins them for #466: a fallback the chain
-    /// settled on because Unpaywall left the copy unassessed is the outcome a link-only
+    /// settled on because the open-access copy went unassessed is the outcome a link-only
     /// card exists to explain, and nothing else on the record says it.
     var cachedRetrievalNotice: (
         warnings: JATSParseWarnings,
@@ -1343,6 +1363,18 @@ final class Document {
     /// ``OpenAccessShortfall/restored(fromPersisted:)``) rather than as silence.
     private var storedOpenAccessShortfall: OpenAccessShortfall? {
         fullTextOpenAccessShortfallJSON.map(OpenAccessShortfall.restored(fromPersisted:))
+    }
+
+    /// The caching note for this document, if a PDF was served and not saved
+    /// (#480): "only its link is kept" when the link stored is that PDF's,
+    /// "it could not be read" when something else (an abstract) was stored.
+    ///
+    /// Read straight from the stored fields, like ``cachedRetrievalNotice``,
+    /// so it speaks whether or not anything can be rendered.
+    var storedPDFNotSavedNote: String? {
+        fullTextPDFNotSavedFrom.map {
+            OpenAccessShortfall.notSavedNote(address: $0, linkKept: fullTextPDFPath == $0)
+        }
     }
 
     /// The persisted content kind, or `nil` for a record that predates it.

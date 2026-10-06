@@ -59,7 +59,8 @@ struct FullTextViewer: View {
                     warnings: result.warnings,
                     degradation: result.degradation,
                     extractionCoverage: result.extractionCoverage,
-                    openAccessShortfall: result.openAccessShortfall
+                    openAccessShortfall: result.openAccessShortfall,
+                    pdfNotSavedNote: result.pdfNotSavedNote
                 )
                 content
             }

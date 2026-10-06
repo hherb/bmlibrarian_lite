@@ -19,6 +19,7 @@ PDF discovery and download functionality for BMLibrarian Lite.
 
 Provides multiple methods for discovering and downloading PDF files:
 - Unpaywall API for open access PDFs
+- OpenAlex's locations, for open access PDFs Unpaywall did not name
 - PubMed Central (PMC) for free full text
 - Direct DOI resolution via CrossRef/content negotiation
 - Browser-based download (Playwright) for bot-protected sites
@@ -39,7 +40,8 @@ import logging
 import re
 import time
 import threading
-from collections.abc import Iterator, Mapping
+from collections import deque
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
@@ -69,6 +71,9 @@ from .constants import (
     RETRYABLE_HTTP_STATUSES,
     SERVICE_DOI_PUBLISHER,
     SERVICE_DOI_RESOLVER,
+    SERVICE_OPENALEX,
+    SERVICE_OPENALEX_PDF,
+    SERVICE_PDF_DOWNLOAD,
     SERVICE_PMC_ID_CONVERTER,
     SERVICE_UNPAYWALL,
     SERVICE_UNPAYWALL_LANDING_PAGE,
@@ -77,6 +82,9 @@ from .constants import (
 from .analysis_failures import (
     no_pdf_sources_message,
     paywall_message,
+    not_saved_note,
+    tried_sources_statement,
+    unestablished_access_clause,
     with_unestablished_access,
 )
 from .data_models import (
@@ -94,6 +102,7 @@ from .oa_landing_page import (
     location_pdf_url,
     unpaywall_locations,
 )
+from .openalex import OpenAlexLocationsClient, untried_pdf_urls
 from .polite_session import is_loopback_host, mount_politely
 from .rate_limit import limiter_for
 from .search_failures import request_failure_from_exception
@@ -432,6 +441,7 @@ class PDFSourceType(Enum):
     PMC = "pmc"  # PubMed Central
     DOI_DIRECT = "doi_direct"  # Direct from DOI/publisher
     OPENATHENS = "openathens"  # Via institutional access
+    OPENALEX_OA = "openalex_oa"  # A PDF an OpenAlex location names (#480)
     UNKNOWN = "unknown"
 
 
@@ -477,9 +487,12 @@ class DiscoveryResult:
         paywall_url: Where, so the caller can offer authentication.
         verification_warning: What the content check doubted.
         lookups: The lookups that went unanswered, whether they failed
-            (#347) or were never made (#355), and an Unpaywall PDF that could
-            not be obtained (#478). Empty means every lookup this discovery
-            could make was made and answered. Independent of
+            (#347) or were never made (#355), every open-access PDF
+            (Unpaywall's or OpenAlex's) that could not be obtained (#478,
+            #480), and a PDF served but not saved (a ``NOT_SAVED`` caching
+            note, #480). Empty means every lookup this discovery could make
+            was made and answered, and every copy tried was saved.
+            Independent of
             ``success``, which says only whether a PDF arrived: a download
             can succeed while Unpaywall was throttled, and that is worth
             knowing.
@@ -492,20 +505,27 @@ class DiscoveryResult:
         failure: Why one download attempt got no PDF, as a typed failure
             safe to show: the status, the transport failure,
             ``MALFORMED_RESPONSE`` for a body that is not the PDF, or
-            ``REQUEST_FAILED`` for an address that cannot be requested or a
-            fault of our own, such as a file that could not be written.
+            ``REQUEST_FAILED`` for an address that cannot be requested or an
+            unexpected fault of our own.
             ``None`` on success, on a cancel, and for a PDF refused for its
             size. Set only by :meth:`PDFDiscoverer._try_download`, so the
-            discovery can record an Unpaywall PDF it could not obtain (#478).
+            discovery can record an open-access PDF it could not obtain
+            (#478, #480).
         refused_for_size: Whether the source offered a PDF larger than
             :data:`MAX_PDF_SIZE`. Our limit rather than the source's answer,
             so it is no ``failure``; but the copy exists and went unread,
-            so an Unpaywall PDF refused for its size is still recorded as
+            so an open-access PDF refused for its size is still recorded as
             unassessed (#478).
+        not_saved: The source served the PDF and it could not be written
+            here: a fault of ours, told as a caching note (#480). Not a
+            ``failure``: the source answered.
 
     Raises:
         ValueError: On construction, if a successful result carries a
-            failure or a size refusal.
+            failure, a size refusal or a not-saved flag, or if more than one
+            of those three is set: each is a different answer to why no PDF
+            was obtained, and :func:`unobtained_open_access_pdf` records
+            only one.
     """
 
     success: bool
@@ -518,11 +538,18 @@ class DiscoveryResult:
     lookups: LookupRecord = LookupRecord()
     failure: RequestFailure | None = None
     refused_for_size: bool = False
+    not_saved: bool = False
 
     def __post_init__(self) -> None:
-        """Refuse a success that also says why no PDF was obtained."""
-        if self.success and (self.failure is not None or self.refused_for_size):
+        """Refuse a success that says why no PDF was obtained, or two whys."""
+        whys = sum((self.failure is not None, self.refused_for_size, self.not_saved))
+        if self.success and whys:
             raise ValueError("A downloaded PDF carries no download failure")
+        if whys > 1:
+            raise ValueError(
+                "A download failure, a size refusal and a copy not saved "
+                "exclude one another"
+            )
 
     def with_lookups(self, record: LookupRecord) -> "DiscoveryResult":
         """Add the lookups that went unanswered to this result.
@@ -616,40 +643,41 @@ def discard_partial_download(partial: Path) -> None:
         logger.warning(f"Could not remove the partial download {partial}: {e}")
 
 
-def unobtained_unpaywall_pdf(
+#: Whose PDF an unobtained open-access copy is recorded against (#478, #480).
+_UNOBTAINED_PDF_SERVICE = {
+    PDFSourceType.UNPAYWALL_OA: SERVICE_UNPAYWALL_PDF,
+    PDFSourceType.OPENALEX_OA: SERVICE_OPENALEX_PDF,
+}
+
+
+def unobtained_open_access_pdf(
     source: "PDFSource", result: "DiscoveryResult"
 ) -> LookupRecord:
-    """Record an Unpaywall PDF we could not obtain, or nothing.
+    """Record an open-access PDF we could not obtain, with its address.
 
-    Unpaywall answered with a copy; that we could not then obtain it is not
-    an article without one, and the discovery must not conclude it has no
-    full text (#478). A PDF refused for its size is our limit, not the
-    source's answer, so it is recorded as a lookup not made rather than as
-    a failure; it is unassessed all the same. A cancel records nothing: the
-    caller walked away from the question.
+    A source answered with a copy; that we could not then obtain it is not an
+    article without one (#478). It is recorded under the copy's own name, not
+    the service's, which answered, and with its address, so the reader is
+    told each copy tried by its host (#480). A PDF refused for its size is
+    our limit, recorded as a lookup not made; a cancel records nothing.
 
     Args:
         source: The source the download tried.
         result: What the attempt came to.
 
     Returns:
-        A record under :data:`SERVICE_UNPAYWALL_PDF` when ``source`` is a
-        PDF Unpaywall named and the attempt did not obtain it; empty
+        A record under the copy's service when ``source`` is a PDF an
+        open-access source named and the attempt did not obtain it; empty
         otherwise.
     """
-    if result.success or source.source_type is not PDFSourceType.UNPAYWALL_OA:
+    service = _UNOBTAINED_PDF_SERVICE.get(source.source_type)
+    if result.success or service is None:
         return LookupRecord()
     if result.failure is not None:
-        return LookupRecord(
-            failures=(SourceLookupFailure(SERVICE_UNPAYWALL_PDF, result.failure),)
-        )
+        return LookupRecord(failures=(SourceLookupFailure(service, result.failure, source.url),))
     if result.refused_for_size:
         return LookupRecord(
-            skipped=(
-                SourceLookupSkipped(
-                    SERVICE_UNPAYWALL_PDF, LookupSkipReason.OVER_SIZE_LIMIT
-                ),
-            )
+            skipped=(SourceLookupSkipped(service, LookupSkipReason.OVER_SIZE_LIMIT, source.url),)
         )
     return LookupRecord()
 
@@ -677,6 +705,21 @@ def usable_unpaywall_email(email: str | None) -> str | None:
     return stripped
 
 
+def default_openalex_client(mailto: str | None) -> OpenAlexLocationsClient:
+    """The OpenAlex client a discoverer asks when none is injected.
+
+    A module-level seam so ``tests/conftest.py`` can keep every discovery in
+    the test suite off the real OpenAlex.
+
+    Args:
+        mailto: The contact email, already checked usable, or ``None``.
+
+    Returns:
+        A client on OpenAlex itself.
+    """
+    return OpenAlexLocationsClient(mailto=mailto)
+
+
 class PDFDiscoverer:
     """
     Discovers and downloads PDF files from various sources.
@@ -696,6 +739,8 @@ class PDFDiscoverer:
         progress_callback: Optional[Callable[[str, str], None]] = None,
         use_browser_fallback: bool = True,
         browser_headless: bool = False,
+        openalex_email: str | None = None,
+        openalex: OpenAlexLocationsClient | None = None,
     ) -> None:
         """
         Initialize PDF discoverer.
@@ -707,8 +752,20 @@ class PDFDiscoverer:
             progress_callback: Callback for progress updates (stage, status)
             use_browser_fallback: If True, use browser for bot-protected downloads
             browser_headless: If True, run browser without visible window
+            openalex_email: The contact email sent to OpenAlex, the one the
+                transparency analysis already sends it; the application's
+                placeholder counts as none, and OpenAlex is then asked
+                without one (#480)
+            openalex: The OpenAlex client; tests pass a stub
         """
         self.unpaywall_email = usable_unpaywall_email(unpaywall_email)
+        # The placeholder test is Unpaywall's: a blank or placeholder address
+        # is no contact, and OpenAlex is asked without one rather than skipped
+        self._openalex = (
+            openalex
+            if openalex is not None
+            else default_openalex_client(usable_unpaywall_email(openalex_email))
+        )
         self.openathens_url = openathens_url
         self.progress_callback = progress_callback
         self.use_browser_fallback = use_browser_fallback
@@ -758,6 +815,8 @@ class PDFDiscoverer:
         Tries multiple sources in order of reliability:
         1. PubMed Central (if PMID/PMCID available)
         2. Unpaywall (if DOI and email available)
+        2a. OpenAlex's locations not already found (if DOI), before any
+            source that is not open access
         3. Direct DOI resolution
 
         Args:
@@ -780,6 +839,12 @@ class PDFDiscoverer:
         self._cancelled = False
         self._emit_progress("discovery", "starting")
 
+        # A DOI that cleans to nothing ("doi:", a bare resolver URL) is no
+        # DOI: asked with it, Unpaywall and OpenAlex answer nothing, which
+        # read as an absence where no lookup was made, and the NO_IDENTIFIER
+        # skip below never recorded (#480 review).
+        doi = (self._clean_doi(doi) or None) if doi else None
+
         # Find all available PDF sources, and what could not be asked at all
         sources, lookups = self._discover_sources(doi, pmid, pmcid)
         # What the reader is told about: everything unasked so far.
@@ -792,6 +857,17 @@ class PDFDiscoverer:
                 lookups=lookups,
             )
 
+        # OpenAlex is asked once, for the PDFs Unpaywall did not name (#480,
+        # stage B): at once when nothing else was found, otherwise when the
+        # next source to try is not an open-access copy (below).
+        openalex_doi = doi
+        if not sources and openalex_doi:
+            found, openalex_lookups = self._discover_openalex(openalex_doi, ())
+            openalex_doi = None
+            sources = found
+            lookups = lookups.merged(openalex_lookups)
+            told = told.merged(openalex_lookups)
+
         if not sources:
             self._emit_progress("discovery", "not_found")
             return DiscoveryResult(
@@ -803,13 +879,12 @@ class PDFDiscoverer:
                 lookups=lookups,
             )
 
-        # Unpaywall's own order, best location first, before the priority
-        # sort reorders its PDFs: the failure kept for the reader is the best
-        # location's, the one PDF the apps try (#478).
-        unpaywall_rank = {
+        # Unpaywall's own order, then OpenAlex's (#480), before the priority
+        # sort reorders them: every copy not obtained is told, in this order.
+        copy_rank = {
             s.url: rank
             for rank, s in enumerate(
-                s for s in sources if s.source_type is PDFSourceType.UNPAYWALL_OA
+                s for s in sources if s.source_type in _UNOBTAINED_PDF_SERVICE
             )
         }
 
@@ -823,10 +898,10 @@ class PDFDiscoverer:
         # Try to download from each source
         last_paywall_result: Optional[DiscoveryResult] = None
         blocked_oa_sources: List[PDFSource] = []  # Track sources blocked by bot protection
-        unobtained_pdf = LookupRecord()
-        unobtained_rank: int | None = None
+        unobtained: list[tuple[int, LookupRecord]] = []
 
-        for source in sources:
+        pending = deque(sources)
+        while pending or openalex_doi:
             if self._cancelled:
                 return DiscoveryResult(
                     success=False,
@@ -834,25 +909,56 @@ class PDFDiscoverer:
                     lookups=lookups,
                 )
 
+            if openalex_doi and (not pending or not pending[0].is_open_access):
+                found, openalex_lookups = self._discover_openalex(
+                    openalex_doi, [s.url for s in sources]
+                )
+                openalex_doi = None
+                lookups = lookups.merged(openalex_lookups)
+                told = told.merged(openalex_lookups)
+                # After every earlier copy's rank: OpenAlex's PDFs are told
+                # after Unpaywall's, whatever order they were tried in
+                first_rank = max(copy_rank.values(), default=-1) + 1
+                for offset, found_source in enumerate(found):
+                    copy_rank[found_source.url] = first_rank + offset
+                sources.extend(found)
+                pending.extendleft(reversed(found))
+                continue
+
+            source = pending.popleft()
             self._emit_progress("discovery", "found_oa" if source.is_open_access else "found")
             result = self._try_download(source, output_path, expected_title or title)
 
             if result.success:
                 return result.with_lookups(lookups)
 
-            # An Unpaywall PDF we could not obtain leaves the open-access copy
+            if result.not_saved:
+                # Served, and not saved here: the copy exists, so nothing else
+                # is asked (saving is our problem) and the open-access
+                # question is settled (the maintainer's decision): the error
+                # is the caching note alone. Other unsettled service lookups
+                # stay in ``lookups`` for the absence logic; the refused
+                # copies held in ``unobtained`` are dropped on purpose, as a
+                # served copy answers what they left open (#480).
+                saved_note = LookupRecord(skipped=(SourceLookupSkipped(
+                    _UNOBTAINED_PDF_SERVICE.get(source.source_type, SERVICE_PDF_DOWNLOAD),
+                    LookupSkipReason.NOT_SAVED,
+                    source.url,
+                ),))
+                return DiscoveryResult(
+                    success=False,
+                    error=not_saved_note(saved_note),
+                    lookups=lookups.merged(saved_note),
+                )
+
+            # An open-access PDF we could not obtain leaves that copy
             # unassessed (#478). Held apart from ``lookups`` and merged only
             # where the discovery gives up: a later source that serves the
-            # PDF settles the question. One is kept, the PDF earliest in
-            # Unpaywall's order, as the apps try the best location's alone.
-            unobtained = unobtained_unpaywall_pdf(source, result)
-            rank = unpaywall_rank.get(source.url)
-            if (
-                unobtained.anything_unsettled
-                and rank is not None
-                and (unobtained_rank is None or rank < unobtained_rank)
-            ):
-                unobtained_pdf, unobtained_rank = unobtained, rank
+            # PDF settles the question. Every one is kept, in chain order.
+            record = unobtained_open_access_pdf(source, result)
+            rank = copy_rank.get(source.url)
+            if record.anything_unsettled and rank is not None:
+                unobtained.append((rank, record))
 
             if result.is_paywall:
                 # For open access sources, a 403 might be bot protection, not paywall
@@ -868,10 +974,11 @@ class PDFDiscoverer:
                     # answer, not the document's licence: where the lookup
                     # that would have found a free copy could not be made,
                     # the claim is withheld rather than asserted (#347).
+                    not_obtained = self._ranked(unobtained)
                     return replace(
-                        result.with_lookups(lookups.merged(unobtained_pdf)),
+                        result.with_lookups(lookups.merged(not_obtained)),
                         error=paywall_message(
-                            result.error or "", told.merged(unobtained_pdf)
+                            result.error or "", told.merged(not_obtained)
                         ),
                     )
 
@@ -892,25 +999,42 @@ class PDFDiscoverer:
                 if result.success:
                     return result.with_lookups(lookups)
 
+        not_obtained = self._ranked(unobtained)
+
         # If we had a paywall result but no success, return it for OpenAthens option
         if last_paywall_result:
             return replace(
-                last_paywall_result.with_lookups(lookups.merged(unobtained_pdf)),
+                last_paywall_result.with_lookups(lookups.merged(not_obtained)),
                 error=paywall_message(
-                    last_paywall_result.error or "", told.merged(unobtained_pdf)
+                    last_paywall_result.error or "", told.merged(not_obtained)
                 ),
             )
 
+        unsettled = told.merged(not_obtained)
         return DiscoveryResult(
             success=False,
-            # A claim about our own attempts, which the unasked sources
-            # cannot falsify -- so it is qualified rather than withheld.
-            error=with_unestablished_access(
-                "Failed to download PDF from any available source.",
-                told.merged(unobtained_pdf),
+            # With tried PDFs the tried-sources statement says it all and
+            # opens "Failed to obtain a PDF ..."; the claim beside it would
+            # say "Failed" twice. Otherwise the claim about our own attempts,
+            # which the unasked sources cannot falsify, is qualified rather
+            # than withheld.
+            error=(
+                unestablished_access_clause(unsettled)
+                if tried_sources_statement(unsettled)
+                else with_unestablished_access(
+                    "Failed to download PDF from any available source.", unsettled
+                )
             ),
-            lookups=lookups.merged(unobtained_pdf),
+            lookups=lookups.merged(not_obtained),
         )
+
+    @staticmethod
+    def _ranked(unobtained: list[tuple[int, LookupRecord]]) -> LookupRecord:
+        """Every copy not obtained, in chain order whatever order they were tried in."""
+        merged = LookupRecord()
+        for _rank, record in sorted(unobtained, key=lambda pair: pair[0]):
+            merged = merged.merged(record)
+        return merged
 
     def _discover_sources(
         self,
@@ -1322,6 +1446,37 @@ class PDFDiscoverer:
             return sources, SourceLookupFailure(SERVICE_UNPAYWALL, failure)
 
         return sources, landing_failure
+
+    def _discover_openalex(
+        self, doi: str, known_urls: Iterable[str]
+    ) -> tuple[list[PDFSource], LookupRecord]:
+        """The PDFs OpenAlex's locations name that no earlier source did (#480).
+
+        Args:
+            doi: The article's DOI.
+            known_urls: Every address already found, tried or still to try.
+
+        Returns:
+            The new open-access sources, in OpenAlex's order, and the failure
+            that left OpenAlex unasked, if any. No work, or a work naming no
+            new PDF, is an answer: no source and nothing recorded.
+        """
+        fetch = self._openalex.fetch_pdf_urls(self._clean_doi(doi))
+        if fetch.failure is not None:
+            logger.warning(
+                "OpenAlex could not be asked about DOI %s (%s), so any open-access "
+                "copy it knows of is not assessed.",
+                doi,
+                fetch.failure.describe(),
+            )
+            return [], LookupRecord(
+                failures=(SourceLookupFailure(SERVICE_OPENALEX, fetch.failure),)
+            )
+        urls = untried_pdf_urls(fetch.pdf_urls or (), known_urls)
+        return [
+            PDFSource(url=url, source_type=PDFSourceType.OPENALEX_OA, is_open_access=True)
+            for url in urls
+        ], LookupRecord()
 
     def _resolve_landing_page(
         self, page_url: str, location: Mapping[str, Any]
@@ -1859,15 +2014,15 @@ class PDFDiscoverer:
         except OSError as e:
             # After the ``requests`` handlers, whose exceptions are OSErrors
             # too: what is left is ours, a file that could not be written.
-            # The source served the PDF, so this is no answer about the copy;
-            # but with no link to fall back on, recording nothing would let
-            # the discovery conclude the article has no full text. It is
-            # recorded as REQUEST_FAILED: the copy went unassessed (#478).
+            # The source served the PDF, so it is no answer about the copy.
+            # It is recorded as a NOT_SAVED skip with its address, which keeps
+            # the discovery from concluding there is no full text and is told
+            # as a caching note (#480).
             logger.error(f"Could not save the PDF from {source.url}: {e}")
             return DiscoveryResult(
                 success=False,
                 error=f"The PDF could not be saved: {e}",
-                failure=RequestFailure(RequestFailureKind.REQUEST_FAILED),
+                not_saved=True,
             )
 
         except Exception as e:

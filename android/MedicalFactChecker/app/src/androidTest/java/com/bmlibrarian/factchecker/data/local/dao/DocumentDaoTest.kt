@@ -222,7 +222,7 @@ class DocumentDaoTest {
     /**
      * Each full-text update clears the open-access shortfall an earlier fetch
      * stored (#466): it settles the question, and the card must not keep saying
-     * a free copy may exist.
+     * a free copy may exist. The caching note is cleared with it (#480).
      */
     @Test
     fun fullTextUpdatesClearTheOpenAccessShortfall() = runTest {
@@ -233,13 +233,16 @@ class DocumentDaoTest {
         )
         updates.forEachIndexed { index, update ->
             val document = createTestDocument(pmid = "9$index").copy(
-                fullTextOpenAccessShortfallJson = OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED.toJson()
+                fullTextOpenAccessShortfallJson = OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED.toJson(),
+                fullTextPdfNotSavedFrom = "https://repo.example.org/a.pdf"
             )
             documentDao.insert(document)
 
             update(document.id)
 
             assertNull("update $index", documentDao.getById(document.id)?.fullTextOpenAccessShortfallJson)
+            // The caching note goes with it (#480)
+            assertNull("update $index note", documentDao.getById(document.id)?.fullTextPdfNotSavedFrom)
         }
     }
 

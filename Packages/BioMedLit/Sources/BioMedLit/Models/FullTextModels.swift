@@ -32,6 +32,10 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
     /// Open access PDF via Unpaywall.
     case unpaywall = "unpaywall"
 
+    /// Open access PDF an OpenAlex location names, Unpaywall having named
+    /// none that served (#480, stage B).
+    case openAlex = "openalex"
+
     /// DOI resolution (publisher website).
     case doi = "doi"
 
@@ -49,6 +53,8 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
             return "Europe PMC PDF"
         case .unpaywall:
             return "Unpaywall"
+        case .openAlex:
+            return "OpenAlex"
         case .doi:
             return "Publisher"
         case .cached:
@@ -245,17 +251,32 @@ public struct FullTextResult: Sendable, Equatable {
     /// text whatsoever.
     public let extractionCoverage: PDFExtractionCoverage?
 
-    /// Why the open-access copy Unpaywall may know of went unassessed, or `nil`
-    /// when Unpaywall settled it (a PDF, or a 404) or was never reached because
-    /// an earlier tier served the article.
+    /// Why the open-access copy Unpaywall or OpenAlex may know of went
+    /// unassessed, or `nil` when they settled it (a copy served, or answers
+    /// naming none) or were never reached because an earlier tier served the
+    /// article.
     ///
-    /// Set only on a fallback returned after the Unpaywall tier: a caller that
+    /// Set only on a fallback returned after the open-access PDFs (Unpaywall's,
+    /// then OpenAlex's): a caller that
     /// already holds a PDF link must not trade it for a fallback the chain
     /// settled on only because the copy went unassessed (#464), and the reader
     /// is told what it leaves open (``OpenAccessShortfall/notice``, #466). Not a
     /// ``degradation``: that names a lost machine-readable source, and the two
     /// can both be true of one fetch.
     public let openAccessShortfall: OpenAccessShortfall?
+
+    /// The PDF a source served that could not be saved on this device (#480):
+    /// a fault of ours, told as a note of its own, never as a shortfall
+    /// (`OpenAccessShortfall.notSavedNote`). `nil` when none was.
+    ///
+    /// Always the `absoluteString` of the `URL` the PDF was fetched by, the
+    /// one a link-only result's content carries, never the address as the
+    /// source gave it (which a shortfall entry keeps): `URL(string:)` may
+    /// re-encode that (a space, a non-ASCII letter). The app tells "only its
+    /// link is kept" by comparing this with the stored link
+    /// (`AppFullTextResult.pdfNotSavedNote`, `Document.storedPDFNotSavedNote`),
+    /// so the two must stay one string.
+    public let pdfNotSavedFrom: String?
 
     /// Create a retrieval result.
     ///
@@ -275,6 +296,8 @@ public struct FullTextResult: Sendable, Equatable {
     ///     or `nil` — the default — when no extraction was run.
     ///   - openAccessShortfall: Why the open-access copy went unassessed, or
     ///     `nil` — the default — when nothing was left unsettled.
+    ///   - pdfNotSavedFrom: The PDF a source served that could not be saved,
+    ///     or `nil` — the default — when none was.
     public init(
         content: FullTextContent,
         warnings: JATSParseWarnings = JATSParseWarnings(),
@@ -283,7 +306,8 @@ public struct FullTextResult: Sendable, Equatable {
         extractedText: String? = nil,
         localPDFPath: String? = nil,
         extractionCoverage: PDFExtractionCoverage? = nil,
-        openAccessShortfall: OpenAccessShortfall? = nil
+        openAccessShortfall: OpenAccessShortfall? = nil,
+        pdfNotSavedFrom: String? = nil
     ) {
         // Three combinations the fallback chain never emits, and which the reader
         // would be shown as fact if it ever did. They were unspellable while
@@ -356,12 +380,14 @@ public struct FullTextResult: Sendable, Equatable {
             extractionCoverage == nil || content.pdfURL != nil,
             "extraction coverage on \(content.source), which carries no PDF"
         )
-        // An open-access shortfall rides only on a fallback. Unpaywall's own PDF
-        // settles the question it would raise, and text in hand (parsed or
-        // extracted) is no fallback the reader needs warning about.
+        // An open-access shortfall rides only on a fallback. An open-access
+        // copy's own PDF (Unpaywall's or OpenAlex's) settles the question it
+        // would raise, and text in hand (parsed or extracted) is no fallback
+        // the reader needs warning about.
         assert(
-            openAccessShortfall == nil || content.source != .unpaywall,
-            "an open-access shortfall on Unpaywall's own PDF, which settles it"
+            openAccessShortfall == nil
+                || (content.source != .unpaywall && content.source != .openAlex),
+            "an open-access shortfall on Unpaywall's or OpenAlex's own PDF, which settles it"
         )
         assert(
             openAccessShortfall == nil || (contentKind != .fulltext && contentKind != .extracted),
@@ -375,13 +401,20 @@ public struct FullTextResult: Sendable, Equatable {
         self.localPDFPath = localPDFPath
         self.extractionCoverage = extractionCoverage
         self.openAccessShortfall = openAccessShortfall
+        self.pdfNotSavedFrom = pdfNotSavedFrom
     }
 
-    /// This result, noting why the open-access copy went unassessed.
+    /// This result, noting why the open-access copy went unassessed and which
+    /// PDF was served and not saved.
     ///
-    /// - Parameter openAccessShortfall: The failure, or `nil` for none.
-    /// - Returns: The same result with ``openAccessShortfall`` set.
-    func noting(openAccessShortfall: OpenAccessShortfall?) -> FullTextResult {
+    /// - Parameters:
+    ///   - openAccessShortfall: The failure, or `nil` for none.
+    ///   - pdfNotSavedFrom: The PDF served and not saved, or `nil` for none.
+    /// - Returns: The same result with ``openAccessShortfall`` and
+    ///   ``pdfNotSavedFrom`` set.
+    func noting(
+        openAccessShortfall: OpenAccessShortfall?, pdfNotSavedFrom: String?
+    ) -> FullTextResult {
         FullTextResult(
             content: content,
             warnings: warnings,
@@ -390,7 +423,8 @@ public struct FullTextResult: Sendable, Equatable {
             extractedText: extractedText,
             localPDFPath: localPDFPath,
             extractionCoverage: extractionCoverage,
-            openAccessShortfall: openAccessShortfall
+            openAccessShortfall: openAccessShortfall,
+            pdfNotSavedFrom: pdfNotSavedFrom
         )
     }
 
@@ -403,7 +437,7 @@ public struct FullTextResult: Sendable, Equatable {
     /// Markdown content if available (parsed JATS: Europe PMC or PMC's bucket).
     public var markdown: String? { content.markdown }
 
-    /// PDF URL if available (Europe PMC PDF, Unpaywall, or cached).
+    /// PDF URL if available (Europe PMC PDF, Unpaywall, OpenAlex, or cached).
     public var pdfURL: URL? { content.pdfURL }
 
     /// Web URL if available (DOI resolution).
@@ -424,6 +458,10 @@ public enum FullTextContent: Sendable, Equatable {
     /// Open access PDF URL from Unpaywall.
     case unpaywall(pdfURL: URL)
 
+    /// A PDF an OpenAlex location names, Unpaywall having named none that
+    /// served (#480, stage B).
+    case openAlex(pdfURL: URL)
+
     /// DOI resolution URL (opens publisher website).
     case doi(webURL: URL)
 
@@ -441,6 +479,8 @@ public enum FullTextContent: Sendable, Equatable {
             return .europePMCPDF
         case .unpaywall:
             return .unpaywall
+        case .openAlex:
+            return .openAlex
         case .doi:
             return .doi
         case .cached:
@@ -468,12 +508,12 @@ public enum FullTextContent: Sendable, Equatable {
         }
     }
 
-    /// PDF URL if available (Europe PMC PDF, Unpaywall, or cached).
+    /// PDF URL if available (Europe PMC PDF, Unpaywall, OpenAlex, or cached).
     public var pdfURL: URL? {
         switch self {
         case .europePMCPDF(let url):
             return url
-        case .unpaywall(let url):
+        case .unpaywall(let url), .openAlex(let url):
             return url
         case .cached(let path):
             return URL(fileURLWithPath: path)
@@ -559,8 +599,9 @@ public enum FullTextError: LocalizedError, RetryableError, Sendable {
     /// unavailable on it.
     case pmcOpenDataNotEstablished(RequestFailure)
 
-    /// Every source was exhausted, but the Unpaywall tier did not settle
-    /// whether a free copy exists, and no link was left to fall back on.
+    /// Every source was exhausted, but the open-access PDFs (Unpaywall's, then
+    /// OpenAlex's) did not settle whether a free copy exists, and no link was
+    /// left to fall back on.
     ///
     /// Every fallback the chain returns after the tier (the abstract, a PDF
     /// link it could not download, the DOI link, the PubMed record) carries

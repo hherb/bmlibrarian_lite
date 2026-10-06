@@ -441,9 +441,11 @@ class ReportViewModel @Inject constructor(
                     onSuccess = { chainResult ->
                         // The result as settled by the download: a PDF Unpaywall
                         // named that could not be downloaded is the DOI link (#478)
-                        val (updatedDoc, fullTextResult) = document.recordingFullTextFetch(chainResult) { url ->
-                            fullTextService.downloadPdf(url, document.id)
-                        }
+                        val (updatedDoc, fullTextResult) = document.recordingFullTextFetch(
+                            chainResult,
+                            downloadPdf = { url -> fullTextService.downloadPdf(url, document.id) },
+                            askOpenAlex = { doi, tried -> fullTextService.openAlexSteps(doi, tried) }
+                        )
 
                         documentRepository.updateDocument(updatedDoc)
 
@@ -505,6 +507,18 @@ class ReportViewModel @Inject constructor(
     fun openDoi(doi: String) {
         viewModelScope.launch {
             val url = "${Constants.DOI_URL_PREFIX}$doi"
+            _events.send(ReportUiEvent.OpenUrl(url))
+        }
+    }
+
+    /**
+     * Open an address in the browser: the PDF a link-only record keeps when it
+     * was served and could not be saved on this device (#480).
+     *
+     * @param url The address to open
+     */
+    fun openUrl(url: String) {
+        viewModelScope.launch {
             _events.send(ReportUiEvent.OpenUrl(url))
         }
     }

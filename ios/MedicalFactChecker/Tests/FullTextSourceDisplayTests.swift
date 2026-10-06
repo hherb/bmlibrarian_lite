@@ -19,6 +19,11 @@ final class FullTextSourceDisplayTests: XCTestCase {
         XCTAssertEqual(label("pmc_open_data"), "PMC Open-Access Collection")
     }
 
+    func testOpenAlexHasItsOwnLabel() {
+        XCTAssertEqual(AppFullTextSource(rawValue: "openalex")?.displayName, "OpenAlex")
+        XCTAssertEqual(label("openalex"), "OpenAlex")
+    }
+
     func testExistingLabelsAreUnchanged() {
         XCTAssertEqual(label("europepmc"), "Europe PMC")
         XCTAssertEqual(label("unpaywall"), "Unpaywall")

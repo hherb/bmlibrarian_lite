@@ -104,7 +104,8 @@ class FullTextServiceUnpaywallTest {
             europePmcService = europePmc,
             unpaywallApi = unpaywallApi,
             httpClient = httpClient,
-            pmcOpenData = absentBucket()
+            pmcOpenData = absentBucket(),
+            openAlex = absentOpenAlex()
         )
     }
 
@@ -137,6 +138,30 @@ class FullTextServiceUnpaywallTest {
                 """.trimIndent()
             )
     }
+
+    /**
+     * Unpaywall answers with one location per PDF URL, the first as its best
+     * location too, as it does for an article held by several repositories.
+     */
+    private fun unpaywallLocations(pdfUrls: List<String>) {
+        val locations = pdfUrls.map { url ->
+            """{"url": "$url", "url_for_pdf": "$url", "url_for_landing_page": "$url",
+               "host_type": "repository", "version": "acceptedVersion"}"""
+        }
+        routes[unpaywallPath] = MockResponse()
+            .setHeader("Content-Type", "application/json")
+            .setBody(
+                """
+                {"doi": "$doi", "is_oa": true, "best_oa_location": ${locations.first()},
+                 "oa_locations": [${locations.joinToString(", ")}]}
+                """.trimIndent()
+            )
+    }
+
+    /** The chain's answer naming [pdfUrls] as Unpaywall's candidates, in order. */
+    private fun candidates(vararg pdfUrls: String) = FullTextService.FullTextResult.OpenAccessPdfs(
+        pdfUrls.map { OpenAccessStep.Candidate(it, PdfNamer.UNPAYWALL) }, doi
+    )
 
     /** The handle redirects to the repository page, as hdl.handle.net does. */
     private fun handleRedirectsToPage() {
@@ -171,7 +196,7 @@ class FullTextServiceUnpaywallTest {
 
         assertEquals(
             "${Log.lines}",
-            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = server.url(pdfPath).toString(), doi = doi),
+            candidates(server.url(pdfPath).toString()),
             result
         )
         server.takeRequest() // Unpaywall
@@ -219,8 +244,61 @@ class FullTextServiceUnpaywallTest {
         val pdfUrl = server.url(pdfPath).toString()
         unpaywallAnswers(pdfUrl = pdfUrl, landingPage = server.url(handlePath).toString())
 
-        assertEquals("${Log.lines}", FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = pdfUrl, doi = doi), fetch())
+        assertEquals("${Log.lines}", candidates(pdfUrl), fetch())
         assertEquals(listOf<String?>(unpaywallPath), requestedPaths())
+    }
+
+    @Test
+    fun `every location's PDF is a candidate, in Unpaywall's order, once`() = runTest {
+        val a = server.url("/a.pdf").toString()
+        val b = server.url("/b.pdf").toString()
+        unpaywallLocations(listOf(a, a, b))
+        assertEquals(
+            FullTextService.FullTextResult.OpenAccessPdfs(
+                listOf(OpenAccessStep.Candidate(a, PdfNamer.UNPAYWALL), OpenAccessStep.Candidate(b, PdfNamer.UNPAYWALL)),
+                doi
+            ),
+            fetch()
+        )
+        // Nothing is downloaded here: the PDFs are tried when the result is recorded
+        assertEquals(listOf<String?>(unpaywallPath), requestedPaths())
+    }
+
+    /** An address that cannot be requested is refused in its place; the PDFs after it are still tried. */
+    @Test
+    fun `an unfetchable location is refused in its place among the candidates`() = runTest {
+        val a = server.url("/a.pdf").toString()
+        val unfetchable = "ftp://repo.example.org/c.pdf"
+        unpaywallLocations(listOf(unfetchable, a))
+        assertEquals(
+            FullTextService.FullTextResult.OpenAccessPdfs(
+                listOf(
+                    OpenAccessStep.Unsettled(
+                        OpenAccessShortfall(
+                            OpenAccessSource.PDF, RequestFailure(RequestFailureKind.REQUEST_FAILED), unfetchable
+                        )
+                    ),
+                    OpenAccessStep.Candidate(a, PdfNamer.UNPAYWALL)
+                ),
+                doi
+            ),
+            fetch()
+        )
+    }
+
+    /** Every location unfetchable: nothing to try, so the DOI link carries each, by address. */
+    @Test
+    fun `every location unfetchable is the DOI link listing each`() = runTest {
+        val first = "ftp://repo.example.org/a.pdf"
+        val second = "file:///tmp/b.pdf"
+        unpaywallLocations(listOf(first, second))
+        val refused = { url: String ->
+            OpenAccessShortfall(OpenAccessSource.PDF, RequestFailure(RequestFailureKind.REQUEST_FAILED), url)
+        }
+        assertEquals(
+            FullTextService.FullTextResult.DoiUrl("${Constants.DOI_URL_PREFIX}$doi", refused(first) + refused(second)),
+            fetch()
+        )
     }
 
     /** How many times the handle was asked for. */
@@ -258,8 +336,9 @@ class FullTextServiceUnpaywallTest {
     /**
      * A `url_for_pdf` that is not an http(s) URL is refused, never handed on as
      * the PDF link (#478, the maintainer's call): the reader gets the DOI link,
-     * told the PDF Unpaywall named could not be asked, as Swift and Python
-     * tell it. Neither the address nor the landing page is requested.
+     * told the PDF Unpaywall named could not be asked, by its address (#480),
+     * as Swift and Python tell it. Neither the address nor the landing page is
+     * requested.
      */
     @Test
     fun `a url_for_pdf that cannot be fetched is refused`() = runTest {
@@ -270,7 +349,10 @@ class FullTextServiceUnpaywallTest {
 
             assertEquals(
                 "$pdfUrl ${Log.lines}",
-                doiLinkLeaving(OpenAccessSource.PDF, RequestFailure(RequestFailureKind.REQUEST_FAILED)),
+                FullTextService.FullTextResult.DoiUrl(
+                    "${Constants.DOI_URL_PREFIX}$doi",
+                    OpenAccessShortfall(OpenAccessSource.PDF, RequestFailure(RequestFailureKind.REQUEST_FAILED), pdfUrl)
+                ),
                 fetch()
             )
             assertEquals(pdfUrl, before + 1, server.requestCount)
@@ -435,7 +517,7 @@ class FullTextServiceUnpaywallTest {
 
         assertEquals(
             "${Log.lines}",
-            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = server.url(pagePath).toString(), doi = doi),
+            candidates(server.url(pagePath).toString()),
             fetch()
         )
     }
@@ -451,7 +533,8 @@ class FullTextServiceUnpaywallTest {
 
         val result = fetch()
 
-        assertTrue("$result", (result as FullTextService.FullTextResult.UnpaywallPdf).pdfUrl.endsWith("/論文.pdf"))
+        val step = (result as FullTextService.FullTextResult.OpenAccessPdfs).steps.single()
+        assertTrue("$result", (step as OpenAccessStep.Candidate).pdfUrl.endsWith("/論文.pdf"))
     }
 
     @Test
@@ -467,7 +550,7 @@ class FullTextServiceUnpaywallTest {
         pageServes(tag + padding)
 
         assertEquals(
-            FullTextService.FullTextResult.UnpaywallPdf(pdfUrl = server.url(pdfPath).toString(), doi = doi),
+            candidates(server.url(pdfPath).toString()),
             fetch()
         )
     }

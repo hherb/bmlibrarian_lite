@@ -1080,6 +1080,18 @@ SERVICE_UNPAYWALL_LANDING_PAGE = "the open-access copy's landing page"
 # download that failed, or a body that is not a PDF. Unpaywall answered; the
 # copy it pointed at is what went unassessed, so it is never "no copy" (#478).
 SERVICE_UNPAYWALL_PDF = "the open-access copy's PDF"
+# OpenAlex's record of a work, asked by DOI for the PDFs its locations name
+# that Unpaywall did not (#480, stage B). Named as the reader knows it.
+SERVICE_OPENALEX = "OpenAlex"
+# A PDF OpenAlex named that we could not obtain. OpenAlex answered; the copy
+# it pointed at went unassessed, so it is never "no copy" (#478's rule).
+SERVICE_OPENALEX_PDF = "OpenAlex's copy"
+OPENALEX_HOST = "api.openalex.org"
+OPENALEX_API_BASE_URL = f"https://{OPENALEX_HOST}"
+OPENALEX_REQUEST_TIMEOUT_SECONDS = 30
+OPENALEX_MAX_RETRIES = 3
+# OpenAlex serves JSON, which is UTF-8 (RFC 8259); nothing is guessed.
+OPENALEX_ENCODING = "utf-8"
 
 # What a PDF file begins with. A body that does not is not the PDF, whatever
 # it was served as -- a login page or a bot wall's challenge (#478, #480).

@@ -136,6 +136,31 @@ def location_pdf_url(location: Mapping[str, Any]) -> str | None:
     return _present(location.get("url_for_pdf"))
 
 
+def unpaywall_pdf_urls(response: Mapping[str, Any]) -> list[str]:
+    """Every PDF URL an Unpaywall answer names, best location first.
+
+    The candidates every platform tries (#480, stage B; before it the apps
+    tried only the best location's). The desktop's chain reads the locations
+    itself (``pdf_discovery``); this is the shared contract's helper, pinned
+    against that chain by the tests. A URL named by more
+    than one location -- the best location is usually repeated in
+    ``oa_locations`` -- is kept once, where it first appears.
+
+    Args:
+        response: Unpaywall's decoded JSON answer for one DOI.
+
+    Returns:
+        Each location's :func:`location_pdf_url`, in Unpaywall's order,
+        without repeats; empty when no location names a PDF.
+    """
+    urls: list[str] = []
+    for location in unpaywall_locations(response):
+        url = location_pdf_url(location)
+        if url and url not in urls:
+            urls.append(url)
+    return urls
+
+
 def choose_unpaywall_url(response: Mapping[str, Any]) -> UnpaywallChoice:
     """Decide which URL an Unpaywall answer offers.
 

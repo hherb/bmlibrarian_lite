@@ -28,6 +28,7 @@ from bmlibrarian_lite.oa_landing_page import (
     citation_pdf_url,
     decode_character_references,
     landing_page_text,
+    unpaywall_pdf_urls,
 )
 from bmlibrarian_lite.pdf_discovery import web_page_status_unsettled
 
@@ -85,6 +86,7 @@ def test_every_contract_table_is_read_here() -> None:
         "schema_version",
         "description",
         "unpaywall_choice",
+        "unpaywall_pdf_urls",
         "citation_pdf_url",
         "character_references",
         "landing_page_status",
@@ -136,6 +138,53 @@ def test_a_landing_page_is_never_a_pdf_url() -> None:
 def test_the_contract_has_rows() -> None:
     """Guard against an empty file making every parametrized test vanish."""
     assert len(CONTRACT["unpaywall_choice"]) >= 5
+    assert len(CONTRACT["unpaywall_pdf_urls"]) >= 5
     assert len(CONTRACT["citation_pdf_url"]) >= 10
     assert len(CONTRACT["character_references"]) >= 5
     assert len(CONTRACT["landing_page_status"]) >= 10
+
+
+@pytest.mark.parametrize(
+    "row", CONTRACT["unpaywall_pdf_urls"], ids=lambda row: row["name"]
+)
+def test_unpaywall_pdf_urls_match_the_contract(row: dict[str, Any]) -> None:
+    """Each row's answer names the PDFs the contract lists, in its order."""
+    assert unpaywall_pdf_urls(row["response"]) == row["expected"]
+
+
+@pytest.mark.parametrize(
+    "row",
+    [row for row in CONTRACT["unpaywall_pdf_urls"] if row["expected"]],
+    ids=lambda row: row["name"],
+)
+def test_the_desktop_discovers_the_same_pdfs(row: dict[str, Any]) -> None:
+    """Python's discovery names exactly these Unpaywall PDFs, in this order.
+
+    The desktop then tries them by its own priority (#478), but the list is
+    the one the apps try, so the two cannot disagree about which PDFs exist.
+    """
+    from bmlibrarian_lite.pdf_discovery import PDFDiscoverer, PDFSourceType
+
+    class _Answer:
+        status_code = 200
+
+        @staticmethod
+        def json() -> dict[str, Any]:
+            return row["response"]
+
+        @staticmethod
+        def raise_for_status() -> None:
+            return None
+
+    class _Session:
+        def get(self, url: str, **kwargs: Any) -> _Answer:
+            return _Answer()
+
+    discoverer = PDFDiscoverer(unpaywall_email="test@example.com", use_browser_fallback=False)
+    discoverer._session = _Session()  # type: ignore[assignment]
+    sources, failure = discoverer._discover_unpaywall("10.1/x")
+
+    assert failure is None
+    assert [
+        s.url for s in sources if s.source_type is PDFSourceType.UNPAYWALL_OA
+    ] == row["expected"]

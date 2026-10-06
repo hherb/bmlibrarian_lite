@@ -135,6 +135,16 @@ public enum BioMedLitConstants {
     /// not a listing.
     public static let s3ListingNamespace = "http://s3.amazonaws.com/doc/2006-03-01/"
 
+    // MARK: - OpenAlex (#480, stage B)
+
+    /// OpenAlex's API, asked by DOI for the PDFs its locations name.
+    public static let openAlexBaseURL = "https://api.openalex.org"
+    /// OpenAlex as the reader knows it; Python's `SERVICE_OPENALEX`.
+    public static let openAlexServiceName = "OpenAlex"
+    /// Ten requests a second, OpenAlex's published limit and Python's
+    /// `POLITE_RATE_CEILINGS` entry; per service instance, as the bucket's (#489).
+    public static let openAlexMinimumInterval: TimeInterval = 0.1
+
     // MARK: - PubMed API
 
     /// NCBI E-utilities base URL.

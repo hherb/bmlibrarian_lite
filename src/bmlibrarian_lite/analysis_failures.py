@@ -77,7 +77,15 @@ is ``doc/cross_platform/analysis_failure_reporting.md``.
 
 from collections import Counter
 from collections.abc import Iterable, Sequence
+from urllib.parse import urlsplit
 
+from .constants import (
+    SERVICE_OPENALEX,
+    SERVICE_OPENALEX_PDF,
+    SERVICE_UNPAYWALL,
+    SERVICE_UNPAYWALL_LANDING_PAGE,
+    SERVICE_UNPAYWALL_PDF,
+)
 from .data_models import (
     AnalysisShortfall,
     EvaluationErrorCode,
@@ -86,6 +94,7 @@ from .data_models import (
     PassFailure,
     RequestFailure,
     SourceLookupFailure,
+    SourceLookupSkipped,
     TransparencyAnalysisFailure,
     TransparencyFailureKind,
 )
@@ -804,9 +813,10 @@ def unsettled_lookups_clause(record: LookupRecord) -> str:
         and Unpaywall (not configured) could not be asked, and Europe PMC
         (HTTP 404 Not Found) did not serve it"``. The unasked are named
         first, failures before skips. Empty when every lookup was made and
-        served.
+        served; a PDF served but not saved is not named (#480), it has
+        :func:`not_saved_note`.
     """
-    unasked, answered = _unsettled(record)
+    unasked, answered = _unsettled(_without_not_saved(record))
     clauses = []
     if unasked:
         clauses.append(f"{_joined(unasked)} could not be asked")
@@ -1004,6 +1014,146 @@ def unread_records_clause(
     return _and_list(clauses) if clauses else ""
 
 
+#: The open-access chain's sources, in the order they are tried (#480): the
+#: tried-sources statement names them in this order, after any other source.
+_OPEN_ACCESS_CHAIN = (
+    SERVICE_UNPAYWALL,
+    SERVICE_UNPAYWALL_LANDING_PAGE,
+    SERVICE_UNPAYWALL_PDF,
+    SERVICE_OPENALEX,
+    SERVICE_OPENALEX_PDF,
+)
+
+#: Who named a tried PDF, by the service it is recorded under.
+_NAMED_BY = {
+    SERVICE_UNPAYWALL_PDF: SERVICE_UNPAYWALL,
+    SERVICE_OPENALEX_PDF: SERVICE_OPENALEX,
+}
+
+TRIED_SOURCES_LEAD = "Failed to obtain a PDF from the following tried sources: "
+_TRIED_UNASKED_ENDING = (
+    "A freely available copy may exist. Whether this document is open access "
+    "was not established."
+)
+_TRIED_ANSWERED_ENDING = "Whether this document is open access was not established."
+
+
+def address_host(address: str) -> str:
+    """The name a tried PDF is told by: its host, else the address itself.
+
+    Args:
+        address: The PDF's address, as the source gave it.
+
+    Returns:
+        The host, lower-cased and without a port; an address with no host
+        (a relative path, text that is no URL) trimmed, as given.
+    """
+    trimmed = address.strip()
+    try:
+        host = urlsplit(trimmed).hostname
+    except ValueError:
+        host = None
+    return host or trimmed
+
+
+def _without_not_saved(record: LookupRecord) -> LookupRecord:
+    """The record without its caching notes, which are not access shortfalls."""
+    return LookupRecord(
+        record.failures,
+        tuple(s for s in record.skipped if s.reason is not LookupSkipReason.NOT_SAVED),
+    )
+
+
+def _chain_rank(service: str) -> int:
+    """Where a service sits in the open-access chain; -1 outside it."""
+    return _OPEN_ACCESS_CHAIN.index(service) if service in _OPEN_ACCESS_CHAIN else -1
+
+
+def tried_sources_statement(record: LookupRecord) -> str:
+    """List every source tried, once open-access PDFs were tried (#480).
+
+    The maintainer's decision of 2026-10-05: each PDF a source named that we
+    could not obtain is told by its host and by who named it; each lookup
+    that went unsettled once, with the reason :func:`_unsettled` picks; in
+    chain order, any source outside the chain first. Identical entries (two
+    PDFs on one host refused alike) are told once. The ending follows the
+    verbs, as :func:`_access_left_open`'s does.
+
+    Args:
+        record: What went unsettled; caching notes are ignored.
+
+    Returns:
+        The lead sentence listing every entry, then its ending (whether a
+        free copy may exist, and whether open access was established); the
+        caller adds any configuration advice. ``""`` when no PDF was tried:
+        a lookup-only record keeps :func:`_access_left_open`'s wording.
+    """
+    access = _without_not_saved(record)
+    tried: list[SourceLookupFailure | SourceLookupSkipped] = [
+        *(f for f in access.failures if f.address),
+        *(s for s in access.skipped if s.address),
+    ]
+    if not tried:
+        return ""
+    lookups = LookupRecord(
+        tuple(f for f in access.failures if not f.address),
+        tuple(s for s in access.skipped if not s.address),
+    )
+    unasked, answered = _unsettled(lookups)
+    reasons = {**answered, **unasked}
+    services = list(dict.fromkeys(
+        [f.service for f in lookups.failures] + [s.service for s in lookups.skipped]
+    ))
+    entries: list[tuple[int, int, str, bool]] = [
+        (_chain_rank(service), position, f"{service} ({reasons[service]})", service in unasked)
+        for position, service in enumerate(services)
+    ]
+    for position, item in enumerate(tried, start=len(entries)):
+        if isinstance(item, SourceLookupFailure):
+            reason, could_not_ask = item.failure.describe(), not item.failure.is_answer
+        else:
+            reason, could_not_ask = item.describe(), True
+        named_by = _NAMED_BY.get(item.service, item.service)
+        text = f"{address_host(item.address or '')}, named by {named_by} ({reason})"
+        entries.append((_chain_rank(item.service), position, text, could_not_ask))
+    entries.sort(key=lambda entry: (entry[0], entry[1]))
+    ending = (
+        _TRIED_UNASKED_ENDING if any(entry[3] for entry in entries) else _TRIED_ANSWERED_ENDING
+    )
+    # Two PDFs on one host refused alike read the same; told once, the first
+    # after sorting, so the list does not stutter.
+    texts = list(dict.fromkeys(entry[2] for entry in entries))
+    return f"{TRIED_SOURCES_LEAD}{'; '.join(texts)}. {ending}"
+
+
+def not_saved_note(record: LookupRecord, link_kept: bool = False) -> str:
+    """Tell the reader a PDF was served and could not be saved (#480).
+
+    A fault of ours, not the source's answer, so it is a note of its own and
+    never in the tried-sources list (the maintainer's decision, 2026-10-05).
+
+    Args:
+        record: What went unsettled; only its ``NOT_SAVED`` skips are read.
+        link_kept: Whether the PDF's link is what the reader is given (the
+            apps); the desktop has none to give.
+
+    Returns:
+        One sentence and its advice, or ``""`` when no PDF went unsaved.
+    """
+    addresses = [
+        s.address for s in record.skipped
+        if s.reason is LookupSkipReason.NOT_SAVED and s.address
+    ]
+    if not addresses:
+        return ""
+    outcome = "only its link is kept" if link_kept else "it could not be read"
+    return (
+        f"A PDF of this article was found at {address_host(addresses[0])} but "
+        f"could not be saved on this device, so {outcome}. Check the free "
+        "storage space and try again."
+    )
+
+
 def unestablished_access_clause(record: LookupRecord) -> str:
     """Say which lookups went unsettled, and what that leaves open.
 
@@ -1011,14 +1161,26 @@ def unestablished_access_clause(record: LookupRecord) -> str:
         record: What went unsettled; may be empty.
 
     Returns:
-        One to three sentences ending in a full stop, or empty when every
-        lookup was made and served. Never the bare denial "this is not
+        Sentences ending in a full stop: what was left open (with tried PDFs,
+        the tried-sources statement), then any configuration advice, then
+        any caching note; or empty when every lookup was made and served
+        and no PDF went unsaved. Never the bare denial "this is not
         evidence the document requires access": read on its own, that
-        repeats the claim it means to withdraw.
+        repeats the claim it means to withdraw. With tried PDFs, the
+        tried-sources statement (#480); a caching note follows whatever is
+        said.
     """
-    if not record.anything_unsettled:
-        return ""
-    return _with_nudge(_sentence_start(_access_left_open(record)), record)
+    access = _without_not_saved(record)
+    sentences: list[str] = []
+    if access.anything_unsettled:
+        sentences.append(_with_nudge(
+            tried_sources_statement(access) or _sentence_start(_access_left_open(access)),
+            access,
+        ))
+    note = not_saved_note(record)
+    if note:
+        sentences.append(note)
+    return " ".join(sentences)
 
 
 def _sentence_start(text: str) -> str:
@@ -1069,7 +1231,8 @@ def with_unestablished_access(claim: str, record: LookupRecord) -> str:
 
     Returns:
         ``claim`` when every lookup was made and served, else ``claim``
-        followed by :func:`unestablished_access_clause`.
+        followed by :func:`unestablished_access_clause`: with a PDF served
+        but not saved, ``claim`` and :func:`not_saved_note`.
     """
     clause = unestablished_access_clause(record)
     return f"{claim} {clause}" if clause else claim
@@ -1086,15 +1249,27 @@ def refused_access_sentence(record: LookupRecord) -> str:
         record: What went unsettled; not empty.
 
     Returns:
-        One or two sentences ending in a full stop, for example ``"A source
+        Sentences ending in a full stop: the refusal, with what was left
+        open (the bare refusal alone when only a caching note is left), then
+        any caching note, for example ``"A source
         refused access to this document, and Europe PMC (HTTP 404 Not Found)
         did not serve it, so whether this document is open access was not
-        established."``
+        established."`` With tried PDFs (#480), the sentence is followed by
+        the tried-sources statement.
     """
-    return (
-        f"A source refused access to this document{_set_against(record)}"
-        f"{_access_left_open(record)}"
-    )
+    access = _without_not_saved(record)
+    refusal = "A source refused access to this document."
+    if not access.anything_unsettled:
+        sentence = refusal
+    else:
+        statement = tried_sources_statement(access)
+        sentence = (
+            f"{refusal} {statement}" if statement else
+            f"A source refused access to this document{_set_against(access)}"
+            f"{_access_left_open(access)}"
+        )
+    note = not_saved_note(record)
+    return f"{sentence} {note}" if note else sentence
 
 
 def paywall_message(claim: str, record: LookupRecord) -> str:
@@ -1114,11 +1289,18 @@ def paywall_message(claim: str, record: LookupRecord) -> str:
         record: What went unsettled; may be empty.
 
     Returns:
-        One to three sentences for the reader, ending in a full stop.
+        Sentences for the reader, ending in a full stop: ``claim`` when
+        nothing was left open, else :func:`refused_access_sentence` and any
+        configuration advice; then a caching note (#480) when a PDF went
+        unsaved.
     """
-    if not record.anything_unsettled:
-        return claim
-    return _with_nudge(refused_access_sentence(record), record)
+    access = _without_not_saved(record)
+    text = (
+        _with_nudge(refused_access_sentence(access), access)
+        if access.anything_unsettled else claim
+    )  # the note is added once, below: ``access`` carries none
+    note = not_saved_note(record)
+    return f"{text} {note}" if note else text
 
 
 def no_pdf_sources_message(record: LookupRecord) -> str:
@@ -1135,16 +1317,18 @@ def no_pdf_sources_message(record: LookupRecord) -> str:
         record: What went unsettled; may be empty.
 
     Returns:
-        Two or three sentences for the reader, ending in a full stop: the
-        third is the configuration advice, when there is any to give.
+        Sentences for the reader, ending in a full stop: why no source was
+        found, then any configuration advice, then a caching note (#480)
+        when a PDF went unsaved.
     """
-    if not record.anything_unsettled:
-        return (
-            "No PDF sources found. The document may require institutional "
-            "access."
+    access = _without_not_saved(record)
+    if not access.anything_unsettled:
+        text = "No PDF sources found. The document may require institutional access."
+    else:
+        text = _with_nudge(
+            f"No PDF sources found for this document{_set_against(access)}"
+            f"{_access_left_open(access)}",
+            access,
         )
-    return _with_nudge(
-        f"No PDF sources found for this document{_set_against(record)}"
-        f"{_access_left_open(record)}",
-        record,
-    )
+    note = not_saved_note(record)
+    return f"{text} {note}" if note else text

@@ -300,6 +300,7 @@ fun ReportScreen(
                     onGetFullText = viewModel::fetchFullText,
                     onViewFullText = viewModel::viewFullText,
                     onOpenPublisher = { doi -> viewModel.openDoi(doi) },
+                    onOpenUrl = { url -> viewModel.openUrl(url) },
                     onOpenInPubMed = { pmid ->
                         viewModel.openInPubMed(pmid)
                     },

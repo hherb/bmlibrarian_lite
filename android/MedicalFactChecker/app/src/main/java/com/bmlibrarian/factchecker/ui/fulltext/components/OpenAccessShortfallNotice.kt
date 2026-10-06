@@ -40,6 +40,10 @@ import com.bmlibrarian.factchecker.util.Constants
  * note, not a warning: the link shown is complete in itself. The sentence is the
  * shared contract's ([com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall.notice]).
  *
+ * Also shows the caching note for a PDF served and not saved (#480,
+ * [com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall.notSavedNote]),
+ * in the same style but as a note of its own, never joined to the shortfall.
+ *
  * @param notice The sentence to show
  * @param modifier Modifier for the row
  */

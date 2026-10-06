@@ -107,6 +107,24 @@ enum UnpaywallLandingPage {
         return .nothing
     }
 
+    /// Every PDF URL an Unpaywall answer names, best location first (#480,
+    /// stage B): each location's `url_for_pdf`, trimmed, kept once where it
+    /// first appears. The chain tries them in this order; Python's
+    /// `unpaywall_pdf_urls`, pinned by `unpaywall_landing_page.json`.
+    ///
+    /// - Parameter response: Unpaywall's answer for one DOI.
+    /// - Returns: The PDF URLs, possibly none.
+    static func pdfURLs(from response: UnpaywallResponse) -> [String] {
+        let locations = [response.bestOaLocation].compactMap { $0 } + (response.oaLocations ?? [])
+        var urls: [String] = []
+        for location in locations {
+            if let pdf = present(location.urlForPdf), !urls.contains(pdf) {
+                urls.append(pdf)
+            }
+        }
+        return urls
+    }
+
     /// The URL an Unpaywall address names, when the tier can fetch it.
     ///
     /// An absolute http(s) URL with a host; anything else (a relative path, an

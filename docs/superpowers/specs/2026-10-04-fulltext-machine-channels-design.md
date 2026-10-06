@@ -145,23 +145,40 @@ audit say where it came from. The XML is not truncated (golden rule 13).
   (`PDFDiscoverer._discover_unpaywall`). Try every location's `url_for_pdf`,
   deduplicated, in Unpaywall's order. Read a landing page (the first location
   without a PDF URL, as `choose_unpaywall_url` picks it) only when no location
-  names a PDF. Keep one failure, that of the PDF earliest in Unpaywall's
-  order, and record it only when no source served the PDF. That rule is
-  already in the contract (#478); the apps currently try the best location
-  alone.
+  names a PDF. Record every PDF that could not be obtained, in Unpaywall's
+  order, and only when no source served the PDF (superseding the first
+  draft's "one failure, the earliest"; see the as-built note below). Before
+  stage B the apps tried the best location alone.
   - **Not ported.** The desktop's derived PMC addresses (`ptpmcrender.fcgi`,
     `/pmc/articles/{id}/pdf/`), which are walled and which stage A supersedes.
     Its publisher-specific URL guesses, which are a desktop heuristic outside
     this contract.
 - **OpenAlex.** Request `GET https://api.openalex.org/works/doi:{doi}` with
-  `mailto` set to the contact email each platform already sends OpenAlex and
-  Crossref for the transparency analysis, so no new party receives the
-  user's address. Without one, the request goes to the common pool rather
-  than being skipped. Try each
+  `mailto` set to the contact email each platform already sends Crossref for
+  the transparency analysis. (This draft also said OpenAlex already received
+  it, so no new party would; that was wrong: no platform called OpenAlex
+  before stage B, so OpenAlex is a new recipient. See the as-built note.)
+  Without one, the request goes to the common pool rather than being
+  skipped. Try each
   `locations[].pdf_url` not already tried, in OpenAlex's order, under the same
   download rules. A PDF OpenAlex named that could not be obtained is refused,
   not "no copy", under a new source, "OpenAlex's copy" (`openalex_pdf`). This
   mirrors `unpaywall_pdf` (#478).
+
+**As built.** The binding rules are in `doc/cross_platform/fulltext_retrieval.md`
+("OpenAlex's Locations", "Tried sources (#480)") and
+`fulltext_parity/openalex_locations.json`; where this section differs, they win.
+- Every `pdf_url` counts, whatever its `is_oa`.
+- OpenAlex is asked only once no Unpaywall copy was served and kept (Android
+  through a hook in its download step; in Swift a textless copy cached does
+  not count).
+- When no PDF is obtained, every source tried is told, each PDF by host and by
+  who named it; not only the earliest failure, as the first draft said.
+- OpenAlex newly receives the contact email (`mailto`); the contract states
+  which address each platform sends.
+- The first copy served ends the walk. One not saved is a caching note of its
+  own, stored on the document in the apps, never a shortfall.
+- `select=locations` is asked for.
 
 ## Stage C: CORE and Elsevier
 

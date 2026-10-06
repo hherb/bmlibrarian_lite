@@ -18,6 +18,7 @@
 import Foundation
 import SwiftData
 import XCTest
+import BioMedLit
 @testable import MedicalFactChecker
 
 /// A store written by an earlier build keeps its fact checks (#285).
@@ -69,6 +70,36 @@ final class StoreMigrationTests: XCTestCase {
                 self.title = title
                 self.fullTextSource = "doi"
                 self.fullTextFetchedAt = Date()
+            }
+        }
+    }
+
+    /// A document as a build after #466 and before #480 stored it: a PDF link
+    /// with an open-access shortfall, and no caching-note field.
+    enum BeforeTheCachingNoteSchema: VersionedSchema {
+        static var versionIdentifier: Schema.Version { Schema.Version(2, 0, 0) }
+        static var models: [any PersistentModel.Type] { [Document.self] }
+
+        @Model
+        final class Document {
+            var id: String = ""
+            var pmid: String = ""
+            var title: String = ""
+            var abstract: String = ""
+            var fullTextSource: String?
+            var fullTextFetchedAt: Date?
+            var fullTextPDFPath: String?
+            var fullTextPDFPathIsLocalFile: Bool?
+            var fullTextOpenAccessShortfallJSON: String?
+            init(pmid: String, title: String, pdfLink: String, shortfallJSON: String) {
+                self.id = UUID().uuidString
+                self.pmid = pmid
+                self.title = title
+                self.fullTextSource = "europepmc_pdf"
+                self.fullTextFetchedAt = Date()
+                self.fullTextPDFPath = pdfLink
+                self.fullTextPDFPathIsLocalFile = false
+                self.fullTextOpenAccessShortfallJSON = shortfallJSON
             }
         }
     }
@@ -168,6 +199,46 @@ final class StoreMigrationTests: XCTestCase {
         XCTAssertTrue(document.isLinkOnly)
         XCTAssertNil(document.fullTextOpenAccessShortfallJSON)
         XCTAssertNil(document.cachedRetrievalNotice.openAccessShortfall)
+        XCTAssertNil(document.fullTextPDFNotSavedFrom)
+        XCTAssertNil(document.storedPDFNotSavedNote)
+        XCTAssertFalse(setAsideRan, "A store that migrates must never reach the last resort")
+    }
+
+    /// A document stored before the caching note existed (#480) is carried
+    /// across with its shortfall, and reads as having no note rather than as a
+    /// damaged record.
+    func testADocumentFromBeforeTheCachingNoteMigrates() throws {
+        let shortfall = OpenAccessShortfall(source: .unpaywall, failure: .httpStatus(429))
+        let earlier = Schema(versionedSchema: BeforeTheCachingNoteSchema.self)
+        let earlierContainer = try ModelContainer(
+            for: earlier,
+            configurations: [ModelConfiguration(schema: earlier, url: storeURL, cloudKitDatabase: .none)]
+        )
+        let earlierContext = ModelContext(earlierContainer)
+        earlierContext.insert(
+            BeforeTheCachingNoteSchema.Document(
+                pmid: "12345678",
+                title: "A study from before the note",
+                pdfLink: "https://repo.example.org/a.pdf",
+                shortfallJSON: shortfall.persisted()
+            )
+        )
+        try earlierContext.save()
+        var setAsideRan = false
+        let (schema, configuration) = todaysConfiguration()
+
+        let container = try CloudKitConfiguration.makeContainer(
+            schema: schema,
+            configuration: configuration,
+            setAsideUnreadableStore: { setAsideRan = true; return .noStoreFound }
+        )
+
+        let document = try XCTUnwrap(try ModelContext(container).fetch(FetchDescriptor<Document>()).first)
+        XCTAssertEqual(document.title, "A study from before the note")
+        XCTAssertEqual(document.fullTextPDFPath, "https://repo.example.org/a.pdf")
+        XCTAssertEqual(document.cachedRetrievalNotice.openAccessShortfall, shortfall)
+        XCTAssertNil(document.fullTextPDFNotSavedFrom)
+        XCTAssertNil(document.storedPDFNotSavedNote)
         XCTAssertFalse(setAsideRan, "A store that migrates must never reach the last resort")
     }
 

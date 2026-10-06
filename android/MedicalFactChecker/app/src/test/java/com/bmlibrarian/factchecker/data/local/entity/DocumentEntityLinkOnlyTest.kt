@@ -20,7 +20,9 @@ package com.bmlibrarian.factchecker.data.local.entity
 
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService.FullTextResult
 import com.bmlibrarian.factchecker.data.remote.fulltext.NotEstablishedSource
+import com.bmlibrarian.factchecker.data.remote.fulltext.OpenAccessStep
 import com.bmlibrarian.factchecker.data.remote.fulltext.PdfDownload
+import com.bmlibrarian.factchecker.data.remote.fulltext.PdfNamer
 import com.bmlibrarian.factchecker.data.remote.fulltext.recordingFullTextFetch
 import com.bmlibrarian.factchecker.domain.model.FullTextLinkKind
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
@@ -31,6 +33,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Date
 
@@ -46,9 +49,13 @@ class DocumentEntityLinkOnlyTest {
     private val fresh = DocumentEntity(id = "d", sessionId = "s", title = "t", doi = "10.1/x")
 
     private suspend fun recorded(result: FullTextResult, downloaded: String? = null) =
-        fresh.recordingFullTextFetch(result) {
-            downloaded?.let(PdfDownload::Saved) ?: PdfDownload.Failed(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
-        }.document
+        fresh.recordingFullTextFetch(
+            result,
+            downloadPdf = {
+                downloaded?.let(PdfDownload::Saved) ?: PdfDownload.Failed(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
+            },
+            askOpenAlex = { _, _ -> emptyList() }
+        ).document
 
     @Test
     fun `a record never fetched is not link-only`() {
@@ -74,16 +81,91 @@ class DocumentEntityLinkOnlyTest {
     /** An Unpaywall PDF that could not be downloaded is refused for the DOI link (#478). */
     @Test
     fun `an Unpaywall PDF that could not be downloaded is the publisher's page`() = runTest {
-        val answer = FullTextResult.UnpaywallPdf("https://repo.example.org/a.pdf", doi = "10.1/x")
+        val answer = FullTextResult.OpenAccessPdfs(listOf(OpenAccessStep.Candidate("https://repo.example.org/a.pdf", PdfNamer.UNPAYWALL)), "10.1/x")
 
         assertSame(FullTextLinkKind.PUBLISHER_PAGE, recorded(answer).linkOnlyKind)
+    }
+
+    /** An OpenAlex PDF served and not saved: a copy found, its link kept, named OpenAlex (#480). */
+    @Test
+    fun `an OpenAlex PDF that could not be saved is a PDF not saved, named OpenAlex`() = runTest {
+        val pdfUrl = "https://oa.example.org/a.pdf"
+        val answer = FullTextResult.OpenAccessPdfs(
+            listOf(OpenAccessStep.Candidate(pdfUrl, PdfNamer.OPENALEX)), "10.1/x",
+            openAlexAsked = true
+        )
+        val doc = fresh.recordingFullTextFetch(
+            answer, downloadPdf = { PdfDownload.NotSaved }, askOpenAlex = { _, _ -> emptyList() }
+        ).document
+
+        assertSame(FullTextLinkKind.PDF_NOT_SAVED, doc.linkOnlyKind)
+        assertEquals(pdfUrl, doc.linkOnlyPdfUrl)
+        assertSame(FullTextLinkKind.UNDOWNLOADED_PDF, FullTextLinkKind.forStoredSource(Constants.FULLTEXT_SOURCE_OPENALEX))
+        assertEquals("OpenAlex", doc.fullTextSourceDisplay)
+    }
+
+    /**
+     * A PDF served and not saved keeps only its address (`pdfPath` is null), so
+     * the stored record's card offers that address, not the DOI, and what it
+     * says agrees with the caching note beside it: the note says only the link
+     * is kept, so the kind must not say the PDF "could not be downloaded" (#480).
+     * Driven for each source that can serve one: Unpaywall, OpenAlex and Europe
+     * PMC's render.
+     */
+    @Test
+    fun `a stored PDF not saved offers its address, in words that agree with the note`() = runTest {
+        val pdfUrl = "https://Repo.example.org/a.pdf"
+        val answers = listOf(
+            FullTextResult.OpenAccessPdfs(listOf(OpenAccessStep.Candidate(pdfUrl, PdfNamer.UNPAYWALL)), "10.1/x"),
+            FullTextResult.OpenAccessPdfs(
+                listOf(OpenAccessStep.Candidate(pdfUrl, PdfNamer.OPENALEX)), "10.1/x", openAlexAsked = true
+            ),
+            FullTextResult.EuropePmcPdf(pdfUrl),
+        )
+        for (answer in answers) {
+            val doc = fresh.recordingFullTextFetch(
+                answer, downloadPdf = { PdfDownload.NotSaved }, askOpenAlex = { _, _ -> emptyList() }
+            ).document
+
+            assertNull("$answer", doc.pdfPath)
+            assertSame("$answer", FullTextLinkKind.PDF_NOT_SAVED, doc.linkOnlyKind)
+            assertEquals("$answer", pdfUrl, doc.linkOnlyPdfUrl)
+            assertEquals(
+                "$answer",
+                "A PDF of this article was found at repo.example.org but could not be saved on this device, " +
+                    "so only its link is kept. Check the free storage space and try again.",
+                doc.pdfNotSavedNote
+            )
+        }
+        assertEquals("PDF Not Saved", FullTextLinkKind.PDF_NOT_SAVED.title)
+        assertFalse(FullTextLinkKind.PDF_NOT_SAVED.statement.contains("downloaded"))
+    }
+
+    /**
+     * The controls: a link-only record that kept no PDF address offers the
+     * publisher's page, and a record with text in hand offers no link at all,
+     * so its note says the PDF "could not be read", not that its link is kept.
+     */
+    @Test
+    fun `only a link-only record with a PDF not saved offers a PDF address`() = runTest {
+        assertNull(recorded(FullTextResult.DoiUrl("https://doi.org/10.1/x")).linkOnlyPdfUrl)
+        // Europe PMC's PDF failed to download: its address is not kept
+        assertNull(recorded(FullTextResult.EuropePmcPdf("https://europepmc.org/a.pdf")).linkOnlyPdfUrl)
+        assertNull(fresh.linkOnlyPdfUrl)
+
+        val withText = fresh.copy(
+            fullTextMarkdown = "m", fullTextFetchedAt = Date(), fullTextPdfNotSavedFrom = "https://repo.example.org/a.pdf"
+        )
+        assertNull(withText.linkOnlyPdfUrl)
+        assertNull(withText.linkOnlyKind)
+        assertTrue(withText.pdfNotSavedNote!!, withText.pdfNotSavedNote!!.contains("so it could not be read."))
     }
 
     /** The controls: text in hand, a settled absence, and a fetch that settled nothing. */
     @Test
     fun `text in hand, an absence and an unsettled fetch are not link-only`() = runTest {
         val notLinkOnly = listOf(
-            recorded(FullTextResult.UnpaywallPdf("https://repo.example.org/a.pdf", doi = "10.1/x"), downloaded = "/cache/a.pdf"),
+            recorded(FullTextResult.OpenAccessPdfs(listOf(OpenAccessStep.Candidate("https://repo.example.org/a.pdf", PdfNamer.UNPAYWALL)), "10.1/x"), downloaded = "/cache/a.pdf"),
             recorded(FullTextResult.EuropePmcXml(xml = "<a/>", markdown = "m", html = "<p>h</p>")),
             recorded(FullTextResult.PmcOpenDataXml(xml = "<a/>", markdown = "m", html = "<p>h</p>")),
             recorded(FullTextResult.Unavailable("No full text source available")),
@@ -128,6 +210,10 @@ class DocumentEntityLinkOnlyTest {
         assertEquals(
             "A PDF of this article was found but could not be downloaded.",
             FullTextLinkKind.UNDOWNLOADED_PDF.statement
+        )
+        assertEquals(
+            "A PDF of this article was found and can be opened from its link.",
+            FullTextLinkKind.PDF_NOT_SAVED.statement
         )
     }
 }

@@ -446,13 +446,16 @@ enum BioMedLitAdapters {
         // same reasoning carries them across too: Task 8 reads them off the
         // document regardless of which case produced the result. So does
         // `openAccessShortfall`, which is what the reader is told about a
-        // fallback Unpaywall could not rule out a free copy behind (#466).
+        // fallback Unpaywall or OpenAlex could not rule out a free copy behind
+        // (#466, #480), and
+        // `pdfNotSavedFrom`, the PDF served and not saved (#480).
         AppFullTextResult(
             content: content(of: result.content, localPDFPath: result.localPDFPath),
             source: appSource(of: result.content),
             warnings: result.warnings,
             degradation: result.degradation,
             openAccessShortfall: result.openAccessShortfall,
+            pdfNotSavedFrom: result.pdfNotSavedFrom,
             contentKind: result.contentKind,
             extractedText: result.extractedText,
             localPDFPath: result.localPDFPath,
@@ -474,7 +477,7 @@ enum BioMedLitAdapters {
         case .europePMC(let html, let markdown), .pmcOpenData(let html, let markdown):
             // Both HTML (for rendering) and markdown (for search/export fallback)
             return .html(content: html, markdown: markdown)
-        case .europePMCPDF(let pdfURL), .unpaywall(let pdfURL):
+        case .europePMCPDF(let pdfURL), .unpaywall(let pdfURL), .openAlex(let pdfURL):
             // The cached file wins over the remote URL. The iOS viewers render
             // the live result rather than the stored document, so mapping this
             // to the remote URL sent them back over the network for bytes
@@ -502,6 +505,7 @@ enum BioMedLitAdapters {
         case .pmcOpenData: return .pmcOpenData
         case .europePMCPDF: return .europePMCPDF
         case .unpaywall: return .unpaywall
+        case .openAlex: return .openAlex
         case .doi: return .doi
         case .cached: return .cached
         }

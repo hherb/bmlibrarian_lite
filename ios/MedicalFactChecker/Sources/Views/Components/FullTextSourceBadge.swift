@@ -66,6 +66,7 @@ struct FullTextSourceBadge: View {
         case .pmcOpenData: return .blue
         case .europePMCPDF: return .blue
         case .unpaywall: return .green
+        case .openAlex: return .green
         case .doi: return .orange
         case .cached: return .gray
         case .uploaded: return .purple

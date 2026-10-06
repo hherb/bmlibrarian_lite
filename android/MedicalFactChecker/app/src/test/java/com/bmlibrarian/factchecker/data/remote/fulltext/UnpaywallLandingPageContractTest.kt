@@ -115,6 +115,17 @@ class UnpaywallLandingPageContractTest {
     }
 
     @Test
+    fun `each unpaywall_pdf_urls row`() {
+        for (row in table("unpaywall_pdf_urls")) {
+            assertEquals(
+                "${row.string("name")}",
+                row.getValue("expected").jsonArray.map { it.jsonPrimitive.content },
+                UnpaywallLandingPage.pdfUrls(response(row.getValue("response").jsonObject))
+            )
+        }
+    }
+
+    @Test
     fun `each citation_pdf_url row`() {
         for (row in table("citation_pdf_url")) {
             assertEquals(
@@ -156,7 +167,7 @@ class UnpaywallLandingPageContractTest {
     fun `every contract table is read here`() {
         assertEquals(
             setOf(
-                "schema_version", "description", "unpaywall_choice", "citation_pdf_url",
+                "schema_version", "description", "unpaywall_choice", "unpaywall_pdf_urls", "citation_pdf_url",
                 "character_references", "landing_page_status"
             ),
             contract.keys
