@@ -2,6 +2,7 @@
 // Copyright (C) 2024-2026 Dr Horst Herb
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import CryptoKit
 import Foundation
 
 /// CORE's extracted text, asked by DOI with the user's own key (#480, stage C).
@@ -44,6 +45,15 @@ public enum CORE {
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// The fingerprint a refused key is remembered by (#498): the SHA-256 digest of the
+    /// trimmed key's UTF-8 bytes, as lower-case hex, Python's `core_key_digest`. A refusal
+    /// is scoped to the key CORE refused, so a key corrected in the settings is asked
+    /// again; the key itself is never held for that, and the digest is never logged.
+    public static func keyDigest(_ apiKey: String) -> String {
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return SHA256.hash(data: Data(trimmed.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
     /// The full text CORE's answer serves for this DOI, or nil; throws for an answer we cannot read.
     static func fullText(
         fromAnswer data: Data, doi: String,
@@ -84,9 +94,11 @@ enum COREFetch: Equatable {
 
 /// CORE's session state, shared by every `FullTextService`, since the app builds one per
 /// screen. Two consecutive fetches ending in 429 pause CORE until the process ends: its
-/// key buys a daily budget no pacing can express. A fetch ending in 401 marks the key
-/// refused for the rest of the process (#498): every article would be refused alike, so
-/// CORE is not asked again, and nothing lifts it.
+/// key buys a daily budget no pacing can express. A fetch ending in 401 marks the key it
+/// was sent with refused for the rest of the process (#498): every article would be
+/// refused alike, so CORE is not asked with that key again. The refusal is the key's,
+/// held as its ``CORE/keyDigest(_:)``: another key, such as one corrected in the
+/// settings, is asked as usual, and a 401 for it refuses that key instead.
 public final class CoreThrottle: @unchecked Sendable {
     /// The pause every service in this process shares.
     public static let shared = CoreThrottle()
@@ -95,7 +107,7 @@ public final class CoreThrottle: @unchecked Sendable {
     private let pauseAfter: Int
     private var consecutive = 0
     private var paused = false
-    private var keyRefused = false
+    private var refusedKeyDigest: String?
 
     public init(pauseAfter: Int = BioMedLitConstants.corePauseAfterConsecutive429) {
         self.pauseAfter = pauseAfter
@@ -107,17 +119,23 @@ public final class CoreThrottle: @unchecked Sendable {
         return paused
     }
 
-    /// Whether CORE refused the key this session (#498).
-    public var isKeyRefused: Bool {
+    /// Whether CORE refused this key this session (#498); any other key is asked as usual.
+    ///
+    /// - Parameter keyDigest: The key's ``CORE/keyDigest(_:)``.
+    public func refuses(keyDigest: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        return keyRefused
+        return refusedKeyDigest == keyDigest
     }
 
-    /// Note how one fetch ended: its HTTP status, or nil when it got none. A 401 marks the
-    /// key refused for good; like any ending but a 429, it also resets the 429 count.
-    func record(endedOn status: Int?) {
+    /// Note how one fetch ended. A 401 marks the key it was sent with refused, in place of
+    /// any key refused before; like any ending but a 429, it also resets the 429 count.
+    ///
+    /// - Parameters:
+    ///   - status: Its HTTP status, or nil when it got none.
+    ///   - keyDigest: The ``CORE/keyDigest(_:)`` of the key it was sent with.
+    func record(endedOn status: Int?, keyDigest: String) {
         lock.lock(); defer { lock.unlock() }
-        if status == BioMedLitConstants.coreKeyRefusedStatus { keyRefused = true }
+        if status == BioMedLitConstants.coreKeyRefusedStatus { refusedKeyDigest = keyDigest }
         guard status == BioMedLitConstants.httpStatusRateLimited else {
             consecutive = 0
             return

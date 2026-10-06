@@ -203,7 +203,7 @@ final class FullTextServiceCORETests: XCTestCase {
         StubURLProtocol.routes[coreHost] = (401, Data())
         let first = try await makeService(coreThrottle: throttle).fetchFullText(pmcId: nil, doi: doi, pmid: "1")
         XCTAssertEqual(coreRequests, 1)
-        XCTAssertTrue(throttle.isKeyRefused)
+        XCTAssertTrue(throttle.refuses(keyDigest: CORE.keyDigest("test-core-key")))
         let second = try await makeService(coreThrottle: throttle).fetchFullText(pmcId: nil, doi: doi, pmid: "2")
         XCTAssertEqual(coreRequests, 1, "a refused key sends nothing")
         for result in [first, second] {
@@ -228,14 +228,47 @@ final class FullTextServiceCORETests: XCTestCase {
         let first = try await makeService(coreThrottle: throttle).fetchFullText(pmcId: nil, doi: doi, pmid: "1")
         _ = try await makeService(coreThrottle: throttle).fetchFullText(pmcId: nil, doi: doi, pmid: "2")
         XCTAssertEqual(coreRequests, 2)
-        XCTAssertFalse(throttle.isKeyRefused)
+        XCTAssertFalse(throttle.refuses(keyDigest: CORE.keyDigest("test-core-key")))
         XCTAssertEqual(first.openAccessShortfall?.entries.last?.reason, .failed(.httpStatus(403)))
+    }
+
+    /// The refusal is the refused key's: a key corrected in the settings is
+    /// asked again, and served (#498).
+    func testACorrectedKeyIsAskedAgain() async throws {
+        let throttle = CoreThrottle()
+        StubURLProtocol.routes[coreHost] = (401, Data())
+        let refused = try await makeService(coreThrottle: throttle)
+            .fetchCoreText(doi: doi, apiKey: "test-core-key")
+        XCTAssertEqual(refused, .keyRefused)
+        StubURLProtocol.routes[coreHost] = (200, hit(longText))
+        let result = try await makeService(coreAPIKey: "test-core-key-corrected", coreThrottle: throttle)
+            .fetchFullText(pmcId: nil, doi: doi, pmid: "1")
+        XCTAssertEqual(result.content, .core(text: longText))
+        XCTAssertEqual(coreRequests, 2)
+        let index = try XCTUnwrap(
+            StubURLProtocol.requestedURLs.lastIndex { URL(string: $0)?.host == coreHost })
+        XCTAssertEqual(StubURLProtocol.requestedHeaders[index]["Authorization"], "Bearer test-core-key-corrected")
+    }
+
+    /// The control: the refused key stays refused beside another, and sends nothing.
+    func testTheRefusedKeyStaysRefused() async throws {
+        let throttle = CoreThrottle()
+        StubURLProtocol.routes[coreHost] = (401, Data())
+        _ = try await makeService(coreThrottle: throttle).fetchCoreText(doi: doi, apiKey: "test-core-key")
+        StubURLProtocol.routes[coreHost] = (200, hit(longText))
+        _ = try await makeService(coreThrottle: throttle)
+            .fetchCoreText(doi: doi, apiKey: "test-core-key-corrected")
+        let again = try await makeService(coreThrottle: throttle).fetchCoreText(doi: doi, apiKey: "test-core-key")
+        XCTAssertEqual(again, .keyRefused)
+        XCTAssertEqual(coreRequests, 2)
     }
 
     /// Refused and paused, a fetch is told the key: the cause the reader can act on.
     func testARefusedKeyIsToldBeforeAPause() async throws {
         let throttle = CoreThrottle()
-        for status in [429, 429, BioMedLitConstants.coreKeyRefusedStatus] { throttle.record(endedOn: status) }
+        for status in [429, 429, BioMedLitConstants.coreKeyRefusedStatus] {
+            throttle.record(endedOn: status, keyDigest: CORE.keyDigest("test-core-key"))
+        }
         StubURLProtocol.routes[coreHost] = (200, hit(longText))
         let fetch = try await makeService(coreThrottle: throttle).fetchCoreText(doi: doi, apiKey: "test-core-key")
         XCTAssertEqual(fetch, .keyRefused)

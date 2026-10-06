@@ -1343,7 +1343,8 @@ public actor FullTextService {
     /// CORE's extracted text for a DOI (#480, stage C). The key travels in the
     /// `Authorization` header alone. A fetch ending in 429 counts towards the
     /// session pause; any other ending resets it. A fetch ending in 401 marks
-    /// the key refused for the session (#498). The statuses are pinned by
+    /// this key refused for the session (#498); another key is asked as usual.
+    /// The statuses are pinned by
     /// `fulltext_parity/core_fulltext.json` ("status"). Internal rather than
     /// private so each outcome can be tested on its own.
     ///
@@ -1355,12 +1356,15 @@ public actor FullTextService {
     ///   200 (a 404 included: a search's 404 says nothing about the article),
     ///   an answer we cannot read (`malformedResponse`), a transport failure,
     ///   or a session pause (`httpStatus(429)`, no request made); or
-    ///   `keyRefused` for a 401, and for every fetch after one (no request made).
+    ///   `keyRefused` for a 401, and for every later fetch with that key (no
+    ///   request made).
     /// - Throws: `CancellationError` only.
     func fetchCoreText(doi: String, apiKey: String) async throws -> COREFetch {
         guard !doi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .absent }
         // The key before the pause: it is the cause the reader can act on (#498).
-        if coreThrottle.isKeyRefused { return .keyRefused }
+        // Only the refused key is refused: a corrected one is asked again.
+        let keyDigest = CORE.keyDigest(apiKey)
+        if coreThrottle.refuses(keyDigest: keyDigest) { return .keyRefused }
         if coreThrottle.isPaused {
             return .unreachable(.httpStatus(BioMedLitConstants.httpStatusRateLimited))
         }
@@ -1379,18 +1383,18 @@ public actor FullTextService {
             throw CancellationError()
         } catch FullTextError.serverError(let statusCode) {
             // A throttle or server error that outlasted its retries.
-            coreThrottle.record(endedOn: statusCode)
+            coreThrottle.record(endedOn: statusCode, keyDigest: keyDigest)
             return .unreachable(.httpStatus(statusCode))
         } catch FullTextError.invalidResponse {
             // As OpenAlex maps it: an answer that is not HTTP
-            coreThrottle.record(endedOn: nil)
+            coreThrottle.record(endedOn: nil, keyDigest: keyDigest)
             return .unreachable(.malformedResponse)
         } catch {
             // Logged by the chain, which knows what it falls through to.
-            coreThrottle.record(endedOn: nil)
+            coreThrottle.record(endedOn: nil, keyDigest: keyDigest)
             return .unreachable(SearchTransport.failure(for: error))
         }
-        coreThrottle.record(endedOn: answer.status)
+        coreThrottle.record(endedOn: answer.status, keyDigest: keyDigest)
         if answer.status == BioMedLitConstants.coreKeyRefusedStatus { return .keyRefused }
         guard answer.status == BioMedLitConstants.httpStatusOK else {
             return .unreachable(.httpStatus(answer.status))

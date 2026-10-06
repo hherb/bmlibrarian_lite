@@ -172,10 +172,21 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         ///   - reason: Why it left the question open.
         ///   - address: The PDF's address, if it is a PDF's entry.
         fileprivate init(source: OpenAccessSource, reason: OpenAccessUnsettledReason, address: String?) {
+            let trimmed = address?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let kept = (trimmed?.isEmpty ?? true) ? nil : trimmed
+            // A skip is a service's own lookup, and only its own service's: any other
+            // would be written as one that reads back as another source's (Kotlin's `require`)
+            switch reason {
+            case .notConfigured:
+                precondition(source == .unpaywall && kept == nil, "a not-configured skip is Unpaywall's own lookup")
+            case .keyRefused:
+                precondition(source == .core && kept == nil, "a refused-key skip is CORE's own lookup")
+            case .failed:
+                break
+            }
             self.source = source
             self.reason = reason
-            let trimmed = address?.trimmingCharacters(in: .whitespacesAndNewlines)
-            self.address = (trimmed?.isEmpty ?? true) ? nil : trimmed
+            self.address = kept
         }
 
         /// The failure, or `nil` for a lookup that was never made.

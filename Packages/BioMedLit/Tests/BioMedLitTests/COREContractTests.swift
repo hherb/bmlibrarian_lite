@@ -27,6 +27,8 @@ enum COREContract {
 
 final class COREContractTests: XCTestCase {
     private var contract: [String: Any] = [:]
+    /// The fingerprint of the key the throttle tests send.
+    private let digest = CORE.keyDigest("test-core-key")
 
     override func setUpWithError() throws {
         contract = try COREContract.load()
@@ -42,7 +44,7 @@ final class COREContractTests: XCTestCase {
         XCTAssertEqual(Set(contract.keys), [
             "schema_version", "description", "service_name", "source", "source_label",
             "desktop_source_type", "base_url", "min_fulltext_chars",
-            "pause_after_consecutive_429", "key_refused_status", "key_refused_reason",
+            "pause_after_consecutive_429", "key_refused_status", "key_refused_reason", "key_refusal_scope",
             "search_url", "full_text", "status", "bodies",
         ])
     }
@@ -56,6 +58,8 @@ final class COREContractTests: XCTestCase {
         XCTAssertEqual(OpenAccessSource.core.serviceName, "CORE")
         XCTAssertEqual(contract["key_refused_status"] as? Int, BioMedLitConstants.coreKeyRefusedStatus)
         XCTAssertEqual(contract["key_refused_reason"] as? String, BioMedLitConstants.coreKeyRefusedReason)
+        // The refusal is scoped to the key refused (#498): a corrected key is asked again
+        XCTAssertEqual(contract["key_refusal_scope"] as? String, "the refused key")
     }
 
     func testEachSearchURL() throws {
@@ -101,43 +105,63 @@ final class COREContractTests: XCTestCase {
 
     func testTwo429sInARowPause() {
         let throttle = CoreThrottle(pauseAfter: 2)
-        throttle.record(endedOn: 429)
+        throttle.record(endedOn: 429, keyDigest: digest)
         XCTAssertFalse(throttle.isPaused)
-        throttle.record(endedOn: 429)
+        throttle.record(endedOn: 429, keyDigest: digest)
         XCTAssertTrue(throttle.isPaused)
     }
 
     func testA401RefusesTheKeyForGood() {
         let throttle = CoreThrottle(pauseAfter: 2)
-        XCTAssertFalse(throttle.isKeyRefused)
-        throttle.record(endedOn: BioMedLitConstants.coreKeyRefusedStatus)
-        XCTAssertTrue(throttle.isKeyRefused)
-        throttle.record(endedOn: 200)
-        XCTAssertTrue(throttle.isKeyRefused, "nothing lifts a refused key")
+        XCTAssertFalse(throttle.refuses(keyDigest: digest))
+        throttle.record(endedOn: BioMedLitConstants.coreKeyRefusedStatus, keyDigest: digest)
+        XCTAssertTrue(throttle.refuses(keyDigest: digest))
+        throttle.record(endedOn: 200, keyDigest: digest)
+        XCTAssertTrue(throttle.refuses(keyDigest: digest), "another ending lifts no refusal")
+    }
+
+    func testA401ForAnotherKeyRefusesThatKeyInstead() {
+        let throttle = CoreThrottle(pauseAfter: 2)
+        let other = CORE.keyDigest("test-core-key-corrected")
+        throttle.record(endedOn: BioMedLitConstants.coreKeyRefusedStatus, keyDigest: digest)
+        XCTAssertFalse(throttle.refuses(keyDigest: other), "another key is asked as usual")
+        throttle.record(endedOn: BioMedLitConstants.coreKeyRefusedStatus, keyDigest: other)
+        XCTAssertTrue(throttle.refuses(keyDigest: other))
+        XCTAssertFalse(throttle.refuses(keyDigest: digest))
+    }
+
+    func testTheKeyIsHeldAsADigestOfTheTrimmedKey() {
+        XCTAssertEqual(CORE.keyDigest("  test-core-key\n"), digest)
+        XCTAssertNotEqual(CORE.keyDigest("test-core-key-corrected"), digest)
+        XCTAssertEqual(digest.count, 64)
+        XCTAssertFalse(digest.contains("test-core-key"))
+        XCTAssertTrue(digest.allSatisfy(\.isHexDigit))
+        // Python's core_key_digest of the same key, so the platforms agree
+        XCTAssertEqual(digest, "648a20094c7319271078b3f552cac0ce0f0f84c812ee4be3b825f6a3e489be68")
     }
 
     func testA403RefusesNothing() {
         let throttle = CoreThrottle(pauseAfter: 2)
-        throttle.record(endedOn: 403)
-        XCTAssertFalse(throttle.isKeyRefused)
+        throttle.record(endedOn: 403, keyDigest: digest)
+        XCTAssertFalse(throttle.refuses(keyDigest: digest))
     }
 
     func testA401ResetsThe429Count() {
         let throttle = CoreThrottle(pauseAfter: 2)
-        throttle.record(endedOn: 429)
-        throttle.record(endedOn: BioMedLitConstants.coreKeyRefusedStatus)
-        throttle.record(endedOn: 429)
+        throttle.record(endedOn: 429, keyDigest: digest)
+        throttle.record(endedOn: BioMedLitConstants.coreKeyRefusedStatus, keyDigest: digest)
+        throttle.record(endedOn: 429, keyDigest: digest)
         XCTAssertFalse(throttle.isPaused)
     }
 
     func testAnotherEndingResetsTheCount() {
         let throttle = CoreThrottle(pauseAfter: 2)
-        throttle.record(endedOn: 429)
-        throttle.record(endedOn: 200)
-        throttle.record(endedOn: 429)
+        throttle.record(endedOn: 429, keyDigest: digest)
+        throttle.record(endedOn: 200, keyDigest: digest)
+        throttle.record(endedOn: 429, keyDigest: digest)
         XCTAssertFalse(throttle.isPaused)
-        throttle.record(endedOn: nil)
-        throttle.record(endedOn: 429)
+        throttle.record(endedOn: nil, keyDigest: digest)
+        throttle.record(endedOn: 429, keyDigest: digest)
         XCTAssertFalse(throttle.isPaused)
     }
 }
