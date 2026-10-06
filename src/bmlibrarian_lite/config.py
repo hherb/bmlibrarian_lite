@@ -422,7 +422,7 @@ class DiscoveryConfig:
     """PDF discovery and download configuration."""
 
     unpaywall_email: str = ""  # Email for Unpaywall API (enables additional PDF sources)
-    core_api_key: Optional[str] = None  # CORE's API key (#480): CORE's extracted text when no other source has the article
+    core_api_key: str | None = None  # CORE's API key (#480): CORE's extracted text when no other source has the article
 
 
 @dataclass

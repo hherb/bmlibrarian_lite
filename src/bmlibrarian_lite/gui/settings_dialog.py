@@ -676,11 +676,11 @@ class SettingsDialog(QDialog):
         tab = QWidget()
         layout = QFormLayout(tab)
         layout.setContentsMargins(scaled(12), scaled(12), scaled(12), scaled(12))
-        layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
         self.core_api_key_input = QLineEdit()
         self.core_api_key_input.setPlaceholderText("Optional")
-        self.core_api_key_input.setEchoMode(QLineEdit.Password)
+        self.core_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.core_api_key_input.setToolTip(CORE_API_KEY_EXPLANATION)
         layout.addRow("CORE API Key:", self.core_api_key_input)
         explanation = QLabel(f"<small>{CORE_API_KEY_EXPLANATION}</small>")
