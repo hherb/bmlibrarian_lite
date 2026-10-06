@@ -159,8 +159,9 @@ public enum BioMedLitConstants {
     public static let coreMinFullTextCharacters = 5000
     /// Consecutive fetches ending in 429 after which CORE is not asked again this session.
     public static let corePauseAfterConsecutive429 = 2
-    /// The one status that means CORE refused the key (#498): the first marks it refused
-    /// for the rest of the process. Not 403, which Cloudflare can answer to a valid key.
+    /// The one status that means CORE refused the key (#498): the first marks that key refused
+    /// for the rest of the process (a corrected key is asked again). Not 403, which Cloudflare
+    /// can answer to a valid key.
     public static let coreKeyRefusedStatus = 401
     /// A refused key as the reader is told it, Python's `LookupSkipReason.KEY_REFUSED` words.
     public static let coreKeyRefusedReason = "the key in the settings was refused"
