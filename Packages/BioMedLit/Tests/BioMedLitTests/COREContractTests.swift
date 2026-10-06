@@ -42,7 +42,8 @@ final class COREContractTests: XCTestCase {
         XCTAssertEqual(Set(contract.keys), [
             "schema_version", "description", "service_name", "source", "source_label",
             "desktop_source_type", "base_url", "min_fulltext_chars",
-            "pause_after_consecutive_429", "search_url", "full_text", "status", "bodies",
+            "pause_after_consecutive_429", "key_refused_status", "key_refused_reason",
+            "search_url", "full_text", "status", "bodies",
         ])
     }
 
@@ -53,6 +54,8 @@ final class COREContractTests: XCTestCase {
         XCTAssertEqual(contract["min_fulltext_chars"] as? Int, BioMedLitConstants.coreMinFullTextCharacters)
         XCTAssertEqual(contract["pause_after_consecutive_429"] as? Int, BioMedLitConstants.corePauseAfterConsecutive429)
         XCTAssertEqual(OpenAccessSource.core.serviceName, "CORE")
+        XCTAssertEqual(contract["key_refused_status"] as? Int, BioMedLitConstants.coreKeyRefusedStatus)
+        XCTAssertEqual(contract["key_refused_reason"] as? String, BioMedLitConstants.coreKeyRefusedReason)
     }
 
     func testEachSearchURL() throws {
@@ -102,6 +105,29 @@ final class COREContractTests: XCTestCase {
         XCTAssertFalse(throttle.isPaused)
         throttle.record(endedOn: 429)
         XCTAssertTrue(throttle.isPaused)
+    }
+
+    func testA401RefusesTheKeyForGood() {
+        let throttle = CoreThrottle(pauseAfter: 2)
+        XCTAssertFalse(throttle.isKeyRefused)
+        throttle.record(endedOn: BioMedLitConstants.coreKeyRefusedStatus)
+        XCTAssertTrue(throttle.isKeyRefused)
+        throttle.record(endedOn: 200)
+        XCTAssertTrue(throttle.isKeyRefused, "nothing lifts a refused key")
+    }
+
+    func testA403RefusesNothing() {
+        let throttle = CoreThrottle(pauseAfter: 2)
+        throttle.record(endedOn: 403)
+        XCTAssertFalse(throttle.isKeyRefused)
+    }
+
+    func testA401ResetsThe429Count() {
+        let throttle = CoreThrottle(pauseAfter: 2)
+        throttle.record(endedOn: 429)
+        throttle.record(endedOn: BioMedLitConstants.coreKeyRefusedStatus)
+        throttle.record(endedOn: 429)
+        XCTAssertFalse(throttle.isPaused)
     }
 
     func testAnotherEndingResetsTheCount() {

@@ -62,10 +62,10 @@ public enum OpenAccessSource: String, Sendable, CaseIterable {
     }
 }
 
-/// Why a lookup of the Unpaywall tier left the question of a free copy open.
+/// Why a lookup of the open-access chain left the question of a free copy open.
 ///
-/// Python records the two as a `SourceLookupFailure` and a `SourceLookupSkipped`
-/// with `LookupSkipReason.NOT_CONFIGURED`.
+/// Python records these as a `SourceLookupFailure`, or a `SourceLookupSkipped`
+/// with `LookupSkipReason.NOT_CONFIGURED` or `LookupSkipReason.KEY_REFUSED`.
 public enum OpenAccessUnsettledReason: Sendable, Equatable, Hashable {
     /// The lookup was made and did not settle it; why, by kind and status only.
     case failed(RequestFailure)
@@ -74,6 +74,22 @@ public enum OpenAccessUnsettledReason: Sendable, Equatable, Hashable {
     /// Only ``OpenAccessSource/unpaywall`` is ever skipped so; see
     /// ``OpenAccessShortfall/unpaywallNotConfigured``.
     case notConfigured
+
+    /// CORE was not asked: it refused the key the settings hold, on this fetch
+    /// or earlier this session (#498). Only ``OpenAccessSource/core`` is ever
+    /// skipped so; see ``OpenAccessShortfall/coreKeyRefused``. Configured, so
+    /// it earns no configuration nudge.
+    case keyRefused
+
+    /// The reason as the reader is told it, in the sentence's parenthesis
+    /// (Python's `RequestFailure.describe()` or `SourceLookupSkipped.describe()`).
+    public var described: String {
+        switch self {
+        case .failed(let failure): return failure.describe()
+        case .notConfigured: return OpenAccessShortfall.notConfiguredDescription
+        case .keyRefused: return BioMedLitConstants.coreKeyRefusedReason
+        }
+    }
 }
 
 /// Why the open-access copy Unpaywall may know of went unassessed (#464, #466).
@@ -114,6 +130,9 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
     /// Python's `LookupSkipReason.NOT_CONFIGURED`, as stored.
     private static let skippedNotConfigured = "not_configured"
 
+    /// Python's `LookupSkipReason.KEY_REFUSED`, as stored (#498).
+    private static let skippedKeyRefused = "key_refused"
+
     /// Python's `SourceLookupSkipped.describe()` for that reason.
     fileprivate static let notConfiguredDescription = "not configured"
 
@@ -122,7 +141,8 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         /// Which lookup, or whose PDF.
         public let source: OpenAccessSource
 
-        /// Why: a failed lookup, or an Unpaywall that was not configured.
+        /// Why: a failed lookup, an Unpaywall that was not configured, or
+        /// CORE's refused key.
         public let reason: OpenAccessUnsettledReason
 
         /// The PDF's address, for a PDF a source named (#480); `nil` for a
@@ -142,7 +162,8 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         /// Create an entry from any reason, a skipped lookup's included.
         ///
         /// Kept to this file so that only ``OpenAccessShortfall`` makes a
-        /// `.notConfigured` entry, and only for Unpaywall. The address is
+        /// `.notConfigured` entry, and only for Unpaywall, or a `.keyRefused`
+        /// entry, and only for CORE, without an address. The address is
         /// trimmed, and a blank one becomes `nil`, so an entry with an address
         /// is always a tried PDF.
         ///
@@ -167,9 +188,7 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         fileprivate var couldNotBeAsked: Bool { failure.map { !$0.isAnswer } ?? true }
 
         /// Its reason as the reader is told it.
-        fileprivate var described: String {
-            failure?.describe() ?? OpenAccessShortfall.notConfiguredDescription
-        }
+        fileprivate var described: String { reason.described }
     }
 
     /// What went unsettled, in the order it was met; never empty.
@@ -203,6 +222,13 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
     /// Unpaywall, never asked for want of a contact email it would accept.
     public static let unpaywallNotConfigured = OpenAccessShortfall(
         entries: [Entry(source: .unpaywall, reason: .notConfigured, address: nil)]
+    )
+
+    /// CORE, not asked because it refused the key the settings hold (#498).
+    /// Told as "CORE (the key in the settings was refused) could not be asked";
+    /// it keeps the absence unsettled, as any source not asked does.
+    public static let coreKeyRefused = OpenAccessShortfall(
+        entries: [Entry(source: .core, reason: .keyRefused, address: nil)]
     )
 
     /// The first entry's source, for callers that log one; decide nothing from
@@ -359,7 +385,8 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         return Self.triedSourcesLead + texts.joined(separator: "; ") + ". " + ending
     }
 
-    /// Python's `configuration_nudge`: only Unpaywall is ever not configured.
+    /// Python's `configuration_nudge`: only Unpaywall is ever not configured. A
+    /// refused CORE key is configured, so it earns none (#498).
     private func withNudge(_ sentence: String) -> String {
         guard entries.contains(where: { $0.reason == .notConfigured }) else { return sentence }
         return "\(sentence) Configuring \(OpenAccessSource.unpaywall.serviceName) "
@@ -428,7 +455,8 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
     ///
     /// One lookup without an address keeps schema 1:
     /// `{"failure":{"kind":…,"status_code":…},"schema_version":1,"source":…}`
-    /// (for a lookup not made, `"skipped":"not_configured"` in its place).
+    /// (for a lookup not made, `"skipped":"not_configured"` or
+    /// `"skipped":"key_refused"` in its place).
     /// Anything else is schema 2: `{"entries":[…],"schema_version":2}`, each
     /// entry in the same shape plus the PDF's `address`.
     ///
@@ -465,6 +493,7 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         switch entry.reason {
         case .failed(let failure): object[keyFailure] = SearchFailureReporting.failureObject(failure)
         case .notConfigured: object[keySkipped] = skippedNotConfigured
+        case .keyRefused: object[keySkipped] = skippedKeyRefused
         }
         return object
     }
@@ -478,8 +507,9 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
     /// Unpaywall, the tier every open-access lookup belongs to. An unknown
     /// source reads as Unpaywall too; the failure degrades as a search
     /// shortfall's does (`search_failure_reporting.md`, "Persisted form"). A
-    /// stored skip is Unpaywall's, whatever source it names: only Unpaywall is
-    /// skipped.
+    /// stored `not_configured` skip is Unpaywall's and a stored `key_refused`
+    /// skip CORE's, whatever source it names: only they are skipped so. Any
+    /// other skip reads by its failure.
     ///
     /// - Parameter stored: The stored value, untrusted.
     /// - Returns: The shortfall, as specific as the stored value allows.
@@ -506,8 +536,13 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
 
     /// One stored entry, as specific as it allows.
     private static func restoredEntry(_ fields: [String: Any]) -> Entry {
-        if fields[keySkipped] as? String == skippedNotConfigured {
+        switch fields[keySkipped] as? String {
+        case skippedNotConfigured:
             return Entry(source: .unpaywall, reason: .notConfigured, address: nil)
+        case skippedKeyRefused:
+            return Entry(source: .core, reason: .keyRefused, address: nil)
+        default:
+            break
         }
         let source = (fields[keySource] as? String).flatMap(OpenAccessSource.init(rawValue:)) ?? .unpaywall
         return Entry(

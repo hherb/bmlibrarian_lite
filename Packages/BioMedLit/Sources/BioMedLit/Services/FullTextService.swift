@@ -634,7 +634,7 @@ public actor FullTextService {
                 // The tier's own failure type carries no description, so the
                 // shortfall names what went unsettled and why
                 let cause = shortfall.map {
-                    "\($0.source.serviceName): \($0.failure?.describe() ?? "not configured")"
+                    "\($0.source.serviceName): \($0.reason.described)"
                 } ?? error.localizedDescription
                 BioMedLitLib.logger?.warning(
                     "Unpaywall failed for DOI \(doi) (\(cause))", category: .fullText
@@ -728,6 +728,15 @@ public actor FullTextService {
                         )
                         BioMedLitLib.logger?.warning(
                             "CORE could not be asked about DOI \(doi) (\(failure.describe())), so any "
+                                + "text it holds is not assessed",
+                            category: .fullText
+                        )
+                    case .keyRefused:
+                        // A skip, not a failure: told as the key, and it keeps
+                        // the absence unsettled (#498)
+                        openAccessShortfall = .adding(.coreKeyRefused, to: openAccessShortfall)
+                        BioMedLitLib.logger?.warning(
+                            "CORE refused the configured key; not asked about DOI \(doi), so any "
                                 + "text it holds is not assessed",
                             category: .fullText
                         )
@@ -921,7 +930,7 @@ public actor FullTextService {
             BioMedLitLib.logger?.warning(
                 "No source served full text for \(articleName), and the open-access copy "
                     + "went unassessed (\(openAccessShortfall.source.serviceName): "
-                    + "\(openAccessShortfall.failure?.describe() ?? "not configured"))",
+                    + "\(openAccessShortfall.reason.described))",
                 category: .fullText
             )
             return .openAccessNotEstablished(openAccessShortfall)
@@ -1333,7 +1342,8 @@ public actor FullTextService {
 
     /// CORE's extracted text for a DOI (#480, stage C). The key travels in the
     /// `Authorization` header alone. A fetch ending in 429 counts towards the
-    /// session pause; any other ending resets it. The statuses are pinned by
+    /// session pause; any other ending resets it. A fetch ending in 401 marks
+    /// the key refused for the session (#498). The statuses are pinned by
     /// `fulltext_parity/core_fulltext.json` ("status"). Internal rather than
     /// private so each outcome can be tested on its own.
     ///
@@ -1344,10 +1354,13 @@ public actor FullTextService {
     ///   absent when none is; or unreachable, of its real kind: any status but
     ///   200 (a 404 included: a search's 404 says nothing about the article),
     ///   an answer we cannot read (`malformedResponse`), a transport failure,
-    ///   or a session pause (`httpStatus(429)`, no request made).
+    ///   or a session pause (`httpStatus(429)`, no request made); or
+    ///   `keyRefused` for a 401, and for every fetch after one (no request made).
     /// - Throws: `CancellationError` only.
     func fetchCoreText(doi: String, apiKey: String) async throws -> COREFetch {
         guard !doi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .absent }
+        // The key before the pause: it is the cause the reader can act on (#498).
+        if coreThrottle.isKeyRefused { return .keyRefused }
         if coreThrottle.isPaused {
             return .unreachable(.httpStatus(BioMedLitConstants.httpStatusRateLimited))
         }
@@ -1378,6 +1391,7 @@ public actor FullTextService {
             return .unreachable(SearchTransport.failure(for: error))
         }
         coreThrottle.record(endedOn: answer.status)
+        if answer.status == BioMedLitConstants.coreKeyRefusedStatus { return .keyRefused }
         guard answer.status == BioMedLitConstants.httpStatusOK else {
             return .unreachable(.httpStatus(answer.status))
         }

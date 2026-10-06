@@ -80,6 +80,10 @@ final class OpenAccessStatementContractTests: XCTestCase {
                 (entry["source"] as? String).flatMap(OpenAccessSource.init(rawValue:)), "\(entry)"
             )
             if entry["skipped"] as? String == "not_configured" { return .unpaywallNotConfigured }
+            if entry["skipped"] as? String == "key_refused" {
+                XCTAssertEqual(source, .core, "\(entry)")
+                return .coreKeyRefused
+            }
             let kind = try XCTUnwrap(
                 (entry["kind"] as? String).flatMap(RequestFailureKind.init(rawValue:)), "\(entry)"
             )

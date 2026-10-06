@@ -77,11 +77,16 @@ enum COREFetch: Equatable {
     case served(String)
     case absent
     case unreachable(RequestFailure)
+    /// CORE refused the key, on this fetch or an earlier one this session (#498): CORE
+    /// was not asked about the article, and the reader is told the key, never the article.
+    case keyRefused
 }
 
-/// CORE's session pause: two consecutive fetches ending in 429 stop CORE being asked
-/// again until the process ends. Shared by every `FullTextService`, since the app builds
-/// one per screen; CORE's key buys a daily budget no pacing can express.
+/// CORE's session state, shared by every `FullTextService`, since the app builds one per
+/// screen. Two consecutive fetches ending in 429 pause CORE until the process ends: its
+/// key buys a daily budget no pacing can express. A fetch ending in 401 marks the key
+/// refused for the rest of the process (#498): every article would be refused alike, so
+/// CORE is not asked again, and nothing lifts it.
 public final class CoreThrottle: @unchecked Sendable {
     /// The pause every service in this process shares.
     public static let shared = CoreThrottle()
@@ -90,6 +95,7 @@ public final class CoreThrottle: @unchecked Sendable {
     private let pauseAfter: Int
     private var consecutive = 0
     private var paused = false
+    private var keyRefused = false
 
     public init(pauseAfter: Int = BioMedLitConstants.corePauseAfterConsecutive429) {
         self.pauseAfter = pauseAfter
@@ -101,9 +107,17 @@ public final class CoreThrottle: @unchecked Sendable {
         return paused
     }
 
-    /// Note how one fetch ended: its HTTP status, or nil when it got none.
+    /// Whether CORE refused the key this session (#498).
+    public var isKeyRefused: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return keyRefused
+    }
+
+    /// Note how one fetch ended: its HTTP status, or nil when it got none. A 401 marks the
+    /// key refused for good; like any ending but a 429, it also resets the 429 count.
     func record(endedOn status: Int?) {
         lock.lock(); defer { lock.unlock() }
+        if status == BioMedLitConstants.coreKeyRefusedStatus { keyRefused = true }
         guard status == BioMedLitConstants.httpStatusRateLimited else {
             consecutive = 0
             return

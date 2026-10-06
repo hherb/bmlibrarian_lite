@@ -196,6 +196,52 @@ final class FullTextServiceCORETests: XCTestCase {
         XCTAssertEqual(third.openAccessShortfall?.entries.last?.reason, .failed(.httpStatus(429)))
     }
 
+    /// The first 401 is told as a refused key, and no service sharing the
+    /// throttle asks CORE again (#498).
+    func testA401RefusesTheKeyAcrossServices() async throws {
+        let throttle = CoreThrottle()
+        StubURLProtocol.routes[coreHost] = (401, Data())
+        let first = try await makeService(coreThrottle: throttle).fetchFullText(pmcId: nil, doi: doi, pmid: "1")
+        XCTAssertEqual(coreRequests, 1)
+        XCTAssertTrue(throttle.isKeyRefused)
+        let second = try await makeService(coreThrottle: throttle).fetchFullText(pmcId: nil, doi: doi, pmid: "2")
+        XCTAssertEqual(coreRequests, 1, "a refused key sends nothing")
+        for result in [first, second] {
+            let last = try XCTUnwrap(result.openAccessShortfall?.entries.last)
+            XCTAssertEqual(last.source, .core)
+            XCTAssertEqual(last.reason, .keyRefused)
+            XCTAssertNil(last.address)
+            XCTAssertFalse(result.openAccessShortfall?.notice.contains("HTTP 401") ?? true)
+            XCTAssertTrue(
+                result.openAccessShortfall?.notice
+                    .contains("CORE (the key in the settings was refused) could not be asked") ?? false
+            )
+        }
+        // Blocks a settled absence: the chain ends on an unsettled open-access copy
+        XCTAssertEqual(second.openAccessShortfall, .coreKeyRefused)
+    }
+
+    /// The control: a 403 is an ordinary answer, and CORE is asked again.
+    func testA403IsAnOrdinaryAnswerAndRefusesNothing() async throws {
+        let throttle = CoreThrottle()
+        StubURLProtocol.routes[coreHost] = (403, Data())
+        let first = try await makeService(coreThrottle: throttle).fetchFullText(pmcId: nil, doi: doi, pmid: "1")
+        _ = try await makeService(coreThrottle: throttle).fetchFullText(pmcId: nil, doi: doi, pmid: "2")
+        XCTAssertEqual(coreRequests, 2)
+        XCTAssertFalse(throttle.isKeyRefused)
+        XCTAssertEqual(first.openAccessShortfall?.entries.last?.reason, .failed(.httpStatus(403)))
+    }
+
+    /// Refused and paused, a fetch is told the key: the cause the reader can act on.
+    func testARefusedKeyIsToldBeforeAPause() async throws {
+        let throttle = CoreThrottle()
+        for status in [429, 429, BioMedLitConstants.coreKeyRefusedStatus] { throttle.record(endedOn: status) }
+        StubURLProtocol.routes[coreHost] = (200, hit(longText))
+        let fetch = try await makeService(coreThrottle: throttle).fetchCoreText(doi: doi, apiKey: "test-core-key")
+        XCTAssertEqual(fetch, .keyRefused)
+        XCTAssertEqual(coreRequests, 0)
+    }
+
     func testACopyServedButNotCachedMeansCOREIsNotAsked() async throws {
         // FullTextServiceOpenAlexTests' "served but not cached" setup: an
         // Unpaywall PDF route answering %PDF and a `writeCachedPDF` that throws.
@@ -233,7 +279,8 @@ final class FullTextServiceCORETests: XCTestCase {
     }
 
     /// Every row of the shared contract's status table gets its outcome here:
-    /// 200 serves the text, every other status (404 included) is unreachable.
+    /// 200 serves the text, 401 refuses the key (#498), every other status (404
+    /// and 403 included) is unreachable.
     func testEveryStatusRowOfTheContractGetsItsOutcome() async throws {
         let rows = try XCTUnwrap(COREContract.load()["status"] as? [[String: Any]])
         XCTAssertGreaterThanOrEqual(rows.count, 9, "status table lost rows")
@@ -243,9 +290,12 @@ final class FullTextServiceCORETests: XCTestCase {
             StubURLProtocol.routes[coreHost] = (status, status == 200 ? hit(longText) : Data())
             let fetch = try await makeService(coreThrottle: CoreThrottle())
                 .fetchCoreText(doi: doi, apiKey: "test-core-key")
-            if status == 200 {
+            switch row["outcome"] as? String {
+            case "served":
                 XCTAssertEqual(fetch, .served(longText), "status \(status)")
-            } else {
+            case "key_refused":
+                XCTAssertEqual(fetch, .keyRefused, "status \(status)")
+            default:
                 XCTAssertEqual(fetch, .unreachable(.httpStatus(status)), "status \(status)")
             }
         }

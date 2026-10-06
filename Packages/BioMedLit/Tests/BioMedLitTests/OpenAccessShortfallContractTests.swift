@@ -72,9 +72,16 @@ final class OpenAccessShortfallContractTests: XCTestCase {
             (row["source"] as? String).flatMap(OpenAccessSource.init(rawValue:)), "\(row)"
         )
         if let skipped = row["skipped"] as? String {
-            XCTAssertEqual(skipped, "not_configured", "\(row)")
-            XCTAssertEqual(source, .unpaywall, "\(row)")
-            return .unpaywallNotConfigured
+            switch skipped {
+            case "not_configured":
+                XCTAssertEqual(source, .unpaywall, "\(row)")
+                return .unpaywallNotConfigured
+            case "key_refused":
+                XCTAssertEqual(source, .core, "\(row)")
+                return .coreKeyRefused
+            default:
+                throw ContractError.malformed("an unknown skip in \(row)")
+            }
         }
         let kind = try XCTUnwrap(
             (row["kind"] as? String).flatMap(RequestFailureKind.init(rawValue:)), "\(row)"
@@ -101,7 +108,12 @@ final class OpenAccessShortfallContractTests: XCTestCase {
             XCTAssertEqual(try shortfall(row).notice, row["notice"] as? String, "\(row)")
         }
         XCTAssertTrue(
-            rows.contains { $0["skipped"] is String }, "a skip row pins the not-configured sentence"
+            rows.contains { $0["skipped"] as? String == "not_configured" },
+            "a skip row pins the not-configured sentence"
+        )
+        XCTAssertTrue(
+            rows.contains { $0["skipped"] as? String == "key_refused" },
+            "a skip row pins CORE's refused key (#498)"
         )
     }
 
@@ -146,8 +158,27 @@ final class OpenAccessShortfallContractTests: XCTestCase {
                 )
             }
         }
-        let skipped = OpenAccessShortfall.unpaywallNotConfigured
-        XCTAssertEqual(OpenAccessShortfall.restored(fromPersisted: skipped.persisted()), skipped)
+        for skipped in [OpenAccessShortfall.unpaywallNotConfigured, .coreKeyRefused] {
+            XCTAssertEqual(OpenAccessShortfall.restored(fromPersisted: skipped.persisted()), skipped)
+        }
+    }
+
+    /// A refused key is CORE's, configured, and unasked: no nudge (#498).
+    func testARefusedKeyEarnsNoConfigurationNudge() {
+        let refused = OpenAccessShortfall.coreKeyRefused
+        XCTAssertEqual(refused.source, .core)
+        XCTAssertEqual(refused.reason, .keyRefused)
+        XCTAssertNil(refused.failure)
+        XCTAssertFalse(refused.notice.contains("Configuring"))
+        // The control: alongside an unconfigured Unpaywall, only Unpaywall is nudged
+        let both = OpenAccessShortfall.unpaywallNotConfigured.appending(refused)
+        XCTAssertEqual(
+            both.notice,
+            "Unpaywall (not configured) and CORE (the key in the settings was refused) could not be "
+                + "asked, so a freely available copy may exist. Whether this document is open access "
+                + "was not established. Configuring Unpaywall would add an open-access route this "
+                + "search did not have."
+        )
     }
 
     /// A table added to the contract and asserted nowhere would pin nothing.
