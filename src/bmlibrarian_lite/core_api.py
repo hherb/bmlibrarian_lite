@@ -31,6 +31,7 @@ from .constants import (
     CORE_API_BASE_URL,
     CORE_BACKOFF_FACTOR,
     CORE_ENCODING,
+    CORE_KEY_REFUSED_STATUS,
     CORE_MAX_RETRIES,
     CORE_MIN_FULLTEXT_CHARS,
     CORE_PAUSE_AFTER_CONSECUTIVE_429,
@@ -42,8 +43,16 @@ from .constants import (
     HTTP_OK,
     HTTP_TOO_MANY_REQUESTS,
     RETRYABLE_HTTP_STATUSES,
+    SERVICE_CORE,
 )
-from .data_models import RequestFailure, RequestFailureKind
+from .data_models import (
+    LookupRecord,
+    LookupSkipReason,
+    RequestFailure,
+    RequestFailureKind,
+    SourceLookupFailure,
+    SourceLookupSkipped,
+)
 from .polite_session import mount_politely
 from .search_failures import request_failure_from_exception
 
@@ -141,20 +150,26 @@ def core_full_text(
 
 @dataclass(frozen=True)
 class CoreFetch:
-    """What asking CORE for one DOI learned: served, absent or unreachable.
+    """What asking CORE for one DOI learned: served, absent, unreachable, or refused.
 
     Attributes:
         text: The article's text, when served.
         failure: Why CORE could not be asked, when unreachable.
+        refused_key: Whether CORE refused the key, now or earlier this
+            session (#498): CORE was not asked about this article, and the
+            reader is told the key, never the article.
     """
 
     text: str | None
     failure: RequestFailure | None
+    refused_key: bool = False
 
     def __post_init__(self) -> None:
-        """Refuse a fetch both served and unreachable, or a blank text."""
+        """Refuse a fetch in two states at once, or a blank text."""
         if self.text is not None and self.failure is not None:
             raise ValueError("A CORE fetch is served or unreachable, never both")
+        if self.refused_key and (self.text is not None or self.failure is not None):
+            raise ValueError("A refused key is neither served nor unreachable")
         if self.text is not None and not self.text.strip():
             raise ValueError("A blank text is not CORE's full text")
 
@@ -173,18 +188,44 @@ class CoreFetch:
         """CORE could not be asked, or its answer could not be read."""
         return cls(text=None, failure=failure)
 
+    @classmethod
+    def key_refused(cls) -> CoreFetch:
+        """CORE refused the key, so it was not asked about this article (#498)."""
+        return cls(text=None, failure=None, refused_key=True)
+
     @property
     def is_unreachable(self) -> bool:
         """Whether the lookup failed."""
         return self.failure is not None
 
+    def lookups(self) -> LookupRecord:
+        """What this fetch leaves unsettled, as the discovery records it.
+
+        Returns:
+            Nothing for served text or an absence; a failure of CORE when it
+            could not be asked; a ``KEY_REFUSED`` skip of CORE when the key
+            was refused, which blocks a settled absence and is told as the
+            key, never as the article not served (#498).
+        """
+        if self.failure is not None:
+            return LookupRecord(failures=(SourceLookupFailure(SERVICE_CORE, self.failure),))
+        if self.refused_key:
+            return LookupRecord(
+                skipped=(SourceLookupSkipped(SERVICE_CORE, LookupSkipReason.KEY_REFUSED),)
+            )
+        return LookupRecord()
+
 
 class CoreThrottle:
-    """CORE's session pause after consecutive 429s.
+    """CORE's session state: the pause after consecutive 429s, and a refused key.
 
     CORE's key buys a daily token budget, which no per-second pacing can
     express. Once two fetches in a row end in 429, asking again only spends
     the reader's time, so CORE is not asked again until the process ends.
+
+    A fetch ending in HTTP 401 means CORE refused the key (#498). Every
+    article would be refused alike, so the key is marked refused for the
+    rest of the process and CORE is not asked again; nothing lifts it.
     """
 
     def __init__(self, pause_after: int = CORE_PAUSE_AFTER_CONSECUTIVE_429) -> None:
@@ -196,6 +237,7 @@ class CoreThrottle:
         self._pause_after = pause_after
         self._consecutive = 0
         self._paused = False
+        self._key_refused = False
         self._lock = threading.Lock()
 
     @property
@@ -204,13 +246,29 @@ class CoreThrottle:
         with self._lock:
             return self._paused
 
+    @property
+    def key_refused(self) -> bool:
+        """Whether CORE refused the key this session (#498)."""
+        with self._lock:
+            return self._key_refused
+
     def record(self, status: int | None) -> None:
         """Note how one fetch ended.
+
+        A 401 marks the key refused for good; like any ending but a 429, it
+        also resets the 429 count.
 
         Args:
             status: The HTTP status it ended on, or ``None`` when it got none.
         """
         with self._lock:
+            if status == CORE_KEY_REFUSED_STATUS and not self._key_refused:
+                self._key_refused = True
+                logger.warning(
+                    "CORE refused the configured key (HTTP %d); it is not asked "
+                    "again this session.",
+                    status,
+                )
             if status != HTTP_TOO_MANY_REQUESTS:
                 self._consecutive = 0
                 return
@@ -228,12 +286,12 @@ _session_throttle = CoreThrottle()
 
 
 def session_core_throttle() -> CoreThrottle:
-    """The pause every CORE client in this process shares."""
+    """The pause and refused key every CORE client in this process shares."""
     return _session_throttle
 
 
 def reset_core_throttle() -> None:
-    """Forget the session's pause. For tests, as ``reset_limiters`` is."""
+    """Forget the session's pause and refused key. For tests, as ``reset_limiters`` is."""
     global _session_throttle
     _session_throttle = CoreThrottle()
 
@@ -291,10 +349,14 @@ class CoreTextClient:
 
         Returns:
             Served text, an absence (CORE answered and holds none of this
-            article, or there is no DOI), or the failure.
+            article, or there is no DOI), a refused key (this fetch ended in
+            401, or an earlier one did; then nothing is sent), or the failure.
         """
         if not doi.strip():
             return CoreFetch.absent()
+        # The key before the pause: it is the cause the reader can act on.
+        if self._throttle.key_refused:
+            return CoreFetch.key_refused()
         if self._throttle.paused:
             return CoreFetch.unreachable(
                 RequestFailure(RequestFailureKind.HTTP_STATUS, HTTP_TOO_MANY_REQUESTS)
@@ -312,6 +374,8 @@ class CoreTextClient:
             self._throttle.record(None)
             return CoreFetch.unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
         self._throttle.record(response.status_code)
+        if response.status_code == CORE_KEY_REFUSED_STATUS:
+            return CoreFetch.key_refused()
         if response.status_code != HTTP_OK:
             return CoreFetch.unreachable(
                 RequestFailure(RequestFailureKind.HTTP_STATUS, response.status_code)

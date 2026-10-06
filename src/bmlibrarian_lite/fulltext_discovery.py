@@ -51,7 +51,6 @@ from typing import Any, Callable, Dict, Optional
 
 from .constants import (
     HTTP_NOT_FOUND,
-    SERVICE_CORE,
     SERVICE_EUROPE_PMC,
     SERVICE_CACHED_FULLTEXT,
     SERVICE_PMC_OPEN_DATA,
@@ -891,7 +890,8 @@ class FulltextDiscoverer:
 
         Returns:
             CORE's text when served; otherwise the unreadable-PDF result,
-            carrying CORE's failure in its lookups when it was unreachable.
+            carrying CORE's failure in its lookups when it was unreachable,
+            or its ``KEY_REFUSED`` skip when it refused the key (#498).
         """
         unreadable = _pdf_unreadable(pdf_result)
         if self._core is None or not clean_doi.strip():
@@ -904,14 +904,12 @@ class FulltextDiscoverer:
                 markdown_content=fetch.text,
                 lookups=pdf_result.lookups,
             )
-        if fetch.failure is not None:
+        lookups = fetch.lookups()
+        if lookups.anything_unsettled:
             # The sentence is built from the PDF alone, so only the lookups
-            # change: the failure keeps the result unsettled.
-            return unreadable.with_lookups(
-                LookupRecord(
-                    failures=(SourceLookupFailure(SERVICE_CORE, fetch.failure),)
-                )
-            )
+            # change: a failure, or a refused key (#498), keeps the result
+            # unsettled.
+            return unreadable.with_lookups(lookups)
         return unreadable
 
     def _try_pdf_download(

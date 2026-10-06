@@ -14,13 +14,17 @@ network: CORE is a stub or a scripted loopback server.
 from __future__ import annotations
 
 from contextlib import ExitStack
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from bmlibrarian_lite.analysis_failures import unestablished_access_clause
+from bmlibrarian_lite.analysis_failures import (
+    configuration_nudge,
+    unestablished_access_clause,
+)
 from bmlibrarian_lite.constants import (
     CORE_SEARCH_PATH,
     CORE_TEXT_CACHE_STAMP,
@@ -32,9 +36,11 @@ from bmlibrarian_lite.constants import (
 from bmlibrarian_lite.core_api import CoreFetch, CoreTextClient, CoreThrottle
 from bmlibrarian_lite.data_models import (
     LookupRecord,
+    LookupSkipReason,
     RequestFailure,
     RequestFailureKind,
     SourceLookupFailure,
+    SourceLookupSkipped,
 )
 from bmlibrarian_lite.fulltext_discovery import (
     FulltextDiscoverer,
@@ -54,7 +60,7 @@ from bmlibrarian_lite.pdf_utils import (
     save_core_text,
 )
 
-from .scripted_http_server import json_answer, running
+from .scripted_http_server import json_answer, running, status_answer
 
 DOI = "10.1159/000513404"
 TEXT = "The article's extracted text."
@@ -161,6 +167,41 @@ def test_an_unreachable_core_is_told_and_blocks_absence(tmp_path: Path) -> None:
     assert SourceLookupFailure(SERVICE_CORE, failure) in result.lookups.failures
     assert not result.absence_established
     assert "CORE (HTTP 503 Service Unavailable) could not be asked" in (result.error or "")
+
+
+#: CORE's refused key, as the record holds it (#498).
+REFUSED = SourceLookupSkipped(SERVICE_CORE, LookupSkipReason.KEY_REFUSED)
+#: The sentence the reader is told for it, alone (open_access_unsettled_notice.json).
+REFUSED_NOTICE = (
+    "CORE (the key in the settings was refused) could not be asked, so a freely "
+    "available copy may exist. Whether this document is open access was not established."
+)
+
+
+def test_a_refused_key_is_a_skip_that_blocks_absence(tmp_path: Path) -> None:
+    """The maintainer's ruling: a skip of CORE, told as the key, never as a failure (#498)."""
+    result = _discover(_Core(CoreFetch.key_refused()), tmp_path)
+    assert REFUSED in result.lookups.skipped
+    assert SERVICE_CORE not in {f.service for f in result.lookups.failures}
+    assert not result.absence_established
+    assert unestablished_access_clause(LookupRecord(skipped=(REFUSED,))) == REFUSED_NOTICE
+    assert "CORE (the key in the settings was refused) could not be asked" in (result.error or "")
+    assert "did not serve it" not in (result.error or "")
+
+
+def test_a_refused_key_earns_no_configuration_nudge() -> None:
+    """The key is configured; the nudge is for a source that is not (#498)."""
+    assert configuration_nudge(LookupRecord(skipped=(REFUSED,))) == ""
+    assert "Configuring" not in unestablished_access_clause(LookupRecord(skipped=(REFUSED,)))
+
+
+def test_a_scripted_401_reaches_the_reader_as_a_refused_key(tmp_path: Path) -> None:
+    """End to end over loopback: the 401 itself is told as the key (#498)."""
+    with running({CORE_SEARCH_PATH: [status_answer(HTTPStatus.UNAUTHORIZED)]}) as server:
+        client = CoreTextClient(KEY, base_url=server.url, max_retries=0, throttle=CoreThrottle())
+        result = _discover(client, tmp_path)
+    assert REFUSED in result.lookups.skipped
+    assert "HTTP 401" not in (result.error or "")
 
 
 def test_without_a_key_core_is_not_asked_and_nothing_is_recorded(tmp_path: Path) -> None:
@@ -612,6 +653,16 @@ def test_an_unreadable_pdf_with_core_unreachable_stays_unsettled(tmp_path: Path)
     assert SourceLookupFailure(SERVICE_CORE, failure) in result.lookups.failures
     assert not result.absence_established
     assert core.asked == [DOI]
+
+
+def test_an_unreadable_pdf_with_a_refused_key_records_the_skip(tmp_path: Path) -> None:
+    """After a scan, a refused key is a skip of CORE, keeping the result unsettled (#498)."""
+    core = _Core(CoreFetch.key_refused())
+    result = _try_with_downloaded_pdf(core, tmp_path, "   ")
+    assert not result.success
+    assert REFUSED in result.lookups.skipped
+    assert SERVICE_CORE not in {f.service for f in result.lookups.failures}
+    assert not result.absence_established
 
 
 def test_an_unreadable_pdf_with_core_absent_is_as_before(tmp_path: Path) -> None:

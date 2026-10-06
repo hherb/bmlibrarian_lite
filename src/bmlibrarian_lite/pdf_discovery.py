@@ -69,7 +69,6 @@ from .constants import (
     PDF_PARTIAL_SUFFIX,
     POLITE_MAX_THROTTLE_RETRIES,
     RETRYABLE_HTTP_STATUSES,
-    SERVICE_CORE,
     SERVICE_DOI_PUBLISHER,
     SERVICE_DOI_RESOLVER,
     SERVICE_OPENALEX,
@@ -752,20 +751,15 @@ class _CoreFallback:
 
         Returns:
             The text when CORE served it, and what to record otherwise: a
-            failure when CORE could not be asked, nothing for an absence, a
-            second ask or no CORE at all.
+            failure when CORE could not be asked, a ``KEY_REFUSED`` skip when
+            it refused the key (#498), nothing for an absence, a second ask
+            or no CORE at all.
         """
         if self._fetch is None:
             return None, LookupRecord()
         fetch, self._fetch = self._fetch, None
         outcome = fetch(self._doi)
-        if outcome.text is not None:
-            return outcome.text, LookupRecord()
-        if outcome.failure is not None:
-            return None, LookupRecord(
-                failures=(SourceLookupFailure(SERVICE_CORE, outcome.failure),)
-            )
-        return None, LookupRecord()
+        return outcome.text, outcome.lookups()
 
 
 class PDFDiscoverer:

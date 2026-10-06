@@ -401,6 +401,12 @@ class LookupSkipReason(Enum):
     #: discovery from concluding the article has no full text (#480).
     NOT_SAVED = "not_saved"
 
+    #: The service refused the key the settings hold (CORE's HTTP 401), so it
+    #: is not asked again this session (#498). A fault of the key, not the
+    #: article: never told as the source "not serving" it. Configured, so no
+    #: configuration nudge; unasked, so it leaves the question open.
+    KEY_REFUSED = "key_refused"
+
 
 #: What each skip reason tells the reader, as a parenthetical in the clause.
 #: The wording is here rather than in the sentence builder so that the enum
@@ -411,6 +417,7 @@ _SKIP_REASONS: dict[LookupSkipReason, str] = {
     LookupSkipReason.NOT_REQUESTED: "not requested on this run",
     LookupSkipReason.OVER_SIZE_LIMIT: "larger than the download limit",
     LookupSkipReason.NOT_SAVED: "served, but could not be saved on this device",
+    LookupSkipReason.KEY_REFUSED: "the key in the settings was refused",
 }
 
 # The wording map is what :meth:`SourceLookupSkipped.describe` indexes, and

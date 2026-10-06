@@ -13,10 +13,12 @@ import pytest
 from bmlibrarian_lite.constants import (
     CORE_API_BASE_URL,
     CORE_HOST,
+    CORE_KEY_REFUSED_STATUS,
     CORE_MIN_FULLTEXT_CHARS,
     CORE_PAUSE_AFTER_CONSECUTIVE_429,
     CORE_SEARCH_PATH,
     CORE_SOURCE_LABEL,
+    HTTP_TOO_MANY_REQUESTS,
     POLITE_RATE_CEILINGS,
     SERVICE_CORE,
 )
@@ -28,7 +30,14 @@ from bmlibrarian_lite.core_api import (
     core_search_url,
     default_core_client,
 )
-from bmlibrarian_lite.data_models import RequestFailure, RequestFailureKind
+from bmlibrarian_lite.data_models import (
+    LookupRecord,
+    LookupSkipReason,
+    RequestFailure,
+    RequestFailureKind,
+    SourceLookupFailure,
+    SourceLookupSkipped,
+)
 
 from .scripted_http_server import ScriptedAnswer, json_answer, running, status_answer
 
@@ -55,7 +64,8 @@ def test_every_contract_table_is_read_here() -> None:
     assert set(CONTRACT) == {
         "schema_version", "description", "service_name", "source",
         "source_label", "desktop_source_type", "base_url",
-        "min_fulltext_chars", "pause_after_consecutive_429", "search_url",
+        "min_fulltext_chars", "pause_after_consecutive_429",
+        "key_refused_status", "key_refused_reason", "search_url",
         "full_text", "status", "bodies",
     }
 
@@ -67,6 +77,11 @@ def test_the_names_are_the_contracts() -> None:
     assert CONTRACT["base_url"] == CORE_API_BASE_URL
     assert CONTRACT["min_fulltext_chars"] == CORE_MIN_FULLTEXT_CHARS
     assert CONTRACT["pause_after_consecutive_429"] == CORE_PAUSE_AFTER_CONSECUTIVE_429
+    assert CONTRACT["key_refused_status"] == CORE_KEY_REFUSED_STATUS
+    assert (
+        SourceLookupSkipped(SERVICE_CORE, LookupSkipReason.KEY_REFUSED).describe()
+        == CONTRACT["key_refused_reason"]
+    )
 
 
 def test_the_contract_has_rows() -> None:
@@ -107,6 +122,32 @@ def test_a_fetch_is_served_or_unreachable_never_both() -> None:
         CoreFetch.served("   ")
 
 
+def test_a_refused_key_is_neither_served_nor_unreachable() -> None:
+    """A refused key carries no text and no failure: it is a skip (#498)."""
+    with pytest.raises(ValueError):
+        CoreFetch(text="t", failure=None, refused_key=True)
+    with pytest.raises(ValueError):
+        CoreFetch(
+            text=None, failure=RequestFailure(RequestFailureKind.TIMEOUT), refused_key=True
+        )
+    refused = CoreFetch.key_refused()
+    assert refused.refused_key and not refused.is_unreachable
+    assert refused.text is None and refused.failure is None
+
+
+def test_each_outcome_is_recorded_as_the_reader_is_told_it() -> None:
+    """Served and absent record nothing; unreachable a failure; refused a skip (#498)."""
+    failure = RequestFailure(RequestFailureKind.HTTP_STATUS, 503)
+    assert CoreFetch.served("t").lookups() == LookupRecord()
+    assert CoreFetch.absent().lookups() == LookupRecord()
+    assert CoreFetch.unreachable(failure).lookups() == LookupRecord(
+        failures=(SourceLookupFailure(SERVICE_CORE, failure),)
+    )
+    assert CoreFetch.key_refused().lookups() == LookupRecord(
+        skipped=(SourceLookupSkipped(SERVICE_CORE, LookupSkipReason.KEY_REFUSED),)
+    )
+
+
 def _client(base_url: str, throttle: CoreThrottle | None = None) -> CoreTextClient:
     return CoreTextClient(
         KEY, base_url=base_url, max_retries=0, throttle=throttle or CoreThrottle()
@@ -129,6 +170,8 @@ def test_the_contracts_statuses(row: dict[str, Any]) -> None:
         fetch = _client(server.url).fetch_full_text(DOI)
     if row["outcome"] == "served":
         assert fetch.text == "x" * CORE_MIN_FULLTEXT_CHARS
+    elif row["outcome"] == "key_refused":
+        assert fetch == CoreFetch.key_refused()
     else:
         assert fetch.failure == RequestFailure(RequestFailureKind.HTTP_STATUS, row["status"])
 
@@ -235,6 +278,52 @@ def test_the_pause_is_shared_by_every_client() -> None:
             RequestFailure(RequestFailureKind.HTTP_STATUS, 429)
         )
         assert len(server.received) == 2
+
+
+def test_a_401_refuses_the_key_for_the_session() -> None:
+    """The first 401 is told as a refused key; later fetches send nothing (#498)."""
+    throttle = CoreThrottle()
+    with running({PATH: [status_answer(HTTPStatus.UNAUTHORIZED), json_answer(HIT)]}) as server:
+        first = _client(server.url, throttle).fetch_full_text(DOI)
+        second = _client(server.url, throttle).fetch_full_text(DOI)
+        assert len(server.received) == 1
+    assert first == CoreFetch.key_refused()
+    assert second == CoreFetch.key_refused()
+    assert throttle.key_refused
+    assert not throttle.paused
+
+
+def test_a_403_is_an_ordinary_answer_and_refuses_nothing() -> None:
+    """Control: Cloudflare can 403 a valid key, so CORE is asked again (#498)."""
+    throttle = CoreThrottle()
+    forbidden = status_answer(HTTPStatus.FORBIDDEN)
+    with running({PATH: [forbidden, json_answer(HIT)]}) as server:
+        first = _client(server.url, throttle).fetch_full_text(DOI)
+        second = _client(server.url, throttle).fetch_full_text(DOI)
+        assert len(server.received) == 2
+    assert first.failure == RequestFailure(RequestFailureKind.HTTP_STATUS, 403)
+    assert second.text == "x" * CORE_MIN_FULLTEXT_CHARS
+    assert not throttle.key_refused
+
+
+def test_a_401_resets_the_429_count() -> None:
+    """A 401 is an ending other than 429, so 429, 401 leaves the count at zero."""
+    throttle = CoreThrottle()
+    throttle.record(HTTP_TOO_MANY_REQUESTS)
+    throttle.record(CORE_KEY_REFUSED_STATUS)
+    throttle.record(HTTP_TOO_MANY_REQUESTS)
+    assert not throttle.paused
+    assert throttle.key_refused
+
+
+def test_a_refused_key_is_told_before_a_pause() -> None:
+    """Paused and refused, a fetch is told the key: the cause the reader can act on."""
+    throttle = CoreThrottle()
+    for status in (HTTP_TOO_MANY_REQUESTS, HTTP_TOO_MANY_REQUESTS, CORE_KEY_REFUSED_STATUS):
+        throttle.record(status)
+    with running({PATH: [json_answer(HIT)]}) as server:
+        assert _client(server.url, throttle).fetch_full_text(DOI) == CoreFetch.key_refused()
+        assert server.received == []
 
 
 def test_no_key_means_no_client(monkeypatch: pytest.MonkeyPatch) -> None:
