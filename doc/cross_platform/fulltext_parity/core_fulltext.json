@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "CORE's extracted text, asked by DOI with the user's own key (#480, stage C). Read by tests/test_core_api.py, Packages/BioMedLit COREContractTests and Android CoreContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, under \"CORE's Extracted Text\". search_url: the request for a DOI (trimmed; backslash and double quote escaped for CORE's phrase query; the q value percent-encoded as Python's quote(s, safe='')). full_text: the text a parsed search answer serves for a DOI, given min_chars: the first result that is an object, whose string doi normalises to the requested DOI's (trim, lower-case, one resolver or doi: prefix removed, trim) and whose string fullText, trimmed, holds at least min_chars Unicode code points; outcome served (with that trimmed text), absent, or malformed (the answer is not an object, or its results are not a list). status: the outcome of each HTTP status (200 is read by full_text). bodies: 200 answers that cannot be read. Add a row here, not a test on one platform.",
+  "description": "CORE's extracted text, asked by DOI with the user's own key (#480, stage C). Read by tests/test_core_api.py, Packages/BioMedLit COREContractTests and Android CoreContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, under \"CORE's Extracted Text\". search_url: the request for a DOI (trimmed; backslash and double quote escaped for CORE's phrase query; the q value percent-encoded as Python's quote(s, safe='')). full_text: the text a parsed search answer serves for a DOI, given min_chars: the first result that is an object, whose string doi normalises to the requested DOI's (trim, lower-case, one resolver or doi: prefix removed, trim) and whose string fullText, trimmed, holds at least min_chars Unicode code points; outcome served (with that trimmed text), absent, or malformed (the answer is not an object, or its results are not a list). status: the outcome of each HTTP status (200 is read by full_text); key_refused (only key_refused_status, 401: 403 stays unreachable, as Cloudflare can answer 403 to a valid key) marks the key refused for the rest of the process, so every later fetch sends no request and is key_refused too, recorded as a skip of CORE told with key_refused_reason (#498). bodies: 200 answers that cannot be read. Add a row here, not a test on one platform.",
   "service_name": "CORE",
   "source": "core",
   "source_label": "CORE (extracted text)",
@@ -8,6 +8,8 @@
   "base_url": "https://api.core.ac.uk",
   "min_fulltext_chars": 5000,
   "pause_after_consecutive_429": 2,
+  "key_refused_status": 401,
+  "key_refused_reason": "the key in the settings was refused",
   "search_url": [
     {"name": "a DOI is one phrase, its slash escaped", "doi": "10.1016/j.cis.2021.102529", "base_url": null,
      "url": "https://api.core.ac.uk/v3/search/works/?q=doi%3A%2210.1016%2Fj.cis.2021.102529%22&limit=3"},
@@ -101,7 +103,7 @@
   "status": [
     {"status": 200, "outcome": "served"},
     {"status": 400, "outcome": "unreachable"},
-    {"status": 401, "outcome": "unreachable"},
+    {"status": 401, "outcome": "key_refused"},
     {"status": 403, "outcome": "unreachable"},
     {"status": 404, "outcome": "unreachable"},
     {"status": 410, "outcome": "unreachable"},

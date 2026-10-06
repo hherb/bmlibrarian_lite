@@ -72,9 +72,9 @@ enter the key under Settings → Full Text, or set it in the environment:
 export CORE_API_KEY="your-key"
 ```
 The key is stored only in your configuration file (readable by you alone)
-and sent only to CORE. Without one, CORE is simply not asked. If the key is
-mistyped or revoked, articles that reach CORE are reported as not served by
-CORE (HTTP 401); check the key in Settings → Full Text.
+and sent only to CORE. Without one, CORE is simply not asked. If CORE refuses
+the key, the app stops asking CORE for the rest of the session and says 'the
+key in the settings was refused'; check the key under Settings → Full Text.
 
 ### Launching the Application
 

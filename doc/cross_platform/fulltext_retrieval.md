@@ -609,13 +609,17 @@ banner says both.
  "failure": {"kind": "http_status", "status_code": 408}}
 ```
 
-`source` is `unpaywall`, `unpaywall_landing_page`, `unpaywall_pdf`, `openalex`
-or `openalex_pdf`; `failure` is a search
+`source` is `unpaywall`, `unpaywall_landing_page`, `unpaywall_pdf`, `openalex`,
+`openalex_pdf` or `core`; `failure` is a search
 shortfall's failure object and reads back by its rules
 (`search_failure_reporting.md`, "Persisted form"). An Unpaywall that was not
 configured is stored as `{"schema_version": 1, "source": "unpaywall",
-"skipped": "not_configured"}` in place of a failure, and a stored skip reads as
-Unpaywall's whatever source it names.
+"skipped": "not_configured"}` in place of a failure, and a stored
+`not_configured` skip reads as Unpaywall's whatever source it names. CORE's
+refused key (#498) is stored as `{"schema_version": 1, "source": "core",
+"skipped": "key_refused"}` (in schema 2, an entry `{"source": "core",
+"skipped": "key_refused"}`), and a stored `key_refused` skip reads as CORE's
+whatever source it names. Any other skip reason reads by its failure.
 
 A single entry without an address is stored in this form (schema 1). Anything
 else is `{"schema_version": 2, "entries": [{"source", "address"?, "failure" |
@@ -839,6 +843,8 @@ GET https://api.openalex.org/works/doi:{escape(doi)}?select=locations[&mailto={e
                                # unreadable body, a non-object work, or locations not
                                # a list → UNREACHABLE(malformed_response)
 404 → ABSENT                   # OpenAlex knows no such work (an HTML body)
+401               → KEY_REFUSED, and the key is refused for the rest of the
+                    process (session-wide, shared by every client)
 any other status (after 429/5xx retries), transport failure → UNREACHABLE(failure)
 ```
 
@@ -896,12 +902,15 @@ GET https://api.core.ac.uk/v3/search/works/?q={escape('doi:"' + lucene(trim(doi)
 # required: without it CORE answers an HTML meta-refresh page.
 
 no key            → no request, nothing recorded, nothing told (a debug log line)
+key refused (below) → KEY_REFUSED, no request
 paused (below)    → UNREACHABLE(http_status 429), no request
 200               → the first result that is an object, whose string doi
                     normalises to this DOI's, and whose string fullText,
                     trimmed, holds ≥ 5,000 code points: SERVED(that text);
                     none → ABSENT; an answer that is not an object, or whose
                     results are not a list → UNREACHABLE(malformed_response)
+401               → KEY_REFUSED, and the key is refused for the rest of the
+                    process (session-wide, shared by every client)
 any other status (after 429/5xx retries), transport failure → UNREACHABLE(failure)
 ```
 
@@ -919,8 +928,21 @@ request is a search, and its results are not guaranteed to be this article.
   open-access sentence ("CORE (HTTP 503 Service Unavailable) could not be
   asked, …") and last in "Tried sources" order. It blocks a settled absence
   (the maintainer's decision of 2026-10-06), as any unanswered source does.
-  A rejected key (HTTP 401/403) is told today as 'did not serve it' for each
-  article; a session-wide 'key refused' is planned with stage C2 (#498).
+- **A refused key (#498).** Only HTTP 401 means CORE refused the key; a 403
+  stays an ordinary unreachable answer for that article (Cloudflare can answer
+  403 to a valid key). The first 401 marks the key refused for the rest of the
+  process, on the same session object as the 429 pause (Python `CoreThrottle`,
+  Swift `CoreThrottle`, Android `CoreService`); every later fetch makes no
+  request. That 401, and every fetch after it, is `KEY_REFUSED`: recorded as a
+  **skip** of CORE with reason `key_refused`, worded "the key in the settings
+  was refused" (`core_fulltext.json`'s `key_refused_reason`), so the reader
+  reads "CORE (the key in the settings was refused) could not be asked, so a
+  freely available copy may exist. Whether this document is open access was
+  not established." and, in "Tried sources", "CORE (the key in the settings
+  was refused)". It blocks a settled absence, as any source not asked does,
+  and adds no configuration nudge. A 401 ending resets the 429 count, as any
+  other ending does; once the key is refused, that is what a fetch is told,
+  paused or not.
 - **A missing key is silent** (spec decision 4). It is not recorded as a
   `NOT_CONFIGURED` skip, which on the desktop would block every settled
   absence and add a configuration nudge to every sentence; the settings

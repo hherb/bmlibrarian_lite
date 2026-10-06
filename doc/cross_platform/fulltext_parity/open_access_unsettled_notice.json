@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "What the reader is told when Unpaywall, the landing page it named, the PDF it named (#478), OpenAlex, the PDF OpenAlex named (#480 stage B), or CORE (#480 stage C) could not settle whether an open-access copy exists, and how the apps store that on a document (#466). Read by tests/test_open_access_unsettled_notice.py (Python: notices only), Packages/BioMedLit OpenAccessShortfallContractTests and Android OpenAccessShortfallContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, under the heading 'An unsettled open-access copy (#466)'. A row names a failed lookup by kind and status_code, or a lookup that was never made by skipped (Python's LookupSkipReason; only Unpaywall's not_configured), kind and status_code then null. notices: the sentence for one shortfall; Python builds it with analysis_failures.unestablished_access_clause, the apps with their own port. persisted.written: the stored value for a shortfall, compared as parsed JSON. persisted.read: a stored value and the shortfall it reads as; the field is written only when something went unsettled, so every stored value reads as some shortfall, never as none. Add a row here, not a test on one platform.",
+  "description": "What the reader is told when Unpaywall, the landing page it named, the PDF it named (#478), OpenAlex, the PDF OpenAlex named (#480 stage B), or CORE (#480 stage C) could not settle whether an open-access copy exists, and how the apps store that on a document (#466). Read by tests/test_open_access_unsettled_notice.py (Python: notices only), Packages/BioMedLit OpenAccessShortfallContractTests and Android OpenAccessShortfallContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, under the heading 'An unsettled open-access copy (#466)'. A row names a failed lookup by kind and status_code, or a lookup that was never made by skipped (Python's LookupSkipReason; only Unpaywall's not_configured and CORE's key_refused, #498), kind and status_code then null. A stored not_configured skip is Unpaywall's and a stored key_refused skip CORE's, whatever source it names. notices: the sentence for one shortfall; Python builds it with analysis_failures.unestablished_access_clause, the apps with their own port. persisted.written: the stored value for a shortfall, compared as parsed JSON. persisted.read: a stored value and the shortfall it reads as; the field is written only when something went unsettled, so every stored value reads as some shortfall, never as none. Add a row here, not a test on one platform.",
   "sources": {
     "unpaywall": "Unpaywall",
     "unpaywall_landing_page": "the open-access copy's landing page",
@@ -43,7 +43,8 @@
     {"source": "openalex_pdf", "kind": "request_failed", "status_code": null, "notice": "OpenAlex's copy (the request failed) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
     {"source": "core", "kind": "timeout", "status_code": null, "notice": "CORE (the request timed out) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
     {"source": "core", "kind": "http_status", "status_code": 429, "notice": "CORE (HTTP 429 Too Many Requests) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
-    {"source": "core", "kind": "http_status", "status_code": 401, "notice": "CORE (HTTP 401 Unauthorized) did not serve it, so whether this document is open access was not established."}
+    {"source": "core", "kind": "http_status", "status_code": 403, "notice": "CORE (HTTP 403 Forbidden) did not serve it, so whether this document is open access was not established."},
+    {"source": "core", "skipped": "key_refused", "kind": null, "status_code": null, "notice": "CORE (the key in the settings was refused) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."}
   ],
   "persisted": {
     "written": [
@@ -54,7 +55,8 @@
       {"source": "unpaywall_pdf", "kind": "http_status", "status_code": 403, "stored": {"schema_version": 1, "source": "unpaywall_pdf", "failure": {"kind": "http_status", "status_code": 403}}},
       {"source": "openalex", "kind": "http_status", "status_code": 429, "stored": {"schema_version": 1, "source": "openalex", "failure": {"kind": "http_status", "status_code": 429}}},
       {"source": "openalex_pdf", "kind": "http_status", "status_code": 403, "stored": {"schema_version": 1, "source": "openalex_pdf", "failure": {"kind": "http_status", "status_code": 403}}},
-      {"source": "core", "kind": "http_status", "status_code": 503, "stored": {"schema_version": 1, "source": "core", "failure": {"kind": "http_status", "status_code": 503}}}
+      {"source": "core", "kind": "http_status", "status_code": 503, "stored": {"schema_version": 1, "source": "core", "failure": {"kind": "http_status", "status_code": 503}}},
+      {"source": "core", "skipped": "key_refused", "kind": null, "status_code": null, "stored": {"schema_version": 1, "source": "core", "skipped": "key_refused"}}
     ],
     "read": [
       {"name": "a stored shortfall", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "unpaywall", "kind": "timeout", "status_code": null},
@@ -78,7 +80,9 @@
       {"name": "an Unpaywall that was not configured", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"skipped\":\"not_configured\"}", "source": "unpaywall", "skipped": "not_configured", "kind": null, "status_code": null},
       {"name": "a skip is Unpaywall's, whatever source it names", "stored": "{\"schema_version\":1,\"source\":\"unpaywall_landing_page\",\"skipped\":\"not_configured\"}", "source": "unpaywall", "skipped": "not_configured", "kind": null, "status_code": null},
       {"name": "an unknown skip reason reads by its failure", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"skipped\":\"quantum\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "unpaywall", "kind": "timeout", "status_code": null},
-      {"name": "CORE's lookup", "stored": "{\"schema_version\":1,\"source\":\"core\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "core", "kind": "timeout", "status_code": null}
+      {"name": "CORE's lookup", "stored": "{\"schema_version\":1,\"source\":\"core\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "core", "kind": "timeout", "status_code": null},
+      {"name": "CORE's refused key", "stored": "{\"schema_version\":1,\"source\":\"core\",\"skipped\":\"key_refused\"}", "source": "core", "skipped": "key_refused", "kind": null, "status_code": null},
+      {"name": "a key_refused skip is CORE's, whatever source it names", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"skipped\":\"key_refused\"}", "source": "core", "skipped": "key_refused", "kind": null, "status_code": null}
     ]
   }
 }
