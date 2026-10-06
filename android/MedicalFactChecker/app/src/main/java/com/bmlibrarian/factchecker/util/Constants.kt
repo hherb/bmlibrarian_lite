@@ -186,8 +186,9 @@ object Constants {
     const val CORE_PAUSE_AFTER_CONSECUTIVE_429 = 2
 
     /**
-     * The one status that means CORE refused the key (#498): the first marks it refused for
-     * the rest of the process. Not 403, which Cloudflare can answer to a valid key.
+     * The one status that means CORE refused the key (#498): the first marks that key refused
+     * for the rest of the process (a corrected key is asked again). Not 403, which Cloudflare
+     * can answer to a valid key.
      */
     const val CORE_KEY_REFUSED_STATUS = 401
 

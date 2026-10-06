@@ -205,7 +205,7 @@ class CoreServiceTest {
         routes[path] = MockResponse().setResponseCode(Constants.CORE_KEY_REFUSED_STATUS)
         val service = service()
         assertEquals(CoreFetch.KeyRefused, service.fetchText(doi))
-        assertTrue(service.isKeyRefused)
+        assertTrue(service.refuses(Core.keyDigest("test-core-key")))
         routes[path] = MockResponse().setBody(hitBody)
         assertEquals(CoreFetch.KeyRefused, service.fetchText(doi))
         assertEquals("a refused key sends nothing", 1, server.requestCount)
@@ -217,10 +217,60 @@ class CoreServiceTest {
         routes[path] = MockResponse().setResponseCode(403)
         val service = service()
         assertEquals(CoreFetch.Unreachable(RequestFailure.forHttpStatus(403)), service.fetchText(doi))
-        assertFalse(service.isKeyRefused)
+        assertFalse(service.refuses(Core.keyDigest("test-core-key")))
         routes[path] = MockResponse().setBody(hitBody)
         assertEquals(served, service.fetchText(doi))
         assertEquals(2, server.requestCount)
+    }
+
+    /** The refusal is the refused key's: a key corrected in the settings is asked again (#498). */
+    @Test
+    fun `a corrected key is asked again`() = runBlocking {
+        val service = service()
+        routes[path] = MockResponse().setResponseCode(Constants.CORE_KEY_REFUSED_STATUS)
+        assertEquals(CoreFetch.KeyRefused, service.fetchText(doi))
+        key = "test-core-key-corrected"
+        routes[path] = MockResponse().setBody(hitBody)
+        assertEquals(served, service.fetchText(doi))
+        assertEquals(2, server.requestCount)
+        server.takeRequest(REQUEST_WAIT_SECONDS, TimeUnit.SECONDS)
+        val corrected = server.takeRequest(REQUEST_WAIT_SECONDS, TimeUnit.SECONDS)!!
+        assertEquals("Bearer test-core-key-corrected", corrected.getHeader("Authorization"))
+    }
+
+    /** The control: the refused key stays refused beside another, and sends nothing. */
+    @Test
+    fun `the refused key stays refused`() = runBlocking {
+        val service = service()
+        routes[path] = MockResponse().setResponseCode(Constants.CORE_KEY_REFUSED_STATUS)
+        service.fetchText(doi)
+        key = "test-core-key-corrected"
+        routes[path] = MockResponse().setBody(hitBody)
+        service.fetchText(doi)
+        key = "test-core-key"
+        assertEquals(CoreFetch.KeyRefused, service.fetchText(doi))
+        assertEquals(2, server.requestCount)
+    }
+
+    /** A 401 for another key refuses that key instead; the earlier one is asked again. */
+    @Test
+    fun `a 401 for another key refuses that key instead`() = runBlocking {
+        val service = service()
+        routes[path] = MockResponse().setResponseCode(Constants.CORE_KEY_REFUSED_STATUS)
+        service.fetchText(doi)
+        key = "test-core-key-corrected"
+        service.fetchText(doi)
+        assertTrue(service.refuses(Core.keyDigest("test-core-key-corrected")))
+        assertFalse(service.refuses(Core.keyDigest("test-core-key")))
+    }
+
+    /** The key is held as the SHA-256 hex of the trimmed key, as Python's `core_key_digest`. */
+    @Test
+    fun `the key is held as a digest of the trimmed key`() {
+        val digest = Core.keyDigest("test-core-key")
+        assertEquals("648a20094c7319271078b3f552cac0ce0f0f84c812ee4be3b825f6a3e489be68", digest)
+        assertEquals(digest, Core.keyDigest("  test-core-key\n"))
+        assertFalse("test-core-key" in digest)
     }
 
     /** A 401 is an ending other than 429, so 429, 401, 429 does not pause. */
@@ -231,8 +281,12 @@ class CoreServiceTest {
         service.fetchText(doi)
         routes[path] = MockResponse().setResponseCode(Constants.CORE_KEY_REFUSED_STATUS)
         service.fetchText(doi)
+        // A corrected key's 429 is the first in a row, not the second
+        key = "test-core-key-corrected"
+        routes[path] = MockResponse().setResponseCode(429)
+        service.fetchText(doi)
         assertFalse(service.isPaused)
-        assertTrue(service.isKeyRefused)
+        assertEquals(3, server.requestCount)
     }
 
     @Test

@@ -64,7 +64,7 @@ class CoreContractTest {
             setOf(
                 "schema_version", "description", "service_name", "source", "source_label",
                 "desktop_source_type", "base_url", "min_fulltext_chars",
-                "pause_after_consecutive_429", "key_refused_status", "key_refused_reason",
+                "pause_after_consecutive_429", "key_refused_status", "key_refused_reason", "key_refusal_scope",
                 "search_url", "full_text", "status", "bodies"
             ),
             contract.keys
@@ -85,6 +85,8 @@ class CoreContractTest {
         )
         assertEquals(Constants.CORE_KEY_REFUSED_STATUS, contract["key_refused_status"]!!.jsonPrimitive.int)
         assertEquals(Constants.CORE_KEY_REFUSED_REASON, contract.string("key_refused_reason"))
+        // The refusal is scoped to the key refused (#498): a corrected key is asked again
+        assertEquals("the refused key", contract.string("key_refusal_scope"))
     }
 
     @Test

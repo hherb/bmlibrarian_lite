@@ -36,6 +36,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -108,6 +109,24 @@ object Core {
 
     private fun stringOf(element: JsonElement?): String? =
         (element as? JsonPrimitive)?.takeIf { it.isString }?.content
+
+    /** The digest a refused key is remembered by. */
+    private const val KEY_DIGEST_ALGORITHM = "SHA-256"
+
+    /**
+     * The fingerprint a refused key is remembered by (#498), Python's `core_key_digest`.
+     *
+     * A refusal is scoped to the key CORE refused, so a key corrected in the settings
+     * is asked again. The key itself is never held for that, and the digest is never
+     * logged.
+     *
+     * @param apiKey A CORE key; trimmed here, so padding names the same key
+     * @return The SHA-256 digest of the trimmed key's UTF-8 bytes, as lower-case hex
+     */
+    fun keyDigest(apiKey: String): String =
+        MessageDigest.getInstance(KEY_DIGEST_ALGORITHM)
+            .digest(apiKey.trim().toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
 }
 
 /** What asking CORE for one DOI's text produced. */
@@ -139,9 +158,11 @@ sealed interface CoreFetch {
  * A singleton, so its session state is the process's: two consecutive fetches
  * ending in 429 stop CORE being asked until the app restarts. A paused fetch
  * sends nothing and answers 429; any other ending, a transport failure included,
- * resets the count. A fetch ending in 401 marks the key refused for the rest of
- * the process (#498): that fetch and every later one is [CoreFetch.KeyRefused],
- * and nothing more is sent; nothing lifts it.
+ * resets the count. A fetch ending in 401 marks the key it was sent with refused
+ * for the rest of the process (#498): that fetch and every later one with that key
+ * is [CoreFetch.KeyRefused], and nothing more is sent with it. The refusal is the
+ * key's, held as its [Core.keyDigest]: another key, such as one corrected in the
+ * settings, is asked as usual, and a 401 for it refuses that key instead.
  *
  * @param httpClient Derived from the shared client with [PmcOpenDataService.bucketClient]
  * @param baseUrl CORE's address; tests point it at a local server
@@ -179,14 +200,19 @@ class CoreService internal constructor(
     @Volatile
     private var paused = false
 
+    /** The [Core.keyDigest] of the key CORE refused this session, if any (#498). */
     @Volatile
-    private var keyRefused = false
+    private var refusedKeyDigest: String? = null
 
     /** Whether CORE is paused for the rest of the session. */
     val isPaused: Boolean get() = paused
 
-    /** Whether CORE refused the key this session (#498). */
-    val isKeyRefused: Boolean get() = keyRefused
+    /**
+     * Whether CORE refused this key this session (#498); any other key is asked as usual.
+     *
+     * @param keyDigest The key's [Core.keyDigest]
+     */
+    fun refuses(keyDigest: String): Boolean = refusedKeyDigest == keyDigest
 
     /**
      * CORE's text for [doi].
@@ -196,8 +222,8 @@ class CoreService internal constructor(
      *
      * @param doi The DOI; a blank one is never asked
      * @return Null when no key is set (nothing is asked or recorded); served; absent;
-     *   unreachable, of its real kind; or key refused, for a 401 and for every fetch
-     *   after one (nothing sent)
+     *   unreachable, of its real kind; or key refused, for a 401 and for every later
+     *   fetch with that key (nothing sent)
      * @throws kotlinx.coroutines.CancellationException if the caller cancelled
      */
     suspend fun fetchText(doi: String): CoreFetch? {
@@ -209,8 +235,10 @@ class CoreService internal constructor(
             return CoreFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
         } ?: return null
         if (doi.isBlank()) return CoreFetch.Absent
-        // The key before the pause: it is the cause the reader can act on (#498)
-        if (keyRefused) return CoreFetch.KeyRefused
+        // The key before the pause: it is the cause the reader can act on (#498).
+        // Only the refused key is refused: a corrected one is asked again
+        val keyDigest = Core.keyDigest(key)
+        if (refuses(keyDigest)) return CoreFetch.KeyRefused
         if (paused) return CoreFetch.Unreachable(RequestFailure.forHttpStatus(Constants.HTTP_TOO_MANY_REQUESTS))
         return try {
             val url = Core.searchUrl(doi, baseUrl).toHttpUrlOrNull()
@@ -220,7 +248,7 @@ class CoreService internal constructor(
                 .header("Authorization", "Bearer $key")
                 .build()
             val (code, bytes) = get(request)
-            record(code)
+            record(code, keyDigest)
             if (code == Constants.CORE_KEY_REFUSED_STATUS) return CoreFetch.KeyRefused
             if (code != Constants.HTTP_OK) return CoreFetch.Unreachable(RequestFailure.forHttpStatus(code))
             val text = bytes.strictUtf8() ?: return malformed(null)
@@ -230,15 +258,15 @@ class CoreService internal constructor(
                 malformed(e) // SerializationException is one
             }
         } catch (e: RetryableStatusException) {
-            record(e.statusCode)
+            record(e.statusCode, keyDigest)
             CoreFetch.Unreachable(RequestFailure.forHttpStatus(e.statusCode))
         } catch (e: IOException) {
-            record(null)
+            record(null, keyDigest)
             CoreFetch.Unreachable(RequestFailure.fromException(e))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            record(null)
+            record(null, keyDigest)
             Log.e(TAG, "CORE lookup failed unexpectedly: ${e.javaClass.simpleName}")
             CoreFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
         }
@@ -246,15 +274,16 @@ class CoreService internal constructor(
 
     /**
      * Count one fetch's ending: the consecutive 429s pause CORE, anything else resets them;
-     * a 401 also marks the key refused for good (#498).
+     * a 401 also marks the key it was sent with refused, in place of any refused before (#498).
      *
      * @param status The ending's HTTP status, or null for no status (a transport failure)
+     * @param keyDigest The [Core.keyDigest] of the key it was sent with
      */
-    private fun record(status: Int?) {
+    private fun record(status: Int?, keyDigest: String) {
         synchronized(throttleLock) {
-            if (status == Constants.CORE_KEY_REFUSED_STATUS && !keyRefused) {
-                keyRefused = true
-                Log.w(TAG, "CORE refused the configured key (HTTP $status); not asked again this session")
+            if (status == Constants.CORE_KEY_REFUSED_STATUS && refusedKeyDigest != keyDigest) {
+                refusedKeyDigest = keyDigest
+                Log.w(TAG, "CORE refused the configured key (HTTP $status); not asked with it again this session")
             }
             if (status != Constants.HTTP_TOO_MANY_REQUESTS) {
                 consecutive429 = 0
