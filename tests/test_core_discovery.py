@@ -551,3 +551,99 @@ def test_the_core_fallback_asks_once() -> None:
     first = fallback.ask()
     assert first[1].failures and fallback.ask() == (None, LookupRecord())
     assert core.asked == [DOI]
+
+
+# ---- #499: a downloaded PDF that yields no text ---------------------------
+
+
+def _try_with_downloaded_pdf(
+    core: Any, tmp_path: Path, extracted: Any, doi: str = f"https://doi.org/{DOI}"
+) -> FulltextResult:
+    """``_try_pdf_download`` where discovery succeeded with a PDF file.
+
+    Args:
+        core: The CORE client, or ``None`` for no key.
+        tmp_path: Where the PDF stands.
+        extracted: What ``extract_pdf_text`` returns, or the exception it raises.
+        doi: The DOI as the caller holds it.
+
+    Returns:
+        The result of the PDF step.
+    """
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    downloaded = DiscoveryResult(
+        success=True,
+        file_path=pdf,
+        source=_open_access_source("https://repo.example.org/a.pdf"),
+    )
+    discoverer = FulltextDiscoverer(use_browser_fallback=False, core=core)
+    extractor: dict[str, Any] = (
+        {"side_effect": extracted}
+        if isinstance(extracted, Exception)
+        else {"return_value": extracted}
+    )
+    with patch.dict("os.environ", {PDF_BASE_DIR_ENV_VAR: str(tmp_path / "pdf")}), \
+         patch.object(PDFDiscoverer, "discover_and_download", return_value=downloaded), \
+         patch("bmlibrarian_lite.fulltext_discovery.extract_pdf_text", **extractor), \
+         patch("bmlibrarian_lite.pdf_utils.get_fulltext_base_dir", return_value=tmp_path), \
+         patch("bmlibrarian_lite.fulltext_discovery.save_core_text"), \
+         patch("bmlibrarian_lite.fulltext_discovery.read_cached_core_text", lambda _p: None):
+        return discoverer._try_pdf_download({"doi": DOI, "id": "d1"}, None, None, doi, "T")
+
+
+def test_an_unreadable_pdf_is_followed_by_cores_text(tmp_path: Path) -> None:
+    """A scan is no full text obtained: CORE is asked, once, by the cleaned DOI."""
+    core = _Core(CoreFetch.served(TEXT))
+    result = _try_with_downloaded_pdf(core, tmp_path, "   ")
+    assert result.success
+    assert result.source_type is FulltextSourceType.CORE_TEXT
+    assert result.markdown_content == TEXT
+    assert result.file_path is None
+    assert core.asked == [DOI]
+
+
+def test_an_unreadable_pdf_with_core_unreachable_stays_unsettled(tmp_path: Path) -> None:
+    """CORE's failure joins the lookups, so no absence is claimed."""
+    failure = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=503)
+    core = _Core(CoreFetch.unreachable(failure))
+    result = _try_with_downloaded_pdf(core, tmp_path, "   ")
+    assert not result.success
+    assert SourceLookupFailure(SERVICE_CORE, failure) in result.lookups.failures
+    assert not result.absence_established
+    assert core.asked == [DOI]
+
+
+def test_an_unreadable_pdf_with_core_absent_is_as_before(tmp_path: Path) -> None:
+    """Control: CORE knowing nothing leaves the unreadable-PDF result unchanged."""
+    core = _Core(CoreFetch.absent())
+    result = _try_with_downloaded_pdf(core, tmp_path, "   ")
+    assert not result.success
+    assert result.source_type is FulltextSourceType.NOT_ASSESSED
+    assert "no text could be extracted" in (result.error or "")
+    assert not result.absence_established
+    assert SERVICE_CORE not in {f.service for f in result.lookups.failures}
+    assert core.asked == [DOI]
+
+
+def test_a_pdf_with_text_means_core_is_never_asked(tmp_path: Path) -> None:
+    """Control: a PDF that yields text ends the walk."""
+    core = _Core(CoreFetch.served(TEXT))
+    result = _try_with_downloaded_pdf(core, tmp_path, "The PDF's own text.")
+    assert result.source_type is FulltextSourceType.DOWNLOADED_PDF
+    assert core.asked == []
+
+
+def test_an_extraction_that_raises_is_unreadable_and_asks_core(tmp_path: Path) -> None:
+    """A raising extractor is an unreadable copy, like an empty one."""
+    core = _Core(CoreFetch.served(TEXT))
+    result = _try_with_downloaded_pdf(core, tmp_path, RuntimeError("corrupt"))
+    assert result.source_type is FulltextSourceType.CORE_TEXT
+    assert core.asked == [DOI]
+
+
+def test_an_unreadable_pdf_without_a_key_asks_nothing(tmp_path: Path) -> None:
+    """Without a key nothing changes and nothing is asked."""
+    result = _try_with_downloaded_pdf(None, tmp_path, "   ")
+    assert not result.success
+    assert not result.absence_established

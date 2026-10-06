@@ -51,6 +51,7 @@ from typing import Any, Callable, Dict, Optional
 
 from .constants import (
     HTTP_NOT_FOUND,
+    SERVICE_CORE,
     SERVICE_EUROPE_PMC,
     SERVICE_CACHED_FULLTEXT,
     SERVICE_PMC_OPEN_DATA,
@@ -875,6 +876,44 @@ class FulltextDiscoverer:
                 logger.warning("CORE's text could not be cached (%s).", type(error).__name__)
         return fetch
 
+    def _after_unreadable_pdf(
+        self,
+        doc_dict: dict[str, Any],
+        clean_doi: str,
+        pdf_result: PDFDiscoveryResult,
+    ) -> FulltextResult:
+        """Ask CORE once, after a downloaded PDF that yielded no text.
+
+        Args:
+            doc_dict: Document dictionary, for CORE's text cache.
+            clean_doi: The DOI as PDF discovery cleans it; blank asks nothing.
+            pdf_result: The successful discovery whose file would not read.
+
+        Returns:
+            CORE's text when served; otherwise the unreadable-PDF result,
+            carrying CORE's failure in its lookups when it was unreachable.
+        """
+        unreadable = _pdf_unreadable(pdf_result)
+        if self._core is None or not clean_doi.strip():
+            return unreadable
+        fetch = self._core_text(doc_dict, clean_doi)
+        if fetch.text is not None:
+            return FulltextResult(
+                success=True,
+                source_type=FulltextSourceType.CORE_TEXT,
+                markdown_content=fetch.text,
+                lookups=pdf_result.lookups,
+            )
+        if fetch.failure is not None:
+            # The sentence is built from the PDF alone, so only the lookups
+            # change: the failure keeps the result unsettled.
+            return unreadable.with_lookups(
+                LookupRecord(
+                    failures=(SourceLookupFailure(SERVICE_CORE, fetch.failure),)
+                )
+            )
+        return unreadable
+
     def _try_pdf_download(
         self,
         doc_dict: Dict[str, Any],
@@ -959,7 +998,11 @@ class FulltextDiscoverer:
                 # ``absence_established`` true and MCP told a calling agent
                 # no full text exists, with the PDF sitting in the cache
                 # (#354, the rule of #359 one layer down).
-                return _pdf_unreadable(pdf_result)
+                # A scan is no full text obtained, so CORE is asked here:
+                # discovery succeeded, so its own fallback never was (#499).
+                return self._after_unreadable_pdf(
+                    doc_dict, pdf_discoverer._clean_doi(doi) if doi else "", pdf_result
+                )
 
             # A source that demanded payment answered about itself, not
             # about the article: a free copy may exist elsewhere, and
