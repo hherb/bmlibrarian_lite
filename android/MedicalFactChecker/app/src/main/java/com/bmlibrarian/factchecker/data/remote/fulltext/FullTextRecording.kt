@@ -162,6 +162,8 @@ private suspend fun DocumentEntity.obtainingOpenAccessPdf(
             OpenAccessShortfall(OpenAccessSource.CORE, OpenAccessUnsettledReason.Failed(fetched.failure)),
             shortfall
         )
+        // A skip, not a failure: told as the key, and it keeps the absence unsettled (#498)
+        CoreFetch.KeyRefused -> shortfall = OpenAccessShortfall.adding(OpenAccessShortfall.CORE_KEY_REFUSED, shortfall)
         CoreFetch.Absent, null -> Unit
     }
     val refused = FullTextResult.DoiUrl(doiLink(result.doi), shortfall)

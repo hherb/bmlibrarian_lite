@@ -28,6 +28,8 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -73,9 +75,17 @@ class OpenAccessShortfallContractTest {
         val source = OpenAccessSource.fromPersisted(row["source"]!!.jsonPrimitive.content)
             ?: error("unknown source in $row")
         row["skipped"]?.takeUnless { it is JsonNull }?.let { skipped ->
-            assertEquals("$row", "not_configured", skipped.jsonPrimitive.content)
-            assertEquals("$row", OpenAccessSource.UNPAYWALL, source)
-            return OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED
+            return when (skipped.jsonPrimitive.content) {
+                "not_configured" -> {
+                    assertEquals("$row", OpenAccessSource.UNPAYWALL, source)
+                    OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED
+                }
+                "key_refused" -> {
+                    assertEquals("$row", OpenAccessSource.CORE, source)
+                    OpenAccessShortfall.CORE_KEY_REFUSED
+                }
+                else -> error("an unknown skip in $row")
+            }
         }
         val kind = RequestFailureKind.fromPersisted(row["kind"]!!.jsonPrimitive.content)
             ?: error("unknown kind in $row")
@@ -100,7 +110,9 @@ class OpenAccessShortfallContractTest {
         for (row in table) {
             assertEquals("$row", row["notice"]!!.jsonPrimitive.content, shortfall(row).notice)
         }
-        assertTrue("a skip row pins the not-configured sentence", table.any { "skipped" in it })
+        fun skipped(row: JsonObject) = row["skipped"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.content
+        assertTrue("a skip row pins the not-configured sentence", table.any { skipped(it) == "not_configured" })
+        assertTrue("a skip row pins CORE's refused key (#498)", table.any { skipped(it) == "key_refused" })
     }
 
     @Test
@@ -146,8 +158,27 @@ class OpenAccessShortfallContractTest {
                 assertEquals(shortfall, OpenAccessShortfall.fromJson(shortfall.toJson()))
             }
         }
-        val skipped = OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED
-        assertEquals(skipped, OpenAccessShortfall.fromJson(skipped.toJson()))
+        for (skipped in listOf(OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED, OpenAccessShortfall.CORE_KEY_REFUSED)) {
+            assertEquals(skipped, OpenAccessShortfall.fromJson(skipped.toJson()))
+        }
+    }
+
+    /** A refused key is CORE's, configured, and unasked: no nudge (#498). */
+    @Test
+    fun `a refused key earns no configuration nudge`() {
+        val refused = OpenAccessShortfall.CORE_KEY_REFUSED
+        assertEquals(OpenAccessSource.CORE, refused.source)
+        assertEquals(OpenAccessUnsettledReason.KeyRefused, refused.reason)
+        assertNull(refused.failure)
+        assertFalse(refused.notice, "Configuring" in refused.notice)
+        // The control: alongside an unconfigured Unpaywall, only Unpaywall is nudged
+        assertEquals(
+            "Unpaywall (not configured) and CORE (the key in the settings was refused) could not be " +
+                "asked, so a freely available copy may exist. Whether this document is open access " +
+                "was not established. Configuring Unpaywall would add an open-access route this " +
+                "search did not have.",
+            (OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED + refused).notice
+        )
     }
 
     /** A table added to the contract and asserted nowhere would pin nothing. */

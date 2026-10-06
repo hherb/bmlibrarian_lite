@@ -115,6 +115,20 @@ class FullTextServiceCoreTest {
         assertEquals(RequestFailure.forHttpStatus(503), result.openAccessShortfall!!.entries.last().failure)
     }
 
+    /** A refused key is a skip of CORE, told as the key, on the DOI link (#498). */
+    @Test
+    fun `a refused CORE key is told on the DOI link as the key`() = runTest {
+        unpaywallKnowsNothing()
+        core = coreAnswering(CoreFetch.KeyRefused)
+        val result = service().fetchFullText(null, doi, "1", email).getOrThrow() as FullTextResult.DoiUrl
+        assertEquals(OpenAccessShortfall.CORE_KEY_REFUSED, result.openAccessShortfall)
+        assertEquals(
+            "CORE (the key in the settings was refused) could not be asked, so a freely available copy " +
+                "may exist. Whether this document is open access was not established.",
+            result.openAccessShortfall!!.notice
+        )
+    }
+
     /** Chain order: Unpaywall's skip first, CORE's failure after it. */
     @Test
     fun `an unconfigured Unpaywall and an unreachable CORE are told in chain order`() = runTest {

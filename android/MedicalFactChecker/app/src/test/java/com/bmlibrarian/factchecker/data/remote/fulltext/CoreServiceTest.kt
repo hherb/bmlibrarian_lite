@@ -99,7 +99,11 @@ class CoreServiceTest {
             val status = row.getValue("status").jsonPrimitive.int
             val outcome = row.getValue("outcome").jsonPrimitive.content
             routes[path] = MockResponse().setResponseCode(status).setBody(if (status == 200) hitBody else "")
-            val expected = if (outcome == "served") served else CoreFetch.Unreachable(RequestFailure.forHttpStatus(status))
+            val expected = when (outcome) {
+                "served" -> served
+                "key_refused" -> CoreFetch.KeyRefused
+                else -> CoreFetch.Unreachable(RequestFailure.forHttpStatus(status))
+            }
             // A fresh service each row: two 429s would otherwise pause the next
             assertEquals("status $status", expected, service().fetchText(doi))
         }
@@ -193,6 +197,42 @@ class CoreServiceTest {
         val flaky = CoreService(failing, server.url("").toString().trimEnd('/'), { key }, RequestPacer(0L), 0, 0L)
         flaky.fetchText(doi)
         assertFalse(flaky.isPaused)
+    }
+
+    /** The first 401 is told as a refused key, and CORE is not asked again (#498). */
+    @Test
+    fun `a 401 refuses the key for the session`() = runBlocking {
+        routes[path] = MockResponse().setResponseCode(Constants.CORE_KEY_REFUSED_STATUS)
+        val service = service()
+        assertEquals(CoreFetch.KeyRefused, service.fetchText(doi))
+        assertTrue(service.isKeyRefused)
+        routes[path] = MockResponse().setBody(hitBody)
+        assertEquals(CoreFetch.KeyRefused, service.fetchText(doi))
+        assertEquals("a refused key sends nothing", 1, server.requestCount)
+    }
+
+    /** The control: a 403 is an ordinary answer, and CORE is asked again. */
+    @Test
+    fun `a 403 is an ordinary answer and refuses nothing`() = runBlocking {
+        routes[path] = MockResponse().setResponseCode(403)
+        val service = service()
+        assertEquals(CoreFetch.Unreachable(RequestFailure.forHttpStatus(403)), service.fetchText(doi))
+        assertFalse(service.isKeyRefused)
+        routes[path] = MockResponse().setBody(hitBody)
+        assertEquals(served, service.fetchText(doi))
+        assertEquals(2, server.requestCount)
+    }
+
+    /** A 401 is an ending other than 429, so 429, 401, 429 does not pause. */
+    @Test
+    fun `a 401 resets the 429 count`() = runBlocking {
+        val service = service()
+        routes[path] = MockResponse().setResponseCode(429)
+        service.fetchText(doi)
+        routes[path] = MockResponse().setResponseCode(Constants.CORE_KEY_REFUSED_STATUS)
+        service.fetchText(doi)
+        assertFalse(service.isPaused)
+        assertTrue(service.isKeyRefused)
     }
 
     @Test

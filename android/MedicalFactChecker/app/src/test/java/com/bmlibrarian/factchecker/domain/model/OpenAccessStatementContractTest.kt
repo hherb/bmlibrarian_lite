@@ -69,8 +69,13 @@ class OpenAccessStatementContractTest {
         val entries: JsonArray = row["entries"]!!.jsonArray
         return entries.map { element ->
             val entry = element.jsonObject
-            if (entry["skipped"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.content == "not_configured") {
+            val skipped = entry["skipped"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.content
+            if (skipped == "not_configured") {
                 return@map OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED
+            }
+            if (skipped == "key_refused") {
+                assertEquals("$entry", OpenAccessSource.CORE.persistedValue, str(entry, "source"))
+                return@map OpenAccessShortfall.CORE_KEY_REFUSED
             }
             val source = OpenAccessSource.fromPersisted(str(entry, "source")) ?: error("unknown source in $entry")
             val kind = RequestFailureKind.fromPersisted(str(entry, "kind")) ?: error("unknown kind in $entry")

@@ -124,16 +124,24 @@ sealed interface CoreFetch {
 
     /** CORE's answer is missing, of its real kind (a 404 is one: never an absence). */
     data class Unreachable(val failure: RequestFailure) : CoreFetch
+
+    /**
+     * CORE refused the key, on this fetch or an earlier one this session (#498): CORE
+     * was not asked about the article, and the reader is told the key, never the article.
+     */
+    data object KeyRefused : CoreFetch
 }
 
 /**
  * Asks CORE's search for a DOI's extracted text, the user's key in the
  * `Authorization` header alone, paced to CORE's polite rate.
  *
- * A singleton, so its session pause is the process's: two consecutive fetches
+ * A singleton, so its session state is the process's: two consecutive fetches
  * ending in 429 stop CORE being asked until the app restarts. A paused fetch
  * sends nothing and answers 429; any other ending, a transport failure included,
- * resets the count.
+ * resets the count. A fetch ending in 401 marks the key refused for the rest of
+ * the process (#498): that fetch and every later one is [CoreFetch.KeyRefused],
+ * and nothing more is sent; nothing lifts it.
  *
  * @param httpClient Derived from the shared client with [PmcOpenDataService.bucketClient]
  * @param baseUrl CORE's address; tests point it at a local server
@@ -171,8 +179,14 @@ class CoreService internal constructor(
     @Volatile
     private var paused = false
 
+    @Volatile
+    private var keyRefused = false
+
     /** Whether CORE is paused for the rest of the session. */
     val isPaused: Boolean get() = paused
+
+    /** Whether CORE refused the key this session (#498). */
+    val isKeyRefused: Boolean get() = keyRefused
 
     /**
      * CORE's text for [doi].
@@ -182,7 +196,8 @@ class CoreService internal constructor(
      *
      * @param doi The DOI; a blank one is never asked
      * @return Null when no key is set (nothing is asked or recorded); served; absent;
-     *   or unreachable, of its real kind
+     *   unreachable, of its real kind; or key refused, for a 401 and for every fetch
+     *   after one (nothing sent)
      * @throws kotlinx.coroutines.CancellationException if the caller cancelled
      */
     suspend fun fetchText(doi: String): CoreFetch? {
@@ -194,6 +209,8 @@ class CoreService internal constructor(
             return CoreFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
         } ?: return null
         if (doi.isBlank()) return CoreFetch.Absent
+        // The key before the pause: it is the cause the reader can act on (#498)
+        if (keyRefused) return CoreFetch.KeyRefused
         if (paused) return CoreFetch.Unreachable(RequestFailure.forHttpStatus(Constants.HTTP_TOO_MANY_REQUESTS))
         return try {
             val url = Core.searchUrl(doi, baseUrl).toHttpUrlOrNull()
@@ -204,6 +221,7 @@ class CoreService internal constructor(
                 .build()
             val (code, bytes) = get(request)
             record(code)
+            if (code == Constants.CORE_KEY_REFUSED_STATUS) return CoreFetch.KeyRefused
             if (code != Constants.HTTP_OK) return CoreFetch.Unreachable(RequestFailure.forHttpStatus(code))
             val text = bytes.strictUtf8() ?: return malformed(null)
             try {
@@ -227,12 +245,17 @@ class CoreService internal constructor(
     }
 
     /**
-     * Count one fetch's ending: the consecutive 429s pause CORE, anything else resets them.
+     * Count one fetch's ending: the consecutive 429s pause CORE, anything else resets them;
+     * a 401 also marks the key refused for good (#498).
      *
      * @param status The ending's HTTP status, or null for no status (a transport failure)
      */
     private fun record(status: Int?) {
         synchronized(throttleLock) {
+            if (status == Constants.CORE_KEY_REFUSED_STATUS && !keyRefused) {
+                keyRefused = true
+                Log.w(TAG, "CORE refused the configured key (HTTP $status); not asked again this session")
+            }
             if (status != Constants.HTTP_TOO_MANY_REQUESTS) {
                 consecutive429 = 0
                 return

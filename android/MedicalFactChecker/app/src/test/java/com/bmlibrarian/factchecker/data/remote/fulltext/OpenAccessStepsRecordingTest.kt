@@ -390,6 +390,20 @@ class OpenAccessStepsRecordingTest {
         assertEquals(Constants.FULLTEXT_SOURCE_DOI, recorded.document.fullTextSource)
     }
 
+    /** A refused CORE key is a skip of CORE after the refusals, never a failure (#498). */
+    @Test
+    fun `a refused CORE key is told after every refusal`() = runTest {
+        val recorded = document().recordingFullTextFetch(
+            found(candidate(first)),
+            { PdfDownload.Failed(RequestFailure.forHttpStatus(403)) },
+            { _, _ -> emptyList() },
+            { CoreFetch.KeyRefused }
+        )
+        val expected = refused(first, 403) + OpenAccessShortfall.CORE_KEY_REFUSED
+        assertEquals(FullTextResult.DoiUrl(doiLink(doi), expected), recorded.result)
+        assertEquals(expected, recorded.document.openAccessShortfall)
+    }
+
     /** CORE knowing nothing, or not asked for want of a key, adds nothing: the refusals alone are told. */
     @Test
     fun `CORE absent or without a key adds nothing to the refusals`() = runTest {

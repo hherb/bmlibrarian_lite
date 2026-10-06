@@ -64,7 +64,8 @@ class CoreContractTest {
             setOf(
                 "schema_version", "description", "service_name", "source", "source_label",
                 "desktop_source_type", "base_url", "min_fulltext_chars",
-                "pause_after_consecutive_429", "search_url", "full_text", "status", "bodies"
+                "pause_after_consecutive_429", "key_refused_status", "key_refused_reason",
+                "search_url", "full_text", "status", "bodies"
             ),
             contract.keys
         )
@@ -82,6 +83,8 @@ class CoreContractTest {
             Constants.CORE_PAUSE_AFTER_CONSECUTIVE_429,
             contract["pause_after_consecutive_429"]!!.jsonPrimitive.int
         )
+        assertEquals(Constants.CORE_KEY_REFUSED_STATUS, contract["key_refused_status"]!!.jsonPrimitive.int)
+        assertEquals(Constants.CORE_KEY_REFUSED_REASON, contract.string("key_refused_reason"))
     }
 
     @Test

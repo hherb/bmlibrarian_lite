@@ -78,10 +78,10 @@ enum class OpenAccessSource(val persistedValue: String, val serviceName: String)
 }
 
 /**
- * Why a lookup of the Unpaywall tier left the question of a free copy open.
+ * Why a lookup of the open-access chain left the question of a free copy open.
  *
- * Python records the two as a `SourceLookupFailure` and a `SourceLookupSkipped`
- * with `LookupSkipReason.NOT_CONFIGURED`.
+ * Python records these as a `SourceLookupFailure`, or a `SourceLookupSkipped`
+ * with `LookupSkipReason.NOT_CONFIGURED` or `LookupSkipReason.KEY_REFUSED`.
  */
 sealed interface OpenAccessUnsettledReason {
     /**
@@ -97,6 +97,14 @@ sealed interface OpenAccessUnsettledReason {
      * [OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED].
      */
     data object NotConfigured : OpenAccessUnsettledReason
+
+    /**
+     * CORE was not asked: it refused the key the settings hold, on this fetch or
+     * earlier this session (#498). Only [OpenAccessSource.CORE] is ever skipped so;
+     * see [OpenAccessShortfall.CORE_KEY_REFUSED]. Configured, so it earns no
+     * configuration nudge.
+     */
+    data object KeyRefused : OpenAccessUnsettledReason
 }
 
 /**
@@ -121,7 +129,8 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
      * One lookup, or one PDF a source named, that left the question open.
      *
      * @property source Which lookup, or whose PDF
-     * @property reason Why: a failed lookup, or an Unpaywall that was not configured
+     * @property reason Why: a failed lookup, an Unpaywall that was not configured, or
+     *   CORE's refused key
      * @property address The PDF's address, for a PDF a source named; null for a
      *   service's own lookup. Trimmed; blank is null
      */
@@ -139,6 +148,11 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
                 reason !is OpenAccessUnsettledReason.NotConfigured ||
                     (source == OpenAccessSource.UNPAYWALL && this.address == null)
             ) { "a not-configured skip is Unpaywall's own lookup, not $source with address ${this.address}" }
+            // Likewise only CORE's own lookup is skipped for a refused key (#498)
+            require(
+                reason !is OpenAccessUnsettledReason.KeyRefused ||
+                    (source == OpenAccessSource.CORE && this.address == null)
+            ) { "a refused-key skip is CORE's own lookup, not $source with address ${this.address}" }
         }
 
         /** The failure, or null for a lookup that was never made. */
@@ -151,7 +165,11 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
 
         /** Its reason as the reader is told it. */
         internal val described: String
-            get() = failure?.describe() ?: NOT_CONFIGURED_DESCRIPTION
+            get() = when (reason) {
+                is OpenAccessUnsettledReason.Failed -> reason.failure.describe()
+                OpenAccessUnsettledReason.NotConfigured -> NOT_CONFIGURED_DESCRIPTION
+                OpenAccessUnsettledReason.KeyRefused -> Constants.CORE_KEY_REFUSED_REASON
+            }
 
         override fun equals(other: Any?): Boolean =
             other is Entry && source == other.source && reason == other.reason && address == other.address
@@ -250,7 +268,10 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
             return TRIED_SOURCES_LEAD + texts.joinToString("; ") + ". " + ending
         }
 
-    /** Python's `configuration_nudge`: only Unpaywall is ever not configured. */
+    /**
+     * Python's `configuration_nudge`: only Unpaywall is ever not configured. A refused
+     * CORE key is configured, so it earns none (#498).
+     */
     private fun withNudge(sentence: String): String =
         if (entries.any { it.reason == OpenAccessUnsettledReason.NotConfigured }) {
             "$sentence Configuring ${OpenAccessSource.UNPAYWALL.serviceName} " +
@@ -264,7 +285,8 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
      *
      * One lookup without an address keeps schema 1:
      * `{"schema_version":1,"source":…,"failure":{"kind":…,"status_code":…}}` (for a
-     * lookup not made, `"skipped":"not_configured"` in its place). Anything else
+     * lookup not made, `"skipped":"not_configured"` or `"skipped":"key_refused"` in
+     * its place). Anything else
      * is schema 2: `{"schema_version":2,"entries":[…]}`, each entry in the same
      * shape plus the PDF's `address`.
      *
@@ -304,6 +326,9 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
         /** Python's `LookupSkipReason.NOT_CONFIGURED`, as stored. */
         private const val SKIPPED_NOT_CONFIGURED = "not_configured"
 
+        /** Python's `LookupSkipReason.KEY_REFUSED`, as stored (#498). */
+        private const val SKIPPED_KEY_REFUSED = "key_refused"
+
         /** Python's `SourceLookupSkipped.describe()` for that reason. */
         private const val NOT_CONFIGURED_DESCRIPTION = "not configured"
 
@@ -340,6 +365,14 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
         /** Unpaywall, never asked for want of a contact email it would accept. */
         val UNPAYWALL_NOT_CONFIGURED =
             OpenAccessShortfall(OpenAccessSource.UNPAYWALL, OpenAccessUnsettledReason.NotConfigured)
+
+        /**
+         * CORE, not asked because it refused the key the settings hold (#498). Told as
+         * "CORE (the key in the settings was refused) could not be asked"; it keeps the
+         * absence unsettled, as any source not asked does.
+         */
+        val CORE_KEY_REFUSED =
+            OpenAccessShortfall(OpenAccessSource.CORE, OpenAccessUnsettledReason.KeyRefused)
 
         /** The article a mid-sentence service name may begin with. */
         private const val LOWER_CASE_ARTICLE = "the "
@@ -446,6 +479,7 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
             when (val reason = entry.reason) {
                 is OpenAccessUnsettledReason.Failed -> put(KEY_FAILURE, SearchFailureReporting.failureJson(reason.failure))
                 OpenAccessUnsettledReason.NotConfigured -> put(KEY_SKIPPED, SKIPPED_NOT_CONFIGURED)
+                OpenAccessUnsettledReason.KeyRefused -> put(KEY_SKIPPED, SKIPPED_KEY_REFUSED)
             }
         }
 
@@ -458,8 +492,9 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
          * `entries` that is not a non-empty list included, reads as a failed
          * request to Unpaywall, the tier every open-access lookup belongs to. An
          * unknown source reads as Unpaywall too; the failure degrades as a search
-         * shortfall's does. A stored skip is Unpaywall's, whatever source it
-         * names: only Unpaywall is skipped.
+         * shortfall's does. A stored `not_configured` skip is Unpaywall's and a
+         * stored `key_refused` skip CORE's, whatever source it names: only they are
+         * skipped so. Any other skip reads by its failure.
          *
          * @param stored The stored value, untrusted
          * @return The shortfall, as specific as the stored value allows
@@ -484,8 +519,12 @@ data class OpenAccessShortfall(val entries: List<Entry>) {
 
         /** One stored entry, as specific as it allows. */
         private fun restoredEntry(fields: JsonObject): Entry {
-            if (fields[KEY_SKIPPED] == JsonPrimitive(SKIPPED_NOT_CONFIGURED)) {
-                return Entry(OpenAccessSource.UNPAYWALL, OpenAccessUnsettledReason.NotConfigured)
+            when (fields[KEY_SKIPPED]) {
+                JsonPrimitive(SKIPPED_NOT_CONFIGURED) ->
+                    return Entry(OpenAccessSource.UNPAYWALL, OpenAccessUnsettledReason.NotConfigured)
+                JsonPrimitive(SKIPPED_KEY_REFUSED) ->
+                    return Entry(OpenAccessSource.CORE, OpenAccessUnsettledReason.KeyRefused)
+                else -> Unit
             }
             val sourceValue = (fields[KEY_SOURCE] as? JsonPrimitive)?.takeIf { it.isString }?.content
             val address = (fields[KEY_ADDRESS] as? JsonPrimitive)?.takeIf { it.isString }?.content

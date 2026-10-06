@@ -482,6 +482,9 @@ class FullTextService @Inject constructor(
                     OpenAccessShortfall(OpenAccessSource.CORE, OpenAccessUnsettledReason.Failed(fetched.failure)),
                     openAccessShortfall
                 )
+                // A skip, not a failure: told as the key, and it keeps the absence unsettled (#498)
+                CoreFetch.KeyRefused -> openAccessShortfall =
+                    OpenAccessShortfall.adding(OpenAccessShortfall.CORE_KEY_REFUSED, openAccessShortfall)
                 CoreFetch.Absent, null -> Unit
             }
         }

@@ -185,6 +185,15 @@ object Constants {
     /** Consecutive fetches ending in 429 after which CORE is not asked again this session. */
     const val CORE_PAUSE_AFTER_CONSECUTIVE_429 = 2
 
+    /**
+     * The one status that means CORE refused the key (#498): the first marks it refused for
+     * the rest of the process. Not 403, which Cloudflare can answer to a valid key.
+     */
+    const val CORE_KEY_REFUSED_STATUS = 401
+
+    /** A refused key as the reader is told it, Python's `LookupSkipReason.KEY_REFUSED` words. */
+    const val CORE_KEY_REFUSED_REASON = "the key in the settings was refused"
+
     /** 0.4 requests a second, Python's POLITE_RATE_CEILINGS entry. */
     const val CORE_MIN_INTERVAL_MS = 2500L
 
