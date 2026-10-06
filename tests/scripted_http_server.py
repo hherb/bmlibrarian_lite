@@ -44,6 +44,7 @@ class ReceivedRequest(NamedTuple):
 
     path: str
     parameters: dict[str, list[str]]
+    headers: dict[str, str] = {}
 
 
 def json_answer(payload: object, status: HTTPStatus = HTTPStatus.OK) -> ScriptedAnswer:
@@ -142,7 +143,7 @@ class _ScriptedHandler(BaseHTTPRequestHandler):
         parameters = parse_qs(split.query)
         for name, values in parse_qs(body).items():
             parameters.setdefault(name, []).extend(values)
-        server.received.append(ReceivedRequest(split.path, parameters))
+        server.received.append(ReceivedRequest(split.path, parameters, dict(self.headers)))
 
         answer = server.next_answer(split.path)
         self.send_response(answer.status)

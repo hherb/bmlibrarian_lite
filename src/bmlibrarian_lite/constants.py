@@ -648,6 +648,7 @@ FULLTEXT_SOURCE_PRIORITY = {
     "pmc_open_data_xml": 85,  # PMC's open-data bucket (JATS)
     "cached_pdf": 80,        # Cached PDF
     "downloaded_pdf": 70,    # Downloaded PDF
+    "core_text": 60,         # CORE's extracted text (no structure)
     "abstract_only": 10,     # Abstract fallback
 }
 
@@ -950,6 +951,10 @@ POLITE_RATE_CEILINGS: dict[str, float] = {
     # PMC's open-data bucket on S3 (#480). S3 publishes no per-client limit;
     # three requests per article (listing, metadata, XML) at 5/s.
     "pmc-oa-opendata.s3.amazonaws.com": 5.0,
+    # CORE (#480, stage C): a personal key allows 25 requests a minute, and
+    # the spike met 429s at that rate, so a search evidently costs more than
+    # one token. Paced well under it.
+    "api.core.ac.uk": 0.4,
 }
 
 
@@ -1049,6 +1054,7 @@ DOI_RESOLVER_ABSENCE_STATUSES = (400, 404)
 # (#346). Europe PMC's fullTextXML answers 500, not 404, for closed-access
 # text; see ``europepmc.offers_fulltext_xml``.
 HTTP_NOT_FOUND = 404
+HTTP_OK = 200
 
 # The sources a full-text lookup can fail against, named as the reader knows
 # them. One place, because each name travels into a sentence the user reads
@@ -1092,6 +1098,34 @@ OPENALEX_REQUEST_TIMEOUT_SECONDS = 30
 OPENALEX_MAX_RETRIES = 3
 # OpenAlex serves JSON, which is UTF-8 (RFC 8259); nothing is guessed.
 OPENALEX_ENCODING = "utf-8"
+
+# CORE's search of the text it extracted from repository copies, asked by
+# DOI with the user's own key, last in the chain (#480, stage C). Named as
+# the reader knows it.
+SERVICE_CORE = "CORE"
+CORE_HOST = "api.core.ac.uk"
+CORE_API_BASE_URL = f"https://{CORE_HOST}"
+# The slash after "works" matters: without it CORE answers an HTML page.
+CORE_SEARCH_PATH = "/v3/search/works/"
+# Results asked for: the DOI query can match more than one record.
+CORE_SEARCH_LIMIT = 3
+# Below this, a "full text" is an abstract or a cover page (the #480 spike's
+# threshold), counted in Unicode code points.
+CORE_MIN_FULLTEXT_CHARS = 5000
+# Consecutive fetches ending in HTTP 429 after which CORE is not asked again
+# this session: its key buys a daily budget, which no pacing can express.
+CORE_PAUSE_AFTER_CONSECUTIVE_429 = 2
+CORE_REQUEST_TIMEOUT_SECONDS = 30
+CORE_MAX_RETRIES = 3
+CORE_BACKOFF_FACTOR = 1
+# CORE serves JSON, which is UTF-8 (RFC 8259).
+CORE_ENCODING = "utf-8"
+# The environment variable a CORE key may be given in, as NCBI_API_KEY is.
+ENV_CORE_API_KEY = "CORE_API_KEY"
+# How the desktop labels CORE's text, and the line opening its cache file.
+CORE_SOURCE_LABEL = "CORE (extracted text)"
+CORE_TEXT_CACHE_STAMP = "<!-- bmlibrarian-lite core-text v1 -->"
+CORE_TEXT_CACHE_SUFFIX = ".core.txt"
 
 # What a PDF file begins with. A body that does not is not the PDF, whatever
 # it was served as -- a login page or a bot wall's challenge (#478, #480).

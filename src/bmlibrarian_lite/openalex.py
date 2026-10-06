@@ -31,6 +31,7 @@ from urllib3.util.retry import Retry
 from .constants import (
     EUROPEPMC_USER_AGENT,
     HTTP_NOT_FOUND,
+    HTTP_OK,
     OPENALEX_API_BASE_URL,
     OPENALEX_ENCODING,
     OPENALEX_MAX_RETRIES,
@@ -42,7 +43,6 @@ from .polite_session import mount_politely
 from .search_failures import request_failure_from_exception
 
 logger = logging.getLogger(__name__)
-_HTTP_OK = 200
 
 
 def openalex_work_url(
@@ -241,7 +241,7 @@ class OpenAlexLocationsClient:
             )
         if response.status_code == HTTP_NOT_FOUND:
             return OpenAlexWorkFetch.absent()
-        if response.status_code != _HTTP_OK:
+        if response.status_code != HTTP_OK:
             return OpenAlexWorkFetch.unreachable(
                 RequestFailure(RequestFailureKind.HTTP_STATUS, response.status_code)
             )
