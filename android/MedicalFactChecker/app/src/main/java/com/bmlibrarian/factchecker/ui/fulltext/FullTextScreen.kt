@@ -31,6 +31,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -41,9 +42,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronLeft
@@ -299,28 +298,47 @@ private fun LoadingContent() {
     }
 }
 
+/** A run of one or more blank lines, with the line breaks around it: what parts two paragraphs. */
+private val BLANK_LINE_RUN = Regex("\\r?\\n(?:[ \\t\\f\\u000B]*\\r?\\n)+")
+
 /**
- * Plain-text viewer: selectable, scrolling text in a Compose [Text].
+ * Plain text cut into paragraphs at its blank lines, for a lazy list.
+ *
+ * Every character but the blank lines that part paragraphs is kept, in order:
+ * a paragraph keeps its own line breaks and spacing. A paragraph of nothing but
+ * whitespace (before the first, say) is left out, having nothing to show.
+ *
+ * @param text The text, exactly as stored
+ * @return Its paragraphs, in order
+ */
+internal fun plainTextParagraphs(text: String): List<String> =
+    text.split(BLANK_LINE_RUN).filter { it.isNotBlank() }
+
+/**
+ * Plain-text viewer: selectable text, one lazily laid out paragraph at a time.
  *
  * For text from an untrusted source (CORE's extracted text, #480, stage C).
  * Nothing here interprets markup: the text is shown exactly as stored, so it is
  * never passed to [markdownToBasicHtml] or [HtmlViewer], whose WebView runs
  * JavaScript. (The markdown renderer escapes its input too, since #495; CORE's
- * text, being no markdown at all, is still kept out of it.)
+ * text, being no markdown at all, is still kept out of it.) A text of several
+ * MB is laid out only as far as it is scrolled, never truncated.
  *
  * @param text The text to show.
  */
 @Composable
 private fun PlainTextViewer(text: String) {
+    val paragraphs = remember(text) { plainTextParagraphs(text) }
     SelectionContainer {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(Constants.UI_SCREEN_PADDING.dp)
-        )
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(Constants.UI_SCREEN_PADDING.dp),
+            verticalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING.dp)
+        ) {
+            items(paragraphs) { paragraph ->
+                Text(text = paragraph, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
     }
 }
 
@@ -329,8 +347,9 @@ private fun PlainTextViewer(text: String) {
  *
  * JavaScript stays on: the pages' own scripts need it (the figures' fallback to
  * other image extensions, smooth scrolling to anchors). So everything loaded
- * here is built from escaped text: the JATS renderer's HTML, and stored
- * markdown through [markdownToBasicHtml] (#495).
+ * here is built from escaped text: the JATS renderer's HTML, its unsafe URL
+ * attributes dropped as the view model wraps it, and stored markdown through
+ * [markdownToBasicHtml] (#495).
  *
  * @param html The page to show
  */

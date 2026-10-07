@@ -145,13 +145,16 @@ class FullTextServiceCoreTest {
         )
     }
 
+    /** Absent: the DOI link as it was without CORE, and the absence holds (Python's twin). */
     @Test
     fun `CORE knowing nothing adds nothing`() = runTest {
         unpaywallKnowsNothing()
         core = coreAnswering(CoreFetch.Absent)
-        val result = service().fetchFullText(null, doi, "1", email).getOrThrow() as FullTextResult.DoiUrl
-        assertTrue(result.openAccessShortfall?.entries.orEmpty().none { it.source == OpenAccessSource.CORE })
+        val result = service().fetchFullText(null, doi, "1", email).getOrThrow()
+        // Else the absence proves nothing
         coVerify(exactly = 1) { core.fetchText(doi) }
+        // Nothing left unsettled: the absence of a free copy is established
+        assertEquals(FullTextResult.DoiUrl(doiLink(doi), openAccessShortfall = null), result)
     }
 
     @Test

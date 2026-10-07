@@ -32,6 +32,7 @@ import com.bmlibrarian.factchecker.domain.model.FullTextLinkKind
 import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
 import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.neutraliseUnsafeUrls
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -99,7 +100,7 @@ class FullTextViewModel @Inject constructor(
          * Plain text, shown as such: CORE's extracted text (#480, stage C).
          *
          * Untrusted, so it is rendered in a Compose text view, never through the
-         * HTML viewer (a JavaScript-enabled WebView that does not escape).
+         * HTML viewer, whose WebView runs JavaScript.
          *
          * @param text The text, exactly as stored.
          * @param title Document title.
@@ -468,6 +469,11 @@ class FullTextViewModel @Inject constructor(
      * - Horizontal scrolling for tables
      * - Figure fallback JavaScript for alternative image extensions
      * - Anchor navigation with smooth scrolling
+     *
+     * Every [FullTextState.HtmlContent] page is built here, so every unsafe URL
+     * attribute is dropped here ([neutraliseUnsafeUrls], #495): in HTML stored by
+     * earlier builds, whose links were written for any scheme, as in a fresh
+     * render and its figures. Stored markdown takes its own escaped route.
      */
     private fun wrapHtmlContent(html: String): String {
         return """
@@ -484,7 +490,7 @@ class FullTextViewModel @Inject constructor(
                 </script>
             </head>
             <body>
-                $html
+                ${neutraliseUnsafeUrls(html)}
             </body>
             </html>
         """.trimIndent()

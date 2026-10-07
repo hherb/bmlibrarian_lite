@@ -445,12 +445,12 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Save the NCBI API key.
+     * Save the NCBI API key, trimmed; an empty field clears it. The reader is told
+     * whether it was written: a failed write is never reported as saved.
      */
     fun saveNcbiApiKey() {
         val apiKey = _ncbiApiKeyInput.value.trim()
-        settingsRepository.saveNcbiApiKey(apiKey)
-        showStatus(if (apiKey.isNotEmpty()) "NCBI API key saved" else "NCBI API key cleared")
+        showStatus(keySaveStatus("NCBI API key", apiKey.isEmpty(), settingsRepository.saveNcbiApiKey(apiKey)))
     }
 
     /**
@@ -464,12 +464,27 @@ class SettingsViewModel @Inject constructor(
 
     /**
      * Save the CORE API key, trimmed; an empty field clears it, so CORE is no
-     * longer asked.
+     * longer asked. The reader is told whether it was written: a failed write is
+     * never reported as saved.
      */
     fun saveCoreApiKey() {
         val trimmed = _coreApiKeyInput.value.trim()
-        settingsRepository.saveCoreApiKey(trimmed)
-        showStatus(if (trimmed.isEmpty()) "CORE API key cleared" else "CORE API key saved")
+        showStatus(keySaveStatus("CORE API key", trimmed.isEmpty(), settingsRepository.saveCoreApiKey(trimmed)))
+    }
+
+    /**
+     * What the reader is told after saving a key.
+     *
+     * @param label The key's name, as the reader knows it
+     * @param cleared Whether the field was empty, so the key was cleared
+     * @param written Whether the repository wrote it
+     * @return "saved" or "cleared", or that it could not be, and the key in use is unchanged
+     */
+    private fun keySaveStatus(label: String, cleared: Boolean, written: Boolean): String = when {
+        !written && cleared -> "$label could not be cleared; the key in use is unchanged"
+        !written -> "$label could not be saved; the key in use is unchanged"
+        cleared -> "$label cleared"
+        else -> "$label saved"
     }
 
     // ==================== Search Settings Actions ====================

@@ -716,7 +716,8 @@ class FullTextService @Inject constructor(
      *
      * @param doi The DOI
      * @return Null when no CORE key is set (nothing was asked, nothing to record);
-     *   otherwise served, absent or unreachable
+     *   otherwise served, absent, unreachable, or KeyRefused (a 401, now or earlier
+     *   this session, for this key)
      * @throws CancellationException if the caller cancelled.
      */
     suspend fun askCore(doi: String): CoreFetch? = core.fetchText(doi)

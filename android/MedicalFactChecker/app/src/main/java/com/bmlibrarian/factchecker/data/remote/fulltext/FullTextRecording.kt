@@ -98,7 +98,8 @@ suspend fun DocumentEntity.recordingFullTextFetch(
  * decision of 2026-10-05: no OpenAlex request that cannot raise the odds).
  * When still nothing was served, CORE is asked, once, for its extracted text
  * (#480, stage C): served, it is the result, recorded as plain text; unreachable,
- * it is the last shortfall; absent, or without a key, it adds nothing.
+ * it is the last shortfall; a refused key adds the key_refused skip, which keeps
+ * the absence open (#498); absent, or without a key, it adds nothing.
  * Otherwise the DOI link carries every shortfall met, in chain order: an
  * unsettled lookup, or a candidate refused under its namer's source with its
  * address (#478's rule).
@@ -179,9 +180,7 @@ private suspend fun DocumentEntity.obtainingOpenAccessPdf(
  * An answer that brings no text (a PDF, the DOI link, unavailable) clears the
  * text an earlier fetch stored (#495), so no text is ever shown under another
  * answer's source: CORE's text, untrusted, is kept out of the JavaScript-enabled
- * WebView by its source label alone. No flow re-fetches over a stored text
- * today (the cards offer a fetch only without one, and the full-text screen's
- * refresh clears it first), so this guards the record, not a current path.
+ * WebView by its source label alone.
  *
  * @param result What the chain came to
  * @param pdfPath Where its PDF was saved; null when nothing was

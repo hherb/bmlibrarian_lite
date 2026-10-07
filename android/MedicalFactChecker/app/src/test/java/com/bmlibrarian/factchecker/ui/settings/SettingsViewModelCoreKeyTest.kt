@@ -53,6 +53,7 @@ class SettingsViewModelCoreKeyTest {
             every { getApiKey(any()) } returns ""
             every { getNcbiApiKey() } returns ""
             every { getCoreApiKey() } returns ""
+            every { saveCoreApiKey(any()) } returns true
         }
     }
 
@@ -123,5 +124,26 @@ class SettingsViewModelCoreKeyTest {
         viewModel.resetToDefaults()
 
         assertEquals("", viewModel.coreApiKeyInput.value)
+    }
+
+    /** A write that fails is told as such, never as saved (the repository logs why). */
+    @Test
+    fun `a failed save is told, never as saved`() {
+        every { settingsRepository.saveCoreApiKey(any()) } returns false
+        val viewModel = viewModel()
+
+        viewModel.updateCoreApiKeyInput("k")
+        viewModel.saveCoreApiKey()
+        assertEquals(
+            "CORE API key could not be saved; the key in use is unchanged",
+            viewModel.statusMessage.value
+        )
+
+        viewModel.updateCoreApiKeyInput("")
+        viewModel.saveCoreApiKey()
+        assertEquals(
+            "CORE API key could not be cleared; the key in use is unchanged",
+            viewModel.statusMessage.value
+        )
     }
 }

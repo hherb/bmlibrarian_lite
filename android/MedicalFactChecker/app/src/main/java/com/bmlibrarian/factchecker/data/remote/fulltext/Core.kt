@@ -77,6 +77,7 @@ object Core {
      * The full text CORE's JSON answer serves for [doi]; see the decoded overload.
      *
      * @throws IllegalArgumentException for a body that is not JSON, or an answer that is unreadable
+     *   (an unpaired surrogate escape included)
      */
     fun fullText(json: String, doi: String, minChars: Int = Constants.CORE_MIN_FULLTEXT_CHARS): String? =
         fullText(Json.parseToJsonElement(json), doi, minChars) // SerializationException is an IllegalArgumentException
@@ -89,9 +90,14 @@ object Core {
      * @param doi The DOI asked about
      * @param minChars The fewest code points that count as a full text
      * @return That trimmed text, or null
-     * @throws IllegalArgumentException if the answer is not an object or its `results` not a list
+     * @throws IllegalArgumentException if the answer is not an object, its `results` not a
+     *   list, or it holds a string that is not valid Unicode: an answer we cannot read is
+     *   not an absence
      */
     fun fullText(answer: JsonElement, doi: String, minChars: Int): String? {
+        if (holdsUnpairedSurrogate(answer)) {
+            throw IllegalArgumentException("a CORE answer's strings are valid Unicode")
+        }
         val obj = answer as? JsonObject ?: throw IllegalArgumentException("a CORE answer is a JSON object")
         val results = obj["results"] as? JsonArray
             ?: throw IllegalArgumentException("a CORE answer's results are a list")
@@ -110,7 +116,52 @@ object Core {
     private fun stringOf(element: JsonElement?): String? =
         (element as? JsonPrimitive)?.takeIf { it.isString }?.content
 
-    /** The digest a refused key is remembered by. */
+    /**
+     * Whether a decoded answer holds a string that is not valid Unicode, Python's
+     * `holds_unpaired_surrogate`.
+     *
+     * The parser decodes each `\uXXXX` escape to its own UTF-16 unit, so a
+     * well-formed escaped pair stays a valid pair and only an unpaired escape leaves
+     * a lone surrogate. Such text cannot be written as UTF-8, and Apple's JSON parser
+     * refuses the whole answer for it, so every platform reads it as an answer that
+     * cannot be read (the contract's `bodies`).
+     *
+     * @param answer The decoded answer
+     * @return True when any string in it, object keys included, holds a lone surrogate
+     */
+    fun holdsUnpairedSurrogate(answer: JsonElement): Boolean {
+        val pending = ArrayDeque<JsonElement>().apply { add(answer) }
+        while (pending.isNotEmpty()) {
+            when (val element = pending.removeLast()) {
+                is JsonObject -> {
+                    if (element.keys.any { hasLoneSurrogate(it) }) return true
+                    pending.addAll(element.values)
+                }
+                is JsonArray -> pending.addAll(element)
+                is JsonPrimitive -> if (element.isString && hasLoneSurrogate(element.content)) return true
+            }
+        }
+        return false
+    }
+
+    /** Whether [text] holds a surrogate that is not half of a high-then-low pair. */
+    private fun hasLoneSurrogate(text: String): Boolean {
+        var index = 0
+        while (index < text.length) {
+            val unit = text[index]
+            if (Character.isHighSurrogate(unit) && index + 1 < text.length &&
+                Character.isLowSurrogate(text[index + 1])
+            ) {
+                index += 2
+                continue
+            }
+            if (Character.isSurrogate(unit)) return true
+            index += 1
+        }
+        return false
+    }
+
+    /** The algorithm of the digest a refused key is remembered by. */
     private const val KEY_DIGEST_ALGORITHM = "SHA-256"
 
     /**
@@ -134,14 +185,22 @@ sealed interface CoreFetch {
     /**
      * CORE holds this article's text.
      *
-     * @property text The trimmed text, at least the minimum length
+     * @property text The trimmed text, at least the minimum length; never blank
      */
-    data class Served(val text: String) : CoreFetch
+    data class Served(val text: String) : CoreFetch {
+        init {
+            require(text.isNotBlank()) { "a served CORE text is never blank" }
+        }
+    }
 
     /** CORE answered, and holds no usable text for this DOI. */
     data object Absent : CoreFetch
 
-    /** CORE's answer is missing, of its real kind (a 404 is one: never an absence). */
+    /**
+     * CORE could not be asked, or its answer could not be read (a 404 included: never
+     * an absence), of its real kind: a status, a transport failure, a malformed answer,
+     * the session's pause, or a key that could not be read.
+     */
     data class Unreachable(val failure: RequestFailure) : CoreFetch
 
     /**
@@ -220,8 +279,12 @@ class CoreService internal constructor(
      * Never throws but for cancellation: an unexpected error is logged (never
      * with the key) and answered as CORE unreachable.
      *
-     * @param doi The DOI; a blank one is never asked
-     * @return Null when no key is set (nothing is asked or recorded); served; absent;
+     * The answer is decoded and parsed off the caller's thread: it can hold several MB.
+     *
+     * @param doi The DOI; a blank one sends nothing and is [CoreFetch.Absent], which
+     *   records nothing, exactly as not asking does (callers ask only with a DOI)
+     * @return Null when no key is set (nothing is asked or recorded; a debug line
+     *   says so, never with the key); served; absent;
      *   unreachable, of its real kind; or key refused, for a 401 and for every later
      *   fetch with that key (nothing sent)
      * @throws kotlinx.coroutines.CancellationException if the caller cancelled
@@ -233,7 +296,11 @@ class CoreService internal constructor(
             if (e is CancellationException) throw e
             Log.e(TAG, "CORE's key could not be read: ${e.javaClass.simpleName}")
             return CoreFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
-        } ?: return null
+        }
+        if (key == null) {
+            Log.d(TAG, "No CORE key is set; CORE is not asked")
+            return null
+        }
         if (doi.isBlank()) return CoreFetch.Absent
         // The key before the pause: it is the cause the reader can act on (#498).
         // Only the refused key is refused: a corrected one is asked again
@@ -251,11 +318,14 @@ class CoreService internal constructor(
             record(code, keyDigest)
             if (code == Constants.CORE_KEY_REFUSED_STATUS) return CoreFetch.KeyRefused
             if (code != Constants.HTTP_OK) return CoreFetch.Unreachable(RequestFailure.forHttpStatus(code))
-            val text = bytes.strictUtf8() ?: return malformed(null)
-            try {
-                Core.fullText(text, doi)?.let { CoreFetch.Served(it) } ?: CoreFetch.Absent
-            } catch (e: IllegalArgumentException) {
-                malformed(e) // SerializationException is one
+            // Off the caller's thread, which may be Main: the answer can hold several MB
+            withContext(Dispatchers.Default) {
+                val text = bytes.strictUtf8() ?: return@withContext malformed(null)
+                try {
+                    Core.fullText(text, doi)?.let { CoreFetch.Served(it) } ?: CoreFetch.Absent
+                } catch (e: IllegalArgumentException) {
+                    malformed(e) // SerializationException is one
+                }
             }
         } catch (e: RetryableStatusException) {
             record(e.statusCode, keyDigest)

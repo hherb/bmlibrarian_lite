@@ -53,6 +53,7 @@ class SettingsViewModelNcbiKeyTest {
             every { getApiKey(any()) } returns ""
             every { getNcbiApiKey() } returns ""
             every { getCoreApiKey() } returns ""
+            every { saveNcbiApiKey(any()) } returns true
         }
     }
 
@@ -102,5 +103,26 @@ class SettingsViewModelNcbiKeyTest {
         every { settingsRepository.getNcbiApiKey() } returns "stored"
 
         assertEquals("stored", viewModel().ncbiApiKeyInput.value)
+    }
+
+    /** A write that fails is told as such, never as saved (the repository logs why). */
+    @Test
+    fun `a failed save is told, never as saved`() {
+        every { settingsRepository.saveNcbiApiKey(any()) } returns false
+        val viewModel = viewModel()
+
+        viewModel.updateNcbiApiKeyInput("k")
+        viewModel.saveNcbiApiKey()
+        assertEquals(
+            "NCBI API key could not be saved; the key in use is unchanged",
+            viewModel.statusMessage.value
+        )
+
+        viewModel.updateNcbiApiKeyInput("")
+        viewModel.saveNcbiApiKey()
+        assertEquals(
+            "NCBI API key could not be cleared; the key in use is unchanged",
+            viewModel.statusMessage.value
+        )
     }
 }

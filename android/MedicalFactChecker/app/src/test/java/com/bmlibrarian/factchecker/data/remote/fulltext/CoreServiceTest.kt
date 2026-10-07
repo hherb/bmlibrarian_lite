@@ -29,6 +29,7 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.Dns
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
@@ -45,6 +46,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.File
+import java.io.IOException
 import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 
@@ -136,13 +138,58 @@ class CoreServiceTest {
         assertFalse(Log.lines.toString(), Log.lines.any { "test-core-key" in it })
     }
 
+    /** No key = nothing told: a debug line says so, and nothing is sent. */
     @Test
     fun `without a key nothing is asked`() = runBlocking {
         for (absent in listOf<String?>(null, "  ")) {
+            Log.clear()
             key = absent
             assertNull(service().fetchText(doi))
+            assertEquals(Log.lines.toString(), listOf("CoreService: No CORE key is set; CORE is not asked"), Log.lines)
         }
         assertEquals(0, server.requestCount)
+    }
+
+    /** One code point short of the floor is no full text, counted in code points, not UTF-16 units. */
+    @Test
+    fun `a hit one code point short is an absence`() = runBlocking {
+        val short = Constants.CORE_MIN_FULLTEXT_CHARS - 1
+        // An emoji is two UTF-16 units: a count of units would serve it
+        for (text in listOf("x".repeat(short), "\uD83D\uDE00".repeat(short))) {
+            routes[path] = MockResponse().setBody("""{"results":[{"doi":"$doi","fullText":"$text"}]}""")
+            assertEquals(CoreFetch.Absent, service().fetchText(doi))
+        }
+        // The control: CORE was asked each time, and its answer read
+        assertEquals(2, server.requestCount)
+    }
+
+    /** The bearer key follows no redirect off the host it was sent to, Python's twin. */
+    @Test
+    fun `a redirect to another host drops the key`() = runBlocking {
+        // Every name is the loopback server, so the second host name reaches it too
+        val loopback = OkHttpClient.Builder().dns(object : Dns {
+            override fun lookup(hostname: String) = listOf(InetAddress.getLoopbackAddress())
+        }).build()
+        val target = "http://localhost:${server.port}$REDIRECTED_PATH"
+        routes[path] = MockResponse().setResponseCode(HTTP_FOUND).setHeader("Location", target)
+        routes[REDIRECTED_PATH] = MockResponse().setBody(hitBody)
+        val service = CoreService(
+            PmcOpenDataService.bucketClient(loopback, Constants.CORE_REQUEST_TIMEOUT_SECONDS),
+            "http://127.0.0.1:${server.port}",
+            { key },
+            RequestPacer(0L),
+            0,
+            0L
+        )
+        assertEquals(served, service.fetchText(doi))
+        // The control: the redirect was followed, to the other host name
+        assertEquals(2, server.requestCount)
+        val first = server.takeRequest(REQUEST_WAIT_SECONDS, TimeUnit.SECONDS)!!
+        val second = server.takeRequest(REQUEST_WAIT_SECONDS, TimeUnit.SECONDS)!!
+        assertTrue(first.getHeader("Host")!!, first.getHeader("Host")!!.startsWith("127.0.0.1"))
+        assertTrue(second.getHeader("Host")!!, second.getHeader("Host")!!.startsWith("localhost"))
+        assertEquals("Bearer test-core-key", first.getHeader("Authorization"))
+        assertNull(second.getHeader("Authorization"))
     }
 
     @Test
@@ -186,17 +233,37 @@ class CoreServiceTest {
         assertFalse(service.isPaused)
     }
 
+    /** One service: 429, a transport failure, 429 does not pause; a further 429 does. */
     @Test
     fun `a transport failure between 429s resets the count`() = runBlocking {
-        val service = service()
-        routes[path] = MockResponse().setResponseCode(429)
-        service.fetchText(doi)
-        val failing = OkHttpClient.Builder()
-            .addInterceptor(Interceptor { throw java.io.IOException("down") })
+        var calls = 0
+        // The second request fails in transport, before it reaches CORE
+        val flakyOnSecond = OkHttpClient.Builder()
+            .addInterceptor(Interceptor { chain ->
+                calls += 1
+                if (calls == 2) throw IOException("down")
+                chain.proceed(chain.request())
+            })
             .build()
-        val flaky = CoreService(failing, server.url("").toString().trimEnd('/'), { key }, RequestPacer(0L), 0, 0L)
-        flaky.fetchText(doi)
-        assertFalse(flaky.isPaused)
+        val service = CoreService(
+            PmcOpenDataService.bucketClient(flakyOnSecond, Constants.CORE_REQUEST_TIMEOUT_SECONDS),
+            server.url("").toString().trimEnd('/'),
+            { key },
+            RequestPacer(0L),
+            0,
+            0L
+        )
+        routes[path] = MockResponse().setResponseCode(429)
+        val throttled = CoreFetch.Unreachable(RequestFailure.forHttpStatus(429))
+        assertEquals(throttled, service.fetchText(doi))
+        val failed = service.fetchText(doi)
+        assertTrue(failed.toString(), failed is CoreFetch.Unreachable && failed.failure.statusCode == null)
+        assertEquals(throttled, service.fetchText(doi))
+        assertFalse(service.isPaused)
+        // The control: 429s are still counted, so the next one in a row pauses
+        assertEquals(throttled, service.fetchText(doi))
+        assertTrue(service.isPaused)
+        assertEquals(3, server.requestCount)
     }
 
     /** The first 401 is told as a refused key, and CORE is not asked again (#498). */
@@ -325,6 +392,8 @@ class CoreServiceTest {
         const val PACER_INTERVAL_MS = 150L
         const val REQUEST_WAIT_SECONDS = 5L
         const val MIN_STATUS_ROWS = 9
-        const val MIN_BODY_ROWS = 4
+        const val MIN_BODY_ROWS = 6
+        const val HTTP_FOUND = 302
+        const val REDIRECTED_PATH = "/redirected"
     }
 }

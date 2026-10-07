@@ -126,6 +126,31 @@ class CoreContractTest {
         }
     }
 
+    /** An unpaired surrogate in an object key is as unreadable as one in a value. */
+    @Test
+    fun `an unpaired surrogate in a key throws`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            Core.fullText("""{"results": [], "n\uDC00te": 1}""", "10.1/x")
+        }
+    }
+
+    /** The control: a well-formed escaped pair is valid Unicode, and its text is served. */
+    @Test
+    fun `a well-formed surrogate pair is read`() {
+        val answer = """{"\uD83D\uDE00": 1, "results": [{"doi": "10.1/x", "fullText": "a\uD83D\uDE00b"}]}"""
+        assertEquals("a\uD83D\uDE00b", Core.fullText(answer, "10.1/x", minChars = 3))
+    }
+
+    /** Escaped, a high surrogate closing a string, a low one opening it, or a reversed pair is unpaired. */
+    @Test
+    fun `an unpaired surrogate escape at either end, or a reversed pair, throws`() {
+        for (text in listOf("ab\\uD800", "\\uDC00ab", "\\uDE00\\uD83D")) {
+            assertThrows(text, IllegalArgumentException::class.java) {
+                Core.fullText("""{"results": [{"doi": "10.1/x", "fullText": "$text"}]}""", "10.1/x", minChars = 1)
+            }
+        }
+    }
+
     /** The status table is walked by CoreServiceTest; its floor is checked here too. */
     @Test
     fun `the status table is not empty`() {
@@ -141,7 +166,7 @@ class CoreContractTest {
         /** The contract's row counts when these tests were written (#480). */
         const val MIN_SEARCH_URL_ROWS = 7
         const val MIN_FULL_TEXT_ROWS = 24
-        const val MIN_BODY_ROWS = 4
+        const val MIN_BODY_ROWS = 6
         const val MIN_STATUS_ROWS = 9
     }
 }

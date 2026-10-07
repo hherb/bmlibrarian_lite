@@ -210,7 +210,7 @@ internal fun markdownToBasicHtml(markdown: String): String {
  *
  * Two rules keep the passes from reaching into each other's markup, since each
  * runs over what the earlier ones wrote:
- * - Every attribute value is written by [attributeValue], which also encodes
+ * - Every attribute value taken from the text is written by [attributeValue], which also encodes
  *   the characters a later pass matches on (`[`, `]`, `(`, `)`, `*`, `|`, line
  *   breaks), so no later pass finds anything to match inside one.
  * - A link's or image's URL cannot contain `<`, `>` or `"`. Escaped article
