@@ -951,9 +951,10 @@ POLITE_RATE_CEILINGS: dict[str, float] = {
     # PMC's open-data bucket on S3 (#480). S3 publishes no per-client limit;
     # three requests per article (listing, metadata, XML) at 5/s.
     "pmc-oa-opendata.s3.amazonaws.com": 5.0,
-    # CORE (#480, stage C): a personal key allows 25 requests a minute, and
-    # the spike met 429s at that rate, so a search evidently costs more than
-    # one token. Paced well under it.
+    # CORE (#480, stage C): 0.4/s is 24 a minute, at the personal key's 25
+    # a minute. The spike still met 429s at that rate (a search can cost
+    # more than one token), so the session pause after two 429s in a row
+    # (CORE_PAUSE_AFTER_CONSECUTIVE_429) is the real guard, not this pace.
     "api.core.ac.uk": 0.4,
 }
 
@@ -1127,19 +1128,26 @@ CORE_BACKOFF_FACTOR = 1
 CORE_ENCODING = "utf-8"
 # The environment variable a CORE key may be given in, as NCBI_API_KEY is.
 ENV_CORE_API_KEY = "CORE_API_KEY"
-# What the settings say a CORE key is for.
+# What the Full Text settings tab says each field is for.
 UNPAYWALL_EMAIL_EXPLANATION = (
-    "Unpaywall asks for an email with every request. Without one, "
-    "Unpaywall's open-access copies are not looked for."
+    "Unpaywall asks for an email with every request. Without one, Document "
+    "Interrogation does not look for Unpaywall's open-access copies; the "
+    "transparency analysis and the MCP server fall back to your PubMed email."
 )
 CORE_API_KEY_EXPLANATION = (
     "Optional. A free CORE API key (core.ac.uk/services/api) lets the app "
     "read the text CORE extracted from repository copies when no other "
     "source has the article."
 )
+# The CORE key field's placeholder when the key comes from CORE_API_KEY.
+CORE_API_KEY_FROM_ENVIRONMENT = (
+    "Set by the CORE_API_KEY environment variable; a key here replaces it"
+)
 # How the desktop labels CORE's text, and the line opening its cache file.
+# v2 adds the DOI the text was served for, on the second line, so a cached
+# text is served again only for that DOI.
 CORE_SOURCE_LABEL = "CORE (extracted text)"
-CORE_TEXT_CACHE_STAMP = "<!-- bmlibrarian-lite core-text v1 -->"
+CORE_TEXT_CACHE_STAMP = "<!-- bmlibrarian-lite core-text v2 -->"
 CORE_TEXT_CACHE_SUFFIX = ".core.txt"
 
 # What a PDF file begins with. A body that does not is not the PDF, whatever

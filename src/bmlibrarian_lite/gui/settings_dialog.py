@@ -63,6 +63,8 @@ from ..config import (
 from ..embeddings import LiteEmbedder
 from ..constants import (
     CORE_API_KEY_EXPLANATION,
+    CORE_API_KEY_FROM_ENVIRONMENT,
+    ENV_CORE_API_KEY,
     UNPAYWALL_EMAIL_EXPLANATION,
     DEFAULT_LLM_MODEL,
     DEFAULT_LLM_TEMPERATURE,
@@ -1067,6 +1069,11 @@ class SettingsDialog(QDialog):
         self.unpaywall_email_input.setText(self.config.discovery.unpaywall_email)
         if self.config.discovery.core_api_key:
             self.core_api_key_input.setText(self.config.discovery.core_api_key)
+        elif os.environ.get(ENV_CORE_API_KEY, "").strip():
+            # Discovery falls back to the environment's key, so a refusal of
+            # it is told as "the key in the settings": the field says where
+            # that key is.
+            self.core_api_key_input.setPlaceholderText(CORE_API_KEY_FROM_ENVIRONMENT)
 
         # Search Provider
         provider_value = self.config.search.search_provider.value
@@ -1223,8 +1230,21 @@ class SettingsDialog(QDialog):
                 benchmark_models.append(model_config)
         self.config.benchmark.models = benchmark_models
 
-        # Save to file
-        self.config.save()
+        # Save to file. The edits above are already in the live
+        # configuration, so they apply this session either way; the reader
+        # is told when they will not survive a restart.
+        try:
+            self.config.save()
+        except (OSError, TypeError, ValueError) as error:
+            logger.error("Settings could not be saved: %s", type(error).__name__)
+            QMessageBox.critical(
+                self,
+                "Settings Not Saved",
+                "The settings could not be written to the configuration file "
+                f"({type(error).__name__}: {error}).\n\n"
+                "They apply until you quit, and are lost after that.",
+            )
+            return
 
         # Handle Anthropic API key separately (in .env)
         anthropic_key = self.anthropic_key_input.text().strip()

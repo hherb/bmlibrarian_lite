@@ -41,6 +41,9 @@ MIN_REQUEST_INTERVAL_SECONDS = 0.5
 if TYPE_CHECKING:
     from ..config import LiteConfig
     from ..storage import LiteStorage
+    from ..study_transparency_analyzer.study_transparency_analyzer import (
+        StudyTransparencyAnalyzer,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -92,12 +95,15 @@ class TransparencyManager(QObject):
         self.config = config
         self.settings = config.transparency
 
-        self._analyzer = create_background_analyzer(
-            email,
-            pubmed_api_key,
-            unpaywall_email=config.discovery.unpaywall_email or None,
-            core_api_key=config.discovery.core_api_key or None,
-        )
+        self._email = email
+        self._pubmed_api_key = pubmed_api_key
+        # The analyser, and the discovery settings it was built with: the
+        # configuration is the live one the settings dialog edits in place,
+        # so a changed Unpaywall email or CORE key rebuilds it before the
+        # next analysis (a corrected CORE key is asked again, #498).
+        self._analyzer_lock = Lock()
+        self._analyzer_settings = self._discovery_settings()
+        self._analyzer = self._build_analyzer(self._analyzer_settings)
 
         # Thread pool for background analysis, and the worker count it was
         # started with. Kept apart from ``settings``: the settings object is
@@ -111,6 +117,50 @@ class TransparencyManager(QObject):
         # Rate limiting
         self._last_request_time = 0.0
         self._min_request_interval = MIN_REQUEST_INTERVAL_SECONDS
+
+    def _discovery_settings(self) -> tuple[str | None, str | None]:
+        """The discovery settings the analyser is built with, as they stand now.
+
+        Returns:
+            The configured Unpaywall email and CORE key, each ``None`` when
+            blank.
+        """
+        discovery = self.config.discovery
+        return (discovery.unpaywall_email or None, discovery.core_api_key or None)
+
+    def _build_analyzer(
+        self, settings: tuple[str | None, str | None]
+    ) -> "StudyTransparencyAnalyzer":
+        """Build the analyser for these discovery settings.
+
+        Args:
+            settings: The Unpaywall email and CORE key, from
+                :meth:`_discovery_settings`.
+
+        Returns:
+            A background analyser.
+        """
+        unpaywall_email, core_api_key = settings
+        return create_background_analyzer(
+            self._email,
+            self._pubmed_api_key,
+            unpaywall_email=unpaywall_email,
+            core_api_key=core_api_key,
+        )
+
+    def _current_analyzer(self) -> "StudyTransparencyAnalyzer":
+        """The analyser for the settings as they stand, rebuilt when they changed.
+
+        Returns:
+            The analyser an analysis starting now runs.
+        """
+        settings = self._discovery_settings()
+        with self._analyzer_lock:
+            if settings != self._analyzer_settings:
+                logger.info("Discovery settings changed; rebuilding the analyser.")
+                self._analyzer = self._build_analyzer(settings)
+                self._analyzer_settings = settings
+            return self._analyzer
 
     def start(self) -> None:
         """Start the background executor."""
@@ -283,7 +333,7 @@ class TransparencyManager(QObject):
             self._last_request_time = time.time()
 
         return assess_document(
-            self._analyzer,
+            self._current_analyzer(),
             self.storage,
             self.settings,
             document_id,

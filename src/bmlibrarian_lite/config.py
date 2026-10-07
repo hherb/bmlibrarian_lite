@@ -78,9 +78,13 @@ def _reject_redaction_placeholder(
     ``bmll config --json`` prints :data:`REDACTED_SECRET_PLACEHOLDER` where the
     key would be. Saving that output back as ``config.json`` is an easy mistake
     to make, and the placeholder is a truthy string, so without this guard it
-    would be loaded as a live credential: it would shadow ``NCBI_API_KEY``,
-    win the rate limit reserved for real keys, and be sent to NCBI as if it
-    authenticated anything.
+    would be loaded as a live credential: it would shadow ``env_var`` and be
+    sent to that key's service as if it authenticated anything (for the
+    PubMed key, winning the rate limit reserved for real keys too).
+
+    A value that is not a string (a number or a list typed into the file) is
+    discarded too, with a warning: every reader of a key strips it, and would
+    otherwise fail at start-up.
 
     Args:
         value: Candidate secret as read from the configuration file
@@ -89,7 +93,18 @@ def _reject_redaction_placeholder(
 
     Returns:
         ``value`` unchanged, or ``None`` if it is the redaction placeholder
+        or not a string
     """
+    if value is not None and not isinstance(value, str):
+        logger.warning(
+            "Ignoring %s: the config file holds a %s rather than a key. "
+            "Put the key in the config file as text, or remove the entry to "
+            "fall back to the %s environment variable.",
+            field,
+            type(value).__name__,
+            env_var,
+        )
+        return None
     if value == REDACTED_SECRET_PLACEHOLDER:
         logger.warning(
             "Ignoring %s: the config file holds the redaction "
@@ -405,7 +420,9 @@ class PubMedConfig:
     """PubMed API configuration."""
 
     email: str = ""  # Required by NCBI for polite access
-    api_key: Optional[str] = None  # Optional, increases rate limit to 10 req/sec
+    # Optional, increases rate limit to 10 req/sec. Kept out of the repr, so
+    # printing or logging the configuration never shows it.
+    api_key: Optional[str] = field(default=None, repr=False)
 
 
 @dataclass
@@ -422,7 +439,9 @@ class DiscoveryConfig:
     """PDF discovery and download configuration."""
 
     unpaywall_email: str = ""  # Email for Unpaywall API (enables additional PDF sources)
-    core_api_key: str | None = None  # CORE's API key (#480): CORE's extracted text when no other source has the article
+    # CORE's API key (#480): CORE's extracted text when no other source has
+    # the article's text. Kept out of the repr, as the PubMed key is.
+    core_api_key: str | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -867,8 +886,8 @@ class LiteConfig:
         """
         Convert configuration to dictionary for serialization.
 
-        The result carries the PubMed API key in clear text, so it is fit only
-        for the 0600 config file and for in-process hashing
+        The result carries the PubMed and CORE API keys in clear text, so it
+        is fit only for the 0600 config file and for in-process hashing
         (:meth:`_compute_config_hash`). Anything a human or a log can see must
         use :meth:`to_redacted_dict` instead.
 
@@ -883,10 +902,10 @@ class LiteConfig:
     def to_redacted_dict(self) -> dict[str, Any]:
         """Convert configuration to dictionary safe to display, log or paste.
 
-        Identical to :meth:`to_dict` except that the PubMed API key is replaced
-        with a placeholder. The key is never read into the returned structure at
-        all -- only tested for presence -- so there is no clear-text copy of it
-        for a caller to reach by accident.
+        Identical to :meth:`to_dict` except that the PubMed and CORE API keys
+        are replaced with a placeholder. A key is never read into the returned
+        structure at all -- only tested for presence -- so there is no
+        clear-text copy of it for a caller to reach by accident.
 
         Returns:
             Configuration dictionary with secrets masked

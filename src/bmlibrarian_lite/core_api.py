@@ -6,7 +6,8 @@
 
 CORE aggregates open-access repositories and serves the text it extracted
 from their copies. It is the poorest full-text form the chain reads, so it
-is asked last, only when nothing earlier obtained the article. The rules are
+is asked last, only when nothing earlier obtained the article's text (a PDF
+that yields none, such as a scan, included). The rules are
 in doc/cross_platform/fulltext_retrieval.md, "CORE's Extracted Text", pinned
 by doc/cross_platform/fulltext_parity/core_fulltext.json.
 
@@ -20,9 +21,10 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import quote
 
 import requests
@@ -58,6 +60,9 @@ from .polite_session import mount_politely
 from .search_failures import request_failure_from_exception
 
 logger = logging.getLogger(__name__)
+
+#: A UTF-16 surrogate code point: in a parsed string, always an unpaired one.
+_SURROGATE = re.compile("[\ud800-\udfff]")
 
 #: Ways a DOI is written that name the same DOI; one is removed.
 _DOI_PREFIXES = (
@@ -120,6 +125,36 @@ def normalise_doi(doi: str) -> str:
     return text.strip()
 
 
+def holds_unpaired_surrogate(value: object) -> bool:
+    """Whether a parsed JSON value holds a string that is not valid Unicode.
+
+    ``json.loads`` joins an escaped surrogate pair into one code point, so
+    any surrogate left in a string came from an unpaired surrogate escape
+    (a lone high or low one). Such text cannot be written as UTF-8, and
+    Apple's JSON parser refuses the whole answer for it, so every platform
+    reads it as an answer that cannot be read (the contract's ``bodies``).
+
+    Args:
+        value: A value ``json.loads`` returned.
+
+    Returns:
+        ``True`` when any string in it, object keys included, holds a lone
+        surrogate code point.
+    """
+    pending: list[object] = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            if _SURROGATE.search(item):
+                return True
+        elif isinstance(item, Mapping):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+    return False
+
+
 def core_full_text(
     answer: object, doi: str, min_chars: int = CORE_MIN_FULLTEXT_CHARS
 ) -> str | None:
@@ -139,9 +174,12 @@ def core_full_text(
         result is this article's full text.
 
     Raises:
-        ValueError: If the answer is not an object, or its ``results`` is
-            not a list: an answer we cannot read is not an absence.
+        ValueError: If the answer is not an object, its ``results`` is not a
+            list, or it holds a string that is not valid Unicode: an answer
+            we cannot read is not an absence.
     """
+    if holds_unpaired_surrogate(answer):
+        raise ValueError("CORE's answer holds a string that is not valid Unicode")
     if not isinstance(answer, Mapping):
         raise ValueError("CORE's answer is not an object")
     results = answer.get("results")
@@ -175,11 +213,15 @@ class CoreFetch:
         refused_key: Whether CORE refused the key, now or earlier this
             session (#498): CORE was not asked about this article, and the
             reader is told the key, never the article.
+        also: What else finding CORE's text left unsettled, such as a cached
+            copy of it that could not be read: we hold the article's text,
+            so a CORE that then answers "none" has not settled the question.
     """
 
     text: str | None
     failure: RequestFailure | None
     refused_key: bool = False
+    also: LookupRecord = field(default_factory=LookupRecord)
 
     def __post_init__(self) -> None:
         """Refuse a fetch in two states at once, or a blank text."""
@@ -210,6 +252,22 @@ class CoreFetch:
         """CORE refused the key, so it was not asked about this article (#498)."""
         return cls(text=None, failure=None, refused_key=True)
 
+    def with_also(self, record: LookupRecord) -> CoreFetch:
+        """This fetch, with more it left unsettled.
+
+        Args:
+            record: What else went unsettled.
+
+        Returns:
+            A copy whose :meth:`lookups` include ``record``.
+        """
+        return CoreFetch(
+            text=self.text,
+            failure=self.failure,
+            refused_key=self.refused_key,
+            also=self.also.merged(record),
+        )
+
     @property
     def is_unreachable(self) -> bool:
         """Whether the lookup failed."""
@@ -222,22 +280,26 @@ class CoreFetch:
             Nothing for served text or an absence; a failure of CORE when it
             could not be asked; a ``KEY_REFUSED`` skip of CORE when the key
             was refused, which blocks a settled absence and is told as the
-            key, never as the article not served (#498).
+            key, never as the article not served (#498). Each with
+            :attr:`also` before it.
         """
         if self.failure is not None:
-            return LookupRecord(failures=(SourceLookupFailure(SERVICE_CORE, self.failure),))
-        if self.refused_key:
-            return LookupRecord(
+            own = LookupRecord(failures=(SourceLookupFailure(SERVICE_CORE, self.failure),))
+        elif self.refused_key:
+            own = LookupRecord(
                 skipped=(SourceLookupSkipped(SERVICE_CORE, LookupSkipReason.KEY_REFUSED),)
             )
-        return LookupRecord()
+        else:
+            own = LookupRecord()
+        return self.also.merged(own)
 
 
 class CoreThrottle:
     """CORE's session state: the pause after consecutive 429s, and a refused key.
 
     CORE's key buys a daily token budget, which no per-second pacing can
-    express. Once two fetches in a row end in 429, asking again only spends
+    express. Once ``pause_after`` fetches in a row (by default two) end in
+    429, asking again only spends
     the reader's time, so CORE is not asked again until the process ends.
 
     A fetch ending in HTTP 401 means CORE refused the key (#498). Every
@@ -376,13 +438,14 @@ class CoreTextClient:
         """Ask CORE for this DOI's extracted text.
 
         Args:
-            doi: The article's DOI.
+            doi: The article's DOI. Callers ask only with one: a blank DOI
+                sends nothing and returns an absence, which records nothing,
+                exactly as not asking does.
 
         Returns:
             Served text, an absence (CORE answered and holds none of this
-            article, or there is no DOI), a refused key (this fetch ended in
-            401, or an earlier one with this key did; then nothing is sent),
-            or the failure.
+            article), a refused key (this fetch ended in 401, or an earlier
+            one with this key did; then nothing is sent), or the failure.
         """
         if not doi.strip():
             return CoreFetch.absent()
@@ -414,8 +477,15 @@ class CoreTextClient:
             )
         try:
             text = core_full_text(json.loads(response.content.decode(CORE_ENCODING)), doi)
-        except ValueError:
-            logger.warning("CORE's answer could not be read.")
+        except (ValueError, RecursionError) as error:
+            # ValueError: not UTF-8, not JSON, or not the expected shape.
+            # RecursionError: nested deeper than the parser can follow.
+            logger.warning(
+                "CORE's answer could not be read (%s, HTTP %d, %s).",
+                type(error).__name__,
+                response.status_code,
+                response.headers.get("Content-Type", "no content type"),
+            )
             return CoreFetch.unreachable(RequestFailure(RequestFailureKind.MALFORMED_RESPONSE))
         return CoreFetch.served(text) if text is not None else CoreFetch.absent()
 

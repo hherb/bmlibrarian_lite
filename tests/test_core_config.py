@@ -135,3 +135,62 @@ def test_the_cli_config_view_never_prints_the_key(
     lines = capsys.readouterr().out.splitlines()
     assert f"  CORE API key: {expected}" in lines
     assert not any(KEY in line for line in lines)
+
+
+@pytest.mark.parametrize("value", [12345, ["k"], {"k": 1}, True])
+def test_a_key_that_is_not_text_is_no_key(tmp_path: Path, value: object) -> None:
+    """A number or a list typed into the file is ignored, not a start-up crash."""
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"discovery": {"core_api_key": value}, "pubmed": {"api_key": value}}))
+    loaded = LiteConfig.load(path)
+    assert loaded.discovery.core_api_key is None
+    assert loaded.pubmed.api_key is None
+
+
+def test_the_keys_are_never_in_the_repr() -> None:
+    """Printing or logging the configuration shows neither key."""
+    config = LiteConfig()
+    config.discovery.core_api_key = KEY
+    config.pubmed.api_key = "ncbi-secret-0123"
+    assert KEY not in repr(config)
+    assert "ncbi-secret-0123" not in repr(config)
+    # The control: the other fields are still shown
+    config.discovery.unpaywall_email = "a@b.org"
+    assert "a@b.org" in repr(config)
+
+
+def test_the_dialog_says_when_the_key_comes_from_the_environment(qapp, monkeypatch) -> None:
+    """A refusal is told as "the key in the settings": the field says where it is."""
+    from bmlibrarian_lite.constants import CORE_API_KEY_FROM_ENVIRONMENT, ENV_CORE_API_KEY
+    from bmlibrarian_lite.gui.settings_dialog import SettingsDialog
+
+    monkeypatch.setenv(ENV_CORE_API_KEY, KEY)
+    field = SettingsDialog(LiteConfig()).core_api_key_input
+    assert field.text() == ""
+    assert field.placeholderText() == CORE_API_KEY_FROM_ENVIRONMENT
+    # The control: without it the placeholder is the ordinary one
+    monkeypatch.delenv(ENV_CORE_API_KEY)
+    assert SettingsDialog(LiteConfig()).core_api_key_input.placeholderText() == "Optional"
+
+
+def test_a_save_that_fails_is_told_and_keeps_the_dialog_open(qapp, monkeypatch) -> None:
+    """The reader is told the key will not survive a restart; the dialog does not close."""
+    from bmlibrarian_lite.gui import settings_dialog
+
+    def failing_save(self: LiteConfig, *args: object, **kwargs: object) -> None:
+        raise PermissionError("config.json")
+
+    shown: list[str] = []
+    monkeypatch.setattr(LiteConfig, "save", failing_save)
+    monkeypatch.setattr(
+        settings_dialog.QMessageBox, "critical",
+        lambda parent, title, text: shown.append(text),
+    )
+    dialog = settings_dialog.SettingsDialog(LiteConfig())
+    accepted: list[bool] = []
+    monkeypatch.setattr(dialog, "accept", lambda: accepted.append(True))
+    dialog.core_api_key_input.setText(KEY)
+    dialog._save_config()
+    assert accepted == []
+    assert len(shown) == 1 and "PermissionError" in shown[0]
+    assert KEY not in shown[0]

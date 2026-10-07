@@ -26,9 +26,11 @@ from bmlibrarian_lite.analysis_failures import (
     unestablished_access_clause,
 )
 from bmlibrarian_lite.constants import (
+    CORE_MIN_FULLTEXT_CHARS,
     CORE_SEARCH_PATH,
     CORE_TEXT_CACHE_STAMP,
     PDF_BASE_DIR_ENV_VAR,
+    SERVICE_CACHED_FULLTEXT,
     SERVICE_CORE,
     SERVICE_OPENALEX,
     SERVICE_UNPAYWALL_PDF,
@@ -68,6 +70,8 @@ TEXT = "The article's extracted text."
 KEY = "test-core-key-0123456789"
 #: Long enough for CORE's text to be served, were it this article's.
 LONG_TEXT_CHARS = 6000
+#: CORE's text as a cache holds it: long enough to be served from it.
+CACHED_TEXT = "Methods. " * (CORE_MIN_FULLTEXT_CHARS // 4)
 
 
 class _Core:
@@ -395,33 +399,112 @@ def test_another_articles_text_is_not_served_through_the_chain(tmp_path: Path) -
 def test_the_core_cache_is_read_at_cores_place_and_never_shadows_jats(tmp_path: Path) -> None:
     """Cached CORE text is served without asking; find_existing_fulltext never returns it."""
     doc = {"doi": DOI, "id": "d1"}
-    path = save_core_text(doc, TEXT, base_dir=tmp_path)
+    path = save_core_text(doc, CACHED_TEXT, DOI, base_dir=tmp_path)
     assert path == generate_core_text_path(doc, base_dir=tmp_path)
-    assert path.read_text(encoding="utf-8").startswith(CORE_TEXT_CACHE_STAMP + "\n")
-    assert read_cached_core_text(path) == TEXT
+    assert path.read_text(encoding="utf-8").startswith(f"{CORE_TEXT_CACHE_STAMP}\n{DOI}\n")
+    assert read_cached_core_text(path, DOI) == CACHED_TEXT
     assert find_existing_fulltext(doc, base_dir=tmp_path) is None
     core = _Core(CoreFetch.served("live text"))
     result = _discover(core, tmp_path)
-    assert result.markdown_content == TEXT
+    assert result.markdown_content == CACHED_TEXT
     assert core.asked == []
 
 
 def test_cores_served_text_is_cached(tmp_path: Path) -> None:
     """Served once, read from the cache the next time."""
-    _discover(_Core(CoreFetch.served(TEXT)), tmp_path)
+    _discover(_Core(CoreFetch.served(CACHED_TEXT)), tmp_path)
     path = generate_core_text_path({"doi": DOI, "id": "d1"}, base_dir=tmp_path)
-    assert read_cached_core_text(path) == TEXT
+    assert read_cached_core_text(path, DOI) == CACHED_TEXT
 
 
 def test_a_damaged_core_cache_is_asked_again(tmp_path: Path) -> None:
-    """No stamp, another stamp or an empty body is no cached text."""
+    """No stamp, another stamp, no DOI line or an empty body is no cached text."""
     doc = {"doi": DOI, "id": "d1"}
     path = generate_core_text_path(doc, base_dir=tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    assert read_cached_core_text(path) is None, "a missing file is no cached text"
-    for content in ("plain text", "<!-- other v1 -->\ntext", f"{CORE_TEXT_CACHE_STAMP}\n  \n"):
+    assert read_cached_core_text(path, DOI) is None, "a missing file is no cached text"
+    for content in (
+        "plain text",
+        f"<!-- other v1 -->\n{DOI}\n{CACHED_TEXT}",
+        f"<!-- bmlibrarian-lite core-text v1 -->\n{CACHED_TEXT}",
+        f"{CORE_TEXT_CACHE_STAMP}\n{DOI}\n  \n",
+        f"{CORE_TEXT_CACHE_STAMP}\n{CACHED_TEXT}",
+    ):
         path.write_text(content, encoding="utf-8")
-        assert read_cached_core_text(path) is None
+        assert read_cached_core_text(path, DOI) is None
+
+
+def test_a_cached_text_is_served_only_for_its_own_doi(tmp_path: Path) -> None:
+    """The cache keeps CORE's rule: another article's text is never served."""
+    doc = {"doi": DOI, "id": "d1"}
+    path = save_core_text(doc, CACHED_TEXT, DOI, base_dir=tmp_path)
+    assert read_cached_core_text(path, "10.1159/999999") is None
+    # The same DOI, written another way, is the same article
+    assert read_cached_core_text(path, f"https://doi.org/{DOI.upper()}") == CACHED_TEXT
+    core = _Core(CoreFetch.absent())
+    with patch("bmlibrarian_lite.pdf_utils.get_fulltext_base_dir", return_value=tmp_path):
+        fetch = FulltextDiscoverer(use_browser_fallback=False, core=core)._core_text(
+            doc, "10.1159/999999"
+        )
+    assert fetch.text is None
+    assert core.asked == ["10.1159/999999"]
+
+
+def test_a_cached_text_below_the_minimum_is_asked_again(tmp_path: Path) -> None:
+    """A truncated cache file is not the article's full text."""
+    doc = {"doi": DOI, "id": "d1"}
+    path = save_core_text(doc, "x" * (CORE_MIN_FULLTEXT_CHARS - 1), DOI, base_dir=tmp_path)
+    assert read_cached_core_text(path, DOI) is None
+    # The control: at the minimum it is served
+    save_core_text(doc, "x" * CORE_MIN_FULLTEXT_CHARS, DOI, base_dir=tmp_path)
+    assert read_cached_core_text(path, DOI) == "x" * CORE_MIN_FULLTEXT_CHARS
+
+
+def test_an_unreadable_core_cache_keeps_the_absence_open(tmp_path: Path) -> None:
+    """We hold CORE's text and cannot read it: CORE's "none" settles nothing (#354)."""
+    doc = {"doi": DOI, "id": "d1"}
+    path = generate_core_text_path(doc, base_dir=tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\xff\xfe not UTF-8")
+    with pytest.raises(UnicodeDecodeError):
+        read_cached_core_text(path, DOI)
+    core = _Core(CoreFetch.absent())
+    with patch("bmlibrarian_lite.pdf_utils.get_fulltext_base_dir", return_value=tmp_path):
+        fetch = FulltextDiscoverer(use_browser_fallback=False, core=core)._core_text(doc, DOI)
+    assert fetch.text is None
+    assert core.asked == [DOI]
+    assert fetch.lookups().anything_unsettled
+    assert SERVICE_CACHED_FULLTEXT in {failure.service for failure in fetch.lookups().failures}
+
+
+def test_an_unreadable_core_cache_is_replaced_by_cores_text(tmp_path: Path) -> None:
+    """The control: CORE serves the text, so the unread cache settles nothing and is rewritten."""
+    doc = {"doi": DOI, "id": "d1"}
+    path = generate_core_text_path(doc, base_dir=tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\xff\xfe not UTF-8")
+    core = _Core(CoreFetch.served(CACHED_TEXT))
+    with patch("bmlibrarian_lite.pdf_utils.get_fulltext_base_dir", return_value=tmp_path):
+        fetch = FulltextDiscoverer(use_browser_fallback=False, core=core)._core_text(doc, DOI)
+    assert fetch.text == CACHED_TEXT
+    assert not fetch.lookups().anything_unsettled
+    assert read_cached_core_text(path, DOI) == CACHED_TEXT
+
+
+def test_a_text_that_cannot_be_cached_is_still_served(tmp_path: Path) -> None:
+    """A text UTF-8 cannot hold is served uncached, and no partial file is left."""
+    doc = {"doi": DOI, "id": "d1"}
+    unencodable = CACHED_TEXT + "\ud800"
+    with pytest.raises(UnicodeError):
+        save_core_text(doc, unencodable, DOI, base_dir=tmp_path)
+    path = generate_core_text_path(doc, base_dir=tmp_path)
+    assert not path.with_name(f"{path.name}.partial").exists()
+    core = _Core(CoreFetch.served(unencodable))
+    with patch("bmlibrarian_lite.pdf_utils.get_fulltext_base_dir", return_value=tmp_path):
+        fetch = FulltextDiscoverer(use_browser_fallback=False, core=core)._core_text(doc, DOI)
+    assert fetch.text == unencodable
+    assert not path.exists()
+    assert not path.with_name(f"{path.name}.partial").exists()
 
 
 def test_core_is_told_last_in_chain_order() -> None:
@@ -506,6 +589,32 @@ def test_the_mcp_server_passes_the_configured_key(monkeypatch: pytest.MonkeyPatc
     config.discovery.core_api_key = "k4"
     mcp_server._make_server(config)
     assert seen == ["k4"]
+
+
+@pytest.mark.real_core_client
+def test_the_mcp_server_asks_unpaywall_with_its_own_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Unpaywall email first, the PubMed email only when it is blank (#435)."""
+    pytest.importorskip("mcp")
+    from bmlibrarian_lite import mcp_server
+    from bmlibrarian_lite.config import LiteConfig
+
+    built: list[str | None] = []
+    for name in (
+        "LiteStorage", "LLMClient", "LiteSearchAgent", "LiteScoringAgent",
+        "LiteCitationAgent", "LiteReportingAgent", "LiteInterrogationAgent",
+    ):
+        monkeypatch.setattr(mcp_server, name, MagicMock())
+    monkeypatch.setattr(
+        mcp_server, "FulltextDiscoverer",
+        lambda **kwargs: built.append(kwargs["unpaywall_email"]) or MagicMock(),
+    )
+    config = LiteConfig()
+    config.pubmed.email = "pubmed@b.org"
+    config.discovery.unpaywall_email = "unpaywall@b.org"
+    mcp_server._make_server(config)
+    config.discovery.unpaywall_email = ""
+    mcp_server._make_server(config)
+    assert built == ["unpaywall@b.org", "pubmed@b.org"]
 
 
 def test_the_analyser_factory_passes_the_key() -> None:
@@ -629,7 +738,7 @@ def _try_with_downloaded_pdf(
          patch("bmlibrarian_lite.fulltext_discovery.extract_pdf_text", **extractor), \
          patch("bmlibrarian_lite.pdf_utils.get_fulltext_base_dir", return_value=tmp_path), \
          patch("bmlibrarian_lite.fulltext_discovery.save_core_text"), \
-         patch("bmlibrarian_lite.fulltext_discovery.read_cached_core_text", lambda _p: None):
+         patch("bmlibrarian_lite.fulltext_discovery.read_cached_core_text", lambda _p, _d: None):
         return discoverer._try_pdf_download({"doi": DOI, "id": "d1"}, None, None, doi, "T")
 
 
@@ -698,3 +807,106 @@ def test_an_unreadable_pdf_without_a_key_asks_nothing(tmp_path: Path) -> None:
     result = _try_with_downloaded_pdf(None, tmp_path, "   ")
     assert not result.success
     assert not result.absence_established
+
+
+def test_after_a_scan_an_unasked_core_is_told_in_the_error(tmp_path: Path) -> None:
+    """The reader who sees only the error hears CORE went unasked, after the PDF's sentence."""
+    failure = RequestFailure(RequestFailureKind.HTTP_STATUS, status_code=503)
+    result = _try_with_downloaded_pdf(_Core(CoreFetch.unreachable(failure)), tmp_path, "   ")
+    error = result.error or ""
+    assert error.startswith("A PDF was retrieved for this article")
+    assert "CORE (HTTP 503 Service Unavailable)" in error
+    refused = _try_with_downloaded_pdf(_Core(CoreFetch.key_refused()), tmp_path, "   ")
+    assert "the key in the settings was refused" in (refused.error or "")
+    # The control: an absent CORE adds nothing to the sentence
+    absent = _try_with_downloaded_pdf(_Core(CoreFetch.absent()), tmp_path, "   ")
+    assert "CORE" not in (absent.error or "")
+
+
+def test_a_cancelled_discovery_never_reads_as_cores_absence(tmp_path: Path) -> None:
+    """Cancelled before CORE's turn: CORE is not asked, and the result says Cancelled."""
+    asked: list[str] = []
+
+    def cancel_during_openalex(
+        self: PDFDiscoverer, doi: Any, known: Any
+    ) -> tuple[list[PDFSource], LookupRecord]:
+        self.cancel()
+        return [], LookupRecord()
+
+    def core(doi: str) -> CoreFetch:
+        asked.append(doi)
+        return CoreFetch.absent()
+
+    with patch.object(PDFDiscoverer, "_discover_sources", lambda *a: ([], LookupRecord())), \
+         patch.object(PDFDiscoverer, "_discover_openalex", cancel_during_openalex):
+        result = PDFDiscoverer(use_browser_fallback=False).discover_and_download(
+            tmp_path / "x.pdf", doi=DOI, core_text=core
+        )
+    assert result.error == "Cancelled"
+    assert not result.success
+    assert asked == []
+
+
+def test_cores_text_is_never_blank_in_a_discovery_result() -> None:
+    """A blank text is no full text, as CORE's own fetch refuses it."""
+    with pytest.raises(ValueError):
+        DiscoveryResult(success=True, text="  \n")
+    assert DiscoveryResult(success=True, text=TEXT).text == TEXT
+
+
+def test_only_cores_own_lookup_is_skipped_for_a_refused_key() -> None:
+    """As the apps' entries: a refused key is CORE's, and never a tried PDF's."""
+    with pytest.raises(ValueError):
+        SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.KEY_REFUSED)
+    with pytest.raises(ValueError):
+        SourceLookupSkipped(
+            SERVICE_CORE, LookupSkipReason.KEY_REFUSED, address="https://x.example.org/a.pdf"
+        )
+    assert SourceLookupSkipped(SERVICE_CORE, LookupSkipReason.KEY_REFUSED).service == SERVICE_CORE
+
+
+def test_a_changed_key_reaches_the_background_analysis() -> None:
+    """The analyser is rebuilt when the live configuration's key changes (#498)."""
+    from bmlibrarian_lite.config import LiteConfig
+    from bmlibrarian_lite.transparency.transparency_manager import TransparencyManager
+
+    built: list[tuple[str | None, str | None]] = []
+
+    def recording(
+        email: str,
+        pubmed_api_key: str | None = None,
+        unpaywall_email: str | None = None,
+        core_api_key: str | None = None,
+    ) -> MagicMock:
+        built.append((unpaywall_email, core_api_key))
+        return MagicMock()
+
+    config = LiteConfig()
+    config.discovery.core_api_key = "refused-key"
+    with patch(
+        "bmlibrarian_lite.transparency.transparency_manager.create_background_analyzer",
+        recording,
+    ):
+        manager = TransparencyManager(storage=MagicMock(), config=config, email="a@b.org")
+        first = manager._current_analyzer()
+        assert manager._current_analyzer() is first, "unchanged settings keep the analyser"
+        config.discovery.core_api_key = "corrected-key"
+        config.discovery.unpaywall_email = "u@b.org"
+        rebuilt = manager._current_analyzer()
+    assert rebuilt is not first
+    assert built == [(None, "refused-key"), ("u@b.org", "corrected-key")]
+
+
+def test_the_settings_dialog_edits_the_configuration_the_tabs_hold() -> None:
+    """After a save the main window keeps its configuration object, so tabs see later edits."""
+    pytest.importorskip("PySide6")
+    from bmlibrarian_lite.gui import app
+
+    window = MagicMock()
+    config = window.config
+    with patch.object(app, "SettingsDialog") as dialog:
+        dialog.return_value.exec.return_value = True
+        app.LiteMainWindow._show_settings(window)
+        app.LiteMainWindow._show_settings(window)
+    assert window.config is config
+    assert [call.args[0] for call in dialog.call_args_list] == [config, config]

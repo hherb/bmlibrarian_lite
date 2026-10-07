@@ -53,6 +53,7 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled, get_font_scale
 
 from ..config import LiteConfig
+from ..constants import CORE_SOURCE_LABEL
 from ..storage import LiteStorage
 from ..agents import LiteInterrogationAgent
 from ..pdf_utils import (
@@ -947,7 +948,7 @@ class DocumentInterrogationTab(QWidget):
             "pmc_open_data_xml": "Full Text (PMC open-access collection)",
             "cached_pdf": "Full Text (PDF - cached)",
             "downloaded_pdf": "Full Text (PDF)",
-            "core_text": "Full Text (CORE, extracted text)",
+            "core_text": f"Full Text ({CORE_SOURCE_LABEL})",
         }
         source_label = source_labels.get(source_type, f"Full Text ({source_type})")
 

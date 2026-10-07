@@ -20,6 +20,7 @@ from bmlibrarian_lite.constants import (
     CORE_SOURCE_LABEL,
     HTTP_TOO_MANY_REQUESTS,
     POLITE_RATE_CEILINGS,
+    SERVICE_CACHED_FULLTEXT,
     SERVICE_CORE,
 )
 from bmlibrarian_lite.core_api import (
@@ -30,6 +31,7 @@ from bmlibrarian_lite.core_api import (
     core_key_digest,
     core_search_url,
     default_core_client,
+    holds_unpaired_surrogate,
 )
 from bmlibrarian_lite.data_models import (
     LookupRecord,
@@ -85,6 +87,18 @@ def test_the_names_are_the_contracts() -> None:
     )
     # The refusal is scoped to the key refused (#498): a corrected key is asked again
     assert CONTRACT["key_refusal_scope"] == "the refused key"
+    throttle = CoreThrottle()
+    throttle.record(CORE_KEY_REFUSED_STATUS, core_key_digest(KEY))
+    assert throttle.refuses(core_key_digest(KEY))
+    assert not throttle.refuses(core_key_digest(OTHER_KEY))
+
+
+def test_the_sources_are_the_contracts() -> None:
+    """The source the apps store, and the desktop's source type, are the contract's."""
+    from bmlibrarian_lite.fulltext_discovery import FulltextSourceType
+
+    assert CONTRACT["source"] == "core"
+    assert FulltextSourceType.CORE_TEXT.value == CONTRACT["desktop_source_type"]
 
 
 def test_the_contract_has_rows() -> None:
@@ -92,7 +106,7 @@ def test_the_contract_has_rows() -> None:
     assert len(CONTRACT["search_url"]) >= 7
     assert len(CONTRACT["full_text"]) >= 24
     assert len(CONTRACT["status"]) >= 9
-    assert len(CONTRACT["bodies"]) >= 4
+    assert len(CONTRACT["bodies"]) >= 6
 
 
 def test_core_is_paced_under_its_key_limit() -> None:
@@ -193,6 +207,32 @@ def test_an_answer_we_cannot_read_is_malformed(row: dict[str, Any]) -> None:
     assert fetch.failure == RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
 
 
+def test_an_unpaired_surrogate_is_found_anywhere() -> None:
+    """Keys, nested values and lists; a well-formed pair is valid Unicode."""
+    assert holds_unpaired_surrogate({"results": [{"fullText": "ab\ud800"}]})
+    assert holds_unpaired_surrogate({"\udc00": 1})
+    assert holds_unpaired_surrogate(["\udfff"])
+    assert not holds_unpaired_surrogate({"results": [{"fullText": "\U0001F600 e\u0301"}]})
+    assert not holds_unpaired_surrogate({"results": [1, None, 2.5, True]})
+
+
+def test_an_answer_nested_too_deep_is_malformed() -> None:
+    """Deeper than the parser can follow is unreadable, not an absence."""
+    depth = 100_000
+    body = ("[" * depth + "]" * depth).encode("utf-8")
+    with running({PATH: [_body(body)]}) as server:
+        fetch = _client(server.url).fetch_full_text(DOI)
+    assert fetch.failure == RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+
+
+def test_a_text_one_short_of_the_minimum_is_absent_through_the_client() -> None:
+    """The service holds the production minimum, not just the pure rule's."""
+    short = {"results": [{"doi": DOI, "fullText": "x" * (CORE_MIN_FULLTEXT_CHARS - 1)}]}
+    with running({PATH: [json_answer(short)]}) as server:
+        fetch = _client(server.url).fetch_full_text(DOI)
+    assert fetch == CoreFetch.absent()
+
+
 def test_a_body_that_is_not_utf8_is_malformed() -> None:
     """Strict UTF-8, as every JSON source."""
     with running({PATH: [_body(b'{"results": ["\xff"]}')]}) as server:
@@ -212,6 +252,39 @@ def test_the_key_travels_in_the_header_alone(caplog: pytest.LogCaptureFixture) -
     assert all(KEY not in value for values in request.parameters.values() for value in values)
     assert KEY not in caplog.text
     assert KEY not in repr(_client(server.url))
+
+
+def test_the_key_is_in_no_log_line_when_refused_or_unreachable(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A 401, a 503, a refused connection and an unreadable answer log no key."""
+    caplog.set_level(logging.DEBUG)
+    answers = [
+        status_answer(HTTPStatus(CORE_KEY_REFUSED_STATUS)),
+        status_answer(HTTPStatus.SERVICE_UNAVAILABLE),
+        _body(b"<html></html>"),
+    ]
+    with running({PATH: answers}) as server:
+        assert _client(server.url).fetch_full_text(DOI) == CoreFetch.key_refused()
+        assert _client(server.url).fetch_full_text(DOI).is_unreachable
+        assert _client(server.url).fetch_full_text(DOI).is_unreachable
+    assert _client("http://127.0.0.1:9").fetch_full_text(DOI).is_unreachable
+    assert caplog.records, "the control: these paths do log"
+    assert KEY not in caplog.text
+    assert core_key_digest(KEY) not in caplog.text
+
+
+def test_more_left_unsettled_is_recorded_before_cores_own() -> None:
+    """A cached copy that could not be read is told with CORE's outcome."""
+    unread = LookupRecord(failures=(SourceLookupFailure(
+        SERVICE_CACHED_FULLTEXT, RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+    ),))
+    failure = RequestFailure(RequestFailureKind.HTTP_STATUS, 503)
+    assert CoreFetch.absent().with_also(unread).lookups() == unread
+    assert CoreFetch.unreachable(failure).with_also(unread).lookups() == unread.merged(
+        LookupRecord(failures=(SourceLookupFailure(SERVICE_CORE, failure),))
+    )
+    assert CoreFetch.key_refused().with_also(unread).refused_key
 
 
 def test_a_redirect_to_another_host_drops_the_key() -> None:

@@ -522,7 +522,7 @@ class DiscoveryResult:
             ``failure``: the source answered.
         text: CORE's extracted text, when no PDF was obtained and CORE
             served the article (#480, stage C); only with ``success`` and
-            no ``file_path``.
+            no ``file_path``, and never blank.
 
     Raises:
         ValueError: On construction, if a successful result carries a
@@ -550,6 +550,8 @@ class DiscoveryResult:
         """Refuse a success that says why no PDF was obtained, or two whys."""
         if self.text is not None and (not self.success or self.file_path is not None):
             raise ValueError("CORE's text is a success without a file")
+        if self.text is not None and not self.text.strip():
+            raise ValueError("A blank text is not CORE's full text")
         whys = sum((self.failure is not None, self.refused_for_size, self.not_saved))
         if self.success and whys:
             raise ValueError("A downloaded PDF carries no download failure")
@@ -921,6 +923,8 @@ class PDFDiscoverer:
 
         if not sources:
             core_text_found, core_lookups = self._ask_core(core)
+            if self._cancelled:
+                return DiscoveryResult(success=False, error="Cancelled", lookups=lookups)
             if core_text_found is not None:
                 return DiscoveryResult(success=True, text=core_text_found, lookups=lookups)
             lookups = lookups.merged(core_lookups)
@@ -1032,6 +1036,8 @@ class PDFDiscoverer:
                     # the claim is withheld rather than asserted (#347).
                     # CORE's text, asked first, is served instead (#480).
                     core_text_found, core_lookups = self._ask_core(core)
+                    if self._cancelled:
+                        return DiscoveryResult(success=False, error="Cancelled", lookups=lookups)
                     if core_text_found is not None:
                         return DiscoveryResult(
                             success=True, text=core_text_found, lookups=lookups
@@ -1067,6 +1073,8 @@ class PDFDiscoverer:
         # CORE last, after every copy tried: its text settles the question
         # as a downloaded PDF does, so the refused copies are dropped (#480).
         core_text_found, core_lookups = self._ask_core(core)
+        if self._cancelled:
+            return DiscoveryResult(success=False, error="Cancelled", lookups=lookups)
         if core_text_found is not None:
             return DiscoveryResult(success=True, text=core_text_found, lookups=lookups)
         lookups = lookups.merged(core_lookups)
@@ -1101,6 +1109,10 @@ class PDFDiscoverer:
 
     def _ask_core(self, core: _CoreFallback) -> tuple[str | None, LookupRecord]:
         """Ask CORE at a no-PDF exit, unless the discovery was cancelled.
+
+        A cancelled discovery asks nothing, and its caller returns the
+        ``"Cancelled"`` result rather than the exit's ordinary one: a CORE
+        never asked must not read as a search that found nothing.
 
         Args:
             core: This discovery's CORE, asked at most once.

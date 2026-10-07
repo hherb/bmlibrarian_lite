@@ -23,8 +23,10 @@ Provides unified full-text retrieval that tries multiple sources:
    2a. PMC's open-data bucket, by PMC ID (the same JATS; #480)
    2b. Europe PMC's PDF render
 3. Cached PDF
-4. PDF download via traditional sources
-5. CORE's extracted text, last and only with a CORE key (#480)
+4. PDF download via traditional sources, the direct DOI download included
+   4a. CORE's extracted text (#480), with a CORE key and a DOI: asked inside
+       the PDF download at each exit that obtained no PDF, and after a PDF
+       that yields no text (a scan). Not asked with ``skip_pdf``.
 
 Usage:
     from bmlibrarian_lite.fulltext_discovery import FulltextDiscoverer
@@ -266,8 +268,9 @@ class FulltextDiscoverer:
            2a. PMC's open-data bucket, by PMC ID (JATS, converted to markdown)
            2b. Europe PMC's PDF render (when it lists a free PDF)
         3. Cached PDF (extracted to text)
-        4. PDF download (if not skip_pdf), then CORE's extracted text (if a
-           CORE key is configured and the article has a DOI)
+        4. Unless ``skip_pdf``: PDF download, with CORE's extracted text
+           asked at each exit that obtained no PDF and after a PDF that
+           yields no text (with a CORE key and a DOI)
 
         Args:
             doc_dict: Document dictionary with identifiers
@@ -276,7 +279,8 @@ class FulltextDiscoverer:
             doi: Digital Object Identifier
             title: Document title for verification
             year: Publication year
-            skip_pdf: If True, don't attempt PDF download
+            skip_pdf: If True, don't attempt PDF download, and so do not
+                ask CORE either, nor read its cached text
 
         Returns:
             FulltextResult with content and source information
@@ -439,9 +443,9 @@ class FulltextDiscoverer:
                 ),
             )
 
-        # 4. Try PDF download as last resort. The record is passed in so the
-        # sentence the reader is shown names what went unasked above too,
-        # and merged here, the one place, so no path below can drop it.
+        # 4. Try the PDF download, then CORE's text. The record is passed in
+        # so the sentence the reader is shown names what went unasked above
+        # too, and merged here, the one place, so no path below can drop it.
         self._emit_progress("discovery", "downloading_pdf")
         return self._try_pdf_download(
             doc_dict, pmid, pmcid, doi, title, earlier_lookups=lookups
@@ -864,15 +868,26 @@ class FulltextDiscoverer:
             What CORE holds for the article.
         """
         assert self._core is not None
-        cached = read_cached_core_text(generate_core_text_path(doc_dict))
+        cache_lookups = LookupRecord()
+        try:
+            cached = read_cached_core_text(generate_core_text_path(doc_dict), doi)
+        except (OSError, UnicodeDecodeError) as error:
+            logger.warning("Cached CORE text could not be read (%s).", type(error).__name__)
+            # Recorded, not only logged, as the cached markdown's failure is
+            # (#354): we hold this article's text, so a CORE that now answers
+            # "none" has not established that it has none.
+            cached = None
+            cache_lookups = _unreadable_cache_record()
         if cached is not None:
             return CoreFetch.served(cached)
         fetch = self._core.fetch_full_text(doi)
-        if fetch.text is not None:
-            try:
-                save_core_text(doc_dict, fetch.text)
-            except OSError as error:
-                logger.warning("CORE's text could not be cached (%s).", type(error).__name__)
+        if fetch.text is None:
+            return fetch.with_also(cache_lookups)
+        try:
+            save_core_text(doc_dict, fetch.text, doi)
+        except (OSError, UnicodeError) as error:
+            # Served all the same: only the next run asks CORE again.
+            logger.warning("CORE's text could not be cached (%s).", type(error).__name__)
         return fetch
 
     def _after_unreadable_pdf(
@@ -906,10 +921,13 @@ class FulltextDiscoverer:
             )
         lookups = fetch.lookups()
         if lookups.anything_unsettled:
-            # The sentence is built from the PDF alone, so only the lookups
-            # change: a failure, or a refused key (#498), keeps the result
-            # unsettled.
-            return unreadable.with_lookups(lookups)
+            # A failure, or a refused key (#498), keeps the result unsettled,
+            # and is told after the PDF's sentence: the reader who sees only
+            # this error would otherwise never hear CORE went unasked.
+            return replace(
+                unreadable.with_lookups(lookups),
+                error=with_unestablished_access(unreadable.error or "", lookups),
+            )
         return unreadable
 
     def _try_pdf_download(
@@ -921,7 +939,7 @@ class FulltextDiscoverer:
         title: Optional[str],
         earlier_lookups: LookupRecord | None = None,
     ) -> FulltextResult:
-        """Try to download PDF as last resort.
+        """Try the PDF download, then CORE's extracted text.
 
         Args:
             doc_dict: Document dictionary for path generation.

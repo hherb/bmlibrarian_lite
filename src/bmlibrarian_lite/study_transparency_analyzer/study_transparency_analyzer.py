@@ -2839,11 +2839,13 @@ class StudyTransparencyAnalyzer:
             browser_headless: If True, run browser without visible window
             auto_discover_fulltext: If True, automatically attempt full-text
                 discovery when no fulltext is provided to analyze().
-                Tries cached markdown, Europe PMC XML, Europe PMC PDF,
-                cached PDF, and PDF download (with optional browser fallback).
+                Tries cached markdown, Europe PMC XML, PMC's open-data
+                bucket, Europe PMC PDF, cached PDF, PDF download (with
+                optional browser fallback), and CORE's extracted text.
             core_api_key: The configured CORE key (#480, stage C), asked
-                for CORE's extracted text when no PDF is obtained; the
-                ``CORE_API_KEY`` environment variable when not given.
+                for CORE's extracted text when no PDF is obtained or the
+                PDF yields no text; the ``CORE_API_KEY`` environment
+                variable when not given.
         """
         self.email = email
         self.pubmed = PubMedClient(email, pubmed_api_key)
