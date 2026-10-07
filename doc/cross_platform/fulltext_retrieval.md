@@ -12,6 +12,10 @@ Not all biomedical articles have freely available full text. We implement a fall
 3. **Europe PMC's PDF render, then every Unpaywall PDF, then OpenAlex's, then CORE's extracted text** - Open access copies
 4. **DOI Resolution** - Fall back to publisher website
 
+On the desktop, CORE's text comes after the direct DOI download (a PDF
+fetched through the DOI resolver is one of `PDFDiscoverer`'s sources); in
+the apps it comes before the DOI link, which they never download.
+
 ## Retrieval Priority
 
 | Source | Format | Quality | Coverage |
@@ -476,8 +480,9 @@ HTML nor PDF, or a page without the tag is its answer (`DeclaresNone`).
 #### An unsettled open-access copy (#466)
 
 The reader of a fallback the chain settled on because Unpaywall, the landing
-page it named, the PDF it named (#478), OpenAlex, or the PDF OpenAlex named
-(#480) could not settle whether a free copy exists is told so.
+page it named, the PDF it named (#478), OpenAlex, the PDF OpenAlex named
+(#480) or CORE (#480, stage C) could not settle whether a free copy exists is
+told so.
 Without it the publisher link reads exactly as one for an article with no free
 copy at all.
 
@@ -846,6 +851,12 @@ GET https://api.openalex.org/works/doi:{escape(doi)}?select=locations[&mailto={e
 any other status (after 429/5xx retries), transport failure → UNREACHABLE(failure)
 ```
 
+`UNREACHABLE(http_status)` keeps #435's verb (`RequestFailure.is_answer`):
+a 429 or a 5xx reads "CORE (…) could not be asked", any other status
+(400, 403, 404, 410) "CORE (…) did not serve it". Either way it is an
+unsettled lookup, never an absence: a search's 404 says nothing about the
+article.
+
 It is asked only when no Unpaywall copy was served and kept (in Swift, a
 textless copy does not count; a copy refused for its size never does): it
 could not raise the odds otherwise (the maintainer's decision, 2026-10-05).
@@ -887,9 +898,9 @@ stage B.
 
 CORE aggregates open-access repositories and serves the text it extracted
 from their copies. Its v3 search is asked by DOI with **the user's own key**,
-last in the chain: only when nothing earlier obtained the article (no JATS
-body, no PDF downloaded, no copy served but not saved), at most once per
-fetch, and never without a DOI. Service name **"CORE"**, source `core`
+last in the chain: only when nothing earlier obtained the article's text (no
+JATS body, no PDF downloaded, or one that yields no text, such as a scan; no
+copy served but not saved), at most once per fetch, and never without a DOI. Service name **"CORE"**, source `core`
 (desktop `core_text`), shown as **"CORE (extracted text)"**. Pinned by
 `fulltext_parity/core_fulltext.json`.
 
@@ -899,19 +910,29 @@ GET https://api.core.ac.uk/v3/search/works/?q={escape('doi:"' + lucene(trim(doi)
 # lucene: \ → \\, then " → \"; escape: as OpenAlex's. The slash after works is
 # required: without it CORE answers an HTML meta-refresh page.
 
-no key            → no request, nothing recorded, nothing told (a debug log line)
+no key            → no request, nothing recorded, nothing told (a debug log line,
+                    on every platform)
 this key refused (below) → KEY_REFUSED, no request
 paused (below)    → UNREACHABLE(http_status 429), no request
 200               → the first result that is an object, whose string doi
                     normalises to this DOI's, and whose string fullText,
                     trimmed, holds ≥ 5,000 code points: SERVED(that text);
-                    none → ABSENT; an answer that is not an object, or whose
-                    results are not a list → UNREACHABLE(malformed_response)
+                    none → ABSENT; an answer that is not UTF-8 JSON, is not
+                    an object, whose results are not a list, or that holds
+                    a string anywhere with an unpaired surrogate escape
+                    (Apple's parser refuses the whole answer for one, so
+                    every platform does) → UNREACHABLE(malformed_response)
 401               → KEY_REFUSED, and this key is refused for the rest of the
                     process (shared by every client; held as sha256(trim(key)),
                     never the key); another key is asked as usual
 any other status (after 429/5xx retries), transport failure → UNREACHABLE(failure)
 ```
+
+`UNREACHABLE(http_status)` keeps #435's verb (`RequestFailure.is_answer`):
+a 429 or a 5xx reads "CORE (…) could not be asked", any other status
+(400, 403, 404, 410) "CORE (…) did not serve it". Either way it is an
+unsettled lookup, never an absence: a search's 404 says nothing about the
+article.
 
 `normalise(doi)` trims, lower-cases, removes one leading `https://doi.org/`,
 `http://doi.org/`, `https://dx.doi.org/`, `http://dx.doi.org/` or `doi:`, and
@@ -922,7 +943,9 @@ request is a search, and its results are not guaranteed to be this article.
   settles the open-access question, as a copy obtained does: no shortfall is
   stored with it, and it wins over a held abstract. It has no sections, so
   statement checks read "not assessed" (#428's "no marker, no charge"), as
-  for a PDF's text.
+  for a PDF's text: a funding or conflict-of-interest statement the text holds
+  can still be found, but one it lacks is "not assessed" rather than counted
+  against the study.
 - **Unreachable** is an unsettled lookup under **CORE** (`core`), told in the
   open-access sentence ("CORE (HTTP 503 Service Unavailable) could not be
   asked, …") and last in "Tried sources" order. It blocks a settled absence
@@ -958,12 +981,21 @@ request is a search, and its results are not guaranteed to be this article.
 - **Paced at 0.4 requests per second** (`polite_request_pacing.md`).
 - **Where:** Python asks at each exit of `PDFDiscoverer.discover_and_download`
   that obtained no PDF, through a hook `FulltextDiscoverer` passes in, which
-  reads the cached CORE text (`*.core.txt`, stamp `core-text v1`, never
-  returned by `find_existing_fulltext`) before asking. Swift asks in
-  `FullTextService` after OpenAlex, unless a copy was served and not cached.
+  reads the cached CORE text (`*.core.txt`) before asking. The cache file is
+  stamped `core-text v2` and records the normalised DOI the text was served
+  for; it is served again only for that DOI and only while it holds the
+  5,000 code points, so the cache keeps CORE's rules. It is never returned
+  by `find_existing_fulltext`, and a cache file that cannot be read is
+  recorded as an unread cached full text (#354), so a CORE that then answers
+  "none" settles nothing. Swift asks in `FullTextService` after OpenAlex,
+  unless a copy was served and not cached.
   Both Python and Swift also ask CORE after a copy that yields no text (a
-  scan), as a textless copy is no full text obtained; Android stores PDFs
-  without extracting text, so it does not.
+  scan), whether or not an abstract is held, as a textless copy is no full
+  text obtained: served text wins, and otherwise the scan is returned with
+  CORE's failure or refused key recorded beside it. Swift's textless Europe
+  PMC render still ends the walk there, before Unpaywall and OpenAlex, where
+  Python goes on to them (#505). Android stores PDFs without extracting text,
+  so it does not.
   Android asks in `fetchFullText` when no open-access candidate exists, and
   otherwise in recording, through its `askCore` hook, once every candidate
   failed. Android shows the text as plain text, never through its
@@ -1140,11 +1172,26 @@ async function fetch_fulltext(
             case NO_TEXT(local_path):    # a scan, or a file the reader declined
                 if held_abstract != null:
                     continue
-                # The file is real even though its prose is not.
-                return FullTextResult.PDF(pdf_url, NONE, null, local_path, null)
+                # A scan is no full text obtained: CORE is asked first (once,
+                # with a key and a DOI; "CORE's Extracted Text").
+                core = await ask_core_once(doi)
+                if core.served:
+                    return FullTextResult.CORE(core.text)
+                # The file is real even though its prose is not; CORE's
+                # failure or refused key goes with it.
+                return FullTextResult.PDF(pdf_url, NONE, null, local_path, null,
+                                          shortfall=core.unsettled)
 
             case EXTRACTED(local_path, text, coverage):
                 return FullTextResult.PDF(pdf_url, EXTRACTED, text, local_path, coverage)
+
+    # 3b. CORE's extracted text (with a key and a DOI, unless a copy was
+    #     served and not cached): asked once; served text beats the held
+    #     abstract. Unreachable or a refused key is recorded and keeps the
+    #     absence open.
+    core = await ask_core_once(doi)
+    if core.served:
+        return FullTextResult.CORE(core.text)
 
     # 4. The held abstract, if nothing better arrived.
     if held_abstract != null:
@@ -1688,6 +1735,13 @@ async function fetch_fulltext_resilient(
                 return (FullTextResult.PDF(pdf_url, ...), errors)
         except Error as e:
             errors.append(("Unpaywall", e))
+
+    # Then CORE's extracted text (#480, stage C), with a key: here when no
+    # candidate was named, otherwise in recording once every one failed
+    if doi:
+        core = await ask_core(doi)
+        if core.served:
+            return (FullTextResult.CoreText(core.text), errors)
 
     # Try DOI
     if doi:

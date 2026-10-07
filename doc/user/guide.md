@@ -74,8 +74,10 @@ export CORE_API_KEY="your-key"
 The key is stored only in your configuration file (readable by you alone)
 and sent only to CORE. Without one, CORE is simply not asked. If CORE refuses
 the key, the app stops asking CORE with that key for the rest of the session
-and says 'the key in the settings was refused'; correct the key under
-Settings → Full Text and CORE is asked again.
+and says 'the key in the settings was refused' (also when the key came from
+`CORE_API_KEY`: the settings field then says so); correct the key under
+Settings → Full Text and CORE is asked again, by Document Interrogation and
+by the background transparency analysis alike, without a restart.
 
 ### Launching the Application
 
@@ -327,13 +329,18 @@ BMLibrarian Lite can automatically find and retrieve full-text content through a
 2. **PMC open-access collection**: The same JATS, by PMC ID, including author manuscripts
 3. **Europe PMC PDF**: PDF versions from Europe PMC
 4. **Unpaywall and OpenAlex**: Every Unpaywall PDF, then OpenAlex's
-5. **CORE extracted text**: With a key; plain text, so statement checks are "not assessed"
-6. **DOI Resolution**: Direct publisher links
+5. **DOI Resolution**: A PDF fetched through the publisher's DOI link
+6. **CORE extracted text**: With a key, when no PDF was obtained or the PDF
+   holds no text (a scan). Plain text, so a missing funding or
+   conflict-of-interest statement is "not assessed" rather than counted
+   against the study
 7. **Manual Upload**: Upload PDFs for documents not found automatically
 
 JATS XML articles are rendered with full support for tables, figures, references, and anchor navigation.
 
-Set the Unpaywall email under Settings → Full Text to enable Unpaywall access.
+Set the Unpaywall email under Settings → Full Text to enable Unpaywall
+access in Document Interrogation; the transparency analysis and the MCP
+server fall back to your PubMed email when it is not set.
 
 ### Document Interrogation
 
