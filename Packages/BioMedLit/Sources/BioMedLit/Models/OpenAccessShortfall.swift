@@ -92,10 +92,12 @@ public enum OpenAccessUnsettledReason: Sendable, Equatable, Hashable {
     }
 }
 
-/// Why the open-access copy Unpaywall may know of went unassessed (#464, #466).
+/// Why an open-access copy, or CORE's text, the open-access chain may know of
+/// went unassessed (#464, #466, #480).
 ///
-/// Unpaywall, the landing page it named, or the PDF it named (#478) could not settle whether a free
-/// copy exists, so the chain ended on a fallback without learning it. That is
+/// Unpaywall, the landing page it named, the PDF it named (#478), OpenAlex or
+/// the PDF it named, or CORE could not settle whether a free copy or its text
+/// exists, so the chain ended on a fallback without learning it. That is
 /// not "no open-access copy": the reader is told so (``notice``), and the app
 /// keeps it beside the document's full text (``persisted()``). Python records
 /// the same event as a `SourceLookupFailure` (or, for an Unpaywall with no
@@ -266,6 +268,16 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
     /// This shortfall, then `other`'s entries.
     public func appending(_ other: OpenAccessShortfall) -> OpenAccessShortfall {
         OpenAccessShortfall(entries: entries + other.entries)
+    }
+
+    /// Only `source`'s entries, in order, or `nil` when it has none: what a
+    /// served copy leaves of the shortfall, CORE's entry (#499).
+    ///
+    /// - Parameter source: The lookup whose entries are kept.
+    /// - Returns: The shortfall of those entries, or `nil`.
+    func keeping(only source: OpenAccessSource) -> OpenAccessShortfall? {
+        let kept = entries.filter { $0.source == source }
+        return kept.isEmpty ? nil : OpenAccessShortfall(entries: kept)
     }
 
     /// `next` added after whatever is held: how the chain records each lookup

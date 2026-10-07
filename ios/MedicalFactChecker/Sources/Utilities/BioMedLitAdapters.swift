@@ -489,7 +489,8 @@ enum BioMedLitAdapters {
             }
             return .pdfURL(pdfURL)
         case .core(let text):
-            // CORE serves extracted prose, not a document to render.
+            // Plain prose, shown through the native markdown view (no
+            // WebView), so markdown-like characters in it may be styled.
             return .markdown(text)
         case .doi(let webURL):
             return .webURL(webURL)

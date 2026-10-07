@@ -217,6 +217,19 @@ final class FullTextAutoFetchTests: XCTestCase {
         XCTAssertNil(FullTextAutoFetch.storedLinkKept(makeDocument(), refetched: unsettled))
     }
 
+    /// A downloaded copy without text carries CORE's entry when CORE, asked
+    /// after it, could not be reached (#499). It is no fallback: the file
+    /// beats the stored link, so it is applied.
+    func testADownloadedScanCarryingCOREsEntryIsApplied() {
+        let scan = FullTextResult(
+            content: .unpaywall(pdfURL: URL(string: "https://repo.example.org/files/a.pdf")!),
+            localPDFPath: "/tmp/full-text-auto-fetch-test-scan.pdf",
+            openAccessShortfall: OpenAccessShortfall(source: .core, failure: .timeout)
+        )
+
+        XCTAssertNil(FullTextAutoFetch.storedLinkKept(documentHoldingALink(), refetched: scan))
+    }
+
     /// The refusal fails the document in the run, which leaves it as it was.
     func testARefusedRefetchLeavesTheDocumentToBeFetchedNextRun() async throws {
         let document = documentHoldingALink()

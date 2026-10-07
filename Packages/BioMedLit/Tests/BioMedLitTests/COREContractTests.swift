@@ -89,7 +89,7 @@ final class COREContractTests: XCTestCase {
     }
 
     func testEachUnreadableBodyThrows() throws {
-        for row in try table("bodies", minimum: 4) {
+        for row in try table("bodies", minimum: 6) {
             let body = Data(try XCTUnwrap(row["body"] as? String).utf8)
             XCTAssertThrowsError(try CORE.fullText(fromAnswer: body, doi: "10.1/x"), row["name"] as? String ?? "?")
         }

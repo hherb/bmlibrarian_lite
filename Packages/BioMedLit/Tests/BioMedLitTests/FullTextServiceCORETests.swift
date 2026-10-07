@@ -25,6 +25,16 @@ private struct ExtractingStub: PDFTextExtracting {
     }
 }
 
+/// A scan: the file opens, and no page yields text.
+private struct ScanStub: PDFTextExtracting {
+    func extract(from fileURL: URL) -> PDFExtractionResult {
+        PDFExtractionResult(
+            text: "", success: true, pageCount: 2, convertedPages: 0,
+            warnings: ["page 1 yielded no text", "page 2 yielded no text"]
+        )
+    }
+}
+
 fileprivate extension RetryConfiguration {
     /// One attempt, no wait: a test of an outcome does not sleep through the
     /// backoff, and a 503 that outlasts it arrives as `serverError`.
@@ -42,8 +52,9 @@ fileprivate extension RetryConfiguration {
 /// CORE's extracted text is the last full-text source before the link: asked
 /// once, only with the user's key and a DOI, only when no copy was served; its
 /// text wins over a held abstract; an unreachable CORE is an unsettled lookup
-/// (#480, stage C; the maintainer's decisions of 2026-10-06).
-final class FullTextServiceCORETests: XCTestCase {
+/// (#480, stage C; the maintainer's decisions of 2026-10-06). A copy that
+/// yields no text is no full text obtained, so CORE is asked after it (#499).
+final class FullTextServiceCORETests: RecordingLoggerTestCase {
     private let doi = "10.1159/000513404"
     private let coreHost = "api.core.ac.uk"
     private let repo = "https://repo.example.org/b.pdf"
@@ -75,6 +86,7 @@ final class FullTextServiceCORETests: XCTestCase {
     }
 
     private func makeService(
+        extractor: PDFTextExtracting = ExtractingStub(),
         retry: RetryConfiguration = .noRetry,
         email: String = "test@example.org",
         coreAPIKey: String? = "test-core-key",
@@ -89,7 +101,7 @@ final class FullTextServiceCORETests: XCTestCase {
             email: email,
             session: session,
             europePMCService: EuropePMCService(session: session),
-            extractor: ExtractingStub(),
+            extractor: extractor,
             europePMCRetry: .noRetry,
             pmcOpenDataRetry: .noRetry,
             openAlexRetry: retry,
@@ -348,5 +360,232 @@ final class FullTextServiceCORETests: XCTestCase {
         XCTAssertGreaterThanOrEqual(
             Date().timeIntervalSince(start), BioMedLitConstants.coreMinimumInterval * 0.9
         )
+    }
+
+    // MARK: - A copy without text (#499)
+
+    /// Unpaywall names one copy, served as a PDF, which the scan stub reads as
+    /// yielding no text; nothing is held, so the copy would be returned.
+    private func serveAScan() {
+        StubURLProtocol.routes["unpaywall"] = (200, unpaywall([repo]))
+        StubURLProtocol.routes["repo.example.org"] = (200, pdfBody)
+    }
+
+    func testAScanWithoutAnAbstractAsksCOREAndItsTextWins() async throws {
+        serveAScan()
+        StubURLProtocol.routes[coreHost] = (200, hit(longText))
+        let result = try await makeService(extractor: ScanStub()).fetchFullText(pmcId: nil, doi: doi, pmid: "")
+        XCTAssertEqual(result.content, .core(text: longText))
+        XCTAssertEqual(result.contentKind, .extracted)
+        XCTAssertEqual(result.extractedText, longText)
+        XCTAssertNil(result.localPDFPath)
+        XCTAssertNil(result.openAccessShortfall)
+        XCTAssertEqual(coreRequests, 1)
+        // The control that the copy was downloaded first
+        XCTAssertTrue(StubURLProtocol.requested("repo.example.org"))
+    }
+
+    func testAScanWithCOREUnreachableKeepsCOREsEntry() async throws {
+        serveAScan()
+        StubURLProtocol.routes[coreHost] = (503, Data())
+        let result = try await makeService(extractor: ScanStub()).fetchFullText(pmcId: nil, doi: doi, pmid: "")
+        XCTAssertEqual(result.content, .unpaywall(pdfURL: URL(string: repo)!))
+        XCTAssertEqual(result.contentKind, FullTextContentKind.none)
+        XCTAssertNotNil(result.localPDFPath)
+        XCTAssertNotNil(result.extractionCoverage)
+        XCTAssertEqual(result.openAccessShortfall, OpenAccessShortfall(source: .core, failure: .httpStatus(503)))
+        XCTAssertEqual(coreRequests, 1)
+    }
+
+    func testAScanWithARefusedKeyCarriesTheRefusal() async throws {
+        serveAScan()
+        StubURLProtocol.routes[coreHost] = (BioMedLitConstants.coreKeyRefusedStatus, Data())
+        let result = try await makeService(extractor: ScanStub()).fetchFullText(pmcId: nil, doi: doi, pmid: "")
+        XCTAssertEqual(result.content, .unpaywall(pdfURL: URL(string: repo)!))
+        XCTAssertEqual(result.openAccessShortfall, .coreKeyRefused)
+    }
+
+    /// The control: without a key the scan comes back as it did, nothing asked.
+    func testAScanWithoutAKeyIsReturnedAndCOREIsNotAsked() async throws {
+        serveAScan()
+        StubURLProtocol.routes[coreHost] = (200, hit(longText))
+        let result = try await makeService(extractor: ScanStub(), coreAPIKey: nil)
+            .fetchFullText(pmcId: nil, doi: doi, pmid: "")
+        XCTAssertEqual(result.content, .unpaywall(pdfURL: URL(string: repo)!))
+        XCTAssertEqual(result.contentKind, FullTextContentKind.none)
+        XCTAssertNil(result.openAccessShortfall)
+        XCTAssertEqual(coreRequests, 0)
+    }
+
+    /// The control: a CORE that knows nothing adds nothing to the scan.
+    func testAScanWithCOREKnowingNothingIsReturnedAsItWas() async throws {
+        serveAScan()
+        StubURLProtocol.routes[coreHost] = (200, Data(#"{"results": []}"#.utf8))
+        let result = try await makeService(extractor: ScanStub()).fetchFullText(pmcId: nil, doi: doi, pmid: "")
+        XCTAssertEqual(result.content, .unpaywall(pdfURL: URL(string: repo)!))
+        XCTAssertNil(result.openAccessShortfall)
+        XCTAssertEqual(coreRequests, 1)
+    }
+
+    /// Europe PMC's render, read as a scan with nothing held, asks CORE too.
+    func testATextlessEuropePMCRenderAsksCORE() async throws {
+        let render = "https://europepmc.org/articles/PMC1/pdf"
+        StubURLProtocol.routes["search"] = (200, Data(#"""
+            {"resultList": {"result": [{
+              "id": "1", "pmcid": "PMC1", "inPMC": "Y", "doi": "10.1159/000513404",
+              "fullTextUrlList": {"fullTextUrl": [
+                {"documentStyle": "pdf", "site": "Europe_PMC", "url": "\#(render)",
+                 "availability": "Open access", "availabilityCode": "OA"}
+              ]}
+            }]}}
+            """#.utf8))
+        StubURLProtocol.routes["fullTextXML"] = (404, Data())
+        StubURLProtocol.routes["pmc-oa-opendata"] = (404, Data())
+        StubURLProtocol.routes["articles/PMC1/pdf"] = (200, pdfBody)
+        StubURLProtocol.routes[coreHost] = (200, hit(longText))
+        let served = try await makeService(extractor: ScanStub()).fetchFullText(pmcId: nil, doi: doi, pmid: "")
+        XCTAssertEqual(served.content, .core(text: longText))
+        XCTAssertTrue(StubURLProtocol.requested("articles/PMC1/pdf"), "the render was read first")
+        XCTAssertFalse(StubURLProtocol.requested("unpaywall"), "the render's return site asked CORE")
+
+        // Unreachable: the render comes back, CORE's entry on it
+        FullTextService.deleteCachedPDF(for: cacheKey)
+        StubURLProtocol.routes[coreHost] = (503, Data())
+        let unread = try await makeService(extractor: ScanStub()).fetchFullText(pmcId: nil, doi: doi, pmid: "")
+        XCTAssertEqual(unread.content, .europePMCPDF(pdfURL: URL(string: render)!))
+        XCTAssertEqual(unread.contentKind, FullTextContentKind.none)
+        XCTAssertEqual(unread.openAccessShortfall, OpenAccessShortfall(source: .core, failure: .httpStatus(503)))
+    }
+
+    /// With an abstract held, a scan settles the open-access question but not
+    /// CORE's: an unreachable CORE stays on the abstract returned (#499;
+    /// Python's `test_an_unreadable_pdf_with_core_unreachable_stays_unsettled`).
+    func testAScanBesideAHeldAbstractKeepsCOREsUnsettledEntry() async throws {
+        StubURLProtocol.routes["fullTextXML"] = (200, Data(bodylessJATS.utf8))
+        serveAScan()
+        StubURLProtocol.routes[coreHost] = (503, Data())
+        let result = try await makeService(extractor: ScanStub()).fetchFullText(pmcId: "PMC1", doi: doi, pmid: "1")
+        XCTAssertEqual(result.contentKind, .abstract)
+        XCTAssertEqual(result.openAccessShortfall, OpenAccessShortfall(source: .core, failure: .httpStatus(503)))
+        XCTAssertEqual(coreRequests, 1, "asked once, at the chain's own CORE step")
+    }
+
+    /// The rule itself: a served copy settles every entry but CORE's.
+    func testASettledShortfallKeepsOnlyCOREsEntries() {
+        let pdf = OpenAccessShortfall(source: .pdf, failure: .httpStatus(404), address: repo)
+        let core = OpenAccessShortfall(source: .core, failure: .timeout)
+        XCTAssertEqual(FullTextService.settledOpenAccessShortfall(pdf.appending(core), copyServed: true), core)
+        XCTAssertEqual(
+            FullTextService.settledOpenAccessShortfall(pdf.appending(.coreKeyRefused), copyServed: true),
+            .coreKeyRefused
+        )
+        XCTAssertNil(FullTextService.settledOpenAccessShortfall(pdf, copyServed: true))
+        XCTAssertEqual(FullTextService.settledOpenAccessShortfall(pdf.appending(core), copyServed: false), pdf.appending(core))
+    }
+
+    // MARK: - What the service makes of each answer
+
+    /// Every unreadable body of the contract, and one that is not UTF-8, is an
+    /// unreachable CORE, never an absent one: an absence would settle it.
+    func testEveryUnreadableBodyIsUnreachableThroughTheService() async throws {
+        let rows = try XCTUnwrap(COREContract.load()["bodies"] as? [[String: Any]])
+        XCTAssertGreaterThanOrEqual(rows.count, 6, "bodies table lost rows")
+        var bodies: [(name: String, body: Data)] = []
+        for row in rows {
+            let name = try XCTUnwrap(row["name"] as? String)
+            bodies.append((name, Data(try XCTUnwrap(row["body"] as? String, name).utf8)))
+        }
+        bodies.append(("a body that is not UTF-8", Data([0x7B, 0xFF, 0x7D])))
+        for (name, body) in bodies {
+            StubURLProtocol.routes[coreHost] = (200, body)
+            let fetch = try await makeService().fetchCoreText(doi: doi, apiKey: "test-core-key")
+            XCTAssertEqual(fetch, .unreachable(.malformedResponse), name)
+        }
+    }
+
+    func testATimeoutIsUnreachableAndUnsettled() async throws {
+        StubURLProtocol.failures[coreHost] = URLError(.timedOut)
+        let fetch = try await makeService().fetchCoreText(doi: doi, apiKey: "test-core-key")
+        XCTAssertEqual(fetch, .unreachable(.timeout))
+        let result = try await makeService().fetchFullText(pmcId: nil, doi: doi, pmid: "1")
+        XCTAssertEqual(result.openAccessShortfall?.entries.last, OpenAccessShortfall(source: .core, failure: .timeout).entries[0])
+    }
+
+    func testATransportFailureIsUnreachableAndUnsettled() async throws {
+        StubURLProtocol.failures[coreHost] = URLError(.cannotConnectToHost)
+        let fetch = try await makeService().fetchCoreText(doi: doi, apiKey: "test-core-key")
+        XCTAssertEqual(fetch, .unreachable(.connection))
+        let result = try await makeService().fetchFullText(pmcId: nil, doi: doi, pmid: "1")
+        XCTAssertEqual(result.openAccessShortfall?.entries.last, OpenAccessShortfall(source: .core, failure: .connection).entries[0])
+    }
+
+    /// One code point short of the floor is no text; the control serves 5,000.
+    func testATextOneCodePointShortIsAbsentThroughTheService() async throws {
+        let short = String(repeating: "x", count: BioMedLitConstants.coreMinFullTextCharacters - 1)
+        StubURLProtocol.routes[coreHost] = (200, hit(short))
+        let absent = try await makeService().fetchCoreText(doi: doi, apiKey: "test-core-key")
+        XCTAssertEqual(absent, .absent)
+        StubURLProtocol.routes[coreHost] = (200, hit(short + "y"))
+        let served = try await makeService().fetchCoreText(doi: doi, apiKey: "test-core-key")
+        XCTAssertEqual(served, .served(short + "y"))
+    }
+
+    // MARK: - Asking by DOI
+
+    /// CORE needs only its key and a DOI: an Unpaywall with no contact email is
+    /// told first, then CORE's failure, in chain order (as Kotlin pins it).
+    func testAnUnconfiguredUnpaywallAndAnUnreachableCOREAreToldInChainOrder() async throws {
+        StubURLProtocol.routes[coreHost] = (503, Data())
+        let result = try await makeService(email: "").fetchFullText(pmcId: nil, doi: doi, pmid: "1")
+        XCTAssertEqual(coreRequests, 1)
+        XCTAssertEqual(
+            result.openAccessShortfall,
+            OpenAccessShortfall.unpaywallNotConfigured.appending(OpenAccessShortfall(source: .core, failure: .httpStatus(503)))
+        )
+    }
+
+    /// The control: an unconfigured Unpaywall leaves CORE's text to be served.
+    func testAnUnconfiguredUnpaywallLeavesCOREsTextServed() async throws {
+        StubURLProtocol.routes[coreHost] = (200, hit(longText))
+        let result = try await makeService(email: "").fetchFullText(pmcId: nil, doi: doi, pmid: "1")
+        XCTAssertEqual(result.content, .core(text: longText))
+    }
+
+    /// A DOI held as a resolver URL is searched bare, as Python's `_clean_doi` asks it.
+    func testAResolverDOIIsSearchedBare() async throws {
+        StubURLProtocol.routes[coreHost] = (200, hit(longText))
+        let result = try await makeService().fetchFullText(pmcId: nil, doi: "https://doi.org/\(doi)", pmid: "1")
+        XCTAssertEqual(result.content, .core(text: longText))
+        let asked = StubURLProtocol.requestedURLs.filter { URL(string: $0)?.host == coreHost }
+        XCTAssertEqual(asked, [try XCTUnwrap(CORE.searchURL(doi: doi)).absoluteString])
+    }
+
+    func testTheBareDOIIsPythonsCleanDOI() {
+        XCTAssertEqual(CORE.bareDOI("https://doi.org/10.1/A"), "10.1/A")
+        XCTAssertEqual(CORE.bareDOI("  HTTP://DX.DOI.ORG/10.1/a "), "10.1/a")
+        XCTAssertEqual(CORE.bareDOI("https://www.doi.org/10.1/a"), "10.1/a")
+        XCTAssertEqual(CORE.bareDOI("DOI:10.1/a"), "10.1/a")
+        XCTAssertEqual(CORE.bareDOI("doi:doi:10.1/a"), "10.1/a", "Python's list holds doi: twice, ignoring case")
+        XCTAssertEqual(CORE.bareDOI("10.1/a"), "10.1/a")
+        XCTAssertEqual(CORE.bareDOI("   "), "")
+    }
+
+    // MARK: - Logging the refusal
+
+    /// A refused key is logged once, when the refusal is new, as Python and
+    /// Kotlin log it; the articles it then skips are not warned of.
+    func testARefusedKeyIsWarnedOfOnce() async throws {
+        let throttle = CoreThrottle()
+        StubURLProtocol.routes[coreHost] = (BioMedLitConstants.coreKeyRefusedStatus, Data())
+        for pmid in ["1", "2", "3"] {
+            _ = try await makeService(coreThrottle: throttle).fetchFullText(pmcId: nil, doi: doi, pmid: pmid)
+        }
+        let refusals = logger.problems.filter { $0.contains("CORE refused") }
+        XCTAssertEqual(refusals.count, 1, "\(logger.problems)")
+        XCTAssertFalse(logger.recorded.contains { $0.contains("test-core-key") || $0.contains(CORE.keyDigest("test-core-key")) })
+        // A second key refused is a new refusal, and is warned of in turn
+        _ = try await makeService(coreAPIKey: "test-core-key-2", coreThrottle: throttle)
+            .fetchFullText(pmcId: nil, doi: doi, pmid: "4")
+        XCTAssertEqual(logger.problems.filter { $0.contains("CORE refused") }.count, 2)
     }
 }

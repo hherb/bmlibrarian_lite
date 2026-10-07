@@ -29,6 +29,8 @@ struct SettingsView: View {
     @State private var ncbiAPIKey = ""
     @State private var coreAPIKey = ""
     @State private var showingSaveConfirmation = false
+    /// Which key failed to save, when one did: told instead of "saved".
+    @State private var keyNotSaved: String?
     @State private var monthlyUsage: Double = 0
     @State private var showingCustomConfig = false
 
@@ -374,8 +376,7 @@ struct SettingsView: View {
                     SecureField("CORE API Key (optional)", text: $coreAPIKey)
                         .textContentType(.password)
                     Button("Save CORE API Key") {
-                        settings.coreAPIKey = coreAPIKey
-                        showingSaveConfirmation = true
+                        reportKeySave(settings.saveCOREAPIKey(coreAPIKey), keyName: "CORE")
                     }
                     .disabled(coreAPIKey == settings.coreAPIKey)
                 } header: {
@@ -434,8 +435,7 @@ struct SettingsView: View {
 
                     if !ncbiAPIKey.isEmpty {
                         Button("Save NCBI API Key") {
-                            settings.ncbiAPIKey = ncbiAPIKey
-                            showingSaveConfirmation = true
+                            reportKeySave(settings.saveNCBIAPIKey(ncbiAPIKey), keyName: "NCBI")
                         }
                     }
                 } header: {
@@ -515,6 +515,14 @@ struct SettingsView: View {
             } message: {
                 Text("API key saved securely to Keychain")
             }
+            .alert("Not Saved", isPresented: Binding(
+                get: { keyNotSaved != nil },
+                set: { if !$0 { keyNotSaved = nil } }
+            )) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(AppSettings.keySaveFailureMessage(keyName: keyNotSaved ?? ""))
+            }
             .alert("Delete All Reports?", isPresented: $showingDeleteAllConfirmation) {
                 Button("Cancel", role: .cancel) { }
                 Button("Delete All", role: .destructive) {
@@ -578,6 +586,19 @@ struct SettingsView: View {
                 modelContext.delete(session)
             }
             try? modelContext.save()
+        }
+    }
+
+    /// Tell the outcome of saving an API key: "saved" only when it was.
+    ///
+    /// - Parameters:
+    ///   - saved: Whether the key was stored.
+    ///   - keyName: The key's service, as the failure names it.
+    private func reportKeySave(_ saved: Bool, keyName: String) {
+        if saved {
+            showingSaveConfirmation = true
+        } else {
+            keyNotSaved = keyName
         }
     }
 

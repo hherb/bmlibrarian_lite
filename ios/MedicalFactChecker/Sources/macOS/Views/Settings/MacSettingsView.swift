@@ -801,6 +801,8 @@ struct PubMedSettingsTab: View {
     @State private var coreAPIKey = ""
     @State private var showingSaveConfirmation = false
     @State private var showingCoreSaveConfirmation = false
+    /// Which key failed to save, when one did: told instead of "saved".
+    @State private var keyNotSaved: String?
 
     var body: some View {
         @Bindable var settings = settings
@@ -821,8 +823,11 @@ struct PubMedSettingsTab: View {
 
                 HStack {
                     Button("Save API Key") {
-                        settings.ncbiAPIKey = ncbiAPIKey
-                        showingSaveConfirmation = true
+                        if settings.saveNCBIAPIKey(ncbiAPIKey) {
+                            showingSaveConfirmation = true
+                        } else {
+                            keyNotSaved = "NCBI"
+                        }
                     }
                     .disabled(ncbiAPIKey.isEmpty)
 
@@ -844,8 +849,11 @@ struct PubMedSettingsTab: View {
 
                 HStack {
                     Button("Save API Key") {
-                        settings.coreAPIKey = coreAPIKey
-                        showingCoreSaveConfirmation = true
+                        if settings.saveCOREAPIKey(coreAPIKey) {
+                            showingCoreSaveConfirmation = true
+                        } else {
+                            keyNotSaved = "CORE"
+                        }
                     }
                     .disabled(coreAPIKey == settings.coreAPIKey)
 
@@ -876,6 +884,14 @@ struct PubMedSettingsTab: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text("CORE API key saved securely to Keychain")
+        }
+        .alert("Not Saved", isPresented: Binding(
+            get: { keyNotSaved != nil },
+            set: { if !$0 { keyNotSaved = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(AppSettings.keySaveFailureMessage(keyName: keyNotSaved ?? ""))
         }
     }
 }

@@ -99,11 +99,14 @@ enum FullTextAutoFetch {
     ///   - result: What the chain returned for it.
     /// - Returns: The refusal when the document holds only an undownloaded PDF
     ///   link and the result is a fallback the chain settled on because the
-    ///   open-access copy went unassessed; `nil` when it may be applied.
+    ///   open-access copy went unassessed; `nil` when it may be applied. A
+    ///   downloaded copy is no fallback: the shortfall it carries is CORE's,
+    ///   about its text (#499), and the file beats a link.
     static func storedLinkKept(
         _ document: Document, refetched result: BMLFullTextResult
     ) -> StoredLinkKept? {
         guard document.holdsOnlyUndownloadedPDFLink,
+              result.localPDFPath == nil,
               let shortfall = result.openAccessShortfall else { return nil }
         return StoredLinkKept(shortfall: shortfall)
     }
