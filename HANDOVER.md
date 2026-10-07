@@ -22,22 +22,32 @@ replay**: the maintainer puts the CORE key in `config.json`
 not-open-access rows; record the counts in the spikes README and the contract.
 **Binds:**
 - **A search hit counts only if its own DOI is this article's.**
-  Code points ≥ 5,000, trimmed.
+  Code points ≥ 5,000, trimmed. An answer holding an unpaired surrogate
+  escape anywhere is unreadable on every platform (Apple's parser refuses it).
 - **Asked last and once, only with a key and a DOI**, never after a copy was
-  served. Python asks inside `PDFDiscoverer` (hook), including after a PDF
-  with no text (#499), as Swift does. Android's render tier skips it (#493).
+  served and not saved. Python asks inside `PDFDiscoverer` (hook), and after
+  a PDF with no text (#499); Swift likewise, abstract held or not (a scan
+  keeps CORE's failure beside it). Android's render tier skips it (#493);
+  Swift's textless render skips Unpaywall (#505).
 - **No key: no request, nothing recorded** (spec decision 4, as built).
 - **A configured CORE that could not be asked is an unsettled lookup** that
   blocks absence (maintainer, 2026-10-06), last in chain order.
 - **Two 429s in a row pause CORE for the process.**
 - **A 401 refuses that key** (SHA-256 digest, never the key), told as a
   `key_refused` skip "CORE (the key in the settings was refused) …".
-  A corrected key is asked again; a 403 is an ordinary answer (#498).
-- **Desktop cache** `*.core.txt`, read only at CORE's place.
-- **Android shows CORE text as plain text**, and escapes every stored markdown
-  before the WebView (#495).
+  A corrected key is asked again; a 403 is an ordinary answer (#498). On
+  the desktop the settings dialog edits the one live config every tab holds,
+  and `TransparencyManager` rebuilds its analyser when the key changes.
+- **Desktop cache** `*.core.txt` (stamp v2: the DOI on line two), read only
+  at CORE's place, served again only for that DOI and ≥ 5,000 code points;
+  an unreadable one is recorded (#354).
+- **Android shows CORE text as plain text**, escapes every stored markdown,
+  and strips every unsafe URL attribute from any HTML at the WebView
+  boundary (`neutraliseUnsafeUrls`), pre-#495 stored HTML included.
+- **Key saves report failure** on all three (Keychain update-in-place,
+  `commit()`, the dialog's save) and never say "saved" for an unwritten key.
 
-Follow-ups: #500. **Next: C2 (Elsevier)**: copy C1's settings plumbing and
+Follow-ups: #500, #502–#505. **Next: C2 (Elsevier)**: copy C1's settings plumbing and
 the `key_refused` mechanism for Elsevier's 403.
 
 ## Recently landed (context)
