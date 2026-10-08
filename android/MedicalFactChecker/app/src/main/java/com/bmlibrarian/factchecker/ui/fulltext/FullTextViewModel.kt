@@ -26,6 +26,7 @@ import com.bmlibrarian.factchecker.data.local.dao.DocumentDao
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService.FullTextResult
+import com.bmlibrarian.factchecker.data.remote.fulltext.isCachedPdf
 import com.bmlibrarian.factchecker.data.remote.fulltext.recordingFullTextFetch
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.domain.model.FullTextLinkKind
@@ -40,6 +41,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 /**
@@ -243,6 +245,26 @@ class FullTextViewModel @Inject constructor(
                         pdfPath = cachedPdf,
                         title = doc.title,
                         source = doc.fullTextSourceDisplay ?: Constants.FULLTEXT_SOURCE_CACHED
+                    )
+                    return@launch
+                }
+
+                // Elsevier's PDF is cached under its DOI's digest, not the document's
+                // ID, and its URL needs the key: the stored local file is the only way
+                // back to it (#480, stage C2). Served from disk, so a key cleared since
+                // never sends the record down the chain, which would overwrite it.
+                // Keyed on the source: a later answer that brings no PDF leaves an
+                // earlier pdfPath behind, and only a record whose answer was
+                // Elsevier's PDF owns the path it holds
+                val elsevierPdf = doc.pdfPath?.takeIf {
+                    doc.fullTextSource == Constants.FULLTEXT_SOURCE_ELSEVIER && isCachedPdf(File(it))
+                }
+                if (elsevierPdf != null) {
+                    Log.d(TAG, "Using the stored Elsevier PDF for ${doc.id}")
+                    _state.value = FullTextState.PdfContent(
+                        pdfPath = elsevierPdf,
+                        title = doc.title,
+                        source = doc.fullTextSourceDisplay ?: Constants.FULLTEXT_SOURCE_ELSEVIER_LABEL
                     )
                     return@launch
                 }

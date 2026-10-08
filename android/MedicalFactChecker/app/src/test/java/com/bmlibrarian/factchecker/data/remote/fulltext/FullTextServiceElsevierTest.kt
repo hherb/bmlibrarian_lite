@@ -396,6 +396,35 @@ class FullTextServiceElsevierTest {
         assertEquals(Constants.FULLTEXT_SOURCE_ELSEVIER_LABEL, recorded.document.fullTextSourceDisplay)
     }
 
+    /**
+     * Review focus 2, end to end: Elsevier's API (a local server) serves the PDF, the
+     * chain returns it and recording stores it, and no column holds the address it
+     * came from or the key it was asked with.
+     */
+    @Test
+    fun `a PDF served end to end is stored with no address and no key`() = runBlocking {
+        val key = "secret-elsevier-key-for-recording"
+        server.enqueue(MockResponse().setBody(Buffer().write(CONTRACT_PDF_BODY)))
+        elsevier = realElsevier(key)
+
+        val result = fetch() as FullTextResult.ElsevierPdf
+        val recorded = DocumentEntity(id = "d", sessionId = "s", title = "t", doi = doi).recordingFullTextFetch(
+            result,
+            { error("an Elsevier PDF is never downloaded again") },
+            { _, _ -> error("nothing further is asked") },
+            { error("nothing further is asked") }
+        )
+
+        assertEquals(1, server.requestCount)
+        assertTrue(java.io.File(recorded.document.pdfPath!!).readBytes().contentEquals(CONTRACT_PDF_BODY))
+        val stored = recorded.document.toString()
+        for (secret in listOf(server.url("/").toString(), "${server.hostName}:${server.port}", key, "api.elsevier.com")) {
+            assertFalse("$secret in $stored", secret in stored)
+        }
+        // The control: the record is what toString shows, the local path included
+        assertTrue(stored, recorded.document.pdfPath!! in stored)
+    }
+
     @Test
     fun `an Elsevier PDF has content, and is stored as Elsevier's`() {
         assertTrue(FullTextResult.ElsevierPdf(localPdf).hasContent)

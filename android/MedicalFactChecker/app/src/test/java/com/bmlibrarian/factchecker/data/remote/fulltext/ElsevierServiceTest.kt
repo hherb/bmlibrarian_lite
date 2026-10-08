@@ -372,7 +372,10 @@ class ElsevierServiceTest {
         val notADirectory = folder.newFile()
         assertEquals(ElsevierFetch.NotSaved, service().fetch(notADirectory))
         assertEquals(1, server.requestCount)
-        assertTrue(Log.lines.toString(), Log.lines.any { it.startsWith("ElsevierService: ") && "could not be saved" in it })
+        assertTrue(
+            Log.levelledLines.toString(),
+            Log.levelledLines.any { it.startsWith("E/ElsevierService: ") && "could not be saved" in it }
+        )
     }
 
     @Test
@@ -432,6 +435,33 @@ class ElsevierServiceTest {
         routes[path] = MockResponse().setResponseCode(404)
         key = processKey
         assertEquals(ElsevierFetch.Absent, service().fetch())
+    }
+
+    /** A CORE paused by its 429s leaves Elsevier's process session untouched: the two share nothing. */
+    @Test
+    fun `a CORE pause never pauses Elsevier`() = runBlocking {
+        routes[Constants.CORE_SEARCH_PATH] = MockResponse().setResponseCode(429)
+        val core = CoreService(
+            PmcOpenDataService.bucketClient(OkHttpClient(), Constants.CORE_REQUEST_TIMEOUT_SECONDS),
+            server.url("").toString().trimEnd('/'), { "core-key" }, RequestPacer(0L), 0, 0L
+        )
+        repeat(Constants.CORE_PAUSE_AFTER_CONSECUTIVE_429) { core.fetchText(doi) }
+        assertTrue("the control: CORE is paused", core.isPaused)
+
+        // The injected Elsevier service, on the process's session, still asks
+        val context: Context = mockk { every { cacheDir } returns folder.newFolder() }
+        val settings: SettingsRepository = mockk {
+            every { getElsevierApiKey() } returns "core-pause-test-key"
+            every { getElsevierInstToken() } returns ""
+        }
+        val toServer = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+            val local = chain.request().url.newBuilder().scheme("http").host(server.hostName).port(server.port).build()
+            chain.proceed(chain.request().newBuilder().url(local).build())
+        }).build()
+        routes[path] = MockResponse().setResponseCode(Constants.HTTP_NOT_FOUND)
+        val before = server.requestCount
+        assertEquals(ElsevierFetch.Absent, ElsevierService(toServer, settings, context).fetchPdf(doi))
+        assertEquals("Elsevier was asked", before + 1, server.requestCount)
     }
 
     private companion object {

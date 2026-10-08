@@ -16,16 +16,30 @@ public class Log {
     /** Every line logged since the last {@link #clear()}, as "tag: message". */
     public static final List<String> lines = new CopyOnWriteArrayList<>();
 
-    /** Forget every line recorded so far. */
-    public static void clear() { lines.clear(); }
+    /**
+     * The same lines with their level, as "L/tag: message" (L one of V, D, I, W, E,
+     * as logcat writes it), for a test that pins how loud a line is.
+     */
+    public static final List<String> levelledLines = new CopyOnWriteArrayList<>();
 
-    public static int d(String tag, String msg) { return record(tag, msg); }
-    public static int i(String tag, String msg) { return record(tag, msg); }
-    public static int w(String tag, String msg) { return record(tag, msg); }
-    public static int e(String tag, String msg) { return record(tag, msg); }
-    public static int e(String tag, String msg, Throwable tr) { return record(tag, msg + ": " + tr); }
-    public static int w(String tag, String msg, Throwable tr) { return record(tag, msg + ": " + tr); }
-    public static int v(String tag, String msg) { return record(tag, msg); }
+    /** Forget every line recorded so far. */
+    public static void clear() {
+        lines.clear();
+        levelledLines.clear();
+    }
+
+    public static int d(String tag, String msg) { return record("D", tag, msg); }
+    public static int i(String tag, String msg) { return record("I", tag, msg); }
+    public static int w(String tag, String msg) { return record("W", tag, msg); }
+    public static int e(String tag, String msg) { return record("E", tag, msg); }
+    public static int e(String tag, String msg, Throwable tr) { return record("E", tag, msg + ": " + tr); }
+    public static int w(String tag, String msg, Throwable tr) { return record("W", tag, msg + ": " + tr); }
+    public static int v(String tag, String msg) { return record("V", tag, msg); }
+
+    private static int record(String level, String tag, String msg) {
+        levelledLines.add(level + "/" + tag + ": " + msg);
+        return record(tag, msg);
+    }
 
     private static int record(String tag, String msg) {
         lines.add(tag + ": " + msg);

@@ -85,6 +85,10 @@ enum class FullTextLinkKind(val title: String, val statement: String) {
             Constants.FULLTEXT_SOURCE_EUROPE_PMC,
             Constants.FULLTEXT_SOURCE_UNPAYWALL,
             Constants.FULLTEXT_SOURCE_OPENALEX,
+            // Unreachable for an Elsevier record: it always carries its pdfPath, and
+            // a record is link-only only with none (DocumentEntity.isLinkOnly). Kept
+            // a PDF's kind so a record that somehow lost its path never reads as
+            // the publisher's page
             Constants.FULLTEXT_SOURCE_ELSEVIER -> UNDOWNLOADED_PDF
             else -> PUBLISHER_PAGE
         }
