@@ -2,7 +2,6 @@
 // Copyright (C) 2024-2026 Dr Horst Herb
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import CryptoKit
 import Foundation
 
 /// CORE's extracted text, asked by DOI with the user's own key (#480, stage C).
@@ -70,9 +69,24 @@ public enum CORE {
     /// trimmed key's UTF-8 bytes, as lower-case hex, Python's `core_key_digest`. A refusal
     /// is scoped to the key CORE refused, so a key corrected in the settings is asked
     /// again; the key itself is never held for that, and the digest is never logged.
+    /// Forwards to ``KeyDigest/key(_:)``, which Elsevier's session shares.
     public static func keyDigest(_ apiKey: String) -> String {
-        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        return SHA256.hash(data: Data(trimmed.utf8)).map { String(format: "%02x", $0) }.joined()
+        KeyDigest.key(apiKey)
+    }
+
+    /// A DOI as asked by a path: trimmed, one resolver or `doi:` prefix removed as
+    /// ``normalisedDOI(_:)`` matches it (in any case), trimmed again; its own case kept.
+    /// Python's `core_api.strip_doi_prefix`, which removes the same prefixes.
+    ///
+    /// - Parameter doi: The DOI as a source wrote it.
+    /// - Returns: The DOI without its prefix, its case kept; blank for a blank one.
+    static func doiWithoutPrefix(_ doi: String) -> String {
+        var text = Substring(doi.trimmingCharacters(in: .whitespacesAndNewlines))
+        let lowered = text.lowercased()
+        if let prefix = doiPrefixes.first(where: { lowered.hasPrefix($0) }) {
+            text = text.dropFirst(prefix.count)
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The full text CORE's answer serves for this DOI, or nil; throws for an answer we cannot read.
@@ -114,82 +128,26 @@ enum COREFetch: Equatable {
 }
 
 /// CORE's session state, shared by every `FullTextService`, since the app builds one per
-/// screen. Two consecutive fetches ending in 429 pause CORE until the process ends: its
-/// key buys a daily budget no pacing can express. A fetch ending in 401 marks the key it
-/// was sent with refused for the rest of the process (#498): every article would be
-/// refused alike, so CORE is not asked with that key again. The refusal is the key's,
-/// held as its ``CORE/keyDigest(_:)``: another key, such as one corrected in the
-/// settings, is asked as usual, and a 401 for it refuses that key instead.
-public final class CoreThrottle: @unchecked Sendable {
+/// screen: the rules of ``KeyedServiceSession``, with CORE's own instance. Two consecutive
+/// fetches ending in 429 pause CORE until the process ends: its key buys a daily budget no
+/// pacing can express. A fetch ending in 401 marks the key it was sent with refused for the
+/// rest of the process (#498): every article would be refused alike, so CORE is not asked
+/// with that key again. The refusal is the key's, held as its ``CORE/keyDigest(_:)``:
+/// another key, such as one corrected in the settings, is asked as usual, and a 401 for it
+/// refuses that key instead. CORE has no refusal from a network; that is Elsevier's.
+public final class CoreThrottle: KeyedServiceSession, @unchecked Sendable {
     /// CORE's session state every service in this process shares: the 429
-    /// pause and the refused key.
+    /// pause and the refused key. Shares nothing with ``ElsevierSession/shared``.
     public static let shared = CoreThrottle()
 
-    private let lock = NSLock()
-    private let pauseAfter: Int
-    private var consecutive = 0
-    private var paused = false
-    private var refusedKeyDigest: String?
-
+    /// Start unpaused, with no key refused.
+    ///
+    /// - Parameter pauseAfter: Consecutive 429 endings that pause CORE.
     public init(pauseAfter: Int = BioMedLitConstants.corePauseAfterConsecutive429) {
-        self.pauseAfter = pauseAfter
-    }
-
-    /// Whether CORE is paused for the rest of the session.
-    public var isPaused: Bool {
-        lock.lock(); defer { lock.unlock() }
-        return paused
-    }
-
-    /// Whether CORE refused this key this session (#498); any other key is asked as usual.
-    ///
-    /// - Parameter keyDigest: The key's ``CORE/keyDigest(_:)``.
-    public func refuses(keyDigest: String) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        return refusedKeyDigest == keyDigest
-    }
-
-    /// Note how one fetch ended. A 401 marks the key it was sent with refused, in place of
-    /// any key refused before; like any ending but a 429, it also resets the 429 count.
-    /// A refusal is logged here, once, when it is new, as Python and Kotlin log it; the
-    /// articles it then skips are not (the key and its digest never are).
-    ///
-    /// - Parameters:
-    ///   - status: Its HTTP status, or nil when it got none.
-    ///   - keyDigest: The ``CORE/keyDigest(_:)`` of the key it was sent with.
-    /// - Returns: Whether this ending newly refused the key.
-    @discardableResult
-    func record(endedOn status: Int?, keyDigest: String) -> Bool {
-        let newlyRefused = noteEnding(status, keyDigest: keyDigest)
-        if newlyRefused {
-            BioMedLitLib.logger?.warning(
-                "CORE refused the configured API key (HTTP \(BioMedLitConstants.coreKeyRefusedStatus)); "
-                    + "it is not asked with that key again this session, so any text it holds is not assessed",
-                category: .fullText
-            )
-        }
-        return newlyRefused
-    }
-
-    /// The state change behind ``record(endedOn:keyDigest:)``, under the lock.
-    ///
-    /// - Parameters:
-    ///   - status: The fetch's HTTP status, or nil when it got none.
-    ///   - keyDigest: The ``CORE/keyDigest(_:)`` of the key it was sent with.
-    /// - Returns: Whether this ending newly refused the key.
-    private func noteEnding(_ status: Int?, keyDigest: String) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        var newlyRefused = false
-        if status == BioMedLitConstants.coreKeyRefusedStatus {
-            newlyRefused = refusedKeyDigest != keyDigest
-            refusedKeyDigest = keyDigest
-        }
-        guard status == BioMedLitConstants.httpStatusRateLimited else {
-            consecutive = 0
-            return newlyRefused
-        }
-        consecutive += 1
-        if consecutive >= pauseAfter { paused = true }
-        return newlyRefused
+        super.init(
+            serviceName: BioMedLitConstants.coreServiceName,
+            keyRefusedStatus: BioMedLitConstants.coreKeyRefusedStatus,
+            pauseAfter: pauseAfter
+        )
     }
 }

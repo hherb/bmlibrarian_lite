@@ -18,6 +18,7 @@
 PDF discovery and download functionality for BMLibrarian Lite.
 
 Provides multiple methods for discovering and downloading PDF files:
+- Elsevier's Article API, for an Elsevier article's PDF (with a key)
 - Unpaywall API for open access PDFs
 - OpenAlex's locations, for open access PDFs Unpaywall did not name
 - PubMed Central (PMC) for free full text
@@ -41,7 +42,7 @@ import re
 import time
 import threading
 from collections import deque
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
@@ -66,7 +67,6 @@ from .constants import (
     LANDING_PAGE_READ_CHUNK_BYTES,
     PAYWALL_HTTP_STATUSES,
     PDF_MAGIC_BYTES,
-    PDF_PARTIAL_SUFFIX,
     POLITE_MAX_THROTTLE_RETRIES,
     RETRYABLE_HTTP_STATUSES,
     SERVICE_DOI_PUBLISHER,
@@ -96,6 +96,7 @@ from .data_models import (
     SourceLookupFailure,
     SourceLookupSkipped,
 )
+from .elsevier_api import ElsevierArticleClient, ElsevierOutcome, elsevier_eligible
 from .oa_landing_page import (
     choose_unpaywall_url,
     citation_pdf_url,
@@ -104,6 +105,13 @@ from .oa_landing_page import (
     unpaywall_locations,
 )
 from .openalex import OpenAlexLocationsClient, untried_pdf_urls
+# Shared with the clients that download a PDF themselves (#480, stage C2).
+from .pdf_download import (
+    MAX_PDF_SIZE,
+    discard_partial_download,
+    partial_download_path,
+    read_body_prefix,
+)
 from .polite_session import is_loopback_host, mount_politely
 from .rate_limit import limiter_for
 from .search_failures import request_failure_from_exception
@@ -431,8 +439,6 @@ USER_AGENT = "BMLibrarian/1.0 (https://github.com/hherb/bmlibrarian-lite; mailto
 # Timeout for HTTP requests (seconds)
 REQUEST_TIMEOUT = 30
 
-# Maximum PDF file size (100 MB)
-MAX_PDF_SIZE = 100 * 1024 * 1024
 
 
 class PDFSourceType(Enum):
@@ -443,6 +449,7 @@ class PDFSourceType(Enum):
     DOI_DIRECT = "doi_direct"  # Direct from DOI/publisher
     OPENATHENS = "openathens"  # Via institutional access
     OPENALEX_OA = "openalex_oa"  # A PDF an OpenAlex location names (#480)
+    ELSEVIER_API = "elsevier_api"  # Elsevier's Article API, by DOI (#480, stage C2)
     UNKNOWN = "unknown"
 
 
@@ -600,59 +607,6 @@ def refused_download_failure(status_code: int) -> RequestFailure:
     return RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
 
 
-def read_body_prefix(chunks: Iterator[bytes], at_least: int) -> bytes:
-    """Read the start of a streamed body, enough of it to sniff.
-
-    A first chunk can be shorter than the bytes a sniff needs -- one HTTP
-    chunk of a chunked body -- so chunks are joined until there are enough
-    or the body ends. A read that fails raises: it is the transport's
-    failure, not an empty body.
-
-    Args:
-        chunks: The body's chunks, consumed as far as needed.
-        at_least: How many bytes the caller needs.
-
-    Returns:
-        The bytes read, which are ``at_least`` or more unless the body was
-        shorter.
-    """
-    prefix = b""
-    for chunk in chunks:
-        prefix += chunk
-        if len(prefix) >= at_least:
-            break
-    return prefix
-
-
-def partial_download_path(output_path: Path) -> Path:
-    """Where a PDF is written while its download is in progress.
-
-    Args:
-        output_path: Where the PDF is to end up.
-
-    Returns:
-        ``output_path`` with :data:`PDF_PARTIAL_SUFFIX` appended, beside it,
-        so the rename into place stays on one filesystem.
-    """
-    return output_path.with_name(output_path.name + PDF_PARTIAL_SUFFIX)
-
-
-def discard_partial_download(partial: Path) -> None:
-    """Remove a partial download, if one is left.
-
-    Logged rather than raised when it cannot be removed: the download's own
-    outcome is what the caller reports, and a leftover partial file is never
-    read as the PDF -- only the renamed file is.
-
-    Args:
-        partial: The partial file; may not exist.
-    """
-    try:
-        partial.unlink(missing_ok=True)
-    except OSError as e:
-        logger.warning(f"Could not remove the partial download {partial}: {e}")
-
-
 #: Whose PDF an unobtained open-access copy is recorded against (#478, #480).
 _UNOBTAINED_PDF_SERVICE = {
     PDFSourceType.UNPAYWALL_OA: SERVICE_UNPAYWALL_PDF,
@@ -785,6 +739,7 @@ class PDFDiscoverer:
         browser_headless: bool = False,
         openalex_email: str | None = None,
         openalex: OpenAlexLocationsClient | None = None,
+        elsevier: ElsevierArticleClient | None = None,
     ) -> None:
         """
         Initialize PDF discoverer.
@@ -801,6 +756,9 @@ class PDFDiscoverer:
                 placeholder counts as none, and OpenAlex is then asked
                 without one (#480)
             openalex: The OpenAlex client; tests pass a stub
+            elsevier: Elsevier's Article API client, built with the user's
+                key (#480, stage C2); ``None`` when no key is configured,
+                and Elsevier is then not asked and nothing is recorded
         """
         self.unpaywall_email = usable_unpaywall_email(unpaywall_email)
         # The placeholder test is Unpaywall's: a blank or placeholder address
@@ -810,6 +768,7 @@ class PDFDiscoverer:
             if openalex is not None
             else default_openalex_client(usable_unpaywall_email(openalex_email))
         )
+        self._elsevier = elsevier
         self.openathens_url = openathens_url
         self.progress_callback = progress_callback
         self.use_browser_fallback = use_browser_fallback
@@ -858,6 +817,8 @@ class PDFDiscoverer:
         Discover and download PDF for a document.
 
         Tries multiple sources in order of reliability:
+        0. Elsevier's Article API (if an Elsevier DOI and a key), once,
+           before any other lookup (#480, stage C2)
         1. PubMed Central (if PMID/PMCID available)
         2. Unpaywall (if DOI and email available)
         2a. OpenAlex's locations not already found (if DOI), before any
@@ -898,8 +859,26 @@ class PDFDiscoverer:
         doi = (self._clean_doi(doi) or None) if doi else None
         core = _CoreFallback(core_text, doi)
 
+        # Elsevier's Article API first, before any Unpaywall lookup (#480,
+        # stage C2). A PDF it served, a cancel, or a PDF it served that could
+        # not be saved ends the discovery; anything it left unsettled is
+        # recorded, and the walk goes on. A PDF it offered over the size
+        # limit is a copy not obtained, held with the refused copies, ranked
+        # first (-1), and dropped with them when a later copy is obtained.
+        if self._cancelled:
+            return DiscoveryResult(success=False, error="Cancelled")
+        elsevier_lookups = LookupRecord()
+        elsevier_copy = LookupRecord()
+        if doi and self._elsevier is not None and elsevier_eligible(doi):
+            ended, elsevier_lookups, elsevier_copy = self._ask_elsevier(
+                self._elsevier, doi, output_path, expected_title or title
+            )
+            if ended is not None:
+                return ended
+
         # Find all available PDF sources, and what could not be asked at all
-        sources, lookups = self._discover_sources(doi, pmid, pmcid)
+        sources, found_lookups = self._discover_sources(doi, pmid, pmcid)
+        lookups = elsevier_lookups.merged(found_lookups)
         # What the reader is told about: everything unasked so far.
         told = (earlier_lookups or LookupRecord()).merged(lookups)
 
@@ -935,8 +914,8 @@ class PDFDiscoverer:
                 # A lookup we did not make says nothing about the licence,
                 # so the paywall claim is withheld whenever one went unasked
                 # -- skipped as well as failed (#347, #355).
-                error=no_pdf_sources_message(told),
-                lookups=lookups,
+                error=no_pdf_sources_message(told.merged(elsevier_copy)),
+                lookups=lookups.merged(elsevier_copy),
             )
 
         # Unpaywall's own order, then OpenAlex's (#480), before the priority
@@ -958,7 +937,10 @@ class PDFDiscoverer:
         # Try to download from each source
         last_paywall_result: Optional[DiscoveryResult] = None
         blocked_oa_sources: List[PDFSource] = []  # Track sources blocked by bot protection
-        unobtained: list[tuple[int, LookupRecord]] = []
+        # Elsevier's copy first, before every copy tried below (rank -1)
+        unobtained: list[tuple[int, LookupRecord]] = (
+            [(-1, elsevier_copy)] if elsevier_copy.anything_unsettled else []
+        )
 
         pending = deque(sources)
         while pending or openalex_doi:
@@ -1106,6 +1088,85 @@ class PDFDiscoverer:
             ),
             lookups=lookups.merged(not_obtained),
         )
+
+    def _ask_elsevier(
+        self,
+        elsevier: ElsevierArticleClient,
+        doi: str,
+        output_path: Path,
+        expected_title: str | None,
+    ) -> tuple[DiscoveryResult | None, LookupRecord, LookupRecord]:
+        """Ask Elsevier's Article API for this DOI's PDF, once (#480, stage C2).
+
+        Args:
+            elsevier: The client, built with the user's key.
+            doi: The cleaned DOI, already found to be Elsevier's.
+            output_path: Where a served PDF is saved: the discovery's own
+                path, so the PDF cache and text extraction apply unchanged.
+            expected_title: The title a served PDF is checked against.
+
+        Returns:
+            The result that ends the discovery -- a served PDF, a cancel, or
+            the caching note for a PDF served and not saved -- or ``None`` to
+            go on. Then, when the discovery goes on, what Elsevier left
+            unasked (a failure when it could not be asked, a skip when it
+            refused the key or the network) and the copy it offered that was
+            not obtained (an ``OVER_SIZE_LIMIT`` skip with the article URL).
+            Both are empty for an absence (a 404, the first page only).
+        """
+        url = elsevier.article_url(doi)
+        fetch = elsevier.fetch_pdf(doi, output_path, lambda: self._cancelled)
+        if fetch.path is not None:
+            # Whole at its path: a success, checked as any download is, even
+            # if a cancel came after the last chunk (as ``_try_download``).
+            self._emit_progress("download", "success")
+            return DiscoveryResult(
+                success=True,
+                file_path=fetch.path,
+                source=PDFSource(url=url, source_type=PDFSourceType.ELSEVIER_API),
+                verification_warning=self._verification_warning(fetch.path, expected_title),
+            ), LookupRecord(), LookupRecord()
+        if fetch.is_cancelled or self._cancelled:
+            # Nothing recorded for Elsevier: we stopped asking.
+            return (
+                DiscoveryResult(success=False, error="Cancelled"), LookupRecord(), LookupRecord()
+            )
+        record = fetch.lookups(url)
+        if fetch.failure is not None:
+            # describe() names the kind and status alone: never a key or token.
+            logger.warning(
+                "Elsevier's API could not be asked about %s (%s)",
+                doi, fetch.failure.describe(),
+            )
+        if fetch.outcome is ElsevierOutcome.NOT_SAVED:
+            # Served, and not saved here: as for any copy served and not
+            # saved, nothing else is asked and the error is the caching note
+            # alone, its address the article URL, which carries no key.
+            return DiscoveryResult(
+                success=False, error=not_saved_note(record), lookups=record
+            ), LookupRecord(), LookupRecord()
+        if fetch.outcome is ElsevierOutcome.REFUSED_FOR_SIZE:
+            return None, LookupRecord(), record
+        return None, record, LookupRecord()
+
+    def _verification_warning(
+        self, pdf_path: Path, expected_title: str | None
+    ) -> str | None:
+        """Check a saved PDF against the title expected, as every download is.
+
+        Args:
+            pdf_path: The PDF saved.
+            expected_title: The document's title; ``None`` checks nothing.
+
+        Returns:
+            What the check doubted, or ``None``.
+        """
+        if not expected_title:
+            return None
+        self._emit_progress("verification", "starting")
+        is_valid, warning = self._verify_pdf_content(pdf_path, expected_title)
+        self._emit_progress("verification", "success" if is_valid else "mismatch")
+        return None if is_valid else warning
 
     def _ask_core(self, core: _CoreFallback) -> tuple[str | None, LookupRecord]:
         """Ask CORE at a no-PDF exit, unless the discovery was cancelled.
@@ -2058,22 +2119,13 @@ class PDFDiscoverer:
 
             self._emit_progress("download", "success")
 
-            # Verify the downloaded file
-            verification_warning = None
-            if expected_title:
-                self._emit_progress("verification", "starting")
-                is_valid, warning = self._verify_pdf_content(output_path, expected_title)
-                if not is_valid:
-                    verification_warning = warning
-                    self._emit_progress("verification", "mismatch")
-                else:
-                    self._emit_progress("verification", "success")
-
             return DiscoveryResult(
                 success=True,
                 file_path=output_path,
                 source=source,
-                verification_warning=verification_warning,
+                verification_warning=self._verification_warning(
+                    output_path, expected_title
+                ),
             )
 
         except requests.exceptions.HTTPError as e:
@@ -2167,22 +2219,13 @@ class PDFDiscoverer:
 
             self._emit_progress("download", "success")
 
-            # Verify the downloaded file
-            verification_warning = None
-            if expected_title:
-                self._emit_progress("verification", "starting")
-                is_valid, warning = self._verify_pdf_content(output_path, expected_title)
-                if not is_valid:
-                    verification_warning = warning
-                    self._emit_progress("verification", "mismatch")
-                else:
-                    self._emit_progress("verification", "success")
-
             return DiscoveryResult(
                 success=True,
                 file_path=output_path,
                 source=source,
-                verification_warning=verification_warning,
+                verification_warning=self._verification_warning(
+                    output_path, expected_title
+                ),
             )
 
         except Exception as e:

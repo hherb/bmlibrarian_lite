@@ -27,6 +27,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from ..constants import FALLBACK_CONTACT_EMAIL
+from ..elsevier_api import ElsevierCredentials
 from ..study_transparency_analyzer.study_transparency_analyzer import (
     StudyTransparencyAnalyzer,
     TransparencyReport,
@@ -83,6 +84,7 @@ def create_background_analyzer(
     pubmed_api_key: str | None = None,
     unpaywall_email: str | None = None,
     core_api_key: str | None = None,
+    elsevier_credentials: ElsevierCredentials | None = None,
 ) -> StudyTransparencyAnalyzer:
     """Build the analyser a background analysis runs.
 
@@ -95,6 +97,8 @@ def create_background_analyzer(
         unpaywall_email: Email for Unpaywall; ``email`` when not given.
         core_api_key: The configured CORE key (#480, stage C); the
             environment's when not given.
+        elsevier_credentials: The configured Elsevier key and token (#480,
+            stage C2); the environment's when not given.
 
     Returns:
         The analyser, with full-text discovery enabled.
@@ -106,6 +110,7 @@ def create_background_analyzer(
         use_browser_fallback=False,
         auto_discover_fulltext=True,
         core_api_key=core_api_key,
+        elsevier_credentials=elsevier_credentials,
     )
 
 

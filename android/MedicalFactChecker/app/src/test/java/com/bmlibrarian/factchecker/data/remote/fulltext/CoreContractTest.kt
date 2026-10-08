@@ -58,6 +58,20 @@ class CoreContractTest {
 
     private fun JsonObject.string(key: String): String = this[key]!!.jsonPrimitive.content
 
+    /** Every resolver form Python's `_clean_doi` removes, in any case, the DOI's own case kept. */
+    @Test
+    fun `a bare DOI drops the resolver forms Python's _clean_doi drops`() {
+        for (stored in listOf(
+            "https://doi.org/10.1016/J.x", "http://doi.org/10.1016/J.x", "https://www.doi.org/10.1016/J.x",
+            "HTTP://WWW.DOI.ORG/10.1016/J.x", "https://dx.doi.org/10.1016/J.x", "doi:10.1016/J.x", "DOI:10.1016/J.x",
+            "  10.1016/J.x\n"
+        )) {
+            assertEquals(stored, "10.1016/J.x", Core.bareDoi(stored))
+        }
+        // The control: anything else is returned as given, trimmed
+        assertEquals("ark:/1234/x", Core.bareDoi("ark:/1234/x"))
+    }
+
     @Test
     fun `every contract table is read here`() {
         assertEquals(

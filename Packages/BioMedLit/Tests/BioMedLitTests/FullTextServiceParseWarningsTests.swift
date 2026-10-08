@@ -49,6 +49,10 @@ final class StubURLProtocol: URLProtocol {
         // `search` route (Europe PMC's) also matches CORE's `/search/works/`
         // URL and wins over this, so such a test routes CORE itself.
         "api.core.ac.uk": (200, Data(#"{"results": []}"#.utf8)),
+        // Elsevier's API is asked only with a key and an Elsevier DOI (#480,
+        // stage C2); a test that passes both and sets no route gets its 404,
+        // an absence that records nothing.
+        "api.elsevier.com": (404, Data()),
     ]
 
     /// Answers served in order to requests whose URL contains the key, one
@@ -78,7 +82,8 @@ final class StubURLProtocol: URLProtocol {
 
     /// Redirects: a request whose URL contains the key is redirected to the
     /// value, as a server's 302 would, and the redirected request is then
-    /// served like any other.
+    /// served like any other. A client that declines the redirect (Elsevier's
+    /// API, #480 stage C2) is answered the 302 itself, with no body.
     static var redirects: [String: String] = [:]
 
     /// Every URL asked for, in order.
@@ -137,6 +142,10 @@ final class StubURLProtocol: URLProtocol {
             client?.urlProtocol(
                 self, wasRedirectedTo: URLRequest(url: targetURL), redirectResponse: redirect
             )
+            // Reached as the task's result only if the redirect is declined;
+            // following it stops this protocol and starts a new request instead.
+            client?.urlProtocol(self, didReceive: redirect, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
             return
         }
         let queued = Self.sequences

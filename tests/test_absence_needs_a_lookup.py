@@ -35,6 +35,7 @@ from bmlibrarian_lite.analysis_failures import (
 from bmlibrarian_lite.constants import (
     SERVICE_CORE,
     SERVICE_CROSSREF,
+    SERVICE_ELSEVIER,
     SERVICE_EUROPE_PMC,
     SERVICE_PMC_ID_CONVERTER,
     SERVICE_PUBMED,
@@ -2034,14 +2035,16 @@ class TestTheGapsTheReviewFound:
         """``describe()`` indexed a map nothing kept in step with the enum.
 
         Each is given an address, which a ``NOT_SAVED`` note requires (#480),
-        except a refused key, which is CORE's own lookup alone (#498).
+        except a refused key, which is a keyed service's own lookup alone
+        (#498), and a refusal from this network, Elsevier's own (#480, C2).
         """
         for reason in LookupSkipReason:
-            skip = (
-                SourceLookupSkipped(SERVICE_CORE, reason)
-                if reason is LookupSkipReason.KEY_REFUSED
-                else SourceLookupSkipped("X", reason, "https://x.example/a.pdf")
-            )
+            if reason is LookupSkipReason.KEY_REFUSED:
+                skip = SourceLookupSkipped(SERVICE_CORE, reason)
+            elif reason is LookupSkipReason.NETWORK_REFUSED:
+                skip = SourceLookupSkipped(SERVICE_ELSEVIER, reason)
+            else:
+                skip = SourceLookupSkipped("X", reason, "https://x.example/a.pdf")
             assert skip.describe()
 
 

@@ -225,3 +225,28 @@ def _no_live_core(
         "bmlibrarian_lite.fulltext_discovery.default_core_client",
         lambda api_key: None,
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_live_elsevier(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep every discovery off the real Elsevier (#480, stage C2).
+
+    No key means no client, which is what a user without one has; a test
+    that wants Elsevier passes its own client. An ELSEVIER_API_KEY or
+    ELSEVIER_INSTTOKEN in the developer's environment must not reach the
+    network from the suite, and each test starts with a fresh session (no
+    pause, nothing refused). A test that needs the real default marks itself
+    ``real_elsevier_client``.
+    """
+    from bmlibrarian_lite import elsevier_api
+
+    elsevier_api.reset_elsevier_session()
+    monkeypatch.delenv("ELSEVIER_API_KEY", raising=False)
+    monkeypatch.delenv("ELSEVIER_INSTTOKEN", raising=False)
+    if request.node.get_closest_marker("real_elsevier_client"):
+        return
+    monkeypatch.setattr(
+        elsevier_api, "default_elsevier_client", lambda api_key, insttoken: None
+    )

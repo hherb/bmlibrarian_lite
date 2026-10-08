@@ -83,7 +83,7 @@ class SettingsRepository @Inject constructor(
     }
 
     // In-memory cache for API keys to avoid decryption on every access. Concurrent:
-    // each CORE fetch reads it on an IO thread while the settings screen writes it
+    // each CORE and Elsevier fetch reads it on an IO thread while the settings screen writes it
     private val apiKeyCache = ConcurrentHashMap<String, String>()
 
     // Coroutine scope for background initialization
@@ -306,6 +306,50 @@ class SettingsRepository @Inject constructor(
      * @return Whether it was written
      */
     fun saveCoreApiKey(apiKey: String): Boolean = saveSecretKey(KEY_CORE_API_KEY, apiKey, "CORE API key")
+
+    // ==================== Elsevier API Key and Token (#480, stage C2) ====================
+
+    /**
+     * Get the Elsevier API key, which lets the app download the PDFs of Elsevier
+     * articles the user is entitled to.
+     *
+     * @return The stored Elsevier API key, or empty string if not set
+     */
+    fun getElsevierApiKey(): String {
+        return apiKeyCache.getOrPut(KEY_ELSEVIER_API_KEY) {
+            encryptedPrefs.getString(KEY_ELSEVIER_API_KEY, "") ?: ""
+        }
+    }
+
+    /**
+     * Save the Elsevier API key; see [writeSecretKey].
+     *
+     * @param apiKey The Elsevier API key; empty clears it
+     * @return Whether it was written
+     */
+    fun saveElsevierApiKey(apiKey: String): Boolean =
+        saveSecretKey(KEY_ELSEVIER_API_KEY, apiKey, "Elsevier API key")
+
+    /**
+     * Get the Elsevier institutional token, which lets the key use an institution's
+     * subscriptions away from its network. Sent only with a key.
+     *
+     * @return The stored token, or empty string if not set
+     */
+    fun getElsevierInstToken(): String {
+        return apiKeyCache.getOrPut(KEY_ELSEVIER_INSTTOKEN) {
+            encryptedPrefs.getString(KEY_ELSEVIER_INSTTOKEN, "") ?: ""
+        }
+    }
+
+    /**
+     * Save the Elsevier institutional token; see [writeSecretKey].
+     *
+     * @param token The token; empty clears it
+     * @return Whether it was written
+     */
+    fun saveElsevierInstToken(token: String): Boolean =
+        saveSecretKey(KEY_ELSEVIER_INSTTOKEN, token, "Elsevier institutional token")
 
     /**
      * Write a key to the encrypted preferences; see [writeSecretKey].
@@ -638,6 +682,8 @@ class SettingsRepository @Inject constructor(
         private const val KEY_API_KEY_PREFIX = "api_key_"
         private const val KEY_NCBI_API_KEY = "ncbi_api_key"
         private const val KEY_CORE_API_KEY = "core_api_key"
+        private const val KEY_ELSEVIER_API_KEY = "elsevier_api_key"
+        private const val KEY_ELSEVIER_INSTTOKEN = "elsevier_insttoken"
 
         // Regular keys
         private const val KEY_LLM_PROVIDER = "llm_provider"

@@ -79,6 +79,34 @@ and says 'the key in the settings was refused' (also when the key came from
 Settings → Full Text and CORE is asked again, by Document Interrogation and
 by the background transparency analysis alike, without a restart.
 
+#### Elsevier API Key and Institutional Token (Optional)
+
+Elsevier's Article API serves the PDF of an Elsevier article (a DOI starting
+`10.1016/`) to a requestor entitled to it. Get a free API key at
+https://dev.elsevier.com, then enter it under Settings → Full Text, or set it
+in the environment:
+```bash
+export ELSEVIER_API_KEY="your-key"
+export ELSEVIER_INSTTOKEN="your-institutional-token"   # optional
+```
+In testing, a key alone was refused for every article from outside the
+institution's network, open-access ones included. An institutional token from
+Elsevier is meant to lift that: it lets the key use your institution's
+subscriptions away from its network. Both are stored only
+in your configuration file (readable by you alone) and sent only to Elsevier,
+in request headers. Without a key, Elsevier is simply not asked. When Elsevier
+serves only an article's first page (you are not entitled to it), that page is
+never used; the app goes on to look for an open-access copy. If Elsevier
+refuses the key, or refuses the key and token from your current network, the
+app stops asking with them for the rest of the session and says so ("the key
+in the settings was refused" or "not available from this network"). A
+corrected key is asked again; after a refusal from your network, so is the same
+key with a token added or changed under Settings → Full Text. A token in the
+`ELSEVIER_INSTTOKEN` variable is used only with the key in `ELSEVIER_API_KEY`,
+never with a key typed in the settings. A key pasted with an invisible
+character (one that cannot be sent in a request) is never sent: the app says
+Elsevier could not be asked, and the log asks you to enter the key again.
+
 ### Launching the Application
 
 ```bash

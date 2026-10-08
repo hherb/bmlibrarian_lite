@@ -37,6 +37,8 @@ import tempfile
 
 from .constants import (
     ENV_CORE_API_KEY,
+    ENV_ELSEVIER_API_KEY,
+    ENV_ELSEVIER_INSTTOKEN,
     CONFIG_DIR_PERMISSIONS,
     CONFIG_FILE_PERMISSIONS,
     DEFAULT_DATA_DIR,
@@ -442,6 +444,11 @@ class DiscoveryConfig:
     # CORE's API key (#480): CORE's extracted text when no other source has
     # the article's text. Kept out of the repr, as the PubMed key is.
     core_api_key: str | None = field(default=None, repr=False)
+    # Elsevier's API key and institutional token (#480, stage C2): an
+    # Elsevier article's PDF, for a requestor entitled to it. Kept out of the
+    # repr, as the other keys are.
+    elsevier_api_key: str | None = field(default=None, repr=False)
+    elsevier_insttoken: str | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -824,6 +831,16 @@ class LiteConfig:
                     "discovery.core_api_key",
                     ENV_CORE_API_KEY,
                 ),
+                elsevier_api_key=_reject_redaction_placeholder(
+                    discovery_data.get("elsevier_api_key"),
+                    "discovery.elsevier_api_key",
+                    ENV_ELSEVIER_API_KEY,
+                ),
+                elsevier_insttoken=_reject_redaction_placeholder(
+                    discovery_data.get("elsevier_insttoken"),
+                    "discovery.elsevier_insttoken",
+                    ENV_ELSEVIER_INSTTOKEN,
+                ),
             )
 
         if "europepmc" in data:
@@ -886,7 +903,8 @@ class LiteConfig:
         """
         Convert configuration to dictionary for serialization.
 
-        The result carries the PubMed and CORE API keys in clear text, so it
+        The result carries the PubMed, CORE and Elsevier API keys and the
+        Elsevier institutional token in clear text, so it
         is fit only for the 0600 config file and for in-process hashing
         (:meth:`_compute_config_hash`). Anything a human or a log can see must
         use :meth:`to_redacted_dict` instead.
@@ -897,13 +915,16 @@ class LiteConfig:
         data = self._to_dict_without_secrets()
         data["pubmed"]["api_key"] = self.pubmed.api_key
         data["discovery"]["core_api_key"] = self.discovery.core_api_key
+        data["discovery"]["elsevier_api_key"] = self.discovery.elsevier_api_key
+        data["discovery"]["elsevier_insttoken"] = self.discovery.elsevier_insttoken
         return data
 
     def to_redacted_dict(self) -> dict[str, Any]:
         """Convert configuration to dictionary safe to display, log or paste.
 
-        Identical to :meth:`to_dict` except that the PubMed and CORE API keys
-        are replaced with a placeholder. A key is never read into the returned
+        Identical to :meth:`to_dict` except that the PubMed, CORE and Elsevier
+        API keys and the Elsevier institutional token are replaced with a
+        placeholder. A key is never read into the returned
         structure at all -- only tested for presence -- so there is no
         clear-text copy of it for a caller to reach by accident.
 
@@ -917,6 +938,12 @@ class LiteConfig:
         data["discovery"]["core_api_key"] = (
             REDACTED_SECRET_PLACEHOLDER if self.discovery.core_api_key else None
         )
+        data["discovery"]["elsevier_api_key"] = (
+            REDACTED_SECRET_PLACEHOLDER if self.discovery.elsevier_api_key else None
+        )
+        data["discovery"]["elsevier_insttoken"] = (
+            REDACTED_SECRET_PLACEHOLDER if self.discovery.elsevier_insttoken else None
+        )
         return data
 
     def _to_dict_without_secrets(self) -> dict[str, Any]:
@@ -925,17 +952,17 @@ class LiteConfig:
         The shared body of :meth:`to_dict` and :meth:`to_redacted_dict`. Keeping
         the keys out of it and letting each caller fill them in is what makes
         the redacted view provably free of *those* secrets
-        (``pubmed.api_key`` and ``discovery.core_api_key``).
+        (``pubmed.api_key``, ``discovery.core_api_key``,
+        ``discovery.elsevier_api_key`` and ``discovery.elsevier_insttoken``).
 
-        The scope of the guarantee is exactly two fields. The nested ``to_dict()``
+        The scope of the guarantee is exactly those four fields. The nested ``to_dict()``
         calls below (``models``, ``benchmark``, ``transparency``) are trusted to
         carry no credentials -- true of their current schemas, but not enforced.
         A new secret in any of them must be excluded here too, or
         :meth:`to_redacted_dict` will leak it.
 
         Returns:
-            Configuration dictionary with no ``pubmed.api_key`` or
-            ``discovery.core_api_key`` entry
+            Configuration dictionary with none of those four entries
         """
         return {
             "models": self.models.to_dict(),

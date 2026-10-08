@@ -85,6 +85,7 @@ dependencies = [
     { name = "sqlite-vec" },
     { name = "tenacity" },
     { name = "tokenizers" },
+    { name = "urllib3" },
 ]
 
 [package.optional-dependencies]
@@ -116,6 +117,7 @@ requires-dist = [
     { name = "sqlite-vec", specifier = ">=0.1.6" },
     { name = "tenacity", specifier = ">=8.2.0" },
     { name = "tokenizers", specifier = ">=0.19.0" },
+    { name = "urllib3", specifier = ">=2.0" },
 ]
 provides-extras = ["dev"]
 

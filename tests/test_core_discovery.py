@@ -877,6 +877,7 @@ def test_a_changed_key_reaches_the_background_analysis() -> None:
         pubmed_api_key: str | None = None,
         unpaywall_email: str | None = None,
         core_api_key: str | None = None,
+        elsevier_credentials: Any = None,
     ) -> MagicMock:
         built.append((unpaywall_email, core_api_key))
         return MagicMock()

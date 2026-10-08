@@ -8,47 +8,73 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Machine channels, stage C1: CORE's extracted text, and the key settings**
-(all three; #480, which stays open until C2): PR on
-`feat/machine-channels-stage-c1-core-480`, which also fixes #495–#499. Spec
-`docs/superpowers/specs/2026-10-04-fulltext-machine-channels-design.md`
-"Stage C" (its as-built notes win); plan
-`docs/superpowers/plans/2026-10-06-fulltext-machine-channels-stage-c1.md`;
-contract `fulltext_retrieval.md` "CORE's Extracted Text" +
-`fulltext_parity/core_fulltext.json`. **Still to do: the live acceptance
-replay**: the maintainer puts the CORE key in `config.json`
-(`discovery.core_api_key`), then `python scripts/core_acceptance_replay.py
---out tmp/core_acceptance.jsonl`. The bar is ≥ 14 of the spike's 149
-not-open-access rows; record the counts in the spikes README and the contract.
-**Binds:**
-- **A search hit counts only if its own DOI is this article's.**
-  Code points ≥ 5,000, trimmed. An answer holding an unpaired surrogate
-  escape anywhere is unreadable on every platform (Apple's parser refuses it).
-- **Asked last and once, only with a key and a DOI**, never after a copy was
-  served and not saved. Python asks inside `PDFDiscoverer` (hook), and after
-  a PDF with no text (#499); Swift likewise, abstract held or not (a scan
-  keeps CORE's failure beside it). Android's render tier skips it (#493);
-  Swift's textless render skips Unpaywall (#505).
-- **No key: no request, nothing recorded** (spec decision 4, as built).
-- **A configured CORE that could not be asked is an unsettled lookup** that
-  blocks absence (maintainer, 2026-10-06), last in chain order.
-- **Two 429s in a row pause CORE for the process.**
-- **A 401 refuses that key** (SHA-256 digest, never the key), told as a
-  `key_refused` skip "CORE (the key in the settings was refused) …".
-  A corrected key is asked again; a 403 is an ordinary answer (#498). On
-  the desktop the settings dialog edits the one live config every tab holds,
-  and `TransparencyManager` rebuilds its analyser when the key changes.
-- **Desktop cache** `*.core.txt` (stamp v2: the DOI on line two), read only
-  at CORE's place, served again only for that DOI and ≥ 5,000 code points;
-  an unreadable one is recorded (#354).
-- **Android shows CORE text as plain text**, escapes every stored markdown,
-  and strips every unsafe URL attribute from any HTML at the WebView
-  boundary (`neutraliseUnsafeUrls`), pre-#495 stored HTML included.
-- **Key saves report failure** on all three (Keychain update-in-place,
-  `commit()`, the dialog's save) and never say "saved" for an unwritten key.
+**Machine channels, stage C2: Elsevier's API** (all three; #480 stays open
+for the embedded browser): built on `feat/machine-channels-stage-c2-elsevier-480`,
+PR #507. Contract `fulltext_retrieval.md` "Elsevier's Article API" +
+`fulltext_parity/elsevier_article.json`; plan
+`docs/superpowers/plans/2026-10-08-fulltext-machine-channels-stage-c2.md`.
+**Still owed by the maintainer:**
+- **Run the probe off-network**: `ELSEVIER_API_KEY=… python
+  scripts/elsevier_probe.py --label off-network --out tmp/elsevier_probe.jsonl`.
+  It never writes the key and follows no redirect. **The fixtures follow
+  Elsevier's documented shapes**: the off-network refusal is assumed to be a
+  403 with `AUTHENTICATION_ERROR`, and a 401 is assumed to mean a refused
+  key. Correct `elsevier_article.json` and all three platforms from the rows.
+  The same rows settle **#508**: whether a bad token answers 401 (then a 401
+  sent with a token must refuse the credentials, not the key), and whether
+  the key's explanation may keep "open-access articles anywhere".
+- **Then on-network acceptance** (the same probe with `--label on-network`,
+  and a desktop fetch of a subscribed `10.1016/` article).
+- **C1's CORE replay** (below).
 
-Follow-ups: #500, #502–#505. **Next: C2 (Elsevier)**: copy C1's settings plumbing and
-the `key_refused` mechanism for Elsevier's 403.
+**Binds (maintainer, 2026-10-08):**
+- **A first-page PDF is never served.** `X-ELS-Status: WARNING …` on a 200
+  (trimmed, any case, read before the body) is an absence. Nothing is
+  told, and the chain goes on.
+- **Whatever the requestor is entitled to is served**, with no
+  open-access-only check (spec decision 3 dropped).
+- **A refused network is unsettled.** A 403 with `AUTHENTICATION_ERROR` in
+  the first 64 KiB is told "Elsevier's API (not available from this
+  network)". It is scoped to `sha256(key + "\n" + token)`, so a token added
+  later is asked. A 401 refuses that key (`key_refused`).
+- **Never a redirect, never a link.**
+  - The apps hold a served PDF only as a local file and never store or
+    offer the `api.elsevier.com` URL.
+  - The apps read Elsevier's cached PDF before asking.
+  - Android reopens a stored Elsevier PDF from disk.
+- **The apps' not-saved deviation:** the walk goes on, and when nothing
+  serves, `OpenAccessShortfall(elsevier, request_failed)`; the desktop
+  keeps its `NOT_SAVED` note.
+- **Added by the review round (2026-10-09):**
+  - **Credentials that cannot be sent are never sent.** A key or token with a
+    character outside printable ASCII (a zero-width space or a curly quote
+    pasted in) makes no request. It is unreachable `request_failed`, recorded
+    nowhere, with a WARNING that never names it (the contract's `sendable`
+    rows). Android's OkHttp used to throw here, quoting the key, and end the
+    chain.
+  - **The environment's token goes only with the environment's key**
+    (desktop); a token in the settings goes with either.
+  - **The apps ask by the cleaned DOI** (Python's `_clean_doi`), so a
+    `www.doi.org` form is Elsevier's too.
+  - `urllib3>=2.0` is declared: it enforces a body's Content-Length, so a PDF
+    cut short raises rather than being saved.
+- **Accepted limits:**
+  - Android asks Elsevier only when Europe PMC offered no render URL (#493).
+  - Swift skips Elsevier when `extractPDFText` is off.
+  - The desktop's "Fetch PDF" path asks Elsevier before PMC's derived
+    addresses (one quota request each).
+
+Lodged: #506 (`FulltextDiscoverer.cancel` never reaches its PDF step). From
+the review round: #508 (the probe's questions), #509 (a network refusal
+outlives a change of network), #510 (the apps tell not-saved as "the request
+failed"), #511 (a failed Keychain read is cached as no key), #512 (test gaps
+left), #513 (cross-platform simplifications).
+
+**C1's live acceptance replay is still owed**: the maintainer puts the CORE
+key in `config.json` (`discovery.core_api_key`), then `python
+scripts/core_acceptance_replay.py --out tmp/core_acceptance.jsonl`; the bar is
+≥ 14 of the spike's 149 not-open-access rows; record the counts in the spikes
+README and the contract.
 
 ## Recently landed (context)
 
@@ -56,56 +82,39 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
-- **Machine channels, stage B: every Unpaywall PDF in the apps, then OpenAlex's**
-  (all three; PR #491, #480). Contract `fulltext_retrieval.md` "Tried sources
-  (#480)" and "OpenAlex's Locations"; fixtures `open_access_statement.json`,
-  `openalex_locations.json`. With a tried PDF, every source tried is listed
-  ("Failed to obtain a PDF from the following tried sources: …", each PDF by
-  host and who named it, chain order); lookup-only keeps the grouped sentence.
-  **The first copy served ends the walk; one not saved is a caching note,
-  never a shortfall** (Python `NOT_SAVED`; apps `fullTextPDFNotSavedFrom`, Room
-  9). OpenAlex only when no Unpaywall copy was served and kept; it receives the
-  contact email. Stored shortfall: v1 for one address-less entry, else v2
-  `entries`. Follow-ups: #492, #493.
-
-- **Machine channels, stage A: PMC's open-data bucket** (all three; PR #487,
-  survey PR #484, #480). Why: our clients get 28% of 400 Unpaywall PDFs, 81% of
-  failures are bot walls (`doc/developer/unpaywall_pdf_survey/`, **re-analyse,
-  never re-fetch**; spikes in its `spikes/`). **Decided (maintainer):** machine
-  channels first, then a real embedded browser; no stealth clients; never judge
-  a wall by Playwright. The bucket `pmc-oa-opendata` is a JATS source after
-  Europe PMC's XML, by PMC ID (`pmc_open_data.py`, `PMCOpenData.swift`,
-  `PmcOpenData.kt`); contract `fulltext_retrieval.md` "PMC's Open-Data Bucket"
-  + `fulltext_parity/pmc_open_data.json`. **Absent only for a 200 listing naming
-  no version or a record with no `xml_url`; a listing 404 is unreachable**
-  (`NoSuchBucket`); an answer we cannot read is `malformed_response`; strict
-  UTF-8 everywhere. Follow-ups: #485, #488, #489, #490.
-- **Unpaywall, compressed** (PRs #465–#482; rules in `fulltext_retrieval.md`):
-  - An Unpaywall PDF not obtained is refused, never a link (`unpaywall_pdf`).
-  - A body that is not `%PDF` is `malformed_response`.
-  - Our own stops are not the copy's answer (`OVER_SIZE_LIMIT`, not cached).
-  - A landing URL that is not an absolute http(s) URL is an unread page.
-  - Landing pages are read for `citation_pdf_url` (2 MiB cap).
-  - Apps store an **`OpenAccessShortfall`** with the full text, in Python's
-    sentence. Every fetch that settles it writes or clears it.
-  - No usable email is "not configured".
-  - **No absence while a shortfall is set** (`exhaustedChainError`).
-  - Room migrations register from `AppDatabase.ALL_MIGRATIONS`.
+- **Machine channels, stage C1: CORE's text and the key settings** (all
+  three; PR #501). Contract "CORE's Extracted Text" + `core_fulltext.json`.
+  **A hit counts only if its own DOI is this article's.** Asked last and once,
+  only with a key and a DOI. **No key: no request, nothing recorded.**
+  **A configured channel that could not be asked is unsettled.** Two 429s
+  pause it; a 401 refuses that key. Desktop cache `*.core.txt` (v2). Android
+  shows it as plain text.
+- **Machine channels, stage B: every Unpaywall PDF in the apps, then
+  OpenAlex's** (all three; PR #491). Contract "Tried sources (#480)" and
+  "OpenAlex's Locations". **The first copy served ends the walk; one not saved
+  is a caching note, never a shortfall.** Stored shortfall: v1 for one
+  address-less entry, else v2 `entries`.
+- **Machine channels, stage A: PMC's open-data bucket** (all three; PR #487).
+  Why: our clients get 28% of 400 Unpaywall PDFs, and 81% of the failures are
+  bot walls (`doc/developer/unpaywall_pdf_survey/`; **re-analyse, never
+  re-fetch**). **Decided (maintainer):** machine channels first, then a real
+  embedded browser; no stealth clients. **Absent only for a listing naming no
+  version or a record with no `xml_url`.** A listing 404 is unreachable.
+- **Unpaywall, compressed** (PRs #465–#482; rules in `fulltext_retrieval.md`).
+  An Unpaywall PDF not obtained is refused, never a link. A body that is not
+  `%PDF` is `malformed_response`. Landing pages are read for `citation_pdf_url`
+  (2 MiB cap). The apps store an **`OpenAccessShortfall`** in Python's
+  sentence, and there is **no absence while one is set**. Room migrations
+  register from `AppDatabase.ALL_MIGRATIONS`.
 - **iOS/macOS workflow** (PRs #458–#469): one stop path, `stopWork(_:)`;
   **`session.errorMessage` means a failure and nothing else** (a stop never
   writes it; per-document misses are notices).
-- **Europe PMC fetches, compressed** (PRs #433–#452):
-  - **Typed XML fetch** on all three: served, absent (404) or unreachable.
-  - **Preprints are fetched by their `PPR` ID.** A preprint's 500 is asked once.
-  - A chain that Europe PMC did not settle is **not** "no full text" (Swift
-    `absenceNotEstablished`, Android `NotEstablished`).
-  - Python asks `fullTextXML` only when the record allows it: closed text
-    answers **500, not 404** (`tests/test_europepmc_xml_survey.py`).
-  - **An `HTTP_STATUS` is an answer ("did not serve it") except a 429 or
-    5xx.** One predicate, `RequestFailure.is_answer`, is pinned by
-    `answered_lookup_verb.json`.
-  - doi.org's HEAD status is read, and `mount_politely` turns off
-    `respect_retry_after_header`.
+- **Europe PMC fetches, compressed** (PRs #433–#452). A typed XML fetch on all
+  three: served, absent (404) or unreachable. **Preprints are fetched by their
+  `PPR` ID.** A chain Europe PMC did not settle is **not** "no full text".
+  Closed text answers `fullTextXML` with a **500, not a 404**. **An `HTTP_STATUS`
+  is an answer except a 429 or a 5xx** (`RequestFailure.is_answer`, pinned by
+  `answered_lookup_verb.json`).
 - **A missing statement is charged only when the end matter is known**
   (Python; PR #431, #428). The converter writes `END_MATTER_MARKER` where end
   matter begins (converter version **5**); a COI/data charge needs every
@@ -218,10 +227,10 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **C1's acceptance replay, then C2 (Elsevier)**, then the **embedded browser and
+- **C2's probe and acceptance, and C1's replay** (maintainer), then the **embedded browser and
   review queue** with the `challenged` kind (replaces **#483**); **#481**
   follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
-  **#492**, **#493** (stage B follow-ups); **#500** (C1 follow-up);
+  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2);
   **#467**, **#468** / **#470**, **#476**.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted

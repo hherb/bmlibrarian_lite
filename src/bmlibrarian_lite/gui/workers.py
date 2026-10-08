@@ -52,6 +52,8 @@ from ..data_models import (
     PassOutcome,
     TransparencyAnalysisFailure,
 )
+from .. import elsevier_api
+from ..elsevier_api import ElsevierCredentials
 from ..pdf_discovery import PDFDiscoverer, DiscoveryResult
 from ..pdf_utils import generate_pdf_path
 from ..fulltext_discovery import FulltextDiscoverer, FulltextResult, FulltextSourceType
@@ -193,6 +195,7 @@ class PDFDiscoveryWorker(SingleOutcome, QThread):
     Background worker for PDF discovery and download.
 
     Discovers and downloads PDFs from multiple sources:
+    - Elsevier's Article API, for an Elsevier article (with a key; #480)
     - PubMed Central (PMC) for open access articles
     - Unpaywall API for open access discovery
     - Direct DOI resolution
@@ -228,6 +231,7 @@ class PDFDiscoveryWorker(SingleOutcome, QThread):
         openathens_url: Optional[str] = None,
         parent: Optional[QWidget] = None,
         openalex_email: str | None = None,
+        elsevier_credentials: ElsevierCredentials | None = None,
     ) -> None:
         """
         Initialize PDF discovery worker.
@@ -239,10 +243,13 @@ class PDFDiscoveryWorker(SingleOutcome, QThread):
             openathens_url: OpenAthens institution URL for authenticated downloads
             parent: Optional parent widget
             openalex_email: The contact email sent to OpenAlex (#480)
+            elsevier_credentials: The configured Elsevier key and token
+                (#480, stage C2); the environment's when ``None``
         """
         super().__init__(parent)
         self.doc_dict = doc_dict
         self.output_dir = output_dir
+        self.elsevier_credentials = elsevier_credentials
         self.unpaywall_email = unpaywall_email
         self.openathens_url = openathens_url
         self.openalex_email = openalex_email
@@ -268,6 +275,22 @@ class PDFDiscoveryWorker(SingleOutcome, QThread):
         else:
             self._end(self.error, error)
 
+    def _build_discoverer(self) -> PDFDiscoverer:
+        """The discoverer this run asks, reporting progress to this worker.
+
+        Returns:
+            A discoverer with this worker's emails, OpenAthens URL and
+            Elsevier client (through ``elsevier_api``, so the test suite's
+            patch covers it).
+        """
+        return PDFDiscoverer(
+            unpaywall_email=self.unpaywall_email,
+            openathens_url=self.openathens_url,
+            progress_callback=self._emit_progress,
+            openalex_email=self.openalex_email,
+            elsevier=elsevier_api.elsevier_client_for(self.elsevier_credentials),
+        )
+
     def _discover(self) -> None:
         """Find and download the PDF, and end the run."""
         try:
@@ -289,12 +312,7 @@ class PDFDiscoveryWorker(SingleOutcome, QThread):
             output_path = generate_pdf_path(self.doc_dict, self.output_dir)
 
             # Create discoverer with progress callback
-            self._discoverer = PDFDiscoverer(
-                unpaywall_email=self.unpaywall_email,
-                openathens_url=self.openathens_url,
-                progress_callback=self._emit_progress,
-                openalex_email=self.openalex_email,
-            )
+            self._discoverer = self._build_discoverer()
 
             # Perform discovery and download
             result = self._discoverer.discover_and_download(
@@ -384,6 +402,7 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
         parent: Optional[QWidget] = None,
         openalex_email: str | None = None,
         core_api_key: str | None = None,
+        elsevier_credentials: ElsevierCredentials | None = None,
     ) -> None:
         """
         Initialize full-text discovery worker.
@@ -395,6 +414,8 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
             parent: Optional parent widget
             openalex_email: The contact email sent to OpenAlex (#480)
             core_api_key: The configured CORE key (#480, stage C)
+            elsevier_credentials: The configured Elsevier key and token
+                (#480, stage C2)
         """
         super().__init__(parent)
         self.doc_dict = doc_dict
@@ -402,6 +423,7 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
         self.openathens_url = openathens_url
         self.openalex_email = openalex_email
         self.core_api_key = core_api_key
+        self.elsevier_credentials = elsevier_credentials
         self._cancelled = False
         self._discoverer: Optional[FulltextDiscoverer] = None
 
@@ -428,8 +450,8 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
         """The discoverer this run asks, reporting progress to this worker.
 
         Returns:
-            A discoverer with this worker's emails, OpenAthens URL and CORE
-            key.
+            A discoverer with this worker's emails, OpenAthens URL, CORE
+            key and Elsevier credentials.
         """
         return FulltextDiscoverer(
             unpaywall_email=self.unpaywall_email,
@@ -437,6 +459,7 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
             progress_callback=self._emit_progress,
             openalex_email=self.openalex_email,
             core_api_key=self.core_api_key,
+            elsevier_credentials=self.elsevier_credentials,
         )
 
     def _discover(self) -> None:
@@ -1480,6 +1503,9 @@ class TransparencyReanalysisWorker(SingleOutcome, QThread):
                 self.config.pubmed.api_key,
                 unpaywall_email=unpaywall_contact_email(self.config),
                 core_api_key=self.config.discovery.core_api_key or None,
+                elsevier_credentials=ElsevierCredentials.from_config(
+                    self.config.discovery
+                ),
             )
 
             for i, doc in enumerate(self.documents):

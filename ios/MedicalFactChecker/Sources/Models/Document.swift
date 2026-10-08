@@ -991,6 +991,17 @@ final class Document {
             // recorded rather than left to be inferred later.
             if let localPath = result.localPDFPath {
                 storePDFPath(localPath, isLocalFile: true)
+            } else if result.source == .elsevier {
+                // Elsevier's PDF is held only as a local file (#480, stage
+                // C2). Its article URL needs the key, so stored as a link it
+                // would be refused to the reader and re-fetched without the
+                // headers; the file the URL names, when it is one, is kept.
+                storePDFPath(url.isFileURL ? url.path : nil, isLocalFile: true)
+                if !url.isFileURL {
+                    documentLog.error(
+                        "An Elsevier PDF for PMID \(self.pmid, privacy: .public) named no local file; no link is stored."
+                    )
+                }
             } else {
                 storePDFPath(url.absoluteString, isLocalFile: false)
             }

@@ -32,6 +32,14 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
     /// Europe PMC PDF (when XML is unavailable but free PDF exists).
     case europePMCPDF = "europepmc_pdf"
 
+    /// The PDF Elsevier's Article Retrieval API served with the user's key
+    /// (#480, stage C2), asked after Europe PMC's render tier and before
+    /// Unpaywall.
+    ///
+    /// Held only as the local file it was saved to: its article URL needs the
+    /// key, so it is never a reader link.
+    case elsevier = "elsevier"
+
     /// Unpaywall open access PDF.
     case unpaywall = "unpaywall"
 
@@ -57,6 +65,7 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
         case .europePMC: return "Europe PMC"
         case .pmcOpenData: return "PMC Open-Access Collection"
         case .europePMCPDF: return "Europe PMC PDF"
+        case .elsevier: return BioMedLitConstants.elsevierSourceLabel
         case .unpaywall: return "Unpaywall"
         case .openAlex: return "OpenAlex"
         case .core: return "CORE (extracted text)"
@@ -72,6 +81,7 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
         case .europePMC: return "building.columns"
         case .pmcOpenData: return "building.columns"
         case .europePMCPDF: return "doc.richtext"
+        case .elsevier: return "key"
         case .unpaywall: return "lock.open"
         case .openAlex: return "lock.open"
         case .core: return "text.alignleft"
@@ -83,11 +93,13 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
 
     /// Whether this source provides in-app viewable content.
     ///
-    /// Europe PMC, PMC's open-access collection, Unpaywall, OpenAlex and CORE provide content that
-    /// can be displayed within the app. DOI sources require opening in an external browser.
+    /// Europe PMC, PMC's open-access collection, Elsevier's API, Unpaywall, OpenAlex and CORE
+    /// provide content that can be displayed within the app. DOI sources require opening in an
+    /// external browser.
     var canDisplayInApp: Bool {
         switch self {
-        case .europePMC, .pmcOpenData, .europePMCPDF, .unpaywall, .openAlex, .core, .cached, .uploaded:
+        case .europePMC, .pmcOpenData, .europePMCPDF, .elsevier, .unpaywall, .openAlex, .core, .cached,
+             .uploaded:
             return true
         case .doi:
             return false

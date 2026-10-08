@@ -81,6 +81,7 @@ from urllib.parse import urlsplit
 
 from .constants import (
     SERVICE_CORE,
+    SERVICE_ELSEVIER,
     SERVICE_OPENALEX,
     SERVICE_OPENALEX_PDF,
     SERVICE_UNPAYWALL,
@@ -1018,6 +1019,8 @@ def unread_records_clause(
 #: The open-access chain's sources, in the order they are tried (#480): the
 #: tried-sources statement names them in this order, after any other source.
 _OPEN_ACCESS_CHAIN = (
+    # Elsevier's Article API, asked before any Unpaywall lookup (#480, stage C2)
+    SERVICE_ELSEVIER,
     SERVICE_UNPAYWALL,
     SERVICE_UNPAYWALL_LANDING_PAGE,
     SERVICE_UNPAYWALL_PDF,
@@ -1322,10 +1325,15 @@ def no_pdf_sources_message(record: LookupRecord) -> str:
     Returns:
         Sentences for the reader, ending in a full stop: why no source was
         found, then any configuration advice, then a caching note (#480)
-        when a PDF went unsaved.
+        when a PDF went unsaved. A PDF tried before the sources were looked
+        for (Elsevier's, larger than the download limit; #480, stage C2) is
+        a source found, so the tried-sources statement is said instead.
     """
     access = _without_not_saved(record)
-    if not access.anything_unsettled:
+    statement = tried_sources_statement(access)
+    if statement:
+        text = _with_nudge(statement, access)
+    elif not access.anything_unsettled:
         text = "No PDF sources found. The document may require institutional access."
     else:
         text = _with_nudge(

@@ -64,7 +64,13 @@ from ..embeddings import LiteEmbedder
 from ..constants import (
     CORE_API_KEY_EXPLANATION,
     CORE_API_KEY_FROM_ENVIRONMENT,
+    ELSEVIER_API_KEY_EXPLANATION,
+    ELSEVIER_API_KEY_FROM_ENVIRONMENT,
+    ELSEVIER_INSTTOKEN_EXPLANATION,
+    ELSEVIER_INSTTOKEN_FROM_ENVIRONMENT,
     ENV_CORE_API_KEY,
+    ENV_ELSEVIER_API_KEY,
+    ENV_ELSEVIER_INSTTOKEN,
     UNPAYWALL_EMAIL_EXPLANATION,
     DEFAULT_LLM_MODEL,
     DEFAULT_LLM_TEMPERATURE,
@@ -698,6 +704,25 @@ class SettingsDialog(QDialog):
         explanation.setWordWrap(True)
         layout.addRow(explanation)
 
+        # Elsevier's API key and institutional token (#480, stage C2)
+        self.elsevier_api_key_input = QLineEdit()
+        self.elsevier_api_key_input.setPlaceholderText("Optional")
+        self.elsevier_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.elsevier_api_key_input.setToolTip(ELSEVIER_API_KEY_EXPLANATION)
+        layout.addRow("Elsevier API Key:", self.elsevier_api_key_input)
+        elsevier_key_note = QLabel(f"<small>{ELSEVIER_API_KEY_EXPLANATION}</small>")
+        elsevier_key_note.setWordWrap(True)
+        layout.addRow(elsevier_key_note)
+
+        self.elsevier_insttoken_input = QLineEdit()
+        self.elsevier_insttoken_input.setPlaceholderText("Optional")
+        self.elsevier_insttoken_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.elsevier_insttoken_input.setToolTip(ELSEVIER_INSTTOKEN_EXPLANATION)
+        layout.addRow("Elsevier Institutional Token:", self.elsevier_insttoken_input)
+        elsevier_token_note = QLabel(f"<small>{ELSEVIER_INSTTOKEN_EXPLANATION}</small>")
+        elsevier_token_note.setWordWrap(True)
+        layout.addRow(elsevier_token_note)
+
         self.tab_widget.addTab(tab, "Full Text")
 
     def _setup_api_keys_tab(self) -> None:
@@ -1074,6 +1099,20 @@ class SettingsDialog(QDialog):
             # it is told as "the key in the settings": the field says where
             # that key is.
             self.core_api_key_input.setPlaceholderText(CORE_API_KEY_FROM_ENVIRONMENT)
+        # Elsevier's falls back to the environment the same way (#480, stage C2)
+        if self.config.discovery.elsevier_api_key:
+            self.elsevier_api_key_input.setText(self.config.discovery.elsevier_api_key)
+        elif os.environ.get(ENV_ELSEVIER_API_KEY, "").strip():
+            self.elsevier_api_key_input.setPlaceholderText(ELSEVIER_API_KEY_FROM_ENVIRONMENT)
+        if self.config.discovery.elsevier_insttoken:
+            self.elsevier_insttoken_input.setText(self.config.discovery.elsevier_insttoken)
+        elif not self.config.discovery.elsevier_api_key and os.environ.get(
+            ENV_ELSEVIER_INSTTOKEN, ""
+        ).strip():
+            # The environment's token goes only with the environment's key
+            self.elsevier_insttoken_input.setPlaceholderText(
+                ELSEVIER_INSTTOKEN_FROM_ENVIRONMENT
+            )
 
         # Search Provider
         provider_value = self.config.search.search_provider.value
@@ -1177,6 +1216,10 @@ class SettingsDialog(QDialog):
         )
         core_key = self.core_api_key_input.text().strip()
         self.config.discovery.core_api_key = core_key or None
+        elsevier_key = self.elsevier_api_key_input.text().strip()
+        self.config.discovery.elsevier_api_key = elsevier_key or None
+        elsevier_token = self.elsevier_insttoken_input.text().strip()
+        self.config.discovery.elsevier_insttoken = elsevier_token or None
 
         # Save Search Provider settings
         provider_value = self.search_provider_combo.currentData()

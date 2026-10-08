@@ -105,6 +105,12 @@ public struct RetryConfiguration: Sendable {
         maxAttempts: 4, initialDelay: 1.0, maxDelay: 30.0, backoffMultiplier: 2.0, jitterFactor: 0.2
     )
 
+    /// Configuration for Elsevier's Article API (#480, stage C2): four attempts, as CORE's
+    /// and Python's.
+    public static let elsevier = RetryConfiguration(
+        maxAttempts: 4, initialDelay: 1.0, maxDelay: 30.0, backoffMultiplier: 2.0, jitterFactor: 0.2
+    )
+
     /// Configuration for PDF downloads (longer timeouts).
     public static let pdfDownload = RetryConfiguration(
         maxAttempts: 3,

@@ -224,6 +224,8 @@ def cmd_config(args: argparse.Namespace) -> int:
         print(f"  Email: {config.pubmed.email or '(not set)'}")
         print(f"  API key: {REDACTED_SECRET_PLACEHOLDER if config.pubmed.api_key else '(not set)'}")
         print(f"  CORE API key: {REDACTED_SECRET_PLACEHOLDER if config.discovery.core_api_key else '(not set)'}")
+        print(f"  Elsevier API key: {REDACTED_SECRET_PLACEHOLDER if config.discovery.elsevier_api_key else '(not set)'}")
+        print(f"  Elsevier institutional token: {REDACTED_SECRET_PLACEHOLDER if config.discovery.elsevier_insttoken else '(not set)'}")
         print("\n[Search]")
         print(f"  Chunk size: {config.search.chunk_size}")
         print(f"  Chunk overlap: {config.search.chunk_overlap}")

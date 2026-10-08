@@ -27,6 +27,9 @@ import Foundation
 ///    ask it then. It holds the author manuscripts Europe PMC does not serve.
 /// 2. **Europe PMC PDF** - The free render URL, when the XML is unavailable or
 ///    carries no `<body>`
+///    2a. **Elsevier's API PDF** - An Elsevier article's PDF (`10.1016/`), with
+///    the user's key, for a requestor entitled to it (#480, stage C2). Held only
+///    as a local file: its article URL needs the key, so it is never a link
 /// 3. **Unpaywall PDF** - Open access PDFs via Unpaywall API, every one it
 ///    names (#480), or the PDF an open-access landing page declares (#464)
 ///    3a. **OpenAlex PDF** - The PDFs OpenAlex's locations name that Unpaywall
@@ -132,18 +135,47 @@ public actor FullTextService {
     /// Whether this service asks CORE: a non-blank key was given.
     public nonisolated var asksCore: Bool { coreAPIKey != nil }
 
+    /// The user's Elsevier API key, trimmed; `nil` when none or blank, and then
+    /// Elsevier's API is never asked and nothing is recorded (#480, stage C2).
+    /// It travels in the `X-ELS-APIKey` header alone, never in a URL or a log line.
+    private let elsevierAPIKey: String?
+
+    /// The user's Elsevier institutional token, trimmed; `nil` when none or
+    /// blank. Sent in `X-ELS-Insttoken` beside the key, and never without one.
+    private let elsevierInstToken: String?
+
+    /// How each request to Elsevier's API retries a throttle, a 5xx or a
+    /// transient transport failure. Injectable for the same reason as
+    /// ``coreRetry``. Defaults to ``RetryConfiguration/elsevier``: four
+    /// attempts, as Python's.
+    private let elsevierRetry: RetryConfiguration
+
+    /// Elsevier's session state: the 429 pause, the refused key and the
+    /// credentials refused from this network, shared by every service in the
+    /// process and with nothing of CORE's. Injectable so a test owns its own.
+    private let elsevierSession: ElsevierSession
+
+    /// Whether this service asks Elsevier's API: a non-blank key was given.
+    public nonisolated var asksElsevier: Bool { elsevierAPIKey != nil }
+
+    /// Whether this service sends an institutional token with Elsevier's key: a
+    /// non-blank token was given with a key.
+    public nonisolated var sendsElsevierToken: Bool { elsevierInstToken != nil }
+
     /// Hosts this service paces itself on: one slot each (#489 tracks making
     /// it per host across instances, as Python's).
     private enum PacedHost: Hashable {
         case pmcOpenData
         case openAlex
         case core
+        case elsevier
 
         var minimumInterval: TimeInterval {
             switch self {
             case .pmcOpenData: return BioMedLitConstants.pmcOpenDataMinimumInterval
             case .openAlex: return BioMedLitConstants.openAlexMinimumInterval
             case .core: return BioMedLitConstants.coreMinimumInterval
+            case .elsevier: return BioMedLitConstants.elsevierMinimumInterval
             }
         }
     }
@@ -203,6 +235,15 @@ public actor FullTextService {
     ///   - coreThrottle: CORE's session state: the 429 pause and the refused
     ///     key. Defaults to ``CoreThrottle/shared``, the one every service in
     ///     the process uses.
+    ///   - elsevierAPIKey: The user's Elsevier API key. `nil` — the default —
+    ///     or blank means Elsevier's API is never asked (#480, stage C2).
+    ///   - elsevierInstToken: The user's Elsevier institutional token, sent
+    ///     beside the key. `nil` — the default — or blank sends none.
+    ///   - elsevierRetry: How each request to Elsevier's API retries a
+    ///     transient failure. Defaults to ``RetryConfiguration/elsevier``.
+    ///   - elsevierSession: Elsevier's session state: the 429 pause, the
+    ///     refused key and the credentials refused from this network. Defaults
+    ///     to ``ElsevierSession/shared``, the one every service in the process uses.
     ///   - writeCachedPDF: Writes a verified PDF to its cache file. Defaults
     ///     to ``writeAtomically(_:to:)``; injectable so a test can make the
     ///     write fail.
@@ -218,6 +259,10 @@ public actor FullTextService {
         coreAPIKey: String? = nil,
         coreRetry: RetryConfiguration = .core,
         coreThrottle: CoreThrottle = .shared,
+        elsevierAPIKey: String? = nil,
+        elsevierInstToken: String? = nil,
+        elsevierRetry: RetryConfiguration = .elsevier,
+        elsevierSession: ElsevierSession = .shared,
         writeCachedPDF: @escaping @Sendable (Data, URL) throws -> Void = FullTextService.writeAtomically
     ) {
         self.email = email
@@ -228,11 +273,24 @@ public actor FullTextService {
         self.europePMCRetry = europePMCRetry
         self.pmcOpenDataRetry = pmcOpenDataRetry
         self.openAlexRetry = openAlexRetry
-        let trimmedKey = coreAPIKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        self.coreAPIKey = trimmedKey.isEmpty ? nil : trimmedKey
+        self.coreAPIKey = Self.setting(coreAPIKey)
         self.coreRetry = coreRetry
         self.coreThrottle = coreThrottle
+        self.elsevierAPIKey = Self.setting(elsevierAPIKey)
+        // Never sent without a key, so not held without one either
+        self.elsevierInstToken = self.elsevierAPIKey == nil ? nil : Self.setting(elsevierInstToken)
+        self.elsevierRetry = elsevierRetry
+        self.elsevierSession = elsevierSession
         self.writeCachedPDF = writeCachedPDF
+    }
+
+    /// A credential as the settings hold it, trimmed; blank is none.
+    ///
+    /// - Parameter value: The setting's value, or `nil`.
+    /// - Returns: The trimmed value, or `nil` when it is absent or blank.
+    private static func setting(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// The production cache write: the whole file or none, so a write that
@@ -248,7 +306,7 @@ public actor FullTextService {
 
     /// The transport production uses.
     ///
-    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:openAlexRetry:coreAPIKey:coreRetry:coreThrottle:writeCachedPDF:)``
+    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:openAlexRetry:coreAPIKey:coreRetry:coreThrottle:elsevierAPIKey:elsevierInstToken:elsevierRetry:elsevierSession:writeCachedPDF:)``
     /// so a test can
     /// substitute a stubbed `URLSession` without reproducing these timeouts.
     ///
@@ -267,7 +325,8 @@ public actor FullTextService {
     /// Attempt to retrieve full text for a document.
     ///
     /// Tries sources in order: Europe PMC XML → PMC's open-data bucket (by PMC
-    /// ID, #480) → Europe PMC PDF → Unpaywall PDFs → OpenAlex PDFs → CORE's
+    /// ID, #480) → Europe PMC PDF → Elsevier's API PDF (an Elsevier DOI, with
+    /// the user's key, #480 stage C2) → Unpaywall PDFs → OpenAlex PDFs → CORE's
     /// extracted text (with the user's key, #480 stage C) → DOI website. Each
     /// source is tried with retry logic for transient network failures. A
     /// body-less XML deposit is held back rather than returned, so the PDF
@@ -292,7 +351,8 @@ public actor FullTextService {
     ///   record this on the document); `absenceNotEstablished` when Europe PMC
     ///   did not settle it; `pmcOpenDataNotEstablished` when PMC's open-data
     ///   bucket could not be read; `openAccessNotEstablished` when the
-    ///   open-access PDFs (Unpaywall's, then OpenAlex's) did not settle it;
+    ///   copies after the render (Elsevier's API, then Unpaywall's and
+    ///   OpenAlex's PDFs, then CORE) did not settle it;
     ///   `identifierKindUnresolved` when the PubMed last resort could not be
     ///   authorised. None of the last four may
     ///   be recorded (see
@@ -596,27 +656,49 @@ public actor FullTextService {
             }
         }
 
-        // Try Unpaywall (open access PDFs). The DOI is trimmed to the same
-        // definition of "blank" `ArticleCacheKey` uses, so the two guards agree
-        // about the same input: a whitespace-only DOI keys nothing, and it must
-        // not reach Unpaywall either.
+        // The DOI the copies after the render are asked by. Trimmed to the
+        // same definition of "blank" `ArticleCacheKey` uses, so the two guards
+        // agree about the same input: a whitespace-only DOI keys nothing, and
+        // it must not reach Elsevier or Unpaywall either.
         let unpaywallDOI = doi?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        // Why the open-access copy Unpaywall or OpenAlex may know of went
-        // unassessed, if it did: Unpaywall, the landing page it named or
-        // OpenAlex could not settle whether a free copy exists, a PDF either
-        // named could not be obtained (#478; every one is listed, #480), or
-        // Unpaywall was not configured. Carried
-        // on whatever fallback is returned, so a caller holding a better link
-        // than that fallback knows not to trade it away (#464).
+        // Why a copy Elsevier's API, Unpaywall or OpenAlex may hold went
+        // unassessed, if it did: Elsevier could not be asked, refused the
+        // credentials or served a PDF that could not be saved (#480, stage
+        // C2); Unpaywall, the landing page it named or OpenAlex could not
+        // settle whether a free copy exists, a PDF either named could not be
+        // obtained (#478; every one is listed, #480), or Unpaywall was not
+        // configured. In chain order, Elsevier's first. Carried on whatever
+        // fallback is returned, so a caller holding a better link than that
+        // fallback knows not to trade it away (#464).
         var openAccessShortfall: OpenAccessShortfall?
+        // Whether any copy was served: not cached, or cached without text
+        // while an abstract is held. Either settles the question; only the
+        // first ends the walk (a textless copy lets another, OpenAlex's
+        // included, be tried for text)
+        var openAccessCopyServed = false
+        // Elsevier's API (#480, stage C2): after the render, before any
+        // Unpaywall lookup, only for an Elsevier DOI and only with the user's
+        // key. Its PDF is held only as a local file, and nothing it does falls
+        // back to a link: its article URL needs the key.
+        // Asked by the DOI cleaned as CORE's is (Python's `_clean_doi`), so a
+        // DOI stored as `https://www.doi.org/10.1016/...` is Elsevier's too.
+        if let cacheKey,
+           let result = try await elsevierResult(
+               doi: coreDOI,
+               cacheKey: cacheKey,
+               degradation: degradation,
+               holdingAbstract: abstractOnly != nil,
+               articleName: articleName,
+               shortfall: &openAccessShortfall,
+               copyServed: &openAccessCopyServed
+           ) {
+            return try await textlessCopyOrCORE(result, doi: coreDOI, degradation: degradation)
+        }
+
+        // Try Unpaywall (open access PDFs).
         // An open-access copy served but not cached (#480): it ends the walk,
         // settles the question, and is the caching note's address
         var openAccessNotSavedFrom: String?
-        // Whether any open-access copy was served: not cached, or cached
-        // without text while an abstract is held. Either settles the
-        // question; only the first ends the walk (a textless copy lets
-        // another, OpenAlex's included, be tried for text)
-        var openAccessCopyServed = false
         var triedPDFs = Set<String>()
         if let cacheKey, !unpaywallDOI.isEmpty {
             let doi = unpaywallDOI
@@ -822,8 +904,8 @@ public actor FullTextService {
     ///     the article's JATS, when it could not be read (#480). Consulted
     ///     only when Europe PMC left no shortfall, so the reader is given one
     ///     sentence.
-    ///   - openAccessShortfall: Why the open-access PDFs (Unpaywall's, then
-    ///     OpenAlex's) left a free copy unassessed.
+    ///   - openAccessShortfall: Why the copies after the render (Elsevier's
+    ///     API, Unpaywall's and OpenAlex's PDFs, CORE) left one unassessed.
     ///   - articleName: How the log names the article.
     /// - Returns: The error to throw.
     static func exhaustedChainError(
@@ -890,8 +972,9 @@ public actor FullTextService {
             return .pmcOpenDataNotEstablished(pmcOpenDataShortfall)
         }
 
-        // The same for the open-access PDFs, Unpaywall's and OpenAlex's: a free
-        // copy they could not assess is not a copy that does not exist (#475).
+        // The same for the copies after the render, Elsevier's, Unpaywall's
+        // and OpenAlex's: a copy they could not assess is not a copy that
+        // does not exist (#475, #480).
         if let openAccessShortfall {
             BioMedLitLib.logger?.warning(
                 "No source served full text for \(articleName), and the open-access copy "
@@ -1227,13 +1310,7 @@ public actor FullTextService {
     private func pacedAttempt(
         _ url: URL, host: PacedHost, headers: [String: String] = [:]
     ) async throws -> (status: Int, body: Data) {
-        let now = Date()
-        let slot = max(now, nextRequest[host] ?? now)
-        nextRequest[host] = slot.addingTimeInterval(host.minimumInterval)
-        let wait = slot.timeIntervalSince(now)
-        if wait > 0 {
-            try await Task.sleep(nanoseconds: UInt64(wait * Double(BioMedLitConstants.nanosecondsPerSecond)))
-        }
+        try await waitForSlot(host)
         var request = URLRequest(url: url)
         request.timeoutInterval = BioMedLitConstants.defaultRequestTimeout
         for (field, value) in headers {
@@ -1247,6 +1324,21 @@ public actor FullTextService {
             throw FullTextError.serverError(statusCode: http.statusCode)
         }
         return (http.statusCode, data)
+    }
+
+    /// Wait for this request's pacing slot on a paced host, reserving it
+    /// first so two fetches interleaving on this actor cannot both take it.
+    ///
+    /// - Parameter host: Whose pacing slot the request takes.
+    /// - Throws: `CancellationError` from the wait.
+    private func waitForSlot(_ host: PacedHost) async throws {
+        let now = Date()
+        let slot = max(now, nextRequest[host] ?? now)
+        nextRequest[host] = slot.addingTimeInterval(host.minimumInterval)
+        let wait = slot.timeIntervalSince(now)
+        if wait > 0 {
+            try await Task.sleep(nanoseconds: UInt64(wait * Double(BioMedLitConstants.nanosecondsPerSecond)))
+        }
     }
 
     // MARK: - OpenAlex (#480, stage B)
@@ -1378,6 +1470,296 @@ public actor FullTextService {
         } catch {
             return .unreachable(.malformedResponse)
         }
+    }
+
+    // MARK: - Elsevier's Article API (#480, stage C2)
+
+    /// Ask Elsevier's Article API for one Elsevier article's PDF, and save it
+    /// under the document's cache key (#480, stage C2).
+    ///
+    /// The checks that make no request come first, in the contract's order
+    /// (``Elsevier/answerWithoutAsking(session:keyDigest:credentialsDigest:sendable:)``);
+    /// a fetch that asks is classified by ``Elsevier/classify(status:headers:body:)``
+    /// and recorded by ``Elsevier/record(_:endedOn:in:keyDigest:credentialsDigest:)``.
+    /// The key travels in `X-ELS-APIKey` and the token in `X-ELS-Insttoken`
+    /// alone; a redirect is never followed, as it would carry them wherever it
+    /// points, so a 3xx is classified as the status it is. Internal rather than
+    /// private so each outcome can be tested on its own.
+    ///
+    /// - Parameters:
+    ///   - doi: The DOI, as the document carries it; an Elsevier DOI.
+    ///   - cacheKey: Names the article, and so the cached file.
+    /// - Returns: The PDF's local path, the cached one when this article's PDF
+    ///   from Elsevier is already on disk (no request made, whatever the
+    ///   session holds); `.absent` for a 404 or a first page only
+    ///   (logged at INFO, never served), and for a call without a key or an
+    ///   Elsevier DOI, which sends nothing and records nothing; unreachable, of
+    ///   its real kind (a paused Elsevier is `httpStatus(429)`, no request
+    ///   made); the refused key or credentials; or `.notSaved` for a PDF served
+    ///   and not written.
+    /// - Throws: `CancellationError` only.
+    func fetchElsevierPDF(doi: String, cacheKey: ArticleCacheKey) async throws -> ElsevierFetch {
+        guard let apiKey = elsevierAPIKey, Elsevier.isEligible(doi: doi) else { return .absent }
+        // The cache first, as every PDF tier consults it: a read is no request,
+        // so the checks below keep their order, and a PDF saved earlier (on the
+        // institution's network, say) is served even when Elsevier would now
+        // refuse or is paused, without spending the weekly quota. A corrupt
+        // entry is quarantined and reads as a miss.
+        if let url = Elsevier.articleURL(doi: doi), let cached = Self.cachedPDFPath(for: cacheKey, from: url) {
+            BioMedLitLib.logger?.info(
+                "Serving the cached PDF from \(BioMedLitConstants.elsevierServiceName) for DOI \(doi) "
+                    + "at \(cached)",
+                category: .fullText
+            )
+            return .served(localPath: cached)
+        }
+        let keyDigest = KeyDigest.key(apiKey)
+        let credentialsDigest = KeyDigest.credentials(key: apiKey, token: elsevierInstToken)
+        let sendable = Elsevier.isSendable(key: apiKey, token: elsevierInstToken)
+        if let unasked = Elsevier.answerWithoutAsking(
+            session: elsevierSession, keyDigest: keyDigest, credentialsDigest: credentialsDigest,
+            sendable: sendable
+        ) {
+            if !sendable, unasked == .unreachable(.requestFailed) {
+                // Never the value: only that the settings hold one that cannot be sent
+                BioMedLitLib.logger?.warning(
+                    "The Elsevier API key or institutional token in the settings holds a "
+                        + "character that cannot be sent in a request (often an invisible one "
+                        + "pasted with it); \(BioMedLitConstants.elsevierServiceName) is not "
+                        + "asked. Enter it again.",
+                    category: .fullText
+                )
+            }
+            return Self.elsevierFetch(for: unasked)
+        }
+        // A request we could not build was never sent: not an absence.
+        guard let url = Elsevier.articleURL(doi: doi) else { return .unreachable(.requestFailed) }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = BioMedLitConstants.pdfDownloadTimeout
+        request.setValue(apiKey, forHTTPHeaderField: BioMedLitConstants.elsevierKeyHeader)
+        if let token = elsevierInstToken {
+            request.setValue(token, forHTTPHeaderField: BioMedLitConstants.elsevierTokenHeader)
+        }
+        request.setValue(BioMedLitConstants.elsevierAccept, forHTTPHeaderField: "Accept")
+
+        let answer: ElsevierAnswer
+        let status: Int?
+        let body: Data
+        do {
+            let (response, data) = try await RetryHelper.retry(
+                config: elsevierRetry,
+                shouldRetry: RetryHelper.retryOnlyTransient
+            ) {
+                try await self.elsevierAttempt(request)
+            }
+            status = response.statusCode
+            body = data
+            // Straight to the classifier, a 3xx included: the contract's
+            // `http_status`, never a refused redirect
+            answer = Elsevier.classify(
+                status: response.statusCode, headers: Self.headerFields(of: response), body: data
+            )
+        } catch where error.isCancellation {
+            throw CancellationError()
+        } catch FullTextError.serverError(let statusCode) {
+            // A throttle or server error that outlasted its retries.
+            (answer, status, body) = (.unreachable(.httpStatus(statusCode)), statusCode, Data())
+        } catch FullTextError.invalidResponse {
+            // As OpenAlex maps it: an answer that is not HTTP
+            (answer, status, body) = (.unreachable(.malformedResponse), nil, Data())
+        } catch {
+            // Logged by the chain, which knows what it falls through to.
+            (answer, status, body) = (.unreachable(SearchTransport.failure(for: error)), nil, Data())
+        }
+        Elsevier.record(
+            answer, endedOn: status, in: elsevierSession, keyDigest: keyDigest,
+            credentialsDigest: credentialsDigest
+        )
+        guard answer == .served else {
+            if answer == .firstPageOnly {
+                BioMedLitLib.logger?.info(
+                    "\(BioMedLitConstants.elsevierServiceName) served only the first page for DOI "
+                        + "\(doi): this requestor is not entitled to the article; not used",
+                    category: .fullText
+                )
+            }
+            return Self.elsevierFetch(for: answer)
+        }
+        do {
+            // The unlogged write: the one ERROR below names the consequence
+            return .served(localPath: try writePDFToCache(data: body, for: cacheKey, from: url))
+        } catch {
+            // Never a link: the article URL needs the key. The chain records it
+            // as an unsettled lookup unless a later copy is served.
+            BioMedLitLib.logger?.error(
+                "\(BioMedLitConstants.elsevierServiceName) served the PDF for DOI \(doi), and it "
+                    + "could not be saved on this device (\(error.localizedDescription))",
+                category: .fullText
+            )
+            return .notSaved
+        }
+    }
+
+    /// What a fetch learned from an answer that is not a PDF served: a first
+    /// page is no article, so an absence.
+    ///
+    /// - Parameter answer: The answer, classified or given without asking.
+    /// - Returns: The fetch's outcome. `.served` never reaches here (the caller
+    ///   saves it); were it to, it is unreachable, never an absence.
+    private static func elsevierFetch(for answer: ElsevierAnswer) -> ElsevierFetch {
+        switch answer {
+        case .served:
+            assertionFailure("A served answer is saved by the caller, not mapped")
+            return .unreachable(.requestFailed)
+        case .absent, .firstPageOnly: return .absent
+        case .unreachable(let failure): return .unreachable(failure)
+        case .keyRefused: return .keyRefused
+        case .networkRefused: return .networkRefused
+        }
+    }
+
+    /// One attempt at Elsevier's API, paced to
+    /// ``BioMedLitConstants/elsevierMinimumInterval``: every attempt, a retry
+    /// included, takes its own slot.
+    ///
+    /// Redirects are refused (``RedirectRefusingTaskDelegate``), so a 3xx comes
+    /// back as the answer. The body arrives whole, as URLSession's data task
+    /// reads it; of an error body only the first
+    /// ``BioMedLitConstants/elsevierErrorBodyMaxBytes`` are examined, for the
+    /// token, and nothing of it is logged or kept.
+    ///
+    /// - Parameter request: The article request, its headers set.
+    /// - Returns: The response, its headers included, and the body.
+    /// - Throws: `FullTextError.serverError` for a retryable status, so the
+    ///   retry sees it; `FullTextError.invalidResponse` when the answer is not
+    ///   HTTP; `CancellationError` from the wait; and the transport's error.
+    private func elsevierAttempt(_ request: URLRequest) async throws -> (response: HTTPURLResponse, body: Data) {
+        try await waitForSlot(.elsevier)
+        let (data, response) = try await session.data(for: request, delegate: RedirectRefusingTaskDelegate())
+        guard let http = response as? HTTPURLResponse else {
+            throw FullTextError.invalidResponse("Not an HTTP response")
+        }
+        if BioMedLitConstants.retryableStatusCodes.contains(http.statusCode) {
+            throw FullTextError.serverError(statusCode: http.statusCode)
+        }
+        return (http, data)
+    }
+
+    /// A response's header fields as names and values; the classifier matches
+    /// a name in any case.
+    private static func headerFields(of response: HTTPURLResponse) -> [String: String] {
+        var fields: [String: String] = [:]
+        for (name, value) in response.allHeaderFields {
+            if let name = name as? String { fields[name] = "\(value)" }
+        }
+        return fields
+    }
+
+    /// Ask Elsevier's API for this article's PDF (#480, stage C2) and record
+    /// what it left unsettled: the chain's Elsevier step.
+    ///
+    /// Served, the PDF's text is extracted as any downloaded PDF's, by the rule
+    /// every PDF tier shares (``pdfTierResult(outcome:content:degradation:holdingAbstract:articleName:linkFallback:)``).
+    /// A 404 or a first page adds nothing. An unreachable Elsevier, its refused
+    /// key or its refusal from this network is added to the shortfall. A PDF
+    /// that could not be saved adds `request_failed` (the apps' deviation from
+    /// the desktop's not-saved note, which carries a link): a copy served later
+    /// settles it. Nothing here ever becomes a link fallback.
+    ///
+    /// Not asked while PDF extraction is off (``extractPDFText``), an accepted
+    /// limit: every other PDF tier then hands over its URL alone, and
+    /// Elsevier's URL can never be handed over, so there is nothing it could
+    /// give. Nothing is recorded then, as without a key.
+    ///
+    /// - Parameters:
+    ///   - doi: The DOI, trimmed; blank asks nothing.
+    ///   - cacheKey: Names the article, and so the cached file.
+    ///   - degradation: Why this is not the best source that existed, if it is not.
+    ///   - holdingAbstract: Whether a body-less rendering is held: a PDF without
+    ///     text does not displace it.
+    ///   - articleName: How to name this article in the log.
+    ///   - shortfall: What went unsettled so far; added to.
+    ///   - copyServed: Set when the PDF is cached without text while an
+    ///     abstract is held: obtained, so the question is settled.
+    /// - Returns: The result to return, or `nil` to go on to Unpaywall.
+    /// - Throws: `CancellationError`.
+    private func elsevierResult(
+        doi: String,
+        cacheKey: ArticleCacheKey,
+        degradation: FullTextDegradation?,
+        holdingAbstract: Bool,
+        articleName: String,
+        shortfall: inout OpenAccessShortfall?,
+        copyServed: inout Bool
+    ) async throws -> FullTextResult? {
+        guard !doi.isEmpty, Elsevier.isEligible(doi: doi) else { return nil }
+        guard elsevierAPIKey != nil else {
+            BioMedLitLib.logger?.debug(
+                "No Elsevier API key configured; Elsevier's API not asked about DOI \(doi)",
+                category: .fullText
+            )
+            return nil
+        }
+        // Its PDF can only be downloaded, never offered as a link, so with
+        // extraction off there is nothing it could give
+        guard extractPDFText else {
+            BioMedLitLib.logger?.debug(
+                "PDF extraction is off; Elsevier's API not asked about DOI \(doi)", category: .fullText
+            )
+            return nil
+        }
+        let service = BioMedLitConstants.elsevierServiceName
+        switch try await fetchElsevierPDF(doi: doi, cacheKey: cacheKey) {
+        case .served(let localPath):
+            BioMedLitLib.logger?.info(
+                "Retrieved the PDF from \(service) for DOI \(doi) at \(localPath)", category: .fullText
+            )
+            let outcome = try extractText(fromCachedPDF: localPath)
+            if case .noText = outcome { copyServed = true }
+            // Never a download failure or a cache failure here, so no link
+            var noLink: FullTextResult?
+            let result = pdfTierResult(
+                outcome: outcome,
+                content: .elsevier(localPath: localPath),
+                degradation: degradation,
+                holdingAbstract: holdingAbstract,
+                articleName: articleName,
+                linkFallback: &noLink
+            )
+            assert(noLink == nil, "Elsevier's article URL is never a link")
+            return result
+        case .absent:
+            BioMedLitLib.logger?.info(
+                "\(service) has no PDF of DOI \(doi) for this requestor; trying Unpaywall",
+                category: .fullText
+            )
+        case .unreachable(let failure):
+            shortfall = .adding(OpenAccessShortfall(source: .elsevier, failure: failure), to: shortfall)
+            BioMedLitLib.logger?.warning(
+                "\(service) could not be asked about DOI \(doi) (\(failure.describe())), so any "
+                    + "PDF it holds is not assessed",
+                category: .fullText
+            )
+        case .keyRefused:
+            // A skip, not a failure: told as the key. Logged once, by the
+            // session, when new.
+            shortfall = .adding(.elsevierKeyRefused, to: shortfall)
+            BioMedLitLib.logger?.debug(
+                "\(service)'s key is refused; not asked about DOI \(doi)", category: .fullText
+            )
+        case .networkRefused:
+            shortfall = .adding(.elsevierNetworkRefused, to: shortfall)
+            BioMedLitLib.logger?.debug(
+                "\(service) refuses these credentials from this network; not asked about DOI \(doi)",
+                category: .fullText
+            )
+        case .notSaved:
+            // Logged at ERROR, with its cause, by the fetch
+            shortfall = .adding(
+                OpenAccessShortfall(source: .elsevier, failure: .requestFailed), to: shortfall
+            )
+        }
+        return nil
     }
 
     /// Convert served JATS XML to HTML and markdown.
@@ -2401,6 +2783,17 @@ public actor FullTextService {
             return .notCached
         }
 
+        return try extractText(fromCachedPDF: path)
+    }
+
+    /// Recover a cached PDF's text: the half of ``downloadAndExtract(from:key:)``
+    /// after the download, shared with Elsevier's PDF, which arrives by its own
+    /// request (#480, stage C2).
+    ///
+    /// - Parameter path: The cached file.
+    /// - Returns: `.noText` or `.extracted`, with the path.
+    /// - Throws: `CancellationError` if the caller cancelled.
+    private func extractText(fromCachedPDF path: String) throws -> PDFTierOutcome {
         let extraction = extractor.extract(from: URL(fileURLWithPath: path))
         // Before anything is read off `extraction`: the extractor stops early
         // when cancelled, so a cancelled read looks exactly like a short
@@ -2755,16 +3148,28 @@ public actor FullTextService {
     /// - Returns: The path the bytes were written to.
     /// - Throws: `FullTextError.cachingFailed` on a failed write.
     private func cachePDF(data: Data, for key: ArticleCacheKey, from url: URL) throws -> String {
-        let cacheDir = Self.pdfCacheDirectory
-        let fileURL = cacheDir.appendingPathComponent(Self.cacheFilename(key: key, url: url))
-
         do {
-            try writeCachedPDF(data, fileURL)
-            return fileURL.path
+            return try writePDFToCache(data: data, for: key, from: url)
         } catch {
             BioMedLitLib.logger?.error("Failed to cache PDF: \(error.localizedDescription)", category: .fullText)
             throw FullTextError.cachingFailed(error.localizedDescription)
         }
+    }
+
+    /// Write PDF data to its cache file, logging nothing: ``cachePDF(data:for:from:)``
+    /// without its log line, for a caller that logs the failure in its own
+    /// words (Elsevier's, #480 stage C2), so one failure is one ERROR.
+    ///
+    /// - Parameters:
+    ///   - data: The verified PDF bytes.
+    ///   - key: Names the article the entry belongs to.
+    ///   - url: The remote PDF the bytes came from; part of the filename.
+    /// - Returns: The path the bytes were written to.
+    /// - Throws: The write's own error.
+    private func writePDFToCache(data: Data, for key: ArticleCacheKey, from url: URL) throws -> String {
+        let fileURL = Self.pdfCacheDirectory.appendingPathComponent(Self.cacheFilename(key: key, url: url))
+        try writeCachedPDF(data, fileURL)
+        return fileURL.path
     }
 
     /// Get the cache directory for PDF files.

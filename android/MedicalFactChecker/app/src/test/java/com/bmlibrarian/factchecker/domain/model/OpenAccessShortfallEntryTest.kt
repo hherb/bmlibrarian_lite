@@ -49,10 +49,10 @@ class OpenAccessShortfallEntryTest {
         }
     }
 
-    /** Only CORE's own lookup is skipped for a refused key, and never with an address (#498). */
+    /** Only CORE's or Elsevier's own lookup is skipped for a refused key, never with an address (#498, #480). */
     @Test
-    fun `a refused key on any source but CORE, or with an address, cannot be built`() {
-        for (source in OpenAccessSource.entries - OpenAccessSource.CORE) {
+    fun `a refused key on any source but CORE or Elsevier, or with an address, cannot be built`() {
+        for (source in OpenAccessSource.entries - OpenAccessSource.CORE - OpenAccessSource.ELSEVIER) {
             assertThrows("$source", IllegalArgumentException::class.java) {
                 OpenAccessShortfall.Entry(source, OpenAccessUnsettledReason.KeyRefused)
             }
@@ -62,10 +62,43 @@ class OpenAccessShortfallEntryTest {
                 OpenAccessSource.CORE, OpenAccessUnsettledReason.KeyRefused, "https://repo.example.org/a.pdf"
             )
         }
-        // The control
+        assertThrows(IllegalArgumentException::class.java) {
+            OpenAccessShortfall.Entry(
+                OpenAccessSource.ELSEVIER, OpenAccessUnsettledReason.KeyRefused, "https://api.elsevier.com/x"
+            )
+        }
+        // The controls
         assertEquals(
             OpenAccessShortfall.CORE_KEY_REFUSED,
             OpenAccessShortfall(listOf(OpenAccessShortfall.Entry(OpenAccessSource.CORE, OpenAccessUnsettledReason.KeyRefused)))
+        )
+        assertEquals(
+            OpenAccessShortfall.ELSEVIER_KEY_REFUSED,
+            OpenAccessShortfall(
+                listOf(OpenAccessShortfall.Entry(OpenAccessSource.ELSEVIER, OpenAccessUnsettledReason.KeyRefused))
+            )
+        )
+    }
+
+    /** Only Elsevier's own lookup is skipped as refused from this network, never with an address (#480). */
+    @Test
+    fun `a network refusal on any source but Elsevier, or with an address, cannot be built`() {
+        for (source in OpenAccessSource.entries - OpenAccessSource.ELSEVIER) {
+            assertThrows("$source", IllegalArgumentException::class.java) {
+                OpenAccessShortfall.Entry(source, OpenAccessUnsettledReason.NetworkRefused)
+            }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            OpenAccessShortfall.Entry(
+                OpenAccessSource.ELSEVIER, OpenAccessUnsettledReason.NetworkRefused, "https://api.elsevier.com/x"
+            )
+        }
+        // The control
+        assertEquals(
+            OpenAccessShortfall.ELSEVIER_NETWORK_REFUSED,
+            OpenAccessShortfall(
+                listOf(OpenAccessShortfall.Entry(OpenAccessSource.ELSEVIER, OpenAccessUnsettledReason.NetworkRefused))
+            )
         )
     }
 

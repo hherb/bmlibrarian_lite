@@ -77,8 +77,15 @@ final class OpenAccessShortfallContractTests: XCTestCase {
                 XCTAssertEqual(source, .unpaywall, "\(row)")
                 return .unpaywallNotConfigured
             case "key_refused":
-                XCTAssertEqual(source, .core, "\(row)")
-                return .coreKeyRefused
+                // CORE's or Elsevier's, as the row names it (#480, stage C2)
+                switch source {
+                case .core: return .coreKeyRefused
+                case .elsevier: return .elsevierKeyRefused
+                default: throw ContractError.malformed("a key_refused skip of \(source) in \(row)")
+                }
+            case "network_refused":
+                XCTAssertEqual(source, .elsevier, "\(row)")
+                return .elsevierNetworkRefused
             default:
                 throw ContractError.malformed("an unknown skip in \(row)")
             }
@@ -114,6 +121,14 @@ final class OpenAccessShortfallContractTests: XCTestCase {
         XCTAssertTrue(
             rows.contains { $0["skipped"] as? String == "key_refused" },
             "a skip row pins CORE's refused key (#498)"
+        )
+        XCTAssertTrue(
+            rows.contains { $0["skipped"] as? String == "key_refused" && $0["source"] as? String == "elsevier" },
+            "a skip row pins Elsevier's refused key"
+        )
+        XCTAssertTrue(
+            rows.contains { $0["skipped"] as? String == "network_refused" },
+            "a skip row pins Elsevier's off-network refusal"
         )
     }
 
@@ -158,7 +173,9 @@ final class OpenAccessShortfallContractTests: XCTestCase {
                 )
             }
         }
-        for skipped in [OpenAccessShortfall.unpaywallNotConfigured, .coreKeyRefused] {
+        for skipped in [
+            OpenAccessShortfall.unpaywallNotConfigured, .coreKeyRefused, .elsevierKeyRefused, .elsevierNetworkRefused,
+        ] {
             XCTAssertEqual(OpenAccessShortfall.restored(fromPersisted: skipped.persisted()), skipped)
         }
     }
@@ -179,6 +196,37 @@ final class OpenAccessShortfallContractTests: XCTestCase {
                 + "was not established. Configuring Unpaywall would add an open-access route this "
                 + "search did not have."
         )
+    }
+
+    /// Elsevier's refusals are a configured keyed channel's, unasked: no
+    /// nudge, and each reads as Elsevier's (#480, stage C2).
+    func testElseviersRefusalsEarnNoConfigurationNudge() {
+        for refused in [OpenAccessShortfall.elsevierKeyRefused, .elsevierNetworkRefused] {
+            XCTAssertEqual(refused.source, .elsevier)
+            XCTAssertNil(refused.failure)
+            XCTAssertFalse(refused.notice.contains("Configuring"), refused.notice)
+        }
+        XCTAssertEqual(OpenAccessShortfall.elsevierKeyRefused.reason, .keyRefused)
+        XCTAssertEqual(OpenAccessShortfall.elsevierNetworkRefused.reason, .networkRefused)
+        // The control: alongside an unconfigured Unpaywall, only Unpaywall is nudged
+        let both = OpenAccessShortfall.elsevierNetworkRefused.appending(.unpaywallNotConfigured)
+        XCTAssertEqual(
+            both.notice,
+            "Elsevier's API (not available from this network) and Unpaywall (not configured) could not "
+                + "be asked, so a freely available copy may exist. Whether this document is open access "
+                + "was not established. Configuring Unpaywall would add an open-access route this "
+                + "search did not have."
+        )
+    }
+
+    /// A refused key and an off-network refusal are told apart, and a CORE
+    /// refusal stays CORE's beside Elsevier's.
+    func testCOREsAndElseviersRefusalsAreToldApart() {
+        XCTAssertNotEqual(OpenAccessShortfall.coreKeyRefused, .elsevierKeyRefused)
+        XCTAssertNotEqual(OpenAccessShortfall.elsevierKeyRefused, .elsevierNetworkRefused)
+        let both = OpenAccessShortfall.elsevierKeyRefused.appending(.coreKeyRefused)
+        XCTAssertEqual(OpenAccessShortfall.restored(fromPersisted: both.persisted()), both)
+        XCTAssertEqual(both.entries.map(\.source), [.elsevier, .core])
     }
 
     /// A table added to the contract and asserted nowhere would pin nothing.

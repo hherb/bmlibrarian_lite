@@ -173,15 +173,110 @@ final class AppSettings {
         return true
     }
 
+    /// Cached Elsevier API key.
+    private var _elsevierAPIKeyCache: String?
+
+    /// Elsevier API key (optional), which lets the app download the PDFs of
+    /// Elsevier articles the user is entitled to (#480, stage C2): the stored key.
+    ///
+    /// Cached in memory after first access to avoid Keychain latency. Changed
+    /// only through ``saveElsevierAPIKey(_:)``, so it never reads as saved when
+    /// the save failed. Sent only in Elsevier's request header, never in a URL,
+    /// a log line or a stored record.
+    var elsevierAPIKey: String {
+        if let cached = _elsevierAPIKeyCache {
+            return cached
+        }
+        let loaded = secretStore.load(key: Keys.elsevierAPIKey) ?? ""
+        _elsevierAPIKeyCache = loaded
+        return loaded
+    }
+
+    /// Store the Elsevier API key, then cache it; an empty key removes it.
+    ///
+    /// - Parameter key: The key to store.
+    /// - Returns: Whether it was stored. On failure the key stored before is
+    ///   kept and stays the one in use (the store logs why).
+    @discardableResult
+    func saveElsevierAPIKey(_ key: String) -> Bool {
+        guard secretStore.save(key: Keys.elsevierAPIKey, value: key) else { return false }
+        _elsevierAPIKeyCache = key
+        return true
+    }
+
+    /// Cached Elsevier institutional token.
+    private var _elsevierInstTokenCache: String?
+
+    /// Elsevier institutional token (optional), which lets the Elsevier key use
+    /// the user's institution's subscriptions away from its network (#480,
+    /// stage C2): the stored token.
+    ///
+    /// Cached in memory after first access to avoid Keychain latency. Changed
+    /// only through ``saveElsevierInstToken(_:)``, so it never reads as saved
+    /// when the save failed. Never sent without a key.
+    var elsevierInstToken: String {
+        if let cached = _elsevierInstTokenCache {
+            return cached
+        }
+        let loaded = secretStore.load(key: Keys.elsevierInstToken) ?? ""
+        _elsevierInstTokenCache = loaded
+        return loaded
+    }
+
+    /// Store the Elsevier institutional token, then cache it; an empty token
+    /// removes it.
+    ///
+    /// - Parameter token: The token to store.
+    /// - Returns: Whether it was stored. On failure the token stored before is
+    ///   kept and stays the one in use (the store logs why).
+    @discardableResult
+    func saveElsevierInstToken(_ token: String) -> Bool {
+        guard secretStore.save(key: Keys.elsevierInstToken, value: token) else { return false }
+        _elsevierInstTokenCache = token
+        return true
+    }
+
     /// What the settings say when an API key could not be stored, in place
     /// of "saved".
     ///
-    /// - Parameter keyName: The key's service ("CORE", "NCBI").
+    /// - Parameter keyName: The key's service ("CORE", "NCBI", "Elsevier").
     /// - Returns: The message: not saved, and the key in use is unchanged.
     static func keySaveFailureMessage(keyName: String) -> String {
-        "The \(keyName) API key could not be saved to the Keychain, so the key in use is unchanged. "
+        saveFailureMessage(credential: "\(keyName) API key", noun: "key")
+    }
+
+    /// What the settings say when a token could not be stored, in place of
+    /// "saved".
+    ///
+    /// - Parameter tokenName: What the token is ("Elsevier institutional").
+    /// - Returns: The message: not saved, and the token in use is unchanged.
+    static func tokenSaveFailureMessage(tokenName: String) -> String {
+        saveFailureMessage(credential: "\(tokenName) token", noun: "token")
+    }
+
+    /// The not-saved message for one credential.
+    ///
+    /// - Parameters:
+    ///   - credential: The credential, named in full ("CORE API key").
+    ///   - noun: What it is, for "the … in use" ("key", "token").
+    /// - Returns: The message: not saved, and the credential in use is unchanged.
+    private static func saveFailureMessage(credential: String, noun: String) -> String {
+        "The \(credential) could not be saved to the Keychain, so the \(noun) in use is unchanged. "
             + "Please try again."
     }
+
+    /// The settings' explanation of the Elsevier API key, verbatim on every
+    /// platform (#480, stage C2).
+    static let elsevierAPIKeyExplanation =
+        "Optional. A free Elsevier API key (dev.elsevier.com) lets the app download the PDFs of "
+        + "Elsevier articles you are entitled to: open-access articles anywhere, subscribed ones "
+        + "from your institution's network."
+
+    /// The settings' explanation of the Elsevier institutional token, verbatim
+    /// on every platform (#480, stage C2).
+    static let elsevierInstTokenExplanation =
+        "Optional. An institutional token from Elsevier lets the key use your institution's "
+        + "subscriptions away from its network."
 
     // MARK: - Search Settings
 
@@ -354,6 +449,8 @@ final class AppSettings {
         static let ncbiEmail = "ncbi_email"
         static let ncbiAPIKey = "ncbi_api_key"
         static let coreAPIKey = "core_api_key"
+        static let elsevierAPIKey = "elsevier_api_key"
+        static let elsevierInstToken = "elsevier_insttoken"
         static let batchSize = "batch_size"
         static let minRelevantDocuments = "min_relevant_documents"
         static let minScoreThreshold = "min_score_threshold"
@@ -410,6 +507,8 @@ final class AppSettings {
         // A failed removal keeps the stored key in use (the store logs why)
         saveNCBIAPIKey("")
         saveCOREAPIKey("")
+        saveElsevierAPIKey("")
+        saveElsevierInstToken("")
         batchSize = 20
         minRelevantDocuments = 5
         minScoreThreshold = 3

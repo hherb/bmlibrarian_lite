@@ -62,6 +62,7 @@ from ..data_models import (
     RequestFailure,
     RequestFailureKind,
 )
+from ..elsevier_api import ElsevierCredentials
 from ..jats_markdown import COI_WORDING_PATTERN
 from ..search_failures import request_failure_from_exception
 from ..transparency_terms import (
@@ -2825,6 +2826,7 @@ class StudyTransparencyAnalyzer:
         browser_headless: bool = False,
         auto_discover_fulltext: bool = True,
         core_api_key: str | None = None,
+        elsevier_credentials: ElsevierCredentials | None = None,
     ):
         """
         Initialize the analyzer.
@@ -2846,6 +2848,10 @@ class StudyTransparencyAnalyzer:
                 for CORE's extracted text when no PDF is obtained or the
                 PDF yields no text; the ``CORE_API_KEY`` environment
                 variable when not given.
+            elsevier_credentials: The configured Elsevier key and token
+                (#480, stage C2), asked for an Elsevier article's PDF before
+                Unpaywall; the ``ELSEVIER_API_KEY`` and
+                ``ELSEVIER_INSTTOKEN`` environment variables when not given.
         """
         self.email = email
         self.pubmed = PubMedClient(email, pubmed_api_key)
@@ -2858,6 +2864,7 @@ class StudyTransparencyAnalyzer:
         self._browser_headless = browser_headless
         self._auto_discover_fulltext = auto_discover_fulltext
         self._core_api_key = core_api_key
+        self._elsevier_credentials = elsevier_credentials
 
     def analyze(
         self,
@@ -2962,6 +2969,7 @@ class StudyTransparencyAnalyzer:
             browser_headless=self._browser_headless,
             openalex_email=self.email,
             core_api_key=self._core_api_key,
+            elsevier_credentials=self._elsevier_credentials,
         )
 
     def _discover_fulltext(self, report: TransparencyReport) -> Optional[str]:

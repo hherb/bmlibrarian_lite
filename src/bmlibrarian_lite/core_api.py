@@ -17,12 +17,10 @@ URL, a log line or a ``repr``.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
 import re
-import threading
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from urllib.parse import quote
@@ -56,6 +54,7 @@ from .data_models import (
     SourceLookupFailure,
     SourceLookupSkipped,
 )
+from .keyed_service_session import KeyedServiceSession, key_digest
 from .polite_session import mount_politely
 from .search_failures import request_failure_from_exception
 
@@ -92,20 +91,29 @@ def core_search_url(doi: str, base_url: str = CORE_API_BASE_URL) -> str:
     )
 
 
-def core_key_digest(api_key: str) -> str:
-    """The fingerprint a refused key is remembered by (#498).
+#: CORE's name for the shared key fingerprint (#498).
+core_key_digest = key_digest
 
-    A refusal is scoped to the key CORE refused, so a key corrected in the
-    settings is asked again. The key itself is never held for that: only this
-    digest is, and it is never logged.
+
+def strip_doi_prefix(doi: str) -> str:
+    """A DOI trimmed, one resolver or ``doi:`` prefix removed, its case kept.
+
+    The prefix is matched in any case; the DOI's own case is kept, as a
+    request path needs it (Elsevier's, #480 stage C2).
 
     Args:
-        api_key: A CORE key; trimmed here, so padding names the same key.
+        doi: A DOI as a source wrote it.
 
     Returns:
-        The SHA-256 digest of the trimmed key's UTF-8 bytes, as hex.
+        The bare DOI, trimmed; empty for a DOI that cleans to nothing.
     """
-    return hashlib.sha256(api_key.strip().encode("utf-8")).hexdigest()
+    text = doi.strip()
+    lowered = text.lower()
+    for prefix in _DOI_PREFIXES:
+        if lowered.startswith(prefix):
+            text = text[len(prefix):]
+            break
+    return text.strip()
 
 
 def normalise_doi(doi: str) -> str:
@@ -117,12 +125,7 @@ def normalise_doi(doi: str) -> str:
     Returns:
         The comparable form; empty for a DOI that cleans to nothing.
     """
-    text = doi.strip().lower()
-    for prefix in _DOI_PREFIXES:
-        if text.startswith(prefix):
-            text = text[len(prefix):]
-            break
-    return text.strip()
+    return strip_doi_prefix(doi).lower()
 
 
 def holds_unpaired_surrogate(value: object) -> bool:
@@ -294,20 +297,13 @@ class CoreFetch:
         return self.also.merged(own)
 
 
-class CoreThrottle:
+class CoreThrottle(KeyedServiceSession):
     """CORE's session state: the pause after consecutive 429s, and a refused key.
 
     CORE's key buys a daily token budget, which no per-second pacing can
     express. Once ``pause_after`` fetches in a row (by default two) end in
-    429, asking again only spends
-    the reader's time, so CORE is not asked again until the process ends.
-
-    A fetch ending in HTTP 401 means CORE refused the key (#498). Every
-    article would be refused alike, so that key is marked refused for the
-    rest of the process and CORE is not asked with it again. The refusal is
-    the key's, held as its :func:`core_key_digest`: another key, such as one
-    corrected in the settings, is asked as usual, and a 401 for it refuses
-    that key instead.
+    429, CORE is not asked again until the process ends. A 401 refuses that
+    key (#498), held as its :func:`core_key_digest`; another key is asked.
     """
 
     def __init__(self, pause_after: int = CORE_PAUSE_AFTER_CONSECUTIVE_429) -> None:
@@ -316,17 +312,7 @@ class CoreThrottle:
         Args:
             pause_after: Consecutive 429 endings that pause CORE.
         """
-        self._pause_after = pause_after
-        self._consecutive = 0
-        self._paused = False
-        self._refused_key_digest: str | None = None
-        self._lock = threading.Lock()
-
-    @property
-    def paused(self) -> bool:
-        """Whether CORE is paused for the rest of the session."""
-        with self._lock:
-            return self._paused
+        super().__init__(SERVICE_CORE, CORE_KEY_REFUSED_STATUS, pause_after)
 
     def refuses(self, key_digest: str) -> bool:
         """Whether CORE refused this key this session (#498).
@@ -335,42 +321,9 @@ class CoreThrottle:
             key_digest: The key's :func:`core_key_digest`.
 
         Returns:
-            ``True`` when a fetch with this key ended in 401: it is then not
-            asked again. Any other key is asked as usual.
+            ``True`` when a fetch with this key ended in 401.
         """
-        with self._lock:
-            return self._refused_key_digest == key_digest
-
-    def record(self, status: int | None, key_digest: str) -> None:
-        """Note how one fetch ended.
-
-        A 401 marks the key it was sent with refused, in place of any key
-        refused before; like any ending but a 429, it also resets the 429
-        count.
-
-        Args:
-            status: The HTTP status it ended on, or ``None`` when it got none.
-            key_digest: The :func:`core_key_digest` of the key it was sent with.
-        """
-        with self._lock:
-            if status == CORE_KEY_REFUSED_STATUS and self._refused_key_digest != key_digest:
-                self._refused_key_digest = key_digest
-                logger.warning(
-                    "CORE refused the configured key (HTTP %d); it is not asked "
-                    "with that key again this session.",
-                    status,
-                )
-            if status != HTTP_TOO_MANY_REQUESTS:
-                self._consecutive = 0
-                return
-            self._consecutive += 1
-            if self._consecutive >= self._pause_after and not self._paused:
-                self._paused = True
-                logger.warning(
-                    "CORE answered HTTP 429 %d times in a row; it is not asked "
-                    "again this session.",
-                    self._consecutive,
-                )
+        return self.refuses_key(key_digest)
 
 
 _session_throttle = CoreThrottle()

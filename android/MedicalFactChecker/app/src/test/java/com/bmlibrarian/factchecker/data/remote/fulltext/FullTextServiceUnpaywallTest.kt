@@ -106,7 +106,8 @@ class FullTextServiceUnpaywallTest {
             httpClient = httpClient,
             pmcOpenData = absentBucket(),
             openAlex = absentOpenAlex(),
-            core = absentCore()
+            core = absentCore(),
+            elsevier = absentElsevier()
         )
     }
 

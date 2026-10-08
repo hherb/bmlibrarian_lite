@@ -65,6 +65,7 @@ struct FullTextSourceBadge: View {
         case .europePMC: return .blue
         case .pmcOpenData: return .blue
         case .europePMCPDF: return .blue
+        case .elsevier: return .green
         case .unpaywall: return .green
         case .openAlex: return .green
         case .core: return .teal
@@ -80,6 +81,7 @@ struct FullTextSourceBadge: View {
 #Preview {
     VStack(spacing: 8) {
         FullTextSourceBadge(source: .europePMC)
+        FullTextSourceBadge(source: .elsevier)
         FullTextSourceBadge(source: .unpaywall)
         FullTextSourceBadge(source: .core)
         FullTextSourceBadge(source: .doi)
