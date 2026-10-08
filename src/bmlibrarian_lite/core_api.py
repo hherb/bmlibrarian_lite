@@ -95,6 +95,27 @@ def core_search_url(doi: str, base_url: str = CORE_API_BASE_URL) -> str:
 core_key_digest = key_digest
 
 
+def strip_doi_prefix(doi: str) -> str:
+    """A DOI trimmed, one resolver or ``doi:`` prefix removed, its case kept.
+
+    The prefix is matched in any case; the DOI's own case is kept, as a
+    request path needs it (Elsevier's, #480 stage C2).
+
+    Args:
+        doi: A DOI as a source wrote it.
+
+    Returns:
+        The bare DOI, trimmed; empty for a DOI that cleans to nothing.
+    """
+    text = doi.strip()
+    lowered = text.lower()
+    for prefix in _DOI_PREFIXES:
+        if lowered.startswith(prefix):
+            text = text[len(prefix):]
+            break
+    return text.strip()
+
+
 def normalise_doi(doi: str) -> str:
     """A DOI as compared: trimmed, lower-cased, one resolver prefix removed.
 
@@ -104,12 +125,7 @@ def normalise_doi(doi: str) -> str:
     Returns:
         The comparable form; empty for a DOI that cleans to nothing.
     """
-    text = doi.strip().lower()
-    for prefix in _DOI_PREFIXES:
-        if text.startswith(prefix):
-            text = text[len(prefix):]
-            break
-    return text.strip()
+    return strip_doi_prefix(doi).lower()
 
 
 def holds_unpaired_surrogate(value: object) -> bool:

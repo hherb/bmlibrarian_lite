@@ -59,7 +59,7 @@ from .constants import (
     RETRYABLE_HTTP_STATUSES,
     SERVICE_ELSEVIER,
 )
-from .core_api import normalise_doi
+from .core_api import normalise_doi, strip_doi_prefix
 from .data_models import (
     LookupRecord,
     LookupSkipReason,
@@ -80,16 +80,6 @@ from .search_failures import request_failure_from_exception
 
 logger = logging.getLogger(__name__)
 
-#: Ways a DOI is written that name the same DOI, matched in any case; one is
-#: removed. CORE's ``normalise_doi`` removes the same ones.
-_DOI_PREFIXES = (
-    "https://doi.org/",
-    "http://doi.org/",
-    "https://dx.doi.org/",
-    "http://dx.doi.org/",
-    "doi:",
-)
-
 #: What a path segment keeps bare besides ALPHA and DIGIT (``quote`` keeps
 #: ``-._~`` bare itself): every other UTF-8 byte is percent-encoded.
 _PATH_SAFE = "/"
@@ -108,17 +98,6 @@ def elsevier_eligible(doi: str) -> bool:
     return normalise_doi(doi).startswith(ELSEVIER_DOI_PREFIX)
 
 
-def _bare_doi(doi: str) -> str:
-    """The DOI trimmed, one resolver or ``doi:`` prefix removed, its case kept."""
-    text = doi.strip()
-    lowered = text.lower()
-    for prefix in _DOI_PREFIXES:
-        if lowered.startswith(prefix):
-            text = text[len(prefix):]
-            break
-    return text.strip()
-
-
 def elsevier_article_url(doi: str, base_url: str = ELSEVIER_API_BASE_URL) -> str:
     """The article request for one DOI. It carries neither the key nor the token.
 
@@ -129,7 +108,7 @@ def elsevier_article_url(doi: str, base_url: str = ELSEVIER_API_BASE_URL) -> str
     Returns:
         The request URL, pinned by the contract's ``article_url`` rows.
     """
-    path = quote(_bare_doi(doi), safe=_PATH_SAFE)
+    path = quote(strip_doi_prefix(doi), safe=_PATH_SAFE)
     return f"{base_url.rstrip('/')}{ELSEVIER_ARTICLE_PATH}{path}"
 
 
@@ -458,8 +437,9 @@ class ElsevierArticleClient:
             self._session_state.record(None, self.credentials.key_digest)
             return ElsevierFetch.unreachable(request_failure_from_exception(error))
         except ValueError:
-            # A header value http.client will not encode, or a redirect that
-            # will not parse.
+            # A header value http.client cannot encode as Latin-1 (a key with
+            # a curly quote): UnicodeEncodeError, which is no RequestException.
+            # No redirect is followed, so nothing else reaches here.
             self._session_state.record(None, self.credentials.key_digest)
             return ElsevierFetch.unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
         with closing(response):

@@ -29,7 +29,12 @@ from bmlibrarian_lite.constants import (
     SERVICE_ELSEVIER,
     SERVICE_UNPAYWALL,
 )
-from bmlibrarian_lite.core_api import reset_core_throttle, session_core_throttle
+from bmlibrarian_lite.core_api import (
+    normalise_doi,
+    reset_core_throttle,
+    session_core_throttle,
+    strip_doi_prefix,
+)
 from bmlibrarian_lite.data_models import (
     LookupRecord,
     LookupSkipReason,
@@ -227,7 +232,15 @@ def test_each_session_row(row: dict[str, Any], tmp_path: Path) -> None:
         for entry in row["fetches"]:
             server.script[PATH] = [_answer({**entry, "headers": {}})]
             key, token = _credentials(entry)
+            before = len(server.received)
+            refused = session.refuses_key(key_digest(key)) or session.refuses_network(
+                credentials_digest(key, token)
+            )
+            paused = session.paused
             _client(server.url, session, key, token).fetch_pdf(DOI, tmp_path / "a.pdf", never)
+            # Already refused or paused: no request; otherwise exactly one
+            expected = 0 if refused or paused else 1
+            assert len(server.received) - before == expected
         for check in row["then"]:
             server.script[PATH] = [_answer({**check, "headers": {}})]
             before = len(server.received)
@@ -314,6 +327,28 @@ def test_a_key_a_header_cannot_carry_is_unreachable_and_never_logged(
         assert server.received == []
     assert fetch == ElsevierFetch.unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
     assert "bad-key" not in caplog.text
+
+
+def test_a_key_http_client_cannot_encode_is_unreachable_and_never_logged(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A curly quote is no Latin-1: classified as a failed request, the key never logged."""
+    caplog.set_level(logging.DEBUG)
+    bad = "curly\u2019key-0123456789"
+    with running({PATH: [ScriptedAnswer(HTTPStatus.OK, PDF)]}) as server:
+        fetch = _client(server.url, key=bad).fetch_pdf(DOI, tmp_path / "a.pdf", never)
+        assert server.received == []
+    assert fetch == ElsevierFetch.unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
+    assert "curly" not in caplog.text and "0123456789" not in caplog.text
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_the_bare_doi_is_cores_prefix_rule_with_its_case_kept() -> None:
+    """One rule, shared with CORE: Elsevier's path keeps the DOI's case."""
+    assert strip_doi_prefix(" HTTPS://DX.DOI.ORG/10.1016/J.X.1 ") == "10.1016/J.X.1"
+    assert strip_doi_prefix("doi:10.1016/J.x") == "10.1016/J.x"
+    assert strip_doi_prefix("DOI: 10.1016/J.x ") == "10.1016/J.x"
+    assert normalise_doi(" HTTPS://DX.DOI.ORG/10.1016/J.X.1 ") == "10.1016/j.x.1"
 
 
 def test_a_redirect_to_another_host_is_not_followed(tmp_path: Path) -> None:

@@ -54,6 +54,9 @@ fulltext_discovery.py # Europe PMC XML → PMC open-data bucket → Europe PMC P
 pmc_open_data.py      # PmcOpenDataClient: PMC's open-data S3 bucket (JATS by PMC ID)
 openalex.py           # OpenAlexLocationsClient: the PDFs OpenAlex's locations name (by DOI)
 core_api.py           # CoreTextClient: CORE's extracted text by DOI (user's key); CoreThrottle (429 pause, refused key)
+elsevier_api.py       # ElsevierArticleClient: Elsevier's article API, keyed PDF by DOI (10.1016/ only); ElsevierFetch, ElsevierSession
+keyed_service_session.py # KeyedServiceSession: a keyed service's 429 pause, refused key, refused network (process-wide)
+pdf_download.py       # PDF download helpers: body prefix, .part file, MAX_PDF_SIZE
 pdf_discovery.py      # PDF source discovery
 rate_limit.py         # Host-keyed, thread-safe pacing for outbound requests
 polite_session.py     # PoliteAdapter + mount_politely for requests.Session
