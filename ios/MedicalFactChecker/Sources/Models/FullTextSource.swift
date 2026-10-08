@@ -39,6 +39,9 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
     /// served (#480, stage B).
     case openAlex = "openalex"
 
+    /// CORE's extracted text, the last source before the link (#480, stage C).
+    case core = "core"
+
     /// DOI resolution to publisher website.
     case doi = "doi"
 
@@ -56,6 +59,7 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
         case .europePMCPDF: return "Europe PMC PDF"
         case .unpaywall: return "Unpaywall"
         case .openAlex: return "OpenAlex"
+        case .core: return "CORE (extracted text)"
         case .doi: return "Publisher"
         case .cached: return "Cached"
         case .uploaded: return "Uploaded"
@@ -70,6 +74,7 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
         case .europePMCPDF: return "doc.richtext"
         case .unpaywall: return "lock.open"
         case .openAlex: return "lock.open"
+        case .core: return "text.alignleft"
         case .doi: return "link"
         case .cached: return "arrow.down.circle"
         case .uploaded: return "square.and.arrow.up"
@@ -78,11 +83,11 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
 
     /// Whether this source provides in-app viewable content.
     ///
-    /// Europe PMC, PMC's open-access collection, Unpaywall and OpenAlex provide content that can
-    /// be displayed within the app. DOI sources require opening in an external browser.
+    /// Europe PMC, PMC's open-access collection, Unpaywall, OpenAlex and CORE provide content that
+    /// can be displayed within the app. DOI sources require opening in an external browser.
     var canDisplayInApp: Bool {
         switch self {
-        case .europePMC, .pmcOpenData, .europePMCPDF, .unpaywall, .openAlex, .cached, .uploaded:
+        case .europePMC, .pmcOpenData, .europePMCPDF, .unpaywall, .openAlex, .core, .cached, .uploaded:
             return true
         case .doi:
             return false

@@ -93,6 +93,8 @@ fun SettingsScreen(
     val estimatedCostPerRun by viewModel.estimatedCostPerRun.collectAsState()
     val isTestingConnection by viewModel.isTestingConnection.collectAsState()
     val syncState by viewModel.syncState.collectAsState()
+    val coreApiKeyInput by viewModel.coreApiKeyInput.collectAsState()
+    val ncbiApiKeyInput by viewModel.ncbiApiKeyInput.collectAsState()
 
     var showResetDialog by remember { mutableStateOf(false) }
     var showClearDataDialog by remember { mutableStateOf(false) }
@@ -192,6 +194,12 @@ fun SettingsScreen(
                 ncbiEmail = settings.ncbiEmail,
                 parallelConcurrency = settings.parallelConcurrency,
                 onNcbiEmailChange = viewModel::setNcbiEmail,
+                ncbiApiKey = ncbiApiKeyInput,
+                onNcbiApiKeyChange = viewModel::updateNcbiApiKeyInput,
+                onSaveNcbiApiKey = viewModel::saveNcbiApiKey,
+                coreApiKey = coreApiKeyInput,
+                onCoreApiKeyChange = viewModel::updateCoreApiKeyInput,
+                onSaveCoreApiKey = viewModel::saveCoreApiKey,
                 onParallelConcurrencyChange = viewModel::setParallelConcurrency,
                 onClearDataClick = { showClearDataDialog = true },
                 onResetClick = { showResetDialog = true }
@@ -622,13 +630,27 @@ private fun AdvancedScoringSection(
 /**
  * Advanced settings section.
  *
- * Contains NCBI configuration, parallel processing settings, and reset options.
+ * Contains NCBI configuration, the optional CORE API key (#480, stage C),
+ * parallel processing settings, and reset options.
+ *
+ * @param ncbiApiKey The NCBI API key field's current value (#496)
+ * @param onNcbiApiKeyChange Called as the NCBI API key field is edited
+ * @param onSaveNcbiApiKey Saves the NCBI API key field; an empty field clears the key
+ * @param coreApiKey The CORE API key field's current value
+ * @param onCoreApiKeyChange Called as the CORE API key field is edited
+ * @param onSaveCoreApiKey Saves the CORE API key field; an empty field clears the key
  */
 @Composable
 private fun AdvancedSection(
     ncbiEmail: String,
     parallelConcurrency: Int,
     onNcbiEmailChange: (String) -> Unit,
+    ncbiApiKey: String,
+    onNcbiApiKeyChange: (String) -> Unit,
+    onSaveNcbiApiKey: () -> Unit,
+    coreApiKey: String,
+    onCoreApiKeyChange: (String) -> Unit,
+    onSaveCoreApiKey: () -> Unit,
     onParallelConcurrencyChange: (Int) -> Unit,
     onClearDataClick: () -> Unit,
     onResetClick: () -> Unit
@@ -644,6 +666,52 @@ private fun AdvancedSection(
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
+
+        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+        // NCBI API key (#496): optional; raises PubMed's rate limit
+        var showNcbiKey by remember { mutableStateOf(false) }
+        OutlinedTextField(
+            value = ncbiApiKey,
+            onValueChange = onNcbiApiKeyChange,
+            label = { Text("NCBI API Key (optional)") },
+            supportingText = { Text(Constants.NCBI_API_KEY_EXPLANATION) },
+            visualTransformation = if (showNcbiKey) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { showNcbiKey = !showNcbiKey }) {
+                    Icon(
+                        if (showNcbiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = if (showNcbiKey) "Hide NCBI API key" else "Show NCBI API key"
+                    )
+                }
+            },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(onClick = onSaveNcbiApiKey) { Text("Save NCBI API Key") }
+
+        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+        // CORE API key (#480, stage C): optional; without it CORE is never asked
+        var showCoreKey by remember { mutableStateOf(false) }
+        OutlinedTextField(
+            value = coreApiKey,
+            onValueChange = onCoreApiKeyChange,
+            label = { Text("CORE API Key (optional)") },
+            supportingText = { Text(Constants.CORE_API_KEY_EXPLANATION) },
+            visualTransformation = if (showCoreKey) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { showCoreKey = !showCoreKey }) {
+                    Icon(
+                        if (showCoreKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = if (showCoreKey) "Hide CORE API key" else "Show CORE API key"
+                    )
+                }
+            },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(onClick = onSaveCoreApiKey) { Text("Save CORE API Key") }
 
         Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
 

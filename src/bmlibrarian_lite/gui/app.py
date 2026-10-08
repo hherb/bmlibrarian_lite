@@ -300,8 +300,11 @@ class LiteMainWindow(QMainWindow):
         """Show the settings dialog."""
         dialog = SettingsDialog(self.config, parent=self)
         if dialog.exec():
-            # Reload configuration
-            self.config = LiteConfig.load()
+            # The dialog edits this configuration in place, and every tab
+            # holds this same object, so the tabs read the new settings at
+            # once. Rebinding it to a fresh load would leave the tabs on the
+            # old object, deaf to every later edit (a corrected CORE key
+            # among them).
             self.status_bar.showMessage("Settings saved", 3000)
 
     def set_status(self, message: str, timeout: int = 0) -> None:

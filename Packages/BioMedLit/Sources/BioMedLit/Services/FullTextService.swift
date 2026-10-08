@@ -113,16 +113,37 @@ public actor FullTextService {
     /// ``RetryConfiguration/openAlex``: four attempts, as Python's.
     private let openAlexRetry: RetryConfiguration
 
+    /// The user's CORE API key, trimmed; `nil` when none or blank, and then
+    /// CORE is never asked and nothing is recorded (#480, stage C). It travels
+    /// in the `Authorization` header alone, never in a URL or a log line.
+    private let coreAPIKey: String?
+
+    /// How each request to CORE retries a throttle, a 5xx or a transient
+    /// transport failure. Injectable for the same reason as
+    /// ``openAlexRetry``. Defaults to ``RetryConfiguration/core``: four
+    /// attempts, as Python's.
+    private let coreRetry: RetryConfiguration
+
+    /// CORE's session state: the 429 pause (two consecutive fetches ending
+    /// in 429 stop CORE being asked) and the refused key (#498), shared by
+    /// every service in the process. Injectable so a test owns its own.
+    private let coreThrottle: CoreThrottle
+
+    /// Whether this service asks CORE: a non-blank key was given.
+    public nonisolated var asksCore: Bool { coreAPIKey != nil }
+
     /// Hosts this service paces itself on: one slot each (#489 tracks making
     /// it per host across instances, as Python's).
     private enum PacedHost: Hashable {
         case pmcOpenData
         case openAlex
+        case core
 
         var minimumInterval: TimeInterval {
             switch self {
             case .pmcOpenData: return BioMedLitConstants.pmcOpenDataMinimumInterval
             case .openAlex: return BioMedLitConstants.openAlexMinimumInterval
+            case .core: return BioMedLitConstants.coreMinimumInterval
             }
         }
     }
@@ -175,6 +196,13 @@ public actor FullTextService {
     ///     ``RetryConfiguration/pmcOpenData``.
     ///   - openAlexRetry: How each request to OpenAlex retries a transient
     ///     failure. Defaults to ``RetryConfiguration/openAlex``.
+    ///   - coreAPIKey: The user's CORE API key. `nil` — the default — or
+    ///     blank means CORE is never asked (#480, stage C).
+    ///   - coreRetry: How each request to CORE retries a transient failure.
+    ///     Defaults to ``RetryConfiguration/core``.
+    ///   - coreThrottle: CORE's session state: the 429 pause and the refused
+    ///     key. Defaults to ``CoreThrottle/shared``, the one every service in
+    ///     the process uses.
     ///   - writeCachedPDF: Writes a verified PDF to its cache file. Defaults
     ///     to ``writeAtomically(_:to:)``; injectable so a test can make the
     ///     write fail.
@@ -187,6 +215,9 @@ public actor FullTextService {
         europePMCRetry: RetryConfiguration = .serverError,
         pmcOpenDataRetry: RetryConfiguration = .pmcOpenData,
         openAlexRetry: RetryConfiguration = .openAlex,
+        coreAPIKey: String? = nil,
+        coreRetry: RetryConfiguration = .core,
+        coreThrottle: CoreThrottle = .shared,
         writeCachedPDF: @escaping @Sendable (Data, URL) throws -> Void = FullTextService.writeAtomically
     ) {
         self.email = email
@@ -197,6 +228,10 @@ public actor FullTextService {
         self.europePMCRetry = europePMCRetry
         self.pmcOpenDataRetry = pmcOpenDataRetry
         self.openAlexRetry = openAlexRetry
+        let trimmedKey = coreAPIKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.coreAPIKey = trimmedKey.isEmpty ? nil : trimmedKey
+        self.coreRetry = coreRetry
+        self.coreThrottle = coreThrottle
         self.writeCachedPDF = writeCachedPDF
     }
 
@@ -213,7 +248,7 @@ public actor FullTextService {
 
     /// The transport production uses.
     ///
-    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:openAlexRetry:writeCachedPDF:)``
+    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:openAlexRetry:coreAPIKey:coreRetry:coreThrottle:writeCachedPDF:)``
     /// so a test can
     /// substitute a stubbed `URLSession` without reproducing these timeouts.
     ///
@@ -232,10 +267,12 @@ public actor FullTextService {
     /// Attempt to retrieve full text for a document.
     ///
     /// Tries sources in order: Europe PMC XML → PMC's open-data bucket (by PMC
-    /// ID, #480) → Europe PMC PDF → Unpaywall PDFs → OpenAlex PDFs → DOI
-    /// website. Each source is tried with retry logic for transient network
-    /// failures. A body-less XML deposit is held back rather than returned, so
-    /// the PDF tiers still get their turn.
+    /// ID, #480) → Europe PMC PDF → Unpaywall PDFs → OpenAlex PDFs → CORE's
+    /// extracted text (with the user's key, #480 stage C) → DOI website. Each
+    /// source is tried with retry logic for transient network failures. A
+    /// body-less XML deposit is held back rather than returned, so the PDF
+    /// tiers still get their turn. A PDF that yields no text is returned only
+    /// after CORE, asked once, served none (#499).
     ///
     /// - Parameters:
     ///   - pmcId: PubMed Central ID (e.g., "PMC1234567").
@@ -531,6 +568,9 @@ public actor FullTextService {
                 category: .fullText
             )
         }
+        // The DOI CORE is asked by: resolver prefixes removed, as Python's
+        // `_clean_doi` (blank asks nothing)
+        let coreDOI = CORE.bareDOI(doi ?? "")
         // A render served and not cached (#480). Not an open-access copy, so it
         // neither settles the shortfall nor stops the Unpaywall walk: a copy
         // Unpaywall names may still be saved. Told only if none is.
@@ -552,7 +592,7 @@ public actor FullTextService {
                 articleName: articleName,
                 linkFallback: &pdfLinkFallback
             ) {
-                return result
+                return try await textlessCopyOrCORE(result, doi: coreDOI, degradation: degradation)
             }
         }
 
@@ -600,7 +640,7 @@ public actor FullTextService {
                 // The tier's own failure type carries no description, so the
                 // shortfall names what went unsettled and why
                 let cause = shortfall.map {
-                    "\($0.source.serviceName): \($0.failure?.describe() ?? "not configured")"
+                    "\($0.source.serviceName): \($0.reason.described)"
                 } ?? error.localizedDescription
                 BioMedLitLib.logger?.warning(
                     "Unpaywall failed for DOI \(doi) (\(cause))", category: .fullText
@@ -620,7 +660,7 @@ public actor FullTextService {
                 copyServed: &openAccessCopyServed,
                 tried: &triedPDFs
             ) {
-                return result
+                return try await textlessCopyOrCORE(result, doi: coreDOI, degradation: degradation)
             }
             // OpenAlex, for the PDFs Unpaywall did not name (#480, stage B);
             // not once an Unpaywall copy was served and not cached: that copy
@@ -647,7 +687,7 @@ public actor FullTextService {
                         copyServed: &openAccessCopyServed,
                         tried: &triedPDFs
                     ) {
-                        return result
+                        return try await textlessCopyOrCORE(result, doi: coreDOI, degradation: degradation)
                     }
                 case .absent:
                     BioMedLitLib.logger?.info(
@@ -663,6 +703,16 @@ public actor FullTextService {
                         category: .fullText
                     )
                 }
+            }
+            // CORE's extracted text (#480, stage C): the poorest form, so last,
+            // only with the user's key and only when no copy was served. A
+            // failure is an unsettled lookup, as OpenAlex's is. No key: never
+            // asked, nothing recorded.
+            if openAccessNotSavedFrom == nil,
+               let result = try await coreTextResult(
+                   doi: coreDOI, degradation: degradation, shortfall: &openAccessShortfall
+               ) {
+                return result
             }
         }
         openAccessShortfall = Self.settledOpenAccessShortfall(
@@ -846,7 +896,7 @@ public actor FullTextService {
             BioMedLitLib.logger?.warning(
                 "No source served full text for \(articleName), and the open-access copy "
                     + "went unassessed (\(openAccessShortfall.source.serviceName): "
-                    + "\(openAccessShortfall.failure?.describe() ?? "not configured"))",
+                    + "\(openAccessShortfall.reason.described))",
                 category: .fullText
             )
             return .openAccessNotEstablished(openAccessShortfall)
@@ -1170,10 +1220,13 @@ public actor FullTextService {
     /// - Parameters:
     ///   - url: The URL to ask.
     ///   - host: Whose pacing slot the request takes.
+    ///   - headers: Header fields to set on the request; none by default.
     /// - Returns: The status and body of an answer that is not transient.
     /// - Throws: `FullTextError.serverError` for a retryable status, so the
     ///   retry sees it; otherwise as ``bucketGET(_:)``.
-    private func pacedAttempt(_ url: URL, host: PacedHost) async throws -> (status: Int, body: Data) {
+    private func pacedAttempt(
+        _ url: URL, host: PacedHost, headers: [String: String] = [:]
+    ) async throws -> (status: Int, body: Data) {
         let now = Date()
         let slot = max(now, nextRequest[host] ?? now)
         nextRequest[host] = slot.addingTimeInterval(host.minimumInterval)
@@ -1183,6 +1236,9 @@ public actor FullTextService {
         }
         var request = URLRequest(url: url)
         request.timeoutInterval = BioMedLitConstants.defaultRequestTimeout
+        for (field, value) in headers {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw FullTextError.invalidResponse("Not an HTTP response")
@@ -1245,6 +1301,82 @@ public actor FullTextService {
             return .absent
         default:
             return .unreachable(.httpStatus(answer.status))
+        }
+    }
+
+    // MARK: - CORE (#480, stage C)
+
+    /// CORE's extracted text for a DOI (#480, stage C). The key travels in the
+    /// `Authorization` header alone. A fetch ending in 429 counts towards the
+    /// session pause; any other ending resets it. A fetch ending in 401 marks
+    /// this key refused for the session (#498); another key is asked as usual.
+    /// The statuses are pinned by
+    /// `fulltext_parity/core_fulltext.json` ("status"). Internal rather than
+    /// private so each outcome can be tested on its own. A blank DOI sends
+    /// nothing and is `.absent`, which records nothing, exactly as not asking
+    /// does; callers ask only with a DOI.
+    ///
+    /// - Parameters:
+    ///   - doi: The DOI, trimmed and non-empty (``CORE/bareDOI(_:)``).
+    ///   - apiKey: The user's CORE key, trimmed and non-empty.
+    /// - Returns: Served text when a result is this article's and long enough;
+    ///   absent when none is; or unreachable, of its real kind: any status but
+    ///   200 (a 404 included: a search's 404 says nothing about the article),
+    ///   an answer we cannot read (`malformedResponse`), a transport failure,
+    ///   or a session pause (`httpStatus(429)`, no request made); or
+    ///   `keyRefused` for a 401, and for every later fetch with that key (no
+    ///   request made).
+    /// - Throws: `CancellationError` only.
+    func fetchCoreText(doi: String, apiKey: String) async throws -> COREFetch {
+        guard !doi.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .absent }
+        // The key before the pause: it is the cause the reader can act on (#498).
+        // Only the refused key is refused: a corrected one is asked again.
+        let keyDigest = CORE.keyDigest(apiKey)
+        if coreThrottle.refuses(keyDigest: keyDigest) { return .keyRefused }
+        if coreThrottle.isPaused {
+            return .unreachable(.httpStatus(BioMedLitConstants.httpStatusRateLimited))
+        }
+        // A request we could not build was never sent: not an absence.
+        guard let url = CORE.searchURL(doi: doi) else { return .unreachable(.requestFailed) }
+        // URLSession drops `Authorization` from a redirected request, to any
+        // host (observed on Darwin 27, CFNetwork 3896), so the key never
+        // follows a redirect elsewhere, as Python and OkHttp ensure by hand.
+        let headers = ["Authorization": "Bearer \(apiKey)", "Accept": "application/json"]
+        let answer: (status: Int, body: Data)
+        do {
+            answer = try await RetryHelper.retry(
+                config: coreRetry,
+                shouldRetry: RetryHelper.retryOnlyTransient
+            ) {
+                try await self.pacedAttempt(url, host: .core, headers: headers)
+            }
+        } catch where error.isCancellation {
+            throw CancellationError()
+        } catch FullTextError.serverError(let statusCode) {
+            // A throttle or server error that outlasted its retries.
+            coreThrottle.record(endedOn: statusCode, keyDigest: keyDigest)
+            return .unreachable(.httpStatus(statusCode))
+        } catch FullTextError.invalidResponse {
+            // As OpenAlex maps it: an answer that is not HTTP
+            coreThrottle.record(endedOn: nil, keyDigest: keyDigest)
+            return .unreachable(.malformedResponse)
+        } catch {
+            // Logged by the chain, which knows what it falls through to.
+            coreThrottle.record(endedOn: nil, keyDigest: keyDigest)
+            return .unreachable(SearchTransport.failure(for: error))
+        }
+        coreThrottle.record(endedOn: answer.status, keyDigest: keyDigest)
+        if answer.status == BioMedLitConstants.coreKeyRefusedStatus { return .keyRefused }
+        guard answer.status == BioMedLitConstants.httpStatusOK else {
+            return .unreachable(.httpStatus(answer.status))
+        }
+        do {
+            if let text = try CORE.fullText(fromAnswer: answer.body, doi: doi) {
+                return .served(text)
+            }
+            return .absent
+        } catch {
+            return .unreachable(.malformedResponse)
         }
     }
 
@@ -2513,7 +2645,10 @@ public actor FullTextService {
 
     /// The shortfall the fallbacks carry (#480): a copy served, whether not
     /// cached or cached without text, settles the open-access question, so
-    /// nothing that went unsettled is told then. `FullTextResult.init` asserts the same of the link itself.
+    /// nothing that went unsettled is told then, but CORE's entry. A copy
+    /// without text is no full text obtained, so a CORE left unasked or
+    /// unreachable after it keeps the absence open (#499), as Python's does.
+    /// `FullTextResult.init` asserts the same of the link itself.
     ///
     /// - Parameters:
     ///   - shortfall: What went unsettled in the open-access tiers.
@@ -2523,7 +2658,90 @@ public actor FullTextService {
     static func settledOpenAccessShortfall(
         _ shortfall: OpenAccessShortfall?, copyServed: Bool
     ) -> OpenAccessShortfall? {
-        copyServed ? nil : shortfall
+        copyServed ? shortfall?.keeping(only: .core) : shortfall
+    }
+
+    /// Ask CORE for this article's text (#480, stage C) and record what it
+    /// left unsettled: the chain's CORE step, shared by the textless copy's.
+    ///
+    /// - Parameters:
+    ///   - doi: The DOI, as ``CORE/bareDOI(_:)`` cleans it; blank asks nothing.
+    ///   - degradation: Why this is not the best source that existed, if it is not.
+    ///   - shortfall: What went unsettled so far; CORE's failure, or its
+    ///     refused key (#498), is added.
+    /// - Returns: CORE's text as the result, or `nil` when it served none or
+    ///   was not asked (no key, or no DOI).
+    /// - Throws: `CancellationError`.
+    private func coreTextResult(
+        doi: String, degradation: FullTextDegradation?, shortfall: inout OpenAccessShortfall?
+    ) async throws -> FullTextResult? {
+        guard !doi.isEmpty else { return nil }
+        guard let coreAPIKey else {
+            BioMedLitLib.logger?.debug(
+                "No CORE API key configured; CORE not asked about DOI \(doi)", category: .fullText
+            )
+            return nil
+        }
+        switch try await fetchCoreText(doi: doi, apiKey: coreAPIKey) {
+        case .served(let text):
+            BioMedLitLib.logger?.info(
+                "Retrieved CORE's extracted text for DOI \(doi)", category: .fullText
+            )
+            // Text in hand: it beats a held abstract, a link and a copy
+            // without text, and settles the open-access question.
+            return FullTextResult(
+                content: .core(text: text),
+                degradation: degradation,
+                contentKind: .extracted,
+                extractedText: text
+            )
+        case .absent:
+            BioMedLitLib.logger?.info("CORE holds no text for DOI \(doi)", category: .fullText)
+        case .unreachable(let failure):
+            shortfall = .adding(OpenAccessShortfall(source: .core, failure: failure), to: shortfall)
+            BioMedLitLib.logger?.warning(
+                "CORE could not be asked about DOI \(doi) (\(failure.describe())), so any "
+                    + "text it holds is not assessed",
+                category: .fullText
+            )
+        case .keyRefused:
+            // A skip, not a failure: told as the key, and it keeps the absence
+            // unsettled (#498). Logged once, by the throttle, when new.
+            shortfall = .adding(.coreKeyRefused, to: shortfall)
+            BioMedLitLib.logger?.debug(
+                "CORE's key is refused; not asked about DOI \(doi)", category: .fullText
+            )
+        }
+        return nil
+    }
+
+    /// A tier's result, unless it is a copy that yielded no text and CORE has
+    /// the text (#499): a scan is no full text obtained, so CORE is asked
+    /// before it is returned, as Python asks after any PDF that yields none.
+    ///
+    /// Reached only where the walk returns a tier's result, before the chain's
+    /// own CORE step, so CORE is asked at most once per fetch. A copy returned
+    /// with an abstract held never arrives here: the walk goes on to that step.
+    ///
+    /// - Parameters:
+    ///   - result: The tier's result; anything but a textless copy (a cached
+    ///     file, no text) is returned as it is.
+    ///   - doi: The DOI CORE is asked by; blank asks nothing.
+    ///   - degradation: Why this is not the best source that existed, if it is not.
+    /// - Returns: CORE's text when served; otherwise the copy, carrying CORE's
+    ///   unsettled entry (unreachable, or its refused key) so the absence stays
+    ///   open. An absent CORE, or none asked, adds nothing.
+    /// - Throws: `CancellationError`.
+    private func textlessCopyOrCORE(
+        _ result: FullTextResult, doi: String, degradation: FullTextDegradation?
+    ) async throws -> FullTextResult {
+        guard result.contentKind == .none, result.localPDFPath != nil else { return result }
+        var coreShortfall: OpenAccessShortfall?
+        if let core = try await coreTextResult(doi: doi, degradation: degradation, shortfall: &coreShortfall) {
+            return core
+        }
+        guard let coreShortfall else { return result }
+        return result.noting(openAccessShortfall: coreShortfall, pdfNotSavedFrom: result.pdfNotSavedFrom)
     }
 
     /// Save PDF data to the cache directory.

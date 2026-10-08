@@ -26,6 +26,7 @@ import com.bmlibrarian.factchecker.data.remote.europepmc.FullTextAccession
 import com.bmlibrarian.factchecker.data.remote.europepmc.FullTextXmlFetch
 import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
 import com.bmlibrarian.factchecker.domain.model.OpenAccessSource
+import com.bmlibrarian.factchecker.domain.model.OpenAccessUnsettledReason
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
@@ -59,7 +60,9 @@ import javax.inject.Singleton
  *    or the PDF an open-access landing page declares
  * 5. OpenAlex PDFs - the PDFs its locations name that Unpaywall did not, asked
  *    only when no Unpaywall copy was served ([openAlexSteps])
- * 6. DOI Resolution - link to publisher website
+ * 6. CORE's extracted text - asked once, only with the user's key, and only when
+ *    no open-access copy was served ([askCore]); plain text, never shown as HTML
+ * 7. DOI Resolution - link to publisher website
  *
  * Full-text content is cached locally after first retrieval.
  */
@@ -70,7 +73,8 @@ class FullTextService @Inject constructor(
     private val unpaywallApi: UnpaywallApi,
     private val httpClient: OkHttpClient,
     private val pmcOpenData: PmcOpenDataService,
-    private val openAlex: OpenAlexService
+    private val openAlex: OpenAlexService,
+    private val core: CoreService
 ) {
     companion object {
         private const val TAG = "FullTextService"
@@ -180,12 +184,21 @@ class FullTextService @Inject constructor(
         ) : FullTextResult(hasContent = true)
 
         /**
+         * CORE's extracted text (#480, stage C): plain text, shown as such, never
+         * as HTML. Untrusted: the viewer renders it in a text view, not its
+         * JavaScript-enabled WebView.
+         *
+         * @property text The text CORE extracted from a repository copy
+         */
+        data class CoreText(val text: String) : FullTextResult(hasContent = true)
+
+        /**
          * Fall back to DOI/publisher URL.
          *
          * @param url URL to the publisher page.
          * @param openAccessShortfall Why the open-access copy went unassessed when
-         *   Unpaywall, the landing page it named, OpenAlex, or a PDF either named
-         *   could not settle whether a free copy exists; null when nothing was
+         *   Unpaywall, the landing page it named, OpenAlex, a PDF either named, or
+         *   CORE could not settle whether a free copy exists; null when nothing was
          *   left unsettled. Stored on the document and shown to the reader
          *   (#466): the link alone reads as "no free copy".
          */
@@ -460,6 +473,20 @@ class FullTextService @Inject constructor(
             openAccessShortfall = steps.filterIsInstance<OpenAccessStep.Unsettled>()
                 .fold(null as OpenAccessShortfall?) { held, step -> OpenAccessShortfall.adding(step.shortfall, held) }
             Log.d(TAG, "Neither Unpaywall nor OpenAlex named a PDF to try for $usableDoi")
+
+            // CORE's extracted text (#480, stage C): last, only with a key, and only
+            // because no open-access candidate exists. A failure is an unsettled lookup.
+            when (val fetched = core.fetchText(usableDoi)) {
+                is CoreFetch.Served -> return@withContext Result.success(FullTextResult.CoreText(fetched.text))
+                is CoreFetch.Unreachable -> openAccessShortfall = OpenAccessShortfall.adding(
+                    OpenAccessShortfall(OpenAccessSource.CORE, OpenAccessUnsettledReason.Failed(fetched.failure)),
+                    openAccessShortfall
+                )
+                // A skip, not a failure: told as the key, and it keeps the absence unsettled (#498)
+                CoreFetch.KeyRefused -> openAccessShortfall =
+                    OpenAccessShortfall.adding(OpenAccessShortfall.CORE_KEY_REFUSED, openAccessShortfall)
+                CoreFetch.Absent, null -> Unit
+            }
         }
 
         // Fall back to DOI URL if DOI is available
@@ -680,6 +707,20 @@ class FullTextService @Inject constructor(
             )
         }
     }
+
+    /**
+     * CORE's extracted text for [doi] (#480, stage C), for recording to ask once
+     * every open-access candidate, OpenAlex's included, failed. The chain asks
+     * CORE itself when no candidate was named; never otherwise, and never after
+     * a copy was served.
+     *
+     * @param doi The DOI
+     * @return Null when no CORE key is set (nothing was asked, nothing to record);
+     *   otherwise served, absent, unreachable, or KeyRefused (a 401, now or earlier
+     *   this session, for this key)
+     * @throws CancellationException if the caller cancelled.
+     */
+    suspend fun askCore(doi: String): CoreFetch? = core.fetchText(doi)
 
     /**
      * OpenAlex's steps, for the PDFs Unpaywall did not name (#480, stage B):
@@ -1025,6 +1066,7 @@ class FullTextService @Inject constructor(
         return when (result) {
             is FullTextResult.EuropePmcXml -> Constants.FULLTEXT_SOURCE_EUROPE_PMC
             is FullTextResult.PmcOpenDataXml -> Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA
+            is FullTextResult.CoreText -> Constants.FULLTEXT_SOURCE_CORE
             is FullTextResult.EuropePmcPdf -> Constants.FULLTEXT_SOURCE_EUROPE_PMC
             is FullTextResult.OpenAccessPdfs ->
                 result.steps.filterIsInstance<OpenAccessStep.Candidate>().first().namedBy.fullTextSource

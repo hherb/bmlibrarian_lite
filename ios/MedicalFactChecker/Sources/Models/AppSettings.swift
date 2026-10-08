@@ -27,6 +27,9 @@ final class AppSettings {
 
     static let shared = AppSettings()
 
+    /// Where the API keys are kept: the Keychain, or a test's stand-in.
+    private let secretStore: any SecretStore
+
     // MARK: - LLM Configuration
 
     /// Selected LLM provider.
@@ -79,7 +82,7 @@ final class AppSettings {
             return cached
         }
         let keychainKey = Keys.llmAPIKeyPrefix + provider.rawValue
-        let loaded = KeychainHelper.load(key: keychainKey) ?? ""
+        let loaded = secretStore.load(key: keychainKey) ?? ""
         _providerAPIKeyCache[provider] = loaded
         return loaded
     }
@@ -92,7 +95,7 @@ final class AppSettings {
     func setAPIKey(_ key: String, for provider: LLMProvider) {
         _providerAPIKeyCache[provider] = key
         let keychainKey = Keys.llmAPIKeyPrefix + provider.rawValue
-        KeychainHelper.save(key: keychainKey, value: key)
+        _ = secretStore.save(key: keychainKey, value: key)
     }
 
     /// Clear all stored API keys for all providers.
@@ -100,7 +103,7 @@ final class AppSettings {
         _providerAPIKeyCache.removeAll()
         for provider in LLMProvider.allCases {
             let keychainKey = Keys.llmAPIKeyPrefix + provider.rawValue
-            KeychainHelper.delete(key: keychainKey)
+            _ = secretStore.delete(key: keychainKey)
         }
     }
 
@@ -114,22 +117,70 @@ final class AppSettings {
     /// Cached NCBI API key.
     private var _ncbiAPIKeyCache: String?
 
-    /// NCBI API key for higher rate limits (optional).
+    /// NCBI API key for higher rate limits (optional): the stored key.
     ///
-    /// Cached in memory after first access to avoid Keychain latency.
+    /// Cached in memory after first access to avoid Keychain latency. Changed
+    /// only through ``saveNCBIAPIKey(_:)``, so it never reads as saved when
+    /// the save failed.
     var ncbiAPIKey: String {
-        get {
-            if let cached = _ncbiAPIKeyCache {
-                return cached
-            }
-            let loaded = KeychainHelper.load(key: Keys.ncbiAPIKey) ?? ""
-            _ncbiAPIKeyCache = loaded
-            return loaded
+        if let cached = _ncbiAPIKeyCache {
+            return cached
         }
-        set {
-            _ncbiAPIKeyCache = newValue
-            KeychainHelper.save(key: Keys.ncbiAPIKey, value: newValue)
+        let loaded = secretStore.load(key: Keys.ncbiAPIKey) ?? ""
+        _ncbiAPIKeyCache = loaded
+        return loaded
+    }
+
+    /// Store the NCBI API key, then cache it; an empty key removes it.
+    ///
+    /// - Parameter key: The key to store.
+    /// - Returns: Whether it was stored. On failure the key stored before is
+    ///   kept and stays the one in use (the store logs why).
+    @discardableResult
+    func saveNCBIAPIKey(_ key: String) -> Bool {
+        guard secretStore.save(key: Keys.ncbiAPIKey, value: key) else { return false }
+        _ncbiAPIKeyCache = key
+        return true
+    }
+
+    /// Cached CORE API key.
+    private var _coreAPIKeyCache: String?
+
+    /// CORE API key (optional), which lets the app read the text CORE extracted (#480):
+    /// the stored key.
+    ///
+    /// Cached in memory after first access to avoid Keychain latency. Changed
+    /// only through ``saveCOREAPIKey(_:)``, so it never reads as saved when
+    /// the save failed.
+    var coreAPIKey: String {
+        if let cached = _coreAPIKeyCache {
+            return cached
         }
+        let loaded = secretStore.load(key: Keys.coreAPIKey) ?? ""
+        _coreAPIKeyCache = loaded
+        return loaded
+    }
+
+    /// Store the CORE API key, then cache it; an empty key removes it.
+    ///
+    /// - Parameter key: The key to store.
+    /// - Returns: Whether it was stored. On failure the key stored before is
+    ///   kept and stays the one in use (the store logs why).
+    @discardableResult
+    func saveCOREAPIKey(_ key: String) -> Bool {
+        guard secretStore.save(key: Keys.coreAPIKey, value: key) else { return false }
+        _coreAPIKeyCache = key
+        return true
+    }
+
+    /// What the settings say when an API key could not be stored, in place
+    /// of "saved".
+    ///
+    /// - Parameter keyName: The key's service ("CORE", "NCBI").
+    /// - Returns: The message: not saved, and the key in use is unchanged.
+    static func keySaveFailureMessage(keyName: String) -> String {
+        "The \(keyName) API key could not be saved to the Keychain, so the key in use is unchanged. "
+            + "Please try again."
     }
 
     // MARK: - Search Settings
@@ -215,7 +266,12 @@ final class AppSettings {
 
     // MARK: - Initialization
 
-    private init() {
+    /// Load the settings. The app uses ``shared``.
+    ///
+    /// - Parameter secretStore: Where the API keys are kept. Defaults to the
+    ///   Keychain; a test passes a stand-in, having no Keychain entitlement.
+    init(secretStore: any SecretStore = KeychainSecretStore()) {
+        self.secretStore = secretStore
         let defaults = UserDefaults.standard
 
         // Determine provider first (need local variable before any self access)
@@ -275,11 +331,11 @@ final class AppSettings {
         guard !defaults.bool(forKey: Keys.apiKeyMigrated) else { return }
 
         // Check for legacy key
-        if let legacyKey = KeychainHelper.load(key: Keys.llmAPIKeyLegacy), !legacyKey.isEmpty {
+        if let legacyKey = secretStore.load(key: Keys.llmAPIKeyLegacy), !legacyKey.isEmpty {
             // Save to new per-provider key
             setAPIKey(legacyKey, for: provider)
             // Delete legacy key
-            KeychainHelper.delete(key: Keys.llmAPIKeyLegacy)
+            _ = secretStore.delete(key: Keys.llmAPIKeyLegacy)
         }
 
         // Mark as migrated
@@ -297,6 +353,7 @@ final class AppSettings {
         static let apiKeyMigrated = "api_key_migrated_v1"
         static let ncbiEmail = "ncbi_email"
         static let ncbiAPIKey = "ncbi_api_key"
+        static let coreAPIKey = "core_api_key"
         static let batchSize = "batch_size"
         static let minRelevantDocuments = "min_relevant_documents"
         static let minScoreThreshold = "min_score_threshold"
@@ -350,7 +407,9 @@ final class AppSettings {
         llmModel = LLMProvider.anthropic.defaultModel?.id ?? "claude-sonnet-4-5-20250929"
         clearAllAPIKeys()
         ncbiEmail = ""
-        ncbiAPIKey = ""
+        // A failed removal keeps the stored key in use (the store logs why)
+        saveNCBIAPIKey("")
+        saveCOREAPIKey("")
         batchSize = 20
         minRelevantDocuments = 5
         minScoreThreshold = 3

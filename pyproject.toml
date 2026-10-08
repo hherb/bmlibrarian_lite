@@ -160,4 +160,5 @@ addopts = "-v --tb=short -m 'not integration'"
 markers = [
     "integration: marks tests as integration tests requiring network access (deselect with '-m \"not integration\"')",
     "real_openalex_client: the PDF discoverer builds its real OpenAlex client (tests/conftest.py otherwise answers every DOI as unknown)",
+    "real_core_client: the full-text discoverer builds its real CORE client (tests/conftest.py otherwise builds none)",
 ]

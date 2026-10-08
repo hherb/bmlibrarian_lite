@@ -44,6 +44,11 @@ final class StubURLProtocol: URLProtocol {
     static var fallbackRoutes: [String: (status: Int, body: Data)] = defaultFallbackRoutes
     static let defaultFallbackRoutes: [String: (status: Int, body: Data)] = [
         "api.openalex.org": (404, Data()),
+        // CORE is asked only with a key (#480, stage C); a test that passes
+        // one and sets no route gets CORE's own answer of no results. A
+        // `search` route (Europe PMC's) also matches CORE's `/search/works/`
+        // URL and wins over this, so such a test routes CORE itself.
+        "api.core.ac.uk": (200, Data(#"{"results": []}"#.utf8)),
     ]
 
     /// Answers served in order to requests whose URL contains the key, one
@@ -86,6 +91,11 @@ final class StubURLProtocol: URLProtocol {
     /// URLs is what lets a test assert the query rather than infer it.
     static private(set) var requestedURLs: [String] = []
 
+    /// The header fields of every request, in the order of ``requestedURLs``:
+    /// the same index names the same request. Lets a test assert where a
+    /// credential travelled (CORE's key, #480), not merely that it was sent.
+    static private(set) var requestedHeaders: [[String: String]] = []
+
     /// Whether any request carried this substring. Query values arrive
     /// percent-encoded, so callers should pass an encoded fragment or use
     /// ``requestedURLs`` directly.
@@ -103,6 +113,7 @@ final class StubURLProtocol: URLProtocol {
         headers = [:]
         redirects = [:]
         requestedURLs = []
+        requestedHeaders = []
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -112,6 +123,7 @@ final class StubURLProtocol: URLProtocol {
     override func startLoading() {
         let url = request.url?.absoluteString ?? ""
         Self.requestedURLs.append(url)
+        Self.requestedHeaders.append(request.allHTTPHeaderFields ?? [:])
         if let failure = Self.failures.first(where: { url.contains($0.key) })?.value {
             client?.urlProtocol(self, didFailWithError: failure)
             return

@@ -19,6 +19,7 @@
 package com.bmlibrarian.factchecker.ui.report
 
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
+import com.bmlibrarian.factchecker.data.remote.fulltext.CoreFetch
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.remote.fulltext.OpenAccessStep
 import com.bmlibrarian.factchecker.data.remote.fulltext.PdfDownload
@@ -71,6 +72,8 @@ class ReportViewModelFullTextTest {
         fullTextService = mockk(relaxed = true) {
             // A relaxed MockK answers a suspend call with null, not an empty list
             coEvery { openAlexSteps(any(), any()) } returns emptyList()
+            // CORE with no key, as for a user without one: a relaxed mock would invent an answer
+            coEvery { askCore(any()) } returns null
         }
         documentRepository = mockk(relaxed = true)
     }
@@ -147,5 +150,29 @@ class ReportViewModelFullTextTest {
         coVerify(exactly = 1) { fullTextService.openAlexSteps("10.1/x", listOf(unpaywallPdf)) }
         assertEquals("openalex", written.fullTextSource)
         assertEquals("/cache/d.pdf", written.pdfPath)
+    }
+
+    /**
+     * Once every open-access PDF failed, OpenAlex's included, the sheet asks
+     * CORE through the service, and records its text as CORE's, plain (#480).
+     */
+    @Test
+    fun `CORE is asked through the service once every PDF failed`() {
+        val unpaywallPdf = "https://repo.example.org/a.pdf"
+        coEvery { fullTextService.downloadPdf(unpaywallPdf, any()) } returns
+            PdfDownload.Failed(RequestFailure.forHttpStatus(404))
+        coEvery { fullTextService.askCore("10.1/x") } returns CoreFetch.Served("core text")
+
+        val written = fetch(
+            document,
+            FullTextService.FullTextResult.OpenAccessPdfs(
+                listOf(OpenAccessStep.Candidate(unpaywallPdf, PdfNamer.UNPAYWALL)), "10.1/x"
+            )
+        )
+
+        coVerify(exactly = 1) { fullTextService.askCore("10.1/x") }
+        assertEquals("core", written.fullTextSource)
+        assertEquals("core text", written.fullTextMarkdown)
+        assertNull(written.fullTextHTML)
     }
 }

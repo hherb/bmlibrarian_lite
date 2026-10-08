@@ -29,6 +29,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -49,6 +50,9 @@ class OpenAccessStepsRecordingTest {
     private val noOpenAlex: suspend (String, List<String>) -> List<OpenAccessStep> = { _, _ -> emptyList() }
     private val openAlexPdf = "https://oa.example.org/c.pdf"
 
+    /** CORE with no key: never asked, as for a user without one. */
+    private val noCore: suspend (String) -> CoreFetch? = { null }
+
     /** A document an earlier fetch left on the DOI link with Unpaywall unsettled, as [FullTextRecordingTest]'s. */
     private fun document() = DocumentEntity(
         id = "d", sessionId = "s", title = "t", doi = doi,
@@ -63,7 +67,7 @@ class OpenAccessStepsRecordingTest {
         val recorded = document().recordingFullTextFetch(found(candidate(first), candidate(second)), downloadPdf = { url ->
             asked += url
             if (url == first) PdfDownload.Failed(RequestFailure.forHttpStatus(403)) else PdfDownload.Saved("/cache/d.pdf")
-        }, askOpenAlex = noOpenAlex)
+        }, askOpenAlex = noOpenAlex, askCore = noCore)
         assertEquals(listOf(first, second), asked)
         assertEquals(FullTextResult.OpenAccessPdf(second, doi, PdfNamer.UNPAYWALL), recorded.result)
         assertEquals("/cache/d.pdf", recorded.document.pdfPath)
@@ -75,7 +79,7 @@ class OpenAccessStepsRecordingTest {
     fun `every candidate refused is told, each by its address`() = runTest {
         val recorded = document().recordingFullTextFetch(found(candidate(first), candidate(second)), downloadPdf = { url ->
             PdfDownload.Failed(RequestFailure.forHttpStatus(if (url == first) 403 else 503))
-        }, askOpenAlex = noOpenAlex)
+        }, askOpenAlex = noOpenAlex, askCore = noCore)
         val expected = refused(first, 403) + refused(second, 503)
         assertEquals(FullTextResult.DoiUrl(doiLink(doi), expected), recorded.result)
         assertEquals(expected, recorded.document.openAccessShortfall)
@@ -88,7 +92,7 @@ class OpenAccessStepsRecordingTest {
         val lookup = OpenAccessShortfall(OpenAccessSource.LANDING_PAGE, RequestFailure(RequestFailureKind.TIMEOUT))
         val recorded = document().recordingFullTextFetch(found(OpenAccessStep.Unsettled(lookup), candidate(first)), downloadPdf = {
             PdfDownload.Failed(RequestFailure.forHttpStatus(403))
-        }, askOpenAlex = noOpenAlex)
+        }, askOpenAlex = noOpenAlex, askCore = noCore)
         assertEquals(FullTextResult.DoiUrl(doiLink(doi), lookup + refused(first, 403)), recorded.result)
     }
 
@@ -105,7 +109,8 @@ class OpenAccessStepsRecordingTest {
                 asked += url
                 PdfDownload.Failed(RequestFailure.forHttpStatus(404))
             },
-            askOpenAlex = noOpenAlex
+            askOpenAlex = noOpenAlex,
+            askCore = noCore
         )
         assertEquals(listOf(first, second), asked)
         assertEquals(
@@ -119,7 +124,7 @@ class OpenAccessStepsRecordingTest {
         val asked = mutableListOf<String>()
         val recorded = document().recordingFullTextFetch(found(candidate(first), candidate(second)), downloadPdf = { url ->
             asked += url; PdfDownload.NotSaved
-        }, askOpenAlex = noOpenAlex)
+        }, askOpenAlex = noOpenAlex, askCore = noCore)
         assertEquals("saving is our problem: no further candidate", listOf(first), asked)
         assertEquals(FullTextResult.OpenAccessPdf(first, doi, PdfNamer.UNPAYWALL, notSaved = true), recorded.result)
         assertNull(recorded.document.pdfPath)
@@ -133,7 +138,7 @@ class OpenAccessStepsRecordingTest {
     fun `a copy not saved after a refused one records no shortfall`() = runTest {
         val recorded = document().recordingFullTextFetch(found(candidate(first), candidate(second)), downloadPdf = { url ->
             if (url == first) PdfDownload.Failed(RequestFailure.forHttpStatus(403)) else PdfDownload.NotSaved
-        }, askOpenAlex = noOpenAlex)
+        }, askOpenAlex = noOpenAlex, askCore = noCore)
         assertEquals(FullTextResult.OpenAccessPdf(second, doi, PdfNamer.UNPAYWALL, notSaved = true), recorded.result)
         assertNull(recorded.document.fullTextOpenAccessShortfallJson)
         assertEquals(second, recorded.document.fullTextPdfNotSavedFrom)
@@ -145,7 +150,7 @@ class OpenAccessStepsRecordingTest {
         val recorded = document().copy(fullTextPdfNotSavedFrom = first)
             .recordingFullTextFetch(found(candidate(first), candidate(second)), downloadPdf = { url ->
                 asked += url; PdfDownload.Saved("/cache/d.pdf")
-            }, askOpenAlex = noOpenAlex)
+            }, askOpenAlex = noOpenAlex, askCore = noCore)
         assertEquals(listOf(first), asked)
         assertNull(recorded.document.fullTextPdfNotSavedFrom)
     }
@@ -163,7 +168,7 @@ class OpenAccessStepsRecordingTest {
         )
         for (answer in answers) {
             val recorded = document().copy(fullTextPdfNotSavedFrom = second)
-                .recordingFullTextFetch(answer, downloadPdf = { PdfDownload.Failed(RequestFailure.forHttpStatus(404)) }, askOpenAlex = noOpenAlex)
+                .recordingFullTextFetch(answer, downloadPdf = { PdfDownload.Failed(RequestFailure.forHttpStatus(404)) }, askOpenAlex = noOpenAlex, askCore = noCore)
             assertNull("$answer", recorded.document.fullTextPdfNotSavedFrom)
         }
     }
@@ -171,7 +176,7 @@ class OpenAccessStepsRecordingTest {
     @Test
     fun `a Europe PMC render served but not saved is noted too`() = runTest {
         val render = "https://europepmc.org/articles/PMC1/pdf"
-        val recorded = document().recordingFullTextFetch(FullTextResult.EuropePmcPdf(render), downloadPdf = { PdfDownload.NotSaved }, askOpenAlex = noOpenAlex)
+        val recorded = document().recordingFullTextFetch(FullTextResult.EuropePmcPdf(render), downloadPdf = { PdfDownload.NotSaved }, askOpenAlex = noOpenAlex, askCore = noCore)
         assertEquals(render, recorded.document.fullTextPdfNotSavedFrom)
         assertNull(recorded.document.pdfPath)
     }
@@ -179,7 +184,7 @@ class OpenAccessStepsRecordingTest {
     /** The note says the link is kept when the link is what the reader is given. */
     @Test
     fun `the caching note says the link is kept on a link-only record`() = runTest {
-        val recorded = document().recordingFullTextFetch(found(candidate(first)), downloadPdf = { PdfDownload.NotSaved }, askOpenAlex = noOpenAlex)
+        val recorded = document().recordingFullTextFetch(found(candidate(first)), downloadPdf = { PdfDownload.NotSaved }, askOpenAlex = noOpenAlex, askCore = noCore)
         assertEquals(
             "A PDF of this article was found at walled.example.org but could not be saved on this device, " +
                 "so only its link is kept. Check the free storage space and try again.",
@@ -211,7 +216,8 @@ class OpenAccessStepsRecordingTest {
             { url ->
                 if (url == first) PdfDownload.Failed(RequestFailure.forHttpStatus(403)) else PdfDownload.Saved("/cache/d.pdf")
             },
-            { _, tried -> askedWith = tried; listOf(OpenAccessStep.Candidate(openAlexPdf, PdfNamer.OPENALEX)) }
+            { _, tried -> askedWith = tried; listOf(OpenAccessStep.Candidate(openAlexPdf, PdfNamer.OPENALEX)) },
+            noCore
         )
         assertEquals(listOf(first), askedWith)
         assertEquals(FullTextResult.OpenAccessPdf(openAlexPdf, doi, PdfNamer.OPENALEX), recorded.result)
@@ -228,7 +234,8 @@ class OpenAccessStepsRecordingTest {
         document().recordingFullTextFetch(
             found(candidate(first), candidate(second)),
             { url -> downloads += url; PdfDownload.Failed(RequestFailure.forHttpStatus(404)) },
-            { askedDoi, tried -> calls += askedDoi to tried; downloads += "openalex"; emptyList() }
+            { askedDoi, tried -> calls += askedDoi to tried; downloads += "openalex"; emptyList() },
+            noCore
         )
         assertEquals(listOf(doi to listOf(first, second)), calls)
         assertEquals(listOf(first, second, "openalex"), downloads)
@@ -244,7 +251,8 @@ class OpenAccessStepsRecordingTest {
         document().recordingFullTextFetch(
             found(candidate(first), OpenAccessStep.Unsettled(unfetchable)),
             { PdfDownload.Failed(RequestFailure.forHttpStatus(404)) },
-            { _, tried -> askedWith = tried; emptyList() }
+            { _, tried -> askedWith = tried; emptyList() },
+            noCore
         )
         assertEquals(listOf(first, "ftp://repo.example.org/c.pdf"), askedWith)
     }
@@ -253,7 +261,7 @@ class OpenAccessStepsRecordingTest {
     fun `OpenAlex is not asked when an Unpaywall copy was served, saved or not`() = runTest {
         for (download in listOf(PdfDownload.Saved("/cache/d.pdf"), PdfDownload.NotSaved)) {
             var asked = false
-            document().recordingFullTextFetch(found(candidate(first)), { download }, { _, _ -> asked = true; emptyList() })
+            document().recordingFullTextFetch(found(candidate(first)), { download }, { _, _ -> asked = true; emptyList() }, noCore)
             assertFalse("$download", asked)
         }
     }
@@ -266,7 +274,8 @@ class OpenAccessStepsRecordingTest {
                 listOf(OpenAccessStep.Candidate(openAlexPdf, PdfNamer.OPENALEX)), doi, openAlexAsked = true
             ),
             { PdfDownload.Failed(RequestFailure.forHttpStatus(403)) },
-            { _, _ -> asked = true; emptyList() }
+            { _, _ -> asked = true; emptyList() },
+            noCore
         )
         assertFalse(asked)
     }
@@ -277,7 +286,8 @@ class OpenAccessStepsRecordingTest {
         val recorded = document().recordingFullTextFetch(
             found(candidate(first)),
             { PdfDownload.Failed(RequestFailure.forHttpStatus(if (it == first) 403 else 404)) },
-            { _, _ -> listOf(OpenAccessStep.Unsettled(timeout), OpenAccessStep.Candidate(openAlexPdf, PdfNamer.OPENALEX)) }
+            { _, _ -> listOf(OpenAccessStep.Unsettled(timeout), OpenAccessStep.Candidate(openAlexPdf, PdfNamer.OPENALEX)) },
+            noCore
         )
         assertEquals(
             refused(first, 403) + timeout +
@@ -292,11 +302,120 @@ class OpenAccessStepsRecordingTest {
         val recorded = document().recordingFullTextFetch(
             found(candidate(first)),
             { url -> if (url == first) PdfDownload.Failed(RequestFailure.forHttpStatus(403)) else PdfDownload.NotSaved },
-            { _, _ -> listOf(OpenAccessStep.Candidate(openAlexPdf, PdfNamer.OPENALEX)) }
+            { _, _ -> listOf(OpenAccessStep.Candidate(openAlexPdf, PdfNamer.OPENALEX)) },
+            noCore
         )
         assertEquals(FullTextResult.OpenAccessPdf(openAlexPdf, doi, PdfNamer.OPENALEX, notSaved = true), recorded.result)
         assertEquals(openAlexPdf, recorded.document.fullTextPdfNotSavedFrom)
         assertNull(recorded.document.fullTextOpenAccessShortfallJson)
+    }
+
+    // ==================== CORE, last before the link (#480, stage C) ====================
+
+    private val coreText = "x".repeat(Constants.CORE_MIN_FULLTEXT_CHARS)
+
+    @Test
+    fun `CORE is asked once every candidate failed, OpenAlex's included`() = runTest {
+        val calls = mutableListOf<String>()
+        val recorded = document().recordingFullTextFetch(
+            found(candidate(first)),
+            { url -> calls += "download $url"; PdfDownload.Failed(RequestFailure.forHttpStatus(403)) },
+            { _, _ -> calls += "openalex"; listOf(OpenAccessStep.Candidate(openAlexPdf, PdfNamer.OPENALEX)) },
+            { askedDoi -> calls += "core $askedDoi"; CoreFetch.Served(coreText) }
+        )
+        assertEquals(listOf("download $first", "openalex", "download $openAlexPdf", "core $doi"), calls)
+        assertEquals(FullTextResult.CoreText(coreText), recorded.result)
+        assertEquals(coreText, recorded.document.fullTextMarkdown)
+        assertNull(recorded.document.fullTextHTML)
+        assertEquals(Constants.FULLTEXT_SOURCE_CORE, recorded.document.fullTextSource)
+        assertNull("CORE's text settles the open-access question", recorded.document.fullTextOpenAccessShortfallJson)
+        assertNull(recorded.document.pdfPath)
+    }
+
+    /** OpenAlex already asked by the service: CORE is still asked once its candidates failed. */
+    @Test
+    fun `CORE is asked after the service's OpenAlex candidates failed`() = runTest {
+        val asked = mutableListOf<String>()
+        val recorded = document().recordingFullTextFetch(
+            FullTextResult.OpenAccessPdfs(
+                listOf(OpenAccessStep.Candidate(openAlexPdf, PdfNamer.OPENALEX)), doi, openAlexAsked = true
+            ),
+            { PdfDownload.Failed(RequestFailure.forHttpStatus(404)) },
+            { _, _ -> error("OpenAlex was asked by the service") },
+            { askedDoi -> asked += askedDoi; CoreFetch.Served(coreText) }
+        )
+        assertEquals(listOf(doi), asked)
+        assertEquals(FullTextResult.CoreText(coreText), recorded.result)
+    }
+
+    @Test
+    fun `CORE is not asked when a copy was served, saved or not`() = runTest {
+        for (download in listOf(PdfDownload.Saved("/cache/d.pdf"), PdfDownload.NotSaved)) {
+            var asked = false
+            val recorded = document().recordingFullTextFetch(
+                found(candidate(first)),
+                { download },
+                { _, _ -> emptyList() },
+                { asked = true; CoreFetch.Served(coreText) }
+            )
+            assertFalse("$download", asked)
+            assertTrue("$download: ${recorded.result}", recorded.result is FullTextResult.OpenAccessPdf)
+        }
+        // And an OpenAlex copy served, after Unpaywall's was refused
+        for (download in listOf(PdfDownload.Saved("/cache/d.pdf"), PdfDownload.NotSaved)) {
+            var asked = false
+            document().recordingFullTextFetch(
+                found(candidate(first)),
+                { url -> if (url == first) PdfDownload.Failed(RequestFailure.forHttpStatus(403)) else download },
+                { _, _ -> listOf(OpenAccessStep.Candidate(openAlexPdf, PdfNamer.OPENALEX)) },
+                { asked = true; CoreFetch.Served(coreText) }
+            )
+            assertFalse("OpenAlex's $download", asked)
+        }
+    }
+
+    @Test
+    fun `an unreachable CORE is told after every refusal`() = runTest {
+        val unreachable = RequestFailure.forHttpStatus(503)
+        val recorded = document().recordingFullTextFetch(
+            found(candidate(first)),
+            { PdfDownload.Failed(RequestFailure.forHttpStatus(403)) },
+            { _, _ -> emptyList() },
+            { CoreFetch.Unreachable(unreachable) }
+        )
+        val expected = refused(first, 403) + OpenAccessShortfall(OpenAccessSource.CORE, unreachable)
+        assertEquals(FullTextResult.DoiUrl(doiLink(doi), expected), recorded.result)
+        assertEquals(OpenAccessSource.CORE, expected.entries.last().source)
+        assertEquals(expected, recorded.document.openAccessShortfall)
+        assertEquals(Constants.FULLTEXT_SOURCE_DOI, recorded.document.fullTextSource)
+    }
+
+    /** A refused CORE key is a skip of CORE after the refusals, never a failure (#498). */
+    @Test
+    fun `a refused CORE key is told after every refusal`() = runTest {
+        val recorded = document().recordingFullTextFetch(
+            found(candidate(first)),
+            { PdfDownload.Failed(RequestFailure.forHttpStatus(403)) },
+            { _, _ -> emptyList() },
+            { CoreFetch.KeyRefused }
+        )
+        val expected = refused(first, 403) + OpenAccessShortfall.CORE_KEY_REFUSED
+        assertEquals(FullTextResult.DoiUrl(doiLink(doi), expected), recorded.result)
+        assertEquals(expected, recorded.document.openAccessShortfall)
+    }
+
+    /** CORE knowing nothing, or not asked for want of a key, adds nothing: the refusals alone are told. */
+    @Test
+    fun `CORE absent or without a key adds nothing to the refusals`() = runTest {
+        for (answer in listOf<CoreFetch?>(CoreFetch.Absent, null)) {
+            val recorded = document().recordingFullTextFetch(
+                found(candidate(first)),
+                { PdfDownload.Failed(RequestFailure.forHttpStatus(403)) },
+                { _, _ -> emptyList() },
+                { answer }
+            )
+            assertEquals("$answer", FullTextResult.DoiUrl(doiLink(doi), refused(first, 403)), recorded.result)
+        }
     }
 
     @Test(expected = IllegalArgumentException::class)

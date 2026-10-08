@@ -145,6 +145,29 @@ public enum BioMedLitConstants {
     /// `POLITE_RATE_CEILINGS` entry; per service instance, as the bucket's (#489).
     public static let openAlexMinimumInterval: TimeInterval = 0.1
 
+    // MARK: - CORE (#480, stage C)
+
+    /// CORE's API root; pinned by fulltext_parity/core_fulltext.json.
+    public static let coreBaseURL = "https://api.core.ac.uk"
+    /// The search path. Its trailing slash matters: without it CORE answers an HTML page.
+    public static let coreSearchPath = "/v3/search/works/"
+    /// Results asked for: a DOI query can match more than one record.
+    public static let coreSearchLimit = 3
+    /// CORE as the reader's sentences name it, verbatim on every platform.
+    public static let coreServiceName = "CORE"
+    /// The fewest Unicode code points CORE's text holds to count as a full text.
+    public static let coreMinFullTextCharacters = 5000
+    /// Consecutive fetches ending in 429 after which CORE is not asked again this session.
+    public static let corePauseAfterConsecutive429 = 2
+    /// The one status that means CORE refused the key (#498): the first marks that key refused
+    /// for the rest of the process (a corrected key is asked again). Not 403, which Cloudflare
+    /// can answer to a valid key.
+    public static let coreKeyRefusedStatus = 401
+    /// A refused key as the reader is told it, Python's `LookupSkipReason.KEY_REFUSED` words.
+    public static let coreKeyRefusedReason = "the key in the settings was refused"
+    /// 0.4 requests a second, Python's POLITE_RATE_CEILINGS entry, per service instance (#489).
+    public static let coreMinimumInterval: TimeInterval = 2.5
+
     // MARK: - PubMed API
 
     /// NCBI E-utilities base URL.

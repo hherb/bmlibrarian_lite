@@ -54,7 +54,8 @@ class DocumentEntityLinkOnlyTest {
             downloadPdf = {
                 downloaded?.let(PdfDownload::Saved) ?: PdfDownload.Failed(RequestFailure(RequestFailureKind.HTTP_STATUS, 404))
             },
-            askOpenAlex = { _, _ -> emptyList() }
+            askOpenAlex = { _, _ -> emptyList() },
+            askCore = { null }
         ).document
 
     @Test
@@ -95,7 +96,8 @@ class DocumentEntityLinkOnlyTest {
             openAlexAsked = true
         )
         val doc = fresh.recordingFullTextFetch(
-            answer, downloadPdf = { PdfDownload.NotSaved }, askOpenAlex = { _, _ -> emptyList() }
+            answer, downloadPdf = { PdfDownload.NotSaved }, askOpenAlex = { _, _ -> emptyList() },
+            askCore = { null }
         ).document
 
         assertSame(FullTextLinkKind.PDF_NOT_SAVED, doc.linkOnlyKind)
@@ -124,7 +126,8 @@ class DocumentEntityLinkOnlyTest {
         )
         for (answer in answers) {
             val doc = fresh.recordingFullTextFetch(
-                answer, downloadPdf = { PdfDownload.NotSaved }, askOpenAlex = { _, _ -> emptyList() }
+                answer, downloadPdf = { PdfDownload.NotSaved }, askOpenAlex = { _, _ -> emptyList() },
+                askCore = { null }
             ).document
 
             assertNull("$answer", doc.pdfPath)

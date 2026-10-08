@@ -58,7 +58,7 @@ object OpenAlex {
     private const val ASCII_LIMIT = 0x80
 
     /** [value] escaped as UTF-8 bytes, the unreserved characters left bare; never `+` for a space. */
-    private fun escaped(value: String): String = buildString {
+    internal fun escaped(value: String): String = buildString {
         for (byte in value.toByteArray(Charsets.UTF_8)) {
             val unsigned = byte.toInt() and BYTE_MASK
             val char = unsigned.toChar()

@@ -32,7 +32,8 @@ import com.bmlibrarian.factchecker.util.Constants
 /**
  * Badge displaying the source of full-text content.
  *
- * @param source Source name (e.g., "Europe PMC", "PMC Open-Access Collection", "Unpaywall", "OpenAlex", "Publisher").
+ * @param source Source name (e.g., "Europe PMC", "PMC Open-Access Collection", "Unpaywall", "OpenAlex",
+ *   "CORE (extracted text)", "Publisher").
  * @param modifier Modifier for the badge.
  */
 @Composable
@@ -43,8 +44,11 @@ fun FullTextSourceBadge(
     val (backgroundColor, textColor) = when (source.lowercase()) {
         // PMC's open-access collection serves the same JATS as Europe PMC, so it shares its colour
         "europe pmc", Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA_LABEL.lowercase() -> Pair(Color(0xFF1976D2), Color.White)
-        // OpenAlex names open-access PDFs as Unpaywall does, so it shares its colour
-        "unpaywall", Constants.FULLTEXT_SOURCE_OPENALEX_LABEL.lowercase() -> Pair(Color(0xFF4CAF50), Color.White)
+        // OpenAlex names open-access PDFs as Unpaywall does, and CORE's text comes from
+        // the same open repository copies, so both share its colour
+        "unpaywall",
+        Constants.FULLTEXT_SOURCE_OPENALEX_LABEL.lowercase(),
+        Constants.FULLTEXT_SOURCE_CORE_LABEL.lowercase() -> Pair(Color(0xFF4CAF50), Color.White)
         "publisher", "doi" -> Pair(Color(0xFF9E9E9E), Color.White)
         "cached" -> Pair(Color(0xFF607D8B), Color.White)
         else -> Pair(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant)

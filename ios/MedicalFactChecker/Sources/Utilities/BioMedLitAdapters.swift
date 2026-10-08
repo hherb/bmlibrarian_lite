@@ -488,6 +488,10 @@ enum BioMedLitAdapters {
                 return .pdfURL(URL(fileURLWithPath: localPDFPath))
             }
             return .pdfURL(pdfURL)
+        case .core(let text):
+            // Plain prose, shown through the native markdown view (no
+            // WebView), so markdown-like characters in it may be styled.
+            return .markdown(text)
         case .doi(let webURL):
             return .webURL(webURL)
         case .cached(let filePath):
@@ -506,6 +510,7 @@ enum BioMedLitAdapters {
         case .europePMCPDF: return .europePMCPDF
         case .unpaywall: return .unpaywall
         case .openAlex: return .openAlex
+        case .core: return .core
         case .doi: return .doi
         case .cached: return .cached
         }
@@ -555,11 +560,19 @@ extension BMLEuropePMCService {
 extension BMLFullTextService {
     /// Create a configured full text service from app settings.
     ///
-    /// - Parameter settings: App settings containing email for API identification.
+    /// - Parameter settings: App settings containing email for API identification
+    ///   and the optional CORE key.
     /// - Returns: Configured full text service.
     static func create(from settings: AppSettings) -> BMLFullTextService {
-        let email = settings.ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : settings.ncbiEmail
-        return BMLFullTextService(email: email)
+        create(ncbiEmail: settings.ncbiEmail, coreAPIKey: settings.coreAPIKey)
+    }
+
+    /// The service for these settings: the NCBI email (or the app's own address) and,
+    /// when one is set, the user's CORE key (#480, stage C).
+    static func create(ncbiEmail: String, coreAPIKey: String) -> BMLFullTextService {
+        let email = ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : ncbiEmail
+        let key = coreAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return BMLFullTextService(email: email, coreAPIKey: key.isEmpty ? nil : key)
     }
 
     /// Retrieve full text for a document, from every identifier it carries.

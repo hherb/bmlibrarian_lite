@@ -29,11 +29,12 @@ public enum OpenAlex {
     /// Escape a value as Python's `quote(value, safe="")` does: every
     /// character but the unreserved ones, `/` included, as UTF-8 bytes, so a
     /// DOI is one path segment and a `+` in an email is not read as a space.
+    /// Also CORE's, for its search query (#480, stage C).
     ///
-    /// - Parameter value: The DOI or the contact email.
+    /// - Parameter value: The DOI, the contact email, or CORE's query.
     /// - Returns: The escaped text; empty in the case Foundation cannot encode
     ///   it, which a Swift `String` (always valid Unicode) does not reach.
-    private static func escaped(_ value: String) -> String {
+    static func escaped(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? ""
     }
 

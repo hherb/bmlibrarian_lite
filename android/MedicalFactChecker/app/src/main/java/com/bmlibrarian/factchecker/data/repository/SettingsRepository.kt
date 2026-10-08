@@ -20,6 +20,7 @@ package com.bmlibrarian.factchecker.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.bmlibrarian.factchecker.domain.model.AppSettings
@@ -29,6 +30,7 @@ import com.bmlibrarian.factchecker.domain.model.NcbiCredentials
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.util.Constants
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,6 +38,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -79,8 +82,9 @@ class SettingsRepository @Inject constructor(
         context.getSharedPreferences(REGULAR_PREFS_NAME, Context.MODE_PRIVATE)
     }
 
-    // In-memory cache for API keys to avoid decryption on every access
-    private val apiKeyCache = mutableMapOf<String, String>()
+    // In-memory cache for API keys to avoid decryption on every access. Concurrent:
+    // each CORE fetch reads it on an IO thread while the settings screen writes it
+    private val apiKeyCache = ConcurrentHashMap<String, String>()
 
     // Coroutine scope for background initialization
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -275,14 +279,44 @@ class SettingsRepository @Inject constructor(
     }
 
     /**
-     * Save NCBI API key.
+     * Save NCBI API key; see [writeSecretKey].
      *
-     * @param apiKey The NCBI API key
+     * @param apiKey The NCBI API key; empty clears it
+     * @return Whether it was written
      */
-    fun saveNcbiApiKey(apiKey: String) {
-        encryptedPrefs.edit().putString(KEY_NCBI_API_KEY, apiKey).apply()
-        apiKeyCache[KEY_NCBI_API_KEY] = apiKey
+    fun saveNcbiApiKey(apiKey: String): Boolean = saveSecretKey(KEY_NCBI_API_KEY, apiKey, "NCBI API key")
+
+    // ==================== CORE API Key ====================
+
+    /**
+     * Get the CORE API key, which lets the app read CORE's extracted text.
+     *
+     * @return The stored CORE API key, or empty string if not set
+     */
+    fun getCoreApiKey(): String {
+        return apiKeyCache.getOrPut(KEY_CORE_API_KEY) {
+            encryptedPrefs.getString(KEY_CORE_API_KEY, "") ?: ""
+        }
     }
+
+    /**
+     * Save the CORE API key; see [writeSecretKey].
+     *
+     * @param apiKey The CORE API key; empty clears it
+     * @return Whether it was written
+     */
+    fun saveCoreApiKey(apiKey: String): Boolean = saveSecretKey(KEY_CORE_API_KEY, apiKey, "CORE API key")
+
+    /**
+     * Write a key to the encrypted preferences; see [writeSecretKey].
+     *
+     * @param prefKey The preference the key is stored under
+     * @param apiKey The key; empty clears it
+     * @param label What the key is, for the log
+     * @return Whether it was written
+     */
+    private fun saveSecretKey(prefKey: String, apiKey: String, label: String): Boolean =
+        writeSecretKey({ encryptedPrefs }, apiKeyCache, prefKey, apiKey, label)
 
     /**
      * The NCBI API key and email as saved, for the PubMed service to send.
@@ -603,6 +637,7 @@ class SettingsRepository @Inject constructor(
         // Encrypted keys prefix
         private const val KEY_API_KEY_PREFIX = "api_key_"
         private const val KEY_NCBI_API_KEY = "ncbi_api_key"
+        private const val KEY_CORE_API_KEY = "core_api_key"
 
         // Regular keys
         private const val KEY_LLM_PROVIDER = "llm_provider"
@@ -623,4 +658,42 @@ class SettingsRepository @Inject constructor(
         private const val KEY_ENABLE_HYDE = "enable_hyde"
         private const val KEY_PARALLEL_CONCURRENCY = "parallel_concurrency"
     }
+}
+
+/** The log tag of [writeSecretKey]. */
+private const val SECRET_KEY_TAG = "SettingsRepository"
+
+/**
+ * Write a key to its preferences, and tell whether it was written.
+ *
+ * Committed, not applied, so a failed write is known; [cache] takes the key only
+ * once it is on disk, so a failed save leaves the key in use unchanged. Opening
+ * the preferences can fail too (the encrypted store's master key), and is
+ * handled the same way. A failure is logged by its class alone, never with the key.
+ *
+ * @param prefs Opens the preferences the key is stored in
+ * @param cache The keys in use, by preference
+ * @param prefKey The preference the key is stored under
+ * @param apiKey The key; empty clears it
+ * @param label What the key is, for the log
+ * @return Whether it was written
+ */
+internal fun writeSecretKey(
+    prefs: () -> SharedPreferences,
+    cache: MutableMap<String, String>,
+    prefKey: String,
+    apiKey: String,
+    label: String
+): Boolean = try {
+    val written = prefs().edit().putString(prefKey, apiKey).commit()
+    if (written) {
+        cache[prefKey] = apiKey
+    } else {
+        Log.e(SECRET_KEY_TAG, "The $label could not be written")
+    }
+    written
+} catch (e: Exception) {
+    if (e is CancellationException) throw e
+    Log.e(SECRET_KEY_TAG, "The $label could not be saved: ${e.javaClass.simpleName}")
+    false
 }

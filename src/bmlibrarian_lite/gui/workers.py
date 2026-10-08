@@ -383,6 +383,7 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
         openathens_url: Optional[str] = None,
         parent: Optional[QWidget] = None,
         openalex_email: str | None = None,
+        core_api_key: str | None = None,
     ) -> None:
         """
         Initialize full-text discovery worker.
@@ -393,12 +394,14 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
             openathens_url: OpenAthens institution URL for authenticated downloads
             parent: Optional parent widget
             openalex_email: The contact email sent to OpenAlex (#480)
+            core_api_key: The configured CORE key (#480, stage C)
         """
         super().__init__(parent)
         self.doc_dict = doc_dict
         self.unpaywall_email = unpaywall_email
         self.openathens_url = openathens_url
         self.openalex_email = openalex_email
+        self.core_api_key = core_api_key
         self._cancelled = False
         self._discoverer: Optional[FulltextDiscoverer] = None
 
@@ -421,6 +424,21 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
         else:
             self._end(self.error, error)
 
+    def _build_discoverer(self) -> FulltextDiscoverer:
+        """The discoverer this run asks, reporting progress to this worker.
+
+        Returns:
+            A discoverer with this worker's emails, OpenAthens URL and CORE
+            key.
+        """
+        return FulltextDiscoverer(
+            unpaywall_email=self.unpaywall_email,
+            openathens_url=self.openathens_url,
+            progress_callback=self._emit_progress,
+            openalex_email=self.openalex_email,
+            core_api_key=self.core_api_key,
+        )
+
     def _discover(self) -> None:
         """Find the full text, and end the run."""
         try:
@@ -439,12 +457,7 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
                 return
 
             # Create discoverer with progress callback
-            self._discoverer = FulltextDiscoverer(
-                unpaywall_email=self.unpaywall_email,
-                openathens_url=self.openathens_url,
-                progress_callback=self._emit_progress,
-                openalex_email=self.openalex_email,
-            )
+            self._discoverer = self._build_discoverer()
 
             # Perform discovery
             result = self._discoverer.discover_fulltext(
@@ -1466,6 +1479,7 @@ class TransparencyReanalysisWorker(SingleOutcome, QThread):
                 contact_email(self.config),
                 self.config.pubmed.api_key,
                 unpaywall_email=unpaywall_contact_email(self.config),
+                core_api_key=self.config.discovery.core_api_key or None,
             )
 
             for i, doc in enumerate(self.documents):

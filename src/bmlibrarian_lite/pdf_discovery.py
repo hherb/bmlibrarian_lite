@@ -87,6 +87,7 @@ from .analysis_failures import (
     unestablished_access_clause,
     with_unestablished_access,
 )
+from .core_api import CoreFetch
 from .data_models import (
     LookupRecord,
     LookupSkipReason,
@@ -519,13 +520,17 @@ class DiscoveryResult:
         not_saved: The source served the PDF and it could not be written
             here: a fault of ours, told as a caching note (#480). Not a
             ``failure``: the source answered.
+        text: CORE's extracted text, when no PDF was obtained and CORE
+            served the article (#480, stage C); only with ``success`` and
+            no ``file_path``, and never blank.
 
     Raises:
         ValueError: On construction, if a successful result carries a
             failure, a size refusal or a not-saved flag, or if more than one
             of those three is set: each is a different answer to why no PDF
             was obtained, and :func:`unobtained_open_access_pdf` records
-            only one.
+            only one. Also if CORE's ``text`` is carried by anything but a
+            success without a file.
     """
 
     success: bool
@@ -539,9 +544,14 @@ class DiscoveryResult:
     failure: RequestFailure | None = None
     refused_for_size: bool = False
     not_saved: bool = False
+    text: str | None = None
 
     def __post_init__(self) -> None:
         """Refuse a success that says why no PDF was obtained, or two whys."""
+        if self.text is not None and (not self.success or self.file_path is not None):
+            raise ValueError("CORE's text is a success without a file")
+        if self.text is not None and not self.text.strip():
+            raise ValueError("A blank text is not CORE's full text")
         whys = sum((self.failure is not None, self.refused_for_size, self.not_saved))
         if self.success and whys:
             raise ValueError("A downloaded PDF carries no download failure")
@@ -720,6 +730,40 @@ def default_openalex_client(mailto: str | None) -> OpenAlexLocationsClient:
     return OpenAlexLocationsClient(mailto=mailto)
 
 
+class _CoreFallback:
+    """CORE's text, asked at most once, at the first exit that obtained no PDF.
+
+    Asked inside the discovery rather than after it, so a failure is in the
+    record before the reader's sentence is built from it (#480, stage C).
+    """
+
+    def __init__(self, fetch: Callable[[str], CoreFetch] | None, doi: str | None) -> None:
+        """Hold CORE's fetch for this DOI.
+
+        Args:
+            fetch: Asks CORE for one DOI's text; ``None`` when no CORE is
+                configured.
+            doi: The cleaned DOI; without one CORE is not asked.
+        """
+        self._fetch = fetch if doi else None
+        self._doi = doi or ""
+
+    def ask(self) -> tuple[str | None, LookupRecord]:
+        """Ask CORE, once.
+
+        Returns:
+            The text when CORE served it, and what to record otherwise: a
+            failure when CORE could not be asked, a ``KEY_REFUSED`` skip when
+            it refused the key (#498), nothing for an absence, a second ask
+            or no CORE at all.
+        """
+        if self._fetch is None:
+            return None, LookupRecord()
+        fetch, self._fetch = self._fetch, None
+        outcome = fetch(self._doi)
+        return outcome.text, outcome.lookups()
+
+
 class PDFDiscoverer:
     """
     Discovers and downloads PDF files from various sources.
@@ -808,6 +852,7 @@ class PDFDiscoverer:
         title: Optional[str] = None,
         expected_title: Optional[str] = None,
         earlier_lookups: LookupRecord | None = None,
+        core_text: Callable[[str], CoreFetch] | None = None,
     ) -> DiscoveryResult:
         """
         Discover and download PDF for a document.
@@ -818,6 +863,8 @@ class PDFDiscoverer:
         2a. OpenAlex's locations not already found (if DOI), before any
             source that is not open access
         3. Direct DOI resolution
+        4. CORE's extracted text (if DOI and ``core_text``), at the first
+           exit that obtained no PDF and served no copy
 
         Args:
             output_path: Path to save the PDF
@@ -832,6 +879,11 @@ class PDFDiscoverer:
                 the caller holds and merges: without it the record named
                 Europe PMC and the sentence said only "No PDF sources found.
                 The document may require institutional access."
+            core_text: Asks CORE for its extracted text, by the cleaned
+                DOI, at the first exit that obtained no PDF and served no
+                copy (#480, stage C). Its text is a success without a file
+                (``text``); a CORE that could not be asked is recorded under
+                ``SERVICE_CORE``; ``None`` asks nothing and records nothing.
 
         Returns:
             DiscoveryResult with success status and details
@@ -844,6 +896,7 @@ class PDFDiscoverer:
         # read as an absence where no lookup was made, and the NO_IDENTIFIER
         # skip below never recorded (#480 review).
         doi = (self._clean_doi(doi) or None) if doi else None
+        core = _CoreFallback(core_text, doi)
 
         # Find all available PDF sources, and what could not be asked at all
         sources, lookups = self._discover_sources(doi, pmid, pmcid)
@@ -869,6 +922,13 @@ class PDFDiscoverer:
             told = told.merged(openalex_lookups)
 
         if not sources:
+            core_text_found, core_lookups = self._ask_core(core)
+            if self._cancelled:
+                return DiscoveryResult(success=False, error="Cancelled", lookups=lookups)
+            if core_text_found is not None:
+                return DiscoveryResult(success=True, text=core_text_found, lookups=lookups)
+            lookups = lookups.merged(core_lookups)
+            told = told.merged(core_lookups)
             self._emit_progress("discovery", "not_found")
             return DiscoveryResult(
                 success=False,
@@ -974,6 +1034,16 @@ class PDFDiscoverer:
                     # answer, not the document's licence: where the lookup
                     # that would have found a free copy could not be made,
                     # the claim is withheld rather than asserted (#347).
+                    # CORE's text, asked first, is served instead (#480).
+                    core_text_found, core_lookups = self._ask_core(core)
+                    if self._cancelled:
+                        return DiscoveryResult(success=False, error="Cancelled", lookups=lookups)
+                    if core_text_found is not None:
+                        return DiscoveryResult(
+                            success=True, text=core_text_found, lookups=lookups
+                        )
+                    lookups = lookups.merged(core_lookups)
+                    told = told.merged(core_lookups)
                     not_obtained = self._ranked(unobtained)
                     return replace(
                         result.with_lookups(lookups.merged(not_obtained)),
@@ -1000,6 +1070,15 @@ class PDFDiscoverer:
                     return result.with_lookups(lookups)
 
         not_obtained = self._ranked(unobtained)
+        # CORE last, after every copy tried: its text settles the question
+        # as a downloaded PDF does, so the refused copies are dropped (#480).
+        core_text_found, core_lookups = self._ask_core(core)
+        if self._cancelled:
+            return DiscoveryResult(success=False, error="Cancelled", lookups=lookups)
+        if core_text_found is not None:
+            return DiscoveryResult(success=True, text=core_text_found, lookups=lookups)
+        lookups = lookups.merged(core_lookups)
+        told = told.merged(core_lookups)
 
         # If we had a paywall result but no success, return it for OpenAthens option
         if last_paywall_result:
@@ -1027,6 +1106,23 @@ class PDFDiscoverer:
             ),
             lookups=lookups.merged(not_obtained),
         )
+
+    def _ask_core(self, core: _CoreFallback) -> tuple[str | None, LookupRecord]:
+        """Ask CORE at a no-PDF exit, unless the discovery was cancelled.
+
+        A cancelled discovery asks nothing, and its caller returns the
+        ``"Cancelled"`` result rather than the exit's ordinary one: a CORE
+        never asked must not read as a search that found nothing.
+
+        Args:
+            core: This discovery's CORE, asked at most once.
+
+        Returns:
+            CORE's text when it served the article, and what to record.
+        """
+        if self._cancelled:
+            return None, LookupRecord()
+        return core.ask()
 
     @staticmethod
     def _ranked(unobtained: list[tuple[int, LookupRecord]]) -> LookupRecord:

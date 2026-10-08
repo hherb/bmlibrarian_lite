@@ -20,6 +20,8 @@ package com.bmlibrarian.factchecker.util.jats
 
 import android.util.Log
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.escapeHtml
+import com.bmlibrarian.factchecker.util.isSafeUrl
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.ByteArrayInputStream
@@ -1148,55 +1150,95 @@ class JATSXMLParser(
         return if (ref.defersToTheDeposit(parts.size)) escapeHtml(ref.citation) else parts.joinToString(". ")
     }
 
+    /**
+     * A paragraph's text as HTML: escaped, with its markdown links (the
+     * cross-references the parser wrote, or a deposit's own) made links when
+     * [isSafeUrl] allows their URL, and left as their text otherwise.
+     *
+     * A `[` is closed by the `]` that brings the bracket depth back to zero, as
+     * a scan from it would find; the pairs are found in one pass, so a deposit
+     * with many unclosed `[` costs time in proportion to its length, not its
+     * square (#495).
+     *
+     * @param text The paragraph's text, with markdown links
+     * @return The paragraph's HTML
+     */
     private fun convertInlineLinksToHtml(text: String): String {
+        val closing = closingBrackets(text)
+        val nextParen = nextParens(text)
         val result = StringBuilder()
-        var remaining = text
+        var position = 0
 
         while (true) {
-            val bracketStart = remaining.indexOf('[')
+            val bracketStart = text.indexOf('[', position)
             if (bracketStart == -1) {
-                result.append(escapeHtml(remaining))
+                result.append(escapeHtml(text.substring(position)))
                 break
             }
 
-            result.append(escapeHtml(remaining.substring(0, bracketStart)))
+            result.append(escapeHtml(text.substring(position, bracketStart)))
 
-            // Find closing bracket
-            var depth = 0
-            var bracketEnd = -1
-            for (i in bracketStart until remaining.length) {
-                when (remaining[i]) {
-                    '[' -> depth++
-                    ']' -> {
-                        depth--
-                        if (depth == 0) {
-                            bracketEnd = i
-                            break
-                        }
-                    }
-                }
-            }
-
-            if (bracketEnd == -1 || bracketEnd + 1 >= remaining.length || remaining[bracketEnd + 1] != '(') {
+            val bracketEnd = closing[bracketStart]
+            if (bracketEnd == -1 || bracketEnd + 1 >= text.length || text[bracketEnd + 1] != '(') {
                 result.append("[")
-                remaining = remaining.substring(bracketStart + 1)
+                position = bracketStart + 1
                 continue
             }
 
-            val linkText = remaining.substring(bracketStart + 1, bracketEnd)
-            val parenEnd = remaining.indexOf(')', bracketEnd + 1)
+            val linkText = text.substring(bracketStart + 1, bracketEnd)
+            val parenEnd = nextParen[bracketEnd + 1]
             if (parenEnd == -1) {
                 result.append("[${escapeHtml(linkText)}]")
-                remaining = remaining.substring(bracketEnd + 1)
+                position = bracketEnd + 1
                 continue
             }
 
-            val href = remaining.substring(bracketEnd + 2, parenEnd)
-            result.append("<a href=\"${escapeHtml(href)}\">${escapeHtml(linkText)}</a>")
-            remaining = remaining.substring(parenEnd + 1)
+            val href = text.substring(bracketEnd + 2, parenEnd)
+            // Deposit text is untrusted, and this HTML is shown in a
+            // JavaScript-enabled WebView: a `javascript:` (or any non-http)
+            // link keeps only its text (#495)
+            if (isSafeUrl(href)) {
+                result.append("<a href=\"${escapeHtml(href)}\">${escapeHtml(linkText)}</a>")
+            } else {
+                result.append(escapeHtml(linkText))
+            }
+            position = parenEnd + 1
         }
 
         return result.toString()
+    }
+
+    /**
+     * For each `[` in [text], the index of the `]` that closes it (bringing the
+     * depth back to zero), or -1; -1 at every other index.
+     *
+     * @param text The text
+     * @return The closing index of each opening bracket
+     */
+    private fun closingBrackets(text: String): IntArray {
+        val closing = IntArray(text.length) { -1 }
+        val open = ArrayDeque<Int>()
+        for ((index, char) in text.withIndex()) {
+            when (char) {
+                '[' -> open.addLast(index)
+                ']' -> open.removeLastOrNull()?.let { closing[it] = index }
+            }
+        }
+        return closing
+    }
+
+    /**
+     * For each index of [text], the index of the first `)` at or after it, or -1.
+     *
+     * @param text The text
+     * @return The next closing parenthesis from each index; one longer than [text]
+     */
+    private fun nextParens(text: String): IntArray {
+        val next = IntArray(text.length + 1) { -1 }
+        for (index in text.length - 1 downTo 0) {
+            next[index] = if (text[index] == ')') index else next[index + 1]
+        }
+        return next
     }
 
     // MARK: - Helper Methods
@@ -1217,15 +1259,6 @@ class JATSXMLParser(
                 if (pmid.isEmpty()) pmid = text
             }
         }
-    }
-
-    private fun escapeHtml(text: String): String {
-        return text
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\"", "&quot;")
-            .replace("'", "&#39;")
     }
 }
 

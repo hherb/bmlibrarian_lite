@@ -36,6 +36,10 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
     /// none that served (#480, stage B).
     case openAlex = "openalex"
 
+    /// The text CORE extracted from a repository copy, asked with the user's
+    /// own key when no other source served the article (#480, stage C).
+    case core = "core"
+
     /// DOI resolution (publisher website).
     case doi = "doi"
 
@@ -55,6 +59,8 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
             return "Unpaywall"
         case .openAlex:
             return "OpenAlex"
+        case .core:
+            return "CORE (extracted text)"
         case .doi:
             return "Publisher"
         case .cached:
@@ -262,7 +268,9 @@ public struct FullTextResult: Sendable, Equatable {
     /// settled on only because the copy went unassessed (#464), and the reader
     /// is told what it leaves open (``OpenAccessShortfall/notice``, #466). Not a
     /// ``degradation``: that names a lost machine-readable source, and the two
-    /// can both be true of one fetch.
+    /// can both be true of one fetch. A copy that yielded no text carries
+    /// CORE's entry alone, when CORE, asked after it, left its text
+    /// unassessed (#499).
     public let openAccessShortfall: OpenAccessShortfall?
 
     /// The PDF a source served that could not be saved on this device (#480):
@@ -371,10 +379,25 @@ public struct FullTextResult: Sendable, Equatable {
         // with no text — `0 of 12 pages` — because "we read a document and got
         // nothing out of it" is the fact the reader most needs, and pairing the
         // two strictly would have made it the one fact we could not state.
+        //
+        // CORE's text is the exception: it was extracted by CORE, not from a
+        // PDF this service read, so there are no pages to count.
         assert(
-            extractedText == nil || extractionCoverage != nil,
+            extractedText == nil || extractionCoverage != nil || content.source == .core,
             "extracted text with no coverage; the reader cannot be told how much was recovered"
         )
+        // CORE's text is the result in full: no file was downloaded, and text
+        // in hand settles the open-access question (#480, stage C).
+        assert(
+            content.source != .core
+                || (contentKind == .extracted && extractedText != nil && localPDFPath == nil
+                    && openAccessShortfall == nil),
+            "CORE's text is extracted text, with no PDF and no shortfall"
+        )
+        // And it is one text, stored twice: the content's and the analyser's.
+        if case .core(let text) = content {
+            assert(extractedText == text, "CORE's content and extractedText must be one text")
+        }
         // Coverage describes reading a PDF, so there has to be one.
         assert(
             extractionCoverage == nil || content.pdfURL != nil,
@@ -383,10 +406,14 @@ public struct FullTextResult: Sendable, Equatable {
         // An open-access shortfall rides only on a fallback. An open-access
         // copy's own PDF (Unpaywall's or OpenAlex's) settles the question it
         // would raise, and text in hand (parsed or extracted) is no fallback
-        // the reader needs warning about.
+        // the reader needs warning about. But a copy that yielded no text is
+        // no text obtained: CORE's unsettled entry rides on it, and only
+        // CORE's (#499).
         assert(
             openAccessShortfall == nil
-                || (content.source != .unpaywall && content.source != .openAlex),
+                || (content.source != .unpaywall && content.source != .openAlex)
+                || (contentKind == .none && localPDFPath != nil
+                    && openAccessShortfall?.entries.allSatisfy { $0.source == .core } == true),
             "an open-access shortfall on Unpaywall's or OpenAlex's own PDF, which settles it"
         )
         assert(
@@ -462,6 +489,10 @@ public enum FullTextContent: Sendable, Equatable {
     /// served (#480, stage B).
     case openAlex(pdfURL: URL)
 
+    /// The text CORE extracted from a repository copy (#480, stage C): plain
+    /// text, no PDF, and the poorest form the chain serves, so asked last.
+    case core(text: String)
+
     /// DOI resolution URL (opens publisher website).
     case doi(webURL: URL)
 
@@ -481,6 +512,8 @@ public enum FullTextContent: Sendable, Equatable {
             return .unpaywall
         case .openAlex:
             return .openAlex
+        case .core:
+            return .core
         case .doi:
             return .doi
         case .cached:

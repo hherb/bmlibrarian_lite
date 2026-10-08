@@ -28,6 +28,7 @@ from urllib3.util.retry import Retry
 
 from .constants import (
     EUROPEPMC_USER_AGENT,
+    HTTP_OK,
     PMC_OPEN_DATA_BASE_URL,
     PMC_OPEN_DATA_BUCKET,
     PMC_OPEN_DATA_ENCODING,
@@ -41,7 +42,6 @@ from .polite_session import mount_politely
 from .search_failures import request_failure_from_exception
 
 logger = logging.getLogger(__name__)
-_HTTP_OK = 200
 
 _S3_NAMESPACE = "{http://s3.amazonaws.com/doc/2006-03-01/}"
 _LISTING_TAG = f"{_S3_NAMESPACE}ListBucketResult"
@@ -276,7 +276,7 @@ class PmcOpenDataClient:
             # A missing article is a 200 listing naming no version of it. A
             # listing 404 is S3's NoSuchBucket, or something in between: the
             # source is gone, which says nothing about the article.
-            if listing.status_code != _HTTP_OK:
+            if listing.status_code != HTTP_OK:
                 return PmcOpenDataFetch.unreachable(
                     RequestFailure(RequestFailureKind.HTTP_STATUS, listing.status_code)
                 )
@@ -292,7 +292,7 @@ class PmcOpenDataClient:
                 return PmcOpenDataFetch.absent()
 
             metadata = self._get(f"{self._base_url}/{key}")
-            if metadata.status_code != _HTTP_OK:
+            if metadata.status_code != HTTP_OK:
                 # The listing named it: a 404 here is the bucket disagreeing
                 # with itself, recorded as what we got (#432's rule).
                 return PmcOpenDataFetch.unreachable(
@@ -312,7 +312,7 @@ class PmcOpenDataClient:
                 return PmcOpenDataFetch.absent()
 
             article = self._get(record.xml_url)
-            if article.status_code != _HTTP_OK:
+            if article.status_code != HTTP_OK:
                 return PmcOpenDataFetch.unreachable(
                     RequestFailure(RequestFailureKind.HTTP_STATUS, article.status_code)
                 )

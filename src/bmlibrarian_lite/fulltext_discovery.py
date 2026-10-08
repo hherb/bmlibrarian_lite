@@ -23,7 +23,10 @@ Provides unified full-text retrieval that tries multiple sources:
    2a. PMC's open-data bucket, by PMC ID (the same JATS; #480)
    2b. Europe PMC's PDF render
 3. Cached PDF
-4. PDF download via traditional sources
+4. PDF download via traditional sources, the direct DOI download included
+   4a. CORE's extracted text (#480), with a CORE key and a DOI: asked inside
+       the PDF download at each exit that obtained no PDF, and after a PDF
+       that yields no text (a scan). Not asked with ``skip_pdf``.
 
 Usage:
     from bmlibrarian_lite.fulltext_discovery import FulltextDiscoverer
@@ -65,18 +68,22 @@ from .data_models import (
     SourceLookupSkipped,
 )
 from .analysis_failures import with_unestablished_access
+from .core_api import CoreFetch, CoreTextClient, default_core_client
 from .europepmc import EuropePMCClient, ArticleInfo, pmc_accession
 from .search_failures import request_failure_from_exception
 from .pdf_utils import (
     find_existing_fulltext,
     read_cached_fulltext,
     find_existing_pdf,
+    generate_core_text_path,
     generate_fulltext_path,
     generate_pdf_path,
     get_fulltext_base_dir,
     get_pdf_base_dir,
+    save_core_text,
     save_fulltext_markdown,
     extract_pdf_text,
+    read_cached_core_text,
 )
 from .pmc_open_data import PmcOpenDataClient
 from .pdf_discovery import PDFDiscoverer, DiscoveryResult as PDFDiscoveryResult
@@ -93,6 +100,7 @@ class FulltextSourceType(Enum):
     PMC_OPEN_DATA_XML = "pmc_open_data_xml"  # PMC's open-data bucket (JATS)
     CACHED_PDF = "cached_pdf"  # Previously cached PDF
     DOWNLOADED_PDF = "downloaded_pdf"  # Freshly downloaded PDF
+    CORE_TEXT = "core_text"  # CORE's extracted text (#480, stage C)
     ABSTRACT_ONLY = "abstract_only"  # Only abstract available
 
     #: Every source we could ask was asked, and none holds a full text.
@@ -200,6 +208,8 @@ class FulltextDiscoverer:
         browser_headless: bool = False,
         pmc_open_data: PmcOpenDataClient | None = None,
         openalex_email: str | None = None,
+        core_api_key: str | None = None,
+        core: CoreTextClient | None = None,
     ) -> None:
         """
         Initialize full-text discoverer.
@@ -212,6 +222,11 @@ class FulltextDiscoverer:
             browser_headless: If True, run browser without visible window
             pmc_open_data: The bucket client; tests pass a stub
             openalex_email: The contact email sent to OpenAlex (#480)
+            core_api_key: The configured CORE key (#480, stage C); the
+                ``CORE_API_KEY`` environment variable when empty. Without
+                either CORE is not asked and nothing is recorded.
+            core: The CORE client; tests pass a stub. Overrides
+                ``core_api_key``.
         """
         self.unpaywall_email = unpaywall_email
         self.openalex_email = openalex_email
@@ -222,6 +237,7 @@ class FulltextDiscoverer:
 
         self._europepmc = EuropePMCClient()
         self._pmc_open_data = pmc_open_data or PmcOpenDataClient()
+        self._core = core if core is not None else default_core_client(core_api_key)
         self._cancelled = False
 
     def _emit_progress(self, stage: str, status: str) -> None:
@@ -252,7 +268,9 @@ class FulltextDiscoverer:
            2a. PMC's open-data bucket, by PMC ID (JATS, converted to markdown)
            2b. Europe PMC's PDF render (when it lists a free PDF)
         3. Cached PDF (extracted to text)
-        4. PDF download (if not skip_pdf)
+        4. Unless ``skip_pdf``: PDF download, with CORE's extracted text
+           asked at each exit that obtained no PDF and after a PDF that
+           yields no text (with a CORE key and a DOI)
 
         Args:
             doc_dict: Document dictionary with identifiers
@@ -261,7 +279,8 @@ class FulltextDiscoverer:
             doi: Digital Object Identifier
             title: Document title for verification
             year: Publication year
-            skip_pdf: If True, don't attempt PDF download
+            skip_pdf: If True, don't attempt PDF download, and so do not
+                ask CORE either, nor read its cached text
 
         Returns:
             FulltextResult with content and source information
@@ -424,9 +443,9 @@ class FulltextDiscoverer:
                 ),
             )
 
-        # 4. Try PDF download as last resort. The record is passed in so the
-        # sentence the reader is shown names what went unasked above too,
-        # and merged here, the one place, so no path below can drop it.
+        # 4. Try the PDF download, then CORE's text. The record is passed in
+        # so the sentence the reader is shown names what went unasked above
+        # too, and merged here, the one place, so no path below can drop it.
         self._emit_progress("discovery", "downloading_pdf")
         return self._try_pdf_download(
             doc_dict, pmid, pmcid, doi, title, earlier_lookups=lookups
@@ -835,6 +854,82 @@ class FulltextDiscoverer:
                 ),
             )
 
+    def _core_text(self, doc_dict: dict[str, Any], doi: str) -> CoreFetch:
+        """CORE's text for this article: the cached copy, else CORE asked.
+
+        Read here, at CORE's place in the chain, so a cached CORE text never
+        shadows the sources asked before it.
+
+        Args:
+            doc_dict: Document dictionary, for the cache path.
+            doi: The cleaned DOI.
+
+        Returns:
+            What CORE holds for the article.
+        """
+        assert self._core is not None
+        cache_lookups = LookupRecord()
+        try:
+            cached = read_cached_core_text(generate_core_text_path(doc_dict), doi)
+        except (OSError, UnicodeDecodeError) as error:
+            logger.warning("Cached CORE text could not be read (%s).", type(error).__name__)
+            # Recorded, not only logged, as the cached markdown's failure is
+            # (#354): we hold this article's text, so a CORE that now answers
+            # "none" has not established that it has none.
+            cached = None
+            cache_lookups = _unreadable_cache_record()
+        if cached is not None:
+            return CoreFetch.served(cached)
+        fetch = self._core.fetch_full_text(doi)
+        if fetch.text is None:
+            return fetch.with_also(cache_lookups)
+        try:
+            save_core_text(doc_dict, fetch.text, doi)
+        except (OSError, UnicodeError) as error:
+            # Served all the same: only the next run asks CORE again.
+            logger.warning("CORE's text could not be cached (%s).", type(error).__name__)
+        return fetch
+
+    def _after_unreadable_pdf(
+        self,
+        doc_dict: dict[str, Any],
+        clean_doi: str,
+        pdf_result: PDFDiscoveryResult,
+    ) -> FulltextResult:
+        """Ask CORE once, after a downloaded PDF that yielded no text.
+
+        Args:
+            doc_dict: Document dictionary, for CORE's text cache.
+            clean_doi: The DOI as PDF discovery cleans it; blank asks nothing.
+            pdf_result: The successful discovery whose file would not read.
+
+        Returns:
+            CORE's text when served; otherwise the unreadable-PDF result,
+            carrying CORE's failure in its lookups when it was unreachable,
+            or its ``KEY_REFUSED`` skip when it refused the key (#498).
+        """
+        unreadable = _pdf_unreadable(pdf_result)
+        if self._core is None or not clean_doi.strip():
+            return unreadable
+        fetch = self._core_text(doc_dict, clean_doi)
+        if fetch.text is not None:
+            return FulltextResult(
+                success=True,
+                source_type=FulltextSourceType.CORE_TEXT,
+                markdown_content=fetch.text,
+                lookups=pdf_result.lookups,
+            )
+        lookups = fetch.lookups()
+        if lookups.anything_unsettled:
+            # A failure, or a refused key (#498), keeps the result unsettled,
+            # and is told after the PDF's sentence: the reader who sees only
+            # this error would otherwise never hear CORE went unasked.
+            return replace(
+                unreadable.with_lookups(lookups),
+                error=with_unestablished_access(unreadable.error or "", lookups),
+            )
+        return unreadable
+
     def _try_pdf_download(
         self,
         doc_dict: Dict[str, Any],
@@ -844,7 +939,7 @@ class FulltextDiscoverer:
         title: Optional[str],
         earlier_lookups: LookupRecord | None = None,
     ) -> FulltextResult:
-        """Try to download PDF as last resort.
+        """Try the PDF download, then CORE's extracted text.
 
         Args:
             doc_dict: Document dictionary for path generation.
@@ -879,7 +974,20 @@ class FulltextDiscoverer:
                 title=title,
                 expected_title=title,
                 earlier_lookups=earlier_lookups,
+                core_text=(
+                    (lambda clean_doi: self._core_text(doc_dict, clean_doi))
+                    if self._core is not None
+                    else None
+                ),
             )
+
+            if pdf_result.success and pdf_result.text is not None:
+                return FulltextResult(
+                    success=True,
+                    source_type=FulltextSourceType.CORE_TEXT,
+                    markdown_content=pdf_result.text,
+                    lookups=pdf_result.lookups,
+                )
 
             if pdf_result.success and pdf_result.file_path:
                 # Extract text from downloaded PDF
@@ -906,7 +1014,11 @@ class FulltextDiscoverer:
                 # ``absence_established`` true and MCP told a calling agent
                 # no full text exists, with the PDF sitting in the cache
                 # (#354, the rule of #359 one layer down).
-                return _pdf_unreadable(pdf_result)
+                # A scan is no full text obtained, so CORE is asked here:
+                # discovery succeeded, so its own fallback never was (#499).
+                return self._after_unreadable_pdf(
+                    doc_dict, pdf_discoverer._clean_doi(doi) if doi else "", pdf_result
+                )
 
             # A source that demanded payment answered about itself, not
             # about the article: a free copy may exist elsewhere, and
@@ -965,6 +1077,7 @@ def discover_fulltext(
     title: Optional[str] = None,
     unpaywall_email: Optional[str] = None,
     openalex_email: str | None = None,
+    core_api_key: str | None = None,
 ) -> FulltextResult:
     """
     Convenience function to discover full-text for an article.
@@ -976,12 +1089,15 @@ def discover_fulltext(
         title: Document title
         unpaywall_email: Email for Unpaywall API
         openalex_email: The contact email sent to OpenAlex (#480)
+        core_api_key: The configured CORE key (#480, stage C)
 
     Returns:
         FulltextResult with content and source information
     """
     discoverer = FulltextDiscoverer(
-        unpaywall_email=unpaywall_email, openalex_email=openalex_email
+        unpaywall_email=unpaywall_email,
+        openalex_email=openalex_email,
+        core_api_key=core_api_key,
     )
     return discoverer.discover_fulltext(
         pmid=pmid,

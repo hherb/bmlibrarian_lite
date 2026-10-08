@@ -33,6 +33,7 @@ from bmlibrarian_lite.analysis_failures import (
     unsettled_lookups_clause,
 )
 from bmlibrarian_lite.constants import (
+    SERVICE_CORE,
     SERVICE_CROSSREF,
     SERVICE_EUROPE_PMC,
     SERVICE_PMC_ID_CONVERTER,
@@ -1417,6 +1418,7 @@ class TestTheGapsTheReviewFound:
         pdf_result = MagicMock(
             success=True,
             file_path="/tmp/x.pdf",
+            text=None,
             is_paywall=False,
             error=None,
             paywall_url=None,
@@ -1449,6 +1451,7 @@ class TestTheGapsTheReviewFound:
         pdf_result = MagicMock(
             success=True,
             file_path="/tmp/x.pdf",
+            text=None,
             is_paywall=False,
             error=None,
             paywall_url=None,
@@ -2030,10 +2033,16 @@ class TestTheGapsTheReviewFound:
     def test_every_skip_reason_has_the_words_the_reader_is_told(self) -> None:
         """``describe()`` indexed a map nothing kept in step with the enum.
 
-        Each is given an address, which a ``NOT_SAVED`` note requires (#480).
+        Each is given an address, which a ``NOT_SAVED`` note requires (#480),
+        except a refused key, which is CORE's own lookup alone (#498).
         """
         for reason in LookupSkipReason:
-            assert SourceLookupSkipped("X", reason, "https://x.example/a.pdf").describe()
+            skip = (
+                SourceLookupSkipped(SERVICE_CORE, reason)
+                if reason is LookupSkipReason.KEY_REFUSED
+                else SourceLookupSkipped("X", reason, "https://x.example/a.pdf")
+            )
+            assert skip.describe()
 
 
 class _RaisingSession:

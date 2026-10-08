@@ -32,6 +32,7 @@ import com.bmlibrarian.factchecker.domain.model.FullTextLinkKind
 import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
 import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.neutraliseUnsafeUrls
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -91,6 +92,22 @@ class FullTextViewModel @Inject constructor(
          */
         data class MarkdownContent(
             val markdown: String,
+            val title: String,
+            val source: String
+        ) : FullTextState()
+
+        /**
+         * Plain text, shown as such: CORE's extracted text (#480, stage C).
+         *
+         * Untrusted, so it is rendered in a Compose text view, never through the
+         * HTML viewer, whose WebView runs JavaScript.
+         *
+         * @param text The text, exactly as stored.
+         * @param title Document title.
+         * @param source Source of the content.
+         */
+        data class PlainTextContent(
+            val text: String,
             val title: String,
             val source: String
         ) : FullTextState()
@@ -182,6 +199,19 @@ class FullTextViewModel @Inject constructor(
                 }
 
                 _document.value = doc
+
+                // CORE's text is untrusted plain text (#480, stage C): checked
+                // first, so neither the HTML nor the markdown path, both shown in
+                // a JavaScript-enabled WebView, ever renders it
+                if (doc.fullTextSource == Constants.FULLTEXT_SOURCE_CORE && !doc.fullTextMarkdown.isNullOrEmpty()) {
+                    Log.d(TAG, "Using cached CORE text for ${doc.id}")
+                    _state.value = FullTextState.PlainTextContent(
+                        text = doc.fullTextMarkdown,
+                        title = doc.title,
+                        source = Constants.FULLTEXT_SOURCE_CORE_LABEL
+                    )
+                    return@launch
+                }
 
                 // Check if we already have cached content
                 // Prefer HTML (from JATS parsing) as it has proper figure/table rendering
@@ -298,7 +328,8 @@ class FullTextViewModel @Inject constructor(
         val (recorded, result) = doc.recordingFullTextFetch(
             chainResult,
             downloadPdf = { url -> fullTextService.downloadPdf(url, doc.id) },
-            askOpenAlex = { doi, tried -> fullTextService.openAlexSteps(doi, tried) }
+            askOpenAlex = { doi, tried -> fullTextService.openAlexSteps(doi, tried) },
+            askCore = { doi -> fullTextService.askCore(doi) }
         )
         if (result !is FullTextResult.NotEstablished) {
             documentDao.update(recorded)
@@ -322,6 +353,15 @@ class FullTextViewModel @Inject constructor(
                     html = wrapHtmlContent(result.html),
                     title = doc.title,
                     source = Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA_LABEL
+                )
+            }
+            is FullTextResult.CoreText -> {
+                Log.d(TAG, "Got CORE's extracted text for ${doc.id}")
+                // Untrusted plain text: never through the HTML viewer
+                FullTextState.PlainTextContent(
+                    text = result.text,
+                    title = doc.title,
+                    source = Constants.FULLTEXT_SOURCE_CORE_LABEL
                 )
             }
             is FullTextResult.EuropePmcPdf -> {
@@ -429,6 +469,11 @@ class FullTextViewModel @Inject constructor(
      * - Horizontal scrolling for tables
      * - Figure fallback JavaScript for alternative image extensions
      * - Anchor navigation with smooth scrolling
+     *
+     * Every [FullTextState.HtmlContent] page is built here, so every unsafe URL
+     * attribute is dropped here ([neutraliseUnsafeUrls], #495): in HTML stored by
+     * earlier builds, whose links were written for any scheme, as in a fresh
+     * render and its figures. Stored markdown takes its own escaped route.
      */
     private fun wrapHtmlContent(html: String): String {
         return """
@@ -445,7 +490,7 @@ class FullTextViewModel @Inject constructor(
                 </script>
             </head>
             <body>
-                $html
+                ${neutraliseUnsafeUrls(html)}
             </body>
             </html>
         """.trimIndent()

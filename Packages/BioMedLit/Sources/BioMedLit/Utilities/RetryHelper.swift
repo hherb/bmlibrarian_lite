@@ -100,6 +100,11 @@ public struct RetryConfiguration: Sendable {
         jitterFactor: 0.2
     )
 
+    /// Configuration for CORE (#480, stage C): four attempts, as Python's.
+    public static let core = RetryConfiguration(
+        maxAttempts: 4, initialDelay: 1.0, maxDelay: 30.0, backoffMultiplier: 2.0, jitterFactor: 0.2
+    )
+
     /// Configuration for PDF downloads (longer timeouts).
     public static let pdfDownload = RetryConfiguration(
         maxAttempts: 3,

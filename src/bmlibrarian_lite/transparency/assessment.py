@@ -82,6 +82,7 @@ def create_background_analyzer(
     email: str,
     pubmed_api_key: str | None = None,
     unpaywall_email: str | None = None,
+    core_api_key: str | None = None,
 ) -> StudyTransparencyAnalyzer:
     """Build the analyser a background analysis runs.
 
@@ -92,6 +93,8 @@ def create_background_analyzer(
         email: Contact email for the literature sources.
         pubmed_api_key: Optional NCBI API key for higher rate limits.
         unpaywall_email: Email for Unpaywall; ``email`` when not given.
+        core_api_key: The configured CORE key (#480, stage C); the
+            environment's when not given.
 
     Returns:
         The analyser, with full-text discovery enabled.
@@ -102,6 +105,7 @@ def create_background_analyzer(
         unpaywall_email=unpaywall_email or email,
         use_browser_fallback=False,
         auto_discover_fulltext=True,
+        core_api_key=core_api_key,
     )
 
 

@@ -30,7 +30,7 @@ import re
 import json
 import logging
 from dataclasses import dataclass, field, asdict
-from typing import Optional, List, Dict, Any, Tuple
+from typing import TYPE_CHECKING, Optional, List, Dict, Any, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
 import requests
@@ -89,6 +89,9 @@ from .statement_headings import (
     markdown_heading_level,
     unclassified_headings,
 )
+
+if TYPE_CHECKING:
+    from ..fulltext_discovery import FulltextDiscoverer
 
 # Each client below owns its own request loop and its own error handling,
 # and made exactly one physical request per call before pacing was mounted.
@@ -2821,6 +2824,7 @@ class StudyTransparencyAnalyzer:
         use_browser_fallback: bool = True,
         browser_headless: bool = False,
         auto_discover_fulltext: bool = True,
+        core_api_key: str | None = None,
     ):
         """
         Initialize the analyzer.
@@ -2835,8 +2839,13 @@ class StudyTransparencyAnalyzer:
             browser_headless: If True, run browser without visible window
             auto_discover_fulltext: If True, automatically attempt full-text
                 discovery when no fulltext is provided to analyze().
-                Tries cached markdown, Europe PMC XML, Europe PMC PDF,
-                cached PDF, and PDF download (with optional browser fallback).
+                Tries cached markdown, Europe PMC XML, PMC's open-data
+                bucket, Europe PMC PDF, cached PDF, PDF download (with
+                optional browser fallback), and CORE's extracted text.
+            core_api_key: The configured CORE key (#480, stage C), asked
+                for CORE's extracted text when no PDF is obtained or the
+                PDF yields no text; the ``CORE_API_KEY`` environment
+                variable when not given.
         """
         self.email = email
         self.pubmed = PubMedClient(email, pubmed_api_key)
@@ -2848,6 +2857,7 @@ class StudyTransparencyAnalyzer:
         self._use_browser_fallback = use_browser_fallback
         self._browser_headless = browser_headless
         self._auto_discover_fulltext = auto_discover_fulltext
+        self._core_api_key = core_api_key
 
     def analyze(
         self,
@@ -2934,6 +2944,26 @@ class StudyTransparencyAnalyzer:
 
         return report
 
+    def _fulltext_discoverer(self) -> "FulltextDiscoverer":
+        """The discoverer an analysis asks for the article's full text.
+
+        Returns:
+            A discoverer with this analyser's emails, browser settings and
+            CORE key.
+
+        Raises:
+            ImportError: If the full-text discovery module is unavailable.
+        """
+        from ..fulltext_discovery import FulltextDiscoverer
+
+        return FulltextDiscoverer(
+            unpaywall_email=self._unpaywall_email,
+            use_browser_fallback=self._use_browser_fallback,
+            browser_headless=self._browser_headless,
+            openalex_email=self.email,
+            core_api_key=self._core_api_key,
+        )
+
     def _discover_fulltext(self, report: TransparencyReport) -> Optional[str]:
         """Attempt to discover and retrieve full-text content.
 
@@ -2949,7 +2979,8 @@ class StudyTransparencyAnalyzer:
             Full-text content as string, or None if unavailable.
         """
         try:
-            from ..fulltext_discovery import FulltextDiscoverer
+            # An availability check: the discoverer is built below
+            from ..fulltext_discovery import FulltextDiscoverer  # noqa: F401
         except ImportError:
             # Logged at debug and reported nowhere, so an installation
             # without the module analysed every article as though its full
@@ -2980,12 +3011,7 @@ class StudyTransparencyAnalyzer:
         )
 
         try:
-            discoverer = FulltextDiscoverer(
-                unpaywall_email=self._unpaywall_email,
-                use_browser_fallback=self._use_browser_fallback,
-                browser_headless=self._browser_headless,
-                openalex_email=self.email,
-            )
+            discoverer = self._fulltext_discoverer()
 
             result = discoverer.discover_fulltext(
                 pmid=pmid,

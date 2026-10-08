@@ -35,6 +35,7 @@ from .constants import (
     HTTP_STATUS_CODE_MAX,
     HTTP_STATUS_CODE_MIN,
     MAX_PUBMED_SEARCH_OFFSET,
+    SERVICE_CORE,
     UNANSWERED_HTTP_STATUSES,
 )
 
@@ -401,6 +402,12 @@ class LookupSkipReason(Enum):
     #: discovery from concluding the article has no full text (#480).
     NOT_SAVED = "not_saved"
 
+    #: The service refused the key the settings hold (CORE's HTTP 401), so it
+    #: is not asked again this session (#498). A fault of the key, not the
+    #: article: never told as the source "not serving" it. Configured, so no
+    #: configuration nudge; unasked, so it leaves the question open.
+    KEY_REFUSED = "key_refused"
+
 
 #: What each skip reason tells the reader, as a parenthetical in the clause.
 #: The wording is here rather than in the sentence builder so that the enum
@@ -411,6 +418,7 @@ _SKIP_REASONS: dict[LookupSkipReason, str] = {
     LookupSkipReason.NOT_REQUESTED: "not requested on this run",
     LookupSkipReason.OVER_SIZE_LIMIT: "larger than the download limit",
     LookupSkipReason.NOT_SAVED: "served, but could not be saved on this device",
+    LookupSkipReason.KEY_REFUSED: "the key in the settings was refused",
 }
 
 # The wording map is what :meth:`SourceLookupSkipped.describe` indexes, and
@@ -444,8 +452,9 @@ class SourceLookupSkipped:
             is told its host (``analysis_failures.address_host``).
 
     Raises:
-        ValueError: On construction, if the service is not named, or if a
-            ``NOT_SAVED`` skip names no PDF. A skip the reader cannot
+        ValueError: On construction, if the service is not named, if a
+            ``NOT_SAVED`` skip names no PDF, or if a ``KEY_REFUSED`` skip is
+            not CORE's own lookup. A skip the reader cannot
             attribute is not reportable, and a caching note without its
             address is told nowhere while still keeping absence unestablished.
     """
@@ -464,6 +473,12 @@ class SourceLookupSkipped:
             object.__setattr__(self, "address", stripped or None)
         if self.reason is LookupSkipReason.NOT_SAVED and self.address is None:
             raise ValueError("A PDF not saved names the PDF's address")
+        if self.reason is LookupSkipReason.KEY_REFUSED and (
+            self.service != SERVICE_CORE or self.address is not None
+        ):
+            # As the apps' entries are: only CORE takes a key, and a skip
+            # with an address would be drawn as a tried PDF.
+            raise ValueError("Only CORE's own lookup is skipped for a refused key")
 
     def describe(self) -> str:
         """Say why this source was not asked, in the reader's words.

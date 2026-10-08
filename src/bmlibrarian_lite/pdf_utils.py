@@ -28,6 +28,9 @@ Pure functions for PDF/full-text file path management and document formatting:
 - save_fulltext_markdown(): Cache converted markdown, stamped with its converter
 - read_cached_fulltext(): Read cached markdown, or None if an older converter wrote it
 - read_stale_cached_fulltext(): Read cached markdown whichever converter wrote it
+- generate_core_text_path(): Where CORE's extracted text is cached, apart from the markdown
+- save_core_text(): Cache CORE's extracted text, stamped with its DOI
+- read_cached_core_text(): Read CORE's cached text for a DOI, or None if there is none to trust
 - format_abstract_as_document(): Format abstract and citation as readable document
 - extract_pdf_text(): Extract text from a PDF file
 
@@ -66,10 +69,14 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .constants import (
+    CORE_MIN_FULLTEXT_CHARS,
+    CORE_TEXT_CACHE_STAMP,
+    CORE_TEXT_CACHE_SUFFIX,
     DEFAULT_FULLTEXT_BASE_DIR,
     DEFAULT_PDF_BASE_DIR,
     PDF_BASE_DIR_ENV_VAR,
 )
+from .core_api import normalise_doi
 from .jats_markdown import JATS_MARKDOWN_CONVERTER_VERSION
 
 logger = logging.getLogger(__name__)
@@ -437,6 +444,98 @@ def read_cached_fulltext(path: Path) -> str | None:
         logger.warning("Cached full text at %s is empty; fetching it again.", path)
         return None
     return markdown
+
+
+def generate_core_text_path(
+    doc_dict: dict[str, Any], base_dir: Path | None = None
+) -> Path:
+    """Where CORE's text for this document is cached (#480, stage C).
+
+    Beside the JATS markdown, under another suffix, so
+    :func:`find_existing_fulltext` -- read before Europe PMC is asked --
+    never returns it: CORE's text is the poorest form and must not shadow
+    a JATS text a later fetch could get.
+
+    Args:
+        doc_dict: Document dictionary with pmcid, pmid, doi, year, etc.
+        base_dir: Base directory for full-text storage.
+
+    Returns:
+        The markdown path with ``.md`` replaced by ``.core.txt``.
+    """
+    return generate_fulltext_path(doc_dict, base_dir).with_suffix(CORE_TEXT_CACHE_SUFFIX)
+
+
+def save_core_text(
+    doc_dict: dict[str, Any], text: str, doi: str, base_dir: Path | None = None
+) -> Path:
+    """Cache CORE's text, stamped and written whole or not at all.
+
+    The file opens with :data:`CORE_TEXT_CACHE_STAMP`, then the DOI the text
+    was served for (normalised), then the text.
+
+    Args:
+        doc_dict: Document dictionary with pmcid, pmid, doi, year, etc.
+        text: CORE's text for the article.
+        doi: The DOI CORE served it for.
+        base_dir: Base directory for full-text storage.
+
+    Returns:
+        Where it was saved.
+
+    Raises:
+        OSError: If it cannot be written; nothing partial is left.
+        UnicodeError: If the text cannot be written as UTF-8; nothing
+            partial is left.
+    """
+    path = generate_core_text_path(doc_dict, base_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(f"{path.name}.partial")
+    try:
+        partial.write_text(
+            f"{CORE_TEXT_CACHE_STAMP}\n{normalise_doi(doi)}\n{text}", encoding="utf-8"
+        )
+        os.replace(partial, path)
+    except (OSError, UnicodeError):
+        partial.unlink(missing_ok=True)
+        raise
+    return path
+
+
+def read_cached_core_text(path: Path, doi: str) -> str | None:
+    """CORE's cached text for this DOI, or ``None`` when there is none to trust.
+
+    The cache is held to the rules CORE's answer is held to: the text is
+    served again only for the DOI it was served for, and only when it still
+    holds :data:`CORE_MIN_FULLTEXT_CHARS` code points, trimmed. A file that
+    fails either is not this article's full text, and CORE is asked again.
+
+    Args:
+        path: :func:`generate_core_text_path`'s path.
+        doi: The DOI asked about.
+
+    Returns:
+        The text without its stamp and DOI; ``None`` when the file is
+        missing, unstamped, stamped otherwise, for another DOI, or too short.
+
+    Raises:
+        OSError: If the file exists and cannot be read.
+        UnicodeDecodeError: If it is not UTF-8.
+    """
+    try:
+        content = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    stamp, _, rest = content.partition("\n")
+    cached_doi, _, text = rest.partition("\n")
+    if stamp != CORE_TEXT_CACHE_STAMP:
+        return None
+    wanted = normalise_doi(doi)
+    if not wanted or cached_doi != wanted:
+        return None
+    if len(text.strip()) < CORE_MIN_FULLTEXT_CHARS:
+        return None
+    return text
 
 
 def read_stale_cached_fulltext(path: Path) -> str | None:

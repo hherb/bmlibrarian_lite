@@ -49,6 +49,26 @@ class OpenAccessShortfallEntryTest {
         }
     }
 
+    /** Only CORE's own lookup is skipped for a refused key, and never with an address (#498). */
+    @Test
+    fun `a refused key on any source but CORE, or with an address, cannot be built`() {
+        for (source in OpenAccessSource.entries - OpenAccessSource.CORE) {
+            assertThrows("$source", IllegalArgumentException::class.java) {
+                OpenAccessShortfall.Entry(source, OpenAccessUnsettledReason.KeyRefused)
+            }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            OpenAccessShortfall.Entry(
+                OpenAccessSource.CORE, OpenAccessUnsettledReason.KeyRefused, "https://repo.example.org/a.pdf"
+            )
+        }
+        // The control
+        assertEquals(
+            OpenAccessShortfall.CORE_KEY_REFUSED,
+            OpenAccessShortfall(listOf(OpenAccessShortfall.Entry(OpenAccessSource.CORE, OpenAccessUnsettledReason.KeyRefused)))
+        )
+    }
+
     /** The controls: Unpaywall's skip, a blank address (no address), and failures on every source. */
     @Test
     fun `Unpaywall's skip and every failure can be built, and round-trip`() {

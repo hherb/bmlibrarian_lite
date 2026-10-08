@@ -56,6 +56,7 @@ def mock_config():
     config = MagicMock()
     config.transparency = TransparencySettings()
     config.discovery.unpaywall_email = ""
+    config.discovery.core_api_key = None
     return config
 
 
@@ -120,6 +121,7 @@ class TestTransparencyManagerInit:
                 unpaywall_email="test@example.com",
                 use_browser_fallback=False,
                 auto_discover_fulltext=True,
+                core_api_key=None,
             )
             manager.stop()
 
