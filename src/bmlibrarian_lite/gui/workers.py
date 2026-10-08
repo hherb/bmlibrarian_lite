@@ -52,6 +52,7 @@ from ..data_models import (
     PassOutcome,
     TransparencyAnalysisFailure,
 )
+from ..elsevier_api import ElsevierCredentials
 from ..pdf_discovery import PDFDiscoverer, DiscoveryResult
 from ..pdf_utils import generate_pdf_path
 from ..fulltext_discovery import FulltextDiscoverer, FulltextResult, FulltextSourceType
@@ -384,6 +385,7 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
         parent: Optional[QWidget] = None,
         openalex_email: str | None = None,
         core_api_key: str | None = None,
+        elsevier_credentials: ElsevierCredentials | None = None,
     ) -> None:
         """
         Initialize full-text discovery worker.
@@ -395,6 +397,8 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
             parent: Optional parent widget
             openalex_email: The contact email sent to OpenAlex (#480)
             core_api_key: The configured CORE key (#480, stage C)
+            elsevier_credentials: The configured Elsevier key and token
+                (#480, stage C2)
         """
         super().__init__(parent)
         self.doc_dict = doc_dict
@@ -402,6 +406,7 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
         self.openathens_url = openathens_url
         self.openalex_email = openalex_email
         self.core_api_key = core_api_key
+        self.elsevier_credentials = elsevier_credentials
         self._cancelled = False
         self._discoverer: Optional[FulltextDiscoverer] = None
 
@@ -428,8 +433,8 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
         """The discoverer this run asks, reporting progress to this worker.
 
         Returns:
-            A discoverer with this worker's emails, OpenAthens URL and CORE
-            key.
+            A discoverer with this worker's emails, OpenAthens URL, CORE
+            key and Elsevier credentials.
         """
         return FulltextDiscoverer(
             unpaywall_email=self.unpaywall_email,
@@ -437,6 +442,7 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
             progress_callback=self._emit_progress,
             openalex_email=self.openalex_email,
             core_api_key=self.core_api_key,
+            elsevier_credentials=self.elsevier_credentials,
         )
 
     def _discover(self) -> None:
@@ -1480,6 +1486,9 @@ class TransparencyReanalysisWorker(SingleOutcome, QThread):
                 self.config.pubmed.api_key,
                 unpaywall_email=unpaywall_contact_email(self.config),
                 core_api_key=self.config.discovery.core_api_key or None,
+                elsevier_credentials=ElsevierCredentials.from_config(
+                    self.config.discovery
+                ),
             )
 
             for i, doc in enumerate(self.documents):

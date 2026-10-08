@@ -54,6 +54,7 @@ from bmlibrarian_lite.resources.styles.dpi_scale import scaled, get_font_scale
 
 from ..config import LiteConfig
 from ..constants import CORE_SOURCE_LABEL
+from ..elsevier_api import ElsevierCredentials
 from ..storage import LiteStorage
 from ..agents import LiteInterrogationAgent
 from ..pdf_utils import (
@@ -916,6 +917,7 @@ class DocumentInterrogationTab(QWidget):
             self,
             openalex_email=self.config.pubmed.email or None,
             core_api_key=self.config.discovery.core_api_key or None,
+            elsevier_credentials=ElsevierCredentials.from_config(self.config.discovery),
         )
         self._fulltext_worker.progress.connect(self._update_progress_dialog)
         self._fulltext_worker.finished.connect(

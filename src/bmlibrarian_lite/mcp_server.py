@@ -53,6 +53,7 @@ from bmlibrarian_lite.data_models import (
     RetrievalShortfall,
     SearchProvider,
 )
+from bmlibrarian_lite.elsevier_api import ElsevierCredentials
 from bmlibrarian_lite.exceptions import AnalysisFailedError, LiteError, SearchFailedError
 from bmlibrarian_lite.fulltext_discovery import FulltextDiscoverer
 from bmlibrarian_lite.llm import LLMClient
@@ -823,6 +824,7 @@ def _make_server(config: LiteConfig) -> tuple[Server, _AgentsContext]:
             openalex_email=config.pubmed.email,
             use_browser_fallback=False,
             core_api_key=config.discovery.core_api_key,
+            elsevier_credentials=ElsevierCredentials.from_config(config.discovery),
         ),
     )
 

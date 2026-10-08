@@ -23,7 +23,9 @@ Provides unified full-text retrieval that tries multiple sources:
    2a. PMC's open-data bucket, by PMC ID (the same JATS; #480)
    2b. Europe PMC's PDF render
 3. Cached PDF
-4. PDF download via traditional sources, the direct DOI download included
+4. PDF download via traditional sources, the direct DOI download included;
+   Elsevier's Article API first (#480, stage C2), with a key and an
+   Elsevier DOI, its PDF saved where any downloaded PDF is
    4a. CORE's extracted text (#480), with a CORE key and a DOI: asked inside
        the PDF download at each exit that obtained no PDF, and after a PDF
        that yields no text (a scan). Not asked with ``skip_pdf``.
@@ -67,8 +69,10 @@ from .data_models import (
     SourceLookupFailure,
     SourceLookupSkipped,
 )
+from . import elsevier_api
 from .analysis_failures import with_unestablished_access
 from .core_api import CoreFetch, CoreTextClient, default_core_client
+from .elsevier_api import ElsevierArticleClient, ElsevierCredentials
 from .europepmc import EuropePMCClient, ArticleInfo, pmc_accession
 from .search_failures import request_failure_from_exception
 from .pdf_utils import (
@@ -210,6 +214,8 @@ class FulltextDiscoverer:
         openalex_email: str | None = None,
         core_api_key: str | None = None,
         core: CoreTextClient | None = None,
+        elsevier_credentials: ElsevierCredentials | None = None,
+        elsevier: ElsevierArticleClient | None = None,
     ) -> None:
         """
         Initialize full-text discoverer.
@@ -227,6 +233,12 @@ class FulltextDiscoverer:
                 either CORE is not asked and nothing is recorded.
             core: The CORE client; tests pass a stub. Overrides
                 ``core_api_key``.
+            elsevier_credentials: The configured Elsevier key and token
+                (#480, stage C2), as ``ElsevierCredentials.from_config``
+                reads them; the environment's when ``None``. Without a key
+                Elsevier is not asked and nothing is recorded.
+            elsevier: The Elsevier client; tests pass a stub. Overrides
+                ``elsevier_credentials``.
         """
         self.unpaywall_email = unpaywall_email
         self.openalex_email = openalex_email
@@ -238,6 +250,15 @@ class FulltextDiscoverer:
         self._europepmc = EuropePMCClient()
         self._pmc_open_data = pmc_open_data or PmcOpenDataClient()
         self._core = core if core is not None else default_core_client(core_api_key)
+        # Through the module, so the test suite's patch covers this call.
+        self._elsevier = (
+            elsevier
+            if elsevier is not None
+            else elsevier_api.default_elsevier_client(
+                elsevier_credentials.api_key if elsevier_credentials else None,
+                elsevier_credentials.insttoken if elsevier_credentials else None,
+            )
+        )
         self._cancelled = False
 
     def _emit_progress(self, stage: str, status: str) -> None:
@@ -268,7 +289,8 @@ class FulltextDiscoverer:
            2a. PMC's open-data bucket, by PMC ID (JATS, converted to markdown)
            2b. Europe PMC's PDF render (when it lists a free PDF)
         3. Cached PDF (extracted to text)
-        4. Unless ``skip_pdf``: PDF download, with CORE's extracted text
+        4. Unless ``skip_pdf``: PDF download (Elsevier's API first, with a
+           key and an Elsevier DOI), with CORE's extracted text
            asked at each exit that obtained no PDF and after a PDF that
            yields no text (with a CORE key and a DOI)
 
@@ -964,6 +986,7 @@ class FulltextDiscoverer:
                 use_browser_fallback=self.use_browser_fallback,
                 browser_headless=self.browser_headless,
                 openalex_email=self.openalex_email,
+                elsevier=self._elsevier,
             )
 
             pdf_result = pdf_discoverer.discover_and_download(
@@ -1078,6 +1101,7 @@ def discover_fulltext(
     unpaywall_email: Optional[str] = None,
     openalex_email: str | None = None,
     core_api_key: str | None = None,
+    elsevier_credentials: ElsevierCredentials | None = None,
 ) -> FulltextResult:
     """
     Convenience function to discover full-text for an article.
@@ -1090,6 +1114,8 @@ def discover_fulltext(
         unpaywall_email: Email for Unpaywall API
         openalex_email: The contact email sent to OpenAlex (#480)
         core_api_key: The configured CORE key (#480, stage C)
+        elsevier_credentials: The configured Elsevier key and token (#480,
+            stage C2)
 
     Returns:
         FulltextResult with content and source information
@@ -1098,6 +1124,7 @@ def discover_fulltext(
         unpaywall_email=unpaywall_email,
         openalex_email=openalex_email,
         core_api_key=core_api_key,
+        elsevier_credentials=elsevier_credentials,
     )
     return discoverer.discover_fulltext(
         pmid=pmid,

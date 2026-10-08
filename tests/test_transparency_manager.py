@@ -57,6 +57,8 @@ def mock_config():
     config.transparency = TransparencySettings()
     config.discovery.unpaywall_email = ""
     config.discovery.core_api_key = None
+    config.discovery.elsevier_api_key = None
+    config.discovery.elsevier_insttoken = None
     return config
 
 
@@ -122,6 +124,7 @@ class TestTransparencyManagerInit:
                 use_browser_fallback=False,
                 auto_discover_fulltext=True,
                 core_api_key=None,
+                elsevier_credentials=None,
             )
             manager.stop()
 

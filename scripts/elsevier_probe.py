@@ -34,8 +34,8 @@ from pathlib import Path
 import requests
 
 from bmlibrarian_lite.constants import EUROPEPMC_USER_AGENT
+from bmlibrarian_lite.elsevier_api import elsevier_article_url
 
-BASE = "https://api.elsevier.com/content/article/doi/"
 #: Heliyon is fully open access; the AJM articles are subscription content;
 #: the last DOI is not Elsevier's, to see how a foreign DOI is answered.
 DOIS = (
@@ -69,7 +69,9 @@ def probe(doi: str, accept: str, key: str, token: str | None) -> dict[str, objec
     secrets = (key, token or "")
     row: dict[str, object] = {"doi": doi, "accept": accept}
     try:
-        response = requests.get(BASE + doi, headers=headers, timeout=TIMEOUT_SECONDS)
+        response = requests.get(
+            elsevier_article_url(doi), headers=headers, timeout=TIMEOUT_SECONDS
+        )
     except requests.RequestException as exc:
         row["error"] = _redact(type(exc).__name__ + ": " + str(exc), secrets)
         return row

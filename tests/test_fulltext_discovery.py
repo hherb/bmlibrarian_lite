@@ -1020,4 +1020,5 @@ class TestDiscoverFulltextConvenience:
             unpaywall_email="test@example.com",
             openalex_email="researcher@example.org",
             core_api_key=None,
+            elsevier_credentials=None,
         )

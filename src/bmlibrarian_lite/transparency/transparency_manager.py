@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 from PySide6.QtCore import QObject, Signal
 
 from ..data_models import TransparencyAnalysisFailure
+from ..elsevier_api import ElsevierCredentials
 from ..utils import classify_analysis_exception
 from .assessment import assess_document, create_background_analyzer
 from .transparency_models import (
@@ -46,6 +47,10 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+#: The discovery settings an analyser is built with: the Unpaywall email, the
+#: CORE key and the Elsevier credentials, compared whole to tell a change.
+_DiscoverySettings = tuple[str | None, str | None, ElsevierCredentials | None]
 
 
 class TransparencyManager(QObject):
@@ -99,8 +104,9 @@ class TransparencyManager(QObject):
         self._pubmed_api_key = pubmed_api_key
         # The analyser, and the discovery settings it was built with: the
         # configuration is the live one the settings dialog edits in place,
-        # so a changed Unpaywall email or CORE key rebuilds it before the
-        # next analysis (a corrected CORE key is asked again, #498).
+        # so a changed Unpaywall email, CORE key or Elsevier key or token
+        # rebuilds it before the next analysis (a corrected key is asked
+        # again, #498; a token added is asked again, #480 stage C2).
         self._analyzer_lock = Lock()
         self._analyzer_settings = self._discovery_settings()
         self._analyzer = self._build_analyzer(self._analyzer_settings)
@@ -118,34 +124,39 @@ class TransparencyManager(QObject):
         self._last_request_time = 0.0
         self._min_request_interval = MIN_REQUEST_INTERVAL_SECONDS
 
-    def _discovery_settings(self) -> tuple[str | None, str | None]:
+    def _discovery_settings(self) -> _DiscoverySettings:
         """The discovery settings the analyser is built with, as they stand now.
 
         Returns:
             The configured Unpaywall email and CORE key, each ``None`` when
-            blank.
+            blank, and the Elsevier credentials (``None`` without a key).
+            Compared whole, so either Elsevier setting changed rebuilds the
+            analyser.
         """
         discovery = self.config.discovery
-        return (discovery.unpaywall_email or None, discovery.core_api_key or None)
+        return (
+            discovery.unpaywall_email or None,
+            discovery.core_api_key or None,
+            ElsevierCredentials.from_config(discovery),
+        )
 
-    def _build_analyzer(
-        self, settings: tuple[str | None, str | None]
-    ) -> "StudyTransparencyAnalyzer":
+    def _build_analyzer(self, settings: _DiscoverySettings) -> "StudyTransparencyAnalyzer":
         """Build the analyser for these discovery settings.
 
         Args:
-            settings: The Unpaywall email and CORE key, from
-                :meth:`_discovery_settings`.
+            settings: The Unpaywall email, CORE key and Elsevier credentials,
+                from :meth:`_discovery_settings`.
 
         Returns:
             A background analyser.
         """
-        unpaywall_email, core_api_key = settings
+        unpaywall_email, core_api_key, elsevier_credentials = settings
         return create_background_analyzer(
             self._email,
             self._pubmed_api_key,
             unpaywall_email=unpaywall_email,
             core_api_key=core_api_key,
+            elsevier_credentials=elsevier_credentials,
         )
 
     def _current_analyzer(self) -> "StudyTransparencyAnalyzer":

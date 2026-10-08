@@ -1325,10 +1325,15 @@ def no_pdf_sources_message(record: LookupRecord) -> str:
     Returns:
         Sentences for the reader, ending in a full stop: why no source was
         found, then any configuration advice, then a caching note (#480)
-        when a PDF went unsaved.
+        when a PDF went unsaved. A PDF tried before the sources were looked
+        for (Elsevier's, larger than the download limit; #480, stage C2) is
+        a source found, so the tried-sources statement is said instead.
     """
     access = _without_not_saved(record)
-    if not access.anything_unsettled:
+    statement = tried_sources_statement(access)
+    if statement:
+        text = _with_nudge(statement, access)
+    elif not access.anything_unsettled:
         text = "No PDF sources found. The document may require institutional access."
     else:
         text = _with_nudge(

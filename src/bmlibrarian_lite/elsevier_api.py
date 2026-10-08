@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from itertools import chain
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 import requests
@@ -77,6 +78,9 @@ from .pdf_download import (
 )
 from .polite_session import mount_politely
 from .search_failures import request_failure_from_exception
+
+if TYPE_CHECKING:
+    from .config import DiscoveryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +143,22 @@ class ElsevierCredentials:
         token = (self.insttoken or "").strip()
         object.__setattr__(self, "api_key", key)
         object.__setattr__(self, "insttoken", token or None)
+
+    @classmethod
+    def from_config(cls, discovery: DiscoveryConfig) -> ElsevierCredentials | None:
+        """The credentials the settings configure, with the environment's fallbacks.
+
+        Args:
+            discovery: The discovery settings (``elsevier_api_key``,
+                ``elsevier_insttoken``).
+
+        Returns:
+            The credentials, or ``None`` when neither the settings nor
+            ``ELSEVIER_API_KEY`` hold a key: Elsevier is then not asked.
+        """
+        return configured_elsevier_credentials(
+            discovery.elsevier_api_key, discovery.elsevier_insttoken
+        )
 
     @property
     def key_digest(self) -> str:
@@ -393,6 +413,18 @@ class ElsevierArticleClient:
         """Name the client without its key or token."""
         return f"ElsevierArticleClient(base_url={self._base_url!r})"
 
+    def article_url(self, doi: str) -> str:
+        """The URL this client asks for a DOI; it carries neither secret.
+
+        Args:
+            doi: The article's DOI.
+
+        Returns:
+            :func:`elsevier_article_url` on this client's base: the address a
+            size or caching note names.
+        """
+        return elsevier_article_url(doi, self._base_url)
+
     def fetch_pdf(
         self, doi: str, output_path: Path, cancelled: Callable[[], bool]
     ) -> ElsevierFetch:
@@ -550,13 +582,40 @@ class ElsevierArticleClient:
         return ElsevierFetch.served(output_path)
 
 
+def configured_elsevier_credentials(
+    api_key: str | None, insttoken: str | None
+) -> ElsevierCredentials | None:
+    """The credentials to ask with: the settings', else the environment's.
+
+    The one place the environment fallbacks are applied, for the default
+    client and :meth:`ElsevierCredentials.from_config` alike.
+
+    Args:
+        api_key: The configured key; ``ELSEVIER_API_KEY`` when this is empty.
+        insttoken: The configured token; ``ELSEVIER_INSTTOKEN`` when this is
+            empty. Never used without a key.
+
+    Returns:
+        The credentials, or ``None`` when no key is set: Elsevier is then not
+        asked, and nothing is recorded.
+    """
+    key = (api_key or os.environ.get(ENV_ELSEVIER_API_KEY, "")).strip()
+    if not key:
+        logger.debug("Elsevier's API is not asked: no Elsevier API key is configured.")
+        return None
+    token = (insttoken or os.environ.get(ENV_ELSEVIER_INSTTOKEN, "")).strip()
+    return ElsevierCredentials(key, token or None)
+
+
 def default_elsevier_client(
     api_key: str | None, insttoken: str | None
 ) -> ElsevierArticleClient | None:
     """The client discovery uses: ``None`` without a key.
 
     A module-level seam, as ``default_core_client`` is, so the test suite
-    keeps every discovery off the real Elsevier (tests/conftest.py).
+    keeps every discovery off the real Elsevier (tests/conftest.py). Callers
+    reach it through this module (``elsevier_api.default_elsevier_client``),
+    so the suite's patch covers every one of them.
 
     Args:
         api_key: The configured key; ``ELSEVIER_API_KEY`` when this is empty.
@@ -567,9 +626,5 @@ def default_elsevier_client(
         A client, or ``None`` when no key is set: Elsevier is then not asked,
         and nothing is recorded.
     """
-    key = (api_key or os.environ.get(ENV_ELSEVIER_API_KEY, "")).strip()
-    if not key:
-        logger.debug("Elsevier's API is not asked: no Elsevier API key is configured.")
-        return None
-    token = (insttoken or os.environ.get(ENV_ELSEVIER_INSTTOKEN, "")).strip()
-    return ElsevierArticleClient(ElsevierCredentials(key, token or None))
+    credentials = configured_elsevier_credentials(api_key, insttoken)
+    return ElsevierArticleClient(credentials) if credentials is not None else None
