@@ -207,6 +207,30 @@ audit say where it came from. The XML is not truncated (golden rule 13).
   - Anything else is a `RequestFailure`.
 - **Scope.** DOIs starting `10.1016/` only.
 
+**As built (C2, maintainer 2026-10-08).** The binding rules are in
+`doc/cross_platform/fulltext_retrieval.md` ("Elsevier's Article API") and
+`fulltext_parity/elsevier_article.json`; where this section or decisions 3 and
+5 differ, they win:
+
+- **A first-page PDF is not served.** A 200 whose `X-ELS-Status` starts
+  `WARNING` (Elsevier served only the first page, the requestor not being
+  entitled) is an absence for this source, told nothing; the chain goes on.
+- **Whatever the requestor is entitled to is served.** Decision 3's
+  open-access-only rule is dropped: open access anywhere, subscribed content
+  from the institution's network or with an institutional token. One request
+  per article, no metadata check first.
+- **The off-network refusal is unsettled**, as CORE's refused key is: a skip
+  told "Elsevier's API (not available from this network)", which blocks a
+  settled absence and adds no nudge.
+- **Redirects are not followed**: `X-ELS-APIKey` is a header no client strips
+  on a redirect, so a 3xx is unreachable `http_status`.
+- **Refusals are scoped to the credentials** (decision 5 refined): a 401
+  refuses that key for the process; a 403 `AUTHENTICATION_ERROR` refuses that
+  key and token together, so a token added later is asked again; any other 403
+  refuses nothing.
+- The error shapes follow Elsevier's documentation until
+  `scripts/elsevier_probe.py` has recorded the real ones.
+
 ## How outcomes reach the reader
 
 - **New source names** in the existing shortfall and lookup vocabulary:

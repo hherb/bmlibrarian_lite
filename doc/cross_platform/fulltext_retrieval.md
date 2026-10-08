@@ -9,12 +9,16 @@ Not all biomedical articles have freely available full text. We implement a fall
 1. **Europe PMC XML** - Best quality, machine-readable JATS format
 2. **PMC's open-data bucket** - The same JATS by PMC ID, including the author
    manuscripts Europe PMC does not serve (#480)
-3. **Europe PMC's PDF render, then every Unpaywall PDF, then OpenAlex's, then CORE's extracted text** - Open access copies
+3. **Europe PMC's PDF render, then Elsevier's API, then every Unpaywall PDF, then OpenAlex's, then CORE's extracted text** - Open access copies (from
+   Elsevier's API, any PDF the requestor is entitled to)
 4. **DOI Resolution** - Fall back to publisher website
 
 On the desktop, CORE's text comes after the direct DOI download (a PDF
 fetched through the DOI resolver is one of `PDFDiscoverer`'s sources); in
-the apps it comes before the DOI link, which they never download.
+the apps it comes before the DOI link, which they never download. Elsevier's
+API is asked only for Elsevier's DOIs and only with the user's key (see
+"Elsevier's Article API"); on Android only when Europe PMC offered no render
+URL (#493).
 
 ## Retrieval Priority
 
@@ -22,6 +26,7 @@ the apps it comes before the DOI link, which they never download.
 |--------|--------|---------|----------|
 | Europe PMC XML | JATS XML | Excellent (structured) | ~5M articles with full XML |
 | PMC open-data bucket | JATS XML | Excellent (structured) | PMC's open-access and author-manuscript collections, by PMC ID |
+| Elsevier's API | PDF | Good (requires parsing) | Elsevier's articles (`10.1016/`) the requestor is entitled to, by DOI, with a key |
 | Unpaywall | PDF URL | Good (requires parsing) | ~30M open access articles |
 | OpenAlex | PDF URLs | Good (requires parsing) | locations Unpaywall does not list, by DOI |
 | CORE | Plain text | Fair (no structure) | text CORE extracted from repository copies, by DOI, with a key |
@@ -481,8 +486,8 @@ HTML nor PDF, or a page without the tag is its answer (`DeclaresNone`).
 
 The reader of a fallback the chain settled on because Unpaywall, the landing
 page it named, the PDF it named (#478), OpenAlex, the PDF OpenAlex named
-(#480) or CORE (#480, stage C) could not settle whether a free copy exists is
-told so.
+(#480), CORE (#480, stage C) or Elsevier's API (#480, stage C2) could not
+settle whether a free copy exists is told so.
 Without it the publisher link reads exactly as one for an article with no free
 copy at all.
 
@@ -501,11 +506,35 @@ verb is #435's (`RequestFailure.is_answer`, `search_failure_reporting.md`):
   established. Configuring Unpaywall would add an open-access route this search
   did not have."` Python records this as a `SourceLookupSkipped`
   (`NOT_CONFIGURED`), and `configuration_nudge` adds the last sentence.
+- a configured keyed channel not asked: `"Elsevier's API (not available from
+  this network) could not be asked, so a freely available copy may exist.
+  Whether this document is open access was not established."` A
+  `SourceLookupSkipped` too (`KEY_REFUSED`, `NETWORK_REFUSED`), with no
+  configuration nudge: the channel is configured.
 
-The source is named as Python records it (`SERVICE_UNPAYWALL`,
-`SERVICE_UNPAYWALL_LANDING_PAGE`, `SERVICE_UNPAYWALL_PDF`, `SERVICE_OPENALEX`,
-`SERVICE_OPENALEX_PDF`), a leading "the" capitalised. The rows are
-`fulltext_parity/open_access_unsettled_notice.json`, read by all three suites.
+The source is named as Python records it, a leading "the" capitalised:
+
+| `source` | Named | Python |
+|---|---|---|
+| `unpaywall` | Unpaywall | `SERVICE_UNPAYWALL` |
+| `unpaywall_landing_page` | the open-access copy's landing page | `SERVICE_UNPAYWALL_LANDING_PAGE` |
+| `unpaywall_pdf` | the open-access copy's PDF | `SERVICE_UNPAYWALL_PDF` |
+| `openalex` | OpenAlex | `SERVICE_OPENALEX` |
+| `openalex_pdf` | OpenAlex's copy | `SERVICE_OPENALEX_PDF` |
+| `core` | CORE | `SERVICE_CORE` |
+| `elsevier` | Elsevier's API | `SERVICE_ELSEVIER` |
+
+A skip is named by its reason (Python's `LookupSkipReason`; only these are
+stored by the apps):
+
+| `skipped` | Told | Nudge | A stored one reads as |
+|---|---|---|---|
+| `not_configured` | not configured | yes | Unpaywall's, whatever source it names |
+| `key_refused` | the key in the settings was refused | no | Elsevier's when the source it names is `elsevier`; CORE's otherwise (`core`, another source, or none) |
+| `network_refused` | not available from this network | no | Elsevier's, whatever source it names |
+
+The rows are `fulltext_parity/open_access_unsettled_notice.json`, read by all
+three suites.
 
 **Which answers leave it unsettled** is the same on all three platforms: from
 Unpaywall, any status of 400 or above but 404 (a 408 or 403 is an answer, "did
@@ -614,17 +643,23 @@ banner says both.
  "failure": {"kind": "http_status", "status_code": 408}}
 ```
 
-`source` is `unpaywall`, `unpaywall_landing_page`, `unpaywall_pdf`, `openalex`,
-`openalex_pdf` or `core`; `failure` is a search
-shortfall's failure object and reads back by its rules
+`source` is one of the sources in the table above (`unpaywall`, `unpaywall_landing_page`,
+`unpaywall_pdf`, `openalex`, `openalex_pdf`, `core` or `elsevier`); `failure`
+is a search shortfall's failure object and reads back by its rules
 (`search_failure_reporting.md`, "Persisted form"). An Unpaywall that was not
 configured is stored as `{"schema_version": 1, "source": "unpaywall",
 "skipped": "not_configured"}` in place of a failure, and a stored
 `not_configured` skip reads as Unpaywall's whatever source it names. CORE's
 refused key (#498) is stored as `{"schema_version": 1, "source": "core",
 "skipped": "key_refused"}` (in schema 2, an entry `{"source": "core",
-"skipped": "key_refused"}`), and a stored `key_refused` skip reads as CORE's
-whatever source it names. Any other skip reason reads by its failure.
+"skipped": "key_refused"}`), Elsevier's as the same with `"source":
+"elsevier"`; a stored `key_refused` skip reads as Elsevier's when the source it
+names is `elsevier`, and as CORE's otherwise (`core`, any other source, or
+none), as before stage C2. Elsevier's off-network refusal is stored as
+`{"schema_version": 1, "source": "elsevier", "skipped": "network_refused"}`
+(in schema 2, an entry of that shape), and a stored `network_refused` skip
+reads as Elsevier's whatever source it names. Any other skip reason reads by
+its failure.
 
 A single entry without an address is stored in this form (schema 1). Anything
 else is `{"schema_version": 2, "entries": [{"source", "address"?, "failure" |
@@ -688,10 +723,12 @@ The maintainer's decisions of 2026-10-05. Pinned by
     `hosts`).
   - A lookup entry reads `{name} ({reason})`, once per service, with the
     reason Python's `_unsettled` picks.
-  - Entries come in chain order: other sources first, then `unpaywall`,
-    `unpaywall_landing_page`, `unpaywall_pdf`, `openalex`, `openalex_pdf`, `core`
-    (stable). Entries that read the same (two PDFs on one host refused
-    alike) are told once, the first after sorting.
+  - Entries come in chain order: other sources first, then `elsevier`,
+    `unpaywall`, `unpaywall_landing_page`, `unpaywall_pdf`, `openalex`,
+    `openalex_pdf`, `core` (stable). Elsevier's API is asked before any
+    Unpaywall lookup, so its entry comes first (#480, stage C2). Entries that
+    read the same (two PDFs on one host refused alike) are told once, the
+    first after sorting.
   - An address is tried once, under the source that tried it first: one that
     both Unpaywall and OpenAlex name is listed once. This holds for an address
     refused before any request (not an absolute http(s) URL) too: Python's
@@ -1003,6 +1040,223 @@ request is a search, and its results are not guaranteed to be this article.
   Unpaywall (#493), so when Europe PMC lists a render Android asks neither
   Unpaywall, OpenAlex nor CORE.
 
+## Elsevier's Article API (#480, stage C2)
+
+Elsevier's Article Retrieval API serves an Elsevier article's PDF to a
+requestor entitled to it. It is asked by DOI with **the user's own key** and,
+when one is set, an **institutional token**: only for a DOI Elsevier
+registered (`10.1016/`), at most once per fetch, after Europe PMC's PDF render
+and before any Unpaywall lookup, and only when nothing earlier obtained the
+article (no JATS body, no PDF). Service name **"Elsevier's API"**, source
+`elsevier` (desktop `PDFSourceType.ELSEVIER_API`, `elsevier_api`; the full
+text it yields is `FulltextSourceType.DOWNLOADED_PDF`, as any downloaded
+PDF's), shown as **"Elsevier's API (PDF)"**. Pinned by
+`fulltext_parity/elsevier_article.json`.
+
+```pseudocode
+eligible(doi) = normalise(doi).startswith("10.1016/")   # CORE's normalise, reused
+
+GET https://api.elsevier.com/content/article/doi/{escape_path(bare(doi))}
+    X-ELS-APIKey: {key}          # the key travels here and nowhere else
+    X-ELS-Insttoken: {token}     # only when the token is not blank; never without a key
+    Accept: application/pdf
+    # Python also sends User-Agent: EUROPEPMC_USER_AGENT
+# bare: trimmed, one resolver or doi: prefix removed as normalise matches it
+# (in any case), trimmed again; the DOI's own case is kept. escape_path: ALPHA,
+# DIGIT, - . _ ~ and / bare, every other UTF-8 byte as %XX in upper-case hex
+# (Python's quote(s, safe="/")); a ; is encoded, as a servlet would read it as
+# a path parameter. Never the apiKey or insttoken query parameter. Redirects
+# are not followed. The base's trailing slashes are dropped.
+
+no key, or a DOI not eligible → no request, nothing recorded, nothing told
+                                (a debug log line, on every platform)
+this key refused (below)      → KEY_REFUSED, no request
+these credentials refused from this network (below)
+                              → NETWORK_REFUSED, no request
+paused (below)                → UNREACHABLE(http_status 429), no request
+200 with an X-ELS-Status whose value, trimmed, starts WARNING (in any case)
+                              → ABSENT: the first page only. Read before the
+                                body; logged at INFO
+200 whose body starts %PDF    → SERVED(the PDF), under the platform's PDF rules
+                                (desktop: the size limit; the .part file; the
+                                not-saved path)
+200 otherwise                 → UNREACHABLE(malformed_response)
+404                           → ABSENT
+401                           → KEY_REFUSED, and this key is refused for the rest
+                                of the process (held as sha256(trim(key)), never
+                                the key), whatever the token
+403 whose body, read to 64 KiB, holds the ASCII bytes AUTHENTICATION_ERROR
+                              → NETWORK_REFUSED, and these credentials are refused
+                                for the rest of the process (held as
+                                sha256(trim(key) + "\n" + trim(token or "")))
+any other status (any other 403, a 3xx; after 429/5xx retries), transport failure
+                              → UNREACHABLE(failure)
+```
+
+The statuses 429, 500, 502, 503 and 504 are retried, four attempts in all, each
+paced, as CORE's. `UNREACHABLE(http_status)` keeps #435's verb
+(`RequestFailure.is_answer`): a 429 or a 5xx reads "Elsevier's API (…) could
+not be asked", any other status (400, 403, 410, a 3xx) "Elsevier's API (…)
+did not serve it". Either way it is an unsettled lookup, never an absence.
+
+**The error answers are Elsevier's documented shapes, not observed ones.** The
+#480 spike recorded only that Elsevier refused every request from outside the
+institution with `AUTHENTICATION_ERROR`, not the status or the body. The
+off-network refusal's status (403) and its body's format (XML for
+`Accept: application/pdf`; a JSON row is pinned too) are taken from Elsevier's
+documentation, and the fixture's rows will be corrected once the maintainer has
+run `scripts/elsevier_probe.py` off the institution's network and on it. The
+test (the token anywhere in the first 64 KiB of the body) is chosen to hold
+for either format.
+
+### What the reader is told
+
+- **Served:** the article's PDF, shown as "Elsevier's API (PDF)"; its text is
+  extracted as any downloaded PDF's. It settles the open-access question, as a
+  copy obtained does: no shortfall is stored with it. A PDF that yields no text
+  (a scan) follows the existing textless-PDF rules (Python, #499: CORE is
+  asked after it).
+- **Absent** (a 404, or the first page only): nothing is added and nothing is
+  told; the chain goes on.
+- **Unreachable:** an unsettled lookup under `elsevier` (Python
+  `SERVICE_ELSEVIER`), with a lookup entry "Elsevier's API ({reason})":
+  "Elsevier's API (HTTP 503 Service Unavailable) could not be asked, so a
+  freely available copy may exist. Whether this document is open access was
+  not established." or "Elsevier's API (HTTP 403 Forbidden) did not serve it,
+  so whether this document is open access was not established." In "Tried
+  sources" it comes first of the chain's entries, before Unpaywall's. It
+  blocks a settled absence.
+- **Key refused:** a skip of `elsevier` with reason `key_refused`: "Elsevier's
+  API (the key in the settings was refused) could not be asked, so a freely
+  available copy may exist. Whether this document is open access was not
+  established." It blocks a settled absence and adds no configuration nudge.
+- **Network refused:** a skip of `elsevier` with reason `network_refused`
+  (Python `LookupSkipReason.NETWORK_REFUSED`): "Elsevier's API (not available
+  from this network) could not be asked, so a freely available copy may exist.
+  Whether this document is open access was not established." It blocks a
+  settled absence and adds no configuration nudge.
+- **Served but not saved** (desktop): the existing `NOT_SAVED` caching note,
+  its address the article URL, which carries no key: "A PDF of this article
+  was found at api.elsevier.com but could not be saved on this device, so it
+  could not be read. Check the free storage space and try again." Nothing else
+  is asked. The apps differ (below).
+- **Larger than the download limit** (desktop only; the apps set none): an
+  `OVER_SIZE_LIMIT` skip of `elsevier`, its address the article URL: "Failed to
+  obtain a PDF from the following tried sources: api.elsevier.com, named by
+  Elsevier's API (larger than the download limit). A freely available copy
+  may exist. Whether this document is open access was not established." The
+  chain goes on.
+
+The notices and their stored forms are rows in
+`open_access_unsettled_notice.json`.
+
+### Decisions
+
+The maintainer's decisions of 2026-10-08 override the spec's decision 3 (open
+access only), which is dropped.
+
+1. **A first-page PDF is never served.** A requestor who is not entitled gets
+   200, the PDF's first page only, and `X-ELS-Status: WARNING - Response
+   limited to first page because requestor not entitled to resource`. That is
+   Elsevier's answer that this requestor gets no full text, so it is an
+   **absence** for this source, told nothing, and the chain goes on to
+   Unpaywall, which may hold an open copy. One page of an article is never
+   used as its text (golden rule 13). The header is read before the body,
+   since the first page is a valid PDF.
+2. **Whatever the requestor is entitled to is served:** open-access articles
+   anywhere, and subscribed ones from the institution's network or with an
+   institutional token. Elsevier decides the entitlement and says so in its
+   answer, so one request per article suffices; no metadata check is made
+   first, which would double the requests against a weekly quota.
+3. **The off-network refusal is unsettled**, as CORE's refused key is. The key
+   is valid; the article may still be open access, or served on another
+   network or with a token. The refusal says nothing about the article, so it
+   cannot settle an absence. The channel is configured, so no nudge.
+4. **Redirects are not followed.** The key travels in `X-ELS-APIKey`, a custom
+   header that no client strips on a redirect (`requests` and OkHttp drop only
+   `Authorization`, and only off-host; `URLSession` drops only
+   `Authorization`), so a followed redirect would hand the key to wherever it
+   points. A 3xx is therefore unreachable `http_status`, never followed.
+5. **Refusals are scoped to the credentials refused.** A 401 refuses that key,
+   whatever the token. A 403 `AUTHENTICATION_ERROR` refuses that key and token
+   together, so a token added in the settings, or another key, is asked again.
+   A 403 without the token (`AUTHORIZATION_ERROR`, an empty body, a CDN's)
+   refuses nothing: it is an ordinary unreachable answer for that article. The
+   session object holds digests (SHA-256, hex), never a key or a token.
+6. **The session state is process-wide**, shared by every client, and shares
+   nothing with CORE's: a CORE 429 never pauses Elsevier. Two consecutive
+   fetches that end in 429 (after retries) pause Elsevier for the rest of the
+   process; any other ending resets the count. Elsevier's weekly quota answers
+   429 `QUOTA_EXCEEDED` once spent. A paused fetch makes no request and is told
+   as a 429.
+7. **No key, or another publisher's DOI, is silent** (the spec's decision 4,
+   as CORE's): no request, nothing recorded, no sentence, the absence settled
+   as before. Elsevier publishes some imprints under other DOI prefixes; they
+   are out of scope (the spec's rule).
+8. **The key and the token never leave their headers.** They are the settings
+   trimmed, and neither ever appears in a URL, a log line, an exception
+   message or a `repr`, a stored record or an exported config. A blank key
+   means Elsevier is not configured; the token is never sent without a key.
+9. **An error body is read to 64 KiB** (`error_body_max_bytes`) to look for
+   `AUTHENTICATION_ERROR`: a bounded read of a provider's error, not research
+   content, so golden rule 13 does not apply.
+10. **Paced at 2 requests per second** (`polite_request_pacing.md`): Elsevier
+    allows 10 per second and a weekly quota.
+
+### Rules for the apps
+
+iOS/macOS and Android follow the outcome table above, with these rules, which
+follow from their maps:
+
+- **Elsevier's article URL is never a reader link**, since it needs the key. It
+  is never stored as the document's PDF URL or link, offered as "Open in
+  Browser", fetched again without its headers (Swift's `PDFContentLoader`,
+  Android's `pdfOrLink`), or set as the not-saved address
+  (`fullTextPdfNotSavedFrom` / `pdfNotSavedFrom`). A served Elsevier PDF is
+  held only as a local file.
+- **A failure or a refusal never falls back to a link.** It is recorded as the
+  outcome table says, and the walk goes on to Unpaywall.
+- **Served but not saved differs from the desktop** (a deviation, deliberate).
+  The walk goes on to Unpaywall, and Elsevier records nothing then; a copy
+  Unpaywall serves settles the question. When nothing later serves a copy, the
+  apps' not-saved note is **not** used, as it carries a link. The result keeps
+  `OpenAccessShortfall(source: elsevier, failure: request_failed)` instead,
+  logged at ERROR with its cause, and the reader is told "Elsevier's API (the
+  request failed) could not be asked, …". It keeps the absence unsettled,
+  which is the property that matters.
+- **No size limit**, as for every PDF in the apps.
+- **Redirects are refused:** Swift with `RedirectRefusingTaskDelegate`
+  (`Services/EutilsRequest.swift`) per task, as `PubMedService` uses it;
+  Kotlin with a client derived with `followRedirects(false)` and
+  `followSslRedirects(false)`.
+- **Android reaches Elsevier only when Europe PMC offered no render URL**
+  (#493). Android's render tier returns `EuropePmcPdf(url)` without
+  downloading it, so a render that would fail never reaches the tiers after
+  it. This is #493's limit, not fixed in stage C2; Elsevier is reached after
+  a render once #493 is fixed.
+
+### Where, and the settings
+
+- **Python** asks in `PDFDiscoverer.discover_and_download`, after the DOI is
+  cleaned and before the sources it discovers (its PMC renders, Unpaywall,
+  OpenAlex, the publisher guesses); `FulltextDiscoverer`'s Europe PMC render
+  (its step 2b) comes before it. The key and token are
+  `LiteConfig.discovery.elsevier_api_key` and `elsevier_insttoken`
+  (environment `ELSEVIER_API_KEY` / `ELSEVIER_INSTTOKEN`), saved owner-only
+  and redacted on export as `core_api_key` is; two fields in the settings
+  dialog's "Full Text" tab.
+- **Swift** asks in `FullTextService.fetchFullText`, after Europe PMC's render
+  tier and before the Unpaywall tier. Keychain keys `elsevier_api_key` and
+  `elsevier_insttoken` (`AppSettings`); fields beside CORE's in
+  `SettingsView` and `MacSettingsView`.
+- **Android** asks in `FullTextService.fetchFullText`, before Unpaywall (and
+  see #493 above). `EncryptedSharedPreferences` keys `elsevier_api_key` and
+  `elsevier_insttoken` (`SettingsRepository`); masked fields beside CORE's.
+- Saving a key reports failure, as CORE's does. The explanations, verbatim on
+  every platform:
+  - Key: "Optional. A free Elsevier API key (dev.elsevier.com) lets the app download the PDFs of Elsevier articles you are entitled to: open-access articles anywhere, subscribed ones from your institution's network."
+  - Token: "Optional. An institutional token from Elsevier lets the key use your institution's subscriptions away from its network."
+
 ## DOI Resolution
 
 ### Publisher Website URL
@@ -1145,6 +1399,14 @@ async function fetch_fulltext(
     #    address and is never the link (#478); a copy served but not cached
     #    ends the walk with a caching note. "Tried sources (#480)" has the
     #    rules, and each platform's differences.
+    #
+    #    Between the render and the first Unpaywall lookup, Elsevier's API is
+    #    asked once (#480, stage C2: with a key, for a 10.1016/ DOI, when nothing
+    #    earlier obtained the article; "Elsevier's Article API"). A PDF it
+    #    serves is returned as an open-access copy's is, held as a local file
+    #    only; a first page only or a 404 adds nothing; unreachable or refused
+    #    is recorded, and the walk goes on to Unpaywall. Its URL is never a
+    #    link: it needs the key.
     for pdf_url in [europe_pmc_pdf_url, *await fetch_unpaywall_pdf_urls(doi, email),
                     *openalex_pdf_urls_once_none_served(doi, tried)]:
         if pdf_url == null:
@@ -1727,6 +1989,13 @@ async function fetch_fulltext_resilient(
                 return (FullTextResult.EuropePMC(...), errors)
         except Error as e:
             errors.append(("Europe PMC", e))
+
+    # Elsevier's API (#480, stage C2), with a key and a 10.1016/ DOI: a PDF
+    # it serves ends the fetch; anything else is recorded and the fetch goes on
+    if doi:
+        elsevier = await ask_elsevier(doi)
+        if elsevier.served:
+            return (FullTextResult.PDF(local_pdf_path=elsevier.path, ...), errors)
 
     # Try Unpaywall: every PDF it names (then OpenAlex's, #480)
     if doi:

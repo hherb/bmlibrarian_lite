@@ -1,13 +1,14 @@
 {
   "schema_version": 1,
-  "description": "What the reader is told when Unpaywall, the landing page it named, the PDF it named (#478), OpenAlex, the PDF OpenAlex named (#480 stage B), or CORE (#480 stage C) could not settle whether an open-access copy exists, and how the apps store that on a document (#466). Read by tests/test_open_access_unsettled_notice.py (Python: notices only), Packages/BioMedLit OpenAccessShortfallContractTests and Android OpenAccessShortfallContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, under the heading 'An unsettled open-access copy (#466)'. A row names a failed lookup by kind and status_code, or a lookup that was never made by skipped (Python's LookupSkipReason; only Unpaywall's not_configured and CORE's key_refused, #498), kind and status_code then null. A stored not_configured skip is Unpaywall's and a stored key_refused skip CORE's, whatever source it names. notices: the sentence for one shortfall; Python builds it with analysis_failures.unestablished_access_clause, the apps with their own port. persisted.written: the stored value for a shortfall, compared as parsed JSON. persisted.read: a stored value and the shortfall it reads as; the field is written only when something went unsettled, so every stored value reads as some shortfall, never as none. Add a row here, not a test on one platform.",
+  "description": "What the reader is told when Unpaywall, the landing page it named, the PDF it named (#478), OpenAlex, the PDF OpenAlex named (#480 stage B), CORE (#480 stage C) or Elsevier's API (#480 stage C2) could not settle whether an open-access copy exists, and how the apps store that on a document (#466). Read by tests/test_open_access_unsettled_notice.py (Python: notices only), Packages/BioMedLit OpenAccessShortfallContractTests and Android OpenAccessShortfallContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, under the heading 'An unsettled open-access copy (#466)'. A row names a failed lookup by kind and status_code, or a lookup that was never made by skipped (Python's LookupSkipReason; only Unpaywall's not_configured, CORE's or Elsevier's key_refused, #498, and Elsevier's network_refused), kind and status_code then null. A stored not_configured skip is Unpaywall's and a stored network_refused skip Elsevier's, whatever source it names; a stored key_refused skip is Elsevier's when the source it names is elsevier, and CORE's otherwise (core, another source, or none). A skip of a configured keyed channel (key_refused, network_refused) adds no configuration nudge. notices: the sentence for one shortfall; Python builds it with analysis_failures.unestablished_access_clause, the apps with their own port. persisted.written: the stored value for a shortfall, compared as parsed JSON; every row is one entry without an address, so schema 1 (open_access_statement.json holds the schema 2 rows). The elsevier request_failed row is the apps' PDF served but not saved: the apps keep no link to Elsevier's article URL, so they store this shortfall where the desktop gives its caching note. persisted.read: a stored value, schema 1 or a schema 2 list of one entry, and the shortfall it reads as; the field is written only when something went unsettled, so every stored value reads as some shortfall, never as none. Add a row here, not a test on one platform.",
   "sources": {
     "unpaywall": "Unpaywall",
     "unpaywall_landing_page": "the open-access copy's landing page",
     "unpaywall_pdf": "the open-access copy's PDF",
     "openalex": "OpenAlex",
     "openalex_pdf": "OpenAlex's copy",
-    "core": "CORE"
+    "core": "CORE",
+    "elsevier": "Elsevier's API"
   },
   "notices": [
     {"source": "unpaywall", "kind": "timeout", "status_code": null, "notice": "Unpaywall (the request timed out) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
@@ -44,7 +45,15 @@
     {"source": "core", "kind": "timeout", "status_code": null, "notice": "CORE (the request timed out) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
     {"source": "core", "kind": "http_status", "status_code": 429, "notice": "CORE (HTTP 429 Too Many Requests) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
     {"source": "core", "kind": "http_status", "status_code": 403, "notice": "CORE (HTTP 403 Forbidden) did not serve it, so whether this document is open access was not established."},
-    {"source": "core", "skipped": "key_refused", "kind": null, "status_code": null, "notice": "CORE (the key in the settings was refused) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."}
+    {"source": "core", "skipped": "key_refused", "kind": null, "status_code": null, "notice": "CORE (the key in the settings was refused) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "elsevier", "kind": "timeout", "status_code": null, "notice": "Elsevier's API (the request timed out) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "elsevier", "kind": "http_status", "status_code": 429, "notice": "Elsevier's API (HTTP 429 Too Many Requests) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "elsevier", "kind": "http_status", "status_code": 503, "notice": "Elsevier's API (HTTP 503 Service Unavailable) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "elsevier", "kind": "http_status", "status_code": 403, "notice": "Elsevier's API (HTTP 403 Forbidden) did not serve it, so whether this document is open access was not established."},
+    {"source": "elsevier", "kind": "malformed_response", "status_code": null, "notice": "Elsevier's API (the response could not be read) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "elsevier", "kind": "request_failed", "status_code": null, "notice": "Elsevier's API (the request failed) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "elsevier", "skipped": "key_refused", "kind": null, "status_code": null, "notice": "Elsevier's API (the key in the settings was refused) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."},
+    {"source": "elsevier", "skipped": "network_refused", "kind": null, "status_code": null, "notice": "Elsevier's API (not available from this network) could not be asked, so a freely available copy may exist. Whether this document is open access was not established."}
   ],
   "persisted": {
     "written": [
@@ -56,7 +65,11 @@
       {"source": "openalex", "kind": "http_status", "status_code": 429, "stored": {"schema_version": 1, "source": "openalex", "failure": {"kind": "http_status", "status_code": 429}}},
       {"source": "openalex_pdf", "kind": "http_status", "status_code": 403, "stored": {"schema_version": 1, "source": "openalex_pdf", "failure": {"kind": "http_status", "status_code": 403}}},
       {"source": "core", "kind": "http_status", "status_code": 503, "stored": {"schema_version": 1, "source": "core", "failure": {"kind": "http_status", "status_code": 503}}},
-      {"source": "core", "skipped": "key_refused", "kind": null, "status_code": null, "stored": {"schema_version": 1, "source": "core", "skipped": "key_refused"}}
+      {"source": "core", "skipped": "key_refused", "kind": null, "status_code": null, "stored": {"schema_version": 1, "source": "core", "skipped": "key_refused"}},
+      {"source": "elsevier", "kind": "http_status", "status_code": 503, "stored": {"schema_version": 1, "source": "elsevier", "failure": {"kind": "http_status", "status_code": 503}}},
+      {"source": "elsevier", "kind": "request_failed", "status_code": null, "stored": {"schema_version": 1, "source": "elsevier", "failure": {"kind": "request_failed", "status_code": null}}},
+      {"source": "elsevier", "skipped": "key_refused", "kind": null, "status_code": null, "stored": {"schema_version": 1, "source": "elsevier", "skipped": "key_refused"}},
+      {"source": "elsevier", "skipped": "network_refused", "kind": null, "status_code": null, "stored": {"schema_version": 1, "source": "elsevier", "skipped": "network_refused"}}
     ],
     "read": [
       {"name": "a stored shortfall", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "unpaywall", "kind": "timeout", "status_code": null},
@@ -82,7 +95,18 @@
       {"name": "an unknown skip reason reads by its failure", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"skipped\":\"quantum\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "unpaywall", "kind": "timeout", "status_code": null},
       {"name": "CORE's lookup", "stored": "{\"schema_version\":1,\"source\":\"core\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "core", "kind": "timeout", "status_code": null},
       {"name": "CORE's refused key", "stored": "{\"schema_version\":1,\"source\":\"core\",\"skipped\":\"key_refused\"}", "source": "core", "skipped": "key_refused", "kind": null, "status_code": null},
-      {"name": "a key_refused skip is CORE's, whatever source it names", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"skipped\":\"key_refused\"}", "source": "core", "skipped": "key_refused", "kind": null, "status_code": null}
+      {"name": "a key_refused skip is CORE's, whatever source it names", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"skipped\":\"key_refused\"}", "source": "core", "skipped": "key_refused", "kind": null, "status_code": null},
+      {"name": "Elsevier's lookup", "stored": "{\"schema_version\":1,\"source\":\"elsevier\",\"failure\":{\"kind\":\"timeout\",\"status_code\":null}}", "source": "elsevier", "kind": "timeout", "status_code": null},
+      {"name": "Elsevier's lookup in a schema 2 list", "stored": "{\"schema_version\":2,\"entries\":[{\"source\":\"elsevier\",\"failure\":{\"kind\":\"http_status\",\"status_code\":503}}]}", "source": "elsevier", "kind": "http_status", "status_code": 503},
+      {"name": "Elsevier's PDF the apps could not save", "stored": "{\"schema_version\":1,\"source\":\"elsevier\",\"failure\":{\"kind\":\"request_failed\",\"status_code\":null}}", "source": "elsevier", "kind": "request_failed", "status_code": null},
+      {"name": "Elsevier's refused key", "stored": "{\"schema_version\":1,\"source\":\"elsevier\",\"skipped\":\"key_refused\"}", "source": "elsevier", "skipped": "key_refused", "kind": null, "status_code": null},
+      {"name": "Elsevier's refused key in a schema 2 list", "stored": "{\"schema_version\":2,\"entries\":[{\"source\":\"elsevier\",\"skipped\":\"key_refused\"}]}", "source": "elsevier", "skipped": "key_refused", "kind": null, "status_code": null},
+      {"name": "Elsevier's off-network refusal", "stored": "{\"schema_version\":1,\"source\":\"elsevier\",\"skipped\":\"network_refused\"}", "source": "elsevier", "skipped": "network_refused", "kind": null, "status_code": null},
+      {"name": "Elsevier's off-network refusal in a schema 2 list", "stored": "{\"schema_version\":2,\"entries\":[{\"source\":\"elsevier\",\"skipped\":\"network_refused\"}]}", "source": "elsevier", "skipped": "network_refused", "kind": null, "status_code": null},
+      {"name": "a network_refused skip is Elsevier's, whatever source it names", "stored": "{\"schema_version\":1,\"source\":\"unpaywall\",\"skipped\":\"network_refused\"}", "source": "elsevier", "skipped": "network_refused", "kind": null, "status_code": null},
+      {"name": "a network_refused skip naming no source is Elsevier's", "stored": "{\"schema_version\":1,\"skipped\":\"network_refused\"}", "source": "elsevier", "skipped": "network_refused", "kind": null, "status_code": null},
+      {"name": "a key_refused skip naming no source is CORE's", "stored": "{\"schema_version\":1,\"skipped\":\"key_refused\"}", "source": "core", "skipped": "key_refused", "kind": null, "status_code": null},
+      {"name": "CORE's refused key in a schema 2 list stays CORE's", "stored": "{\"schema_version\":2,\"entries\":[{\"source\":\"core\",\"skipped\":\"key_refused\"}]}", "source": "core", "skipped": "key_refused", "kind": null, "status_code": null}
     ]
   }
 }
