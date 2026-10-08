@@ -8,47 +8,31 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Machine channels, stage C1: CORE's extracted text, and the key settings**
-(all three; #480, which stays open until C2): PR on
-`feat/machine-channels-stage-c1-core-480`, which also fixes #495–#499. Spec
-`docs/superpowers/specs/2026-10-04-fulltext-machine-channels-design.md`
-"Stage C" (its as-built notes win); plan
-`docs/superpowers/plans/2026-10-06-fulltext-machine-channels-stage-c1.md`;
-contract `fulltext_retrieval.md` "CORE's Extracted Text" +
-`fulltext_parity/core_fulltext.json`. **Still to do: the live acceptance
-replay**: the maintainer puts the CORE key in `config.json`
-(`discovery.core_api_key`), then `python scripts/core_acceptance_replay.py
---out tmp/core_acceptance.jsonl`. The bar is ≥ 14 of the spike's 149
-not-open-access rows; record the counts in the spikes README and the contract.
-**Binds:**
-- **A search hit counts only if its own DOI is this article's.**
-  Code points ≥ 5,000, trimmed. An answer holding an unpaired surrogate
-  escape anywhere is unreadable on every platform (Apple's parser refuses it).
-- **Asked last and once, only with a key and a DOI**, never after a copy was
-  served and not saved. Python asks inside `PDFDiscoverer` (hook), and after
-  a PDF with no text (#499); Swift likewise, abstract held or not (a scan
-  keeps CORE's failure beside it). Android's render tier skips it (#493);
-  Swift's textless render skips Unpaywall (#505).
-- **No key: no request, nothing recorded** (spec decision 4, as built).
-- **A configured CORE that could not be asked is an unsettled lookup** that
-  blocks absence (maintainer, 2026-10-06), last in chain order.
-- **Two 429s in a row pause CORE for the process.**
-- **A 401 refuses that key** (SHA-256 digest, never the key), told as a
-  `key_refused` skip "CORE (the key in the settings was refused) …".
-  A corrected key is asked again; a 403 is an ordinary answer (#498). On
-  the desktop the settings dialog edits the one live config every tab holds,
-  and `TransparencyManager` rebuilds its analyser when the key changes.
-- **Desktop cache** `*.core.txt` (stamp v2: the DOI on line two), read only
-  at CORE's place, served again only for that DOI and ≥ 5,000 code points;
-  an unreadable one is recorded (#354).
-- **Android shows CORE text as plain text**, escapes every stored markdown,
-  and strips every unsafe URL attribute from any HTML at the WebView
-  boundary (`neutraliseUnsafeUrls`), pre-#495 stored HTML included.
-- **Key saves report failure** on all three (Keychain update-in-place,
-  `commit()`, the dialog's save) and never say "saved" for an unwritten key.
+**Machine channels, stage C2: Elsevier's API** (all three; #480, which stays
+open until C2 lands): branch `feat/machine-channels-stage-c2-elsevier-480`.
+Spec `docs/superpowers/specs/2026-10-04-fulltext-machine-channels-design.md`
+"Stage C" (Elsevier half); plan
+`docs/superpowers/plans/2026-10-08-fulltext-machine-channels-stage-c2.md`.
+**Maintainer decisions (2026-10-08):**
+- **A first-page PDF is not served.** Elsevier answers 200 with only the first
+  page and `X-ELS-Status: WARNING - Response limited to first page because
+  requestor not entitled to resource` when the requestor is not entitled:
+  an absence for this source, told nothing, the chain goes on.
+- **Whatever the requestor is entitled to is served** (spec decision 3's
+  open-access-only rule is dropped): open access anywhere, subscribed
+  content on the institution's network. One request, no metadata check.
+- **The off-network refusal is unsettled**, as CORE's refused key is: told
+  "Elsevier's API (not available from this network)", blocks a settled
+  absence.
+- **Fixtures follow Elsevier's documented shapes** until the maintainer runs
+  `scripts/elsevier_probe.py` (off-network now, on-network later; key from
+  `ELSEVIER_API_KEY`, never written) and the shapes are corrected from it.
 
-Follow-ups: #500, #502–#505. **Next: C2 (Elsevier)**: copy C1's settings plumbing and
-the `key_refused` mechanism for Elsevier's 403.
+**C1's live acceptance replay is still owed**: the maintainer puts the CORE
+key in `config.json` (`discovery.core_api_key`), then `python
+scripts/core_acceptance_replay.py --out tmp/core_acceptance.jsonl`; the bar is
+≥ 14 of the spike's 149 not-open-access rows; record the counts in the spikes
+README and the contract.
 
 ## Recently landed (context)
 
@@ -56,6 +40,19 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **Machine channels, stage C1: CORE's extracted text, and the key settings**
+  (all three; PR #501, #480; fixed #495–#499). Contract `fulltext_retrieval.md`
+  "CORE's Extracted Text" + `fulltext_parity/core_fulltext.json`. **A search
+  hit counts only if its own DOI is this article's** (≥ 5,000 code points,
+  trimmed; an unpaired surrogate escape makes the answer unreadable). Asked
+  last and once, only with a key and a DOI, never after a copy was served and
+  not saved. **No key: no request, nothing recorded.** **A configured CORE
+  that could not be asked is unsettled** and blocks absence. Two 429s in a row
+  pause it for the process; **a 401 refuses that key** (SHA-256 digest, never
+  the key; `key_refused` skip); a corrected key is asked again. Desktop cache
+  `*.core.txt` (stamp v2, the DOI on line two). Android shows CORE text as
+  plain text and strips unsafe URLs at the WebView boundary. Key saves report
+  failure on all three. Follow-ups: #500, #502–#505.
 - **Machine channels, stage B: every Unpaywall PDF in the apps, then OpenAlex's**
   (all three; PR #491, #480). Contract `fulltext_retrieval.md` "Tried sources
   (#480)" and "OpenAlex's Locations"; fixtures `open_access_statement.json`,
@@ -218,10 +215,10 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **C1's acceptance replay, then C2 (Elsevier)**, then the **embedded browser and
+- **C2 (Elsevier, in flight) and C1's acceptance replay**, then the **embedded browser and
   review queue** with the `challenged` kind (replaces **#483**); **#481**
   follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
-  **#492**, **#493** (stage B follow-ups); **#500** (C1 follow-up);
+  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups);
   **#467**, **#468** / **#470**, **#476**.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
