@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import requests
 
 from bmlibrarian_lite import elsevier_api
 from bmlibrarian_lite.constants import (
@@ -773,3 +774,20 @@ def test_without_a_key_the_debug_line_names_no_secret(
     assert default_elsevier_client(None, None) is None
     assert [r.levelno for r in caplog.records] == [logging.DEBUG]
     assert TOKEN not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "expected"),
+    [
+        (ELSEVIER_STATUS_HEADER, "  WARNING - Response limited to first page because requestor not entitled to resource  ", True),
+        (ELSEVIER_STATUS_HEADER.lower(), "WARNING - Response limited to first page", True),
+        (ELSEVIER_STATUS_HEADER, "OK", False),
+    ],
+)
+def test_the_first_page_warning_is_read_trimmed_and_by_any_header_case(
+    name: str, value: str, expected: bool
+) -> None:
+    """The ``X-ELS-Status`` warning is found past padding and in any header case."""
+    response = requests.Response()
+    response.headers[name] = value
+    assert elsevier_api._is_first_page_only(response) is expected

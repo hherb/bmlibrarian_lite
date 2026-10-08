@@ -1645,6 +1645,11 @@ public actor FullTextService {
     /// the desktop's not-saved note, which carries a link): a copy served later
     /// settles it. Nothing here ever becomes a link fallback.
     ///
+    /// Not asked while PDF extraction is off (``extractPDFText``), an accepted
+    /// limit: every other PDF tier then hands over its URL alone, and
+    /// Elsevier's URL can never be handed over, so there is nothing it could
+    /// give. Nothing is recorded then, as without a key.
+    ///
     /// - Parameters:
     ///   - doi: The DOI, trimmed; blank asks nothing.
     ///   - cacheKey: Names the article, and so the cached file.
@@ -1655,11 +1660,6 @@ public actor FullTextService {
     ///   - shortfall: What went unsettled so far; added to.
     ///   - copyServed: Set when the PDF is cached without text while an
     ///     abstract is held: obtained, so the question is settled.
-    /// Not asked while PDF extraction is off (``extractPDFText``), an accepted
-    /// limit: every other PDF tier then hands over its URL alone, and
-    /// Elsevier's URL can never be handed over, so there is nothing it could
-    /// give. Nothing is recorded then, as without a key.
-    ///
     /// - Returns: The result to return, or `nil` to go on to Unpaywall.
     /// - Throws: `CancellationError`.
     private func elsevierResult(

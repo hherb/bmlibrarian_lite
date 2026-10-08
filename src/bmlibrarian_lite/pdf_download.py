@@ -74,4 +74,4 @@ def discard_partial_download(partial: Path) -> None:
     try:
         partial.unlink(missing_ok=True)
     except OSError as e:
-        logger.warning(f"Could not remove the partial download {partial}: {e}")
+        logger.warning("Could not remove the partial download %s: %s", partial, e)

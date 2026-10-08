@@ -76,7 +76,7 @@ public enum CORE {
 
     /// A DOI as asked by a path: trimmed, one resolver or `doi:` prefix removed as
     /// ``normalisedDOI(_:)`` matches it (in any case), trimmed again; its own case kept.
-    /// Python's `elsevier_api._bare_doi`, which removes the same prefixes.
+    /// Python's `core_api.strip_doi_prefix`, which removes the same prefixes.
     ///
     /// - Parameter doi: The DOI as a source wrote it.
     /// - Returns: The DOI without its prefix, its case kept; blank for a blank one.

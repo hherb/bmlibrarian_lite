@@ -50,7 +50,7 @@ analysis_failures.py  # AnalysisShortfall → notice, advice (the stages after t
 audit_records.py      # What became of each document: accepted/rejected/failed/not scored
 search_merger.py      # Deduplication (PMID/DOI/PMC/title)
 query_translator.py   # Natural language → structured query
-fulltext_discovery.py # Europe PMC XML → PMC open-data bucket → Europe PMC PDF → Unpaywall PDFs → OpenAlex PDFs → DOI download → CORE text (with a key)
+fulltext_discovery.py # Europe PMC XML → PMC open-data bucket → Europe PMC PDF → Elsevier's API (10.1016/, with a key) → Unpaywall PDFs → OpenAlex PDFs → DOI download → CORE text (with a key)
 pmc_open_data.py      # PmcOpenDataClient: PMC's open-data S3 bucket (JATS by PMC ID)
 openalex.py           # OpenAlexLocationsClient: the PDFs OpenAlex's locations name (by DOI)
 core_api.py           # CoreTextClient: CORE's extracted text by DOI (user's key); CoreThrottle (429 pause, refused key)
@@ -77,7 +77,7 @@ exceptions.py         # Custom exception hierarchy
 
 **Android** (`android/MedicalFactChecker/`):
 - data/local: Room DB + DAOs
-- data/remote: PubMed, Europe PMC, LLM, Unpaywall, FullText APIs (incl. PmcOpenData, PMC's open-data bucket; OpenAlex; Core, CORE's extracted text)
+- data/remote: PubMed, Europe PMC, LLM, Unpaywall, FullText APIs (incl. PmcOpenData, PMC's open-data bucket; OpenAlex; Core, CORE's extracted text; Elsevier, Elsevier's API PDFs with a key)
 - domain: Models, WorkflowState, workflow/ (scoring, searching, reporting)
 - ui: Compose screens + ViewModels (factcheck, report, history, settings, fulltext, onboarding)
 - ui/components: DocumentCard (with transparency), FullTextSourceBadge, SortingControls
@@ -88,7 +88,7 @@ exceptions.py         # Custom exception hierarchy
 
 Shared iOS/macOS components:
 - `JATS/`: XML parsing → HTML/Markdown (JATSXMLParser, JATSModels)
-- `Services/`: EuropePMCService, PubMedService, FullTextService, PMCOpenData (PMC's open-data bucket), OpenAlex, CORE (extracted text)
+- `Services/`: EuropePMCService, PubMedService, FullTextService, PMCOpenData (PMC's open-data bucket), OpenAlex, CORE (extracted text), Elsevier (PDFs, with a key)
 - `Transparency/`: Study transparency analysis
   - `Analysis/`: TransparencyScorer, FundingAnalyzer, COIAnalyzer, DataAvailabilityAnalyzer, TrialComplianceAnalyzer
   - `Models/`: TransparencyModels, TransparencyConstants

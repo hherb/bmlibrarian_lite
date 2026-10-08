@@ -1132,6 +1132,12 @@ class PDFDiscoverer:
                 DiscoveryResult(success=False, error="Cancelled"), LookupRecord(), LookupRecord()
             )
         record = fetch.lookups(url)
+        if fetch.failure is not None:
+            # describe() names the kind and status alone: never a key or token.
+            logger.warning(
+                "Elsevier's API could not be asked about %s (%s)",
+                doi, fetch.failure.describe(),
+            )
         if any(s.reason is LookupSkipReason.NOT_SAVED for s in record.skipped):
             # Served, and not saved here: as for any copy served and not
             # saved, nothing else is asked and the error is the caching note

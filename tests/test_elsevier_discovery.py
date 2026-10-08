@@ -966,3 +966,18 @@ def test_elsevier_is_told_after_sources_outside_the_chain(tmp_path: Path) -> Non
         < error.index("Elsevier's API (HTTP 503")
         < error.index("walled.example.org")
     )
+
+
+def test_an_unreachable_elsevier_is_logged_at_warning_without_a_secret(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A 503 leaves a WARNING naming the DOI and the status, never key or token."""
+    chain = _Chain()
+    with running({PATH: [status_answer(HTTPStatus.SERVICE_UNAVAILABLE)]}) as server:
+        with caplog.at_level("DEBUG", logger="bmlibrarian_lite.pdf_discovery"):
+            chain.discover(_client(server.url, TOKEN), tmp_path)
+    warnings = [r for r in caplog.records if r.levelname == "WARNING" and "Elsevier" in r.getMessage()]
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert DOI in message and "503" in message
+    _never_leaks(caplog.text)

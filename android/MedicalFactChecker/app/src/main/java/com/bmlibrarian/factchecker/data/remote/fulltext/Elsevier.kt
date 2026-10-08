@@ -354,17 +354,15 @@ class ElsevierService internal constructor(
      *
      * @param doi The DOI; only an Elsevier DOI ([Elsevier.isEligible]) is asked
      * @return Null when not asked: no key, or a DOI that is not Elsevier's (nothing
-     *   sent or recorded; a debug line says so, never with the key); otherwise
+     *   sent, recorded or logged; the no-key debug line never carries the key); otherwise
      *   served (a local path), absent (a 404 or a first page only, logged at INFO),
      *   unreachable of its real kind (a paused Elsevier is HTTP 429, nothing sent),
      *   the key or the credentials refused, or not saved
      * @throws CancellationException if the caller cancelled
      */
     suspend fun fetchPdf(doi: String): ElsevierFetch? {
-        if (!Elsevier.isEligible(doi)) {
-            Log.d(TAG, "Not an Elsevier DOI; $SERVICE is not asked")
-            return null
-        }
+        // No per-article log for another publisher's DOI (as Python and Swift).
+        if (!Elsevier.isEligible(doi)) return null
         val key = try {
             apiKey()?.trim()?.takeIf { it.isNotEmpty() }
         } catch (e: Exception) {
