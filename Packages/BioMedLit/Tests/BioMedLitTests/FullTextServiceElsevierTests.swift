@@ -89,6 +89,7 @@ final class FullTextServiceElsevierTests: RecordingLoggerTestCase {
 
     private func makeService(
         extractor: PDFTextExtracting = ExtractingStub(),
+        extractPDFText: Bool = true,
         email: String = "test@example.org",
         coreAPIKey: String? = nil,
         elsevierAPIKey: String? = "test-elsevier-key",
@@ -105,6 +106,7 @@ final class FullTextServiceElsevierTests: RecordingLoggerTestCase {
             session: session,
             europePMCService: EuropePMCService(session: session),
             extractor: extractor,
+            extractPDFText: extractPDFText,
             europePMCRetry: .noRetry,
             pmcOpenDataRetry: .noRetry,
             openAlexRetry: .noRetry,
@@ -510,6 +512,8 @@ final class FullTextServiceElsevierTests: RecordingLoggerTestCase {
         XCTAssertNil(result.pdfNotSavedFrom, "the not-saved note carries a link, so it is not used")
         XCTAssertNil(result.localPDFPath)
         assertNoElsevierURL(result)
+        // One failure, one ERROR: Elsevier's, naming the consequence and its cause
+        XCTAssertEqual(logger.errors.count, 1, "\(logger.errors)")
         XCTAssertTrue(
             logger.errors.contains { $0.contains("Elsevier's API") && $0.contains("could not be saved") },
             "\(logger.errors)"
@@ -575,6 +579,70 @@ final class FullTextServiceElsevierTests: RecordingLoggerTestCase {
         let result = try await makeService(extractor: ScanStub()).fetchFullText(pmcId: nil, doi: doi, pmid: "")
         XCTAssertEqual(result.content, .elsevier(localPath: cachedPath))
         XCTAssertNil(result.openAccessShortfall)
+    }
+
+    // MARK: - The cache first
+
+    /// Plant this article's Elsevier PDF in the cache, as an earlier fetch left it.
+    private func plantCachedPDF(_ data: Data? = nil) throws {
+        try (data ?? pdfBody).write(to: URL(fileURLWithPath: cachedPath))
+    }
+
+    func testACachedPDFIsServedWithoutARequest() async throws {
+        try plantCachedPDF()
+        StubURLProtocol.routes[elsevierHost] = (503, Data())
+        let result = try await makeService().fetchFullText(pmcId: nil, doi: doi, pmid: "")
+        XCTAssertEqual(result.content, .elsevier(localPath: cachedPath))
+        XCTAssertEqual(result.contentKind, .extracted)
+        XCTAssertNil(result.openAccessShortfall)
+        XCTAssertEqual(elsevierRequests, 0)
+        XCTAssertFalse(StubURLProtocol.requested("unpaywall"))
+    }
+
+    /// A PDF saved on the institution's network is still served off it.
+    func testACachedPDFIsServedWhileTheseCredentialsAreRefusedFromThisNetwork() async throws {
+        try plantCachedPDF()
+        let session = ElsevierSession()
+        session.recordNetworkRefused(credentialsDigest: Elsevier.credentialsDigest(key: key, token: nil))
+        let fetch = try await makeService(elsevierSession: session).fetchElsevierPDF(doi: doi, cacheKey: cacheKey)
+        XCTAssertEqual(fetch, .served(localPath: cachedPath))
+        XCTAssertEqual(elsevierRequests, 0)
+    }
+
+    func testACachedPDFIsServedWhileElsevierIsPaused() async throws {
+        try plantCachedPDF()
+        let session = ElsevierSession()
+        session.record(endedOn: 429, keyDigest: KeyDigest.key(key))
+        session.record(endedOn: 429, keyDigest: KeyDigest.key(key))
+        XCTAssertTrue(session.isPaused)
+        let fetch = try await makeService(elsevierSession: session).fetchElsevierPDF(doi: doi, cacheKey: cacheKey)
+        XCTAssertEqual(fetch, .served(localPath: cachedPath))
+        XCTAssertEqual(elsevierRequests, 0)
+    }
+
+    /// The control: a corrupt entry is quarantined, and Elsevier is asked.
+    func testACorruptCachedEntryIsQuarantinedAndElsevierIsAsked() async throws {
+        try plantCachedPDF(Data("<html>not a pdf</html>".utf8))
+        StubURLProtocol.routes[elsevierHost] = (200, pdfBody)
+        let fetch = try await makeService().fetchElsevierPDF(doi: doi, cacheKey: cacheKey)
+        XCTAssertEqual(fetch, .served(localPath: cachedPath))
+        XCTAssertEqual(elsevierRequests, 1)
+        let aside = URL(fileURLWithPath: cachedPath)
+            .appendingPathExtension(BioMedLitConstants.quarantinedPDFExtension).path
+        XCTAssertTrue(FileManager.default.fileExists(atPath: aside), "the corrupt entry was set aside")
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: cachedPath)), pdfBody)
+    }
+
+    // MARK: - Extraction off
+
+    /// An accepted limit: with extraction off every PDF tier hands over a URL,
+    /// and Elsevier's never can be, so it is not asked and nothing is recorded.
+    func testWithExtractionOffElsevierIsNotAsked() async throws {
+        StubURLProtocol.routes[elsevierHost] = (200, pdfBody)
+        let result = try await makeService(extractPDFText: false).fetchFullText(pmcId: nil, doi: doi, pmid: "")
+        XCTAssertEqual(elsevierRequests, 0)
+        XCTAssertNil(result.openAccessShortfall)
+        assertNoElsevierURL(result)
     }
 
     // MARK: - Pacing

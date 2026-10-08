@@ -1483,7 +1483,9 @@ public actor FullTextService {
     /// - Parameters:
     ///   - doi: The DOI, as the document carries it; an Elsevier DOI.
     ///   - cacheKey: Names the article, and so the cached file.
-    /// - Returns: The PDF's local path; `.absent` for a 404 or a first page only
+    /// - Returns: The PDF's local path, the cached one when this article's PDF
+    ///   from Elsevier is already on disk (no request made, whatever the
+    ///   session holds); `.absent` for a 404 or a first page only
     ///   (logged at INFO, never served), and for a call without a key or an
     ///   Elsevier DOI, which sends nothing and records nothing; unreachable, of
     ///   its real kind (a paused Elsevier is `httpStatus(429)`, no request
@@ -1492,6 +1494,19 @@ public actor FullTextService {
     /// - Throws: `CancellationError` only.
     func fetchElsevierPDF(doi: String, cacheKey: ArticleCacheKey) async throws -> ElsevierFetch {
         guard let apiKey = elsevierAPIKey, Elsevier.isEligible(doi: doi) else { return .absent }
+        // The cache first, as every PDF tier consults it: a read is no request,
+        // so the checks below keep their order, and a PDF saved earlier (on the
+        // institution's network, say) is served even when Elsevier would now
+        // refuse or is paused, without spending the weekly quota. A corrupt
+        // entry is quarantined and reads as a miss.
+        if let url = Elsevier.articleURL(doi: doi), let cached = Self.cachedPDFPath(for: cacheKey, from: url) {
+            BioMedLitLib.logger?.info(
+                "Serving the cached PDF from \(BioMedLitConstants.elsevierServiceName) for DOI \(doi) "
+                    + "at \(cached)",
+                category: .fullText
+            )
+            return .served(localPath: cached)
+        }
         let keyDigest = KeyDigest.key(apiKey)
         let credentialsDigest = Elsevier.credentialsDigest(key: apiKey, token: elsevierInstToken)
         if let unasked = Elsevier.answerWithoutAsking(
@@ -1553,7 +1568,8 @@ public actor FullTextService {
             return Self.elsevierFetch(for: answer)
         }
         do {
-            return .served(localPath: try cachePDF(data: body, for: cacheKey, from: url))
+            // The unlogged write: the one ERROR below names the consequence
+            return .served(localPath: try writePDFToCache(data: body, for: cacheKey, from: url))
         } catch {
             // Never a link: the article URL needs the key. The chain records it
             // as an unsettled lookup unless a later copy is served.
@@ -1639,6 +1655,11 @@ public actor FullTextService {
     ///   - shortfall: What went unsettled so far; added to.
     ///   - copyServed: Set when the PDF is cached without text while an
     ///     abstract is held: obtained, so the question is settled.
+    /// Not asked while PDF extraction is off (``extractPDFText``), an accepted
+    /// limit: every other PDF tier then hands over its URL alone, and
+    /// Elsevier's URL can never be handed over, so there is nothing it could
+    /// give. Nothing is recorded then, as without a key.
+    ///
     /// - Returns: The result to return, or `nil` to go on to Unpaywall.
     /// - Throws: `CancellationError`.
     private func elsevierResult(
@@ -1670,7 +1691,7 @@ public actor FullTextService {
         switch try await fetchElsevierPDF(doi: doi, cacheKey: cacheKey) {
         case .served(let localPath):
             BioMedLitLib.logger?.info(
-                "Retrieved \(service)'s PDF for DOI \(doi) at \(localPath)", category: .fullText
+                "Retrieved the PDF from \(service) for DOI \(doi) at \(localPath)", category: .fullText
             )
             let outcome = try extractText(fromCachedPDF: localPath)
             if case .noText = outcome { copyServed = true }
@@ -3106,16 +3127,28 @@ public actor FullTextService {
     /// - Returns: The path the bytes were written to.
     /// - Throws: `FullTextError.cachingFailed` on a failed write.
     private func cachePDF(data: Data, for key: ArticleCacheKey, from url: URL) throws -> String {
-        let cacheDir = Self.pdfCacheDirectory
-        let fileURL = cacheDir.appendingPathComponent(Self.cacheFilename(key: key, url: url))
-
         do {
-            try writeCachedPDF(data, fileURL)
-            return fileURL.path
+            return try writePDFToCache(data: data, for: key, from: url)
         } catch {
             BioMedLitLib.logger?.error("Failed to cache PDF: \(error.localizedDescription)", category: .fullText)
             throw FullTextError.cachingFailed(error.localizedDescription)
         }
+    }
+
+    /// Write PDF data to its cache file, logging nothing: ``cachePDF(data:for:from:)``
+    /// without its log line, for a caller that logs the failure in its own
+    /// words (Elsevier's, #480 stage C2), so one failure is one ERROR.
+    ///
+    /// - Parameters:
+    ///   - data: The verified PDF bytes.
+    ///   - key: Names the article the entry belongs to.
+    ///   - url: The remote PDF the bytes came from; part of the filename.
+    /// - Returns: The path the bytes were written to.
+    /// - Throws: The write's own error.
+    private func writePDFToCache(data: Data, for key: ArticleCacheKey, from url: URL) throws -> String {
+        let fileURL = Self.pdfCacheDirectory.appendingPathComponent(Self.cacheFilename(key: key, url: url))
+        try writeCachedPDF(data, fileURL)
+        return fileURL.path
     }
 
     /// Get the cache directory for PDF files.

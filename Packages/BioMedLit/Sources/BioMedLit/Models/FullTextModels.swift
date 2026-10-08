@@ -270,8 +270,8 @@ public struct FullTextResult: Sendable, Equatable {
     /// naming none) or were never reached because an earlier tier served the
     /// article.
     ///
-    /// Set only on a fallback returned after the open-access PDFs (Unpaywall's,
-    /// then OpenAlex's): a caller that
+    /// Set only on a fallback returned after the copies the render precedes
+    /// (Elsevier's API, then Unpaywall's and OpenAlex's PDFs): a caller that
     /// already holds a PDF link must not trade it for a fallback the chain
     /// settled on only because the copy went unassessed (#464), and the reader
     /// is told what it leaves open (``OpenAccessShortfall/notice``, #466). Not a
