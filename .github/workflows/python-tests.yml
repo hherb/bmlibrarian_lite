@@ -76,7 +76,7 @@ jobs:
         # the network, so on CI they measure those services' availability rather
         # than this repository. --strict-markers makes a mistyped marker an error
         # instead of a silently-ignored no-op.
-        run: pytest tests/ -m "not integration" --strict-markers
+        run: python -X faulthandler -m pytest tests/ -m "not integration" --strict-markers
 
   lint-delta:
     name: No new ruff or mypy findings
