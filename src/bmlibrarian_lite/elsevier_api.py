@@ -326,9 +326,13 @@ def session_elsevier_state() -> ElsevierSession:
 
 
 def reset_elsevier_session() -> None:
-    """Forget the session's pause and refusals. For tests, as ``reset_core_throttle`` is."""
-    global _session_state
+    """Forget the session's pause and refusals, and that "no key" was logged.
+
+    For tests, as ``reset_core_throttle`` is.
+    """
+    global _session_state, _unconfigured_logged
     _session_state = ElsevierSession()
+    _unconfigured_logged = False
 
 
 def _is_first_page_only(response: requests.Response) -> bool:
@@ -601,10 +605,22 @@ def configured_elsevier_credentials(
     """
     key = (api_key or os.environ.get(ENV_ELSEVIER_API_KEY, "")).strip()
     if not key:
-        logger.debug("Elsevier's API is not asked: no Elsevier API key is configured.")
         return None
     token = (insttoken or os.environ.get(ENV_ELSEVIER_INSTTOKEN, "")).strip()
     return ElsevierCredentials(key, token or None)
+
+
+#: Whether the "not configured" line was logged: once a process, not once a
+#: discovery (the transparency analyser builds one per document).
+_unconfigured_logged = False
+
+
+def _log_unconfigured_once() -> None:
+    """Log at DEBUG, once a process, that Elsevier is not asked for want of a key."""
+    global _unconfigured_logged
+    if not _unconfigured_logged:
+        _unconfigured_logged = True
+        logger.debug("Elsevier's API is not asked: no Elsevier API key is configured.")
 
 
 def default_elsevier_client(
@@ -627,4 +643,28 @@ def default_elsevier_client(
         and nothing is recorded.
     """
     credentials = configured_elsevier_credentials(api_key, insttoken)
-    return ElsevierArticleClient(credentials) if credentials is not None else None
+    if credentials is None:
+        _log_unconfigured_once()
+        return None
+    return ElsevierArticleClient(credentials)
+
+
+def elsevier_client_for(
+    credentials: ElsevierCredentials | None,
+) -> ElsevierArticleClient | None:
+    """The client for these credentials, through :func:`default_elsevier_client`.
+
+    The global is looked up at call time, so the test suite's patch of
+    ``default_elsevier_client`` covers every caller of this function too.
+
+    Args:
+        credentials: The configured credentials; ``None`` falls back to the
+            environment's, as ``default_elsevier_client`` does.
+
+    Returns:
+        A client, or ``None`` when no key is set.
+    """
+    return default_elsevier_client(
+        credentials.api_key if credentials is not None else None,
+        credentials.insttoken if credentials is not None else None,
+    )

@@ -31,6 +31,7 @@ from bmlibrarian_lite.constants import (
     ELSEVIER_STATUS_HEADER,
     PDF_BASE_DIR_ENV_VAR,
     SERVICE_ELSEVIER,
+    SERVICE_PMC_ID_CONVERTER,
     SERVICE_UNPAYWALL,
     SERVICE_UNPAYWALL_PDF,
 )
@@ -824,3 +825,144 @@ def test_the_interrogation_tab_passes_the_configured_credentials() -> None:
             tab, {"doi": DOI}, "Title", MagicMock()
         )
     assert worker.call_args.kwargs["elsevier_credentials"] == CREDENTIALS
+
+
+# ---- review round 1 -------------------------------------------------------------
+
+
+def test_the_fetch_pdf_worker_asks_elsevier_with_the_credentials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The "Fetch PDF" path builds Elsevier through the guarded seam and hands it down."""
+    pytest.importorskip("PySide6")
+    from bmlibrarian_lite.gui.workers import PDFDiscoveryWorker
+
+    seen: list[tuple[str | None, str | None]] = []
+    stub = _Elsevier(ElsevierFetch.absent())
+
+    def recording(api_key: str | None, insttoken: str | None) -> Any:
+        seen.append((api_key, insttoken))
+        return stub
+
+    monkeypatch.setattr(elsevier_api, "default_elsevier_client", recording)
+    worker = PDFDiscoveryWorker({"doi": DOI}, tmp_path, elsevier_credentials=CREDENTIALS)
+    assert worker._build_discoverer()._elsevier is stub
+    PDFDiscoveryWorker({"doi": DOI}, tmp_path)._build_discoverer()
+    assert seen == [(KEY, TOKEN), (None, None)]
+
+
+def test_the_interrogation_tabs_fetch_pdf_passes_the_configured_credentials() -> None:
+    """The document tab's PDF worker is built with the configured credentials."""
+    pytest.importorskip("PySide6")
+    from bmlibrarian_lite.gui import document_interrogation_tab as tab_module
+
+    tab = MagicMock()
+    tab.config = _configured()
+    with patch.object(tab_module, "PDFDiscoveryWorker") as worker, \
+         patch.object(tab_module, "find_existing_pdf", lambda _d: None):
+        tab_module.DocumentInterrogationTab._start_pdf_discovery(tab, {"doi": DOI}, "Title")
+    assert worker.call_args.kwargs["elsevier_credentials"] == CREDENTIALS
+
+
+def _over_size_then(result: DiscoveryResult, tmp_path: Path) -> DiscoveryResult:
+    """Elsevier's PDF over the limit, then one Unpaywall copy answering ``result``."""
+    copy = _refused_copy()
+    with patch.object(PDFDiscoverer, "_discover_sources", lambda *a: ([copy], LookupRecord())), \
+         patch.object(PDFDiscoverer, "_try_download", return_value=result):
+        return PDFDiscoverer(
+            use_browser_fallback=False, elsevier=_Elsevier(ElsevierFetch.refused_for_size())
+        ).discover_and_download(tmp_path / "a.pdf", doi=DOI)
+
+
+OVER_SIZE = SourceLookupSkipped(SERVICE_ELSEVIER, LookupSkipReason.OVER_SIZE_LIMIT, ARTICLE_URL)
+
+
+def test_a_later_copy_not_saved_drops_elseviers_size_skip(tmp_path: Path) -> None:
+    """A copy served settles what Elsevier's oversized one left open: the note alone."""
+    result = _over_size_then(DiscoveryResult(success=False, not_saved=True), tmp_path)
+    note = SourceLookupSkipped(SERVICE_UNPAYWALL_PDF, LookupSkipReason.NOT_SAVED, REFUSED_COPY_URL)
+    assert result.lookups == LookupRecord(skipped=(note,))
+    assert ELSEVIER_HOST not in (result.error or "")
+
+
+def test_a_later_copy_downloaded_drops_elseviers_size_skip(tmp_path: Path) -> None:
+    """A copy obtained after it: nothing about Elsevier's oversized PDF is kept."""
+    downloaded = DiscoveryResult(success=True, file_path=tmp_path / "a.pdf", source=_refused_copy())
+    result = _over_size_then(downloaded, tmp_path)
+    assert result.success
+    assert result.lookups == LookupRecord()
+
+
+def test_elseviers_size_skip_is_kept_when_no_copy_is_obtained(tmp_path: Path) -> None:
+    """The control: every copy refused, so Elsevier's is told first among them."""
+    refused = DiscoveryResult(
+        success=False, failure=RequestFailure(RequestFailureKind.HTTP_STATUS, 403)
+    )
+    result = _over_size_then(refused, tmp_path)
+    assert OVER_SIZE in result.lookups.skipped
+    error = result.error or ""
+    assert error.index(ELSEVIER_HOST) < error.index("walled.example.org")
+
+
+def test_a_whole_pdf_is_served_even_if_a_cancel_follows(tmp_path: Path) -> None:
+    """As ``_try_download``: once the PDF is whole at its path, the result is the PDF."""
+    discoverer: PDFDiscoverer
+
+    class _ServesThenCancelled(_Elsevier):
+        def fetch_pdf(
+            self, doi: str, output_path: Path, cancelled: Callable[[], bool]
+        ) -> ElsevierFetch:
+            fetch = super().fetch_pdf(doi, output_path, cancelled)
+            discoverer.cancel()
+            return fetch
+
+    discoverer = PDFDiscoverer(use_browser_fallback=False, elsevier=_ServesThenCancelled(served=True))
+    result = _Chain().discover(None, tmp_path, discoverer=discoverer)
+    assert result.success
+    assert result.file_path == tmp_path / "a.pdf"
+    assert result.source is not None and result.source.source_type is PDFSourceType.ELSEVIER_API
+
+
+@pytest.mark.real_elsevier_client
+def test_no_key_is_logged_once_and_never_by_reading_the_config(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Reading the settings logs nothing; a missing key is logged once a process."""
+    import logging
+
+    elsevier_api.reset_elsevier_session()
+    caplog.set_level(logging.DEBUG, logger="bmlibrarian_lite.elsevier_api")
+    for _ in range(3):
+        assert ElsevierCredentials.from_config(DiscoveryConfig()) is None
+    assert caplog.records == []
+    for _ in range(3):
+        assert elsevier_api.default_elsevier_client(None, None) is None
+    assert len(caplog.records) == 1
+
+
+def test_elsevier_is_in_the_chain_before_unpaywall() -> None:
+    """The tried-sources order is the chain's: Elsevier's entry, then Unpaywall's."""
+    from bmlibrarian_lite.analysis_failures import _OPEN_ACCESS_CHAIN
+
+    assert _OPEN_ACCESS_CHAIN.index(SERVICE_ELSEVIER) < _OPEN_ACCESS_CHAIN.index(SERVICE_UNPAYWALL)
+
+
+def test_elsevier_is_told_after_sources_outside_the_chain(tmp_path: Path) -> None:
+    """Chain order, not record order: an out-of-chain entry recorded after Elsevier's comes first.
+
+    Discriminating: were Elsevier missing from the chain it would sort with
+    the out-of-chain entry by record order, and be told first.
+    """
+    converter = SourceLookupFailure(
+        SERVICE_PMC_ID_CONVERTER, RequestFailure(RequestFailureKind.TIMEOUT)
+    )
+    chain = _Chain(sources=(_refused_copy(),), lookups=LookupRecord(failures=(converter,)))
+    result = chain.discover(_Elsevier(ElsevierFetch.unreachable(UNREACHABLE)), tmp_path)
+    services = [f.service for f in result.lookups.failures]
+    assert services.index(SERVICE_ELSEVIER) < services.index(SERVICE_PMC_ID_CONVERTER)
+    error = result.error or ""
+    assert (
+        error.index(SERVICE_PMC_ID_CONVERTER)
+        < error.index("Elsevier's API (HTTP 503")
+        < error.index("walled.example.org")
+    )

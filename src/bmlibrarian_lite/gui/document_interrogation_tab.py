@@ -607,6 +607,7 @@ class DocumentInterrogationTab(QWidget):
             openathens_url,
             self,
             openalex_email=self.config.pubmed.email or None,
+            elsevier_credentials=ElsevierCredentials.from_config(self.config.discovery),
         )
         self._pdf_worker.progress.connect(self._update_progress_dialog)
         self._pdf_worker.finished.connect(lambda p: self._on_pdf_ready(p, on_success))

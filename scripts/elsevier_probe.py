@@ -69,8 +69,13 @@ def probe(doi: str, accept: str, key: str, token: str | None) -> dict[str, objec
     secrets = (key, token or "")
     row: dict[str, object] = {"doi": doi, "accept": accept}
     try:
+        # Never followed: a redirect would carry X-ELS-APIKey wherever it
+        # points. A 3xx is recorded as its status.
         response = requests.get(
-            elsevier_article_url(doi), headers=headers, timeout=TIMEOUT_SECONDS
+            elsevier_article_url(doi),
+            headers=headers,
+            timeout=TIMEOUT_SECONDS,
+            allow_redirects=False,
         )
     except requests.RequestException as exc:
         row["error"] = _redact(type(exc).__name__ + ": " + str(exc), secrets)

@@ -96,7 +96,7 @@ from .data_models import (
     SourceLookupFailure,
     SourceLookupSkipped,
 )
-from .elsevier_api import ElsevierArticleClient, elsevier_eligible
+from .elsevier_api import ElsevierArticleClient, ElsevierOutcome, elsevier_eligible
 from .oa_landing_page import (
     choose_unpaywall_url,
     citation_pdf_url,
@@ -862,12 +862,15 @@ class PDFDiscoverer:
         # Elsevier's Article API first, before any Unpaywall lookup (#480,
         # stage C2). A PDF it served, a cancel, or a PDF it served that could
         # not be saved ends the discovery; anything it left unsettled is
-        # recorded, and the walk goes on.
+        # recorded, and the walk goes on. A PDF it offered over the size
+        # limit is a copy not obtained, held with the refused copies (ranked
+        # first) and dropped where they are: a later copy settles it.
         if self._cancelled:
             return DiscoveryResult(success=False, error="Cancelled")
         elsevier_lookups = LookupRecord()
+        elsevier_copy = LookupRecord()
         if doi and self._elsevier is not None and elsevier_eligible(doi):
-            ended, elsevier_lookups = self._ask_elsevier(
+            ended, elsevier_lookups, elsevier_copy = self._ask_elsevier(
                 self._elsevier, doi, output_path, expected_title or title
             )
             if ended is not None:
@@ -911,8 +914,8 @@ class PDFDiscoverer:
                 # A lookup we did not make says nothing about the licence,
                 # so the paywall claim is withheld whenever one went unasked
                 # -- skipped as well as failed (#347, #355).
-                error=no_pdf_sources_message(told),
-                lookups=lookups,
+                error=no_pdf_sources_message(told.merged(elsevier_copy)),
+                lookups=lookups.merged(elsevier_copy),
             )
 
         # Unpaywall's own order, then OpenAlex's (#480), before the priority
@@ -934,7 +937,10 @@ class PDFDiscoverer:
         # Try to download from each source
         last_paywall_result: Optional[DiscoveryResult] = None
         blocked_oa_sources: List[PDFSource] = []  # Track sources blocked by bot protection
-        unobtained: list[tuple[int, LookupRecord]] = []
+        # Elsevier's copy first, before every copy tried below (rank -1)
+        unobtained: list[tuple[int, LookupRecord]] = (
+            [(-1, elsevier_copy)] if elsevier_copy.anything_unsettled else []
+        )
 
         pending = deque(sources)
         while pending or openalex_doi:
@@ -1089,7 +1095,7 @@ class PDFDiscoverer:
         doi: str,
         output_path: Path,
         expected_title: str | None,
-    ) -> tuple[DiscoveryResult | None, LookupRecord]:
+    ) -> tuple[DiscoveryResult | None, LookupRecord, LookupRecord]:
         """Ask Elsevier's Article API for this DOI's PDF, once (#480, stage C2).
 
         Args:
@@ -1102,24 +1108,29 @@ class PDFDiscoverer:
         Returns:
             The result that ends the discovery -- a served PDF, a cancel, or
             the caching note for a PDF served and not saved -- or ``None`` to
-            go on; and what Elsevier left unsettled when the discovery goes
-            on: a failure when it could not be asked, a skip when it refused
-            the key or the network or the PDF is over the size limit, nothing
-            for an absence (a 404, the first page only).
+            go on. Then, when the discovery goes on, what Elsevier left
+            unasked (a failure when it could not be asked, a skip when it
+            refused the key or the network) and the copy it offered that was
+            not obtained (an ``OVER_SIZE_LIMIT`` skip with the article URL).
+            Both are empty for an absence (a 404, the first page only).
         """
         url = elsevier.article_url(doi)
         fetch = elsevier.fetch_pdf(doi, output_path, lambda: self._cancelled)
-        if fetch.is_cancelled or self._cancelled:
-            # Nothing recorded for Elsevier: we stopped asking.
-            return DiscoveryResult(success=False, error="Cancelled"), LookupRecord()
         if fetch.path is not None:
+            # Whole at its path: a success, checked as any download is, even
+            # if a cancel came after the last chunk (as ``_try_download``).
             self._emit_progress("download", "success")
             return DiscoveryResult(
                 success=True,
                 file_path=fetch.path,
                 source=PDFSource(url=url, source_type=PDFSourceType.ELSEVIER_API),
                 verification_warning=self._verification_warning(fetch.path, expected_title),
-            ), LookupRecord()
+            ), LookupRecord(), LookupRecord()
+        if fetch.is_cancelled or self._cancelled:
+            # Nothing recorded for Elsevier: we stopped asking.
+            return (
+                DiscoveryResult(success=False, error="Cancelled"), LookupRecord(), LookupRecord()
+            )
         record = fetch.lookups(url)
         if any(s.reason is LookupSkipReason.NOT_SAVED for s in record.skipped):
             # Served, and not saved here: as for any copy served and not
@@ -1127,8 +1138,10 @@ class PDFDiscoverer:
             # alone, its address the article URL, which carries no key.
             return DiscoveryResult(
                 success=False, error=not_saved_note(record), lookups=record
-            ), LookupRecord()
-        return None, record
+            ), LookupRecord(), LookupRecord()
+        if fetch.outcome is ElsevierOutcome.REFUSED_FOR_SIZE:
+            return None, LookupRecord(), record
+        return None, record, LookupRecord()
 
     def _verification_warning(
         self, pdf_path: Path, expected_title: str | None

@@ -254,10 +254,7 @@ class FulltextDiscoverer:
         self._elsevier = (
             elsevier
             if elsevier is not None
-            else elsevier_api.default_elsevier_client(
-                elsevier_credentials.api_key if elsevier_credentials else None,
-                elsevier_credentials.insttoken if elsevier_credentials else None,
-            )
+            else elsevier_api.elsevier_client_for(elsevier_credentials)
         )
         self._cancelled = False
 
