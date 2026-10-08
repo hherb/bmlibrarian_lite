@@ -36,6 +36,7 @@ from .constants import (
     HTTP_STATUS_CODE_MIN,
     MAX_PUBMED_SEARCH_OFFSET,
     SERVICE_CORE,
+    SERVICE_ELSEVIER,
     UNANSWERED_HTTP_STATUSES,
 )
 
@@ -408,6 +409,14 @@ class LookupSkipReason(Enum):
     #: configuration nudge; unasked, so it leaves the question open.
     KEY_REFUSED = "key_refused"
 
+    #: The service refused these credentials from this network (Elsevier's
+    #: HTTP 403 ``AUTHENTICATION_ERROR``), so it is not asked with them again
+    #: this session (#480, stage C2). The key is valid; the article may still
+    #: be served on another network or with an institutional token, so it says
+    #: nothing about the article. Configured, so no configuration nudge;
+    #: unasked, so it leaves the question open.
+    NETWORK_REFUSED = "network_refused"
+
 
 #: What each skip reason tells the reader, as a parenthetical in the clause.
 #: The wording is here rather than in the sentence builder so that the enum
@@ -419,6 +428,7 @@ _SKIP_REASONS: dict[LookupSkipReason, str] = {
     LookupSkipReason.OVER_SIZE_LIMIT: "larger than the download limit",
     LookupSkipReason.NOT_SAVED: "served, but could not be saved on this device",
     LookupSkipReason.KEY_REFUSED: "the key in the settings was refused",
+    LookupSkipReason.NETWORK_REFUSED: "not available from this network",
 }
 
 # The wording map is what :meth:`SourceLookupSkipped.describe` indexes, and
@@ -428,6 +438,9 @@ _SKIP_REASONS: dict[LookupSkipReason, str] = {
 assert set(_SKIP_REASONS) == set(LookupSkipReason), (
     "every LookupSkipReason needs the words the reader is told"
 )
+
+#: The services asked with the user's own key, whose refusal is a skip.
+_KEYED_SERVICES = frozenset({SERVICE_CORE, SERVICE_ELSEVIER})
 
 
 @dataclass(frozen=True)
@@ -453,8 +466,9 @@ class SourceLookupSkipped:
 
     Raises:
         ValueError: On construction, if the service is not named, if a
-            ``NOT_SAVED`` skip names no PDF, or if a ``KEY_REFUSED`` skip is
-            not CORE's own lookup. A skip the reader cannot
+            ``NOT_SAVED`` skip names no PDF, if a ``KEY_REFUSED`` skip is
+            not CORE's or Elsevier's own lookup, or if a ``NETWORK_REFUSED``
+            skip is not Elsevier's own lookup. A skip the reader cannot
             attribute is not reportable, and a caching note without its
             address is told nowhere while still keeping absence unestablished.
     """
@@ -474,11 +488,16 @@ class SourceLookupSkipped:
         if self.reason is LookupSkipReason.NOT_SAVED and self.address is None:
             raise ValueError("A PDF not saved names the PDF's address")
         if self.reason is LookupSkipReason.KEY_REFUSED and (
-            self.service != SERVICE_CORE or self.address is not None
+            self.service not in _KEYED_SERVICES or self.address is not None
         ):
-            # As the apps' entries are: only CORE takes a key, and a skip
-            # with an address would be drawn as a tried PDF.
-            raise ValueError("Only CORE's own lookup is skipped for a refused key")
+            # As the apps' entries are: only CORE and Elsevier take a key,
+            # and a skip with an address would be drawn as a tried PDF.
+            raise ValueError("Only a keyed service's own lookup is skipped for a refused key")
+        if self.reason is LookupSkipReason.NETWORK_REFUSED and (
+            self.service != SERVICE_ELSEVIER or self.address is not None
+        ):
+            # Only Elsevier refuses from a network (#480, stage C2).
+            raise ValueError("Only Elsevier's own lookup is refused from a network")
 
     def describe(self) -> str:
         """Say why this source was not asked, in the reader's words.

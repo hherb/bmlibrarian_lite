@@ -81,6 +81,7 @@ from urllib.parse import urlsplit
 
 from .constants import (
     SERVICE_CORE,
+    SERVICE_ELSEVIER,
     SERVICE_OPENALEX,
     SERVICE_OPENALEX_PDF,
     SERVICE_UNPAYWALL,
@@ -1018,6 +1019,8 @@ def unread_records_clause(
 #: The open-access chain's sources, in the order they are tried (#480): the
 #: tried-sources statement names them in this order, after any other source.
 _OPEN_ACCESS_CHAIN = (
+    # Elsevier's Article API, asked before any Unpaywall lookup (#480, stage C2)
+    SERVICE_ELSEVIER,
     SERVICE_UNPAYWALL,
     SERVICE_UNPAYWALL_LANDING_PAGE,
     SERVICE_UNPAYWALL_PDF,

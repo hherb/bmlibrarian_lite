@@ -956,6 +956,10 @@ POLITE_RATE_CEILINGS: dict[str, float] = {
     # more than one token), so the session pause after two 429s in a row
     # (CORE_PAUSE_AFTER_CONSECUTIVE_429) is the real guard, not this pace.
     "api.core.ac.uk": 0.4,
+    # Elsevier's Article API (#480, stage C2): it allows 10/s and a weekly
+    # quota; the session pause after two 429s in a row
+    # (ELSEVIER_PAUSE_AFTER_CONSECUTIVE_429) guards the quota.
+    "api.elsevier.com": 2.0,
 }
 
 
@@ -1149,6 +1153,66 @@ CORE_API_KEY_FROM_ENVIRONMENT = (
 CORE_SOURCE_LABEL = "CORE (extracted text)"
 CORE_TEXT_CACHE_STAMP = "<!-- bmlibrarian-lite core-text v2 -->"
 CORE_TEXT_CACHE_SUFFIX = ".core.txt"
+
+# Elsevier's Article Retrieval API, asked for an Elsevier article's PDF by
+# DOI with the user's own key and, when set, an institutional token (#480,
+# stage C2). Pinned by doc/cross_platform/fulltext_parity/elsevier_article.json.
+SERVICE_ELSEVIER = "Elsevier's API"
+ELSEVIER_HOST = "api.elsevier.com"
+ELSEVIER_API_BASE_URL = f"https://{ELSEVIER_HOST}"
+ELSEVIER_ARTICLE_PATH = "/content/article/doi/"
+# The prefix of every DOI Elsevier registered; any other DOI is not asked.
+ELSEVIER_DOI_PREFIX = "10.1016/"
+ELSEVIER_MAX_RETRIES = 3
+ELSEVIER_BACKOFF_FACTOR = 1
+ELSEVIER_REQUEST_TIMEOUT_SECONDS = 30
+# The headers the key and the token travel in, and nowhere else.
+ELSEVIER_KEY_HEADER = "X-ELS-APIKey"
+ELSEVIER_TOKEN_HEADER = "X-ELS-Insttoken"
+ELSEVIER_ACCEPT = "application/pdf"
+# The one status that means Elsevier refused the key: that key is refused
+# for the rest of the process, whatever the token.
+ELSEVIER_KEY_REFUSED_STATUS = 401
+# A 403 whose body holds this token means "not available from this network":
+# those credentials (key and token together) are refused for the process.
+ELSEVIER_NETWORK_REFUSED_STATUS = 403
+ELSEVIER_NETWORK_REFUSED_TOKEN = b"AUTHENTICATION_ERROR"
+# At most this much of a 403's body is read to look for the token: a bounded
+# read of a provider's error, not research content (golden rule 13 is not
+# engaged).
+ELSEVIER_ERROR_BODY_MAX_BYTES = 65536
+# A 200 whose X-ELS-Status, trimmed, starts with this (in any case) carries
+# the article's first page only: never the article's text, so an absence.
+ELSEVIER_STATUS_HEADER = "X-ELS-Status"
+ELSEVIER_WARNING_PREFIX = "warning"
+# Consecutive fetches ending in HTTP 429 after which Elsevier is not asked
+# again this session: its weekly quota answers 429 once spent.
+ELSEVIER_PAUSE_AFTER_CONSECUTIVE_429 = 2
+# The bytes a streamed PDF is read in.
+ELSEVIER_DOWNLOAD_CHUNK_BYTES = 8192
+# The environment variables a key and a token may be given in, as CORE's.
+ENV_ELSEVIER_API_KEY = "ELSEVIER_API_KEY"
+ENV_ELSEVIER_INSTTOKEN = "ELSEVIER_INSTTOKEN"
+# What the Full Text settings tab says each field is for (verbatim on every
+# platform).
+ELSEVIER_API_KEY_EXPLANATION = (
+    "Optional. A free Elsevier API key (dev.elsevier.com) lets the app "
+    "download the PDFs of Elsevier articles you are entitled to: open-access "
+    "articles anywhere, subscribed ones from your institution's network."
+)
+ELSEVIER_INSTTOKEN_EXPLANATION = (
+    "Optional. An institutional token from Elsevier lets the key use your "
+    "institution's subscriptions away from its network."
+)
+# The fields' placeholders when the value comes from the environment.
+ELSEVIER_API_KEY_FROM_ENVIRONMENT = (
+    "Set by the ELSEVIER_API_KEY environment variable; a key here replaces it"
+)
+ELSEVIER_INSTTOKEN_FROM_ENVIRONMENT = (
+    "Set by the ELSEVIER_INSTTOKEN environment variable; a token here replaces it"
+)
+# How the desktop labels a PDF Elsevier's API served.
+ELSEVIER_SOURCE_LABEL = "Elsevier's API (PDF)"
 
 # What a PDF file begins with. A body that does not is not the PDF, whatever
 # it was served as -- a login page or a bot wall's challenge (#478, #480).
