@@ -46,6 +46,10 @@ public enum OpenAccessSource: String, Sendable, CaseIterable {
     /// CORE's extracted text, asked last by DOI with the user's own key (#480, stage C).
     case core = "core"
 
+    /// Elsevier's Article API, asked for an Elsevier article's PDF by DOI with the
+    /// user's own key, before any Unpaywall lookup (#480, stage C2).
+    case elsevier = "elsevier"
+
     /// The source as the reader is told of it, worded to sit mid-sentence.
     ///
     /// Python's `SERVICE_UNPAYWALL`, `SERVICE_UNPAYWALL_LANDING_PAGE` and
@@ -58,6 +62,7 @@ public enum OpenAccessSource: String, Sendable, CaseIterable {
         case .openAlex: return "OpenAlex"
         case .openAlexPDF: return "OpenAlex's copy"
         case .core: return BioMedLitConstants.coreServiceName
+        case .elsevier: return BioMedLitConstants.elsevierServiceName
         }
     }
 }
@@ -65,7 +70,8 @@ public enum OpenAccessSource: String, Sendable, CaseIterable {
 /// Why a lookup of the open-access chain left the question of a free copy open.
 ///
 /// Python records these as a `SourceLookupFailure`, or a `SourceLookupSkipped`
-/// with `LookupSkipReason.NOT_CONFIGURED` or `LookupSkipReason.KEY_REFUSED`.
+/// with `LookupSkipReason.NOT_CONFIGURED`, `LookupSkipReason.KEY_REFUSED` or
+/// `LookupSkipReason.NETWORK_REFUSED`.
 public enum OpenAccessUnsettledReason: Sendable, Equatable, Hashable {
     /// The lookup was made and did not settle it; why, by kind and status only.
     case failed(RequestFailure)
@@ -75,11 +81,20 @@ public enum OpenAccessUnsettledReason: Sendable, Equatable, Hashable {
     /// ``OpenAccessShortfall/unpaywallNotConfigured``.
     case notConfigured
 
-    /// CORE was not asked: it refused the key the settings hold, on this fetch
-    /// or earlier this session (#498). Only ``OpenAccessSource/core`` is ever
-    /// skipped so; see ``OpenAccessShortfall/coreKeyRefused``. Configured, so
-    /// it earns no configuration nudge.
+    /// CORE or Elsevier's API was not asked: it refused the key the settings
+    /// hold, on this fetch or earlier this session (#498, #480 stage C2). Only
+    /// ``OpenAccessSource/core`` and ``OpenAccessSource/elsevier`` are ever
+    /// skipped so; see ``OpenAccessShortfall/coreKeyRefused`` and
+    /// ``OpenAccessShortfall/elsevierKeyRefused``. Configured, so it earns no
+    /// configuration nudge. The words are shared.
     case keyRefused
+
+    /// Elsevier's API was not asked: it refused the credentials the settings
+    /// hold from this network, on this fetch or earlier this session (#480,
+    /// stage C2). Only ``OpenAccessSource/elsevier`` is ever skipped so; see
+    /// ``OpenAccessShortfall/elsevierNetworkRefused``. Configured, so it earns
+    /// no configuration nudge.
+    case networkRefused
 
     /// The reason as the reader is told it, in the sentence's parenthesis
     /// (Python's `RequestFailure.describe()` or `SourceLookupSkipped.describe()`).
@@ -88,6 +103,7 @@ public enum OpenAccessUnsettledReason: Sendable, Equatable, Hashable {
         case .failed(let failure): return failure.describe()
         case .notConfigured: return OpenAccessShortfall.notConfiguredDescription
         case .keyRefused: return BioMedLitConstants.coreKeyRefusedReason
+        case .networkRefused: return BioMedLitConstants.elsevierNetworkRefusedReason
         }
     }
 }
@@ -95,8 +111,8 @@ public enum OpenAccessUnsettledReason: Sendable, Equatable, Hashable {
 /// Why an open-access copy, or CORE's text, the open-access chain may know of
 /// went unassessed (#464, #466, #480).
 ///
-/// Unpaywall, the landing page it named, the PDF it named (#478), OpenAlex or
-/// the PDF it named, or CORE could not settle whether a free copy or its text
+/// Elsevier's API, Unpaywall, the landing page it named, the PDF it named
+/// (#478), OpenAlex or the PDF it named, or CORE could not settle whether a free copy or its text
 /// exists, so the chain ended on a fallback without learning it. That is
 /// not "no open-access copy": the reader is told so (``notice``), and the app
 /// keeps it beside the document's full text (``persisted()``). Python records
@@ -135,6 +151,9 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
     /// Python's `LookupSkipReason.KEY_REFUSED`, as stored (#498).
     private static let skippedKeyRefused = "key_refused"
 
+    /// Python's `LookupSkipReason.NETWORK_REFUSED`, as stored (#480, stage C2).
+    private static let skippedNetworkRefused = "network_refused"
+
     /// Python's `SourceLookupSkipped.describe()` for that reason.
     fileprivate static let notConfiguredDescription = "not configured"
 
@@ -143,8 +162,8 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         /// Which lookup, or whose PDF.
         public let source: OpenAccessSource
 
-        /// Why: a failed lookup, an Unpaywall that was not configured, or
-        /// CORE's refused key.
+        /// Why: a failed lookup, an Unpaywall that was not configured, CORE's
+        /// or Elsevier's refused key, or Elsevier's refusal from this network.
         public let reason: OpenAccessUnsettledReason
 
         /// The PDF's address, for a PDF a source named (#480); `nil` for a
@@ -164,8 +183,9 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         /// Create an entry from any reason, a skipped lookup's included.
         ///
         /// Kept to this file so that only ``OpenAccessShortfall`` makes a
-        /// `.notConfigured` entry, and only for Unpaywall, or a `.keyRefused`
-        /// entry, and only for CORE, without an address. The address is
+        /// `.notConfigured` entry, and only for Unpaywall, a `.keyRefused`
+        /// entry, and only for CORE or Elsevier, or a `.networkRefused` entry,
+        /// and only for Elsevier, each without an address. The address is
         /// trimmed, and a blank one becomes `nil`, so an entry with an address
         /// is always a tried PDF.
         ///
@@ -182,7 +202,12 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
             case .notConfigured:
                 precondition(source == .unpaywall && kept == nil, "a not-configured skip is Unpaywall's own lookup")
             case .keyRefused:
-                precondition(source == .core && kept == nil, "a refused-key skip is CORE's own lookup")
+                precondition(
+                    (source == .core || source == .elsevier) && kept == nil,
+                    "a refused-key skip is CORE's or Elsevier's own lookup"
+                )
+            case .networkRefused:
+                precondition(source == .elsevier && kept == nil, "an off-network skip is Elsevier's own lookup")
             case .failed:
                 break
             }
@@ -244,6 +269,21 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         entries: [Entry(source: .core, reason: .keyRefused, address: nil)]
     )
 
+    /// Elsevier's API, not asked because it refused the key the settings hold
+    /// (#480, stage C2). Told as "Elsevier's API (the key in the settings was
+    /// refused) could not be asked"; it keeps the absence unsettled.
+    public static let elsevierKeyRefused = OpenAccessShortfall(
+        entries: [Entry(source: .elsevier, reason: .keyRefused, address: nil)]
+    )
+
+    /// Elsevier's API, not asked because it refused the credentials the settings
+    /// hold from this network (#480, stage C2). Told as "Elsevier's API (not
+    /// available from this network) could not be asked"; it keeps the absence
+    /// unsettled.
+    public static let elsevierNetworkRefused = OpenAccessShortfall(
+        entries: [Entry(source: .elsevier, reason: .networkRefused, address: nil)]
+    )
+
     /// The first entry's source, for callers that log one; decide nothing from
     /// it alone.
     ///
@@ -288,9 +328,10 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
 
     // MARK: - Telling the reader
 
-    /// The open-access chain's sources in the order they are tried (#480).
+    /// The open-access chain's sources in the order they are tried (#480):
+    /// Elsevier's API first, as it is asked before any Unpaywall lookup.
     static let chainOrder: [OpenAccessSource] = [
-        .unpaywall, .landingPage, .pdf, .openAlex, .openAlexPDF, .core,
+        .elsevier, .unpaywall, .landingPage, .pdf, .openAlex, .openAlexPDF, .core,
     ]
 
     /// Who named a tried PDF.
@@ -409,7 +450,8 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
     }
 
     /// Python's `configuration_nudge`: only Unpaywall is ever not configured. A
-    /// refused CORE key is configured, so it earns none (#498).
+    /// refused CORE or Elsevier key, or Elsevier's refusal from this network, is
+    /// a configured channel's, so it earns none (#498, #480 stage C2).
     private func withNudge(_ sentence: String) -> String {
         guard entries.contains(where: { $0.reason == .notConfigured }) else { return sentence }
         return "\(sentence) Configuring \(OpenAccessSource.unpaywall.serviceName) "
@@ -478,8 +520,8 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
     ///
     /// One lookup without an address keeps schema 1:
     /// `{"failure":{"kind":…,"status_code":…},"schema_version":1,"source":…}`
-    /// (for a lookup not made, `"skipped":"not_configured"` or
-    /// `"skipped":"key_refused"` in its place).
+    /// (for a lookup not made, `"skipped":"not_configured"`,
+    /// `"skipped":"key_refused"` or `"skipped":"network_refused"` in its place).
     /// Anything else is schema 2: `{"entries":[…],"schema_version":2}`, each
     /// entry in the same shape plus the PDF's `address`.
     ///
@@ -517,6 +559,7 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         case .failed(let failure): object[keyFailure] = SearchFailureReporting.failureObject(failure)
         case .notConfigured: object[keySkipped] = skippedNotConfigured
         case .keyRefused: object[keySkipped] = skippedKeyRefused
+        case .networkRefused: object[keySkipped] = skippedNetworkRefused
         }
         return object
     }
@@ -530,9 +573,11 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
     /// Unpaywall, the tier every open-access lookup belongs to. An unknown
     /// source reads as Unpaywall too; the failure degrades as a search
     /// shortfall's does (`search_failure_reporting.md`, "Persisted form"). A
-    /// stored `not_configured` skip is Unpaywall's and a stored `key_refused`
-    /// skip CORE's, whatever source it names: only they are skipped so. Any
-    /// other skip reads by its failure.
+    /// stored `not_configured` skip is Unpaywall's and a stored
+    /// `network_refused` skip Elsevier's, whatever source it names; a stored
+    /// `key_refused` skip is Elsevier's when the source it names is `elsevier`,
+    /// and CORE's otherwise: only they are skipped so. Any other skip reads by
+    /// its failure.
     ///
     /// - Parameter stored: The stored value, untrusted.
     /// - Returns: The shortfall, as specific as the stored value allows.
@@ -563,7 +608,10 @@ public struct OpenAccessShortfall: Sendable, Equatable, Hashable {
         case skippedNotConfigured:
             return Entry(source: .unpaywall, reason: .notConfigured, address: nil)
         case skippedKeyRefused:
-            return Entry(source: .core, reason: .keyRefused, address: nil)
+            let elsevier = fields[keySource] as? String == OpenAccessSource.elsevier.rawValue
+            return Entry(source: elsevier ? .elsevier : .core, reason: .keyRefused, address: nil)
+        case skippedNetworkRefused:
+            return Entry(source: .elsevier, reason: .networkRefused, address: nil)
         default:
             break
         }

@@ -81,8 +81,19 @@ final class OpenAccessStatementContractTests: XCTestCase {
             )
             if entry["skipped"] as? String == "not_configured" { return .unpaywallNotConfigured }
             if entry["skipped"] as? String == "key_refused" {
-                XCTAssertEqual(source, .core, "\(entry)")
-                return .coreKeyRefused
+                // CORE's or Elsevier's, as the entry names it (#480, stage C2)
+                switch source {
+                case .core: return .coreKeyRefused
+                case .elsevier: return .elsevierKeyRefused
+                default: throw ContractError.malformed("a key_refused skip of \(source) in \(entry)")
+                }
+            }
+            if entry["skipped"] as? String == "network_refused" {
+                XCTAssertEqual(source, .elsevier, "\(entry)")
+                return .elsevierNetworkRefused
+            }
+            if let skipped = entry["skipped"] as? String {
+                throw ContractError.malformed("an unknown skip \(skipped) in \(entry)")
             }
             let kind = try XCTUnwrap(
                 (entry["kind"] as? String).flatMap(RequestFailureKind.init(rawValue:)), "\(entry)"

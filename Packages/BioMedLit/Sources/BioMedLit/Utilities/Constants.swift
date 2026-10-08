@@ -168,6 +168,45 @@ public enum BioMedLitConstants {
     /// 0.4 requests a second, Python's POLITE_RATE_CEILINGS entry, per service instance (#489).
     public static let coreMinimumInterval: TimeInterval = 2.5
 
+    // MARK: - Elsevier's Article API (#480, stage C2)
+
+    /// Elsevier's API root; pinned by fulltext_parity/elsevier_article.json.
+    public static let elsevierBaseURL = "https://api.elsevier.com"
+    /// The article path; the DOI follows it, escaped as a path.
+    public static let elsevierArticlePath = "/content/article/doi/"
+    /// The prefix of every DOI Elsevier registered; any other DOI is not asked.
+    public static let elsevierDOIPrefix = "10.1016/"
+    /// Elsevier as the reader's sentences name it, verbatim on every platform
+    /// (Python's `SERVICE_ELSEVIER`).
+    public static let elsevierServiceName = "Elsevier's API"
+    /// How a PDF Elsevier's API served is labelled, verbatim on every platform.
+    public static let elsevierSourceLabel = "Elsevier's API (PDF)"
+    /// The one status that means Elsevier refused the key: that key is refused for the
+    /// rest of the process, whatever the token.
+    public static let elsevierKeyRefusedStatus = 401
+    /// The status of a refusal from this network, when its body holds
+    /// ``elsevierNetworkRefusedToken``; any other answer with it is unreachable.
+    public static let elsevierNetworkRefusedStatus = 403
+    /// The ASCII bytes a 403's body holds when the credentials are refused from this network.
+    public static let elsevierNetworkRefusedToken = "AUTHENTICATION_ERROR"
+    /// An off-network refusal as the reader is told it, Python's
+    /// `LookupSkipReason.NETWORK_REFUSED` words.
+    public static let elsevierNetworkRefusedReason = "not available from this network"
+    /// The header whose ``elsevierWarningPrefix`` marks a 200 as the first page only.
+    /// Matched by name in any case.
+    public static let elsevierStatusHeader = "X-ELS-Status"
+    /// What an `X-ELS-Status` value, trimmed, starts with (in any case) when Elsevier
+    /// served the first page only: never the article's text, so an absence.
+    public static let elsevierWarningPrefix = "WARNING"
+    /// At most this much of a 403's body is read to look for the token: a bounded read
+    /// of a provider's error, not research content.
+    public static let elsevierErrorBodyMaxBytes = 65536
+    /// Consecutive fetches ending in 429 after which Elsevier is not asked again this
+    /// session: its weekly quota answers 429 once spent.
+    public static let elsevierPauseAfterConsecutive429 = 2
+    /// Two requests a second, Python's POLITE_RATE_CEILINGS entry.
+    public static let elsevierMinimumInterval: TimeInterval = 0.5
+
     // MARK: - PubMed API
 
     /// NCBI E-utilities base URL.
