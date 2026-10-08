@@ -23,6 +23,7 @@ Provides shared fixtures for testing:
 - Sample document metadata
 """
 
+import importlib.util
 import json
 import tempfile
 from pathlib import Path
@@ -250,3 +251,29 @@ def _no_live_elsevier(
     monkeypatch.setattr(
         elsevier_api, "default_elsevier_client", lambda api_key, insttoken: None
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_live_model_fetch(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep every settings dialog off the real providers.
+
+    Building a ``SettingsDialog`` starts a thread per enabled provider that
+    asks Anthropic or Ollama for its models. A test's dialog has no parent,
+    so it is collected while those threads still run, and the collection
+    crashed the interpreter (stage C2's CI, then master's). Nothing is
+    started here; the dialog keeps its fallback models. A test that needs
+    the real threads marks itself ``real_model_fetch``.
+    """
+    if request.node.get_closest_marker("real_model_fetch"):
+        return
+    if importlib.util.find_spec("PySide6") is None:
+        return
+    from bmlibrarian_lite.gui import settings_dialog
+
+    for worker in (
+        settings_dialog.ModelFetchWorker,
+        settings_dialog.ProviderConnectionTestWorker,
+    ):
+        monkeypatch.setattr(worker, "start", lambda self, *args: None)

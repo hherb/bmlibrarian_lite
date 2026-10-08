@@ -8,73 +8,33 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Machine channels, stage C2: Elsevier's API** (all three; #480 stays open
-for the embedded browser): built on `feat/machine-channels-stage-c2-elsevier-480`,
-PR #507. Contract `fulltext_retrieval.md` "Elsevier's Article API" +
-`fulltext_parity/elsevier_article.json`; plan
-`docs/superpowers/plans/2026-10-08-fulltext-machine-channels-stage-c2.md`.
-**Still owed by the maintainer:**
-- **Run the probe off-network**: `ELSEVIER_API_KEY=… python
-  scripts/elsevier_probe.py --label off-network --out tmp/elsevier_probe.jsonl`.
-  It never writes the key and follows no redirect. **The fixtures follow
-  Elsevier's documented shapes**: the off-network refusal is assumed to be a
-  403 with `AUTHENTICATION_ERROR`, and a 401 is assumed to mean a refused
-  key. Correct `elsevier_article.json` and all three platforms from the rows.
-  The same rows settle **#508**: whether a bad token answers 401 (then a 401
-  sent with a token must refuse the credentials, not the key), and whether
-  the key's explanation may keep "open-access articles anywhere".
-- **Then on-network acceptance** (the same probe with `--label on-network`,
-  and a desktop fetch of a subscribed `10.1016/` article).
-- **C1's CORE replay** (below).
+**Owed by the maintainer** (stages C1 and C2 have landed; #480 stays open for
+the embedded browser):
+- **C2's probe, off-network**: `ELSEVIER_API_KEY=… python
+  scripts/elsevier_probe.py --label off-network --out tmp/elsevier_probe.jsonl`
+  (never writes the key, follows no redirect). The fixtures follow Elsevier's
+  *documented* shapes: an off-network refusal is assumed to be a 403 with
+  `AUTHENTICATION_ERROR`, a 401 a refused key. Correct
+  `fulltext_parity/elsevier_article.json` and all three platforms from the
+  rows; the same rows settle **#508** (does a bad token answer 401; may the
+  key's explanation keep "open-access articles anywhere").
+- **Then on-network acceptance**: the same probe with `--label on-network`,
+  and a desktop fetch of a subscribed `10.1016/` article.
+- **C1's CORE replay**: the CORE key in `config.json`
+  (`discovery.core_api_key`), then `python scripts/core_acceptance_replay.py
+  --out tmp/core_acceptance.jsonl`; the bar is ≥ 14 of the spike's 149
+  not-open-access rows; record the counts in the spikes README and the
+  contract.
 
-**Binds (maintainer, 2026-10-08):**
-- **A first-page PDF is never served.** `X-ELS-Status: WARNING …` on a 200
-  (trimmed, any case, read before the body) is an absence. Nothing is
-  told, and the chain goes on.
-- **Whatever the requestor is entitled to is served**, with no
-  open-access-only check (spec decision 3 dropped).
-- **A refused network is unsettled.** A 403 with `AUTHENTICATION_ERROR` in
-  the first 64 KiB is told "Elsevier's API (not available from this
-  network)". It is scoped to `sha256(key + "\n" + token)`, so a token added
-  later is asked. A 401 refuses that key (`key_refused`).
-- **Never a redirect, never a link.**
-  - The apps hold a served PDF only as a local file and never store or
-    offer the `api.elsevier.com` URL.
-  - The apps read Elsevier's cached PDF before asking.
-  - Android reopens a stored Elsevier PDF from disk.
-- **The apps' not-saved deviation:** the walk goes on, and when nothing
-  serves, `OpenAccessShortfall(elsevier, request_failed)`; the desktop
-  keeps its `NOT_SAVED` note.
-- **Added by the review round (2026-10-09):**
-  - **Credentials that cannot be sent are never sent.** A key or token with a
-    character outside printable ASCII (a zero-width space or a curly quote
-    pasted in) makes no request. It is unreachable `request_failed`, recorded
-    nowhere, with a WARNING that never names it (the contract's `sendable`
-    rows). Android's OkHttp used to throw here, quoting the key, and end the
-    chain.
-  - **The environment's token goes only with the environment's key**
-    (desktop); a token in the settings goes with either.
-  - **The apps ask by the cleaned DOI** (Python's `_clean_doi`), so a
-    `www.doi.org` form is Elsevier's too.
-  - `urllib3>=2.0` is declared: it enforces a body's Content-Length, so a PDF
-    cut short raises rather than being saved.
-- **Accepted limits:**
-  - Android asks Elsevier only when Europe PMC offered no render URL (#493).
-  - Swift skips Elsevier when `extractPDFText` is off.
-  - The desktop's "Fetch PDF" path asks Elsevier before PMC's derived
-    addresses (one quota request each).
-
-Lodged: #506 (`FulltextDiscoverer.cancel` never reaches its PDF step). From
-the review round: #508 (the probe's questions), #509 (a network refusal
-outlives a change of network), #510 (the apps tell not-saved as "the request
-failed"), #511 (a failed Keychain read is cached as no key), #512 (test gaps
-left), #513 (cross-platform simplifications).
-
-**C1's live acceptance replay is still owed**: the maintainer puts the CORE
-key in `config.json` (`discovery.core_api_key`), then `python
-scripts/core_acceptance_replay.py --out tmp/core_acceptance.jsonl`; the bar is
-≥ 14 of the spike's 149 not-open-access rows; record the counts in the spikes
-README and the contract.
+**CI was red after #507** (its own pytest check and master's): the
+interpreter segfaulted while collecting a parentless test `SettingsDialog`
+whose model-fetch threads were still asking Anthropic and Ollama. Fixed on
+`fix/settings-dialog-test-threads`: the autouse `_no_live_model_fetch`
+fixture starts no dialog thread (opt out: `real_model_fetch`), pinned by
+`tests/test_a_test_dialog_starts_no_thread.py`. **A red check on a merged PR
+is master's state: look before starting the next slice.**
+Lodged: #514 (the app's dialog waits for its threads only on the title-bar
+close, and every opening leaks a dialog).
 
 ## Recently landed (context)
 
@@ -82,6 +42,24 @@ Compressed once a slice is merged: what remains is the rule that still binds,
 not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
 the rest.
 
+- **Machine channels, stage C2: Elsevier's article API** (all three; PR
+  #507). Contract "Elsevier's Article API" + `elsevier_article.json`.
+  **A first-page PDF is never served**: `X-ELS-Status: WARNING …` on a 200
+  (trimmed, any case, read before the body) is an absence. **Whatever the
+  requestor is entitled to is served** (no open-access-only check). A 403
+  with `AUTHENTICATION_ERROR` in the first 64 KiB is "not available from this
+  network", scoped to `sha256(key + "\n" + token)`; a 401 refuses that key.
+  **Never a redirect, never a link**: the apps hold a served PDF only as a
+  local file, read Elsevier's cached PDF before asking, and Android reopens
+  it from disk. Not saved: the apps walk on and store
+  `OpenAccessShortfall(elsevier, request_failed)`; the desktop keeps
+  `NOT_SAVED`. **Credentials that cannot be sent are never sent** (a
+  character outside printable ASCII: no request, a WARNING that never names
+  it). The environment's token goes only with the environment's key. The
+  apps ask by the cleaned DOI. `urllib3>=2.0` enforces Content-Length.
+  Accepted limits: Android asks only when Europe PMC offered no render URL
+  (#493); Swift skips it when `extractPDFText` is off; the desktop's "Fetch
+  PDF" asks Elsevier before PMC's derived addresses. Lodged: #506, #508–#513.
 - **Machine channels, stage C1: CORE's text and the key settings** (all
   three; PR #501). Contract "CORE's Extracted Text" + `core_fulltext.json`.
   **A hit counts only if its own DOI is this article's.** Asked last and once,
@@ -207,7 +185,8 @@ the rest.
   - **CI on all three platforms** (#129). **No job may gain a `paths:`
     filter** (the parity fixtures live outside `src/` and `tests/`). **A Qt
     preflight constructs a `QApplication` before pytest**, or a broken Qt
-    install skips ~100 `importorskip` tests green. **`lint_delta.py`** diffs
+    install skips ~100 `importorskip` tests green. **No test starts a
+    settings-dialog thread** (`_no_live_model_fetch`). **`lint_delta.py`** diffs
     against the merge base in a throwaway worktree; **ruff config stays in
     `[tool.ruff.lint]`**, or head and base shrink together.
   - **Cross-platform parity drift guard** (#105, #101–#125). Python
@@ -230,7 +209,7 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **C2's probe and acceptance, and C1's replay** (maintainer), then the **embedded browser and
   review queue** with the `challenged` kind (replaces **#483**); **#481**
   follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
-  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2);
+  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2); **#514**;
   **#467**, **#468** / **#470**, **#476**.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
