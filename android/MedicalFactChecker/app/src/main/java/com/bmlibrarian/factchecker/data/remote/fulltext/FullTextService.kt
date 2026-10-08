@@ -56,6 +56,9 @@ import javax.inject.Singleton
  * 1. Europe PMC XML (JATS format) - preferred, machine-readable
  * 2. PMC's open-data bucket (JATS, by PMC ID) - when Europe PMC's XML gave no text (#480)
  * 3. Europe PMC PDF render - a free PDF Europe PMC offers
+ * 3a. Elsevier's API PDF - an Elsevier article's PDF (`10.1016/`), asked once,
+ *    only with the user's key, only when Europe PMC offered no render URL (#493's
+ *    limit); held only as a local file, never as a link ([ElsevierService])
  * 4. Unpaywall PDFs - every PDF its locations name, tried in order when downloaded,
  *    or the PDF an open-access landing page declares
  * 5. OpenAlex PDFs - the PDFs its locations name that Unpaywall did not, asked
@@ -74,11 +77,12 @@ class FullTextService @Inject constructor(
     private val httpClient: OkHttpClient,
     private val pmcOpenData: PmcOpenDataService,
     private val openAlex: OpenAlexService,
-    private val core: CoreService
+    private val core: CoreService,
+    private val elsevier: ElsevierService
 ) {
     companion object {
         private const val TAG = "FullTextService"
-        private const val PDF_CACHE_DIR = "fulltext_pdfs"
+        private const val PDF_CACHE_DIR = Constants.FULLTEXT_PDF_CACHE_DIR
 
         /** Appended to a PDF's cache name while its download is in progress. */
         private const val PDF_PARTIAL_SUFFIX = ".part"
@@ -191,6 +195,16 @@ class FullTextService @Inject constructor(
          * @property text The text CORE extracted from a repository copy
          */
         data class CoreText(val text: String) : FullTextResult(hasContent = true)
+
+        /**
+         * The PDF Elsevier's API served (#480, stage C2), already saved on this
+         * device. Held only as a local file: Elsevier's article URL needs the key,
+         * so it is never a link, never offered for external viewing, and never
+         * downloaded again without its headers.
+         *
+         * @property pdfPath Where the PDF is cached
+         */
+        data class ElsevierPdf(val pdfPath: String) : FullTextResult(hasContent = true)
 
         /**
          * Fall back to DOI/publisher URL.
@@ -329,7 +343,8 @@ class FullTextService @Inject constructor(
      *
      * @param pmcId PubMed Central ID (if available).
      * @param doi Digital Object Identifier (if available); trimmed, and a
-     *   blank one is no DOI: Unpaywall, OpenAlex and the DOI link are skipped.
+     *   blank one is no DOI: Elsevier's API, Unpaywall, OpenAlex and the DOI link
+     *   are skipped.
      * @param pmid PubMed ID (if available, used for caching).
      * @param email Email to ask Unpaywall with ([UnpaywallContact.emailFor]); null,
      *   blank or the placeholder skips Unpaywall as not configured.
@@ -449,6 +464,23 @@ class FullTextService @Inject constructor(
             )
         }
 
+        // Elsevier's API (#480, stage C2): after the render tier, before any
+        // Unpaywall lookup, only for an Elsevier DOI and only with the user's key
+        // (a call without either asks nothing and records nothing). Its PDF is
+        // held only as a local file, and nothing it does falls back to a link: its
+        // article URL needs the key. What it left unsettled is the first step of
+        // the open-access walk, so a copy served later settles it and the notice
+        // tells it first when none is
+        val elsevierSteps = if (usableDoi == null) {
+            emptyList()
+        } else {
+            when (val fetched = elsevier.fetchPdf(usableDoi)) {
+                is ElsevierFetch.Served -> return@withContext Result.success(FullTextResult.ElsevierPdf(fetched.localPath))
+                null -> emptyList()
+                else -> listOfNotNull(elsevierShortfall(fetched, usableDoi)?.let { OpenAccessStep.Unsettled(it) })
+            }
+        }
+
         // Try Unpaywall if DOI is available: every PDF it names is a step, tried
         // in order when the PDFs are downloaded (#480, stage B). OpenAlex is
         // asked only when it can raise the odds: here when Unpaywall named no
@@ -459,7 +491,7 @@ class FullTextService @Inject constructor(
         var openAccessShortfall: OpenAccessShortfall? = null
         if (usableDoi != null) {
             Log.d(TAG, "Attempting Unpaywall PDF for $usableDoi")
-            val unpaywall = unpaywallSteps(usableDoi, email, pmid)
+            val unpaywall = elsevierSteps + unpaywallSteps(usableDoi, email, pmid)
             if (unpaywall.any { it is OpenAccessStep.Candidate }) {
                 // OpenAlex waits: recording asks it only if none of these is served
                 return@withContext Result.success(FullTextResult.OpenAccessPdfs(unpaywall, usableDoi))
@@ -526,6 +558,30 @@ class FullTextService @Inject constructor(
         Result.success(
             FullTextResult.Unavailable("No full text source available")
         )
+    }
+
+    /**
+     * What an Elsevier fetch that served no PDF left unsettled (#480, stage C2).
+     *
+     * A refused key or network is a skip of a configured channel, told as such.
+     * A PDF served and not saved is the apps' `request_failed` (the desktop's
+     * not-saved note carries a link, and Elsevier's URL can never be one); the
+     * service logged its cause at ERROR. A 404 or a first page adds nothing.
+     *
+     * @param fetched What Elsevier answered; never [ElsevierFetch.Served]
+     * @param doi The DOI, for the log
+     * @return The shortfall, or null when it settled nothing open
+     */
+    private fun elsevierShortfall(fetched: ElsevierFetch, doi: String): OpenAccessShortfall? = when (fetched) {
+        is ElsevierFetch.Unreachable -> {
+            Log.w(TAG, "${Constants.ELSEVIER_SERVICE_NAME} could not be asked about $doi (${fetched.failure.describe()})")
+            OpenAccessShortfall(OpenAccessSource.ELSEVIER, OpenAccessUnsettledReason.Failed(fetched.failure))
+        }
+        ElsevierFetch.KeyRefused -> OpenAccessShortfall.ELSEVIER_KEY_REFUSED
+        ElsevierFetch.NetworkRefused -> OpenAccessShortfall.ELSEVIER_NETWORK_REFUSED
+        ElsevierFetch.NotSaved ->
+            OpenAccessShortfall(OpenAccessSource.ELSEVIER, RequestFailure(RequestFailureKind.REQUEST_FAILED))
+        ElsevierFetch.Absent, is ElsevierFetch.Served -> null
     }
 
     /**
@@ -1067,6 +1123,7 @@ class FullTextService @Inject constructor(
             is FullTextResult.EuropePmcXml -> Constants.FULLTEXT_SOURCE_EUROPE_PMC
             is FullTextResult.PmcOpenDataXml -> Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA
             is FullTextResult.CoreText -> Constants.FULLTEXT_SOURCE_CORE
+            is FullTextResult.ElsevierPdf -> Constants.FULLTEXT_SOURCE_ELSEVIER
             is FullTextResult.EuropePmcPdf -> Constants.FULLTEXT_SOURCE_EUROPE_PMC
             is FullTextResult.OpenAccessPdfs ->
                 result.steps.filterIsInstance<OpenAccessStep.Candidate>().first().namedBy.fullTextSource

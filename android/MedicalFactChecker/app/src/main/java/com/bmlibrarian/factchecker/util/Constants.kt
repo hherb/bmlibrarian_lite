@@ -214,6 +214,76 @@ object Constants {
     const val CORE_API_KEY_EXPLANATION =
         "Optional. A free CORE API key (core.ac.uk/services/api) lets the app read the text CORE extracted from repository copies when no other source has the article."
 
+    // ==================== Elsevier's Article API (#480, stage C2) ====================
+
+    /** Elsevier's API root; pinned by fulltext_parity/elsevier_article.json. */
+    const val ELSEVIER_BASE_URL = "https://api.elsevier.com"
+
+    /** The article-by-DOI path, the escaped DOI appended. */
+    const val ELSEVIER_ARTICLE_PATH = "/content/article/doi/"
+
+    /** Elsevier as the reader's sentences name it, verbatim on every platform. */
+    const val ELSEVIER_SERVICE_NAME = "Elsevier's API"
+
+    /** The DOI prefix Elsevier registers; only a DOI that starts so, normalised, is asked. */
+    const val ELSEVIER_DOI_PREFIX = "10.1016/"
+
+    /** The header the key travels in, and nowhere else. */
+    const val ELSEVIER_KEY_HEADER = "X-ELS-APIKey"
+
+    /** The header the institutional token travels in, only when one is set. */
+    const val ELSEVIER_TOKEN_HEADER = "X-ELS-Insttoken"
+
+    /** What the request accepts: the article's PDF. */
+    const val ELSEVIER_ACCEPT = "application/pdf"
+
+    /** The header whose `WARNING` value marks a first page served in place of the article. */
+    const val ELSEVIER_STATUS_HEADER = "X-ELS-Status"
+
+    /** The value prefix, in any case, that marks a first page only. */
+    const val ELSEVIER_WARNING_PREFIX = "WARNING"
+
+    /** The status that means Elsevier refused the key: that key is refused for the rest of the process. */
+    const val ELSEVIER_KEY_REFUSED_STATUS = 401
+
+    /** The status that, with [ELSEVIER_NETWORK_REFUSED_TOKEN] in its body, refuses these credentials here. */
+    const val ELSEVIER_NETWORK_REFUSED_STATUS = 403
+
+    /** The ASCII bytes a refusal from this network's body holds. */
+    const val ELSEVIER_NETWORK_REFUSED_TOKEN = "AUTHENTICATION_ERROR"
+
+    /** A refusal from this network as the reader is told it, Python's `LookupSkipReason.NETWORK_REFUSED` words. */
+    const val ELSEVIER_NETWORK_REFUSED_REASON = "not available from this network"
+
+    /** The most of an error body read to look for the token: a provider's error, not research content. */
+    const val ELSEVIER_ERROR_BODY_MAX_BYTES = 65536
+
+    /** Consecutive fetches ending in 429 after which Elsevier is not asked again this session. */
+    const val ELSEVIER_PAUSE_AFTER_CONSECUTIVE_429 = 2
+
+    /** 2 requests a second, Python's POLITE_RATE_CEILINGS entry for api.elsevier.com. */
+    const val ELSEVIER_MIN_INTERVAL_MS = 500L
+
+    /** Further attempts after the first, for a transport failure or a retryable status: four in all. */
+    const val ELSEVIER_MAX_RETRIES = 3
+
+    /** Elsevier's wait before its first retry, doubling after; the bucket's value. */
+    const val ELSEVIER_INITIAL_BACKOFF_MS = PMC_OPEN_DATA_INITIAL_BACKOFF_MS
+
+    /** Connect and read timeout for one Elsevier request, in seconds. */
+    const val ELSEVIER_REQUEST_TIMEOUT_SECONDS = 30L
+
+    /** Statuses retried for Elsevier: Python's RETRYABLE_HTTP_STATUSES, as CORE's. */
+    val ELSEVIER_RETRYABLE_STATUSES = setOf(429, 500, 502, 503, 504)
+
+    /** The settings screen's one line on what an Elsevier API key adds, verbatim on every platform. */
+    const val ELSEVIER_API_KEY_EXPLANATION =
+        "Optional. A free Elsevier API key (dev.elsevier.com) lets the app download the PDFs of Elsevier articles you are entitled to: open-access articles anywhere, subscribed ones from your institution's network."
+
+    /** The settings screen's one line on what an Elsevier institutional token adds, verbatim on every platform. */
+    const val ELSEVIER_INSTTOKEN_EXPLANATION =
+        "Optional. An institutional token from Elsevier lets the key use your institution's subscriptions away from its network."
+
     /** The settings screen's one line on what an NCBI API key adds (#496). */
     const val NCBI_API_KEY_EXPLANATION =
         "Raises PubMed's rate limit from 3 to 10 requests a second."
@@ -408,6 +478,9 @@ object Constants {
 
     // ==================== Full-Text Source Constants ====================
 
+    /** The directory, under the app's cache, every full-text PDF is saved in. */
+    const val FULLTEXT_PDF_CACHE_DIR = "fulltext_pdfs"
+
     /** Full-text source: Europe PMC XML. */
     const val FULLTEXT_SOURCE_EUROPE_PMC = "europepmc"
 
@@ -437,6 +510,12 @@ object Constants {
 
     /** How a stored [FULLTEXT_SOURCE_CORE] is labelled for the reader. */
     const val FULLTEXT_SOURCE_CORE_LABEL = "CORE (extracted text)"
+
+    /** Source of a PDF Elsevier's API served (#480, stage C2): held only as a local file. */
+    const val FULLTEXT_SOURCE_ELSEVIER = "elsevier"
+
+    /** How a stored [FULLTEXT_SOURCE_ELSEVIER] is labelled for the reader, verbatim on every platform. */
+    const val FULLTEXT_SOURCE_ELSEVIER_LABEL = "Elsevier's API (PDF)"
 
     /** Full-text source: DOI/Publisher. */
     const val FULLTEXT_SOURCE_DOI = "doi"

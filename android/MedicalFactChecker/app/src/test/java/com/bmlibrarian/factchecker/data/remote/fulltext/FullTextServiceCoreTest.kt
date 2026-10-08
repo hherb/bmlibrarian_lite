@@ -76,7 +76,8 @@ class FullTextServiceCoreTest {
         httpClient = mockk(relaxed = true),
         pmcOpenData = absentBucket(),
         openAlex = absentOpenAlex(),
-        core = core
+        core = core,
+        elsevier = absentElsevier()
     )
 
     /** CORE answering every DOI with [fetch]. */

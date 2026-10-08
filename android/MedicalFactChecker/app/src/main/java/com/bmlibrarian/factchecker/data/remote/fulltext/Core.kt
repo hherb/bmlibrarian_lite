@@ -36,7 +36,6 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
-import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -71,6 +70,20 @@ object Core {
         var text = doi.trim().lowercase()
         DOI_PREFIXES.firstOrNull { text.startsWith(it) }?.let { text = text.removePrefix(it) }
         return text.trim()
+    }
+
+    /**
+     * A DOI as sent where its own case matters (Elsevier's article URL, #480 stage
+     * C2): trimmed, one resolver or `doi:` prefix removed as [normalisedDoi]
+     * matches it (in any case), trimmed again, its own case kept.
+     *
+     * @param doi The DOI as a source wrote it
+     * @return The bare DOI
+     */
+    fun doiWithoutPrefix(doi: String): String {
+        val text = doi.trim()
+        val prefix = DOI_PREFIXES.firstOrNull { text.startsWith(it, ignoreCase = true) }
+        return (if (prefix != null) text.substring(prefix.length) else text).trim()
     }
 
     /**
@@ -161,9 +174,6 @@ object Core {
         return false
     }
 
-    /** The algorithm of the digest a refused key is remembered by. */
-    private const val KEY_DIGEST_ALGORITHM = "SHA-256"
-
     /**
      * The fingerprint a refused key is remembered by (#498), Python's `core_key_digest`.
      *
@@ -174,10 +184,7 @@ object Core {
      * @param apiKey A CORE key; trimmed here, so padding names the same key
      * @return The SHA-256 digest of the trimmed key's UTF-8 bytes, as lower-case hex
      */
-    fun keyDigest(apiKey: String): String =
-        MessageDigest.getInstance(KEY_DIGEST_ALGORITHM)
-            .digest(apiKey.trim().toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
+    fun keyDigest(apiKey: String): String = KeyDigest.key(apiKey)
 }
 
 /** What asking CORE for one DOI's text produced. */
@@ -230,7 +237,8 @@ sealed interface CoreFetch {
  * @property maxRetries Further attempts for a transport failure or a status in
  *   [Constants.CORE_RETRYABLE_STATUSES]; tests pass 0
  * @property initialBackoffMs The wait before the first retry, doubling after
- * @property pauseAfter Consecutive 429 endings that pause CORE
+ * @property session What one fetch leaves for the next: the pause and the refused
+ *   key ([KeyedServiceSession]), CORE's own, shared with nothing of Elsevier's
  */
 @Singleton
 class CoreService internal constructor(
@@ -240,7 +248,12 @@ class CoreService internal constructor(
     private val pacer: RequestPacer,
     private val maxRetries: Int,
     private val initialBackoffMs: Long,
-    private val pauseAfter: Int = Constants.CORE_PAUSE_AFTER_CONSECUTIVE_429
+    private val session: KeyedServiceSession = KeyedServiceSession(
+        Constants.CORE_SERVICE_NAME,
+        Constants.CORE_KEY_REFUSED_STATUS,
+        Constants.CORE_PAUSE_AFTER_CONSECUTIVE_429,
+        TAG
+    )
 ) {
     /** The key is the user's, read from the settings at each request. */
     @Inject
@@ -253,25 +266,15 @@ class CoreService internal constructor(
         Constants.CORE_INITIAL_BACKOFF_MS
     )
 
-    private val throttleLock = Any()
-    private var consecutive429 = 0
-
-    @Volatile
-    private var paused = false
-
-    /** The [Core.keyDigest] of the key CORE refused this session, if any (#498). */
-    @Volatile
-    private var refusedKeyDigest: String? = null
-
     /** Whether CORE is paused for the rest of the session. */
-    val isPaused: Boolean get() = paused
+    val isPaused: Boolean get() = session.isPaused
 
     /**
      * Whether CORE refused this key this session (#498); any other key is asked as usual.
      *
      * @param keyDigest The key's [Core.keyDigest]
      */
-    fun refuses(keyDigest: String): Boolean = refusedKeyDigest == keyDigest
+    fun refuses(keyDigest: String): Boolean = session.refuses(keyDigest)
 
     /**
      * CORE's text for [doi].
@@ -306,7 +309,7 @@ class CoreService internal constructor(
         // Only the refused key is refused: a corrected one is asked again
         val keyDigest = Core.keyDigest(key)
         if (refuses(keyDigest)) return CoreFetch.KeyRefused
-        if (paused) return CoreFetch.Unreachable(RequestFailure.forHttpStatus(Constants.HTTP_TOO_MANY_REQUESTS))
+        if (session.isPaused) return CoreFetch.Unreachable(RequestFailure.forHttpStatus(Constants.HTTP_TOO_MANY_REQUESTS))
         return try {
             val url = Core.searchUrl(doi, baseUrl).toHttpUrlOrNull()
                 ?: return CoreFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
@@ -343,29 +346,14 @@ class CoreService internal constructor(
     }
 
     /**
-     * Count one fetch's ending: the consecutive 429s pause CORE, anything else resets them;
-     * a 401 also marks the key it was sent with refused, in place of any refused before (#498).
+     * Count one fetch's ending ([KeyedServiceSession.record]): the consecutive 429s
+     * pause CORE, anything else resets them; a 401 also marks the key it was sent
+     * with refused, in place of any refused before (#498).
      *
      * @param status The ending's HTTP status, or null for no status (a transport failure)
      * @param keyDigest The [Core.keyDigest] of the key it was sent with
      */
-    private fun record(status: Int?, keyDigest: String) {
-        synchronized(throttleLock) {
-            if (status == Constants.CORE_KEY_REFUSED_STATUS && refusedKeyDigest != keyDigest) {
-                refusedKeyDigest = keyDigest
-                Log.w(TAG, "CORE refused the configured key (HTTP $status); not asked with it again this session")
-            }
-            if (status != Constants.HTTP_TOO_MANY_REQUESTS) {
-                consecutive429 = 0
-                return
-            }
-            consecutive429 += 1
-            if (consecutive429 >= pauseAfter && !paused) {
-                paused = true
-                Log.w(TAG, "CORE answered HTTP 429 $consecutive429 times in a row; not asked again this session")
-            }
-        }
-    }
+    private fun record(status: Int?, keyDigest: String) = session.record(status, keyDigest)
 
     /** CORE's answer could not be read: logged with its class only (never the body), told as malformed. */
     private fun malformed(cause: Exception?): CoreFetch.Unreachable {
@@ -390,6 +378,7 @@ class CoreService internal constructor(
     }
 
     private companion object {
+        /** The tag CORE's log lines carry, its session's included. */
         const val TAG = "CoreService"
     }
 }

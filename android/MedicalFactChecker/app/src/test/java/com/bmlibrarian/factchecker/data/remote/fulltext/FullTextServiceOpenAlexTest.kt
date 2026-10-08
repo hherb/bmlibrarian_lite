@@ -70,7 +70,8 @@ class FullTextServiceOpenAlexTest {
         httpClient = mockk(relaxed = true),
         pmcOpenData = absentBucket(),
         openAlex = openAlex,
-        core = absentCore()
+        core = absentCore(),
+        elsevier = absentElsevier()
     )
 
     /** Unpaywall answers with one location per URL, each naming it as `url_for_pdf`. */

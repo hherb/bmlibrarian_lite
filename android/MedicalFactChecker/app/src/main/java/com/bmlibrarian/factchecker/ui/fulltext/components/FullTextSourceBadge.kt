@@ -33,7 +33,7 @@ import com.bmlibrarian.factchecker.util.Constants
  * Badge displaying the source of full-text content.
  *
  * @param source Source name (e.g., "Europe PMC", "PMC Open-Access Collection", "Unpaywall", "OpenAlex",
- *   "CORE (extracted text)", "Publisher").
+ *   "CORE (extracted text)", "Elsevier's API (PDF)", "Publisher").
  * @param modifier Modifier for the badge.
  */
 @Composable
@@ -42,8 +42,11 @@ fun FullTextSourceBadge(
     modifier: Modifier = Modifier
 ) {
     val (backgroundColor, textColor) = when (source.lowercase()) {
-        // PMC's open-access collection serves the same JATS as Europe PMC, so it shares its colour
-        "europe pmc", Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA_LABEL.lowercase() -> Pair(Color(0xFF1976D2), Color.White)
+        // PMC's open-access collection serves the same JATS as Europe PMC, so it shares its colour,
+        // and so does Elsevier's PDF: the article itself, from a full-text provider (#480, stage C2)
+        "europe pmc",
+        Constants.FULLTEXT_SOURCE_PMC_OPEN_DATA_LABEL.lowercase(),
+        Constants.FULLTEXT_SOURCE_ELSEVIER_LABEL.lowercase() -> Pair(Color(0xFF1976D2), Color.White)
         // OpenAlex names open-access PDFs as Unpaywall does, and CORE's text comes from
         // the same open repository copies, so both share its colour
         "unpaywall",

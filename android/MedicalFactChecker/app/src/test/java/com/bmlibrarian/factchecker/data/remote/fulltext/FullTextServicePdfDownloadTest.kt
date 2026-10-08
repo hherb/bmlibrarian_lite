@@ -69,7 +69,8 @@ class FullTextServicePdfDownloadTest {
             httpClient = OkHttpClient(),
             pmcOpenData = absentBucket(),
             openAlex = absentOpenAlex(),
-            core = absentCore()
+            core = absentCore(),
+            elsevier = absentElsevier()
         )
     }
 

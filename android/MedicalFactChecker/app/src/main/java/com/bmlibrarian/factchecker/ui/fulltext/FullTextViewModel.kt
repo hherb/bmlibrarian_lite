@@ -372,6 +372,16 @@ class FullTextViewModel @Inject constructor(
                 Log.d(TAG, "Got ${result.namedBy.label} PDF URL for ${doc.id}: ${result.pdfUrl}")
                 pdfOrLink(recorded.pdfPath, result.pdfUrl, doc.title, result.namedBy.label, recorded.fullTextPdfNotSavedFrom)
             }
+            is FullTextResult.ElsevierPdf -> {
+                Log.d(TAG, "Got Elsevier's PDF for ${doc.id} at ${result.pdfPath}")
+                // A local file only: never pdfOrLink, whose fallback would offer a URL
+                // that needs the key (#480, stage C2)
+                FullTextState.PdfContent(
+                    pdfPath = result.pdfPath,
+                    title = doc.title,
+                    source = Constants.FULLTEXT_SOURCE_ELSEVIER_LABEL
+                )
+            }
             is FullTextResult.OpenAccessPdfs -> error("resolved by recording")
             is FullTextResult.DoiUrl -> {
                 Log.d(TAG, "Falling back to DOI URL for ${doc.id}: ${result.url}")

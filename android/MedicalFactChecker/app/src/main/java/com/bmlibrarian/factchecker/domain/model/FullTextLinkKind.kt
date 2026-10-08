@@ -69,8 +69,12 @@ enum class FullTextLinkKind(val title: String, val statement: String) {
          * The kind of link a stored record ended on, read from its full-text
          * source.
          *
-         * Only a PDF tier stores Europe PMC, Unpaywall or OpenAlex without
-         * text: Europe PMC's XML always arrives with its markdown. Every other source,
+         * Only a PDF tier stores Europe PMC, Unpaywall, OpenAlex or Elsevier's
+         * API without text: Europe PMC's XML always arrives with its markdown.
+         * Elsevier's PDF is always stored as a local file (#480, stage C2), so a
+         * record of it never ends on a link; read here as a PDF's, never as the
+         * publisher's page, and its card still offers no Elsevier URL (one needs
+         * the key), only the DOI. Every other source,
          * including one a newer build wrote, reads as the publisher's page,
          * whose sentence claims nothing beyond "not retrieved".
          *
@@ -80,7 +84,8 @@ enum class FullTextLinkKind(val title: String, val statement: String) {
         fun forStoredSource(fullTextSource: String?): FullTextLinkKind = when (fullTextSource) {
             Constants.FULLTEXT_SOURCE_EUROPE_PMC,
             Constants.FULLTEXT_SOURCE_UNPAYWALL,
-            Constants.FULLTEXT_SOURCE_OPENALEX -> UNDOWNLOADED_PDF
+            Constants.FULLTEXT_SOURCE_OPENALEX,
+            Constants.FULLTEXT_SOURCE_ELSEVIER -> UNDOWNLOADED_PDF
             else -> PUBLISHER_PAGE
         }
     }

@@ -74,8 +74,15 @@ class OpenAccessStatementContractTest {
                 return@map OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED
             }
             if (skipped == "key_refused") {
-                assertEquals("$entry", OpenAccessSource.CORE.persistedValue, str(entry, "source"))
-                return@map OpenAccessShortfall.CORE_KEY_REFUSED
+                return@map when (str(entry, "source")) {
+                    OpenAccessSource.CORE.persistedValue -> OpenAccessShortfall.CORE_KEY_REFUSED
+                    OpenAccessSource.ELSEVIER.persistedValue -> OpenAccessShortfall.ELSEVIER_KEY_REFUSED
+                    else -> error("a refused key is CORE's or Elsevier's, not in $entry")
+                }
+            }
+            if (skipped == "network_refused") {
+                assertEquals("$entry", OpenAccessSource.ELSEVIER.persistedValue, str(entry, "source"))
+                return@map OpenAccessShortfall.ELSEVIER_NETWORK_REFUSED
             }
             val source = OpenAccessSource.fromPersisted(str(entry, "source")) ?: error("unknown source in $entry")
             val kind = RequestFailureKind.fromPersisted(str(entry, "kind")) ?: error("unknown kind in $entry")

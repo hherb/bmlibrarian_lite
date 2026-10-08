@@ -80,9 +80,15 @@ class OpenAccessShortfallContractTest {
                     assertEquals("$row", OpenAccessSource.UNPAYWALL, source)
                     OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED
                 }
-                "key_refused" -> {
-                    assertEquals("$row", OpenAccessSource.CORE, source)
-                    OpenAccessShortfall.CORE_KEY_REFUSED
+                // CORE's (#498) or Elsevier's (#480, stage C2), by the source named
+                "key_refused" -> when (source) {
+                    OpenAccessSource.CORE -> OpenAccessShortfall.CORE_KEY_REFUSED
+                    OpenAccessSource.ELSEVIER -> OpenAccessShortfall.ELSEVIER_KEY_REFUSED
+                    else -> error("a refused key is CORE's or Elsevier's, not in $row")
+                }
+                "network_refused" -> {
+                    assertEquals("$row", OpenAccessSource.ELSEVIER, source)
+                    OpenAccessShortfall.ELSEVIER_NETWORK_REFUSED
                 }
                 else -> error("an unknown skip in $row")
             }
@@ -113,6 +119,11 @@ class OpenAccessShortfallContractTest {
         fun skipped(row: JsonObject) = row["skipped"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.content
         assertTrue("a skip row pins the not-configured sentence", table.any { skipped(it) == "not_configured" })
         assertTrue("a skip row pins CORE's refused key (#498)", table.any { skipped(it) == "key_refused" })
+        assertTrue(
+            "a skip row pins Elsevier's refused key",
+            table.any { skipped(it) == "key_refused" && it["source"]!!.jsonPrimitive.content == "elsevier" }
+        )
+        assertTrue("a skip row pins Elsevier's off-network refusal", table.any { skipped(it) == "network_refused" })
     }
 
     @Test
@@ -158,7 +169,12 @@ class OpenAccessShortfallContractTest {
                 assertEquals(shortfall, OpenAccessShortfall.fromJson(shortfall.toJson()))
             }
         }
-        for (skipped in listOf(OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED, OpenAccessShortfall.CORE_KEY_REFUSED)) {
+        for (skipped in listOf(
+            OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED,
+            OpenAccessShortfall.CORE_KEY_REFUSED,
+            OpenAccessShortfall.ELSEVIER_KEY_REFUSED,
+            OpenAccessShortfall.ELSEVIER_NETWORK_REFUSED
+        )) {
             assertEquals(skipped, OpenAccessShortfall.fromJson(skipped.toJson()))
         }
     }
@@ -178,6 +194,49 @@ class OpenAccessShortfallContractTest {
                 "was not established. Configuring Unpaywall would add an open-access route this " +
                 "search did not have.",
             (OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED + refused).notice
+        )
+    }
+
+    /**
+     * The read rule for a stored skip (#480, stage C2): `key_refused` is Elsevier's
+     * only when the source it names is `elsevier`, CORE's for any other source or
+     * none; `network_refused` is Elsevier's whatever it names.
+     */
+    @Test
+    fun `a stored refusal reads by the source it names`() {
+        for (stored in listOf(
+            """{"schema_version":1,"source":"unpaywall","skipped":"key_refused"}""",
+            """{"schema_version":1,"skipped":"key_refused"}""",
+            """{"schema_version":1,"source":"core","skipped":"key_refused"}""",
+            """{"schema_version":1,"source":"no-such-source","skipped":"key_refused"}"""
+        )) {
+            assertEquals(stored, OpenAccessShortfall.CORE_KEY_REFUSED, OpenAccessShortfall.fromJson(stored))
+        }
+        assertEquals(
+            OpenAccessShortfall.ELSEVIER_KEY_REFUSED,
+            OpenAccessShortfall.fromJson("""{"schema_version":1,"source":"elsevier","skipped":"key_refused"}""")
+        )
+        for (stored in listOf(
+            """{"schema_version":1,"source":"core","skipped":"network_refused"}""",
+            """{"schema_version":2,"entries":[{"source":"openalex","skipped":"network_refused"}]}"""
+        )) {
+            assertEquals(stored, OpenAccessShortfall.ELSEVIER_NETWORK_REFUSED, OpenAccessShortfall.fromJson(stored))
+        }
+    }
+
+    /** Elsevier's refusals are of a configured channel: no nudge, and the absence kept open. */
+    @Test
+    fun `Elsevier's refusals earn no configuration nudge`() {
+        for (refused in listOf(OpenAccessShortfall.ELSEVIER_KEY_REFUSED, OpenAccessShortfall.ELSEVIER_NETWORK_REFUSED)) {
+            assertEquals(OpenAccessSource.ELSEVIER, refused.source)
+            assertNull(refused.failure)
+            assertFalse(refused.notice, "Configuring" in refused.notice)
+        }
+        assertEquals(
+            "Elsevier's API (not available from this network) and Unpaywall (not configured) could not be " +
+                "asked, so a freely available copy may exist. Whether this document is open access was not " +
+                "established. Configuring Unpaywall would add an open-access route this search did not have.",
+            (OpenAccessShortfall.ELSEVIER_NETWORK_REFUSED + OpenAccessShortfall.UNPAYWALL_NOT_CONFIGURED).notice
         )
     }
 

@@ -22,6 +22,7 @@ import android.content.Context
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCApi
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
 import com.bmlibrarian.factchecker.data.remote.fulltext.CoreService
+import com.bmlibrarian.factchecker.data.remote.fulltext.ElsevierService
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextService
 import com.bmlibrarian.factchecker.data.remote.fulltext.OpenAlexService
 import com.bmlibrarian.factchecker.data.remote.fulltext.PmcOpenDataService
@@ -338,7 +339,7 @@ object NetworkModule {
      * Provides the Full-Text service.
      *
      * Orchestrates full-text retrieval from Europe PMC, PMC's open-data bucket,
-     * Unpaywall, OpenAlex, CORE, and DOI fallback.
+     * Elsevier's API, Unpaywall, OpenAlex, CORE, and DOI fallback.
      *
      * @param context Application context for caching
      * @param europePmcService Europe PMC service
@@ -347,6 +348,8 @@ object NetworkModule {
      * @param pmcOpenDataService PMC's open-data bucket (#480), built by its `@Inject` constructor
      * @param openAlexService OpenAlex's PDF locations (#480), built by its `@Inject` constructor
      * @param coreService CORE's extracted text (#480, stage C), with the user's key, built by its `@Inject` constructor
+     * @param elsevierService Elsevier's article PDFs (#480, stage C2), with the user's key and token, built by its
+     *   `@Inject` constructor
      * @return Full-text service instance
      */
     @Provides
@@ -358,10 +361,12 @@ object NetworkModule {
         okHttpClient: OkHttpClient,
         pmcOpenDataService: PmcOpenDataService,
         openAlexService: OpenAlexService,
-        coreService: CoreService
+        coreService: CoreService,
+        elsevierService: ElsevierService
     ): FullTextService {
         return FullTextService(
-            context, europePmcService, unpaywallApi, okHttpClient, pmcOpenDataService, openAlexService, coreService
+            context, europePmcService, unpaywallApi, okHttpClient, pmcOpenDataService, openAlexService, coreService,
+            elsevierService
         )
     }
 

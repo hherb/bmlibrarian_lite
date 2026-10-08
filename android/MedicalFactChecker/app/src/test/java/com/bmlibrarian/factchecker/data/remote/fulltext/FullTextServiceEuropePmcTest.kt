@@ -63,7 +63,8 @@ class FullTextServiceEuropePmcTest {
             httpClient = mockk(relaxed = true),
             pmcOpenData = absentBucket(),
             openAlex = absentOpenAlex(),
-            core = absentCore()
+            core = absentCore(),
+            elsevier = absentElsevier()
         )
     }
 

@@ -94,6 +94,8 @@ fun SettingsScreen(
     val isTestingConnection by viewModel.isTestingConnection.collectAsState()
     val syncState by viewModel.syncState.collectAsState()
     val coreApiKeyInput by viewModel.coreApiKeyInput.collectAsState()
+    val elsevierApiKeyInput by viewModel.elsevierApiKeyInput.collectAsState()
+    val elsevierInstTokenInput by viewModel.elsevierInstTokenInput.collectAsState()
     val ncbiApiKeyInput by viewModel.ncbiApiKeyInput.collectAsState()
 
     var showResetDialog by remember { mutableStateOf(false) }
@@ -200,6 +202,12 @@ fun SettingsScreen(
                 coreApiKey = coreApiKeyInput,
                 onCoreApiKeyChange = viewModel::updateCoreApiKeyInput,
                 onSaveCoreApiKey = viewModel::saveCoreApiKey,
+                elsevierApiKey = elsevierApiKeyInput,
+                onElsevierApiKeyChange = viewModel::updateElsevierApiKeyInput,
+                onSaveElsevierApiKey = viewModel::saveElsevierApiKey,
+                elsevierInstToken = elsevierInstTokenInput,
+                onElsevierInstTokenChange = viewModel::updateElsevierInstTokenInput,
+                onSaveElsevierInstToken = viewModel::saveElsevierInstToken,
                 onParallelConcurrencyChange = viewModel::setParallelConcurrency,
                 onClearDataClick = { showClearDataDialog = true },
                 onResetClick = { showResetDialog = true }
@@ -630,8 +638,9 @@ private fun AdvancedScoringSection(
 /**
  * Advanced settings section.
  *
- * Contains NCBI configuration, the optional CORE API key (#480, stage C),
- * parallel processing settings, and reset options.
+ * Contains NCBI configuration, the optional CORE API key (#480, stage C), the
+ * optional Elsevier API key and institutional token (#480, stage C2), parallel
+ * processing settings, and reset options.
  *
  * @param ncbiApiKey The NCBI API key field's current value (#496)
  * @param onNcbiApiKeyChange Called as the NCBI API key field is edited
@@ -639,6 +648,12 @@ private fun AdvancedScoringSection(
  * @param coreApiKey The CORE API key field's current value
  * @param onCoreApiKeyChange Called as the CORE API key field is edited
  * @param onSaveCoreApiKey Saves the CORE API key field; an empty field clears the key
+ * @param elsevierApiKey The Elsevier API key field's current value
+ * @param onElsevierApiKeyChange Called as the Elsevier API key field is edited
+ * @param onSaveElsevierApiKey Saves the Elsevier API key field; an empty field clears the key
+ * @param elsevierInstToken The Elsevier institutional token field's current value
+ * @param onElsevierInstTokenChange Called as the Elsevier institutional token field is edited
+ * @param onSaveElsevierInstToken Saves the Elsevier institutional token field; an empty field clears it
  */
 @Composable
 private fun AdvancedSection(
@@ -651,6 +666,12 @@ private fun AdvancedSection(
     coreApiKey: String,
     onCoreApiKeyChange: (String) -> Unit,
     onSaveCoreApiKey: () -> Unit,
+    elsevierApiKey: String,
+    onElsevierApiKeyChange: (String) -> Unit,
+    onSaveElsevierApiKey: () -> Unit,
+    elsevierInstToken: String,
+    onElsevierInstTokenChange: (String) -> Unit,
+    onSaveElsevierInstToken: () -> Unit,
     onParallelConcurrencyChange: (Int) -> Unit,
     onClearDataClick: () -> Unit,
     onResetClick: () -> Unit
@@ -712,6 +733,56 @@ private fun AdvancedSection(
             modifier = Modifier.fillMaxWidth()
         )
         Button(onClick = onSaveCoreApiKey) { Text("Save CORE API Key") }
+
+        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+        // Elsevier API key (#480, stage C2): optional; without it Elsevier's API is never asked
+        var showElsevierKey by remember { mutableStateOf(false) }
+        OutlinedTextField(
+            value = elsevierApiKey,
+            onValueChange = onElsevierApiKeyChange,
+            label = { Text("Elsevier API Key (optional)") },
+            supportingText = { Text(Constants.ELSEVIER_API_KEY_EXPLANATION) },
+            visualTransformation = if (showElsevierKey) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { showElsevierKey = !showElsevierKey }) {
+                    Icon(
+                        if (showElsevierKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = if (showElsevierKey) "Hide Elsevier API key" else "Show Elsevier API key"
+                    )
+                }
+            },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(onClick = onSaveElsevierApiKey) { Text("Save Elsevier API Key") }
+
+        Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+        // Elsevier institutional token (#480, stage C2): optional; sent only with a key
+        var showElsevierToken by remember { mutableStateOf(false) }
+        OutlinedTextField(
+            value = elsevierInstToken,
+            onValueChange = onElsevierInstTokenChange,
+            label = { Text("Elsevier Institutional Token (optional)") },
+            supportingText = { Text(Constants.ELSEVIER_INSTTOKEN_EXPLANATION) },
+            visualTransformation = if (showElsevierToken) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { showElsevierToken = !showElsevierToken }) {
+                    Icon(
+                        if (showElsevierToken) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = if (showElsevierToken) {
+                            "Hide Elsevier institutional token"
+                        } else {
+                            "Show Elsevier institutional token"
+                        }
+                    )
+                }
+            },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Button(onClick = onSaveElsevierInstToken) { Text("Save Elsevier Institutional Token") }
 
         Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
 

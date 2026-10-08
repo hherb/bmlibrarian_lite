@@ -55,7 +55,8 @@ data class RecordedFetch(val document: DocumentEntity, val result: FullTextResul
  * candidate, OpenAlex's included, was refused, CORE is asked for its extracted
  * text ([askCore]), last before the DOI link. A Europe PMC
  * PDF that could not be downloaded stays a link-only record of its own (#471);
- * one served and not saved also gets the caching note.
+ * one served and not saved also gets the caching note. Elsevier's PDF arrives
+ * already saved, and is recorded as the local file it is (#480, stage C2).
  *
  * @param result What the chain returned
  * @param downloadPdf Downloads a PDF URL
@@ -83,6 +84,8 @@ suspend fun DocumentEntity.recordingFullTextFetch(
             RecordedFetch(recording(result, pdfPath = null).copy(fullTextPdfNotSavedFrom = result.pdfUrl), result)
         else -> RecordedFetch(recording(result, download.savedPath), result)
     }
+    // Already saved by the chain: a local file, never a URL to download (#480, stage C2)
+    is FullTextResult.ElsevierPdf -> RecordedFetch(recording(result, result.pdfPath), result)
     else -> RecordedFetch(recording(result, pdfPath = null), result)
 }
 
@@ -217,6 +220,17 @@ private fun DocumentEntity.recording(result: FullTextResult, pdfPath: String?): 
         fullTextMarkdown = null,
         fullTextHTML = null,
         fullTextSource = Constants.FULLTEXT_SOURCE_EUROPE_PMC,
+        fullTextFetchedAt = Date(),
+        fullTextOpenAccessShortfallJson = null,
+        fullTextPdfNotSavedFrom = null
+    )
+    // A local file alone: Elsevier's article URL needs the key, so no column ever
+    // holds it, and a served PDF settles the open-access question (#480, stage C2)
+    is FullTextResult.ElsevierPdf -> copy(
+        pdfPath = pdfPath,
+        fullTextMarkdown = null,
+        fullTextHTML = null,
+        fullTextSource = Constants.FULLTEXT_SOURCE_ELSEVIER,
         fullTextFetchedAt = Date(),
         fullTextOpenAccessShortfallJson = null,
         fullTextPdfNotSavedFrom = null
