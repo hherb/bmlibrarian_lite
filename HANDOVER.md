@@ -10,7 +10,7 @@ its slice has landed; add a new section when handing off new work.
 
 **Machine channels, stage C2: Elsevier's API** (all three; #480 stays open
 for the embedded browser): built on `feat/machine-channels-stage-c2-elsevier-480`,
-PR open. Contract `fulltext_retrieval.md` "Elsevier's Article API" +
+PR #507. Contract `fulltext_retrieval.md` "Elsevier's Article API" +
 `fulltext_parity/elsevier_article.json`; plan
 `docs/superpowers/plans/2026-10-08-fulltext-machine-channels-stage-c2.md`.
 **Still owed by the maintainer:**
