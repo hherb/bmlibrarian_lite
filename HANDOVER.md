@@ -26,21 +26,26 @@ the embedded browser):
   not-open-access rows; record the counts in the spikes README and the
   contract.
 
-**CI was red after #507** (its own pytest check and master's): the
-interpreter segfaulted while collecting a parentless test `SettingsDialog`
-whose model-fetch threads were still asking Anthropic and Ollama. Fixed on
-`fix/settings-dialog-test-threads`: the autouse `_no_live_model_fetch`
-fixture starts no dialog thread (opt out: `real_model_fetch`), pinned by
-`tests/test_a_test_dialog_starts_no_thread.py`. **A red check on a merged PR
-is master's state: look before starting the next slice.**
-Lodged: #514 (the app's dialog waits for its threads only on the title-bar
-close, and every opening leaks a dialog).
+**CI was red after #507** (its own pytest check and master's), fixed on
+`fix/settings-dialog-test-threads` (PR #515):
+- **PySide6 6.12.0 segfaults at exit** destroying a widget still alive then
+  (a parentless widget kept alive by a `self`-capturing lambda on its own
+  button). CI resolves the newest deps and got 6.12.0; `uv.lock` pins 6.10.1,
+  so local runs stayed green. **Capped `PySide6<6.12`**; #516 holds the
+  minimal repro, the upstream report still owed, and when to lift the cap.
+- **Test dialogs no longer start provider threads**: each `SettingsDialog`
+  asked Anthropic and Ollama live, and its threads outlived the test. The
+  autouse `_no_live_model_fetch` fixture starts none (opt out:
+  `real_model_fetch`), pinned by `tests/test_a_test_dialog_starts_no_thread.py`.
+- **Check master's CI before a slice**; a green local run proves nothing
+  about CI's newer deps (reproduce with `uv pip install -e ".[dev]"`).
+- Lodged: #514 (the app's dialog waits for its threads only on the
+  title-bar close, and every opening leaks a dialog), #516.
 
 ## Recently landed (context)
 
-Compressed once a slice is merged: what remains is the rule that still binds,
-not the archaeology. Git history and the `doc/cross_platform/` READMEs carry
-the rest.
+Compressed once merged: the rules that still bind. Git history and the
+`doc/cross_platform/` READMEs carry the rest.
 
 - **Machine channels, stage C2: Elsevier's article API** (all three; PR
   #507). Contract "Elsevier's Article API" + `elsevier_article.json`.
@@ -57,9 +62,8 @@ the rest.
   character outside printable ASCII: no request, a WARNING that never names
   it). The environment's token goes only with the environment's key. The
   apps ask by the cleaned DOI. `urllib3>=2.0` enforces Content-Length.
-  Accepted limits: Android asks only when Europe PMC offered no render URL
-  (#493); Swift skips it when `extractPDFText` is off; the desktop's "Fetch
-  PDF" asks Elsevier before PMC's derived addresses. Lodged: #506, #508–#513.
+  Accepted limits: Android asks only without a Europe PMC render URL (#493);
+  Swift skips it when `extractPDFText` is off. Lodged: #506, #508–#513.
 - **Machine channels, stage C1: CORE's text and the key settings** (all
   three; PR #501). Contract "CORE's Extracted Text" + `core_fulltext.json`.
   **A hit counts only if its own DOI is this article's.** Asked last and once,
@@ -85,8 +89,7 @@ the rest.
   sentence, and there is **no absence while one is set**. Room migrations
   register from `AppDatabase.ALL_MIGRATIONS`.
 - **iOS/macOS workflow** (PRs #458–#469): one stop path, `stopWork(_:)`;
-  **`session.errorMessage` means a failure and nothing else** (a stop never
-  writes it; per-document misses are notices).
+  **`session.errorMessage` means a failure and nothing else**.
 - **Europe PMC fetches, compressed** (PRs #433–#452). A typed XML fetch on all
   three: served, absent (404) or unreachable. **Preprints are fetched by their
   `PPR` ID.** A chain Europe PMC did not settle is **not** "no full text".
@@ -129,7 +132,6 @@ the rest.
   - Never `findtext` a mixed-content element.
   - Funders by brand: `sponsor_patterns.json` schema 4, which differs from
     bmlib's copy.
-  - Release 0.5.0 / apps 1.6.0 (PR #393).
 - **Older rounds, compressed to the rules that still bind.** Each cost a
   defect; the archaeology is in git history and the `doc/cross_platform/`
   READMEs, which these point at.
@@ -209,7 +211,7 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **C2's probe and acceptance, and C1's replay** (maintainer), then the **embedded browser and
   review queue** with the `challenged` kind (replaces **#483**); **#481**
   follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
-  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2); **#514**;
+  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2); **#514**, **#516** (PySide6 cap);
   **#467**, **#468** / **#470**, **#476**.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted

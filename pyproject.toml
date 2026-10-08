@@ -46,8 +46,9 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "backoff>=2.2.1",
     "tenacity>=8.2.0",
-    # GUI
-    "PySide6>=6.6.0",
+    # GUI. 6.12.0 segfaults at exit destroying a widget that is still alive
+    # then (#516); lift the cap once a release passes that issue's repro.
+    "PySide6>=6.6.0,<6.12",
     # PDF processing
     "PyMuPDF>=1.23.0",
     # Text processing
