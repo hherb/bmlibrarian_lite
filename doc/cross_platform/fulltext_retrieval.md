@@ -1074,6 +1074,7 @@ this key refused (below)      → KEY_REFUSED, no request
 these credentials refused from this network (below)
                               → NETWORK_REFUSED, no request
 paused (below)                → UNREACHABLE(http_status 429), no request
+# (these three make no request, and neither count toward the pause nor reset it)
 200 with an X-ELS-Status whose value, trimmed, starts WARNING (in any case)
                               → ABSENT: the first page only. Read before the
                                 body; logged at INFO
@@ -1188,7 +1189,13 @@ access only), which is dropped.
    fetches that end in 429 (after retries) pause Elsevier for the rest of the
    process; any other ending resets the count. Elsevier's weekly quota answers
    429 `QUOTA_EXCEEDED` once spent. A paused fetch makes no request and is told
-   as a 429.
+   as a 429. **A fetch that makes no request** (key refused, network refused,
+   paused) **neither counts toward the pause nor resets it**, as CORE's client
+   returns before it records an ending (stage C2's ruling, 2026-10-08;
+   `elsevier_article.json`'s `session` rows). The checks before a request come
+   in the order of the outcome table: this key refused, these credentials
+   refused from this network, then paused, so a refused key is told as
+   refused even while Elsevier is paused.
 7. **No key, or another publisher's DOI, is silent** (the spec's decision 4,
    as CORE's): no request, nothing recorded, no sentence, the absence settled
    as before. Elsevier publishes some imprints under other DOI prefixes; they
