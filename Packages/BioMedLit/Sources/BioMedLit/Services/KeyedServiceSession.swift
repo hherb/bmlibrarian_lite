@@ -99,8 +99,8 @@ public class KeyedServiceSession: @unchecked Sendable {
     /// Note how one fetch that made a request ended. The key-refused status marks the
     /// key it was sent with refused, in place of any key refused before; like any
     /// ending but a 429, it also resets the 429 count. A refusal is logged here, once,
-    /// when it is new; the articles it then skips are not (the key and its digest
-    /// never are).
+    /// when it is new, and so is the pause, when this ending starts it; the articles
+    /// either then skips are not (the key and its digest never are).
     ///
     /// - Parameters:
     ///   - status: Its HTTP status, or nil when it got none.
@@ -108,11 +108,18 @@ public class KeyedServiceSession: @unchecked Sendable {
     /// - Returns: Whether this ending newly refused the key.
     @discardableResult
     func record(endedOn status: Int?, keyDigest: String) -> Bool {
-        let newlyRefused = noteEnding(status, keyDigest: keyDigest)
+        let (newlyRefused, pausedAfter) = noteEnding(status, keyDigest: keyDigest)
         if newlyRefused {
             BioMedLitLib.logger?.warning(
                 "\(serviceName) refused the configured API key (HTTP \(keyRefusedStatus)); "
                     + "it is not asked with that key again this session",
+                category: .fullText
+            )
+        }
+        if let pausedAfter {
+            BioMedLitLib.logger?.warning(
+                "\(serviceName) answered HTTP \(BioMedLitConstants.httpStatusRateLimited) "
+                    + "\(pausedAfter) times in a row; it is not asked again this session",
                 category: .fullText
             )
         }
@@ -140,7 +147,10 @@ public class KeyedServiceSession: @unchecked Sendable {
     }
 
     /// The state change behind ``record(endedOn:keyDigest:)``, under the lock.
-    private func noteEnding(_ status: Int?, keyDigest: String) -> Bool {
+    ///
+    /// - Returns: Whether this ending newly refused the key, and the count of
+    ///   consecutive 429 endings when it started the pause (`nil` otherwise).
+    private func noteEnding(_ status: Int?, keyDigest: String) -> (newlyRefused: Bool, pausedAfter: Int?) {
         lock.lock(); defer { lock.unlock() }
         var newlyRefused = false
         if status == keyRefusedStatus {
@@ -149,11 +159,12 @@ public class KeyedServiceSession: @unchecked Sendable {
         }
         guard status == BioMedLitConstants.httpStatusRateLimited else {
             consecutive = 0
-            return newlyRefused
+            return (newlyRefused, nil)
         }
         consecutive += 1
-        if consecutive >= pauseAfter { paused = true }
-        return newlyRefused
+        guard consecutive >= pauseAfter, !paused else { return (newlyRefused, nil) }
+        paused = true
+        return (newlyRefused, consecutive)
     }
 
     /// The state change behind ``recordNetworkRefused(credentialsDigest:)``, under the lock.

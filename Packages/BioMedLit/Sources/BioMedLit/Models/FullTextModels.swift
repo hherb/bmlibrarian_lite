@@ -29,6 +29,12 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
     /// Europe PMC PDF (when XML is unavailable but free PDF exists).
     case europePMCPDF = "europepmc_pdf"
 
+    /// The PDF Elsevier's Article API served to a requestor entitled to it,
+    /// asked with the user's own key after Europe PMC's render and before
+    /// Unpaywall (#480, stage C2). Held only as a local file: its article URL
+    /// needs the key, so it is never a link.
+    case elsevier = "elsevier"
+
     /// Open access PDF via Unpaywall.
     case unpaywall = "unpaywall"
 
@@ -55,6 +61,8 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
             return "PMC Open-Access Collection"
         case .europePMCPDF:
             return "Europe PMC PDF"
+        case .elsevier:
+            return BioMedLitConstants.elsevierSourceLabel
         case .unpaywall:
             return "Unpaywall"
         case .openAlex:
@@ -257,7 +265,7 @@ public struct FullTextResult: Sendable, Equatable {
     /// text whatsoever.
     public let extractionCoverage: PDFExtractionCoverage?
 
-    /// Why the open-access copy Unpaywall or OpenAlex may know of went
+    /// Why the copy Elsevier's API, Unpaywall or OpenAlex may hold went
     /// unassessed, or `nil` when they settled it (a copy served, or answers
     /// naming none) or were never reached because an earlier tier served the
     /// article.
@@ -398,23 +406,29 @@ public struct FullTextResult: Sendable, Equatable {
         if case .core(let text) = content {
             assert(extractedText == text, "CORE's content and extractedText must be one text")
         }
+        // Elsevier's PDF is held only as the local file it names: its article
+        // URL needs the key, so the file is all a viewer may be handed.
+        if case .elsevier(let path) = content {
+            assert(localPDFPath == path, "Elsevier's PDF is its local file, and only that")
+        }
         // Coverage describes reading a PDF, so there has to be one.
         assert(
             extractionCoverage == nil || content.pdfURL != nil,
             "extraction coverage on \(content.source), which carries no PDF"
         )
-        // An open-access shortfall rides only on a fallback. An open-access
-        // copy's own PDF (Unpaywall's or OpenAlex's) settles the question it
+        // An open-access shortfall rides only on a fallback. A copy's own
+        // PDF (Elsevier's, Unpaywall's or OpenAlex's) settles the question it
         // would raise, and text in hand (parsed or extracted) is no fallback
         // the reader needs warning about. But a copy that yielded no text is
         // no text obtained: CORE's unsettled entry rides on it, and only
         // CORE's (#499).
         assert(
             openAccessShortfall == nil
-                || (content.source != .unpaywall && content.source != .openAlex)
+                || (content.source != .unpaywall && content.source != .openAlex
+                    && content.source != .elsevier)
                 || (contentKind == .none && localPDFPath != nil
                     && openAccessShortfall?.entries.allSatisfy { $0.source == .core } == true),
-            "an open-access shortfall on Unpaywall's or OpenAlex's own PDF, which settles it"
+            "an open-access shortfall on Elsevier's, Unpaywall's or OpenAlex's own PDF, which settles it"
         )
         assert(
             openAccessShortfall == nil || (contentKind != .fulltext && contentKind != .extracted),
@@ -464,7 +478,8 @@ public struct FullTextResult: Sendable, Equatable {
     /// Markdown content if available (parsed JATS: Europe PMC or PMC's bucket).
     public var markdown: String? { content.markdown }
 
-    /// PDF URL if available (Europe PMC PDF, Unpaywall, OpenAlex, or cached).
+    /// PDF URL if available (Europe PMC PDF, Unpaywall, OpenAlex, or cached),
+    /// or the local file of Elsevier's PDF, never its article URL.
     public var pdfURL: URL? { content.pdfURL }
 
     /// Web URL if available (DOI resolution).
@@ -481,6 +496,11 @@ public enum FullTextContent: Sendable, Equatable {
 
     /// Europe PMC PDF URL (when XML is unavailable but free PDF exists).
     case europePMCPDF(pdfURL: URL)
+
+    /// The PDF Elsevier's Article API served, saved at this local path (#480,
+    /// stage C2). Never its article URL, which needs the key: ``pdfURL`` is the
+    /// file's URL, so no viewer, link or re-download is ever handed the API.
+    case elsevier(localPath: String)
 
     /// Open access PDF URL from Unpaywall.
     case unpaywall(pdfURL: URL)
@@ -508,6 +528,8 @@ public enum FullTextContent: Sendable, Equatable {
             return .pmcOpenData
         case .europePMCPDF:
             return .europePMCPDF
+        case .elsevier:
+            return .elsevier
         case .unpaywall:
             return .unpaywall
         case .openAlex:
@@ -541,14 +563,15 @@ public enum FullTextContent: Sendable, Equatable {
         }
     }
 
-    /// PDF URL if available (Europe PMC PDF, Unpaywall, OpenAlex, or cached).
+    /// PDF URL if available (Europe PMC PDF, Unpaywall, OpenAlex, or cached),
+    /// or the local file of Elsevier's PDF, never its article URL.
     public var pdfURL: URL? {
         switch self {
         case .europePMCPDF(let url):
             return url
         case .unpaywall(let url), .openAlex(let url):
             return url
-        case .cached(let path):
+        case .elsevier(let path), .cached(let path):
             return URL(fileURLWithPath: path)
         default:
             return nil

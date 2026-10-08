@@ -71,7 +71,7 @@ final class ElsevierContractTests: XCTestCase {
         XCTAssertEqual(contract["desktop_source_type"] as? String, "elsevier_api")
     }
 
-    func testTheConstantsAreTheContracts() {
+    func testTheConstantsAreTheContracts() throws {
         XCTAssertEqual(contract["base_url"] as? String, BioMedLitConstants.elsevierBaseURL)
         XCTAssertEqual(contract["doi_prefix"] as? String, BioMedLitConstants.elsevierDOIPrefix)
         XCTAssertEqual(
@@ -99,8 +99,8 @@ final class ElsevierContractTests: XCTestCase {
         XCTAssertEqual(contract["error_body_max_bytes"] as? Int, BioMedLitConstants.elsevierErrorBodyMaxBytes)
         // Never followed: a redirect would carry the key wherever it points
         XCTAssertEqual(contract["follows_redirects"] as? Bool, false)
-        let perSecond = try? XCTUnwrap(contract["requests_per_second"] as? Int)
-        XCTAssertEqual(perSecond.map(Double.init), 1 / BioMedLitConstants.elsevierMinimumInterval)
+        let perSecond = try XCTUnwrap(contract["requests_per_second"] as? Int)
+        XCTAssertEqual(Double(perSecond), 1 / BioMedLitConstants.elsevierMinimumInterval)
         XCTAssertEqual(BioMedLitConstants.elsevierMinimumInterval, 0.5)
     }
 
@@ -263,8 +263,8 @@ final class ElsevierContractTests: XCTestCase {
         XCTAssertFalse(ElsevierSession.shared === CoreThrottle.shared)
     }
 
-    /// A 403 that is no authentication error is an ending like any other:
-    /// it resets the 429 count, and refuses nothing.
+    /// A refusal from this network is an ending: it resets the 429 count and
+    /// refuses no key.
     func testANetworkRefusalResetsThe429Count() {
         let session = ElsevierSession(pauseAfter: 2)
         let key = KeyDigest.key("key-A")

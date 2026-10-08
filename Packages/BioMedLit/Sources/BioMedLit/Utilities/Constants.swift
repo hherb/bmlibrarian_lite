@@ -192,6 +192,13 @@ public enum BioMedLitConstants {
     /// An off-network refusal as the reader is told it, Python's
     /// `LookupSkipReason.NETWORK_REFUSED` words.
     public static let elsevierNetworkRefusedReason = "not available from this network"
+    /// The header the key travels in, and nowhere else.
+    public static let elsevierKeyHeader = "X-ELS-APIKey"
+    /// The header the institutional token travels in, only when it is set, and
+    /// never without the key.
+    public static let elsevierTokenHeader = "X-ELS-Insttoken"
+    /// What an article request accepts: the PDF.
+    public static let elsevierAccept = "application/pdf"
     /// The header whose ``elsevierWarningPrefix`` marks a 200 as the first page only.
     /// Matched by name in any case.
     public static let elsevierStatusHeader = "X-ELS-Status"
