@@ -28,9 +28,11 @@ struct SettingsView: View {
     @State private var showingAPIKey = false
     @State private var ncbiAPIKey = ""
     @State private var coreAPIKey = ""
+    @State private var elsevierAPIKey = ""
+    @State private var elsevierInstToken = ""
     @State private var showingSaveConfirmation = false
-    /// Which key failed to save, when one did: told instead of "saved".
-    @State private var keyNotSaved: String?
+    /// Why a key failed to save, when one did: told instead of "saved".
+    @State private var keySaveFailure: String?
     @State private var monthlyUsage: Double = 0
     @State private var showingCustomConfig = false
 
@@ -376,13 +378,39 @@ struct SettingsView: View {
                     SecureField("CORE API Key (optional)", text: $coreAPIKey)
                         .textContentType(.password)
                     Button("Save CORE API Key") {
-                        reportKeySave(settings.saveCOREAPIKey(coreAPIKey), keyName: "CORE")
+                        reportKeySave(
+                            settings.saveCOREAPIKey(coreAPIKey),
+                            failure: AppSettings.keySaveFailureMessage(keyName: "CORE")
+                        )
                     }
                     .disabled(coreAPIKey == settings.coreAPIKey)
+                    // Elsevier's API (#480, stage C2), below CORE
+                    SecureField("Elsevier API Key (optional)", text: $elsevierAPIKey)
+                        .textContentType(.password)
+                    Button("Save Elsevier API Key") {
+                        reportKeySave(
+                            settings.saveElsevierAPIKey(elsevierAPIKey),
+                            failure: AppSettings.keySaveFailureMessage(keyName: "Elsevier")
+                        )
+                    }
+                    .disabled(elsevierAPIKey == settings.elsevierAPIKey)
+                    SecureField("Elsevier Institutional Token (optional)", text: $elsevierInstToken)
+                        .textContentType(.password)
+                    Button("Save Elsevier Institutional Token") {
+                        reportKeySave(
+                            settings.saveElsevierInstToken(elsevierInstToken),
+                            failure: AppSettings.tokenSaveFailureMessage(tokenName: "Elsevier institutional")
+                        )
+                    }
+                    .disabled(elsevierInstToken == settings.elsevierInstToken)
                 } header: {
                     Text("Full Text")
                 } footer: {
-                    Text("Automatically retrieve the full text of papers scored 4 or 5 before extracting citations and analysing transparency. Slower, and uses more tokens per paper; papers with no open full text fall back to the abstract. Optional. A free CORE API key (core.ac.uk/services/api) lets the app read the text CORE extracted from repository copies when no other source has the article.")
+                    VStack(alignment: .leading) {
+                        Text("Automatically retrieve the full text of papers scored 4 or 5 before extracting citations and analysing transparency. Slower, and uses more tokens per paper; papers with no open full text fall back to the abstract. Optional. A free CORE API key (core.ac.uk/services/api) lets the app read the text CORE extracted from repository copies when no other source has the article.")
+                        Text(AppSettings.elsevierAPIKeyExplanation)
+                        Text(AppSettings.elsevierInstTokenExplanation)
+                    }
                 }
 
                 // Budget Settings
@@ -435,7 +463,10 @@ struct SettingsView: View {
 
                     if !ncbiAPIKey.isEmpty {
                         Button("Save NCBI API Key") {
-                            reportKeySave(settings.saveNCBIAPIKey(ncbiAPIKey), keyName: "NCBI")
+                            reportKeySave(
+                                settings.saveNCBIAPIKey(ncbiAPIKey),
+                                failure: AppSettings.keySaveFailureMessage(keyName: "NCBI")
+                            )
                         }
                     }
                 } header: {
@@ -499,6 +530,8 @@ struct SettingsView: View {
                         apiKey = ""
                         ncbiAPIKey = ""
                         coreAPIKey = ""
+                        elsevierAPIKey = ""
+                        elsevierInstToken = ""
                         showingCustomConfig = false
                     }
 
@@ -513,15 +546,15 @@ struct SettingsView: View {
             .alert("Saved", isPresented: $showingSaveConfirmation) {
                 Button("OK", role: .cancel) { }
             } message: {
-                Text("API key saved securely to Keychain")
+                Text("Saved securely to Keychain")
             }
             .alert("Not Saved", isPresented: Binding(
-                get: { keyNotSaved != nil },
-                set: { if !$0 { keyNotSaved = nil } }
+                get: { keySaveFailure != nil },
+                set: { if !$0 { keySaveFailure = nil } }
             )) {
                 Button("OK", role: .cancel) { }
             } message: {
-                Text(AppSettings.keySaveFailureMessage(keyName: keyNotSaved ?? ""))
+                Text(keySaveFailure ?? "")
             }
             .alert("Delete All Reports?", isPresented: $showingDeleteAllConfirmation) {
                 Button("Cancel", role: .cancel) { }
@@ -589,16 +622,18 @@ struct SettingsView: View {
         }
     }
 
-    /// Tell the outcome of saving an API key: "saved" only when it was.
+    /// Tell the outcome of saving an API key or token: "saved" only when it was.
     ///
     /// - Parameters:
     ///   - saved: Whether the key was stored.
-    ///   - keyName: The key's service, as the failure names it.
-    private func reportKeySave(_ saved: Bool, keyName: String) {
+    ///   - failure: What to tell when it was not
+    ///     (``AppSettings/keySaveFailureMessage(keyName:)`` or
+    ///     ``AppSettings/tokenSaveFailureMessage(tokenName:)``).
+    private func reportKeySave(_ saved: Bool, failure: String) {
         if saved {
             showingSaveConfirmation = true
         } else {
-            keyNotSaved = keyName
+            keySaveFailure = failure
         }
     }
 
@@ -606,6 +641,8 @@ struct SettingsView: View {
         apiKey = settings.llmAPIKey
         ncbiAPIKey = settings.ncbiAPIKey
         coreAPIKey = settings.coreAPIKey
+        elsevierAPIKey = settings.elsevierAPIKey
+        elsevierInstToken = settings.elsevierInstToken
         loadMonthlyUsage()
         // Auto-expand custom config for custom provider
         showingCustomConfig = settings.selectedProvider == .custom

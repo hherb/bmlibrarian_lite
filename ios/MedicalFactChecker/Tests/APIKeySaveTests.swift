@@ -5,6 +5,7 @@
 
 import XCTest
 @testable import MedicalFactChecker
+import BioMedLit
 
 /// A key store whose saves can be made to fail, standing in for the Keychain,
 /// which a test has no entitlement to write.
@@ -83,6 +84,61 @@ final class APIKeySaveTests: XCTestCase {
         XCTAssertTrue(settings.saveNCBIAPIKey(""))
         XCTAssertEqual(settings.ncbiAPIKey, "")
         XCTAssertTrue(store.stored.isEmpty)
+    }
+
+    func testASavedElsevierKeyAndTokenAreTheOnesInUse() {
+        XCTAssertTrue(settings.saveElsevierAPIKey("els-key"))
+        XCTAssertTrue(settings.saveElsevierInstToken("els-token"))
+        XCTAssertEqual(settings.elsevierAPIKey, "els-key")
+        XCTAssertEqual(settings.elsevierInstToken, "els-token")
+        XCTAssertEqual(store.stored["elsevier_api_key"], "els-key")
+        XCTAssertEqual(store.stored["elsevier_insttoken"], "els-token")
+    }
+
+    func testAFailedElsevierKeySaveKeepsTheKeyInUse() {
+        XCTAssertTrue(settings.saveElsevierAPIKey("old-key"))
+        store.failsSaves = true
+
+        XCTAssertFalse(settings.saveElsevierAPIKey("new-key"))
+
+        XCTAssertEqual(settings.elsevierAPIKey, "old-key", "the cache follows the store, not the attempt")
+        XCTAssertEqual(AppSettings(secretStore: store).elsevierAPIKey, "old-key")
+    }
+
+    func testAFailedElsevierTokenSaveKeepsTheTokenInUse() {
+        XCTAssertTrue(settings.saveElsevierInstToken("old-token"))
+        store.failsSaves = true
+
+        XCTAssertFalse(settings.saveElsevierInstToken("new-token"))
+
+        XCTAssertEqual(settings.elsevierInstToken, "old-token", "the cache follows the store, not the attempt")
+        XCTAssertEqual(AppSettings(secretStore: store).elsevierInstToken, "old-token")
+    }
+
+    func testResetClearsTheElsevierKeyAndToken() {
+        XCTAssertTrue(settings.saveElsevierAPIKey("els-key"))
+        XCTAssertTrue(settings.saveElsevierInstToken("els-token"))
+
+        settings.resetToDefaults()
+
+        XCTAssertEqual(settings.elsevierAPIKey, "")
+        XCTAssertEqual(settings.elsevierInstToken, "")
+        XCTAssertNil(store.stored["elsevier_api_key"])
+        XCTAssertNil(store.stored["elsevier_insttoken"])
+    }
+
+    func testTheServiceAsksElsevierWithTheSavedKey() {
+        XCTAssertFalse(BMLFullTextService.create(from: settings).asksElsevier, "no key, no request")
+        XCTAssertTrue(settings.saveElsevierInstToken("els-token"))
+        XCTAssertFalse(BMLFullTextService.create(from: settings).asksElsevier, "a token alone asks nothing")
+        XCTAssertTrue(settings.saveElsevierAPIKey("els-key"))
+        XCTAssertTrue(BMLFullTextService.create(from: settings).asksElsevier)
+    }
+
+    func testATokenFailureNamesTheToken() {
+        let message = AppSettings.tokenSaveFailureMessage(tokenName: "Elsevier institutional")
+        XCTAssertTrue(message.hasPrefix("The Elsevier institutional token could not be saved"))
+        XCTAssertTrue(message.contains("the token in use is unchanged"))
     }
 
     func testTheFailureSaysNotSavedAndNamesTheKey() {

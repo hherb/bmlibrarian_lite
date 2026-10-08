@@ -488,6 +488,11 @@ enum BioMedLitAdapters {
                 return .pdfURL(URL(fileURLWithPath: localPDFPath))
             }
             return .pdfURL(pdfURL)
+        case .elsevier(let localPath):
+            // Only ever the local file: Elsevier's article URL needs the key,
+            // so it is never handed to a viewer or a loader that would fetch
+            // it without headers (#480, stage C2).
+            return .pdfURL(URL(fileURLWithPath: localPath))
         case .core(let text):
             // Plain prose, shown through the native markdown view (no
             // WebView), so markdown-like characters in it may be styled.
@@ -508,6 +513,7 @@ enum BioMedLitAdapters {
         case .europePMC: return .europePMC
         case .pmcOpenData: return .pmcOpenData
         case .europePMCPDF: return .europePMCPDF
+        case .elsevier: return .elsevier
         case .unpaywall: return .unpaywall
         case .openAlex: return .openAlex
         case .core: return .core
@@ -560,19 +566,54 @@ extension BMLEuropePMCService {
 extension BMLFullTextService {
     /// Create a configured full text service from app settings.
     ///
-    /// - Parameter settings: App settings containing email for API identification
-    ///   and the optional CORE key.
+    /// - Parameter settings: App settings containing email for API identification,
+    ///   the optional CORE key and the optional Elsevier key and institutional token.
     /// - Returns: Configured full text service.
     static func create(from settings: AppSettings) -> BMLFullTextService {
-        create(ncbiEmail: settings.ncbiEmail, coreAPIKey: settings.coreAPIKey)
+        create(
+            ncbiEmail: settings.ncbiEmail,
+            coreAPIKey: settings.coreAPIKey,
+            elsevierAPIKey: settings.elsevierAPIKey,
+            elsevierInstToken: settings.elsevierInstToken
+        )
     }
 
     /// The service for these settings: the NCBI email (or the app's own address) and,
-    /// when one is set, the user's CORE key (#480, stage C).
-    static func create(ncbiEmail: String, coreAPIKey: String) -> BMLFullTextService {
+    /// when they are set, the user's CORE key (#480, stage C) and Elsevier key and
+    /// institutional token (#480, stage C2).
+    ///
+    /// Each credential is trimmed, and a blank one is not passed at all. A blank
+    /// Elsevier key means Elsevier is not asked; the service drops a token without a key.
+    ///
+    /// - Parameters:
+    ///   - ncbiEmail: The NCBI identification email, or empty for the app's own.
+    ///   - coreAPIKey: The user's CORE key, or empty for none.
+    ///   - elsevierAPIKey: The user's Elsevier API key, or empty — the default — for none.
+    ///   - elsevierInstToken: The user's Elsevier institutional token, or empty — the
+    ///     default — for none.
+    /// - Returns: Configured full text service.
+    static func create(
+        ncbiEmail: String,
+        coreAPIKey: String,
+        elsevierAPIKey: String = "",
+        elsevierInstToken: String = ""
+    ) -> BMLFullTextService {
         let email = ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : ncbiEmail
-        let key = coreAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        return BMLFullTextService(email: email, coreAPIKey: key.isEmpty ? nil : key)
+        return BMLFullTextService(
+            email: email,
+            coreAPIKey: credential(coreAPIKey),
+            elsevierAPIKey: credential(elsevierAPIKey),
+            elsevierInstToken: credential(elsevierInstToken)
+        )
+    }
+
+    /// A credential from the settings, trimmed, or `nil` when it is blank.
+    ///
+    /// - Parameter value: The setting as stored.
+    /// - Returns: The trimmed value, or `nil` for a blank one.
+    private static func credential(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// Retrieve full text for a document, from every identifier it carries.

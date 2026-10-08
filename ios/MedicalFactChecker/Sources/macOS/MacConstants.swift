@@ -349,6 +349,7 @@ enum MacFullTextColors {
         case .europePMC: return europePMCTint
         case .pmcOpenData: return europePMCTint
         case .europePMCPDF: return europePMCTint
+        case .elsevier: return unpaywallTint
         case .unpaywall: return unpaywallTint
         case .openAlex: return unpaywallTint
         case .core: return unpaywallTint

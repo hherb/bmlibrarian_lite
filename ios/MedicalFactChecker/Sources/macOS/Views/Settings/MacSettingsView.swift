@@ -799,10 +799,12 @@ struct PubMedSettingsTab: View {
 
     @State private var ncbiAPIKey = ""
     @State private var coreAPIKey = ""
-    @State private var showingSaveConfirmation = false
-    @State private var showingCoreSaveConfirmation = false
-    /// Which key failed to save, when one did: told instead of "saved".
-    @State private var keyNotSaved: String?
+    @State private var elsevierAPIKey = ""
+    @State private var elsevierInstToken = ""
+    /// Which credential was saved, named in full ("NCBI API key"), when one was.
+    @State private var savedCredential: String?
+    /// Why a key failed to save, when one did: told instead of "saved".
+    @State private var keySaveFailure: String?
 
     var body: some View {
         @Bindable var settings = settings
@@ -823,11 +825,11 @@ struct PubMedSettingsTab: View {
 
                 HStack {
                     Button("Save API Key") {
-                        if settings.saveNCBIAPIKey(ncbiAPIKey) {
-                            showingSaveConfirmation = true
-                        } else {
-                            keyNotSaved = "NCBI"
-                        }
+                        reportKeySave(
+                            settings.saveNCBIAPIKey(ncbiAPIKey),
+                            credential: "NCBI API key",
+                            failure: AppSettings.keySaveFailureMessage(keyName: "NCBI")
+                        )
                     }
                     .disabled(ncbiAPIKey.isEmpty)
 
@@ -849,11 +851,11 @@ struct PubMedSettingsTab: View {
 
                 HStack {
                     Button("Save API Key") {
-                        if settings.saveCOREAPIKey(coreAPIKey) {
-                            showingCoreSaveConfirmation = true
-                        } else {
-                            keyNotSaved = "CORE"
-                        }
+                        reportKeySave(
+                            settings.saveCOREAPIKey(coreAPIKey),
+                            credential: "CORE API key",
+                            failure: AppSettings.keySaveFailureMessage(keyName: "CORE")
+                        )
                     }
                     .disabled(coreAPIKey == settings.coreAPIKey)
 
@@ -868,30 +870,89 @@ struct PubMedSettingsTab: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            // Elsevier's API (#480, stage C2)
+            Section("Elsevier API Key (Optional)") {
+                SecureField("Elsevier API Key", text: $elsevierAPIKey)
+                    .textFieldStyle(.roundedBorder)
+
+                HStack {
+                    Button("Save API Key") {
+                        reportKeySave(
+                            settings.saveElsevierAPIKey(elsevierAPIKey),
+                            credential: "Elsevier API key",
+                            failure: AppSettings.keySaveFailureMessage(keyName: "Elsevier")
+                        )
+                    }
+                    .disabled(elsevierAPIKey == settings.elsevierAPIKey)
+
+                    Button("Get API Key") {
+                        if let url = URL(string: "https://dev.elsevier.com/") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                }
+
+                Text(AppSettings.elsevierAPIKeyExplanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                SecureField("Elsevier Institutional Token", text: $elsevierInstToken)
+                    .textFieldStyle(.roundedBorder)
+
+                Button("Save Institutional Token") {
+                    reportKeySave(
+                        settings.saveElsevierInstToken(elsevierInstToken),
+                        credential: "Elsevier institutional token",
+                        failure: AppSettings.tokenSaveFailureMessage(tokenName: "Elsevier institutional")
+                    )
+                }
+                .disabled(elsevierInstToken == settings.elsevierInstToken)
+
+                Text(AppSettings.elsevierInstTokenExplanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding()
         .onAppear {
             ncbiAPIKey = settings.ncbiAPIKey
             coreAPIKey = settings.coreAPIKey
+            elsevierAPIKey = settings.elsevierAPIKey
+            elsevierInstToken = settings.elsevierInstToken
         }
-        .alert("Saved", isPresented: $showingSaveConfirmation) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("NCBI API key saved securely to Keychain")
-        }
-        .alert("Saved", isPresented: $showingCoreSaveConfirmation) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("CORE API key saved securely to Keychain")
-        }
-        .alert("Not Saved", isPresented: Binding(
-            get: { keyNotSaved != nil },
-            set: { if !$0 { keyNotSaved = nil } }
+        .alert("Saved", isPresented: Binding(
+            get: { savedCredential != nil },
+            set: { if !$0 { savedCredential = nil } }
         )) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text(AppSettings.keySaveFailureMessage(keyName: keyNotSaved ?? ""))
+            Text("\(savedCredential ?? "") saved securely to Keychain")
+        }
+        .alert("Not Saved", isPresented: Binding(
+            get: { keySaveFailure != nil },
+            set: { if !$0 { keySaveFailure = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(keySaveFailure ?? "")
+        }
+    }
+
+    /// Tell the outcome of saving an API key or token: "saved" only when it was.
+    ///
+    /// - Parameters:
+    ///   - saved: Whether it was stored.
+    ///   - credential: What was saved, named in full ("CORE API key").
+    ///   - failure: What to tell when it was not
+    ///     (``AppSettings/keySaveFailureMessage(keyName:)`` or
+    ///     ``AppSettings/tokenSaveFailureMessage(tokenName:)``).
+    private func reportKeySave(_ saved: Bool, credential: String, failure: String) {
+        if saved {
+            savedCredential = credential
+        } else {
+            keySaveFailure = failure
         }
     }
 }
