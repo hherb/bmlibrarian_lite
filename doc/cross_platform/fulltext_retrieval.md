@@ -1068,13 +1068,20 @@ GET https://api.elsevier.com/content/article/doi/{escape_path(bare(doi))}
 # a path parameter. Never the apiKey or insttoken query parameter. Redirects
 # are not followed. The base's trailing slashes are dropped.
 
-no key, or a DOI not eligible → no request, nothing recorded, nothing told
-                                (a debug log line, on every platform)
+no key, or a DOI not eligible → no request, nothing recorded, nothing told.
+                                No key is logged at DEBUG (Python once a
+                                process; the apps per Elsevier DOI); another
+                                publisher's DOI is not logged
 this key refused (below)      → KEY_REFUSED, no request
 these credentials refused from this network (below)
                               → NETWORK_REFUSED, no request
 paused (below)                → UNREACHABLE(http_status 429), no request
-# (these three make no request, and neither count toward the pause nor reset it)
+credentials that cannot be sent (sendable(key, token) false: a character of
+either, trimmed, outside printable ASCII U+0020..U+007E)
+                              → UNREACHABLE(request_failed), no request; a
+                                WARNING asks for the key to be entered again,
+                                never naming it
+# (these four make no request, and neither count toward the pause nor reset it)
 200 with an X-ELS-Status whose value, trimmed, starts WARNING (in any case)
                               → ABSENT: the first page only. Read before the
                                 body; logged at INFO
@@ -1115,8 +1122,8 @@ for either format.
 - **Served:** the article's PDF, shown as "Elsevier's API (PDF)"; its text is
   extracted as any downloaded PDF's. It settles the open-access question, as a
   copy obtained does: no shortfall is stored with it. A PDF that yields no text
-  (a scan) follows the existing textless-PDF rules (Python, #499: CORE is
-  asked after it).
+  (a scan) follows the existing textless-PDF rules (Python, #499, and Swift:
+  CORE is asked after it; Android reads the PDF later, and does not).
 - **Absent** (a 404, or the first page only): nothing is added and nothing is
   told; the chain goes on.
 - **Unreachable:** an unsettled lookup under `elsevier` (Python
@@ -1168,7 +1175,11 @@ access only), which is dropped.
    anywhere, and subscribed ones from the institution's network or with an
    institutional token. Elsevier decides the entitlement and says so in its
    answer, so one request per article suffices; no metadata check is made
-   first, which would double the requests against a weekly quota.
+   first, which would double the requests against a weekly quota. "Open-access
+   articles anywhere" is Elsevier's documentation, not yet observed: the #480
+   spike saw a key alone refused off the institution's network for every
+   article, open-access ones included. `scripts/elsevier_probe.py` settles it;
+   the settings' explanation, verbatim on every platform, follows its result.
 3. **The off-network refusal is unsettled**, as CORE's refused key is. The key
    is valid; the article may still be open access, or served on another
    network or with a token. The refusal says nothing about the article, so it
@@ -1190,12 +1201,13 @@ access only), which is dropped.
    process; any other ending resets the count. Elsevier's weekly quota answers
    429 `QUOTA_EXCEEDED` once spent. A paused fetch makes no request and is told
    as a 429. **A fetch that makes no request** (key refused, network refused,
-   paused) **neither counts toward the pause nor resets it**, as CORE's client
+   paused, credentials that cannot be sent) **neither counts toward the pause
+   nor resets it**, as CORE's client
    returns before it records an ending (stage C2's ruling, 2026-10-08;
    `elsevier_article.json`'s `session` rows). The checks before a request come
    in the order of the outcome table: this key refused, these credentials
-   refused from this network, then paused, so a refused key is told as
-   refused even while Elsevier is paused.
+   refused from this network, paused, then credentials that cannot be sent, so
+   a refused key is told as refused even while Elsevier is paused.
 7. **No key, or another publisher's DOI, is silent** (the spec's decision 4,
    as CORE's): no request, nothing recorded, no sentence, the absence settled
    as before. Elsevier publishes some imprints under other DOI prefixes; they
@@ -1204,6 +1216,12 @@ access only), which is dropped.
    trimmed, and neither ever appears in a URL, a log line, an exception
    message or a `repr`, a stored record or an exported config. A blank key
    means Elsevier is not configured; the token is never sent without a key.
+   **Credentials that cannot be sent are never sent** (stage C2's review,
+   2026-10-09; the contract's `sendable` rows): a zero-width space or a curly
+   quote pasted with a key is no header value. `requests` refuses it with an
+   exception, OkHttp with one that quotes the value, and `URLSession`'s
+   handling is unspecified, so every platform checks first, the same way, and
+   never builds the request.
 9. **An error body is read to 64 KiB** (`error_body_max_bytes`) to look for
    `AUTHENTICATION_ERROR`: a bounded read of a provider's error, not research
    content, so golden rule 13 does not apply.
@@ -1224,13 +1242,25 @@ follow from their maps:
 - **A failure or a refusal never falls back to a link.** It is recorded as the
   outcome table says, and the walk goes on to Unpaywall.
 - **Served but not saved differs from the desktop** (a deviation, deliberate).
-  The walk goes on to Unpaywall, and Elsevier records nothing then; a copy
-  Unpaywall serves settles the question. When nothing later serves a copy, the
-  apps' not-saved note is **not** used, as it carries a link. The result keeps
-  `OpenAccessShortfall(source: elsevier, failure: request_failed)` instead,
-  logged at ERROR with its cause, and the reader is told "Elsevier's API (the
-  request failed) could not be asked, …". It keeps the absence unsettled,
-  which is the property that matters.
+  The walk goes on to Unpaywall with
+  `OpenAccessShortfall(source: elsevier, failure: request_failed)` already
+  added, logged at ERROR with its cause; a copy served later settles the
+  question and drops it. Otherwise the reader is told "Elsevier's API (the
+  request failed) could not be asked, …". The apps' not-saved note is **not**
+  used, as it carries a link. It keeps the absence unsettled, which is the
+  property that matters.
+- **The cached file is read first**, once a key is set and the DOI is
+  Elsevier's: a PDF saved earlier (on the institution's network, say) is
+  served with no request, even when the session now refuses the credentials
+  or is paused, so the weekly quota is not spent on it.
+- **Asked by the DOI cleaned as Python's `_clean_doi` cleans it** (Swift
+  `CORE.bareDOI`, Kotlin `Core.bareDoi`): a DOI stored as
+  `https://www.doi.org/10.1016/…` is Elsevier's too.
+- **Swift does not ask Elsevier while PDF extraction is off**, and records
+  nothing then: an accepted limit, as every other PDF tier then hands over its
+  URL alone, and Elsevier's can never be handed over.
+- **Android: a key or token the settings cannot read** is unreachable
+  `request_failed`, a shortfall with no request made, never "no key".
 - **No size limit**, as for every PDF in the apps.
 - **Redirects are refused:** Swift with `RedirectRefusingTaskDelegate`
   (`Services/EutilsRequest.swift`) per task, as `PubMedService` uses it;
@@ -1247,9 +1277,13 @@ follow from their maps:
 - **Python** asks in `PDFDiscoverer.discover_and_download`, after the DOI is
   cleaned and before the sources it discovers (its PMC renders, Unpaywall,
   OpenAlex, the publisher guesses); `FulltextDiscoverer`'s Europe PMC render
-  (its step 2b) comes before it. The key and token are
-  `LiteConfig.discovery.elsevier_api_key` and `elsevier_insttoken`
-  (environment `ELSEVIER_API_KEY` / `ELSEVIER_INSTTOKEN`), saved owner-only
+  (its step 2b) comes before it. The desktop's "Fetch PDF" action enters
+  `discover_and_download` directly, so there Elsevier is asked before PMC's
+  derived addresses, at one quota request per article (an accepted limit).
+  The key and token are `LiteConfig.discovery.elsevier_api_key` and
+  `elsevier_insttoken` (environment `ELSEVIER_API_KEY` / `ELSEVIER_INSTTOKEN`;
+  the environment's token goes only with the environment's key, as a token is
+  issued for one key, while a token in the settings goes with either), saved owner-only
   and redacted on export as `core_api_key` is; two fields in the settings
   dialog's "Full Text" tab.
 - **Swift** asks in `FullTextService.fetchFullText`, after Europe PMC's render

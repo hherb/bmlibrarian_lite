@@ -211,8 +211,12 @@ public enum BioMedLitConstants {
     /// Consecutive fetches ending in 429 after which Elsevier is not asked again this
     /// session: its weekly quota answers 429 once spent.
     public static let elsevierPauseAfterConsecutive429 = 2
-    /// Two requests a second, Python's POLITE_RATE_CEILINGS entry.
+    /// Two requests a second, Python's POLITE_RATE_CEILINGS entry, per service instance (#489).
     public static let elsevierMinimumInterval: TimeInterval = 0.5
+    /// The characters a key or token may hold to be sent as a header value: printable
+    /// ASCII, the space included (Python's `HEADER_VALUE_FIRST_CHAR` to
+    /// `HEADER_VALUE_LAST_CHAR`).
+    public static let headerValueScalars: ClosedRange<UInt32> = 0x20...0x7E
 
     // MARK: - PubMed API
 

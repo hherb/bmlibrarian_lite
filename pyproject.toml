@@ -40,6 +40,9 @@ dependencies = [
     "ollama>=0.3.0",
     # HTTP client and utilities
     "requests>=2.31.0",
+    # Imported directly (Retry, the polite adapter). 2.x enforces a body's
+    # Content-Length, so a PDF cut short raises instead of being saved whole.
+    "urllib3>=2.0",
     "python-dotenv>=1.0.0",
     "backoff>=2.2.1",
     "tenacity>=8.2.0",

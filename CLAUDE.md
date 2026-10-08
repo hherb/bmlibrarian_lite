@@ -77,7 +77,7 @@ exceptions.py         # Custom exception hierarchy
 
 **Android** (`android/MedicalFactChecker/`):
 - data/local: Room DB + DAOs
-- data/remote: PubMed, Europe PMC, LLM, Unpaywall, FullText APIs (incl. PmcOpenData, PMC's open-data bucket; OpenAlex; Core, CORE's extracted text; Elsevier, Elsevier's API PDFs with a key)
+- data/remote: PubMed, Europe PMC, LLM, Unpaywall, FullText APIs (incl. PmcOpenData, PMC's open-data bucket; OpenAlex; Core, CORE's extracted text; Elsevier, Elsevier's API PDFs with a key; KeyedServiceSession, CORE's and Elsevier's session state)
 - domain: Models, WorkflowState, workflow/ (scoring, searching, reporting)
 - ui: Compose screens + ViewModels (factcheck, report, history, settings, fulltext, onboarding)
 - ui/components: DocumentCard (with transparency), FullTextSourceBadge, SortingControls
@@ -88,7 +88,7 @@ exceptions.py         # Custom exception hierarchy
 
 Shared iOS/macOS components:
 - `JATS/`: XML parsing → HTML/Markdown (JATSXMLParser, JATSModels)
-- `Services/`: EuropePMCService, PubMedService, FullTextService, PMCOpenData (PMC's open-data bucket), OpenAlex, CORE (extracted text), Elsevier (PDFs, with a key)
+- `Services/`: EuropePMCService, PubMedService, FullTextService, PMCOpenData (PMC's open-data bucket), OpenAlex, CORE (extracted text), Elsevier (PDFs, with a key), KeyedServiceSession (CORE's and Elsevier's session state)
 - `Transparency/`: Study transparency analysis
   - `Analysis/`: TransparencyScorer, FundingAnalyzer, COIAnalyzer, DataAvailabilityAnalyzer, TrialComplianceAnalyzer
   - `Models/`: TransparencyModels, TransparencyConstants

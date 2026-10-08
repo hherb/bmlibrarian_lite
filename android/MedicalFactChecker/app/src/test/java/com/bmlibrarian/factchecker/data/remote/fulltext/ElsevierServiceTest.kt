@@ -41,6 +41,7 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
 import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -378,6 +379,72 @@ class ElsevierServiceTest {
         )
     }
 
+    /**
+     * A zero-width space or a curly quote pasted with a key is never sent: OkHttp
+     * would refuse the header quoting its value, so the fetch would throw, end the
+     * whole chain and show the key. Unreachable instead, and logged without it.
+     */
+    @Test
+    fun `credentials that cannot be sent are never sent, nor logged`() = runBlocking {
+        routes[path] = pdf()
+        val cases = listOf("zero\u200Bwidth-$KEY" to null, "curly\u2019$KEY" to null, KEY to "zero\u200Bwidth-$TOKEN")
+        for ((badKey, badToken) in cases) {
+            Log.clear()
+            key = badKey
+            token = badToken
+            val session = Elsevier.newSession()
+            val fetch = service(session = session).fetch()
+            assertEquals(badKey, ElsevierFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED)), fetch)
+            assertFalse("recorded nowhere", session.isPaused)
+            assertTrue(Log.lines.toString(), Log.lines.any { "cannot be sent" in it })
+            assertFalse(Log.lines.toString(), Log.lines.any { KEY in it || TOKEN in it })
+        }
+        assertEquals("never sent", 0, server.requestCount)
+    }
+
+    /** A PDF whose connection drops mid-body is the transport's failure: nothing kept, never "not saved". */
+    @Test
+    fun `a body cut off mid-stream is unreachable and leaves nothing`() = runBlocking {
+        val body = Buffer().write(CONTRACT_PDF_BODY).write(ByteArray(LARGE_BODY_BYTES))
+        routes[path] = MockResponse().setBody(body).setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY)
+        val dir = cacheDir()
+        val fetch = service().fetch(dir)
+        assertTrue(fetch.toString(), fetch is ElsevierFetch.Unreachable)
+        assertEquals("neither the PDF nor its .part file", emptyList<String>(), dir.listFiles().orEmpty().map { it.name })
+    }
+
+    /** A key the settings could not read is unreachable, never "no key", and nothing is sent. */
+    @Test
+    fun `a key or token that cannot be read is unreachable`() = runBlocking {
+        val failing: () -> String? = { throw IllegalStateException("keystore unavailable") }
+        val dir = cacheDir()
+        fun service(apiKey: () -> String?, instToken: () -> String?) = ElsevierService(
+            ElsevierService.client(OkHttpClient()), server.url("").toString().trimEnd('/'), { dir },
+            apiKey, instToken, RequestPacer(0L), 0, 0L, Elsevier.newSession()
+        )
+        val unreachable = ElsevierFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
+        assertEquals(unreachable, service(failing) { null }.fetchPdf(doi))
+        assertEquals(unreachable, service({ KEY }, failing).fetchPdf(doi))
+        assertEquals(0, server.requestCount)
+        // The control: readable settings ask
+        routes[path] = MockResponse().setResponseCode(404)
+        assertEquals(ElsevierFetch.Absent, service({ KEY }) { null }.fetchPdf(doi))
+    }
+
+    /** One fetch whose 429s outlast its retries counts once toward the pause, however many attempts it made. */
+    @Test
+    fun `a 429 outlasting its retries counts once`() = runBlocking {
+        routes[path] = MockResponse().setResponseCode(429)
+        val session = Elsevier.newSession()
+        val service = service(maxRetries = 1, session = session)
+        assertEquals(ElsevierFetch.Unreachable(RequestFailure.forHttpStatus(429)), service.fetch())
+        assertEquals("retried once", 2, server.requestCount)
+        assertFalse("two attempts are one fetch", session.isPaused)
+        // The control: a second fetch ending in 429 pauses
+        service.fetch()
+        assertTrue(session.isPaused)
+    }
+
     @Test
     fun `no server is unreachable`() = runBlocking {
         server.shutdown()
@@ -470,8 +537,9 @@ class ElsevierServiceTest {
         const val PACER_INTERVAL_MS = 150L
         const val REQUEST_WAIT_SECONDS = 5L
         const val MIN_ANSWER_ROWS = 24
-        const val MIN_SESSION_ROWS = 7
+        const val MIN_SESSION_ROWS = 11
         const val HTTP_FOUND = 302
+        const val LARGE_BODY_BYTES = 256 * 1024
         const val REDIRECTED_PATH = "/redirected"
     }
 }

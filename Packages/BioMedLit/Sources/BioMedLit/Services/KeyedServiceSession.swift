@@ -99,15 +99,13 @@ public class KeyedServiceSession: @unchecked Sendable {
     /// Note how one fetch that made a request ended. The key-refused status marks the
     /// key it was sent with refused, in place of any key refused before; like any
     /// ending but a 429, it also resets the 429 count. A refusal is logged here, once,
-    /// when it is new, and so is the pause, when this ending starts it; the articles
-    /// either then skips are not (the key and its digest never are).
+    /// when it is new, and so is the pause, when this ending starts it. The articles
+    /// skipped afterwards are not logged, and the key and its digest never are.
     ///
     /// - Parameters:
     ///   - status: Its HTTP status, or nil when it got none.
     ///   - keyDigest: The ``KeyDigest/key(_:)`` of the key it was sent with.
-    /// - Returns: Whether this ending newly refused the key.
-    @discardableResult
-    func record(endedOn status: Int?, keyDigest: String) -> Bool {
+    func record(endedOn status: Int?, keyDigest: String) {
         let (newlyRefused, pausedAfter) = noteEnding(status, keyDigest: keyDigest)
         if newlyRefused {
             BioMedLitLib.logger?.warning(
@@ -123,7 +121,6 @@ public class KeyedServiceSession: @unchecked Sendable {
                 category: .fullText
             )
         }
-        return newlyRefused
     }
 
     /// Note a fetch the service refused from this network. It is an ending, so it
@@ -132,18 +129,14 @@ public class KeyedServiceSession: @unchecked Sendable {
     ///
     /// - Parameter credentialsDigest: The ``KeyDigest/credentials(key:token:)`` it was
     ///   sent with.
-    /// - Returns: Whether this ending newly refused the credentials.
-    @discardableResult
-    func recordNetworkRefused(credentialsDigest: String) -> Bool {
-        let newlyRefused = noteNetworkRefused(credentialsDigest)
-        if newlyRefused {
+    func recordNetworkRefused(credentialsDigest: String) {
+        if noteNetworkRefused(credentialsDigest) {
             BioMedLitLib.logger?.warning(
                 "\(serviceName) refused the configured credentials from this network; "
                     + "it is not asked with them again this session",
                 category: .fullText
             )
         }
-        return newlyRefused
     }
 
     /// The state change behind ``record(endedOn:keyDigest:)``, under the lock.

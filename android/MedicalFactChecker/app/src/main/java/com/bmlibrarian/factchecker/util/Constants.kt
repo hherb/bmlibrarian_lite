@@ -234,6 +234,14 @@ object Constants {
     /** The header the institutional token travels in, only when one is set. */
     const val ELSEVIER_TOKEN_HEADER = "X-ELS-Insttoken"
 
+    /**
+     * The characters a key or token may hold to be sent as a header value: printable
+     * ASCII, the space included (Python's `HEADER_VALUE_FIRST_CHAR` to
+     * `HEADER_VALUE_LAST_CHAR`). OkHttp refuses anything else, quoting the value.
+     */
+    const val HEADER_VALUE_FIRST_CHAR = ' '
+    const val HEADER_VALUE_LAST_CHAR = '~'
+
     /** What the request accepts: the article's PDF. */
     const val ELSEVIER_ACCEPT = "application/pdf"
 

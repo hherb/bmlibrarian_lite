@@ -133,6 +133,7 @@ final class APIKeySaveTests: XCTestCase {
         XCTAssertFalse(BMLFullTextService.create(from: settings).asksElsevier, "a token alone asks nothing")
         XCTAssertTrue(settings.saveElsevierAPIKey("els-key"))
         XCTAssertTrue(BMLFullTextService.create(from: settings).asksElsevier)
+        XCTAssertTrue(BMLFullTextService.create(from: settings).sendsElsevierToken, "the saved token goes with it")
     }
 
     func testATokenFailureNamesTheToken() {

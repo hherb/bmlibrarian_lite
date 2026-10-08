@@ -91,7 +91,7 @@ neither. Python's table (`constants.POLITE_RATE_CEILINGS`, default
 | `doi.org`, `dx.doi.org` | 1 |
 | `pmc-oa-opendata.s3.amazonaws.com` | 5 (S3 publishes no per-client limit; conservative choice, #480) |
 | `api.core.ac.uk` | 0.4 (24 a minute, at CORE's personal-key limit of 25; a search can cost more than one token, so the session pause after two 429s in a row is the real guard; #480) |
-| `api.elsevier.com` | 2 (Elsevier allows 10 a second and a weekly quota; the session pause after two 429s in a row guards the quota; #480) |
+| `api.elsevier.com` | 2 (Elsevier allows 10 a second and a weekly quota; the session pause after two 429s in a row stops asking once the quota is spent; #480) |
 | any other host | 1 (the default) |
 
 Europe PMC's ceiling is a **deliberately conservative choice, not a measured

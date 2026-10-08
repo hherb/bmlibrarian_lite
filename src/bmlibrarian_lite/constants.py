@@ -958,7 +958,8 @@ POLITE_RATE_CEILINGS: dict[str, float] = {
     "api.core.ac.uk": 0.4,
     # Elsevier's Article API (#480, stage C2): it allows 10/s and a weekly
     # quota; the session pause after two 429s in a row
-    # (ELSEVIER_PAUSE_AFTER_CONSECUTIVE_429) guards the quota.
+    # (ELSEVIER_PAUSE_AFTER_CONSECUTIVE_429) stops asking once the quota is
+    # spent.
     "api.elsevier.com": 2.0,
 }
 
@@ -1154,6 +1155,10 @@ CORE_SOURCE_LABEL = "CORE (extracted text)"
 CORE_TEXT_CACHE_STAMP = "<!-- bmlibrarian-lite core-text v2 -->"
 CORE_TEXT_CACHE_SUFFIX = ".core.txt"
 
+# The largest PDF the desktop downloads (100 MB): one larger is told as over
+# the limit, never truncated.
+MAX_PDF_SIZE = 100 * 1024 * 1024
+
 # Elsevier's Article Retrieval API, asked for an Elsevier article's PDF by
 # DOI with the user's own key and, when set, an institutional token (#480,
 # stage C2). Pinned by doc/cross_platform/fulltext_parity/elsevier_article.json.
@@ -1169,6 +1174,12 @@ ELSEVIER_REQUEST_TIMEOUT_SECONDS = 30
 # The headers the key and the token travel in, and nowhere else.
 ELSEVIER_KEY_HEADER = "X-ELS-APIKey"
 ELSEVIER_TOKEN_HEADER = "X-ELS-Insttoken"
+# A key or token is sent only when every character, trimmed, lies in this
+# range: printable ASCII, the space included. Anything else (a zero-width
+# space or a curly quote pasted with it) is a request that cannot be built,
+# so nothing is sent, on every platform alike.
+HEADER_VALUE_FIRST_CHAR = " "
+HEADER_VALUE_LAST_CHAR = "~"
 ELSEVIER_ACCEPT = "application/pdf"
 # The one status that means Elsevier refused the key: that key is refused
 # for the rest of the process, whatever the token.

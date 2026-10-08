@@ -65,6 +65,27 @@ object Core {
         return "${baseUrl.trimEnd('/')}${Constants.CORE_SEARCH_PATH}?q=$query&limit=${Constants.CORE_SEARCH_LIMIT}"
     }
 
+    /** The resolver forms a stored DOI turns up in, as Python's `_clean_doi` and Swift's `CORE.bareDOI`. */
+    private val RESOLVER_PREFIXES = listOf(
+        "https://doi.org/", "http://doi.org/", "https://www.doi.org/", "http://www.doi.org/",
+        "https://dx.doi.org/", "http://dx.doi.org/", "doi:", "DOI:"
+    )
+
+    /**
+     * A DOI with every resolver form Python's `_clean_doi` removes removed, in its
+     * order and in any case, its own case kept; trimmed first.
+     *
+     * @param doi The DOI as a source wrote it
+     * @return The bare DOI
+     */
+    fun bareDoi(doi: String): String {
+        var text = doi.trim()
+        for (prefix in RESOLVER_PREFIXES) {
+            if (text.startsWith(prefix, ignoreCase = true)) text = text.substring(prefix.length)
+        }
+        return text
+    }
+
     /** A DOI as compared: trimmed, lower-cased, one resolver or `doi:` prefix removed, trimmed. */
     fun normalisedDoi(doi: String): String {
         var text = doi.trim().lowercase()

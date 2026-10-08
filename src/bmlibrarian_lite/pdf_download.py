@@ -16,12 +16,16 @@ import logging
 from collections.abc import Iterator
 from pathlib import Path
 
-from .constants import PDF_PARTIAL_SUFFIX
+from .constants import MAX_PDF_SIZE, PDF_PARTIAL_SUFFIX
 
 logger = logging.getLogger(__name__)
 
-# Maximum PDF file size (100 MB)
-MAX_PDF_SIZE = 100 * 1024 * 1024
+__all__ = [
+    "MAX_PDF_SIZE",
+    "discard_partial_download",
+    "partial_download_path",
+    "read_body_prefix",
+]
 
 
 def read_body_prefix(chunks: Iterator[bytes], at_least: int) -> bytes:

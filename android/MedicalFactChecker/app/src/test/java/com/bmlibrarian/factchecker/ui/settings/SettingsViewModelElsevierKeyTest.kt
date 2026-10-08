@@ -153,7 +153,7 @@ class SettingsViewModelElsevierKeyTest {
         viewModel.updateElsevierInstTokenInput("t")
         viewModel.saveElsevierInstToken()
         assertEquals(
-            "Elsevier institutional token could not be saved; the key in use is unchanged",
+            "Elsevier institutional token could not be saved; the token in use is unchanged",
             viewModel.statusMessage.value
         )
 
@@ -161,6 +161,13 @@ class SettingsViewModelElsevierKeyTest {
         viewModel.saveElsevierApiKey()
         assertEquals(
             "Elsevier API key could not be cleared; the key in use is unchanged",
+            viewModel.statusMessage.value
+        )
+
+        viewModel.updateElsevierInstTokenInput("")
+        viewModel.saveElsevierInstToken()
+        assertEquals(
+            "Elsevier institutional token could not be cleared; the token in use is unchanged",
             viewModel.statusMessage.value
         )
     }

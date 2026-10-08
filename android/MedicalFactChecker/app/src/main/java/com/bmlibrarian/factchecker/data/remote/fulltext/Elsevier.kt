@@ -118,6 +118,20 @@ object Elsevier {
     fun cacheFileName(doi: String): String =
         CACHE_FILE_PREFIX + KeyDigest.sha256Hex(Core.normalisedDoi(doi)) + CACHE_FILE_SUFFIX
 
+    /**
+     * Whether a key and a token can be sent as header values at all: every character
+     * of each, trimmed, is printable ASCII, Python's `credentials_sendable` (the
+     * contract's `sendable` rows). A zero-width space or a curly quote pasted with a
+     * key is not; such credentials are never sent.
+     *
+     * @param key The key, as the settings hold it
+     * @param token The institutional token, or null; a blank one is no token
+     * @return Whether both can be sent
+     */
+    fun isSendable(key: String, token: String?): Boolean = listOf(key, token.orEmpty()).all { value ->
+        value.trim().all { it in Constants.HEADER_VALUE_FIRST_CHAR..Constants.HEADER_VALUE_LAST_CHAR }
+    }
+
     /** A fresh session with Elsevier's rules: unpaused, nothing refused. */
     fun newSession(): KeyedServiceSession = KeyedServiceSession(
         Constants.ELSEVIER_SERVICE_NAME,
@@ -157,7 +171,7 @@ object Elsevier {
         }
 
     /** Whether a 200 carries the first page only: an `X-ELS-Status` whose value, trimmed, starts `WARNING` in any case. */
-    private fun isFirstPageOnly(headers: Iterable<Pair<String, String>>): Boolean = headers.any { (name, value) ->
+    internal fun isFirstPageOnly(headers: Iterable<Pair<String, String>>): Boolean = headers.any { (name, value) ->
         name.equals(Constants.ELSEVIER_STATUS_HEADER, ignoreCase = true) &&
             value.trim().startsWith(Constants.ELSEVIER_WARNING_PREFIX, ignoreCase = true)
     }
@@ -171,22 +185,26 @@ object Elsevier {
 
     /**
      * The answer a fetch has without asking, in the contract's order: this key
-     * refused, these credentials refused from this network, then the pause. Such a
-     * fetch makes no request and is recorded nowhere.
+     * refused, these credentials refused from this network, the pause, then
+     * credentials that cannot be sent. Such a fetch makes no request and is recorded
+     * nowhere.
      *
      * @param session Elsevier's session state
      * @param keyDigest The key's [KeyDigest.key]
      * @param credentialsDigest The key's and token's [KeyDigest.credentials]
+     * @param sendable The key's and token's [isSendable]
      * @return The answer, or null when Elsevier is to be asked
      */
     fun answerWithoutAsking(
         session: KeyedServiceSession,
         keyDigest: String,
-        credentialsDigest: String
+        credentialsDigest: String,
+        sendable: Boolean
     ): ElsevierAnswer? = when {
         session.refuses(keyDigest) -> ElsevierAnswer.KeyRefused
         session.refusesNetwork(credentialsDigest) -> ElsevierAnswer.NetworkRefused
         session.isPaused -> ElsevierAnswer.Unreachable(RequestFailure.forHttpStatus(Constants.HTTP_TOO_MANY_REQUESTS))
+        !sendable -> ElsevierAnswer.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
         else -> null
     }
 
@@ -353,11 +371,13 @@ class ElsevierService internal constructor(
      * the key or the token) and answered as Elsevier unreachable.
      *
      * @param doi The DOI; only an Elsevier DOI ([Elsevier.isEligible]) is asked
-     * @return Null when not asked: no key, or a DOI that is not Elsevier's (nothing
-     *   sent, recorded or logged; the no-key debug line never carries the key); otherwise
-     *   served (a local path), absent (a 404 or a first page only, logged at INFO),
-     *   unreachable of its real kind (a paused Elsevier is HTTP 429, nothing sent),
-     *   the key or the credentials refused, or not saved
+     * @return Null when not asked, nothing sent or recorded: a DOI that is not
+     *   Elsevier's (not logged), or no key (a DEBUG line, never the key). Unreachable
+     *   `request_failed` when the key or token could not be read, or holds a character
+     *   that cannot be sent (a WARNING, never the value). Otherwise served (a local
+     *   path), absent (a 404 or a first page only, logged at INFO), unreachable of
+     *   its real kind (a paused Elsevier is HTTP 429, nothing sent), the key or the
+     *   credentials refused, or not saved
      * @throws CancellationException if the caller cancelled
      */
     suspend fun fetchPdf(doi: String): ElsevierFetch? {
@@ -388,16 +408,35 @@ class ElsevierService internal constructor(
         }
         val keyDigest = KeyDigest.key(key)
         val credentialsDigest = KeyDigest.credentials(key, token)
-        Elsevier.answerWithoutAsking(session, keyDigest, credentialsDigest)?.let { return fetchFor(it) }
+        val sendable = Elsevier.isSendable(key, token)
+        Elsevier.answerWithoutAsking(session, keyDigest, credentialsDigest, sendable)?.let { unasked ->
+            if (!sendable && unasked is ElsevierAnswer.Unreachable) {
+                // Never the value: only that the settings hold one that cannot be sent
+                Log.w(
+                    TAG,
+                    "The Elsevier API key or institutional token in the settings holds a character " +
+                        "that cannot be sent in a request (often an invisible one pasted with it); " +
+                        "$SERVICE is not asked. Enter it again."
+                )
+            }
+            return fetchFor(unasked)
+        }
 
         // A request we could not build was never sent: not an absence
         val url = Elsevier.articleUrl(doi, baseUrl).toHttpUrlOrNull()
             ?: return ElsevierFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
-        val request = Request.Builder().url(url)
-            .header(Constants.ELSEVIER_KEY_HEADER, key)
-            .apply { token?.let { header(Constants.ELSEVIER_TOKEN_HEADER, it) } }
-            .header(Constants.HTTP_ACCEPT_HEADER, Constants.ELSEVIER_ACCEPT)
-            .build()
+        val request = try {
+            Request.Builder().url(url)
+                .header(Constants.ELSEVIER_KEY_HEADER, key)
+                .apply { token?.let { header(Constants.ELSEVIER_TOKEN_HEADER, it) } }
+                .header(Constants.HTTP_ACCEPT_HEADER, Constants.ELSEVIER_ACCEPT)
+                .build()
+        } catch (e: IllegalArgumentException) {
+            // Never its message: OkHttp quotes a header value it refuses, the key
+            // included. [Elsevier.isSendable] admits nothing it refuses.
+            Log.e(TAG, "$SERVICE's request could not be built: ${e.javaClass.simpleName}")
+            return ElsevierFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
+        }
 
         val ending = try {
             get(request, cached, doi)
@@ -475,8 +514,7 @@ class ElsevierService internal constructor(
         val code = response.code
         val headers = response.headers.toList()
         val source = response.body?.source()
-        val firstPage = code == Constants.HTTP_OK &&
-            Elsevier.classify(code, headers, ByteArray(0)) == ElsevierAnswer.FirstPageOnly
+        val firstPage = code == Constants.HTTP_OK && Elsevier.isFirstPageOnly(headers)
         val prefix = when {
             source == null || firstPage -> ByteArray(0)
             code == Constants.HTTP_OK -> source.peekPrefix(Constants.PDF_MAGIC_BYTES.size)
@@ -530,9 +568,17 @@ class ElsevierService internal constructor(
         return buffer.snapshot(minOf(buffer.size, count.toLong()).toInt()).toByteArray()
     }
 
-    /** What a fetch learned from an answer that is not a PDF saved: a first page is no article, so an absence. */
+    /**
+     * What a fetch learned from an answer that is not a PDF saved: a first page is no
+     * article, so an absence. A served answer is saved by the caller and never mapped
+     * here; were it to be, it is unreachable, never an absence.
+     */
     private fun fetchFor(answer: ElsevierAnswer): ElsevierFetch = when (answer) {
-        ElsevierAnswer.Served, ElsevierAnswer.Absent, ElsevierAnswer.FirstPageOnly -> ElsevierFetch.Absent
+        ElsevierAnswer.Served -> {
+            Log.e(TAG, "$SERVICE: a served answer reached the mapping for answers not saved")
+            ElsevierFetch.Unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
+        }
+        ElsevierAnswer.Absent, ElsevierAnswer.FirstPageOnly -> ElsevierFetch.Absent
         is ElsevierAnswer.Unreachable -> ElsevierFetch.Unreachable(answer.failure)
         ElsevierAnswer.KeyRefused -> ElsevierFetch.KeyRefused
         ElsevierAnswer.NetworkRefused -> ElsevierFetch.NetworkRefused

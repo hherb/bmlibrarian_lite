@@ -403,8 +403,9 @@ class LookupSkipReason(Enum):
     #: discovery from concluding the article has no full text (#480).
     NOT_SAVED = "not_saved"
 
-    #: The service refused the key the settings hold (CORE's HTTP 401), so it
-    #: is not asked again this session (#498). A fault of the key, not the
+    #: The service refused the key the settings hold (CORE's or Elsevier's
+    #: HTTP 401), so it is not asked with that key again this session (#498;
+    #: #480 stage C2); a corrected key is asked. A fault of the key, not the
     #: article: never told as the source "not serving" it. Configured, so no
     #: configuration nudge; unasked, so it leaves the question open.
     KEY_REFUSED = "key_refused"

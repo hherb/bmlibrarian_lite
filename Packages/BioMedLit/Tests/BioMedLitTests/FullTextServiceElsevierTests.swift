@@ -304,7 +304,7 @@ final class FullTextServiceElsevierTests: RecordingLoggerTestCase {
         StubURLProtocol.routes[elsevierHost] = (403, Data("<error>AUTHORIZATION_ERROR</error>".utf8))
         let result = try await makeService(elsevierSession: session).fetchFullText(pmcId: nil, doi: doi, pmid: "")
         XCTAssertEqual(result.openAccessShortfall, OpenAccessShortfall(source: .elsevier, failure: .httpStatus(403)))
-        XCTAssertFalse(session.refusesNetwork(credentialsDigest: Elsevier.credentialsDigest(key: key, token: nil)))
+        XCTAssertFalse(session.refusesNetwork(credentialsDigest: KeyDigest.credentials(key: key, token: nil)))
         _ = try await makeService(elsevierSession: session).fetchFullText(pmcId: nil, doi: doi, pmid: "")
         XCTAssertEqual(elsevierRequests, 2)
     }
@@ -377,7 +377,7 @@ final class FullTextServiceElsevierTests: RecordingLoggerTestCase {
     /// contract orders the checks (network before pause).
     func testANetworkRefusalIsToldBeforeAPause() async throws {
         let session = ElsevierSession()
-        session.recordNetworkRefused(credentialsDigest: Elsevier.credentialsDigest(key: key, token: nil))
+        session.recordNetworkRefused(credentialsDigest: KeyDigest.credentials(key: key, token: nil))
         session.record(endedOn: 429, keyDigest: KeyDigest.key(key))
         session.record(endedOn: 429, keyDigest: KeyDigest.key(key))
         XCTAssertTrue(session.isPaused)
@@ -432,7 +432,7 @@ final class FullTextServiceElsevierTests: RecordingLoggerTestCase {
             XCTAssertFalse(url.contains(key) || url.contains(token), url)
         }
         // Never logged, nor their digests
-        let digests = [KeyDigest.key(key), Elsevier.credentialsDigest(key: key, token: token)]
+        let digests = [KeyDigest.key(key), KeyDigest.credentials(key: key, token: token)]
         XCTAssertFalse(logger.recorded.contains { line in
             line.contains(key) || line.contains(token) || digests.contains { line.contains($0) }
         }, "\(logger.recorded)")
@@ -492,12 +492,116 @@ final class FullTextServiceElsevierTests: RecordingLoggerTestCase {
     /// The control for both: with a key and an Elsevier DOI, it is asked, by
     /// the DOI's resolver form too.
     func testAResolverDOIIsAskedBare() async throws {
-        StubURLProtocol.routes[elsevierHost] = (404, Data())
-        _ = try await makeService().fetchFullText(pmcId: nil, doi: "https://doi.org/\(doi)", pmid: "")
-        let asked = StubURLProtocol.requestedURLs.filter { URL(string: $0)?.host == elsevierHost }
-        XCTAssertEqual(asked, [articleURL.absoluteString])
-        let resolverKey = try XCTUnwrap(ArticleCacheKey(pmid: "", pmcId: nil, doi: "https://doi.org/\(doi)"))
-        FullTextService.deleteCachedPDF(for: resolverKey)
+        // `www.doi.org` too, which CORE's normalised form alone does not remove:
+        // the chain asks by the DOI cleaned as Python's `_clean_doi` cleans it
+        for resolver in ["https://doi.org/", "https://www.doi.org/", "doi: "] {
+            StubURLProtocol.reset()
+            StubURLProtocol.routes["search"] = (200, Data(#"{"resultList": {"result": []}}"#.utf8))
+            StubURLProtocol.routes["unpaywall"] = (404, Data())
+            StubURLProtocol.routes[elsevierHost] = (404, Data())
+            _ = try await makeService().fetchFullText(pmcId: nil, doi: "\(resolver)\(doi)", pmid: "")
+            let asked = StubURLProtocol.requestedURLs.filter { URL(string: $0)?.host == elsevierHost }
+            XCTAssertEqual(asked, [articleURL.absoluteString], resolver)
+            let resolverKey = try XCTUnwrap(ArticleCacheKey(pmid: "", pmcId: nil, doi: "\(resolver)\(doi)"))
+            FullTextService.deleteCachedPDF(for: resolverKey)
+        }
+    }
+
+    // MARK: - Credentials that cannot be sent
+
+    /// A zero-width space or a curly quote pasted with the key is never sent:
+    /// Elsevier is unsettled as a failed request, told without the key, and the
+    /// walk goes on to Unpaywall, whose copy settles it.
+    func testCredentialsThatCannotBeSentAreNeverSent() async throws {
+        let cases: [(key: String, token: String?)] = [
+            ("zero\u{200B}width-\(key)", nil), ("curly\u{2019}\(key)", nil), (key, "zero\u{200B}width-\(token)"),
+        ]
+        for (badKey, badToken) in cases {
+            StubURLProtocol.reset()
+            FullTextService.deleteCachedPDF(for: cacheKey)
+            logger.reset()
+            StubURLProtocol.routes["search"] = (200, Data(#"{"resultList": {"result": []}}"#.utf8))
+            StubURLProtocol.routes["unpaywall"] = (404, Data())
+            StubURLProtocol.routes[elsevierHost] = (200, pdfBody)
+            let session = ElsevierSession()
+            let result = try await makeService(
+                elsevierAPIKey: badKey, elsevierInstToken: badToken, elsevierSession: session
+            ).fetchFullText(pmcId: nil, doi: doi, pmid: "")
+            XCTAssertEqual(elsevierRequests, 0, "never sent")
+            XCTAssertTrue(StubURLProtocol.requested("unpaywall"), "the walk goes on")
+            XCTAssertEqual(result.openAccessShortfall, OpenAccessShortfall(source: .elsevier, failure: .requestFailed))
+            XCTAssertTrue(
+                logger.recorded.contains { $0.contains("cannot be sent") }, "\(logger.recorded)"
+            )
+            XCTAssertFalse(
+                logger.recorded.contains { $0.contains(key) || $0.contains(token) }, "\(logger.recorded)"
+            )
+            XCTAssertFalse(session.isPaused)
+        }
+    }
+
+    // MARK: - The walk goes on
+
+    /// An unreachable or refused Elsevier is told, and Unpaywall is still asked:
+    /// a copy it serves settles the question, so nothing is left unsettled.
+    func testTheWalkGoesOnAfterEveryUnsettledElsevier() async throws {
+        let answers: [(status: Int, body: Data)] = [(503, Data()), (401, Data()), (403, authenticationError)]
+        for answer in answers {
+            StubURLProtocol.reset()
+            FullTextService.deleteCachedPDF(for: cacheKey)
+            StubURLProtocol.routes["search"] = (200, Data(#"{"resultList": {"result": []}}"#.utf8))
+            StubURLProtocol.routes[elsevierHost] = (answer.status, answer.body)
+            StubURLProtocol.routes["unpaywall"] = (200, unpaywall([repo]))
+            StubURLProtocol.routes["repo.example.org"] = (200, pdfBody)
+            let result = try await makeService(elsevierSession: ElsevierSession())
+                .fetchFullText(pmcId: nil, doi: doi, pmid: "")
+            XCTAssertEqual(elsevierRequests, 1, "HTTP \(answer.status)")
+            XCTAssertEqual(result.content, .unpaywall(pdfURL: URL(string: repo)!), "HTTP \(answer.status)")
+            XCTAssertNil(result.openAccessShortfall, "HTTP \(answer.status)")
+            assertNoElsevierURL(result)
+        }
+    }
+
+    // MARK: - The process's session
+
+    /// The app builds a service per document; their default session is the
+    /// process's, so a key refused by one is not sent by the next.
+    func testTheDefaultSessionIsTheProcesss() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubURLProtocol.self]
+        let urlSession = URLSession(configuration: config)
+        // A key no other test uses: the shared session keeps one refused key
+        let refused = "test-elsevier-key-\(UUID().uuidString)"
+        func service() -> FullTextService {
+            FullTextService(
+                email: "test@example.org", session: urlSession,
+                europePMCService: EuropePMCService(session: urlSession), extractor: ExtractingStub(),
+                europePMCRetry: .noRetry, pmcOpenDataRetry: .noRetry, openAlexRetry: .noRetry,
+                coreThrottle: CoreThrottle(), elsevierAPIKey: refused, elsevierRetry: .noRetry
+            )
+        }
+        StubURLProtocol.routes[elsevierHost] = (401, Data())
+        let first = try await service().fetchElsevierPDF(doi: doi, cacheKey: cacheKey)
+        let second = try await service().fetchElsevierPDF(doi: doi, cacheKey: cacheKey)
+        XCTAssertEqual(first, .keyRefused)
+        XCTAssertEqual(second, .keyRefused)
+        XCTAssertEqual(elsevierRequests, 1, "the second service knew the key was refused")
+        XCTAssertTrue(ElsevierSession.shared.refuses(keyDigest: KeyDigest.key(refused)))
+    }
+
+    /// One fetch whose 429s outlast its retries counts once toward the pause,
+    /// however many attempts it made.
+    func testA429OutlastingItsRetriesCountsOnce() async throws {
+        let session = ElsevierSession()
+        StubURLProtocol.routes[elsevierHost] = (429, Data())
+        let service = makeService(elsevierRetry: .oneRetry, elsevierSession: session)
+        let first = try await service.fetchElsevierPDF(doi: doi, cacheKey: cacheKey)
+        XCTAssertEqual(first, .unreachable(.httpStatus(429)))
+        XCTAssertEqual(elsevierRequests, 2, "retried once")
+        XCTAssertFalse(session.isPaused, "two attempts are one fetch")
+        // The control: a second fetch ending in 429 pauses
+        _ = try await service.fetchElsevierPDF(doi: doi, cacheKey: cacheKey)
+        XCTAssertTrue(session.isPaused)
     }
 
     // MARK: - Served but not saved (the apps' deviation)
@@ -603,7 +707,7 @@ final class FullTextServiceElsevierTests: RecordingLoggerTestCase {
     func testACachedPDFIsServedWhileTheseCredentialsAreRefusedFromThisNetwork() async throws {
         try plantCachedPDF()
         let session = ElsevierSession()
-        session.recordNetworkRefused(credentialsDigest: Elsevier.credentialsDigest(key: key, token: nil))
+        session.recordNetworkRefused(credentialsDigest: KeyDigest.credentials(key: key, token: nil))
         let fetch = try await makeService(elsevierSession: session).fetchElsevierPDF(doi: doi, cacheKey: cacheKey)
         XCTAssertEqual(fetch, .served(localPath: cachedPath))
         XCTAssertEqual(elsevierRequests, 0)

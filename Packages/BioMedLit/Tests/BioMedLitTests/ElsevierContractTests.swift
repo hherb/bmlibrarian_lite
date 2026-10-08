@@ -55,7 +55,7 @@ final class ElsevierContractTests: XCTestCase {
             "key_refused_status", "key_refused_reason", "network_refused_status",
             "network_refused_token", "network_refused_reason", "first_page_header",
             "first_page_prefix", "error_body_max_bytes", "follows_redirects", "requests_per_second",
-            "eligible", "article_url", "answers", "session",
+            "eligible", "article_url", "sendable", "answers", "session",
         ])
     }
 
@@ -142,6 +142,16 @@ final class ElsevierContractTests: XCTestCase {
         XCTAssertEqual(url.absoluteString, "https://api.elsevier.com/content/article/doi/10.1016/j.x.1")
     }
 
+    /// Only printable ASCII is ever sent as the key or the token.
+    func testEachSendableRow() throws {
+        for row in try table("sendable", minimum: 11) {
+            let name = row["name"] as? String ?? "?"
+            let key = try XCTUnwrap(row["key"] as? String, name)
+            let token = row["token"] as? String
+            XCTAssertEqual(Elsevier.isSendable(key: key, token: token), row["sendable"] as? Bool, name)
+        }
+    }
+
     // MARK: - Classifying one answer
 
     /// A body that starts `%PDF-1.7` and a newline, then some bytes, as the contract says.
@@ -214,9 +224,10 @@ final class ElsevierContractTests: XCTestCase {
         let key = try XCTUnwrap(credentials["key"] as? String, name)
         let token = credentials["token"] as? String
         let keyDigest = KeyDigest.key(key)
-        let credentialsDigest = Elsevier.credentialsDigest(key: key, token: token)
+        let credentialsDigest = KeyDigest.credentials(key: key, token: token)
         if let unasked = Elsevier.answerWithoutAsking(
-            session: session, keyDigest: keyDigest, credentialsDigest: credentialsDigest
+            session: session, keyDigest: keyDigest, credentialsDigest: credentialsDigest,
+            sendable: Elsevier.isSendable(key: key, token: token)
         ) {
             return (false, unasked)
         }
@@ -231,7 +242,7 @@ final class ElsevierContractTests: XCTestCase {
     }
 
     func testEachSessionRow() throws {
-        for row in try table("session", minimum: 7) {
+        for row in try table("session", minimum: 11) {
             let name = row["name"] as? String ?? "?"
             let session = ElsevierSession()
             for step in try XCTUnwrap(row["fetches"] as? [[String: Any]], name) {
@@ -260,7 +271,6 @@ final class ElsevierContractTests: XCTestCase {
         XCTAssertTrue(core.isPaused)
         XCTAssertFalse(elsevier.isPaused)
         XCTAssertFalse(elsevier.refuses(keyDigest: digest))
-        XCTAssertFalse(ElsevierSession.shared === CoreThrottle.shared)
     }
 
     /// A refusal from this network is an ending: it resets the 429 count and
@@ -268,7 +278,7 @@ final class ElsevierContractTests: XCTestCase {
     func testANetworkRefusalResetsThe429Count() {
         let session = ElsevierSession(pauseAfter: 2)
         let key = KeyDigest.key("key-A")
-        let credentials = Elsevier.credentialsDigest(key: "key-A", token: nil)
+        let credentials = KeyDigest.credentials(key: "key-A", token: nil)
         session.record(endedOn: 429, keyDigest: key)
         session.recordNetworkRefused(credentialsDigest: credentials)
         session.record(endedOn: 429, keyDigest: key)
@@ -282,19 +292,19 @@ final class ElsevierContractTests: XCTestCase {
     func testTheCredentialsAreHeldAsADigestOfKeyNewlineToken() {
         // Python's credentials_digest of the same credentials, so the platforms agree
         XCTAssertEqual(
-            Elsevier.credentialsDigest(key: "key-A", token: nil),
+            KeyDigest.credentials(key: "key-A", token: nil),
             "50b21231d19454abde7269149737076b5236197952c14f0028ab4d0a057c2fee"
         )
         XCTAssertEqual(
-            Elsevier.credentialsDigest(key: " key-A\n", token: " token-T "),
+            KeyDigest.credentials(key: " key-A\n", token: " token-T "),
             "aaf6f589b9c34c106a1fd1f05d29ab067708fe5f7704217d4c663c747ac55048"
         )
         // A blank token is no token
         XCTAssertEqual(
-            Elsevier.credentialsDigest(key: "key-A", token: "  "),
-            Elsevier.credentialsDigest(key: "key-A", token: nil)
+            KeyDigest.credentials(key: "key-A", token: "  "),
+            KeyDigest.credentials(key: "key-A", token: nil)
         )
-        let digest = Elsevier.credentialsDigest(key: "key-A", token: "token-T")
+        let digest = KeyDigest.credentials(key: "key-A", token: "token-T")
         XCTAssertFalse(digest.contains("key-A") || digest.contains("token-T"))
     }
 

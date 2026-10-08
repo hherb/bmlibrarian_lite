@@ -1106,7 +1106,10 @@ class SettingsDialog(QDialog):
             self.elsevier_api_key_input.setPlaceholderText(ELSEVIER_API_KEY_FROM_ENVIRONMENT)
         if self.config.discovery.elsevier_insttoken:
             self.elsevier_insttoken_input.setText(self.config.discovery.elsevier_insttoken)
-        elif os.environ.get(ENV_ELSEVIER_INSTTOKEN, "").strip():
+        elif not self.config.discovery.elsevier_api_key and os.environ.get(
+            ENV_ELSEVIER_INSTTOKEN, ""
+        ).strip():
+            # The environment's token goes only with the environment's key
             self.elsevier_insttoken_input.setPlaceholderText(
                 ELSEVIER_INSTTOKEN_FROM_ENVIRONMENT
             )

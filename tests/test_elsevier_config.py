@@ -271,3 +271,15 @@ def test_a_save_that_fails_is_told_and_keeps_the_dialog_open(qapp, monkeypatch) 
     assert accepted == []
     assert len(shown) == 1 and "PermissionError" in shown[0]
     assert KEY not in shown[0] and TOKEN not in shown[0]
+
+
+def test_the_environments_token_is_not_offered_beside_a_settings_key(qapp, monkeypatch) -> None:
+    """The environment's token goes only with the environment's key, so says nothing then."""
+    from bmlibrarian_lite.gui.settings_dialog import SettingsDialog
+
+    monkeypatch.setenv(ENV_ELSEVIER_INSTTOKEN, TOKEN)
+    config = LiteConfig()
+    config.discovery.elsevier_api_key = KEY
+    token = SettingsDialog(config).elsevier_insttoken_input
+    assert token.text() == ""
+    assert token.placeholderText() == "Optional"

@@ -150,4 +150,23 @@ final class ElsevierDocumentTests: XCTestCase {
             "a token without a key asks nothing")
         XCTAssertFalse(BMLFullTextService.create(ncbiEmail: "", coreAPIKey: "k").asksElsevier)
     }
+
+    /// The token is forwarded with the key, and never alone.
+    func testTheTokenReachesTheService() {
+        XCTAssertTrue(
+            BMLFullTextService.create(
+                ncbiEmail: "", coreAPIKey: "", elsevierAPIKey: "k", elsevierInstToken: " t "
+            ).sendsElsevierToken)
+        // The controls: no token, a blank one, or a token without a key sends none
+        XCTAssertFalse(
+            BMLFullTextService.create(ncbiEmail: "", coreAPIKey: "", elsevierAPIKey: "k").sendsElsevierToken)
+        XCTAssertFalse(
+            BMLFullTextService.create(
+                ncbiEmail: "", coreAPIKey: "", elsevierAPIKey: "k", elsevierInstToken: "  "
+            ).sendsElsevierToken)
+        XCTAssertFalse(
+            BMLFullTextService.create(
+                ncbiEmail: "", coreAPIKey: "", elsevierAPIKey: "", elsevierInstToken: "t"
+            ).sendsElsevierToken)
+    }
 }

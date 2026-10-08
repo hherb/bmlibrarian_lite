@@ -158,6 +158,10 @@ public actor FullTextService {
     /// Whether this service asks Elsevier's API: a non-blank key was given.
     public nonisolated var asksElsevier: Bool { elsevierAPIKey != nil }
 
+    /// Whether this service sends an institutional token with Elsevier's key: a
+    /// non-blank token was given with a key.
+    public nonisolated var sendsElsevierToken: Bool { elsevierInstToken != nil }
+
     /// Hosts this service paces itself on: one slot each (#489 tracks making
     /// it per host across instances, as Python's).
     private enum PacedHost: Hashable {
@@ -676,9 +680,11 @@ public actor FullTextService {
         // Unpaywall lookup, only for an Elsevier DOI and only with the user's
         // key. Its PDF is held only as a local file, and nothing it does falls
         // back to a link: its article URL needs the key.
+        // Asked by the DOI cleaned as CORE's is (Python's `_clean_doi`), so a
+        // DOI stored as `https://www.doi.org/10.1016/...` is Elsevier's too.
         if let cacheKey,
            let result = try await elsevierResult(
-               doi: unpaywallDOI,
+               doi: coreDOI,
                cacheKey: cacheKey,
                degradation: degradation,
                holdingAbstract: abstractOnly != nil,
@@ -1472,7 +1478,7 @@ public actor FullTextService {
     /// under the document's cache key (#480, stage C2).
     ///
     /// The checks that make no request come first, in the contract's order
-    /// (``Elsevier/answerWithoutAsking(session:keyDigest:credentialsDigest:)``);
+    /// (``Elsevier/answerWithoutAsking(session:keyDigest:credentialsDigest:sendable:)``);
     /// a fetch that asks is classified by ``Elsevier/classify(status:headers:body:)``
     /// and recorded by ``Elsevier/record(_:endedOn:in:keyDigest:credentialsDigest:)``.
     /// The key travels in `X-ELS-APIKey` and the token in `X-ELS-Insttoken`
@@ -1508,10 +1514,22 @@ public actor FullTextService {
             return .served(localPath: cached)
         }
         let keyDigest = KeyDigest.key(apiKey)
-        let credentialsDigest = Elsevier.credentialsDigest(key: apiKey, token: elsevierInstToken)
+        let credentialsDigest = KeyDigest.credentials(key: apiKey, token: elsevierInstToken)
+        let sendable = Elsevier.isSendable(key: apiKey, token: elsevierInstToken)
         if let unasked = Elsevier.answerWithoutAsking(
-            session: elsevierSession, keyDigest: keyDigest, credentialsDigest: credentialsDigest
+            session: elsevierSession, keyDigest: keyDigest, credentialsDigest: credentialsDigest,
+            sendable: sendable
         ) {
+            if !sendable, unasked == .unreachable(.requestFailed) {
+                // Never the value: only that the settings hold one that cannot be sent
+                BioMedLitLib.logger?.warning(
+                    "The Elsevier API key or institutional token in the settings holds a "
+                        + "character that cannot be sent in a request (often an invisible one "
+                        + "pasted with it); \(BioMedLitConstants.elsevierServiceName) is not "
+                        + "asked. Enter it again.",
+                    category: .fullText
+                )
+            }
             return Self.elsevierFetch(for: unasked)
         }
         // A request we could not build was never sent: not an absence.
@@ -1586,11 +1604,14 @@ public actor FullTextService {
     /// page is no article, so an absence.
     ///
     /// - Parameter answer: The answer, classified or given without asking.
-    /// - Returns: The fetch's outcome; `.absent` for `.served`, which the caller
-    ///   saves instead.
+    /// - Returns: The fetch's outcome. `.served` never reaches here (the caller
+    ///   saves it); were it to, it is unreachable, never an absence.
     private static func elsevierFetch(for answer: ElsevierAnswer) -> ElsevierFetch {
         switch answer {
-        case .served, .absent, .firstPageOnly: return .absent
+        case .served:
+            assertionFailure("A served answer is saved by the caller, not mapped")
+            return .unreachable(.requestFailed)
+        case .absent, .firstPageOnly: return .absent
         case .unreachable(let failure): return .unreachable(failure)
         case .keyRefused: return .keyRefused
         case .networkRefused: return .networkRefused

@@ -165,6 +165,18 @@ class FullTextServiceElsevierTest {
         coVerify(exactly = 0) { core.fetchText(any()) }
     }
 
+    /** A DOI stored in a resolver form is asked bare, as Python's `_clean_doi` cleans it. */
+    @Test
+    fun `a resolver DOI is asked bare`() = runTest {
+        unpaywallKnowsNothing()
+        for (stored in listOf("https://www.doi.org/$doi", "http://dx.doi.org/$doi", "DOI:$doi")) {
+            elsevier = elsevierAnswering(ElsevierFetch.Served(localPdf))
+            val result = service().fetchFullText(null, stored, "1", email).getOrThrow()
+            assertEquals(stored, FullTextResult.ElsevierPdf(localPdf), result)
+            coVerify(exactly = 1) { elsevier.fetchPdf(doi) }
+        }
+    }
+
     /** Review focus 1: a first page is never served, and Unpaywall is asked next. */
     @Test
     fun `a first page or a 404 adds nothing, and Unpaywall is asked`() = runBlocking {

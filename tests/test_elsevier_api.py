@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable, Iterator
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
@@ -50,8 +51,10 @@ from bmlibrarian_lite.elsevier_api import (
     ElsevierFetch,
     ElsevierOutcome,
     ElsevierSession,
+    credentials_sendable,
     default_elsevier_client,
     elsevier_article_url,
+    elsevier_client_for,
     elsevier_eligible,
     reset_elsevier_session,
     session_elsevier_state,
@@ -100,7 +103,7 @@ def test_every_contract_table_is_read_here() -> None:
         "key_refused_status", "key_refused_reason", "network_refused_status",
         "network_refused_token", "network_refused_reason", "first_page_header",
         "first_page_prefix", "error_body_max_bytes", "follows_redirects",
-        "requests_per_second", "eligible", "article_url", "answers", "session",
+        "requests_per_second", "eligible", "article_url", "sendable", "answers", "session",
     }
 
 
@@ -143,8 +146,16 @@ def test_the_contract_has_rows() -> None:
     """An emptied table would pass every parametrised test below."""
     assert len(CONTRACT["eligible"]) >= 10
     assert len(CONTRACT["article_url"]) >= 12
+    assert len(CONTRACT["sendable"]) >= 11
     assert len(CONTRACT["answers"]) >= 24
-    assert len(CONTRACT["session"]) >= 7
+    assert len(CONTRACT["session"]) >= 11
+
+
+@pytest.mark.parametrize("row", CONTRACT["sendable"], ids=lambda row: row["name"])
+def test_each_sendable_row(row: dict[str, Any]) -> None:
+    """Only printable ASCII is ever sent as the key or the token."""
+    assert credentials_sendable(row["key"], row["token"]) is row["sendable"]
+    assert ElsevierCredentials(row["key"], row["token"]).sendable is row["sendable"]
 
 
 @pytest.mark.parametrize("row", CONTRACT["eligible"], ids=lambda row: repr(row["doi"]))
@@ -237,10 +248,11 @@ def test_each_session_row(row: dict[str, Any], tmp_path: Path) -> None:
             refused = session.refuses_key(key_digest(key)) or session.refuses_network(
                 credentials_digest(key, token)
             )
+            unsendable = not credentials_sendable(key, token)
             paused = session.paused
             _client(server.url, session, key, token).fetch_pdf(DOI, tmp_path / "a.pdf", never)
-            # Already refused or paused: no request; otherwise exactly one
-            expected = 0 if refused or paused else 1
+            # Already refused, paused or not sendable: no request; otherwise exactly one
+            expected = 0 if refused or paused or unsendable else 1
             assert len(server.received) - before == expected
         for check in row["then"]:
             server.script[PATH] = [_answer({**check, "headers": {}})]
@@ -330,17 +342,31 @@ def test_a_key_a_header_cannot_carry_is_unreachable_and_never_logged(
     assert "bad-key" not in caplog.text
 
 
-def test_a_key_http_client_cannot_encode_is_unreachable_and_never_logged(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+@pytest.mark.parametrize(
+    ("key", "token"),
+    [
+        ("curly\u2019key-0123456789", None),
+        ("zero\u200bwidth-key-0123456789", None),
+        ("latin-key-0123456789-\u00e9", None),
+        (KEY, "zero-width-token\u200b-0123456789"),
+    ],
+)
+def test_credentials_that_cannot_be_sent_are_unreachable_and_never_logged(
+    key: str, token: str | None, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A curly quote is no Latin-1: classified as a failed request, the key never logged."""
+    """Never sent: a failed request, told as the settings' fault, the secret never logged."""
     caplog.set_level(logging.DEBUG)
-    bad = "curly\u2019key-0123456789"
     with running({PATH: [ScriptedAnswer(HTTPStatus.OK, PDF)]}) as server:
-        fetch = _client(server.url, key=bad).fetch_pdf(DOI, tmp_path / "a.pdf", never)
+        fetch = _client(server.url, key=key, token=token).fetch_pdf(
+            DOI, tmp_path / "a.pdf", never
+        )
         assert server.received == []
     assert fetch == ElsevierFetch.unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
-    assert "curly" not in caplog.text and "0123456789" not in caplog.text
+    ours = [r for r in caplog.records if r.name == elsevier_api.logger.name]
+    assert [r.levelno for r in ours] == [logging.WARNING]
+    assert "cannot be sent" in ours[0].getMessage()
+    # Nothing logged anywhere names the secret
+    assert "0123456789" not in caplog.text
     assert list(tmp_path.iterdir()) == []
 
 
@@ -514,6 +540,92 @@ def test_a_dropped_connection_mid_body_is_unreachable(
     # requests' ChunkedEncodingError: a transport failure, never "not saved"
     assert fetch == ElsevierFetch.unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
     assert list(tmp_path.iterdir()) == []
+
+
+def _with_body(client: ElsevierArticleClient, monkeypatch: pytest.MonkeyPatch, body: Callable[..., Any]) -> None:
+    """Answer every request through ``client`` with ``body`` as its streamed chunks."""
+    get = client._session.get
+
+    def get_with_body(*args: Any, **kwargs: Any) -> Any:
+        response = get(*args, **kwargs)
+        monkeypatch.setattr(response, "iter_content", body)
+        return response
+
+    monkeypatch.setattr(client._session, "get", get_with_body)
+
+
+def test_a_body_cut_off_after_its_first_bytes_is_unreachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cut off once the prefix was read: still the transport's failure, never "not saved".
+
+    requests' errors are OSErrors too, so a catch in the wrong order would
+    tell the reader to check the free storage space and end the chain.
+    """
+    def first_bytes_then_drop(*_args: Any, **_kwargs: Any) -> Iterator[bytes]:
+        yield PDF[:9]
+        raise requests.exceptions.ChunkedEncodingError("connection dropped")
+
+    with running({PATH: [ScriptedAnswer(HTTPStatus.OK, PDF)]}) as server:
+        client = _client(server.url)
+        _with_body(client, monkeypatch, first_bytes_then_drop)
+        fetch = client.fetch_pdf(DOI, tmp_path / "a.pdf", never)
+    assert fetch == ElsevierFetch.unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
+    assert list(tmp_path.iterdir()) == [], "neither the PDF nor its .part file is left"
+
+
+def test_a_403_whose_body_cannot_be_read_refuses_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unread body holds no AUTHENTICATION_ERROR: one article unreachable, the network not refused."""
+    def unreadable(*_args: Any, **_kwargs: Any) -> Iterator[bytes]:
+        raise requests.exceptions.ChunkedEncodingError("connection reset")
+        yield b""  # pragma: no cover - makes this a generator
+
+    session = ElsevierSession()
+    script = [
+        ScriptedAnswer(HTTPStatus.FORBIDDEN, b"AUTHENTICATION_ERROR"),
+        ScriptedAnswer(HTTPStatus.NOT_FOUND),
+    ]
+    with running({PATH: script}) as server:
+        client = _client(server.url, session)
+        _with_body(client, monkeypatch, unreadable)
+        fetch = client.fetch_pdf(DOI, tmp_path / "a.pdf", never)
+        assert fetch == ElsevierFetch.unreachable(
+            RequestFailure(RequestFailureKind.HTTP_STATUS, HTTPStatus.FORBIDDEN)
+        )
+        assert not session.refuses_network(credentials_digest(KEY, None))
+        # The control: the next fetch is asked
+        again = _client(server.url, session).fetch_pdf(DOI, tmp_path / "b.pdf", never)
+        assert len(server.received) == 2
+    assert again == ElsevierFetch.absent()
+
+
+def test_a_timeout_is_unreachable_and_resets_the_429s(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A timeout is its own kind, and an ending: 429, timeout, 429 does not pause."""
+    session = ElsevierSession()
+    script = [ScriptedAnswer(HTTPStatus.TOO_MANY_REQUESTS), ScriptedAnswer(HTTPStatus.TOO_MANY_REQUESTS)]
+    with running({PATH: script}) as server:
+        _client(server.url, session).fetch_pdf(DOI, tmp_path / "a.pdf", never)
+        timing_out = _client(server.url, session)
+
+        def time_out(*_args: Any, **_kwargs: Any) -> Any:
+            raise requests.exceptions.ReadTimeout("read timed out")
+
+        monkeypatch.setattr(timing_out._session, "get", time_out)
+        fetch = timing_out.fetch_pdf(DOI, tmp_path / "b.pdf", never)
+        _client(server.url, session).fetch_pdf(DOI, tmp_path / "c.pdf", never)
+    assert fetch == ElsevierFetch.unreachable(RequestFailure(RequestFailureKind.TIMEOUT))
+    assert not session.paused
+
+
+def test_the_client_retries_as_many_times_as_the_constant_says() -> None:
+    """The default is ELSEVIER_MAX_RETRIES, so four attempts in all."""
+    client = ElsevierArticleClient(ElsevierCredentials(KEY))
+    adapter = client._session.get_adapter(ELSEVIER_API_BASE_URL)
+    assert adapter.max_retries.total == elsevier_api.ELSEVIER_MAX_RETRIES == 3
 
 
 def test_a_401_refuses_that_key_and_another_key_is_asked(tmp_path: Path) -> None:
@@ -761,6 +873,33 @@ def test_the_settings_win_over_the_environment(monkeypatch: pytest.MonkeyPatch) 
     assert client is not None
     assert client.credentials.api_key == KEY
     assert client.credentials.insttoken == TOKEN
+
+
+@pytest.mark.real_elsevier_client
+def test_the_environments_token_goes_only_with_the_environments_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A settings key is never paired with a token issued for another key."""
+    monkeypatch.setenv("ELSEVIER_API_KEY", "env-key")
+    monkeypatch.setenv("ELSEVIER_INSTTOKEN", "env-token")
+    settings_key = default_elsevier_client(KEY, None)
+    assert settings_key is not None
+    assert settings_key.credentials == ElsevierCredentials(KEY, None)
+    # Through the credentials seam too: resolved credentials pass unchanged
+    again = elsevier_client_for(ElsevierCredentials(KEY, None))
+    assert again is not None and again.credentials == ElsevierCredentials(KEY, None)
+    # The control: the environment's key takes the environment's token
+    env_key = default_elsevier_client(None, None)
+    assert env_key is not None
+    assert env_key.credentials == ElsevierCredentials("env-key", "env-token")
+
+
+def test_a_clients_credentials_cannot_be_replaced(tmp_path: Path) -> None:
+    """The headers are built once, so the credentials they came from are fixed."""
+    client = _client("http://127.0.0.1:9")
+    with pytest.raises(AttributeError):
+        client.credentials = ElsevierCredentials(OTHER_KEY)  # type: ignore[misc]
+    assert client.credentials == ElsevierCredentials(KEY)
 
 
 @pytest.mark.real_elsevier_client

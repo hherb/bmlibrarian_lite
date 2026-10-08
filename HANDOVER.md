@@ -20,6 +20,9 @@ PR #507. Contract `fulltext_retrieval.md` "Elsevier's Article API" +
   Elsevier's documented shapes**: the off-network refusal is assumed to be a
   403 with `AUTHENTICATION_ERROR`, and a 401 is assumed to mean a refused
   key. Correct `elsevier_article.json` and all three platforms from the rows.
+  The same rows settle **#508**: whether a bad token answers 401 (then a 401
+  sent with a token must refuse the credentials, not the key), and whether
+  the key's explanation may keep "open-access articles anywhere".
 - **Then on-network acceptance** (the same probe with `--label on-network`,
   and a desktop fetch of a subscribed `10.1016/` article).
 - **C1's CORE replay** (below).
@@ -42,13 +45,30 @@ PR #507. Contract `fulltext_retrieval.md` "Elsevier's Article API" +
 - **The apps' not-saved deviation:** the walk goes on, and when nothing
   serves, `OpenAccessShortfall(elsevier, request_failed)`; the desktop
   keeps its `NOT_SAVED` note.
+- **Added by the review round (2026-10-09):**
+  - **Credentials that cannot be sent are never sent.** A key or token with a
+    character outside printable ASCII (a zero-width space or a curly quote
+    pasted in) makes no request. It is unreachable `request_failed`, recorded
+    nowhere, with a WARNING that never names it (the contract's `sendable`
+    rows). Android's OkHttp used to throw here, quoting the key, and end the
+    chain.
+  - **The environment's token goes only with the environment's key**
+    (desktop); a token in the settings goes with either.
+  - **The apps ask by the cleaned DOI** (Python's `_clean_doi`), so a
+    `www.doi.org` form is Elsevier's too.
+  - `urllib3>=2.0` is declared: it enforces a body's Content-Length, so a PDF
+    cut short raises rather than being saved.
 - **Accepted limits:**
   - Android asks Elsevier only when Europe PMC offered no render URL (#493).
   - Swift skips Elsevier when `extractPDFText` is off.
   - The desktop's "Fetch PDF" path asks Elsevier before PMC's derived
     addresses (one quota request each).
 
-Lodged: #506 (`FulltextDiscoverer.cancel` never reaches its PDF step).
+Lodged: #506 (`FulltextDiscoverer.cancel` never reaches its PDF step). From
+the review round: #508 (the probe's questions), #509 (a network refusal
+outlives a change of network), #510 (the apps tell not-saved as "the request
+failed"), #511 (a failed Keychain read is cached as no key), #512 (test gaps
+left), #513 (cross-platform simplifications).
 
 **C1's live acceptance replay is still owed**: the maintainer puts the CORE
 key in `config.json` (`discovery.core_api_key`), then `python
@@ -210,7 +230,7 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **C2's probe and acceptance, and C1's replay** (maintainer), then the **embedded browser and
   review queue** with the `challenged` kind (replaces **#483**); **#481**
   follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
-  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506** (C2);
+  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2);
   **#467**, **#468** / **#470**, **#476**.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted

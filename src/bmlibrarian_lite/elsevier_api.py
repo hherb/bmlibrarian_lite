@@ -4,16 +4,18 @@
 
 """Elsevier's Article Retrieval API, asked for an article's PDF (#480, stage C2).
 
-Elsevier serves an Elsevier article's PDF to a requestor entitled to it: an
-open-access article anywhere, a subscribed one from the institution's network
-or with an institutional token. It is asked by DOI with the user's own key,
+Elsevier serves an Elsevier article's PDF to a requestor entitled to it: by
+its documentation an open-access article anywhere (not yet observed), a
+subscribed one from the institution's network or with an institutional
+token. It is asked by DOI with the user's own key,
 only for a DOI Elsevier registered (``10.1016/``). The rules are in
 doc/cross_platform/fulltext_retrieval.md, "Elsevier's Article API", pinned by
 doc/cross_platform/fulltext_parity/elsevier_article.json.
 
 The key travels in ``X-ELS-APIKey`` and the token in ``X-ELS-Insttoken``, and
 nowhere else: never in a URL, a log line, an exception message or a ``repr``.
-No redirect is followed, as one would carry the key wherever it points.
+No redirect is followed, as one would carry the key wherever it points. A key
+or token that is not printable ASCII is never sent (:func:`credentials_sendable`).
 """
 
 from __future__ import annotations
@@ -53,6 +55,8 @@ from .constants import (
     ENV_ELSEVIER_API_KEY,
     ENV_ELSEVIER_INSTTOKEN,
     EUROPEPMC_USER_AGENT,
+    HEADER_VALUE_FIRST_CHAR,
+    HEADER_VALUE_LAST_CHAR,
     HTTP_NOT_FOUND,
     HTTP_OK,
     HTTP_TOO_MANY_REQUESTS,
@@ -100,6 +104,31 @@ def elsevier_eligible(doi: str) -> bool:
         Every other DOI makes no request and records nothing.
     """
     return normalise_doi(doi).startswith(ELSEVIER_DOI_PREFIX)
+
+
+def credentials_sendable(api_key: str, insttoken: str | None) -> bool:
+    """Whether a key and a token can be sent as header values at all.
+
+    Every character of each, trimmed, must be printable ASCII (the space
+    included). A zero-width space or a curly quote pasted with a key is not:
+    no HTTP client sends it as typed, and OkHttp's refusal quotes the value.
+    Such credentials are never sent; the fetch is unreachable
+    (``request_failed``), and nothing is recorded (the contract's
+    ``sendable`` rows).
+
+    Args:
+        api_key: The key, as the settings hold it.
+        insttoken: The token, or ``None``; a blank one is no token.
+
+    Returns:
+        ``True`` when both can be sent.
+    """
+    values = (api_key.strip(), (insttoken or "").strip())
+    return all(
+        HEADER_VALUE_FIRST_CHAR <= char <= HEADER_VALUE_LAST_CHAR
+        for value in values
+        for char in value
+    )
 
 
 def elsevier_article_url(doi: str, base_url: str = ELSEVIER_API_BASE_URL) -> str:
@@ -169,6 +198,11 @@ class ElsevierCredentials:
     def credentials_digest(self) -> str:
         """The key's and token's fingerprint, as a network refusal is held."""
         return credentials_digest(self.api_key, self.insttoken)
+
+    @property
+    def sendable(self) -> bool:
+        """Whether both can be sent as header values (:func:`credentials_sendable`)."""
+        return credentials_sendable(self.api_key, self.insttoken)
 
 
 class ElsevierOutcome(Enum):
@@ -297,6 +331,20 @@ _SKIPS: dict[ElsevierOutcome, tuple[LookupSkipReason, bool]] = {
     ElsevierOutcome.NOT_SAVED: (LookupSkipReason.NOT_SAVED, True),
 }
 
+#: The outcomes ``lookups`` records otherwise: as a failure, or as nothing.
+_NOT_SKIPS = frozenset(
+    {
+        ElsevierOutcome.SERVED,
+        ElsevierOutcome.ABSENT,
+        ElsevierOutcome.UNREACHABLE,
+        ElsevierOutcome.CANCELLED,
+    }
+)
+
+# A new outcome must be placed: left out, it would record nothing, which
+# reads as settled.
+assert set(_SKIPS) | _NOT_SKIPS == set(ElsevierOutcome) and not set(_SKIPS) & _NOT_SKIPS
+
 
 class ElsevierSession(KeyedServiceSession):
     """Elsevier's session state: the pause after 429s, a refused key, a refused network.
@@ -321,7 +369,11 @@ _session_state = ElsevierSession()
 
 
 def session_elsevier_state() -> ElsevierSession:
-    """The pause and refusals every Elsevier client in this process shares."""
+    """The pause and refusals every Elsevier client in this process shares.
+
+    Returns:
+        The process-wide session, replaced only by :func:`reset_elsevier_session`.
+    """
     return _session_state
 
 
@@ -355,12 +407,8 @@ def _read_error_body(response: requests.Response) -> bytes:
     Raises:
         requests.exceptions.RequestException: If the read fails.
     """
-    body = b""
-    for chunk in response.iter_content(chunk_size=ELSEVIER_DOWNLOAD_CHUNK_BYTES):
-        body += chunk
-        if len(body) >= ELSEVIER_ERROR_BODY_MAX_BYTES:
-            break
-    return body[:ELSEVIER_ERROR_BODY_MAX_BYTES]
+    chunks = response.iter_content(chunk_size=ELSEVIER_DOWNLOAD_CHUNK_BYTES)
+    return read_body_prefix(chunks, ELSEVIER_ERROR_BODY_MAX_BYTES)[:ELSEVIER_ERROR_BODY_MAX_BYTES]
 
 
 def _declared_length(response: requests.Response) -> int | None:
@@ -384,13 +432,14 @@ class ElsevierArticleClient:
         """Build a client that sends these credentials.
 
         Args:
-            credentials: The key and the optional token.
+            credentials: The key and the optional token. Fixed for the
+                client's life, as the headers built from them are.
             base_url: Elsevier's API root.
             max_retries: Retries for a 429, a 5xx or a transport failure.
             session_state: The session's pause and refusals; the
                 process-wide one by default.
         """
-        self.credentials = credentials
+        self._credentials = credentials
         self._base_url = base_url
         self._session_state = (
             session_state if session_state is not None else session_elsevier_state()
@@ -416,6 +465,11 @@ class ElsevierArticleClient:
     def __repr__(self) -> str:
         """Name the client without its key or token."""
         return f"ElsevierArticleClient(base_url={self._base_url!r})"
+
+    @property
+    def credentials(self) -> ElsevierCredentials:
+        """The credentials this client sends; read-only, as its headers are."""
+        return self._credentials
 
     def article_url(self, doi: str) -> str:
         """The URL this client asks for a DOI; it carries neither secret.
@@ -449,7 +503,8 @@ class ElsevierArticleClient:
         if not elsevier_eligible(doi):
             return ElsevierFetch.absent()
         # The order of the contract's session table: the key, the network,
-        # then the pause. None of these makes a request or records an ending.
+        # the pause, then credentials that cannot be sent. None of these makes
+        # a request or records an ending.
         if self._session_state.refuses_key(self.credentials.key_digest):
             return ElsevierFetch.key_refused()
         if self._session_state.refuses_network(self.credentials.credentials_digest):
@@ -458,6 +513,13 @@ class ElsevierArticleClient:
             return ElsevierFetch.unreachable(
                 RequestFailure(RequestFailureKind.HTTP_STATUS, HTTP_TOO_MANY_REQUESTS)
             )
+        if not self.credentials.sendable:
+            logger.warning(
+                "The Elsevier API key or institutional token in the settings holds a "
+                "character that cannot be sent in a request (often an invisible one "
+                "pasted with it); Elsevier's API is not asked. Enter it again."
+            )
+            return ElsevierFetch.unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
         if cancelled():
             return ElsevierFetch.cancelled()
         try:
@@ -468,16 +530,10 @@ class ElsevierArticleClient:
                 allow_redirects=False,
             )
         except requests.exceptions.RequestException as error:
-            # The exception is classified and dropped, never logged: requests'
-            # refusal of a header value quotes the value, the key included.
+            # Classified and dropped, never logged: an exception's message or
+            # its request could carry the headers, the key included.
             self._session_state.record(None, self.credentials.key_digest)
             return ElsevierFetch.unreachable(request_failure_from_exception(error))
-        except ValueError:
-            # A header value http.client cannot encode as Latin-1 (a key with
-            # a curly quote): UnicodeEncodeError, which is no RequestException.
-            # No redirect is followed, so nothing else reaches here.
-            self._session_state.record(None, self.credentials.key_digest)
-            return ElsevierFetch.unreachable(RequestFailure(RequestFailureKind.REQUEST_FAILED))
         with closing(response):
             return self._classify(response, output_path, cancelled)
 
@@ -592,21 +648,31 @@ def configured_elsevier_credentials(
     """The credentials to ask with: the settings', else the environment's.
 
     The one place the environment fallbacks are applied, for the default
-    client and :meth:`ElsevierCredentials.from_config` alike.
+    client and :meth:`ElsevierCredentials.from_config` alike. A token is
+    issued for one key, so the environment's token goes only with the
+    environment's key: a key in the settings is never paired with it, which
+    would be refused and told as that key refused. A token in the settings is
+    used with either key.
+
+    Applying this to credentials it already returned returns them unchanged.
 
     Args:
         api_key: The configured key; ``ELSEVIER_API_KEY`` when this is empty.
         insttoken: The configured token; ``ELSEVIER_INSTTOKEN`` when this is
-            empty. Never used without a key.
+            empty and the key is the environment's too. Never used without a
+            key.
 
     Returns:
         The credentials, or ``None`` when no key is set: Elsevier is then not
         asked, and nothing is recorded.
     """
-    key = (api_key or os.environ.get(ENV_ELSEVIER_API_KEY, "")).strip()
+    token = (insttoken or "").strip()
+    key = (api_key or "").strip()
+    if not key:
+        key = os.environ.get(ENV_ELSEVIER_API_KEY, "").strip()
+        token = token or os.environ.get(ENV_ELSEVIER_INSTTOKEN, "").strip()
     if not key:
         return None
-    token = (insttoken or os.environ.get(ENV_ELSEVIER_INSTTOKEN, "")).strip()
     return ElsevierCredentials(key, token or None)
 
 
@@ -635,8 +701,8 @@ def default_elsevier_client(
 
     Args:
         api_key: The configured key; ``ELSEVIER_API_KEY`` when this is empty.
-        insttoken: The configured token; ``ELSEVIER_INSTTOKEN`` when this is
-            empty. Never used without a key.
+        insttoken: The configured token; the environment's only with the
+            environment's key (:func:`configured_elsevier_credentials`).
 
     Returns:
         A client, or ``None`` when no key is set: Elsevier is then not asked,
@@ -656,6 +722,7 @@ def elsevier_client_for(
 
     The global is looked up at call time, so the test suite's patch of
     ``default_elsevier_client`` covers every caller of this function too.
+    Credentials already resolved pass through the fallbacks unchanged.
 
     Args:
         credentials: The configured credentials; ``None`` falls back to the

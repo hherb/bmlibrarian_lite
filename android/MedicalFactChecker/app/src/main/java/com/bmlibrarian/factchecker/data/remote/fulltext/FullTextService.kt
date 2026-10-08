@@ -474,7 +474,9 @@ class FullTextService @Inject constructor(
         val elsevierSteps = if (usableDoi == null) {
             emptyList()
         } else {
-            when (val fetched = elsevier.fetchPdf(usableDoi)) {
+            // Asked by the DOI cleaned as Python's `_clean_doi` cleans it, so a DOI
+            // stored as `https://www.doi.org/10.1016/...` is Elsevier's too
+            when (val fetched = elsevier.fetchPdf(Core.bareDoi(usableDoi))) {
                 is ElsevierFetch.Served -> return@withContext Result.success(FullTextResult.ElsevierPdf(fetched.localPath))
                 null -> emptyList()
                 else -> listOfNotNull(elsevierShortfall(fetched, usableDoi)?.let { OpenAccessStep.Unsettled(it) })

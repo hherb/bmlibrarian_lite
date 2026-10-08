@@ -64,7 +64,8 @@ class ElsevierContractTest {
                 "desktop_source_type", "base_url", "doi_prefix", "pause_after_consecutive_429",
                 "key_refused_status", "key_refused_reason", "network_refused_status", "network_refused_token",
                 "network_refused_reason", "first_page_header", "first_page_prefix", "error_body_max_bytes",
-                "follows_redirects", "requests_per_second", "eligible", "article_url", "answers", "session"
+                "follows_redirects", "requests_per_second", "eligible", "article_url", "sendable", "answers",
+                "session"
             ),
             contract.keys
         )
@@ -120,6 +121,16 @@ class ElsevierContractTest {
         }
     }
 
+    /** Only printable ASCII is ever sent as the key or the token. */
+    @Test
+    fun `each sendable row`() {
+        for (row in table("sendable", MIN_SENDABLE_ROWS)) {
+            val key = row.string("key")
+            val token = row["token"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.content
+            assertEquals(row.string("name"), row["sendable"]!!.jsonPrimitive.boolean, Elsevier.isSendable(key, token))
+        }
+    }
+
     /** The URL never carries a credential: neither query parameter is ever written. */
     @Test
     fun `no article URL carries a key or a token`() {
@@ -164,7 +175,8 @@ class ElsevierContractTest {
         val (key, token) = credentialsOf(fetch)
         val keyDigest = KeyDigest.key(key)
         val credentialsDigest = KeyDigest.credentials(key, token)
-        Elsevier.answerWithoutAsking(session, keyDigest, credentialsDigest)?.let { return false to it }
+        Elsevier.answerWithoutAsking(session, keyDigest, credentialsDigest, Elsevier.isSendable(key, token))
+            ?.let { return false to it }
         val status = fetch.getValue("status").jsonPrimitive.int
         val body = fetch["body_text"]?.jsonPrimitive?.contentOrNull.orEmpty().toByteArray(Charsets.UTF_8)
         val answer = Elsevier.classify(status, emptyList(), body)
@@ -198,7 +210,8 @@ class ElsevierContractTest {
         const val MIN_ELIGIBLE_ROWS = 10
         const val MIN_ARTICLE_URL_ROWS = 12
         const val MIN_ANSWER_ROWS = 24
-        const val MIN_SESSION_ROWS = 7
+        const val MIN_SENDABLE_ROWS = 11
+        const val MIN_SESSION_ROWS = 11
         const val MILLIS_PER_SECOND = 1000L
         const val SHA256_HEX_DIGITS = 64
     }
@@ -257,7 +270,7 @@ internal fun expectedAnswer(row: JsonObject, status: Int): ElsevierAnswer = when
 /** The answer a `session` check expects; an unreachable one names its own `status_code`. */
 internal fun expectedSessionAnswer(check: JsonObject): ElsevierAnswer =
     if (check.getValue("outcome").jsonPrimitive.content == "unreachable") {
-        ElsevierAnswer.Unreachable(failureOf(check, check["status_code"]?.jsonPrimitive?.int))
+        ElsevierAnswer.Unreachable(failureOf(check, check["status_code"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.int))
     } else {
         expectedAnswer(check, check.getValue("status").jsonPrimitive.int)
     }

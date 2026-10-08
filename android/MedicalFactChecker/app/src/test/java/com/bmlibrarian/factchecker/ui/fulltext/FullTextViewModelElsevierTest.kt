@@ -124,12 +124,29 @@ class FullTextViewModelElsevierTest {
         coVerify(exactly = 0) { documentDao.update(any()) }
     }
 
-    /** The control: the file gone, the chain runs. */
+    /** The control: the file gone, the chain runs, and its answer is what the reader gets. */
     @Test
     fun `a stored Elsevier PDF that is gone runs the chain`() {
-        open(elsevierRecord(File(folder.root, "gone.pdf").absolutePath))
+        val viewModel = open(elsevierRecord(File(folder.root, "gone.pdf").absolutePath))
 
         coVerify(exactly = 1) { fullTextService.fetchFullText(any(), any(), any(), any()) }
+        val state = viewModel.state.value
+        assertFalse("$state", state is FullTextViewModel.FullTextState.PdfContent)
+        assertFalse("$state", state is FullTextViewModel.FullTextState.Error)
+    }
+
+    /** A file that exists but is not a PDF (empty, or a page) is not opened as the article. */
+    @Test
+    fun `a stored Elsevier file that is not a PDF runs the chain`() {
+        for (content in listOf(ByteArray(0), "<html>sign in</html>".toByteArray())) {
+            val file = folder.newFile().apply { writeBytes(content) }
+
+            val viewModel = open(elsevierRecord(file.absolutePath))
+
+            val state = viewModel.state.value
+            assertFalse("$state", state is FullTextViewModel.FullTextState.PdfContent)
+        }
+        coVerify(exactly = 2) { fullTextService.fetchFullText(any(), any(), any(), any()) }
     }
 
     /** The control: only a record whose source is Elsevier's owns the path it holds. */

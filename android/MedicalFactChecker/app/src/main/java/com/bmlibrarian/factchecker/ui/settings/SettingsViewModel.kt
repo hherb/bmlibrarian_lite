@@ -523,7 +523,8 @@ class SettingsViewModel @Inject constructor(
             keySaveStatus(
                 "Elsevier institutional token",
                 trimmed.isEmpty(),
-                settingsRepository.saveElsevierInstToken(trimmed)
+                settingsRepository.saveElsevierInstToken(trimmed),
+                secret = "token"
             )
         )
     }
@@ -534,11 +535,12 @@ class SettingsViewModel @Inject constructor(
      * @param label The key's name, as the reader knows it
      * @param cleared Whether the field was empty, so the key was cleared
      * @param written Whether the repository wrote it
-     * @return "saved" or "cleared", or that it could not be, and the key in use is unchanged
+     * @param secret What the value is, as the failure names it: a key, or a token
+     * @return "saved" or "cleared", or that it could not be, and the one in use is unchanged
      */
-    private fun keySaveStatus(label: String, cleared: Boolean, written: Boolean): String = when {
-        !written && cleared -> "$label could not be cleared; the key in use is unchanged"
-        !written -> "$label could not be saved; the key in use is unchanged"
+    private fun keySaveStatus(label: String, cleared: Boolean, written: Boolean, secret: String = "key"): String = when {
+        !written && cleared -> "$label could not be cleared; the $secret in use is unchanged"
+        !written -> "$label could not be saved; the $secret in use is unchanged"
         cleared -> "$label cleared"
         else -> "$label saved"
     }

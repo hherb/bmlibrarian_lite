@@ -7,8 +7,10 @@
 CORE and Elsevier share the rules: consecutive 429 endings pause the service
 for the rest of the process (never lifted); an ending with the service's
 key-refused status refuses that key only; and a refusal from this network
-refuses those credentials only. A key and its token are remembered by SHA-256
-digest alone; neither the key nor a digest is ever logged.
+refuses those credentials only (Elsevier's alone: CORE never records one).
+A fetch that makes no request records nothing. A key and its token are
+remembered by SHA-256 digest alone; neither the key nor a digest is ever
+logged.
 """
 
 from __future__ import annotations

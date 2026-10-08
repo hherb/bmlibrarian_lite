@@ -46,15 +46,21 @@ public enum Elsevier {
         return URL(string: "\(base)\(BioMedLitConstants.elsevierArticlePath)\(path)")
     }
 
-    /// The fingerprint a refusal from this network is remembered by: Python's
-    /// `credentials_digest`, the SHA-256 of `trim(key) + "\n" + trim(token, or "")`.
+    /// Whether a key and a token can be sent as header values at all: every character
+    /// of each, trimmed, is printable ASCII (U+0020 to U+007E), Python's
+    /// `credentials_sendable` (the contract's `sendable` rows). A zero-width space or a
+    /// curly quote pasted with a key is not; such credentials are never sent.
     ///
     /// - Parameters:
     ///   - key: The key, as the settings hold it.
     ///   - token: The institutional token, or `nil`; a blank one is no token.
-    /// - Returns: 64 lower-case hex digits; never logged.
-    public static func credentialsDigest(key: String, token: String?) -> String {
-        KeyDigest.credentials(key: key, token: token)
+    /// - Returns: Whether both can be sent.
+    public static func isSendable(key: String, token: String?) -> Bool {
+        [key, token ?? ""].allSatisfy { value in
+            value.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.allSatisfy {
+                BioMedLitConstants.headerValueScalars.contains($0.value)
+            }
+        }
     }
 
     /// Classify one answer, after its retries (the contract's `answers` table).
@@ -103,20 +109,23 @@ public enum Elsevier {
     }
 
     /// The answer a fetch has without asking, in the contract's order: this key
-    /// refused, these credentials refused from this network, then the pause. Such a
-    /// fetch makes no request and is recorded nowhere.
+    /// refused, these credentials refused from this network, the pause, then
+    /// credentials that cannot be sent. Such a fetch makes no request and is recorded
+    /// nowhere.
     ///
     /// - Parameters:
     ///   - session: Elsevier's session state.
     ///   - keyDigest: The key's ``KeyDigest/key(_:)``.
-    ///   - credentialsDigest: The key's and token's ``credentialsDigest(key:token:)``.
+    ///   - credentialsDigest: The key's and token's ``KeyDigest/credentials(key:token:)``.
+    ///   - sendable: The key's and token's ``isSendable(key:token:)``.
     /// - Returns: The answer, or nil when Elsevier is to be asked.
     static func answerWithoutAsking(
-        session: KeyedServiceSession, keyDigest: String, credentialsDigest: String
+        session: KeyedServiceSession, keyDigest: String, credentialsDigest: String, sendable: Bool
     ) -> ElsevierAnswer? {
         if session.refuses(keyDigest: keyDigest) { return .keyRefused }
         if session.refusesNetwork(credentialsDigest: credentialsDigest) { return .networkRefused }
         if session.isPaused { return .unreachable(.httpStatus(BioMedLitConstants.httpStatusRateLimited)) }
+        if !sendable { return .unreachable(.requestFailed) }
         return nil
     }
 
@@ -129,7 +138,7 @@ public enum Elsevier {
     ///   - status: The HTTP status it ended on, or nil when it got none.
     ///   - session: Elsevier's session state.
     ///   - keyDigest: The key's ``KeyDigest/key(_:)``.
-    ///   - credentialsDigest: The key's and token's ``credentialsDigest(key:token:)``.
+    ///   - credentialsDigest: The key's and token's ``KeyDigest/credentials(key:token:)``.
     static func record(
         _ answer: ElsevierAnswer, endedOn status: Int?, in session: KeyedServiceSession,
         keyDigest: String, credentialsDigest: String

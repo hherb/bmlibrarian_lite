@@ -863,8 +863,8 @@ class PDFDiscoverer:
         # stage C2). A PDF it served, a cancel, or a PDF it served that could
         # not be saved ends the discovery; anything it left unsettled is
         # recorded, and the walk goes on. A PDF it offered over the size
-        # limit is a copy not obtained, held with the refused copies (ranked
-        # first) and dropped where they are: a later copy settles it.
+        # limit is a copy not obtained, held with the refused copies, ranked
+        # first (-1), and dropped with them when a later copy is obtained.
         if self._cancelled:
             return DiscoveryResult(success=False, error="Cancelled")
         elsevier_lookups = LookupRecord()
@@ -1138,7 +1138,7 @@ class PDFDiscoverer:
                 "Elsevier's API could not be asked about %s (%s)",
                 doi, fetch.failure.describe(),
             )
-        if any(s.reason is LookupSkipReason.NOT_SAVED for s in record.skipped):
+        if fetch.outcome is ElsevierOutcome.NOT_SAVED:
             # Served, and not saved here: as for any copy served and not
             # saved, nothing else is asked and the error is the caching note
             # alone, its address the article URL, which carries no key.

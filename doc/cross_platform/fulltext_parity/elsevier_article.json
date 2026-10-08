@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Elsevier's Article Retrieval API, asked for an article's PDF by DOI with the user's own key and, when set, an institutional token (#480, stage C2). Read by tests/test_elsevier_api.py, Packages/BioMedLit ElsevierContractTests and Android ElsevierContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, under \"Elsevier's Article API\". The error answers (the off-network refusal's status and the error body's format) follow Elsevier's documentation, not an observed answer: they are corrected from the rows scripts/elsevier_probe.py records once the maintainer has run it. eligible: whether a DOI is Elsevier's: true when normalise(doi) starts with doi_prefix, normalise being CORE's (trim, lower-case, one leading https://doi.org/, http://doi.org/, https://dx.doi.org/, http://dx.doi.org/ or doi: removed, trim); every other DOI makes no request and records nothing. article_url: the request for a DOI, base_url null meaning the constant base_url: the base with its trailing slashes dropped, then /content/article/doi/, then the DOI trimmed, with one prefix removed as normalise matches it (any case) and trimmed again, its own case kept, escaped as a path: ALPHA, DIGIT, -, ., _, ~ and / bare, every other UTF-8 byte percent-encoded in upper-case hex (Python's quote(s, safe='/')). The key travels only in X-ELS-APIKey and the token, when not blank, only in X-ELS-Insttoken, with Accept: application/pdf; never as a query parameter. answers: how one answer is classified, each row from a fresh session: status, response headers (a name matched in any case), and a body given as body_text (UTF-8) or body_pdf (true: the tests build a body that starts %PDF-1.7 followed by a newline and some bytes); body_padding_bytes, when given, is that many ASCII spaces sent before body_text. The outcome is served, absent, unreachable (with failure_kind; its expected status_code is the row's status for http_status, null for malformed_response), key_refused or network_refused. An X-ELS-Status header whose value, trimmed, starts with first_page_prefix in any case makes a 200 absent, read before the body: Elsevier served the first page only, which is never the article's text. A 403 is network_refused only when its body, read up to error_body_max_bytes, holds the ASCII bytes network_refused_token; any other 403 is unreachable. Redirects are never followed (follows_redirects false): a redirect would carry X-ELS-APIKey to wherever it points, so a 3xx is unreachable http_status. A status that is retried (429, 500, 502, 503, 504) is answered the same on every attempt. session: what one fetch leaves for the next, each row from a fresh session: fetches is a sequence of answers given (credentials, status, body_text when given, else empty), then each check, in turn, is a later fetch with its credentials, the status the server would answer, whether a request is made (asked), and its outcome. A fetch in fetches whose credentials are already refused makes no request; its status is what the server would answer if it were wrongly asked. Two fetches in a row that end in 429 pause Elsevier for the rest of the process, whatever the credentials; any other ending resets the count. A fetch that makes no request (key refused, network refused, paused) neither counts toward the pause nor resets it. The checks before a request come in this order: this key refused, these credentials refused from this network, paused. A 401 refuses that key (a SHA-256 digest of the trimmed key; any token); a 403 holding network_refused_token refuses those credentials (a SHA-256 digest of trim(key) + newline + trim(token, or empty)), so a token added in the settings is asked again. Refused, the skip is told with key_refused_reason or network_refused_reason. Add a row here, not a test on one platform.",
+  "description": "Elsevier's Article Retrieval API, asked for an article's PDF by DOI with the user's own key and, when set, an institutional token (#480, stage C2). Read by tests/test_elsevier_api.py, Packages/BioMedLit ElsevierContractTests and Android ElsevierContractTest. The rules are in doc/cross_platform/fulltext_retrieval.md, under \"Elsevier's Article API\". The error answers (the off-network refusal's status and the error body's format) follow Elsevier's documentation, not an observed answer: they are corrected from the rows scripts/elsevier_probe.py records once the maintainer has run it. eligible: whether a DOI is Elsevier's: true when normalise(doi) starts with doi_prefix, normalise being CORE's (trim, lower-case, one leading https://doi.org/, http://doi.org/, https://dx.doi.org/, http://dx.doi.org/ or doi: removed, trim); every other DOI makes no request and records nothing. article_url: the request for a DOI, base_url null meaning the constant base_url: the base with its trailing slashes dropped, then /content/article/doi/, then the DOI trimmed, with one prefix removed as normalise matches it (any case) and trimmed again, its own case kept, escaped as a path: ALPHA, DIGIT, -, ., _, ~ and / bare, every other UTF-8 byte percent-encoded in upper-case hex (Python's quote(s, safe='/')). The key travels only in X-ELS-APIKey and the token, when not blank, only in X-ELS-Insttoken, with Accept: application/pdf; never as a query parameter. answers: how one answer is classified, each row from a fresh session: status, response headers (a name matched in any case), and a body given as body_text (UTF-8) or body_pdf (true: the tests build a body that starts %PDF-1.7 followed by a newline and some bytes); body_padding_bytes, when given, is that many ASCII spaces sent before body_text. The outcome is served, absent, unreachable (with failure_kind; its expected status_code is the row's status for http_status, null for malformed_response), key_refused or network_refused. An X-ELS-Status header whose value, trimmed, starts with first_page_prefix in any case makes a 200 absent, read before the body: Elsevier served the first page only, which is never the article's text. A 403 is network_refused only when its body, read up to error_body_max_bytes, holds the ASCII bytes network_refused_token; any other 403 is unreachable. Redirects are never followed (follows_redirects false): a redirect would carry X-ELS-APIKey to wherever it points, so a 3xx is unreachable http_status. A status that is retried (429, 500, 502, 503, 504) is answered the same on every attempt. session: what one fetch leaves for the next, each row from a fresh session: fetches is a sequence of answers given (credentials, status, body_text when given, else empty), then each check, in turn, is a later fetch with its credentials, the status the server would answer, whether a request is made (asked), and its outcome. A fetch in fetches whose credentials are already refused makes no request; its status is what the server would answer if it were wrongly asked. Two fetches in a row that end in 429 pause Elsevier for the rest of the process, whatever the credentials; any other ending resets the count. A fetch that makes no request (key refused, network refused, paused, credentials that cannot be sent) neither counts toward the pause nor resets it. The checks before a request come in this order: this key refused, these credentials refused from this network, paused, credentials that cannot be sent. sendable: whether a key and a token can be sent as header values: every character of each, trimmed (a blank token is no token), is printable ASCII, U+0020 to U+007E. The rows put a zero-width space inside a key, not at its end: Foundation's whitespace set trims one at the end, Python's strip and Kotlin's trim do not. Credentials that cannot be sent (a zero-width space or a curly quote pasted into a key, a Latin-1 letter, a tab or a line break) make no request: the fetch is unreachable request_failed, recorded nowhere, and neither the key nor the token is logged. A 401 refuses that key (a SHA-256 digest of the trimmed key; any token); a 403 holding network_refused_token refuses those credentials (a SHA-256 digest of trim(key) + newline + trim(token, or empty)), so a token added in the settings is asked again. Refused, the skip is told with key_refused_reason or network_refused_reason. Add a row here, not a test on one platform.",
   "service_name": "Elsevier's API",
   "source": "elsevier",
   "source_label": "Elsevier's API (PDF)",
@@ -55,6 +55,19 @@
      "url": "https://api.elsevier.com/content/article/doi/10.1016/J.Cell.2020.02.052"},
     {"name": "a base URL's trailing slash is dropped", "doi": "10.1016/j.cell.2020.02.052", "base_url": "https://api.elsevier.com/",
      "url": "https://api.elsevier.com/content/article/doi/10.1016/j.cell.2020.02.052"}
+  ],
+  "sendable": [
+    {"name": "a plain key", "key": "key-A", "token": null, "sendable": true},
+    {"name": "a key is read trimmed", "key": " key-A\n", "token": null, "sendable": true},
+    {"name": "a space inside is printable", "key": "key A", "token": null, "sendable": true},
+    {"name": "a key and a token", "key": "key-A", "token": "token-T", "sendable": true},
+    {"name": "a blank token is no token", "key": "key-A", "token": "  ", "sendable": true},
+    {"name": "a zero-width space inside a key", "key": "key\u200bA", "token": null, "sendable": false},
+    {"name": "a curly quote", "key": "key\u2019A", "token": null, "sendable": false},
+    {"name": "a Latin-1 letter", "key": "key-\u00e9", "token": null, "sendable": false},
+    {"name": "a tab inside", "key": "key\tA", "token": null, "sendable": false},
+    {"name": "a line break inside", "key": "key-A\r\nX-Injected: 1", "token": null, "sendable": false},
+    {"name": "a token that cannot be sent", "key": "key-A", "token": "token\u200bT", "sendable": false}
   ],
   "answers": [
     {"name": "a PDF is served", "status": 200, "headers": {}, "body_pdf": true,
@@ -183,6 +196,43 @@
        {"credentials": {"key": "key-B", "token": null}, "status": 401},
        {"credentials": {"key": "key-A", "token": null}, "status": 429},
        {"credentials": {"key": "key-B", "token": null}, "status": 404},
+       {"credentials": {"key": "key-A", "token": null}, "status": 429}
+     ],
+     "then": [
+       {"credentials": {"key": "key-A", "token": null}, "status": 404, "asked": false, "outcome": "unreachable", "failure_kind": "http_status", "status_code": 429}
+     ]},
+    {"name": "a network refusal is told before the pause",
+     "fetches": [
+       {"credentials": {"key": "key-A", "token": null}, "status": 403,
+        "body_text": "<service-error><status><statusCode>AUTHENTICATION_ERROR</statusCode><statusText>Requestor configuration settings insufficient for access to this resource.</statusText></status></service-error>"},
+       {"credentials": {"key": "key-B", "token": null}, "status": 429},
+       {"credentials": {"key": "key-B", "token": null}, "status": 429}
+     ],
+     "then": [
+       {"credentials": {"key": "key-A", "token": null}, "status": 404, "asked": false, "outcome": "network_refused", "failure_kind": null, "status_code": null},
+       {"credentials": {"key": "key-B", "token": null}, "status": 404, "asked": false, "outcome": "unreachable", "failure_kind": "http_status", "status_code": 429}
+     ]},
+    {"name": "a 403 that is no authentication error resets the 429s",
+     "fetches": [
+       {"credentials": {"key": "key-A", "token": null}, "status": 429},
+       {"credentials": {"key": "key-A", "token": null}, "status": 403, "body_text": ""},
+       {"credentials": {"key": "key-A", "token": null}, "status": 429}
+     ],
+     "then": [
+       {"credentials": {"key": "key-A", "token": null}, "status": 404, "asked": true, "outcome": "absent", "failure_kind": null, "status_code": null}
+     ]},
+    {"name": "credentials that cannot be sent are never sent",
+     "fetches": [],
+     "then": [
+       {"credentials": {"key": "key\u200bA", "token": null}, "status": 200, "asked": false, "outcome": "unreachable", "failure_kind": "request_failed", "status_code": null},
+       {"credentials": {"key": "key\u2019A", "token": null}, "status": 200, "asked": false, "outcome": "unreachable", "failure_kind": "request_failed", "status_code": null},
+       {"credentials": {"key": "key-A", "token": "token\u200bT"}, "status": 200, "asked": false, "outcome": "unreachable", "failure_kind": "request_failed", "status_code": null},
+       {"credentials": {"key": "key-A", "token": null}, "status": 404, "asked": true, "outcome": "absent", "failure_kind": null, "status_code": null}
+     ]},
+    {"name": "credentials that cannot be sent neither count nor reset the 429s",
+     "fetches": [
+       {"credentials": {"key": "key-A", "token": null}, "status": 429},
+       {"credentials": {"key": "key\u200bA", "token": null}, "status": 404},
        {"credentials": {"key": "key-A", "token": null}, "status": 429}
      ],
      "then": [

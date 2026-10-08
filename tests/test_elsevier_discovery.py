@@ -657,9 +657,14 @@ def test_credentials_from_a_config_fall_back_to_the_environment(
     monkeypatch.setenv("ELSEVIER_API_KEY", KEY)
     monkeypatch.setenv("ELSEVIER_INSTTOKEN", TOKEN)
     assert ElsevierCredentials.from_config(DiscoveryConfig()) == ElsevierCredentials(KEY, TOKEN)
+    # A token is issued for one key: the environment's never goes with the settings' key
     assert ElsevierCredentials.from_config(
         DiscoveryConfig(elsevier_api_key="other-key")
-    ) == ElsevierCredentials("other-key", TOKEN)
+    ) == ElsevierCredentials("other-key", None)
+    # A token in the settings goes with either key
+    assert ElsevierCredentials.from_config(
+        DiscoveryConfig(elsevier_insttoken="settings-token")
+    ) == ElsevierCredentials(KEY, "settings-token")
 
 
 @pytest.mark.real_elsevier_client
