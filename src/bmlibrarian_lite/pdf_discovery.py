@@ -41,7 +41,7 @@ import re
 import time
 import threading
 from collections import deque
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
@@ -66,7 +66,6 @@ from .constants import (
     LANDING_PAGE_READ_CHUNK_BYTES,
     PAYWALL_HTTP_STATUSES,
     PDF_MAGIC_BYTES,
-    PDF_PARTIAL_SUFFIX,
     POLITE_MAX_THROTTLE_RETRIES,
     RETRYABLE_HTTP_STATUSES,
     SERVICE_DOI_PUBLISHER,
@@ -104,6 +103,13 @@ from .oa_landing_page import (
     unpaywall_locations,
 )
 from .openalex import OpenAlexLocationsClient, untried_pdf_urls
+# Shared with the clients that download a PDF themselves (#480, stage C2).
+from .pdf_download import (
+    MAX_PDF_SIZE,
+    discard_partial_download,
+    partial_download_path,
+    read_body_prefix,
+)
 from .polite_session import is_loopback_host, mount_politely
 from .rate_limit import limiter_for
 from .search_failures import request_failure_from_exception
@@ -431,8 +437,6 @@ USER_AGENT = "BMLibrarian/1.0 (https://github.com/hherb/bmlibrarian-lite; mailto
 # Timeout for HTTP requests (seconds)
 REQUEST_TIMEOUT = 30
 
-# Maximum PDF file size (100 MB)
-MAX_PDF_SIZE = 100 * 1024 * 1024
 
 
 class PDFSourceType(Enum):
@@ -598,59 +602,6 @@ def refused_download_failure(status_code: int) -> RequestFailure:
     if status_code >= HTTP_ERROR_STATUS_MIN:
         return RequestFailure(RequestFailureKind.HTTP_STATUS, status_code)
     return RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
-
-
-def read_body_prefix(chunks: Iterator[bytes], at_least: int) -> bytes:
-    """Read the start of a streamed body, enough of it to sniff.
-
-    A first chunk can be shorter than the bytes a sniff needs -- one HTTP
-    chunk of a chunked body -- so chunks are joined until there are enough
-    or the body ends. A read that fails raises: it is the transport's
-    failure, not an empty body.
-
-    Args:
-        chunks: The body's chunks, consumed as far as needed.
-        at_least: How many bytes the caller needs.
-
-    Returns:
-        The bytes read, which are ``at_least`` or more unless the body was
-        shorter.
-    """
-    prefix = b""
-    for chunk in chunks:
-        prefix += chunk
-        if len(prefix) >= at_least:
-            break
-    return prefix
-
-
-def partial_download_path(output_path: Path) -> Path:
-    """Where a PDF is written while its download is in progress.
-
-    Args:
-        output_path: Where the PDF is to end up.
-
-    Returns:
-        ``output_path`` with :data:`PDF_PARTIAL_SUFFIX` appended, beside it,
-        so the rename into place stays on one filesystem.
-    """
-    return output_path.with_name(output_path.name + PDF_PARTIAL_SUFFIX)
-
-
-def discard_partial_download(partial: Path) -> None:
-    """Remove a partial download, if one is left.
-
-    Logged rather than raised when it cannot be removed: the download's own
-    outcome is what the caller reports, and a leftover partial file is never
-    read as the PDF -- only the renamed file is.
-
-    Args:
-        partial: The partial file; may not exist.
-    """
-    try:
-        partial.unlink(missing_ok=True)
-    except OSError as e:
-        logger.warning(f"Could not remove the partial download {partial}: {e}")
 
 
 #: Whose PDF an unobtained open-access copy is recorded against (#478, #480).
