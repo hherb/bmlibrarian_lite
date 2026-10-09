@@ -260,20 +260,27 @@ def _no_live_model_fetch(
     """Keep every settings dialog off the real providers.
 
     Building a ``SettingsDialog`` starts a thread per enabled provider that
-    asks Anthropic or Ollama for its models. A test's dialog has no parent,
-    so it is collected while those threads still run, and the collection
-    crashed the interpreter (stage C2's CI, then master's). Nothing is
-    started here; the dialog keeps its fallback models. A test that needs
-    the real threads marks itself ``real_model_fetch``.
+    asks Anthropic or Ollama for its models, and a Test Connection click
+    starts another. In a test those threads reached the live endpoints and
+    outlived the test: the dialog is never collected, since its buttons hold
+    lambdas that capture it. The PySide6 6.12 segfault at exit is a separate
+    matter, which this fixture does not prevent (#516). Nothing is started
+    here; the dialog keeps the models it starts with. A test that needs the
+    real threads marks itself ``real_model_fetch``.
     """
     if request.node.get_closest_marker("real_model_fetch"):
         return
     if importlib.util.find_spec("PySide6") is None:
         return
-    from bmlibrarian_lite.gui import settings_dialog
+    try:
+        from bmlibrarian_lite.gui import settings_dialog
+    except ImportError:
+        # Qt is installed but cannot load (no libGL on a bare machine, say):
+        # no test can build a dialog then, and the GUI tests fail on their own.
+        return
 
     for worker in (
         settings_dialog.ModelFetchWorker,
         settings_dialog.ProviderConnectionTestWorker,
     ):
-        monkeypatch.setattr(worker, "start", lambda self, *args: None)
+        monkeypatch.setattr(worker, "start", lambda self, *args, **kwargs: None)

@@ -89,7 +89,8 @@ Compressed once merged: the rules that still bind. Git history and the
   sentence, and there is **no absence while one is set**. Room migrations
   register from `AppDatabase.ALL_MIGRATIONS`.
 - **iOS/macOS workflow** (PRs #458–#469): one stop path, `stopWork(_:)`;
-  **`session.errorMessage` means a failure and nothing else**.
+  **`session.errorMessage` means a failure and nothing else** (a stop never
+  writes it; per-document misses are notices).
 - **Europe PMC fetches, compressed** (PRs #433–#452). A typed XML fetch on all
   three: served, absent (404) or unreachable. **Preprints are fetched by their
   `PPR` ID.** A chain Europe PMC did not settle is **not** "no full text".
@@ -211,8 +212,7 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **C2's probe and acceptance, and C1's replay** (maintainer), then the **embedded browser and
   review queue** with the `challenged` kind (replaces **#483**); **#481**
   follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
-  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2); **#514**, **#516** (PySide6 cap);
-  **#467**, **#468** / **#470**, **#476**.
+  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2); **#514** (settings-dialog lifecycle), **#516** (PySide6 cap); **#467**, **#468** / **#470**, **#476**.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 

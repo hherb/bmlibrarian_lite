@@ -46,8 +46,9 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "backoff>=2.2.1",
     "tenacity>=8.2.0",
-    # GUI. 6.12.0 segfaults at exit destroying a widget that is still alive
-    # then (#516); lift the cap once a release passes that issue's repro.
+    # GUI. 6.12.0 segfaults at interpreter exit destroying a leaked widget
+    # (one kept alive by a self-capturing lambda); see #516 for the repro and
+    # for when to lift the cap.
     "PySide6>=6.6.0,<6.12",
     # PDF processing
     "PyMuPDF>=1.23.0",
