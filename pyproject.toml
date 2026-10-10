@@ -46,8 +46,10 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "backoff>=2.2.1",
     "tenacity>=8.2.0",
-    # GUI
-    "PySide6>=6.6.0",
+    # GUI. 6.12.0 segfaults at interpreter exit destroying a leaked widget
+    # (one kept alive by a self-capturing lambda); see #516 for the repro and
+    # for when to lift the cap.
+    "PySide6>=6.6.0,<6.12",
     # PDF processing
     "PyMuPDF>=1.23.0",
     # Text processing
@@ -165,4 +167,5 @@ markers = [
     "real_openalex_client: the PDF discoverer builds its real OpenAlex client (tests/conftest.py otherwise answers every DOI as unknown)",
     "real_core_client: the full-text discoverer builds its real CORE client (tests/conftest.py otherwise builds none)",
     "real_elsevier_client: default_elsevier_client builds its real Elsevier client (tests/conftest.py otherwise builds none)",
+    "real_model_fetch: the settings dialog's model-fetch and connection-test threads really start (tests/conftest.py otherwise starts none)",
 ]

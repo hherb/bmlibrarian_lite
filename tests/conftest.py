@@ -23,6 +23,7 @@ Provides shared fixtures for testing:
 - Sample document metadata
 """
 
+import importlib.util
 import json
 import tempfile
 from pathlib import Path
@@ -250,3 +251,36 @@ def _no_live_elsevier(
     monkeypatch.setattr(
         elsevier_api, "default_elsevier_client", lambda api_key, insttoken: None
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_live_model_fetch(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep every settings dialog off the real providers.
+
+    Building a ``SettingsDialog`` starts a thread per enabled provider that
+    asks Anthropic or Ollama for its models, and a Test Connection click
+    starts another. In a test those threads reached the live endpoints and
+    outlived the test: the dialog is never collected, since its buttons hold
+    lambdas that capture it. The PySide6 6.12 segfault at exit is a separate
+    matter, which this fixture does not prevent (#516). Nothing is started
+    here; the dialog keeps the models it starts with. A test that needs the
+    real threads marks itself ``real_model_fetch``.
+    """
+    if request.node.get_closest_marker("real_model_fetch"):
+        return
+    if importlib.util.find_spec("PySide6") is None:
+        return
+    try:
+        from bmlibrarian_lite.gui import settings_dialog
+    except ImportError:
+        # Qt is installed but cannot load (no libGL on a bare machine, say):
+        # no test can build a dialog then, and the GUI tests fail on their own.
+        return
+
+    for worker in (
+        settings_dialog.ModelFetchWorker,
+        settings_dialog.ProviderConnectionTestWorker,
+    ):
+        monkeypatch.setattr(worker, "start", lambda self, *args, **kwargs: None)
