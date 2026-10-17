@@ -1207,7 +1207,7 @@ class TestTheGapsTheMutationSweepFound:
             PubMedClient,
         )
 
-        fetch = PubMedClient("test@example.com")._parse_pubmed_xml("<not xml")
+        fetch = PubMedClient("test@example.com")._parse_pubmed_xml("<not xml", "1")
 
         assert fetch.is_unreachable
 
@@ -1218,7 +1218,7 @@ class TestTheGapsTheMutationSweepFound:
         )
 
         fetch = PubMedClient("test@example.com")._parse_pubmed_xml(
-            "<PubmedArticleSet/>"
+            "<PubmedArticleSet/>", "1"
         )
 
         assert not fetch.is_unreachable
@@ -1823,7 +1823,7 @@ class TestTheGapsTheReviewFound:
         )
 
         fetch = PubMedClient("t@example.com")._parse_pubmed_xml(
-            "<PubmedArticleSet><PubmedArticle/></PubmedArticleSet>"
+            "<PubmedArticleSet><PubmedArticle/></PubmedArticleSet>", "1"
         )
 
         assert fetch.is_unreachable
@@ -1837,7 +1837,8 @@ class TestTheGapsTheReviewFound:
         fetch = PubMedClient("t@example.com")._parse_pubmed_xml(
             "<PubmedArticleSet><PubmedArticle><MedlineCitation>"
             "<PMID>1</PMID><Article><ArticleTitle>T</ArticleTitle></Article>"
-            "</MedlineCitation></PubmedArticle></PubmedArticleSet>"
+            "</MedlineCitation></PubmedArticle></PubmedArticleSet>",
+            "1",
         )
 
         assert fetch.record is not None

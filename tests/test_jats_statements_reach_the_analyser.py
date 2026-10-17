@@ -917,6 +917,7 @@ class TestTheGuardsWording:
         """Stored rows are offered for re-analysis only if the version moves.
 
         2.6, not 2.5: the review of #428 changed what is charged, and a row a
-        pre-review build of the branch stored must not be trusted.
+        pre-review build of the branch stored must not be trusted. 2.7 then
+        moved for bmlib#474 (a record's own PMC ID and DOI).
         """
-        assert TRANSPARENCY_ANALYZER_VERSION == "2.6"
+        assert TRANSPARENCY_ANALYZER_VERSION == "2.7"

@@ -91,6 +91,9 @@ private val TEXT_ELEMENTS: Set<String> = setOf(
 /** The root element of an efetch answer that holds articles. */
 private const val EFETCH_ARTICLE_SET_ROOT = "PubmedArticleSet"
 
+/** The element holding the papers a record cites; their `ArticleId`s are not the record's own. */
+private const val REFERENCE_LIST_ELEMENT = "ReferenceList"
+
 /** The root element of efetch's error document, which E-utilities can send with HTTP 200 (#255). */
 private const val EFETCH_ERROR_ROOT = "eFetchResult"
 
@@ -748,7 +751,9 @@ class PubMedService @Inject constructor(
                         article.pmcId = value
                     }
                 }
-                "ArticleId" -> when (articleIdType) {
+                // Not while inside ReferenceList: every paper the record cites has an
+                // ArticleIdList of its own, and its ids are not this article's (lite #404).
+                "ArticleId" -> if (REFERENCE_LIST_ELEMENT !in elementStack) when (articleIdType) {
                     "doi" -> if (article.doi == null) article.doi = value
                     "pmc" -> if (article.pmcId == null) {
                         article.pmcId = if (value.startsWith("PMC")) value else "PMC$value"

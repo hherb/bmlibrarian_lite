@@ -114,3 +114,10 @@ EMAIL_VALIDATION_PATTERN = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
 # Environment variable names
 ENV_NCBI_EMAIL = "NCBI_EMAIL"
 ENV_NCBI_API_KEY = "NCBI_API_KEY"
+
+# Where a PubMed record keeps its own identifiers and PMID (bmlib#474). The
+# ids are a fixed path, never ``.//``: ``PubmedData/ReferenceList`` holds an
+# ``ArticleIdList`` for every paper the record cites.
+PUBMED_ARTICLE_TAG = "PubmedArticle"
+PUBMED_ARTICLE_ID_PATH = "PubmedData/ArticleIdList/ArticleId"
+PUBMED_RECORD_PMID_PATH = "MedlineCitation/PMID"

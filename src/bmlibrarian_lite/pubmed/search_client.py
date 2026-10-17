@@ -64,6 +64,7 @@ from .constants import (
     ENV_NCBI_API_KEY,
     EMAIL_VALIDATION_PATTERN,
 )
+from .record_ids import own_article_ids
 from .data_types import (
     ArticleFetchResult,
     PubMedQuery,
@@ -889,19 +890,10 @@ class PubMedSearchClient:
             journal_elem = article_elem.find(".//Journal/Title")
             journal = self._get_element_text(journal_elem) if journal_elem is not None else "PubMed"
 
-            # Extract DOI
-            doi = None
-            for article_id in article_elem.findall(".//ArticleId"):
-                if article_id.get("IdType") == "doi":
-                    doi = article_id.text
-                    break
-
-            # Extract PMC ID
-            pmc_id = None
-            for article_id in article_elem.findall(".//ArticleId"):
-                if article_id.get("IdType") == "pmc":
-                    pmc_id = article_id.text
-                    break
+            # The record's own DOI and PMC ID, never a cited paper's (bmlib#474)
+            own_ids = own_article_ids(article_elem)
+            doi = own_ids.get("doi")
+            pmc_id = own_ids.get("pmc")
 
             # Extract MeSH terms
             mesh_terms = []

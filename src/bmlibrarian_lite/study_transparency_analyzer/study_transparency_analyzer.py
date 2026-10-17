@@ -38,6 +38,7 @@ import requests
 from urllib3.util.retry import Retry
 
 from ..polite_session import mount_politely
+from ..pubmed.record_ids import own_article_ids, record_for_pmid, served_pmids
 from ..analysis_failures import (
     COI_DISCLOSURE_SOUGHT,
     coi_not_assessed_caveat,
@@ -1452,7 +1453,7 @@ class PubMedClient:
                 failure.describe(),
             )
             return RecordFetch.unreachable(failure)
-        return self._parse_pubmed_xml(response.text)
+        return self._parse_pubmed_xml(response.text, pmid)
 
     def convert_ids(self, ids: List[str], from_type: str, to_type: str) -> Dict[str, str]:
         """Convert between ID types (pmid, pmcid, doi)."""
@@ -1474,7 +1475,7 @@ class PubMedClient:
                 result[source_id] = target_id
         return result
 
-    def _parse_pubmed_xml(self, xml_text: str) -> RecordFetch:
+    def _parse_pubmed_xml(self, xml_text: str, pmid: str) -> RecordFetch:
         """Parse PubMed XML response into structured data.
 
         Two failures used to share one ``None``. An efetch carrying no
@@ -1489,8 +1490,17 @@ class PubMedClient:
         ``MedlineCitation`` used to raise straight out of ``analyze()`` and
         cost the study every other dimension of its transparency.
 
+        The record read is the one whose own ``MedlineCitation/PMID`` is
+        ``pmid``, not the first in the body, and its PMC ID and DOI are the
+        ones in its own ``PubmedData/ArticleIdList``, not the last
+        ``ArticleId`` anywhere in it, which is a cited paper's (bmlib#474).
+        A body that holds records, none of them for ``pmid``, is the
+        second kind of failure: it is not PubMed's answer that it holds no
+        such article, and another paper's record is never this one's.
+
         Args:
             xml_text: The body PubMed answered with.
+            pmid: The PMID that was asked about.
 
         Returns:
             The record, PubMed's answer that it holds none, or why its
@@ -1500,10 +1510,21 @@ class PubMedClient:
 
         try:
             root = ET.fromstring(xml_text)
-            article = root.find('.//PubmedArticle')
-            if article is None:
+            if root.find('.//PubmedArticle') is None:
                 logger.info("PubMed returned no article for this request.")
                 return RecordFetch.absent()
+            article = record_for_pmid(root, pmid)
+            if article is None:
+                logger.warning(
+                    "PubMed answered with the record(s) for PMID(s) %s, "
+                    "none of them PMID %s, so what its record holds is not "
+                    "assessed.",
+                    ", ".join(served_pmids(root)) or "(none readable)",
+                    pmid,
+                )
+                return RecordFetch.unreachable(
+                    RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+                )
 
             # Either may be None; the AttributeError that follows is caught below
             medline: Any = article.find('MedlineCitation')
@@ -1523,13 +1544,12 @@ class PubMedClient:
                 'mesh_terms': self._extract_mesh_terms(medline),
             }
 
-            # Try to get PMC ID and DOI from article IDs
-            for id_elem in article.findall('.//ArticleId'):
-                id_type = id_elem.get('IdType')
-                if id_type == 'pmc':
-                    result['pmcid'] = id_elem.text
-                elif id_type == 'doi':
-                    result['doi'] = id_elem.text
+            # The record's own PMC ID and DOI, never a cited paper's
+            own_ids = own_article_ids(article)
+            if 'pmc' in own_ids:
+                result['pmcid'] = own_ids['pmc']
+            if 'doi' in own_ids:
+                result['doi'] = own_ids['doi']
 
             return RecordFetch.served(result)
 

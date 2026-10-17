@@ -136,7 +136,11 @@ class TransparencyUnassessed:
 #: it names; "Code availability" and supplements can hold the data
 #: statement; the title vouches for no section; ICMJE wording is disclosure
 #: vocabulary; JACC's combined heading is recognised).
-TRANSPARENCY_ANALYZER_VERSION = "2.6"
+#: 2.7: bmlib#474 (a PubMed record's PMC ID and DOI are its own, not those of
+#: a paper in its reference list, and the record read is the one asked
+#: about; stored COI and data-availability ratings read from a cited
+#: paper's full text can move).
+TRANSPARENCY_ANALYZER_VERSION = "2.7"
 
 #: What every row written before #360 says, whatever analysed it: the field
 #: was never compared to anything, so it never moved off its default.
