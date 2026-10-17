@@ -57,6 +57,7 @@ from bmlibrarian_lite.data_models import (
 from bmlibrarian_lite.elsevier_api import ElsevierCredentials
 from bmlibrarian_lite.exceptions import AnalysisFailedError, LiteError, SearchFailedError
 from bmlibrarian_lite.fulltext_discovery import FulltextDiscoverer
+from bmlibrarian_lite.identifiers import read_caller_ids
 from bmlibrarian_lite.llm import LLMClient
 from bmlibrarian_lite.search_failures import (
     retrieval_shortfalls_from_metadata,
@@ -636,11 +637,25 @@ def _handle_fulltext(args: dict[str, Any], ctx: _AgentsContext) -> dict[str, Any
         the library or a download was another article's and was not read
         (#541).
     """
-    pmid = args.get("pmid")
+    given_pmid = args.get("pmid")
     doi = args.get("doi")
-    pmc_id = args.get("pmc_id")
+    # The PMID is read before anything is asked with it: a padded one finds
+    # nothing and "1 OR 2" widens the query (bmlib#470, bmlib#472, bmlib#478). A
+    # refused one is the caller's, so the call goes on without it if a DOI
+    # or PMC ID remains, and names it if none does
+    pmid, pmc_id = read_caller_ids(given_pmid, args.get("pmc_id"))
 
     if not any([pmid, doi, pmc_id]):
+        if given_pmid not in (None, ""):
+            return {
+                "success": False,
+                "source": "invalid_request",
+                "error": (
+                    f"The pmid {given_pmid!r} is not a PubMed ID (ASCII "
+                    "digits), so nothing was asked about it. Provide a "
+                    "valid pmid, or a doi or pmc_id."
+                ),
+            }
         return {
             "success": False,
             "source": "invalid_request",

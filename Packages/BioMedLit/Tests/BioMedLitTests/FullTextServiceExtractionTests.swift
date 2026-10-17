@@ -91,7 +91,11 @@ final class FullTextServiceExtractionTests: XCTestCase {
 
     /// A second PMID, for the one test that must not share a cache entry with
     /// the rest.
-    private static let secondaryPMID = "extraction-test-99002"
+    ///
+    /// Digits, unlike `primaryPMID`: a slot of no stated kind is asked about
+    /// only as a canonical PMID (bmlib#470, bmlib#472, bmlib#478), and this test needs
+    /// that query to be sent. PubMed has assigned no PMID this high.
+    private static let secondaryPMID = "99999002"
 
     /// Every PMID any test in this file fetches for.
     ///

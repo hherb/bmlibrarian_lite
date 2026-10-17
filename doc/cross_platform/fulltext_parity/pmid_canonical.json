@@ -1,0 +1,231 @@
+{
+  "schema_version": 1,
+  "description": "A PMID is canonical ASCII digits, or it is not sent (bmlib#470, bmlib#472, bmlib#478 at f4b7c52). A caller's PMID reaches Europe PMC's EXT_ID query, NCBI's ID Converter and efetch, so it is read once at the entry: surrounding whitespace is stripped, and whitespace is exactly the code points in stripped_whitespace (what Python's str.strip() removes; the apps trim this set, not Foundation's or Kotlin's own); a blank is no PMID and is not refused; ASCII digits [0-9]+ that are not all zeros are the PMID without their leading zeros (Europe PMC finds nothing for the padded form); 'PMC' then ASCII digits is a PMC ID given as a PMID and is read as one (pmc_id), with pmid null; anything else (a prefix, a suffix, a space inside, a sign, a decimal point, non-ASCII digits, all zeros, lower-case pmc) is refused, which the apps log naming the value and then proceed as though no PMID were given. A PMC ID given as a PMID fills the PMC ID only when the caller gave none. Python alone also reads integers (its digits; 0 is no PMID; bool is refused). Read by tests/test_identifiers.py, Packages/BioMedLit PMIDCanonicalTests and Android PmidCanonicalTest. A case gives its name, the input as text, the pmid read (null for none), the pmc_id read, and whether it was refused; a 'note' says why a case is there, and is read by no suite.",
+  "source": "bmlib#470, bmlib#472, bmlib#478 at f4b7c52",
+  "stripped_whitespace": [
+    9,
+    10,
+    11,
+    12,
+    13,
+    28,
+    29,
+    30,
+    31,
+    32,
+    133,
+    160,
+    5760,
+    8192,
+    8193,
+    8194,
+    8195,
+    8196,
+    8197,
+    8198,
+    8199,
+    8200,
+    8201,
+    8202,
+    8232,
+    8233,
+    8239,
+    8287,
+    12288
+  ],
+  "cases": [
+    {
+      "name": "plain_digits_are_the_pmid",
+      "input": "33301246",
+      "pmid": "33301246",
+      "pmc_id": null,
+      "refused": false
+    },
+    {
+      "name": "surrounding_spaces_are_stripped",
+      "input": " 33301246 ",
+      "pmid": "33301246",
+      "pmc_id": null,
+      "refused": false
+    },
+    {
+      "name": "leading_zeros_are_dropped",
+      "input": "0033301246",
+      "pmid": "33301246",
+      "pmc_id": null,
+      "refused": false
+    },
+    {
+      "name": "surrounding_tab_and_newline_are_stripped",
+      "input": "\t33301246\n",
+      "pmid": "33301246",
+      "pmc_id": null,
+      "refused": false
+    },
+    {
+      "name": "empty_is_no_pmid",
+      "input": "",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": false
+    },
+    {
+      "name": "blank_is_no_pmid",
+      "input": "   ",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": false
+    },
+    {
+      "name": "all_zeros_is_refused",
+      "input": "0000",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": true
+    },
+    {
+      "name": "zero_is_refused",
+      "input": "0",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": true
+    },
+    {
+      "name": "prefixed_pmid_is_refused",
+      "input": "PMID:33301246",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": true
+    },
+    {
+      "name": "suffixed_pmid_is_refused",
+      "input": "33301246abc",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": true
+    },
+    {
+      "name": "query_syntax_is_refused",
+      "input": "1 OR 2",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": true
+    },
+    {
+      "name": "mixed_ascii_and_arabic_indic_digits_are_refused",
+      "input": "1\u0661\u0662",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": true
+    },
+    {
+      "name": "arabic_indic_digits_are_refused",
+      "input": "\u0663\u0663",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": true
+    },
+    {
+      "name": "negative_sign_is_refused",
+      "input": "-5",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": true
+    },
+    {
+      "name": "positive_sign_is_refused",
+      "input": "+5",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": true
+    },
+    {
+      "name": "decimal_point_is_refused",
+      "input": "3.3",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": true
+    },
+    {
+      "name": "pmc_id_is_read_as_a_pmc_id",
+      "input": "PMC7745181",
+      "pmid": null,
+      "pmc_id": "PMC7745181",
+      "refused": false
+    },
+    {
+      "name": "pmc_id_with_surrounding_spaces_is_read_as_a_pmc_id",
+      "input": " PMC7745181 ",
+      "pmid": null,
+      "pmc_id": "PMC7745181",
+      "refused": false
+    },
+    {
+      "name": "lower_case_pmc_is_refused",
+      "input": "pmc7745181",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": true
+    },
+    {
+      "name": "pmc_prefix_without_digits_is_refused",
+      "input": "PMC",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": true
+    },
+    {
+      "name": "pmc_with_arabic_indic_digits_is_refused",
+      "input": "PMC\u0661\u0662",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": true
+    },
+    {
+      "name": "pmc_id_with_query_syntax_is_refused",
+      "input": "PMC7745181 OR 1",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": true
+    },
+    {
+      "name": "trailing_zero_width_space_is_refused",
+      "input": "33301246\u200b",
+      "pmid": null,
+      "pmc_id": null,
+      "refused": true,
+      "note": "U+200B is not whitespace to Python's str.strip(); Foundation's whitespace set strips it, so the apps trim only stripped_whitespace."
+    },
+    {
+      "name": "surrounding_next_line_is_stripped",
+      "input": "\u008533301246\u0085",
+      "pmid": "33301246",
+      "pmc_id": null,
+      "refused": false,
+      "note": "U+0085 is whitespace to Python's str.strip() but not to Kotlin's trim()."
+    },
+    {
+      "name": "surrounding_unit_separator_is_stripped",
+      "input": "\u001f33301246\u001c",
+      "pmid": "33301246",
+      "pmc_id": null,
+      "refused": false,
+      "note": "U+001C to U+001F are whitespace to Python's str.strip() but not to Foundation's whitespacesAndNewlines."
+    },
+    {
+      "name": "surrounding_no_break_space_is_stripped",
+      "input": "\u00a033301246\u3000",
+      "pmid": "33301246",
+      "pmc_id": null,
+      "refused": false
+    },
+    {
+      "name": "pmc_zero_is_read_as_a_pmc_id",
+      "input": "PMC0",
+      "pmid": null,
+      "pmc_id": "PMC0",
+      "refused": false,
+      "note": "Current behaviour, pinned rather than endorsed: 'PMC' then ASCII digits is read as a PMC ID, all zeros included; no PMC record has that ID, so the lookup finds nothing."
+    }
+  ]
+}

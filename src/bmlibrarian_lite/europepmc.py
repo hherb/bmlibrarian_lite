@@ -74,6 +74,7 @@ from .data_models import (
     SearchProvider,
 )
 from .exceptions import SourceRequestError
+from .identifiers import is_canonical_pmid
 from .jats_markdown import jats_to_markdown
 from .polite_session import mount_politely
 from .search_failures import request_failure_from_exception
@@ -690,6 +691,19 @@ class EuropePMCClient:
                 )
             query = f"PMCID:{accession}"
         elif pmid:
+            if not is_canonical_pmid(pmid):
+                # The entries canonicalise a caller's PMID (bmlib#470, bmlib#472,
+                # bmlib#478); one that gets here unread is a programming error,
+                # and an unchecked value widens the query ("1 OR 2") or finds
+                # nothing (a padded PMID). Not asking is not absent.
+                logger.error(
+                    "Programming error: Europe PMC was given a PMID that is "
+                    "not canonical, so it was not asked about it: %r",
+                    pmid,
+                )
+                return ArticleInfoFetch.unreachable(
+                    RequestFailure(RequestFailureKind.REQUEST_FAILED)
+                )
             query = f"ext_id:{pmid} src:med"
         elif doi:
             query = f'DOI:"{doi}"'

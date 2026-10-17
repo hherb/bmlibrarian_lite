@@ -354,6 +354,17 @@ object Constants {
     /** Default sort order for PubMed results. */
     const val PUBMED_DEFAULT_SORT = "relevance"
 
+    /**
+     * The code points stripped from around a caller's PMID: exactly what Python's
+     * `str.strip()` removes, pinned by `fulltext_parity/pmid_canonical.json`
+     * (`stripped_whitespace`). Kotlin's `trim()` keeps U+0085, which Python strips.
+     */
+    val PMID_STRIPPED_WHITESPACE: Set<Int> = setOf(
+        0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x85, 0xA0,
+        0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007,
+        0x2008, 0x2009, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000
+    )
+
     // ==================== Scoring Configuration ====================
 
     /** Minimum relevance score to be considered relevant (inclusive). */

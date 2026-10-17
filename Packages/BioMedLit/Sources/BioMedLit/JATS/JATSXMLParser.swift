@@ -2535,7 +2535,7 @@ extension JATSXMLParser: XMLParserDelegate {
                 // Determine type from content pattern since we don't have attribute access here
                 if text.hasPrefix("10.") {
                     currentReference?.doi = text
-                } else if text.allSatisfy({ $0.isNumber }) && text.count >= 7 {
+                } else if text.allSatisfy({ $0.isASCII && $0.isNumber }) && text.count >= 7 {
                     currentReference?.pmid = text
                 }
             }
@@ -2625,7 +2625,7 @@ extension JATSXMLParser: XMLParserDelegate {
         } else if text.hasPrefix("PMC") {
             guard !pmcIdIsAuthoritative else { return }
             pmcId = text
-        } else if text.allSatisfy({ $0.isNumber }) && text.count >= BioMedLitConstants.minPMIDLength {
+        } else if text.allSatisfy({ $0.isASCII && $0.isNumber }) && text.count >= BioMedLitConstants.minPMIDLength {
             // Pure numeric ID - could be PMID or PMC ID
             // Store in both if empty (PMC ID detection takes priority for figures)
             if pmid.isEmpty {

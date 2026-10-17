@@ -37,6 +37,7 @@ import requests
 
 from urllib3.util.retry import Retry
 
+from ..identifiers import read_caller_ids
 from ..polite_session import mount_politely
 from ..analysis_failures import (
     COI_DISCLOSURE_SOUGHT,
@@ -2894,13 +2895,26 @@ class StudyTransparencyAnalyzer:
         """
         report = TransparencyReport()
 
-        if not doi and not pmid:
-            report.errors.append("Must provide either DOI or PMID")
+        # A PMID reaches efetch, which reads every run of digits as a PMID of
+        # its own, and Europe PMC's query; it is read once here, before any
+        # request (bmlib#470, bmlib#472, bmlib#478). A refused one is logged and the
+        # analysis goes on without it. A PMC ID given as the PMID is read as a
+        # PMC ID and kept as the report's, for full-text discovery; it is the
+        # caller's, so PubMed's own PMC ID never replaces it.
+        given_pmid = pmid
+        pmid, caller_pmcid = read_caller_ids(pmid)
+
+        if not doi and not pmid and not caller_pmcid:
+            message = "Must provide either DOI or PMID"
+            if given_pmid not in (None, ""):
+                message += f" (the PMID {given_pmid!r} is not a usable PubMed ID)"
+            report.errors.append(message)
             return report
 
         # Store initial identifiers
         report.doi = doi
         report.pmid = pmid
+        report.pmcid = caller_pmcid
 
         # Step 1: Get basic metadata and resolve IDs
         self._fetch_basic_metadata(report)
@@ -3154,7 +3168,8 @@ class StudyTransparencyAnalyzer:
                     report.doi = pubmed_data['doi']
 
                 # Get PMCID
-                if pubmed_data.get('pmcid'):
+                # (the caller's own, given as the PMID, wins)
+                if pubmed_data.get('pmcid') and not report.pmcid:
                     report.pmcid = pubmed_data['pmcid']
 
                 # Store grants for later analysis

@@ -74,6 +74,7 @@ from .analysis_failures import with_unestablished_access
 from .core_api import CoreFetch, CoreTextClient, default_core_client
 from .elsevier_api import ElsevierArticleClient, ElsevierCredentials
 from .europepmc import EuropePMCClient, ArticleInfo, pmc_accession
+from .identifiers import read_caller_ids
 from .search_failures import request_failure_from_exception
 from .pdf_utils import (
     find_existing_fulltext,
@@ -372,6 +373,20 @@ class FulltextDiscoverer:
         # concurrent tool calls, and one call's refusal must not reach
         # another's result or be wiped by its start
         refusals = _Refusals()
+        # The PMID is read here, once, before any lookup: it reaches Europe
+        # PMC's query, the ID Converter and the PubMed URLs, and a padded or
+        # malformed one finds nothing or widens the query (bmlib#470, bmlib#472,
+        # bmlib#478). The caller's dict is updated in place, as it is with the
+        # year Europe PMC reports.
+        if doc_dict is not None:
+            pmid = pmid or doc_dict.get('pmid')
+            pmcid = pmcid or doc_dict.get('pmcid') or doc_dict.get('pmc_id')
+        pmid, pmcid = read_caller_ids(pmid, pmcid)
+        if doc_dict is not None:
+            if pmid:
+                doc_dict['pmid'] = pmid
+            else:
+                doc_dict.pop('pmid', None)
         result = replace(
             self._discover_fulltext(
                 doc_dict, pmid, pmcid, doi, title, year, skip_pdf, refusals=refusals

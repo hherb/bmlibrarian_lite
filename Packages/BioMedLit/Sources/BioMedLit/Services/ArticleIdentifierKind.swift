@@ -301,11 +301,13 @@ public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
         in identifier: String?,
         declared: ArticleIdentifierKind?
     ) -> String? {
-        guard let value = identifier?.trimmingCharacters(in: .whitespacesAndNewlines),
+        // Stripped as the PMID contract strips, so U+200B is not trimmed away
+        guard let value = identifier.map(PMID.stripped),
               !value.isEmpty,
               resolved(declared: declared, accession: value) == .pubmed,
               isAllASCIIDigits(value) else { return nil }
-        return value
+        // Canonical, for the URL (bmlib#470, bmlib#472, bmlib#478); all zeros is no PMID
+        return PMID.canonical(value).pmid
     }
 
     /// This kind as the Europe PMC token that names it, for storage.
@@ -324,5 +326,90 @@ public enum ArticleIdentifierKind: Equatable, Hashable, Sendable {
         case .europePMCSource(let token): return token
         case .unknown: return nil
         }
+    }
+}
+
+/// What a caller's PMID value turned out to be (bmlib#470, bmlib#472, bmlib#478).
+///
+/// The three fields mirror Python's `PmidReading` and Kotlin's `PmidReading`;
+/// `doc/cross_platform/fulltext_parity/pmid_canonical.json` is the contract
+/// all three suites read.
+public struct PMIDReading: Equatable, Sendable {
+    /// The canonical PMID (ASCII digits, no leading zeros), or `nil`.
+    public let pmid: String?
+    /// A PMC ID the caller passed as the PMID, or `nil`.
+    public let pmcId: String?
+    /// Whether the value was given and is neither a PMID nor a PMC ID. A blank
+    /// is no PMID, and is not refused.
+    public let refused: Bool
+
+    public init(pmid: String? = nil, pmcId: String? = nil, refused: Bool = false) {
+        self.pmid = pmid
+        self.pmcId = pmcId
+        self.refused = refused
+    }
+}
+
+/// A PMID is canonical ASCII digits, or it is not sent.
+///
+/// A PMID reaches a Europe PMC `ext_id:` query, NCBI's ID Converter and the
+/// PubMed URL. Europe PMC finds nothing for a padded `0033301246`, and
+/// `1 OR 2` widens a query past its `src:med` guard. The rules are the shared
+/// contract's; see ``PMID/canonical(_:)``.
+public enum PMID {
+    /// Read a caller's PMID.
+    ///
+    /// Surrounding whitespace (``stripped(_:)``) is stripped and a blank is no
+    /// PMID. ASCII digits that are not all zeros are the PMID without their
+    /// leading zeros; `PMC`
+    /// then ASCII digits is a PMC ID given as a PMID. Anything else is refused.
+    /// ASCII is checked by scalar, not by `isNumber`, which admits `١٢٣` and
+    /// `½`.
+    ///
+    /// - Parameter raw: What the caller passed as the PMID.
+    /// - Returns: The reading; it never throws.
+    public static func canonical(_ raw: String) -> PMIDReading {
+        let text = stripped(raw)
+        guard !text.isEmpty else { return PMIDReading() }
+        if isASCIIDigits(text) {
+            let stripped = String(text.drop { $0 == "0" })
+            return stripped.isEmpty ? PMIDReading(refused: true) : PMIDReading(pmid: stripped)
+        }
+        let prefix = BioMedLitConstants.pmcAccessionPrefix
+        if text.hasPrefix(prefix), isASCIIDigits(String(text.dropFirst(prefix.count))) {
+            return PMIDReading(pmcId: text)
+        }
+        return PMIDReading(refused: true)
+    }
+
+    /// `raw` without the whitespace around it, as Python's `str.strip()` reads
+    /// whitespace.
+    ///
+    /// The set is ``BioMedLitConstants/pmidStrippedWhitespace``, not Foundation's
+    /// `whitespacesAndNewlines`, which strips U+200B (so `33301246` followed by a
+    /// zero-width space was accepted here and refused by Python and Kotlin) and
+    /// keeps U+001C-U+001F.
+    ///
+    /// - Parameter raw: The caller's value.
+    /// - Returns: The value with surrounding whitespace removed.
+    public static func stripped(_ raw: String) -> String {
+        let scalars = raw.unicodeScalars
+        let isText = { (scalar: Unicode.Scalar) in
+            !BioMedLitConstants.pmidStrippedWhitespace.contains(scalar.value)
+        }
+        guard let first = scalars.firstIndex(where: isText),
+              let last = scalars.lastIndex(where: isText) else { return "" }
+        return String(scalars[first...last])
+    }
+
+    /// Whether `value` is non-empty and every scalar is `0`-`9`.
+    private static func isASCIIDigits(_ value: String) -> Bool {
+        !value.isEmpty && value.unicodeScalars.allSatisfy { ("0"..."9").contains($0) }
+    }
+
+    /// Whether `value` is already a canonical PMID, as the Europe PMC lookup and
+    /// the PubMed URL require of what they are given.
+    public static func isCanonical(_ value: String) -> Bool {
+        canonical(value).pmid == value
     }
 }

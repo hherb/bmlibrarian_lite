@@ -229,6 +229,16 @@ public enum BioMedLitConstants {
     /// PubMed fetch endpoint.
     public static let pubmedFetchURL = "\(pubmedBaseURL)/efetch.fcgi"
 
+    /// The scalars stripped from around a caller's PMID: exactly what Python's
+    /// `str.strip()` removes, pinned by `fulltext_parity/pmid_canonical.json`
+    /// (`stripped_whitespace`). Foundation's `whitespacesAndNewlines` also strips
+    /// U+200B and keeps U+001C-U+001F, so it is not used for a PMID.
+    public static let pmidStrippedWhitespace: Set<UInt32> = [
+        0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x85, 0xA0,
+        0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007,
+        0x2008, 0x2009, 0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000,
+    ]
+
     /// Default batch size for PubMed searches.
     public static let pubmedDefaultBatchSize = 100
 

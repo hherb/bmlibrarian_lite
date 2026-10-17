@@ -98,6 +98,7 @@ from .data_models import (
     SourceLookupFailure,
     SourceLookupSkipped,
 )
+from .identifiers import is_canonical_pmid, read_caller_ids
 from .elsevier_api import ElsevierArticleClient, ElsevierFetch, ElsevierOutcome, elsevier_eligible
 from .oa_landing_page import (
     choose_unpaywall_url,
@@ -735,6 +736,10 @@ class PDFDiscoverer:
         # Held by this call, never on the discoverer, so a discoverer used
         # for two discoveries at once never mixes their PDFs
         set_aside_paths: list[Path] = []
+        # Read here, at the entry, so every caller is covered: the GUI's
+        # download worker calls this directly with a stored PMID
+        # (bmlib#470, bmlib#472, bmlib#478)
+        pmid, pmcid = read_caller_ids(pmid, pmcid)
         result = self._discover_and_download(
             output_path, doi, pmid, pmcid, title, expected_title, earlier_lookups,
             core_text, set_aside_paths=set_aside_paths,
@@ -1413,6 +1418,20 @@ class PDFDiscoverer:
             and is returned as one, because unreachable is not absent and
             this path takes out the whole PMC route (#347).
         """
+        if not is_canonical_pmid(pmid):
+            # The entries canonicalise a caller's PMID (bmlib#470, bmlib#472,
+            # bmlib#478); one that gets here unread is a programming error, and
+            # the converter would read "1,2" as two records. Not asking is
+            # our failure, never the converter holding no record.
+            logger.error(
+                "Programming error: the ID converter was given a PMID that "
+                "is not canonical, so it was not asked: %r",
+                pmid,
+            )
+            return None, SourceLookupFailure(
+                SERVICE_PMC_ID_CONVERTER,
+                RequestFailure(RequestFailureKind.REQUEST_FAILED),
+            )
         try:
             url = (
                 f"https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/"
@@ -1809,12 +1828,12 @@ class PDFDiscoverer:
         if not url:
             return None
         # Match patterns like /pmc/articles/PMC1234567 or /pmc/articles/1234567
-        match = re.search(r'/pmc/articles/(?:PMC)?(\d+)', url, re.IGNORECASE)
+        match = re.search(r'/pmc/articles/(?:PMC)?([0-9]+)', url, re.IGNORECASE)
         if match:
             return f"PMC{match.group(1)}"
         # Also match standalone numbers in PMC URLs
         if 'pmc' in url.lower() or 'ncbi' in url.lower():
-            match = re.search(r'(\d{6,})', url)
+            match = re.search(r'([0-9]{6,})', url)
             if match:
                 return f"PMC{match.group(1)}"
         return None
