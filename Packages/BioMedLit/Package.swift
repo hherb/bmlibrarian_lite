@@ -31,9 +31,26 @@ let package = Package(
     ],
     dependencies: [],
     targets: [
+        // SPIKE (WP-2, doc/cross_platform/bmlib_sync/uniffi_spike.md): bmlib's
+        // Rust crate through UniFFI. `BmlibFFI` is the committed xcframework of
+        // dynamic frameworks built by bmlib's
+        // `rust/bmlib-ffi/scripts/build-xcframework.sh`, pinned in
+        // `Frameworks/BmlibFFI.pin.json`; a path inside this repository, so an
+        // Xcode Cloud fresh clone resolves it (HANDOVER, Xcode Cloud contract).
+        .binaryTarget(
+            name: "BmlibFFI",
+            path: "Frameworks/BmlibFFI.xcframework"
+        ),
+        // The UniFFI-generated Swift over BmlibFFI. Generated, never edited:
+        // regenerate it with the xcframework, from the same bmlib commit.
+        .target(
+            name: "BmlibCore",
+            dependencies: ["BmlibFFI"],
+            path: "Sources/BmlibCore"
+        ),
         .target(
             name: "BioMedLit",
-            dependencies: [],
+            dependencies: ["BmlibCore"],
             path: "Sources/BioMedLit"
         ),
         .testTarget(

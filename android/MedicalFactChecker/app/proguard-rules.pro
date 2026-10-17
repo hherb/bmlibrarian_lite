@@ -53,3 +53,11 @@
     public static **[] values();
     public static ** valueOf(java.lang.String);
 }
+
+# SPIKE (WP-2): JNA binds the UniFFI bindings' native methods by reflection, and
+# JNA itself is reached from native code, so R8 must neither strip nor rename
+# either. Without these a release build fails at the first call into Rust.
+-keep class com.sun.jna.** { *; }
+-keep class * implements com.sun.jna.** { *; }
+-keep class org.bmlib.ffi.** { *; }
+-dontwarn java.awt.**

@@ -1,6 +1,8 @@
 // app/build.gradle.kts
 // MedicalFactChecker Android App - Module Build Configuration
 
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -24,6 +26,13 @@ android {
 
         // Custom test runner for Hilt dependency injection in instrumented tests
         testInstrumentationRunner = "com.bmlibrarian.factchecker.HiltTestRunner"
+
+        // 64-bit only: the ABIs cargo-ndk builds bmlib's Rust library for
+        // (maintainer decision 2026-10-17, doc/cross_platform/bmlib_sync/uniffi_spike.md).
+        // A 32-bit APK would ship without the library and crash at its first call.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
 
         vectorDrawables {
             useSupportLibrary = true
@@ -110,6 +119,68 @@ tasks.withType<Test>().configureEach {
     }
 }
 
+// SPIKE (WP-2, doc/cross_platform/bmlib_sync/uniffi_spike.md): bmlib's Rust
+// crate through UniFFI. The .so files are built by cargo-ndk from a bmlib
+// checkout named by `bmlib.dir` in local.properties or BMLIB_DIR in the
+// environment (CI: an actions/checkout of hherb/bmlib at the pinned tag). With
+// neither set nothing here runs, the app builds without the library, and
+// BmlibJatsFfiTest skips itself.
+val bmlibDir: File? = run {
+    val props = Properties()
+    val local = rootProject.file("local.properties")
+    if (local.isFile) local.inputStream().use { props.load(it) }
+    (props.getProperty("bmlib.dir") ?: System.getenv("BMLIB_DIR"))?.let { file(it) }
+}
+val bmlibJniLibs = layout.buildDirectory.dir("generated/bmlib/jniLibs")
+val bmlibHostLib = layout.buildDirectory.dir("generated/bmlib/host")
+
+if (bmlibDir != null) {
+    val rustWorkspace = File(bmlibDir, "rust")
+    val rustInputs = fileTree(rustWorkspace) {
+        include("bmlib/src/**", "bmlib-ffi/src/**", "**/Cargo.toml", "Cargo.lock", "bmlib-ffi/uniffi.toml")
+    }
+
+    // Android ABIs: the two the spike measures (arm64-v8a devices, x86_64
+    // emulators). armeabi-v7a would be one more `-t`.
+    val cargoNdkBmlib = tasks.register<Exec>("cargoNdkBmlib") {
+        group = "bmlib"
+        description = "Build libbmlib_ffi.so for arm64-v8a and x86_64 with cargo-ndk"
+        workingDir = rustWorkspace
+        inputs.files(rustInputs)
+        outputs.dir(bmlibJniLibs)
+        commandLine(
+            "cargo", "ndk", "-t", "arm64-v8a", "-t", "x86_64", "-p", "26",
+            "-o", bmlibJniLibs.get().asFile.absolutePath,
+            "build", "-p", "bmlib-ffi", "--profile", "release-ffi"
+        )
+    }
+
+    // The host build JVM unit tests load through JNA.
+    val cargoHostBmlib = tasks.register<Exec>("cargoHostBmlib") {
+        group = "bmlib"
+        description = "Build the host libbmlib_ffi for JVM unit tests"
+        workingDir = rustWorkspace
+        inputs.files(rustInputs)
+        outputs.dir(bmlibHostLib)
+        commandLine("cargo", "build", "-p", "bmlib-ffi", "--profile", "release-ffi")
+        doLast {
+            copy {
+                from(File(rustWorkspace, "target/release-ffi")) {
+                    include("libbmlib_ffi.dylib", "libbmlib_ffi.so", "bmlib_ffi.dll")
+                }
+                into(bmlibHostLib)
+            }
+        }
+    }
+
+    android.sourceSets.getByName("main").jniLibs.srcDir(bmlibJniLibs)
+    tasks.named("preBuild") { dependsOn(cargoNdkBmlib) }
+    tasks.withType<Test>().configureEach {
+        dependsOn(cargoHostBmlib)
+        systemProperty("jna.library.path", bmlibHostLib.get().asFile.absolutePath)
+    }
+}
+
 dependencies {
     // Core Android
     implementation("androidx.core:core-ktx:1.12.0")
@@ -176,6 +247,12 @@ dependencies {
     implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
     // Optional: NNAPI delegate for hardware acceleration on supported devices
     implementation("org.tensorflow:tensorflow-lite-gpu-delegate-plugin:0.4.4")
+
+    // SPIKE (WP-2): UniFFI's Kotlin bindings call the Rust library through JNA.
+    // The AAR carries JNA's dispatch library for each Android ABI; JVM unit
+    // tests need the JAR, which carries the desktop ones (darwin-aarch64 etc.).
+    implementation("net.java.dev.jna:jna:5.14.0@aar")
+    testImplementation("net.java.dev.jna:jna:5.14.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

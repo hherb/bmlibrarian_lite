@@ -1,0 +1,7 @@
+framework module BmlibFFI {
+    header "BmlibFFI.h"
+    export *
+    use "Darwin"
+    use "_Builtin_stdbool"
+    use "_Builtin_stdint"
+}

@@ -7,3 +7,9 @@ doc/cross_platform/jats_corpus/*.xml -text
 # line by line. CRLF translation would turn a regeneration into a whole-file
 # diff, which is exactly the noise the trailing newline is there to avoid.
 doc/cross_platform/jats_corpus/*.json -text
+
+# SPIKE (WP-2): the committed bmlib xcframework and its generated bindings.
+# Binary slices are never diffed or line-translated; the Swift is generated.
+Packages/BioMedLit/Frameworks/BmlibFFI.xcframework/** binary
+Packages/BioMedLit/Sources/BmlibCore/bmlib_ffi.swift linguist-generated=true
+android/MedicalFactChecker/app/src/main/java/org/bmlib/ffi/bmlib_ffi.kt linguist-generated=true

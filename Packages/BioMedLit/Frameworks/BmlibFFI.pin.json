@@ -1,0 +1,21 @@
+{
+  "comment": "SPIKE (WP-2). What built BmlibFFI.xcframework and Sources/BmlibCore/bmlib_ffi.swift. Both are regenerated together, from one bmlib commit, by bmlib's rust/bmlib-ffi/scripts/build-xcframework.sh; a binding generated from another commit fails UniFFI's checksum check at first call. treeSha256 is the SHA-256 of the sorted list of '<path> <sha256>' (and '<path> -> <target>' for symlinks) over every file in the xcframework.",
+  "bmlibRepository": "https://github.com/hherb/bmlib",
+  "bmlibCommit": "2b969a5cc05b6436f21fe13224a4ff3fc02fb26f",
+  "bmlibBranch": "spike/uniffi-ffi",
+  "bmlibCrateVersion": "0.2.0",
+  "uniffiVersion": "0.32.2",
+  "rustc": "1.98.0",
+  "profile": "release-ffi",
+  "features": "default-features = false (no sqlite, no http-ureq)",
+  "slices": [
+    "ios-arm64",
+    "ios-arm64_x86_64-simulator",
+    "macos-arm64_x86_64"
+  ],
+  "minimumOS": {
+    "iOS": "17.0",
+    "macOS": "14.0"
+  },
+  "treeSha256": "004989a0323b99950827af0865b8676fa89e688fc919ef0be59d6dbfa1b086da"
+}
