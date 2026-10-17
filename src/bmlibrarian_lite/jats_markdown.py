@@ -79,7 +79,11 @@ logger = logging.getLogger(__name__)
 #: 5: review of #428 -- an untitled footnote group after a titled end-matter
 #: section's own text gets a heading of its own. Bumped before release, as
 #: 3 was.
-JATS_MARKDOWN_CONVERTER_VERSION = 5
+#: 6: bmlib#111 -- an author role declared on the ``<contrib-group>``
+#: (``content-type="author"``) reaches its bare ``<contrib>`` children, and
+#: every group is read, not only the first; a bare contributor is inferred only
+#: from a group directly in ``<article-meta>`` (bmlib#266).
+JATS_MARKDOWN_CONVERTER_VERSION = 6
 
 #: The line that opens end matter: before the back matter and the
 #: front-matter statements, and inside the body wherever a body section
@@ -305,18 +309,10 @@ def _front_matter(front: ET.Element) -> str:
         if article_title is not None:
             parts.append(f"# {text_of(article_title)}")
 
-    contrib_group = front.find(".//contrib-group")
-    if contrib_group is not None:
-        authors = []
-        for contrib in contrib_group.findall("contrib[@contrib-type='author']"):
-            name = contrib.find("name")
-            if name is not None:
-                given = name.findtext("given-names", "")
-                surname = name.findtext("surname", "")
-                if surname:
-                    authors.append(f"{given} {surname}".strip())
-        if authors:
-            parts.append(f"**Authors:** {', '.join(authors)}")
+    meta_for_authors = front.find(".//article-meta")
+    authors = _article_authors(front if meta_for_authors is None else meta_for_authors)
+    if authors:
+        parts.append(f"**Authors:** {', '.join(authors)}")
 
     journal_meta = front.find(".//journal-meta")
     article_meta = front.find(".//article-meta")
@@ -351,6 +347,69 @@ def _front_matter(front: ET.Element) -> str:
             parts.append(f"## Abstract\n\n{abstract_text}")
 
     return "\n\n".join(parts)
+
+
+def _article_authors(article_meta: ET.Element) -> list[str]:
+    """Name the article's authors, reading the role where JATS declares it.
+
+    JATS spells a contributor's role two ways: ``contrib-type`` on the
+    ``<contrib>``, and ``content-type`` on the enclosing ``<contrib-group>``
+    with bare children, which is the dominant form in open-access articles
+    (bmlib#111: 57% of a 79-article sample). The rule is bmlib's
+    ``_is_author_contrib``: a contributor's own non-empty ``contrib-type``
+    decides alone; otherwise the innermost enclosing group that declares a
+    non-empty ``content-type`` decides; where none declares, the contributor
+    is an author. Comparison folds case. Every group is read.
+
+    The inference for a bare contributor starts only from a
+    ``<contrib-group>`` that is a direct child of ``article_meta``, and from
+    the groups nested inside one (bmlib#266). A group under ``<supplement>``,
+    ``<sec-meta>`` or any other element in ``<article-meta>`` lists other
+    people's roles, so its bare contributors are not the article's authors;
+    a contributor there with its own ``contrib-type="author"`` still is.
+
+    A ``<contrib>`` is not entered, so the member roster of a ``<collab>``
+    inside it is never listed as the article's authors.
+
+    Args:
+        article_meta: The article's ``<article-meta>`` (or any element holding
+            its contributor groups as direct children).
+
+    Returns:
+        The authors' names in document order, as "Given Surname".
+    """
+    authors: list[str] = []
+
+    def walk(element: ET.Element, declared: list[str], anchored: bool) -> None:
+        # ``anchored``: inside a contrib-group that is a direct child of
+        # ``article_meta``, where a bare contributor's role may be inferred.
+        for child in element:
+            if child.tag == "contrib-group":
+                walk(
+                    child,
+                    declared + [(child.get("content-type") or "").strip()],
+                    anchored or element is article_meta,
+                )
+            elif child.tag == "contrib":
+                role = (child.get("contrib-type") or "").strip()
+                if not role:
+                    if not anchored:
+                        continue
+                    role = next((r for r in reversed(declared) if r), "")
+                if role and role.lower() != "author":
+                    continue
+                name = child.find("name")
+                if name is None:
+                    continue
+                surname = name.findtext("surname", "")
+                if surname:
+                    given = name.findtext("given-names", "")
+                    authors.append(f"{given} {surname}".strip())
+            elif child.tag != "collab":
+                walk(child, declared, anchored)
+
+    walk(article_meta, [], False)
+    return authors
 
 
 def _body(body: ET.Element) -> str:

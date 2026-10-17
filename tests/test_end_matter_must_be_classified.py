@@ -151,7 +151,7 @@ class TestTheConverterMarksTheEndMatter:
 
     def test_the_converter_version_moved(self) -> None:
         """A cached conversion without the mark must be converted again."""
-        assert JATS_MARKDOWN_CONVERTER_VERSION == 5
+        assert JATS_MARKDOWN_CONVERTER_VERSION == 6
 
 
 class TestTheMarkIsNoPartOfAStatement:
