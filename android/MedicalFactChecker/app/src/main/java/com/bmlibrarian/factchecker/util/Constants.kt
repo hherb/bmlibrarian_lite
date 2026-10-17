@@ -519,6 +519,28 @@ object Constants {
     /** Europe PMC `source` values, upper-cased, that mark a record as a preprint. */
     val EUROPE_PMC_PREPRINT_SOURCES = setOf("PPR", "PREPRINT")
 
+    /**
+     * Europe PMC `availabilityCode` values that mark a downloadable PDF entry (bmlib#79).
+     * `OA` ("Open access") is about 96% of the free PDFs, `F` ("Free") the rest. Pinned by
+     * fulltext_parity/europepmc_free_pdf.json.
+     */
+    val EUROPE_PMC_FREE_PDF_CODES = setOf("OA", "F")
+
+    /**
+     * Europe PMC `availability` display strings accepted for an entry with no code. Never
+     * consulted for a code that is present, so a future code is not admitted on a label.
+     */
+    val EUROPE_PMC_FREE_PDF_LABELS = setOf("Open access", "Free")
+
+    /**
+     * Codes known to mean "not downloadable". Not consulted when deciding; only so a
+     * rejection is logged at the right level (debug for these, warning for any other code).
+     */
+    val EUROPE_PMC_UNAVAILABLE_PDF_CODES = setOf("S")
+
+    /** Europe PMC `documentStyle` marking a PDF entry. */
+    const val EUROPE_PMC_PDF_DOCUMENT_STYLE = "pdf"
+
     // ==================== Full-Text Source Constants ====================
 
     /** The directory, under the app's cache, every full-text PDF is saved in. */

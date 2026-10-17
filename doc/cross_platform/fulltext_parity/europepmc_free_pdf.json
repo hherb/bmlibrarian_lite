@@ -1,0 +1,207 @@
+{
+  "schema_version": 1,
+  "description": "Which Europe PMC fullTextUrl entry is the free PDF (bmlib#79): availabilityCode OA or F is accepted; a present, non-empty, unrecognised code is rejected without reading the label; a missing or empty code falls back to the label being Open access or Free; only documentStyle pdf counts, an entry without a URL is skipped, and the first accepted entry wins. 'fullTextUrl' null means the result carries no fullTextUrlList at all. Read by tests/test_europepmc_free_pdf.py, Packages/BioMedLit EuropePMCFreePDFTests and Android EuropePmcFreePdfTest. Every case is asserted on all three platforms, and each platform asserts it reads every key and that its constants equal the lists here: add a row here, not a test on one platform.",
+  "source": "bmlib#79",
+  "free_codes": [
+    "OA",
+    "F"
+  ],
+  "free_labels": [
+    "Open access",
+    "Free"
+  ],
+  "known_unavailable_codes": [
+    "S"
+  ],
+  "cases": [
+    {
+      "name": "open_access_pdf_is_accepted",
+      "fullTextUrl": [
+        {
+          "documentStyle": "pdf",
+          "site": "Europe_PMC",
+          "availability": "Open access",
+          "availabilityCode": "OA",
+          "url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+        }
+      ],
+      "expected_url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+    },
+    {
+      "name": "free_pdf_is_accepted",
+      "fullTextUrl": [
+        {
+          "documentStyle": "pdf",
+          "site": "Europe_PMC",
+          "availability": "Free",
+          "availabilityCode": "F",
+          "url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+        }
+      ],
+      "expected_url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+    },
+    {
+      "name": "subscription_required_pdf_is_rejected",
+      "fullTextUrl": [
+        {
+          "documentStyle": "pdf",
+          "site": "PubMedCentral",
+          "availability": "Subscription required",
+          "availabilityCode": "S",
+          "url": "https://example.org/paywalled.pdf"
+        }
+      ],
+      "expected_url": null
+    },
+    {
+      "name": "unrecognised_code_is_rejected_without_consulting_label",
+      "fullTextUrl": [
+        {
+          "documentStyle": "pdf",
+          "site": "Europe_PMC",
+          "availability": "Free",
+          "availabilityCode": "Z",
+          "url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+        }
+      ],
+      "expected_url": null
+    },
+    {
+      "name": "missing_code_falls_back_to_open_access_label",
+      "fullTextUrl": [
+        {
+          "documentStyle": "pdf",
+          "site": "Europe_PMC",
+          "availability": "Open access",
+          "url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+        }
+      ],
+      "expected_url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+    },
+    {
+      "name": "missing_code_falls_back_to_rejecting_subscription_label",
+      "fullTextUrl": [
+        {
+          "documentStyle": "pdf",
+          "site": "PubMedCentral",
+          "availability": "Subscription required",
+          "url": "https://example.org/paywalled.pdf"
+        }
+      ],
+      "expected_url": null
+    },
+    {
+      "name": "empty_code_falls_back_to_label",
+      "fullTextUrl": [
+        {
+          "documentStyle": "pdf",
+          "site": "Europe_PMC",
+          "availability": "Open access",
+          "availabilityCode": "",
+          "url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+        }
+      ],
+      "expected_url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+    },
+    {
+      "name": "entry_with_neither_code_nor_label_is_rejected",
+      "fullTextUrl": [
+        {
+          "documentStyle": "pdf",
+          "site": "Europe_PMC",
+          "url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+        }
+      ],
+      "expected_url": null
+    },
+    {
+      "name": "non_pdf_document_style_is_ignored",
+      "fullTextUrl": [
+        {
+          "documentStyle": "html",
+          "site": "Europe_PMC",
+          "availability": "Open access",
+          "availabilityCode": "OA",
+          "url": "https://europepmc.org/article/MED/1"
+        }
+      ],
+      "expected_url": null
+    },
+    {
+      "name": "picks_first_free_pdf_among_mixed_entries",
+      "fullTextUrl": [
+        {
+          "documentStyle": "html",
+          "site": "Europe_PMC",
+          "availability": "Open access",
+          "availabilityCode": "OA",
+          "url": "https://europepmc.org/article/MED/1"
+        },
+        {
+          "documentStyle": "pdf",
+          "site": "Publisher",
+          "availability": "Subscription required",
+          "availabilityCode": "S",
+          "url": "https://example.org/paywalled.pdf"
+        },
+        {
+          "documentStyle": "pdf",
+          "site": "Europe_PMC",
+          "availability": "Open access",
+          "availabilityCode": "OA",
+          "url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+        }
+      ],
+      "expected_url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+    },
+    {
+      "name": "missing_full_text_url_list_yields_nothing",
+      "fullTextUrl": null,
+      "expected_url": null
+    },
+    {
+      "name": "entry_without_url_is_skipped",
+      "fullTextUrl": [
+        {
+          "documentStyle": "pdf",
+          "site": "Europe_PMC",
+          "availability": "Open access",
+          "availabilityCode": "OA"
+        },
+        {
+          "documentStyle": "pdf",
+          "site": "Europe_PMC",
+          "availability": "Free",
+          "availabilityCode": "F",
+          "url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+        }
+      ],
+      "expected_url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+    },
+    {
+      "name": "open_access_code_without_availability_label_is_accepted",
+      "fullTextUrl": [
+        {
+          "documentStyle": "pdf",
+          "site": "Europe_PMC",
+          "availabilityCode": "OA",
+          "url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+        }
+      ],
+      "expected_url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+    },
+    {
+      "name": "open_access_code_decides_over_contrary_label",
+      "fullTextUrl": [
+        {
+          "documentStyle": "pdf",
+          "site": "Europe_PMC",
+          "availability": "Subscription required",
+          "availabilityCode": "OA",
+          "url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+        }
+      ],
+      "expected_url": "https://europepmc.org/articles/PMC1234567?pdf=render"
+    }
+  ]
+}

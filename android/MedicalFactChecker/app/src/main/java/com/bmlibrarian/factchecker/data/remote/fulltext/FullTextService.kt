@@ -350,9 +350,7 @@ class FullTextService @Inject constructor(
                     } else {
                         null
                     },
-                    pdfRenderUrl = article.fullTextUrlList?.fullTextUrl
-                        ?.firstOrNull { it.documentStyle == "pdf" && it.availability == "Free" }
-                        ?.url,
+                    pdfRenderUrl = EuropePmcFreePdf.extractUrl(article.fullTextUrlList?.fullTextUrl),
                     matchedARecord = true
                 )
             }

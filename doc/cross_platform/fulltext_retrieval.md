@@ -1819,6 +1819,8 @@ article by identifier, and **Europe PMC answers only when the identifier is
 asked for in its own terms**. A query that names the wrong source matches
 nothing, which is indistinguishable from the article not existing.
 
+Which `fullTextUrl` entry of the answer is the free PDF render URL (its `availabilityCode`, else its `availability` label) is pinned by `fulltext_parity/europepmc_free_pdf.json` (bmlib#79), which all three suites read.
+
 ```pseudocode
 # Most specific first, in the same order the cache key ladder climbs.
 function identifier_queries(pmid, pmc_id, doi, stated_kind) -> [Query]:

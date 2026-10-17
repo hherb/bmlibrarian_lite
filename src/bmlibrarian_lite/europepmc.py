@@ -51,6 +51,10 @@ import requests
 from urllib3.util.retry import Retry
 
 from .constants import (
+    EUROPE_PMC_FREE_PDF_CODES,
+    EUROPE_PMC_FREE_PDF_LABELS,
+    EUROPE_PMC_PDF_DOCUMENT_STYLE,
+    EUROPE_PMC_UNAVAILABLE_PDF_CODES,
     EUROPEPMC_COUNT_PAGE_SIZE,
     EUROPEPMC_DEFAULT_FILTERS,
     EUROPEPMC_INITIAL_CURSOR,
@@ -127,13 +131,90 @@ def _validated_search_page(data: object) -> dict[str, Any]:
     return data
 
 
-def _extract_free_pdf_url(result: dict) -> str | None:
+def _text_field(entry: dict[str, Any], key: str) -> str | None:
+    """Read a ``fullTextUrl`` entry's string field; anything else is absent.
+
+    Europe PMC's JSON is untrusted. A list or object where a string belongs
+    would raise TypeError on a set-membership test (it is unhashable) and
+    take the whole result down with it; a number would be logged as an
+    unrecognised code. Either way it is not a value this build can judge, so
+    it counts as missing.
+
+    Args:
+        entry: One ``fullTextUrl`` entry, untrusted.
+        key: The field to read.
+
+    Returns:
+        The field's value if it is a string, else None.
+    """
+    value = entry.get(key)
+    return value if isinstance(value, str) else None
+
+
+def _is_free_to_download(entry: dict[str, Any]) -> bool:
+    """Whether a ``fullTextUrl`` entry is one the app may download (bmlib#79).
+
+    A code in ``EUROPE_PMC_FREE_PDF_CODES`` admits the entry. An entry with
+    no code, or an empty one, is judged by its ``availability`` label being
+    in ``EUROPE_PMC_FREE_PDF_LABELS``. A code that is present but
+    unrecognised is refused WITHOUT reading the label: a future code this
+    build has never evaluated must not be admitted because its display
+    string happens to read "Free".
+
+    A code or label that is not a string counts as absent
+    (:func:`_text_field`).
+
+    Args:
+        entry: One ``fullTextUrl`` entry, untrusted.
+
+    Returns:
+        True if the entry is a free download.
+    """
+    code = _text_field(entry, "availabilityCode")
+    if code:
+        return code in EUROPE_PMC_FREE_PDF_CODES
+    return _text_field(entry, "availability") in EUROPE_PMC_FREE_PDF_LABELS
+
+
+def _report_rejected_pdf_entry(entry: dict[str, Any]) -> None:
+    """Log a PDF entry that was seen and not taken.
+
+    A recognised paywall code is the allow-list working as designed and is
+    logged at debug. A code in neither the allow-list nor the known-paywalled
+    set means Europe PMC has published a value this build has never
+    evaluated, so the PDF was refused fail-closed (how bmlib#79 happened):
+    that is a WARNING naming the code and its label.
+
+    Args:
+        entry: The rejected ``fullTextUrl`` entry.
+    """
+    code = _text_field(entry, "availabilityCode")
+    label = entry.get("availability")
+    if code and code not in EUROPE_PMC_UNAVAILABLE_PDF_CODES:
+        logger.warning(
+            "Unrecognised Europe PMC availabilityCode %r (availability=%r); "
+            "the PDF was rejected fail-closed. If this is a free tier, add "
+            "it to EUROPE_PMC_FREE_PDF_CODES.",
+            code,
+            label,
+        )
+        return
+    logger.debug(
+        "Skipping Europe PMC PDF entry: availability=%r code=%r",
+        label,
+        entry.get("availabilityCode"),
+    )
+
+
+def _extract_free_pdf_url(result: dict[str, Any]) -> str | None:
     """Extract free PDF URL from Europe PMC fullTextUrlList.
 
     The Europe PMC search API returns a fullTextUrlList with entries for
     different document formats. This extracts the first free PDF URL,
     which uses the ``?pdf=render`` pattern for articles that have a PDF
-    in PMC but may not have JATS XML available.
+    in PMC but may not have JATS XML available. What is free is decided by
+    :func:`_is_free_to_download` (the shared contract
+    ``doc/cross_platform/fulltext_parity/europepmc_free_pdf.json``).
 
     Args:
         result: Raw result dict from Europe PMC API
@@ -142,9 +223,14 @@ def _extract_free_pdf_url(result: dict) -> str | None:
         URL string for the free PDF, or None if not available
     """
     for entry in result.get("fullTextUrlList", {}).get("fullTextUrl", []):
-        if (entry.get("documentStyle") == "pdf"
-                and entry.get("availability") == "Free"):
-            return entry.get("url")
+        if entry.get("documentStyle") != EUROPE_PMC_PDF_DOCUMENT_STYLE:
+            continue
+        if not _is_free_to_download(entry):
+            _report_rejected_pdf_entry(entry)
+            continue
+        url = entry.get("url")
+        if url:
+            return url
     return None
 
 
@@ -989,7 +1075,7 @@ class EuropePMCClient:
 
         return " AND ".join(filters)
 
-    def _parse_search_result(self, result: dict) -> ArticleInfo | None:
+    def _parse_search_result(self, result: dict[str, Any]) -> ArticleInfo | None:
         """Parse a single search result into ArticleInfo.
 
         Args:

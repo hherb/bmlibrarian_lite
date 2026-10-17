@@ -271,8 +271,10 @@ data class FullTextUrlEntry(
     val site: String? = null,
     /** URL to the document. */
     val url: String? = null,
-    /** Availability status (e.g., "Free", "Subscription required"). */
-    val availability: String? = null
+    /** Availability display string (e.g., "Open access", "Free", "Subscription required"). */
+    val availability: String? = null,
+    /** Availability code (e.g., "OA", "F", "S"); the allow-list's key (bmlib#79). */
+    val availabilityCode: String? = null
 )
 
 /**
