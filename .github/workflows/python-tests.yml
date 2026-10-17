@@ -77,6 +77,30 @@ jobs:
         # instead of a silently-ignored no-op.
         run: pytest tests/ -m "not integration" --strict-markers
 
+      # The ledger check runs after the tests, and whether or not they passed,
+      # so a ledger miss never hides the test results and a test failure never
+      # hides a ledger miss.
+      - name: Read the ledger's bmlib commit
+        # The ledger holds the full SHA (tests/test_bmlib_ledger.py pins its
+        # shape), which actions/checkout requires of a commit ref, so bumping
+        # it there is how a sync starts and nothing resolves it.
+        if: ${{ !cancelled() }}
+        id: bmlib_commit
+        run: |
+          echo "sha=$(python -c "import json; print(json.load(open('doc/cross_platform/bmlib_sync/ledger.json'))['bmlib_commit'])")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        # hherb/bmlib is public, so no token beyond the job's own is needed.
+        if: ${{ !cancelled() }}
+        with:
+          repository: hherb/bmlib
+          ref: ${{ steps.bmlib_commit.outputs.sha }}
+          path: bmlib-checkout
+
+      - name: Every bmlib change has a ledger entry
+        if: ${{ !cancelled() }}
+        run: python scripts/check_bmlib_ledger.py --bmlib bmlib-checkout
+
   lint-delta:
     name: No new ruff or mypy findings
     # Pull requests only. On a push to master the merge base is the commit

@@ -1,0 +1,1630 @@
+{
+  "schema": 1,
+  "bmlib_commit": "f4b7c5291d55c5bf825939b14662da5785fa96af",
+  "from_bmlib": [
+    {
+      "id": "lite:pubmed-articleid-reference-list",
+      "title": "PubMed `ArticleId` from the reference list",
+      "python": "owed",
+      "swift": "ported",
+      "android": "owed",
+      "issue": "#404",
+      "note": "WP T1. Android lite issue #404."
+    },
+    {
+      "id": "bmlib#474",
+      "title": "The PubMed record read is the one asked about",
+      "python": "owed",
+      "swift": "owed",
+      "android": "n/a",
+      "issue": null,
+      "note": "WP T1. Partial on swift. Android has no PubMed record read of this shape (audit: not applicable)."
+    },
+    {
+      "id": "bmlib#470",
+      "title": "PMID canonical ASCII digits",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP T2. Partial on swift."
+    },
+    {
+      "id": "bmlib#472",
+      "title": "PMID canonical ASCII digits; PMC ids ASCII",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP T2. PMID digits owed on all three; PMC ids ASCII still owes python (leftover `pdf_discovery` `\\d`) and swift (leftover `isNumber`); android has the PMC half."
+    },
+    {
+      "id": "bmlib#478",
+      "title": "PMID canonical ASCII digits",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP T2. Partial on swift."
+    },
+    {
+      "id": "lite:out-of-range-scores",
+      "title": "Android invents score 3; Swift bool and `1e300` scores",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP T3. Partial on swift."
+    },
+    {
+      "id": "bmlib#295",
+      "title": "Quality JSON narrowing; NaN read as 1.0; string flags",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "WP T4."
+    },
+    {
+      "id": "bmlib#320",
+      "title": "Quality JSON narrowing; NaN read as 1.0; string flags",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "WP T4."
+    },
+    {
+      "id": "bmlib#79",
+      "title": "Europe PMC free-PDF allow-list",
+      "python": "owed",
+      "swift": "ported",
+      "android": "owed",
+      "issue": null,
+      "note": "WP T5."
+    },
+    {
+      "id": "bmlib#111",
+      "title": "Author role on the contrib-group",
+      "python": "owed",
+      "swift": "ported",
+      "android": "owed",
+      "issue": null,
+      "note": "WP T6."
+    },
+    {
+      "id": "bmlib:474-europepmc-pmid-only-lookup",
+      "title": "Europe PMC PMID-only lookup within `SRC:MED`",
+      "python": "ported",
+      "swift": "ported",
+      "android": "ported",
+      "issue": null,
+      "note": "WP —."
+    },
+    {
+      "id": "bmlib:s2.5-trial-ids-from-full-text",
+      "title": "Trial ids from the full text",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 3.1."
+    },
+    {
+      "id": "bmlib:s2.1-pubmed-coi-grantlist",
+      "title": "PubMed `CoiStatement` / `GrantList`",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 3.2."
+    },
+    {
+      "id": "bmlib:s2.3-fulltext-on-transparency-path",
+      "title": "Full text on the transparency path",
+      "python": "ported",
+      "swift": "ported",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 3.3."
+    },
+    {
+      "id": "bmlib#206",
+      "title": "Partly answered posted results",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 3.4. Partial on python, swift, android."
+    },
+    {
+      "id": "bmlib#209",
+      "title": "A wrong-typed value is reported",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 3.5."
+    },
+    {
+      "id": "bmlib#226",
+      "title": "A wrong-typed value is reported",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 3.5."
+    },
+    {
+      "id": "bmlib#199",
+      "title": "No JSON shape escapes `analyze()`",
+      "python": "owed",
+      "swift": "ported",
+      "android": "ported",
+      "issue": null,
+      "note": "WP 3.7. Partial on python."
+    },
+    {
+      "id": "bmlib#284",
+      "title": "Structured funding (`award-group`)",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1."
+    },
+    {
+      "id": "bmlib#257",
+      "title": "Funding and front-matter statements",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.4."
+    },
+    {
+      "id": "bmlib#230",
+      "title": "Funding and front-matter statements",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.4."
+    },
+    {
+      "id": "bmlib#234",
+      "title": "Funding and front-matter statements",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.4."
+    },
+    {
+      "id": "bmlib#261",
+      "title": "Article year, metadata, empty repeated elements",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.3."
+    },
+    {
+      "id": "bmlib#254",
+      "title": "Article year, metadata, empty repeated elements",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.3."
+    },
+    {
+      "id": "bmlib#259",
+      "title": "Article year, metadata, empty repeated elements",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.3."
+    },
+    {
+      "id": "bmlib#272",
+      "title": "Article year, metadata, empty repeated elements",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.3."
+    },
+    {
+      "id": "bmlib#243",
+      "title": "Cell text and object metadata stay out of prose",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.3."
+    },
+    {
+      "id": "bmlib#241",
+      "title": "Cell text and object metadata stay out of prose",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.3."
+    },
+    {
+      "id": "bmlib#248",
+      "title": "Cell text and object metadata stay out of prose",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.3."
+    },
+    {
+      "id": "bmlib#390",
+      "title": "NLM 2.x `<citation>`",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.2."
+    },
+    {
+      "id": "bmlib#406",
+      "title": "Reference fields",
+      "python": "n/a",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.2."
+    },
+    {
+      "id": "bmlib#397",
+      "title": "Reference fields",
+      "python": "n/a",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.2."
+    },
+    {
+      "id": "bmlib#413",
+      "title": "Reference fields",
+      "python": "n/a",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.2."
+    },
+    {
+      "id": "bmlib#414",
+      "title": "Reference fields",
+      "python": "n/a",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.2."
+    },
+    {
+      "id": "bmlib#415",
+      "title": "Reference fields",
+      "python": "n/a",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.2."
+    },
+    {
+      "id": "bmlib#382",
+      "title": "Reference fields",
+      "python": "n/a",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.2."
+    },
+    {
+      "id": "bmlib#276",
+      "title": "Reference fields",
+      "python": "n/a",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.2."
+    },
+    {
+      "id": "bmlib#270",
+      "title": "Reference fields",
+      "python": "n/a",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.2."
+    },
+    {
+      "id": "bmlib#385",
+      "title": "Reference fields",
+      "python": "n/a",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.2."
+    },
+    {
+      "id": "bmlib#149",
+      "title": "Reference fields",
+      "python": "n/a",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.2."
+    },
+    {
+      "id": "bmlib#407",
+      "title": "`citation-alternatives`",
+      "python": "n/a",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.2. Partial on swift, android."
+    },
+    {
+      "id": "bmlib#265",
+      "title": "`elocation-id`",
+      "python": "n/a",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.3."
+    },
+    {
+      "id": "bmlib#162",
+      "title": "Unnumbered exhibits; table as a graphic",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.3."
+    },
+    {
+      "id": "bmlib#127",
+      "title": "Unnumbered exhibits; table as a graphic",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.3."
+    },
+    {
+      "id": "bmlib#228",
+      "title": "Definitions",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.3."
+    },
+    {
+      "id": "bmlib#224",
+      "title": "Unsectioned back matter; container heading",
+      "python": "ported",
+      "swift": "ported",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.5."
+    },
+    {
+      "id": "bmlib#231",
+      "title": "Unsectioned back matter; container heading",
+      "python": "ported",
+      "swift": "ported",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.5."
+    },
+    {
+      "id": "bmlib#110",
+      "title": "Sub-article; reviewer disclosure",
+      "python": "ported",
+      "swift": "ported",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.5."
+    },
+    {
+      "id": "bmlib#119",
+      "title": "Sub-article; reviewer disclosure",
+      "python": "ported",
+      "swift": "ported",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.5."
+    },
+    {
+      "id": "bmlib#115",
+      "title": "Nested exhibits, labels, captions, graphics",
+      "python": "owed",
+      "swift": "ported",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.5. Partial on python."
+    },
+    {
+      "id": "bmlib#116",
+      "title": "Nested exhibits, labels, captions, graphics",
+      "python": "owed",
+      "swift": "ported",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.5. Partial on python."
+    },
+    {
+      "id": "bmlib#117",
+      "title": "Nested exhibits, labels, captions, graphics",
+      "python": "owed",
+      "swift": "ported",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.5. Partial on python."
+    },
+    {
+      "id": "bmlib#123",
+      "title": "Nested exhibits, labels, captions, graphics",
+      "python": "owed",
+      "swift": "ported",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.5. Partial on python."
+    },
+    {
+      "id": "bmlib#125",
+      "title": "Nested exhibits, labels, captions, graphics",
+      "python": "owed",
+      "swift": "ported",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.5. Partial on python."
+    },
+    {
+      "id": "bmlib#130",
+      "title": "Nested exhibits, labels, captions, graphics",
+      "python": "owed",
+      "swift": "ported",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.5. Partial on python."
+    },
+    {
+      "id": "bmlib#124",
+      "title": "Exhibit footnotes",
+      "python": "owed",
+      "swift": "ported",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.5."
+    },
+    {
+      "id": "bmlib#423",
+      "title": "Note markers and rosters out of titles and names",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.2."
+    },
+    {
+      "id": "bmlib#425",
+      "title": "Note markers and rosters out of titles and names",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.2."
+    },
+    {
+      "id": "bmlib#429",
+      "title": "Note markers and rosters out of titles and names",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.1 / 4.2."
+    },
+    {
+      "id": "bmlib#172",
+      "title": "Re-render when the renderer changes",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.6."
+    },
+    {
+      "id": "bmlib#147",
+      "title": "Formulas",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 4.7. Partial on python, swift, android."
+    },
+    {
+      "id": "bmlib#457",
+      "title": "Europe PMC 500 for closed access",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 5.1."
+    },
+    {
+      "id": "bmlib#462",
+      "title": "Europe PMC 500 for closed access",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 5.1."
+    },
+    {
+      "id": "bmlib#304",
+      "title": "A stale caller PMC ID gives way",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 5.2."
+    },
+    {
+      "id": "bmlib:0.8.0-pdf-section-segmentation",
+      "title": "PDF section segmentation",
+      "python": "owed",
+      "swift": "owed",
+      "android": "n/a",
+      "issue": null,
+      "note": "WP 5.3. Partial on python."
+    },
+    {
+      "id": "lite:pubmed-year-otherabstract",
+      "title": "PubMed year (#402), `OtherAbstract` (#403)",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 5.4. Partial on python."
+    },
+    {
+      "id": "bmlib#33",
+      "title": "JSON span locator and repair",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 6.1. bmlib 0.9.x."
+    },
+    {
+      "id": "bmlib#300",
+      "title": "Truncated output detected",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 6.2."
+    },
+    {
+      "id": "bmlib#302",
+      "title": "Small LLM defects",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "WP 6.3."
+    },
+    {
+      "id": "bmlib#308",
+      "title": "Small LLM defects",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "WP 6.3."
+    },
+    {
+      "id": "bmlib#313",
+      "title": "Small LLM defects",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "WP 6.3."
+    },
+    {
+      "id": "bmlib#315",
+      "title": "Small LLM defects",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "WP 6.3."
+    },
+    {
+      "id": "bmlib:0.7.0-retraction-watch",
+      "title": "Retraction Watch",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 7."
+    },
+    {
+      "id": "bmlib:0.8.0-citation-styles",
+      "title": "Citation styles",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 7."
+    },
+    {
+      "id": "bmlib:0.7.0-context-processor-gemini-think-tool-calling",
+      "title": "`context_processor`; Gemini; `think`; tool calling",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "WP 7."
+    },
+    {
+      "id": "bmlib#73",
+      "title": "A default template is installed atomically, or not at all",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Server-side module (publications.sync, db or templates); the apps have none."
+    },
+    {
+      "id": "bmlib#86",
+      "title": "`docs/manual/llm.md` documented `LLMClient.generate` and `LLMClient.embed` twice each",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib manual correction."
+    },
+    {
+      "id": "bmlib#96",
+      "title": "A PubMed day larger than 9,999 records is now fetched in parts, not walked into a wall",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Server-side module (publications.sync, db or templates); the apps have none."
+    },
+    {
+      "id": "bmlib#103",
+      "title": "`install_defaults()` says why it reserves no `NAME_MAX` headroom",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Server-side module (publications.sync, db or templates); the apps have none."
+    },
+    {
+      "id": "bmlib#105",
+      "title": "Four ways a partitioned PubMed day could still report success it did not have",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Server-side module (publications.sync, db or templates); the apps have none."
+    },
+    {
+      "id": "bmlib#112",
+      "title": "`\"plc\"` and `\"pty\"` join `_INDUSTRY_WORDS`, and the funder-matching comments now state the rule they are actua",
+      "python": "declined",
+      "swift": "declined",
+      "android": "declined",
+      "issue": null,
+      "note": "bmlib adds 'pty' to the industry words; lite declined it: no corpus evidence (plan WP 4, bmlib#216 decision)."
+    },
+    {
+      "id": "bmlib#120",
+      "title": "A contributor whose name arrived undivided was dropped",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Undivided/collab contributor names dropped; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#121",
+      "title": "A JATS parse that yields no authors now says so",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Zero-author parse reported as such; unaudited at seeding (Swift has JATSParseWarnings)."
+    },
+    {
+      "id": "bmlib#129",
+      "title": "A malformed `colspan` cost the whole article",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Malformed colspan costs the whole article; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#131",
+      "title": "`scripts/sample_jats_exhibits.py`",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#132",
+      "title": "Both JATS corpora are redrawn from a named public artifact, and the walk is scoped the way the parser is",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's JATS corpora redrawn; lite's cross-platform JATS corpus is its own."
+    },
+    {
+      "id": "bmlib#134",
+      "title": "An end-of-parse audit for the JATS handler",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib parser-internal audit, counter or log wording; no stored value moves."
+    },
+    {
+      "id": "bmlib#135",
+      "title": "The table side of bmlib#117's ranking is counted, and answered",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#138",
+      "title": "No number is invented for an exhibit the publisher did not number",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's JATS corpora redrawn; lite's cross-platform JATS corpus is its own."
+    },
+    {
+      "id": "bmlib#140",
+      "title": "A contributor whose name arrived undivided was dropped",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Undivided/collab contributor names dropped; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#146",
+      "title": "A `<mixed-citation>`'s rendered string lost every non-inline child",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "mixed-citation string loses non-inline children; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#151",
+      "title": "The prospective half of `_inside_mixed_citation` is mechanised",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib parser-internal audit, counter or log wording; no stored value moves."
+    },
+    {
+      "id": "bmlib#152",
+      "title": "The article's own metadata is read only where the article deposits it",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Article metadata read only where deposited; WP 4.1 / 4.3 with bmlib#254, bmlib#259."
+    },
+    {
+      "id": "bmlib#158",
+      "title": "Both JATS corpora are redrawn from a named public artifact, and the walk is scoped the way the parser is",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's JATS corpora redrawn; lite's cross-platform JATS corpus is its own."
+    },
+    {
+      "id": "bmlib#160",
+      "title": "A body truncated between tags was scanned as a complete article",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Truncated or malformed full-text body refused before analysis; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#161",
+      "title": "A refused full text now leaves a trace in the stored result",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's stored-result status fields (FullTextStatus, PubMed step); lite reports shortfalls through its own analysis_failures/search_failures."
+    },
+    {
+      "id": "bmlib#164",
+      "title": "The figure-side graphic walk counted what the parser does not route",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#165",
+      "title": "Six ways the exhibit sampler reported more than it measured",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#170",
+      "title": "Six ways the exhibit sampler reported more than it measured",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#181",
+      "title": "bmlib#117's thumbnail share is reported over its own population",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#183",
+      "title": "Every Europe PMC full-text fetch 404'd, so the module scored every open-access paper on its abstract",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Truncated or malformed full-text body refused before analysis; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#184",
+      "title": "Every Europe PMC full-text fetch 404'd, so the module scored every open-access paper on its abstract",
+      "python": "equivalent",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": null,
+      "note": "bmlib built a two-segment fullTextXML path; all three ports use the single-segment form."
+    },
+    {
+      "id": "bmlib#186",
+      "title": "The unclosed-region refusal names the region left open",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib parser-internal audit, counter or log wording; no stored value moves."
+    },
+    {
+      "id": "bmlib#187",
+      "title": "An attempt that got no answer now says so, instead of blaming Europe PMC",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's stored-result status fields (FullTextStatus, PubMed step); lite reports shortfalls through its own analysis_failures/search_failures."
+    },
+    {
+      "id": "bmlib#188",
+      "title": "A request whose answer is known before it leaves is not made",
+      "python": "equivalent",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Python gates on has_fulltext_xml (no PMID asked at fullTextXML); mobile not audited."
+    },
+    {
+      "id": "bmlib#190",
+      "title": "An attempt that got no answer now says so, instead of blaming Europe PMC",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's stored-result status fields (FullTextStatus, PubMed step); lite reports shortfalls through its own analysis_failures/search_failures."
+    },
+    {
+      "id": "bmlib#191",
+      "title": "An attempt that got no answer now says so, instead of blaming Europe PMC",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's stored-result status fields (FullTextStatus, PubMed step); lite reports shortfalls through its own analysis_failures/search_failures."
+    },
+    {
+      "id": "bmlib#193",
+      "title": "Every dropped API response now leaves a line, and an outage no longer looks like an answer",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's stored-result status fields (FullTextStatus, PubMed step); lite reports shortfalls through its own analysis_failures/search_failures."
+    },
+    {
+      "id": "bmlib#194",
+      "title": "Every dropped API response now leaves a line, and an outage no longer looks like an answer",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's stored-result status fields (FullTextStatus, PubMed step); lite reports shortfalls through its own analysis_failures/search_failures."
+    },
+    {
+      "id": "bmlib#196",
+      "title": "`publications.sync()` sends the library's one `User-Agent`",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Server-side module (publications.sync, db or templates); the apps have none."
+    },
+    {
+      "id": "bmlib#198",
+      "title": "A stored result now says what happened, once per claim",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Partly-answered posted results, once per claim; WP 3.4 with bmlib#206."
+    },
+    {
+      "id": "bmlib#200",
+      "title": "`TransparencyAnalyzer._request` is typed `httpx.Response | None`",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib internal typing."
+    },
+    {
+      "id": "bmlib#202",
+      "title": "A stored result now says what happened, once per claim",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Partly-answered posted results, once per claim; WP 3.4 with bmlib#206."
+    },
+    {
+      "id": "bmlib#203",
+      "title": "A stored result now says what happened, once per claim",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Partly-answered posted results, once per claim; WP 3.4 with bmlib#206."
+    },
+    {
+      "id": "bmlib#204",
+      "title": "The sampler now reads the *shape* of a 200 body, not only its status",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#207",
+      "title": "The sampler now reads the *shape* of a 200 body, not only its status",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#210",
+      "title": "An absent `hasResults` returning `False` is settled, not deferred",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#211",
+      "title": "The sampler now reads the *shape* of a 200 body, not only its status",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#212",
+      "title": "A stratum that answers and contributes no record is a hole too",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#214",
+      "title": "`scripts/sample_api_failures.py` probes what `analyze()` sends and scores only the remote's failures as the re",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#215",
+      "title": "`scripts/sample_api_failures.py` probes what `analyze()` sends and scores only the remote's failures as the re",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#216",
+      "title": "The sampler probes the address it categorises",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#217",
+      "title": "`scripts/sample_api_failures.py` derives a probe's bucket instead of storing it, and its four vocabularies are",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#218",
+      "title": "A PubMed body that parses and carries no `PubmedArticle` says which kind it is",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib parser-internal audit, counter or log wording; no stored value moves."
+    },
+    {
+      "id": "bmlib#221",
+      "title": "`scripts/sample_api_failures.py` probes what `analyze()` sends and scores only the remote's failures as the re",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#223",
+      "title": "`scripts/sample_api_failures.py` derives a probe's bucket instead of storing it, and its four vocabularies are",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#227",
+      "title": "A stored result says what became of the PubMed step",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's stored-result status fields (FullTextStatus, PubMed step); lite reports shortfalls through its own analysis_failures/search_failures."
+    },
+    {
+      "id": "bmlib#238",
+      "title": "A footnote block's own heading and image are counted when they are dropped",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib parser-internal audit, counter or log wording; no stored value moves."
+    },
+    {
+      "id": "bmlib#245",
+      "title": "Cell text that reaches no table leaves a line",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib parser-internal audit, counter or log wording; no stored value moves."
+    },
+    {
+      "id": "bmlib#249",
+      "title": "Another work's parts are no longer read as this work's, and stay in the text that prints them",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Another work's parts not read as this work's; WP 4.2 / 4.3 with bmlib#270; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#255",
+      "title": "A citation printed in prose stays in its sentence where it is typeset",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "A citation printed in prose stays in its sentence; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#258",
+      "title": "Another work's parts are no longer read as this work's, and stay in the text that prints them",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Another work's parts not read as this work's; WP 4.2 / 4.3 with bmlib#270; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#266",
+      "title": "Another work's parts are no longer read as this work's, and stay in the text that prints them",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Another work's parts not read as this work's; WP 4.2 / 4.3 with bmlib#270; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#267",
+      "title": "Another work's parts are no longer read as this work's, and stay in the text that prints them",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Another work's parts not read as this work's; WP 4.2 / 4.3 with bmlib#270; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#268",
+      "title": "One structured component is never a citation",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "One structured component is never a citation; WP 4.2."
+    },
+    {
+      "id": "bmlib#271",
+      "title": "Another work's parts are no longer read as this work's, and stay in the text that prints them",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Another work's parts not read as this work's; WP 4.2 / 4.3 with bmlib#270; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#292",
+      "title": "Ten labels in the funder corpus now agree with its own definitions",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib funder-corpus labels and docs; lite's own corpus is audited separately."
+    },
+    {
+      "id": "bmlib#294",
+      "title": "The rule-based extractors read a grouped count whole, credit a power or CI bonus only on evidence of one, and ",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's standalone rule-based extractors; lite has none."
+    },
+    {
+      "id": "bmlib#296",
+      "title": "Four small wrong stored values from the Rust port's audit",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Small wrong stored values from the Rust port audit; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#297",
+      "title": "The rule-based extractors read a grouped count whole, credit a power or CI bonus only on evidence of one, and ",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's standalone rule-based extractors; lite has none."
+    },
+    {
+      "id": "bmlib#298",
+      "title": "The rule-based extractors read a grouped count whole, credit a power or CI bonus only on evidence of one, and ",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's standalone rule-based extractors; lite has none."
+    },
+    {
+      "id": "bmlib#299",
+      "title": "Seven `llm/` and `agents/` defects the Rust port's audit filed",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "llm/agents defect from the Rust port audit; Python only, like bmlib#302 and bmlib#308."
+    },
+    {
+      "id": "bmlib#301",
+      "title": "Seven `llm/` and `agents/` defects the Rust port's audit filed",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "llm/agents defect from the Rust port audit; Python only, like bmlib#302 and bmlib#308."
+    },
+    {
+      "id": "bmlib#303",
+      "title": "Seven `llm/` and `agents/` defects the Rust port's audit filed",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "llm/agents defect from the Rust port audit; Python only, like bmlib#302 and bmlib#308."
+    },
+    {
+      "id": "bmlib#305",
+      "title": "The Rust port's `fulltext` group: a caller's PMC ID, a cached PDF's abstract, and the cache key",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Fulltext group of the Rust port audit (PDF abstract, cache key); unaudited at seeding."
+    },
+    {
+      "id": "bmlib#306",
+      "title": "Four small wrong stored values from the Rust port's audit",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Small wrong stored values from the Rust port audit; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#307",
+      "title": "Four small wrong stored values from the Rust port's audit",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Small wrong stored values from the Rust port audit; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#309",
+      "title": "The Rust port's `fulltext` group: a caller's PMC ID, a cached PDF's abstract, and the cache key",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Fulltext group of the Rust port audit (PDF abstract, cache key); unaudited at seeding."
+    },
+    {
+      "id": "bmlib#310",
+      "title": "Every reader of a model's JSON in `quality/` narrows each value to the type its field holds",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "quality/ JSON narrowing; Python only, WP T4 with bmlib#295, bmlib#320."
+    },
+    {
+      "id": "bmlib#312",
+      "title": "Every reader of a model's JSON in `quality/` narrows each value to the type its field holds",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "quality/ JSON narrowing; Python only, WP T4 with bmlib#295, bmlib#320."
+    },
+    {
+      "id": "bmlib#317",
+      "title": "Every reader of a model's JSON in `quality/` narrows each value to the type its field holds",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "quality/ JSON narrowing; Python only, WP T4 with bmlib#295, bmlib#320."
+    },
+    {
+      "id": "bmlib#318",
+      "title": "Every reader of a model's JSON in `quality/` narrows each value to the type its field holds",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "quality/ JSON narrowing; Python only, WP T4 with bmlib#295, bmlib#320."
+    },
+    {
+      "id": "bmlib#319",
+      "title": "Every reader of a model's JSON in `quality/` narrows each value to the type its field holds",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "quality/ JSON narrowing; Python only, WP T4 with bmlib#295, bmlib#320."
+    },
+    {
+      "id": "bmlib#323",
+      "title": "The `biorxiv` and `medrxiv` sources read bioRxiv's `/pubs` endpoint, and a day now means the day a preprint's ",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bioRxiv/medRxiv source endpoint of bmlib's publications module; lite reads preprints through Europe PMC."
+    },
+    {
+      "id": "bmlib#325",
+      "title": "The `biorxiv` and `medrxiv` sources read bioRxiv's `/pubs` endpoint, and a day now means the day a preprint's ",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bioRxiv/medRxiv source endpoint of bmlib's publications module; lite reads preprints through Europe PMC."
+    },
+    {
+      "id": "bmlib#346",
+      "title": "A re-fetch no longer settles an unfinished day below half its peak",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Server-side module (publications.sync, db or templates); the apps have none."
+    },
+    {
+      "id": "bmlib#367",
+      "title": "`extract_study_type` reads an RCT as its abstract describes itself, and no longer reads a review of RCTs as on",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's standalone rule-based extractors; lite has none."
+    },
+    {
+      "id": "bmlib#368",
+      "title": "The extractor audit's draw is a committed sampler, and two committed corpora hold what `extractors.py` returns",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#386",
+      "title": "bioRxiv's `/details` answers again, and the docs said it answers nothing",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bioRxiv/medRxiv source endpoint of bmlib's publications module; lite reads preprints through Europe PMC."
+    },
+    {
+      "id": "bmlib#391",
+      "title": "A citation printed in prose stays in its sentence where it is typeset",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "A citation printed in prose stays in its sentence; unaudited at seeding."
+    },
+    {
+      "id": "bmlib#417",
+      "title": "`scripts/measure_jats_prose_names.py` reads a `<citation-alternatives>` group as the parser does, and runs the",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#446",
+      "title": "A row an earlier bmlib wrote of a source settling at once is held to its own count, and two syncs of one day t",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Server-side module (publications.sync, db or templates); the apps have none."
+    },
+    {
+      "id": "bmlib#447",
+      "title": "A row an earlier bmlib wrote of a source settling at once is held to its own count, and two syncs of one day t",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Server-side module (publications.sync, db or templates); the apps have none."
+    },
+    {
+      "id": "bmlib#449",
+      "title": "`transaction()` refuses a connection in a mode it cannot honour",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Server-side module (publications.sync, db or templates); the apps have none."
+    },
+    {
+      "id": "bmlib#459",
+      "title": "The API sampler's line between \"this script is wrong\" and \"the remote failed\" is httpx's own contract, and a r",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#460",
+      "title": "The API sampler's line between \"this script is wrong\" and \"the remote failed\" is httpx's own contract, and a r",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#463",
+      "title": "No text body a remote serves escapes `analyze()`",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Unpaired-surrogate body must not escape analyze(); WP 3.7 area; unaudited at seeding."
+    }
+  ],
+  "to_bmlib": [
+    {
+      "id": "lite:polite-http-client",
+      "title": "Caller's HTTP client",
+      "bmlib": "owed",
+      "issue": null,
+      "note": "bmlib plan B1. Lite's polite_session.py is a consumer need: bmlib opens its clients internally."
+    },
+    {
+      "id": "lite:unpaywall-landing-page",
+      "title": "Unpaywall landing page read as citation_pdf_url",
+      "bmlib": "owed",
+      "issue": null,
+      "note": "bmlib plan B2. bmlib defect: url_for_pdf or url (lite#464, #465); contract unpaywall_landing_page.json."
+    },
+    {
+      "id": "lite:bot-wall-recognition",
+      "title": "Bot-wall recognition",
+      "bmlib": "owed",
+      "issue": null,
+      "note": "bmlib plan B3. lite#480; contract challenge_detection.json."
+    },
+    {
+      "id": "lite:pdf-title-check",
+      "title": "Wrong-article PDF check, checked before caching",
+      "bmlib": "owed",
+      "issue": null,
+      "note": "bmlib plan B4. lite#532, #541, #546, #560, #561; contract pdf_title_check.json."
+    },
+    {
+      "id": "lite:pmc-open-data",
+      "title": "PMC open-data bucket tier",
+      "bmlib": "owed",
+      "issue": null,
+      "note": "bmlib plan B5. Contract pmc_open_data.json; bmlib has the efetch tier only."
+    },
+    {
+      "id": "lite:openalex-pdf-locations",
+      "title": "OpenAlex PDF locations",
+      "bmlib": "owed",
+      "issue": null,
+      "note": "bmlib plan B5. Contract openalex_locations.json; bmlib uses OpenAlex in publications only."
+    },
+    {
+      "id": "lite:preprints-by-ppr",
+      "title": "Preprints by PPR accession",
+      "bmlib": "owed",
+      "issue": null,
+      "note": "bmlib plan B5. fulltext_retrieval.md; not reachable in bmlib by design."
+    },
+    {
+      "id": "lite:core-elsevier-keyed-session",
+      "title": "CORE text, Elsevier API, keyed session",
+      "bmlib": "owed",
+      "issue": null,
+      "note": "bmlib plan B5. Contracts core_fulltext.json, elsevier_article.json."
+    },
+    {
+      "id": "lite:per-host-polite-pacing",
+      "title": "Per-host polite pacing",
+      "bmlib": "owed",
+      "issue": null,
+      "note": "bmlib plan B6. polite_request_pacing.md; bmlib paces per analyzer only."
+    },
+    {
+      "id": "lite:funders-by-brand",
+      "title": "Funders by brand with a foundation guard",
+      "bmlib": "owed",
+      "issue": null,
+      "note": "bmlib plan B7. lite#394; sponsor_patterns.json v4."
+    },
+    {
+      "id": "lite:statement-caveats",
+      "title": "Statement caveats; tagged statements as headings",
+      "bmlib": "owed",
+      "issue": null,
+      "note": "bmlib plan B7. lite#420, #428; transparency_parity/."
+    },
+    {
+      "id": "lite:parse-warnings-to-reader",
+      "title": "Parse warnings to the reader; PMC ID mismatch",
+      "bmlib": "owed",
+      "issue": null,
+      "note": "bmlib plan B8. Swift JATSParseWarnings; bmlib logs only."
+    },
+    {
+      "id": "lite:one-implementation-on-mobile",
+      "title": "One implementation on mobile",
+      "bmlib": "owed",
+      "issue": null,
+      "note": "bmlib plan B9. Rust crate has no FFI yet."
+    },
+    {
+      "id": "lite:shared-conformance-cases",
+      "title": "Shared conformance cases",
+      "bmlib": "owed",
+      "issue": null,
+      "note": "bmlib plan B10. doc/cross_platform/*; bmlib's oracle cases are unversioned."
+    },
+    {
+      "id": "lite:isopenaccess-precheck",
+      "title": "isOpenAccess pre-check",
+      "bmlib": "declined",
+      "issue": "#432",
+      "note": "bmlib decided otherwise (bmlib#216 measurement); plan B11."
+    },
+    {
+      "id": "lite:trial-id-cap",
+      "title": "Cap on trial ids",
+      "bmlib": "declined",
+      "issue": "#451",
+      "note": "bmlib decided otherwise (bmlib#216 decision); plan B11."
+    },
+    {
+      "id": "lite:pty-industry-word",
+      "title": "'pty' in the industry words",
+      "bmlib": "declined",
+      "issue": null,
+      "note": "Decided otherwise in bmlib (plan B11); the two differ knowingly. See from_bmlib bmlib#112."
+    }
+  ]
+}
