@@ -74,7 +74,7 @@ class ParallelScoringService @Inject constructor(
 ) {
     companion object {
         /** Maximum parse retries per document before giving up. */
-        private const val MAX_PARSE_RETRIES = 3
+        const val MAX_PARSE_RETRIES = 3
 
         /** Base delay for parse retry backoff (milliseconds). */
         private const val PARSE_RETRY_BASE_DELAY_MS = 500L

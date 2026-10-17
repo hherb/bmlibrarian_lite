@@ -287,7 +287,12 @@ class LLMService @Inject constructor(
             maxTokens = Constants.LLM_SCORING_MAX_TOKENS
         ).map { result ->
             val parsed = ResponseParser.parseScoreResponse(result.content)
-            Pair(parsed.score, parsed.rationale)
+            val score = parsed.score
+            if (parsed.parseFailed || score == null) {
+                // "parse" makes the scorer retry it; an unreadable reply is never a score
+                return Result.failure(IllegalStateException(parsed.rationale))
+            }
+            Pair(score, parsed.rationale)
         }
     }
 

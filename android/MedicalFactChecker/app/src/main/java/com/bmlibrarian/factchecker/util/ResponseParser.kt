@@ -19,7 +19,12 @@
 package com.bmlibrarian.factchecker.util
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -50,12 +55,15 @@ object ResponseParser {
     /**
      * Result of parsing a score response.
      *
-     * @property score Relevance score (1-5)
-     * @property rationale Explanation for the score
+     * @property score Relevance score (1-5), or null when the reply holds no score on the scale.
+     *   A failed parse is never a score: not clamped, not defaulted.
+     * @property rationale Explanation for the score, or the reason the parse failed
+     * @property parseFailed Whether the reply held no score on the scale (the caller retries it)
      */
     data class ScoreResult(
-        val score: Int,
-        val rationale: String
+        val score: Int?,
+        val rationale: String,
+        val parseFailed: Boolean
     )
 
     /**
@@ -91,24 +99,59 @@ object ResponseParser {
      * ```
      *
      * @param response Raw LLM response text
-     * @return Parsed score result, or default if parsing fails
+     * A reply that is a JSON object is read as that object alone: a `score` that
+     * is missing, null, not a number or off the scale makes it unreadable. The
+     * contract is `doc/cross_platform/llm_parity/score_values.json`.
+     *
+     * @param response Raw LLM response text
+     * @return The score, or a result with `parseFailed` set and no score
      */
     fun parseScoreResponse(response: String): ScoreResult {
         val cleanJson = cleanJsonResponse(response)
 
-        return try {
-            val jsonObject = json.parseToJsonElement(cleanJson).jsonObject
-            val score = jsonObject["score"]?.jsonPrimitive?.intOrNull
-                ?.coerceIn(Constants.SCORING_MIN_SCORE, Constants.SCORING_MAX_SCORE)
-                ?: DEFAULT_SCORE
-            val rationale = jsonObject["rationale"]?.jsonPrimitive?.content
-                ?: DEFAULT_RATIONALE
-
-            ScoreResult(score, rationale)
+        val jsonObject = try {
+            json.parseToJsonElement(cleanJson).jsonObject
         } catch (e: Exception) {
-            // Fall back to regex parsing if JSON parsing fails
-            parseScoreWithRegex(cleanJson)
+            // Not a JSON object: only an exact `"score": N` is read from the text
+            return parseScoreWithRegex(cleanJson)
         }
+
+        val score = scoreOnScale(jsonObject["score"])
+            ?: return ScoreResult(null, UNREADABLE_SCORE_REASON, parseFailed = true)
+        val rationale = (jsonObject["explanation"] ?: jsonObject["rationale"] ?: jsonObject["reason"])
+            ?.let { it as? JsonPrimitive }
+            ?.content
+            ?: DEFAULT_RATIONALE
+        return ScoreResult(score, rationale, parseFailed = false)
+    }
+
+    /**
+     * A JSON `score` value as a score on the scale, if it is one.
+     *
+     * Mirrors the desktop's `_score_on_scale`: a whole number from 1 to 5 as an
+     * integer, an integral finite float or a string of digits. A boolean, a
+     * fraction, a word, null, a number too large for an Int and anything off the
+     * scale is null, never clamped.
+     *
+     * @param element The value the model gave, or null when the key was missing
+     * @return The score, or null
+     */
+    internal fun scoreOnScale(element: JsonElement?): Int? {
+        val primitive = element as? JsonPrimitive ?: return null
+        if (primitive is JsonNull) return null
+        val value: Int = if (primitive.isString) {
+            val text = primitive.content.trim()
+            if (text.isEmpty() || !text.all { it in '0'..'9' }) return null
+            text.toIntOrNull() ?: return null
+        } else {
+            if (primitive.booleanOrNull != null) return null
+            primitive.intOrNull
+                ?: primitive.doubleOrNull
+                    ?.takeIf { it.isFinite() && it == Math.rint(it) && it in Int.MIN_VALUE.toDouble()..Int.MAX_VALUE.toDouble() }
+                    ?.toInt()
+                ?: return null
+        }
+        return value.takeIf { it in Constants.SCORING_MIN_SCORE..Constants.SCORING_MAX_SCORE }
     }
 
     /**
@@ -287,16 +330,17 @@ object ResponseParser {
      * Fallback regex parsing for score responses.
      */
     private fun parseScoreWithRegex(text: String): ScoreResult {
-        val scoreRegex = Regex(""""score"\s*:\s*(\d+)""")
-        val rationaleRegex = Regex(""""rationale"\s*:\s*"([^"]+)"""")
+        // A whole number and nothing else: `4.5` or `4abc` is no score
+        val scoreRegex = Regex(""""score"\s*:\s*(\d+)\s*[,}]""")
+        val rationaleRegex = Regex(""""(?:rationale|explanation)"\s*:\s*"([^"]+)"""")
 
         val score = scoreRegex.find(text)?.groupValues?.get(1)?.toIntOrNull()
-            ?.coerceIn(Constants.SCORING_MIN_SCORE, Constants.SCORING_MAX_SCORE)
-            ?: DEFAULT_SCORE
+            ?.takeIf { it in Constants.SCORING_MIN_SCORE..Constants.SCORING_MAX_SCORE }
+            ?: return ScoreResult(null, UNREADABLE_SCORE_REASON, parseFailed = true)
         val rationale = rationaleRegex.find(text)?.groupValues?.get(1)
             ?: DEFAULT_RATIONALE
 
-        return ScoreResult(score, rationale)
+        return ScoreResult(score, rationale, parseFailed = false)
     }
 
     /**
@@ -351,7 +395,7 @@ object ResponseParser {
     }
 
     // Default values for failed parsing
-    private const val DEFAULT_SCORE = 3
+    private const val UNREADABLE_SCORE_REASON = "parse: no relevance score on the scale in the reply"
     private const val DEFAULT_RATIONALE = "Unable to parse response"
     private const val DEFAULT_VERDICT = "UNCLEAR"
     private const val DEFAULT_SUMMARY = "Unable to generate summary"

@@ -72,23 +72,10 @@ public enum ResponseParser {
             return .failure("Failed to parse JSON response")
         }
 
-        // Parse score - handle Int, Double, or String
-        let score: Int
-        if let intScore = json["score"] as? Int {
-            score = intScore
-        } else if let doubleScore = json["score"] as? Double {
-            score = Int(doubleScore)
-        } else if let strScore = json["score"] as? String, let parsed = Int(strScore) {
-            score = parsed
-        } else {
-            print("[ResponseParser] Failed to parse score value from: \(json)")
-            return .failure("Failed to parse score value")
-        }
-
-        // Validate score is in expected range
-        guard score >= BioMedLitConstants.minRelevanceScore && score <= BioMedLitConstants.maxRelevanceScore else {
-            print("[ResponseParser] Score out of range: \(score)")
-            return .failure("Score \(score) out of valid range (\(BioMedLitConstants.minRelevanceScore)-\(BioMedLitConstants.maxRelevanceScore))")
+        // A whole number on the scale, or no score: never clamped, never defaulted
+        guard let score = scoreOnScale(json["score"]) else {
+            print("[ResponseParser] No score on the scale in: \(json)")
+            return .failure("Failed to parse a score on the scale (\(BioMedLitConstants.minRelevanceScore)-\(BioMedLitConstants.maxRelevanceScore))")
         }
 
         // Parse explanation - be lenient
@@ -97,7 +84,7 @@ public enum ResponseParser {
             ?? json["reason"] as? String
             ?? "No explanation provided"
 
-        return .success(score: clampScore(score), explanation: explanation)
+        return .success(score: score, explanation: explanation)
     }
 
     /// Fix common JSON issues from local models.
@@ -459,12 +446,33 @@ public enum ResponseParser {
 
     // MARK: - Helpers
 
-    /// Clamp a score to the valid relevance score range.
+    /// A JSON `score` value as a score on the scale, if it is one.
     ///
-    /// - Parameter score: Raw score value.
-    /// - Returns: Score clamped to valid range.
-    public static func clampScore(_ score: Int) -> Int {
-        min(BioMedLitConstants.maxRelevanceScore, max(BioMedLitConstants.minRelevanceScore, score))
+    /// Mirrors the desktop's `_score_on_scale` (contract:
+    /// `doc/cross_platform/llm_parity/score_values.json`): an integer, an
+    /// integral finite float or a string of digits from 1 to 5. A boolean, a
+    /// fraction, a word, null, a number beyond `Int` and anything off the scale
+    /// is nil, never clamped.
+    ///
+    /// - Parameter raw: The value the model gave, or nil when the key was missing.
+    /// - Returns: The score, or nil.
+    static func scoreOnScale(_ raw: Any?) -> Int? {
+        let low = BioMedLitConstants.minRelevanceScore
+        let high = BioMedLitConstants.maxRelevanceScore
+        if let text = raw as? String {
+            let digits = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !digits.isEmpty, digits.allSatisfy({ "0123456789".contains($0) }),
+                  let value = Int(digits) else { return nil }
+            return (low...high).contains(value) ? value : nil
+        }
+        guard let number = raw as? NSNumber else { return nil }
+        // JSONSerialization bridges true/false to NSNumber; true is not a 1
+        if CFGetTypeID(number as CFTypeRef) == CFBooleanGetTypeID() { return nil }
+        let value = number.doubleValue
+        // Compare as a Double, so a huge value never reaches Int(...), which traps
+        guard value.isFinite, value.rounded() == value,
+              value >= Double(low), value <= Double(high) else { return nil }
+        return Int(value)
     }
 
     /// Extract JSON from an LLM response that may contain extra text.

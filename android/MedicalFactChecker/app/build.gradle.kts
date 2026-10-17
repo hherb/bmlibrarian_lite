@@ -90,6 +90,10 @@ val requestFailureParityFixtures: File =
 val fulltextParityFixtures: File =
     rootProject.file("../../doc/cross_platform/fulltext_parity")
 
+// The relevance-score contract, read the same way and for the same reason.
+val llmParityFixtures: File =
+    rootProject.file("../../doc/cross_platform/llm_parity")
+
 tasks.withType<Test>().configureEach {
     // Absent in a partial checkout of android/ alone; the test itself fails with
     // a clear message in that case, so do not break configuration over it.
@@ -107,6 +111,11 @@ tasks.withType<Test>().configureEach {
         inputs.dir(fulltextParityFixtures)
             .withPathSensitivity(PathSensitivity.RELATIVE)
             .withPropertyName("fulltextParityFixtures")
+    }
+    if (llmParityFixtures.isDirectory) {
+        inputs.dir(llmParityFixtures)
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+            .withPropertyName("llmParityFixtures")
     }
 }
 

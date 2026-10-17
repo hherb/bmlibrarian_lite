@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "What an unreadable relevance score is, on every platform (the apps' port of bmlib's rule): a model's reply either carries a whole-number score from 1 to 5 or it carries none, and a reply with none is a parse failure that the caller retries or records, never a score. Read by tests/test_score_parity.py, Packages/BioMedLit ScoreParityTests and Android ResponseParserTest. A case gives the raw model reply and the score read from it, or null. The rules: an integer, an integral float (4.0) or a string of digits (\" 4 \") on the scale is that score; anything else is null and is never clamped, defaulted or rounded: off the scale (0, 6, -3, 42), a boolean, a fractional number (2.5), a word, null, a missing key, a float too large for an integer (1e300), a reply with no JSON object. Desktop-only divergence: the desktop also reads a score stated in prose ('Score: 4/5') when the reply is not a JSON object; the apps do not, so no case here carries a score in prose.",
+  "cases": [
+    {"name": "an integer", "reply": "{\"score\": 4, \"explanation\": \"on topic\"}", "score": 4},
+    {"name": "the lowest score", "reply": "{\"score\": 1, \"explanation\": \"off topic\"}", "score": 1},
+    {"name": "the highest score", "reply": "{\"score\": 5, \"explanation\": \"direct\"}", "score": 5},
+    {"name": "an integral float", "reply": "{\"score\": 4.0, \"explanation\": \"on topic\"}", "score": 4},
+    {"name": "a number in a string", "reply": "{\"score\": \"4\", \"explanation\": \"on topic\"}", "score": 4},
+    {"name": "a number in a string with spaces", "reply": "{\"score\": \" 4 \", \"explanation\": \"on topic\"}", "score": 4},
+    {"name": "an object in a markdown fence", "reply": "```json\n{\"score\": 3, \"explanation\": \"partly\"}\n```", "score": 3},
+    {"name": "zero is off the scale", "reply": "{\"score\": 0, \"explanation\": \"none\"}", "score": null},
+    {"name": "six is off the scale", "reply": "{\"score\": 6, \"explanation\": \"more\"}", "score": null},
+    {"name": "a negative is off the scale", "reply": "{\"score\": -3, \"explanation\": \"less\"}", "score": null},
+    {"name": "a large integer is off the scale", "reply": "{\"score\": 42, \"explanation\": \"much\"}", "score": null},
+    {"name": "a boolean is not a score", "reply": "{\"score\": true, \"explanation\": \"yes\"}", "score": null},
+    {"name": "a fractional score is not a score", "reply": "{\"score\": 2.5, \"explanation\": \"between\"}", "score": null},
+    {"name": "a word is not a score", "reply": "{\"score\": \"high\", \"explanation\": \"very\"}", "score": null},
+    {"name": "a null score", "reply": "{\"score\": null, \"explanation\": \"none\"}", "score": null},
+    {"name": "a missing score", "reply": "{\"explanation\": \"I decline to score this.\"}", "score": null},
+    {"name": "a huge float", "reply": "{\"score\": 1e300, \"explanation\": \"absurd\"}", "score": null},
+    {"name": "a reply that is not JSON", "reply": "I cannot assess this document.", "score": null}
+  ]
+}

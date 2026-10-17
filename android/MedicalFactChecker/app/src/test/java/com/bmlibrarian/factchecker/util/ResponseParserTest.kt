@@ -18,6 +18,15 @@
 
 package com.bmlibrarian.factchecker.util
 
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import java.io.File
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -26,6 +35,15 @@ import org.junit.Test
  * Unit tests for ResponseParser utility.
  */
 class ResponseParserTest {
+
+    private val contract: JsonObject by lazy {
+        val relative = "doc/cross_platform/llm_parity/score_values.json"
+        val file = generateSequence(File("").absoluteFile) { it.parentFile }
+            .map { File(it, relative) }
+            .firstOrNull { it.isFile }
+            ?: error("could not locate $relative above ${File("").absolutePath}")
+        Json.parseToJsonElement(file.readText()).jsonObject
+    }
 
     // ==================== Score Response Tests ====================
 
@@ -52,31 +70,34 @@ class ResponseParserTest {
     }
 
     @Test
-    fun `parseScoreResponse coerces score above maximum to 5`() {
-        val json = """{"score": 10, "rationale": "Very high score"}"""
-
-        val result = ResponseParser.parseScoreResponse(json)
-
-        assertEquals(5, result.score)
+    fun `parseScoreResponse never clamps an off-scale score`() {
+        for (reply in listOf(
+            """{"score": 10, "rationale": "Very high score"}""",
+            """{"score": 0, "rationale": "Very low score"}"""
+        )) {
+            assertNull(reply, ResponseParser.parseScoreResponse(reply).score)
+        }
     }
 
     @Test
-    fun `parseScoreResponse coerces score below minimum to 1`() {
-        val json = """{"score": 0, "rationale": "Very low score"}"""
+    fun `parseScoreResponse reads an unreadable reply as a failure and never a score`() {
+        val result = ResponseParser.parseScoreResponse("not a json at all")
 
-        val result = ResponseParser.parseScoreResponse(json)
-
-        assertEquals(1, result.score)
+        assertNull(result.score)
+        assertTrue(result.parseFailed)
     }
 
     @Test
-    fun `parseScoreResponse returns default for invalid JSON`() {
-        val invalidJson = "not a json at all"
-
-        val result = ResponseParser.parseScoreResponse(invalidJson)
-
-        assertEquals(3, result.score)
-        assertEquals("Unable to parse response", result.rationale)
+    fun `parseScoreResponse takes every row of the shared contract`() {
+        val cases = contract["cases"]!!.jsonArray.map { it.jsonObject }
+        assertTrue(cases.size >= 18)
+        for (row in cases) {
+            val name = row["name"]!!.jsonPrimitive.content
+            val expected = row["score"]!!.let { if (it is JsonNull) null else it.jsonPrimitive.int }
+            val result = ResponseParser.parseScoreResponse(row["reply"]!!.jsonPrimitive.content)
+            assertEquals(name, expected, result.score)
+            assertEquals(name, expected == null, result.parseFailed)
+        }
     }
 
     @Test
