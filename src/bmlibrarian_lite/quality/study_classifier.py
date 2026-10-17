@@ -54,6 +54,7 @@ from ..constants import (
 from ..exceptions import JSONParseError, RetryExhaustedError
 from ..utils import llm_retry, classify_llm_exception
 from .data_models import StudyDesign, StudyClassification
+from .json_fields import as_bool, as_float, as_int, as_text, text_or
 
 logger = logging.getLogger(__name__)
 
@@ -463,7 +464,9 @@ Note: This is part {i + 1} of {len(chunks)} sections from a long abstract."""
                 )
 
             # Parse study design
-            design_str = data.get("study_design", "unknown").lower().strip()
+            design_str = text_or(
+                data.get("study_design"), "unknown", "study_design"
+            ).lower().strip()
             study_design = self._parse_study_design(design_str)
 
             # Parse blinding - validate against known values
@@ -477,7 +480,7 @@ Note: This is part {i + 1} of {len(chunks)} sections from a long abstract."""
 
             return StudyClassification(
                 study_design=study_design,
-                is_randomized=data.get("is_randomized"),
+                is_randomized=as_bool(data.get("is_randomized"), "is_randomized"),
                 is_blinded=is_blinded,
                 sample_size=sample_size,
                 confidence=confidence,
@@ -558,7 +561,7 @@ Note: This is part {i + 1} of {len(chunks)} sections from a long abstract."""
         return STUDY_DESIGN_MAPPING.get(design_str, StudyDesign.UNKNOWN)
 
     def _parse_blinding(
-        self, value: Optional[str], doc_id: str | int = "unknown"
+        self, value: object, doc_id: str | int = "unknown"
     ) -> Optional[str]:
         """
         Parse and validate blinding value.
@@ -570,9 +573,10 @@ Note: This is part {i + 1} of {len(chunks)} sections from a long abstract."""
         Returns:
             Validated blinding string or None
         """
-        if value is None:
+        text = as_text(value, "is_blinded")
+        if text is None:
             return None
-        normalized = str(value).lower().strip()
+        normalized = text.lower().strip()
         if normalized in VALID_BLINDING_VALUES:
             return normalized
         # Invalid value - log it but don't warn (expected for observational studies)
@@ -583,7 +587,7 @@ Note: This is part {i + 1} of {len(chunks)} sections from a long abstract."""
         return None
 
     def _parse_sample_size(
-        self, value: Optional[int | str], doc_id: str | int = "unknown"
+        self, value: object, doc_id: str | int = "unknown"
     ) -> Optional[int]:
         """
         Parse sample size to integer.
@@ -597,22 +601,19 @@ Note: This is part {i + 1} of {len(chunks)} sections from a long abstract."""
         """
         if value is None:
             return None
-        try:
-            result = int(value)
-            if result < 0:
-                logger.warning(
-                    f"Document {doc_id}: Negative sample size {result}, treating as None"
-                )
-                return None
-            return result
-        except (ValueError, TypeError) as e:
-            logger.debug(
-                f"Document {doc_id}: Could not parse sample size '{value}': {e}"
+        result = as_int(value, "sample_size")
+        if result is None:
+            logger.debug(f"Document {doc_id}: Could not read sample size '{value}'")
+            return None
+        if result < 0:
+            logger.warning(
+                f"Document {doc_id}: Negative sample size {result}, treating as None"
             )
             return None
+        return result
 
     def _parse_confidence(
-        self, value: Optional[float | str], doc_id: str | int = "unknown"
+        self, value: object, doc_id: str | int = "unknown"
     ) -> float:
         """
         Parse and clamp confidence value.
@@ -639,13 +640,14 @@ Note: This is part {i + 1} of {len(chunks)} sections from a long abstract."""
             )
             return CONFIDENCE_PARSE_FAILURE_DEFAULT
 
-        try:
-            conf = float(value)
+        conf = as_float(value, "confidence")
+        if conf is not None:
             return max(0.0, min(1.0, conf))
-        except (ValueError, TypeError) as e:
+        else:
             # IMPORTANT: Log and warn - don't silently return arbitrary values
+            # (a bool, NaN and an infinity are refused here, bmlib#320)
             logger.warning(
-                f"Document {doc_id}: Failed to parse confidence value '{value}': {e}. "
+                f"Document {doc_id}: Failed to parse confidence value '{value}'. "
                 f"Using fallback value {CONFIDENCE_PARSE_FAILURE_DEFAULT} to indicate "
                 "uncertainty."
             )

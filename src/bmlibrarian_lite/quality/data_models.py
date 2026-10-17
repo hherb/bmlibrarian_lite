@@ -422,6 +422,12 @@ def llm_extraction_method(model_string: str) -> str:
     return f"llm:{model_string}"
 
 
+# ``assessment_tier`` of the failure sentinel, QualityAssessment.unclassified():
+# no tier produced the assessment (real tiers are 1 metadata, 2 Haiku, 3
+# Sonnet). A Tier 3 verdict of "unknown" keeps tier 3 and is an answer.
+FAILED_ASSESSMENT_TIER = 0
+
+
 @dataclass
 class QualityAssessment:
     """
@@ -432,7 +438,8 @@ class QualityAssessment:
     the primary output of the quality filtering system.
 
     Attributes:
-        assessment_tier: Source tier (1=metadata, 2=Haiku, 3=Sonnet)
+        assessment_tier: Source tier (1=metadata, 2=Haiku, 3=Sonnet), or
+            FAILED_ASSESSMENT_TIER for the failure sentinel
         extraction_method: Method used ("metadata", or "llm:<provider:model>"
             from :func:`llm_extraction_method`)
         study_design: Classified study design
@@ -663,7 +670,7 @@ class QualityAssessment:
             Unclassified QualityAssessment
         """
         return cls(
-            assessment_tier=0,
+            assessment_tier=FAILED_ASSESSMENT_TIER,
             extraction_method="none",
             study_design=StudyDesign.UNKNOWN,
             quality_tier=QualityTier.UNCLASSIFIED,

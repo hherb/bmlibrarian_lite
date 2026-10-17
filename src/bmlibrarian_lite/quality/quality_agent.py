@@ -49,6 +49,15 @@ from .data_models import (
     DESIGN_TO_SCORE,
     llm_extraction_method,
 )
+from .json_fields import (
+    as_bool,
+    as_dict,
+    as_float,
+    as_int,
+    as_str_list,
+    as_text,
+    text_or,
+)
 from .study_classifier import STUDY_DESIGN_MAPPING
 
 logger = logging.getLogger(__name__)
@@ -215,16 +224,24 @@ Focus on THIS study's methodology, not studies it references."""
                 )
 
             data = json.loads(cleaned)
+            if not isinstance(data, dict):
+                raise JSONParseError(
+                    f"Response is not a JSON object: {type(data).__name__}",
+                    raw_response=response,
+                )
 
-            # Parse study design
-            design_str = data.get("study_design", "unknown").lower().strip()
+            # Every value is narrowed to its annotated type (bmlib#295,
+            # bmlib#320): a null or wrong-typed answer reads as unstated.
+            design_str = text_or(
+                data.get("study_design"), "unknown", "study_design"
+            ).lower().strip()
             study_design = self._parse_study_design(design_str)
 
             # Parse design characteristics
-            chars = data.get("design_characteristics", {})
+            chars = as_dict(data.get("design_characteristics"), "design_characteristics")
 
             # Parse bias risk
-            bias_risk = self._parse_bias_risk(data.get("bias_risk", {}))
+            bias_risk = self._parse_bias_risk(as_dict(data.get("bias_risk"), "bias_risk"))
 
             # Parse sample size
             sample_size = self._parse_sample_size(data.get("sample_size"))
@@ -233,10 +250,10 @@ Focus on THIS study's methodology, not studies it references."""
             is_blinded = self._parse_blinding(chars.get("blinded"))
 
             # Parse quality score (1-10 scale)
-            quality_score = self._parse_quality_score(data.get("quality_score", 0))
+            quality_score = self._parse_quality_score(data.get("quality_score"))
 
             # Parse confidence
-            confidence = self._parse_confidence(data.get("confidence", 0.5))
+            confidence = self._parse_confidence(data.get("confidence"))
 
             # The model is recorded so the benchmark reuses this answer as
             # that model's, and no other's
@@ -247,17 +264,17 @@ Focus on THIS study's methodology, not studies it references."""
                 study_design=study_design,
                 quality_tier=DESIGN_TO_TIER.get(study_design, QualityTier.UNCLASSIFIED),
                 quality_score=quality_score,
-                evidence_level=data.get("evidence_level"),
-                is_randomized=chars.get("randomized"),
-                is_controlled=chars.get("controlled"),
+                evidence_level=as_text(data.get("evidence_level"), "evidence_level"),
+                is_randomized=as_bool(chars.get("randomized"), "randomized"),
+                is_controlled=as_bool(chars.get("controlled"), "controlled"),
                 is_blinded=is_blinded,
-                is_prospective=chars.get("prospective"),
-                is_multicenter=chars.get("multicenter"),
+                is_prospective=as_bool(chars.get("prospective"), "prospective"),
+                is_multicenter=as_bool(chars.get("multicenter"), "multicenter"),
                 sample_size=sample_size,
                 confidence=confidence,
                 bias_risk=bias_risk,
-                strengths=data.get("strengths", []),
-                limitations=data.get("limitations", []),
+                strengths=as_str_list(data.get("strengths"), "strengths") or [],
+                limitations=as_str_list(data.get("limitations"), "limitations") or [],
                 extraction_details=[f"Detailed assessment via {model}"],
             )
 
@@ -312,10 +329,11 @@ Focus on THIS study's methodology, not studies it references."""
         """
         valid_values = ("low", "unclear", "high")
 
-        def validate_bias(value: Optional[str]) -> str:
-            if value is None:
+        def validate_bias(value: object) -> str:
+            text = as_text(value, "bias_risk")
+            if text is None:
                 return "unclear"
-            normalized = str(value).lower().strip()
+            normalized = text.lower().strip()
             return normalized if normalized in valid_values else "unclear"
 
         return BiasRisk(
@@ -326,7 +344,7 @@ Focus on THIS study's methodology, not studies it references."""
             reporting=validate_bias(bias_data.get("reporting")),
         )
 
-    def _parse_blinding(self, value: Optional[str]) -> Optional[str]:
+    def _parse_blinding(self, value: object) -> Optional[str]:
         """
         Parse and validate blinding value.
 
@@ -336,13 +354,14 @@ Focus on THIS study's methodology, not studies it references."""
         Returns:
             Validated blinding string or None
         """
-        if value is None:
+        text = as_text(value, "blinded")
+        if text is None:
             return None
-        normalized = str(value).lower().strip()
+        normalized = text.lower().strip()
         valid_values = ("none", "single", "double", "triple")
         return normalized if normalized in valid_values else None
 
-    def _parse_sample_size(self, value: Optional[int | str]) -> Optional[int]:
+    def _parse_sample_size(self, value: object) -> Optional[int]:
         """
         Parse sample size to integer.
 
@@ -352,14 +371,9 @@ Focus on THIS study's methodology, not studies it references."""
         Returns:
             Integer sample size or None
         """
-        if value is None:
-            return None
-        try:
-            return int(value)
-        except (ValueError, TypeError):
-            return None
+        return as_int(value, "sample_size")
 
-    def _parse_quality_score(self, value: float | str) -> float:
+    def _parse_quality_score(self, value: object) -> float:
         """
         Parse and clamp quality score.
 
@@ -369,13 +383,12 @@ Focus on THIS study's methodology, not studies it references."""
         Returns:
             Quality score clamped to 0.0-10.0 range
         """
-        try:
-            score = float(value)
-            return max(0.0, min(10.0, score))
-        except (ValueError, TypeError):
+        score = as_float(value, "quality_score")
+        if score is None:
             return 0.0
+        return max(0.0, min(10.0, score))
 
-    def _parse_confidence(self, value: float | str) -> float:
+    def _parse_confidence(self, value: object) -> float:
         """
         Parse and clamp confidence value.
 
@@ -385,8 +398,7 @@ Focus on THIS study's methodology, not studies it references."""
         Returns:
             Confidence clamped to 0.0-1.0 range
         """
-        try:
-            conf = float(value)
-            return max(0.0, min(1.0, conf))
-        except (ValueError, TypeError):
+        conf = as_float(value, "confidence")
+        if conf is None:
             return 0.5
+        return max(0.0, min(1.0, conf))
