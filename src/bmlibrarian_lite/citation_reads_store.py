@@ -4,8 +4,9 @@
 
 """Which text each paper's citations were read from: one row per paper per run.
 
-SQL only. A paper with no row was read before this was kept, from its
-abstract. Every function takes an open connection; ``LiteStorage`` opens it
+SQL only. A paper with no row has no record of a successful read: its
+extraction failed, its run was cancelled, or it was read before this was
+kept. Either way its full text counts as unread. Every function takes an open connection; ``LiteStorage`` opens it
 and commits.
 """
 

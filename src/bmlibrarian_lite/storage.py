@@ -3464,7 +3464,9 @@ class LiteStorage:
 
         Returns:
             Each recorded paper's id and whether its full text was read. A
-            paper missing was read before this was kept, from its abstract.
+            paper missing has no record of a successful read (its extraction
+            failed, its run was cancelled, or it predates this record); its
+            full text counts as unread.
         """
         with self._sqlite_connection() as conn:
             return citation_reads_store.read(conn, checkpoint_id)

@@ -4,7 +4,8 @@
 
 """Which papers' citations are read from full text, and what the report says of it.
 
-Pure functions. How a text is read -- without its reference list, in
+Pure functions, except :func:`record_full_text_reads`, which fills in a
+report's metadata. How a text is read -- without its reference list, in
 overlapping windows -- is :func:`bmlibrarian_lite.chunking.analysis_windows`.
 """
 
@@ -74,8 +75,13 @@ def full_text_summary(metadata: ReportMetadata) -> str | None:
             else f"The citations of the paper scored {minimum} or higher were "
             "read from its full text."
         )
+    if papers == 1:
+        return (
+            f"The citations of the paper scored {minimum} or higher were read "
+            "from its abstract; no readable full text was obtained."
+        )
     return (
         f"The citations of {read} of the {papers} papers scored {minimum} or "
-        "higher were read from their full text; for the others no full text "
-        "was obtained, and their abstracts were read."
+        "higher were read from their full text; for the others no readable "
+        "full text was obtained, and their abstracts were read."
     )

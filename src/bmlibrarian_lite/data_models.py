@@ -2109,6 +2109,7 @@ class CitationOutcome:
                 or if more read their full text than were read.
         """
         object.__setattr__(self, "failed", tuple(self.failed))
+        object.__setattr__(self, "read_full_text", frozenset(self.read_full_text))
         if self.documents_attempted < 0:
             raise ValueError("A citation outcome counts documents, never fewer than none")
         if self.documents_attempted < len(self.failed):
@@ -2374,6 +2375,36 @@ class ResearchQuestionSummary:
     failed_documents: int = 0
 
 
+def _stored_full_text_reads(data: dict[str, Any]) -> tuple[int | None, int, int]:
+    """Read a stored report's full-text figures, refusing ones that cannot all be true.
+
+    They are printed into the methodology of a report a retry writes again,
+    so "5 of the 2 papers" is refused rather than printed.
+
+    Args:
+        data: The stored metadata.
+
+    Returns:
+        The full-text score, the papers scored that high, and how many of
+        them were read from their full text.
+
+    Raises:
+        ValueError: If a figure is not a whole number, a count is negative
+            or larger than it can be, or counts stand without a score.
+    """
+    minimum = data.get("full_text_min_score")
+    papers = data.get("full_text_papers_read", 0)
+    read = data.get("full_text_read_count", 0)
+    for value in (papers, read) if minimum is None else (minimum, papers, read):
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise ValueError("The full-text figures are whole numbers")
+    if not 0 <= read <= papers:
+        raise ValueError("No more papers are read from full text than were read")
+    if minimum is None and papers:
+        raise ValueError("Papers counted against no full-text score")
+    return minimum, papers, read
+
+
 @dataclass
 class ReportMetadata:
     """
@@ -2453,7 +2484,8 @@ class ReportMetadata:
         unique_sources_cited: Number of unique documents cited
         full_text_min_score: Papers scored this or higher had their
             citations read from their full text where one was found; None
-            when every paper was read from its abstract
+            when the run did not look for full texts (the setting was off,
+            or the report is older than it)
         full_text_papers_read: Of the papers scored that high whose
             citations were extracted, how many
         full_text_read_count: Of those, how many were read from their full
@@ -2597,6 +2629,13 @@ class ReportMetadata:
 
         screen = RetractionSnapshot.from_stored(stored_screen)
 
+        stored_distribution = data.get("score_distribution", {})
+        if not isinstance(stored_distribution, dict):
+            raise ValueError("score_distribution must be a mapping")
+        full_text_min_score, full_text_papers_read, full_text_read_count = (
+            _stored_full_text_reads(data)
+        )
+
         return cls(
             retraction_screen=screen,
             version=data.get("version", 1),
@@ -2613,7 +2652,8 @@ class ReportMetadata:
             documents_accepted=data.get("documents_accepted", 0),
             documents_rejected=data.get("documents_rejected", 0),
             min_score_threshold=data.get("min_score_threshold", 3),
-            score_distribution=data.get("score_distribution", {}),
+            # JSON keys are strings; the report looks a score up as an int
+            score_distribution={int(k): v for k, v in stored_distribution.items()},
             quality_filter_applied=data.get("quality_filter_applied", False),
             quality_filter_settings=data.get("quality_filter_settings"),
             documents_filtered_by_quality=data.get("documents_filtered_by_quality", 0),
@@ -2647,7 +2687,7 @@ class ReportMetadata:
             model_configs=data.get("model_configs", {}),
             citations_extracted=data.get("citations_extracted", 0),
             unique_sources_cited=data.get("unique_sources_cited", 0),
-            full_text_min_score=data.get("full_text_min_score"),
-            full_text_papers_read=data.get("full_text_papers_read", 0),
-            full_text_read_count=data.get("full_text_read_count", 0),
+            full_text_min_score=full_text_min_score,
+            full_text_papers_read=full_text_papers_read,
+            full_text_read_count=full_text_read_count,
         )

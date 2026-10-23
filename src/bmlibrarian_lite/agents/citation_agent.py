@@ -204,8 +204,9 @@ class LiteCitationAgent(LiteBaseAgent):
         Args:
             question: Research question
             scored_doc: Document with relevance score
-            full_text: The paper's full text, read instead of its abstract.
-                Either is read in windows (:func:`analysis_windows`), one
+            full_text: The paper's full text, read instead of its abstract;
+                a text with nothing before its references is ignored and the
+                abstract read. Either is read in windows (:func:`analysis_windows`), one
                 call each, and their passages merged
                 (:func:`merged_window_citations`): every window must be
                 read, or the extraction failed.
@@ -337,7 +338,8 @@ Relevance Score: {scored_doc.score}/5
             max_workers: Number of parallel workers (1=sequential)
             cancelled: Optional threading.Event; when set, stops processing
             full_texts: Full texts by document id; a document with one is
-                read from it rather than from its abstract.
+                read from it rather than from its abstract, unless it has
+                nothing before its references.
 
         Returns:
             The outcome: the citations, how many documents were attempted,

@@ -17,10 +17,12 @@ reduced (the maintainer's rule, 2026-10-23), never its reference list.
 import json
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from bmlib.publications.retraction_status import RetractionStatus
 
 from bmlibrarian_lite import citation_full_texts
 from bmlibrarian_lite.agents.citation_agent import (
@@ -30,10 +32,12 @@ from bmlibrarian_lite.agents.citation_agent import (
     merged_window_citations,
 )
 from bmlibrarian_lite.agents.reporting_agent import LiteReportingAgent
+from bmlibrarian_lite.analysis_failures import failure_cause_text
 from bmlibrarian_lite.audit_records import (
     CHECKPOINT_EXTRACTION_FAILURES_KEY,
     CHECKPOINT_MIN_SCORE_KEY,
     CHECKPOINT_REPORT_METADATA_KEY,
+    CHECKPOINT_RETRACTION_SNAPSHOT_KEY,
     recorded_report_metadata,
 )
 from bmlibrarian_lite.chunking import analysis_windows, without_references
@@ -52,19 +56,23 @@ from bmlibrarian_lite.data_models import (
     EvaluationErrorCode,
     ExtractionFailure,
     LiteDocument,
+    PassFailure,
     ReportMetadata,
     ScoredDocument,
 )
 from bmlibrarian_lite.full_text_retry import (
+    CANCELLED_TEXT,
     NO_NEW_FULL_TEXT_TEXT,
     NO_REPORT_TEXT,
     NOT_KEPT_TEXT,
+    REPORT_PENDING_KEY,
     FullTextRetry,
     RetryNotPossible,
     retry_full_texts,
     retry_text,
 )
 from bmlibrarian_lite.storage import LiteStorage
+from bmlibrarian_lite.utils import classify_analysis_exception
 
 QUESTION = "Does aspirin prevent stroke?"
 UNREACHABLE = EvaluationErrorCode.API_CONNECTION_ERROR
@@ -337,6 +345,25 @@ class TestTheAgentReadsTheFullText:
         assert outcome.citations == []
         assert outcome.read_full_text == frozenset()
 
+    def test_in_parallel_each_paper_is_recorded_by_its_own_text(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """In parallel, the record still names the paper read from full text.
+
+        Cloud providers extract several papers at once.
+        """
+        agent = LiteCitationAgent()
+        monkeypatch.setattr(agent, "_extract_with_retry",
+                            Recording([passage("Quote.")] * 3))
+
+        outcome = agent.extract_all_citations(
+            QUESTION, [scored("1", 5), scored("2", 5), scored("3", 5)],
+            max_workers=3, full_texts={"doc-2": "Body of paper two."},
+        )
+
+        assert outcome.read_full_text == {"doc-2"}
+        assert len(outcome.citations) == 3
+
 
 class TestTheOutcomeRefusesWhatCannotBe:
     """``read_full_text`` is checked like the counts."""
@@ -381,8 +408,8 @@ class TestTheMethodologySaysWhatWasRead:
         assert (metadata.full_text_papers_read, metadata.full_text_read_count) == (2, 1)
         assert full_text_summary(metadata) == (
             "The citations of 1 of the 2 papers scored 4 or higher were read "
-            "from their full text; for the others no full text was obtained, "
-            "and their abstracts were read."
+            "from their full text; for the others no readable full text was "
+            "obtained, and their abstracts were read."
         )
 
     def test_all_read(self) -> None:
@@ -407,6 +434,37 @@ class TestTheMethodologySaysWhatWasRead:
         again = ReportMetadata.from_dict(json.loads(json.dumps(metadata.to_dict())))
         assert (again.full_text_min_score, again.full_text_papers_read,
                 again.full_text_read_count) == (4, 3, 2)
+
+    def test_the_score_distribution_survives_the_checkpoint(self) -> None:
+        """JSON makes the scores strings; read back, they are ints again.
+
+        A report written again looks them up as ints, and would print a
+        table of zeros.
+        """
+        metadata = ReportMetadata(score_distribution={5: 2, 4: 3, 1: 7})
+        again = ReportMetadata.from_dict(json.loads(json.dumps(metadata.to_dict())))
+        assert again.score_distribution == {5: 2, 4: 3, 1: 7}
+
+    @pytest.mark.parametrize("figures", [
+        {"full_text_min_score": 4, "full_text_papers_read": 2, "full_text_read_count": 5},
+        {"full_text_min_score": None, "full_text_papers_read": 2, "full_text_read_count": 1},
+        {"full_text_min_score": "4", "full_text_papers_read": 2, "full_text_read_count": 1},
+        {"full_text_min_score": 4, "full_text_papers_read": True, "full_text_read_count": 0},
+        {"full_text_min_score": 4, "full_text_papers_read": 2, "full_text_read_count": -1},
+    ])
+    def test_figures_that_cannot_all_be_true_are_refused(self, figures: dict[str, Any]) -> None:
+        """Not printed as "5 of the 2 papers"; the retry is refused instead."""
+        with pytest.raises(ValueError):
+            ReportMetadata.from_dict(figures)
+
+    def test_one_paper_not_read_from_full_text(self) -> None:
+        """Not "0 of the 1 papers"."""
+        metadata = ReportMetadata(full_text_min_score=4, full_text_papers_read=1,
+                                  full_text_read_count=0)
+        assert full_text_summary(metadata) == (
+            "The citations of the paper scored 4 or higher were read from its "
+            "abstract; no readable full text was obtained."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -494,6 +552,26 @@ class TestFetching:
 
         assert asked == ["doc-1", "doc-2", "doc-3"]
         assert texts == {"doc-3": "Text."}
+
+    @pytest.mark.parametrize("success, content, expected", [
+        (True, "The body.", "The body."),  # the control
+        (False, "Landing page.", None),  # a failure's text is never the paper
+        (True, "", None),
+    ])
+    def test_only_a_successful_discovery_is_a_text(
+        self, monkeypatch: pytest.MonkeyPatch, success: bool, content: str,
+        expected: str | None,
+    ) -> None:
+        """Whatever else a failed discovery carries is not read as the paper."""
+        result = SimpleNamespace(success=success, markdown_content=content,
+                                 set_aside_pdf_note=None,
+                                 source_type=SimpleNamespace(value="not_found"))
+        monkeypatch.setattr(citation_full_texts, "FulltextDiscoverer",
+                            lambda **_: SimpleNamespace(discover_fulltext=lambda doc_dict: result))
+
+        fetch = citation_full_texts.full_text_fetcher(LiteConfig())
+
+        assert fetch(make_document("1")) == expected
 
     def test_a_paper_is_looked_up_by_its_identifiers(self) -> None:
         """The pmid- id prefix stands in for a missing PMID field."""
@@ -668,11 +746,16 @@ def reviewed(storage: LiteStorage, keep_metadata: bool = True,
 
 def retry(storage: LiteStorage, texts: dict[str, str], answers: dict[str, Any],
           stop_after: int | None = None, assessed: list[Any] | None = None,
+          assess: Any = None, report_error: Exception | None = None,
           ) -> tuple[FullTextRetry, FakeAgent, MagicMock]:
     """Retry with scripted fetches, extractions and reports."""
     agent = FakeAgent(answers)
     reporter = MagicMock()
     reporter.generate_report.return_value = "New report."
+    if report_error is not None:
+        reporter.generate_report.side_effect = report_error
+    if assessed is not None:
+        assess = lambda doc, text: assessed.append((doc.id, text))  # noqa: E731
     config = LiteConfig()
     config.discovery.citations_from_full_text = True
     fetched: list[str] = []
@@ -682,8 +765,7 @@ def retry(storage: LiteStorage, texts: dict[str, str], answers: dict[str, Any],
         return texts.get(doc.id)
 
     outcome = retry_full_texts(
-        QUESTION, storage, config, fetch, agent, reporter,
-        (lambda doc, text: assessed.append((doc.id, text))) if assessed is not None else None,
+        QUESTION, storage, config, fetch, agent, reporter, assess,
         lambda: stop_after is not None and len(agent.calls) >= stop_after,
     )
     agent.fetched = fetched  # type: ignore[attr-defined]
@@ -781,9 +863,15 @@ class TestRetryFullText:
         stored = storage.get_checkpoint_for_question(QUESTION)
         assert stored.metadata[CHECKPOINT_EXTRACTION_FAILURES_KEY] == []
 
-    def test_a_cancel_writes_no_report(self, storage: LiteStorage) -> None:
-        """What it replaced stays; the report is the old one."""
-        reviewed(storage)
+    def test_a_cancel_writes_no_report_and_the_next_retry_writes_it(
+        self, storage: LiteStorage
+    ) -> None:
+        """What it replaced stays, and the next retry writes the report.
+
+        Even one that reads nothing new: the report and the citations never
+        stay out of step.
+        """
+        checkpoint_id = reviewed(storage)
 
         outcome, _, reporter = retry(
             storage, {"doc-1": "T1.", "doc-3": "T3."},
@@ -792,6 +880,115 @@ class TestRetryFullText:
 
         assert outcome.cancelled and outcome.report is None
         reporter.generate_report.assert_not_called()
+        assert passages_of(storage, checkpoint_id)["doc-1"] == {"New 1."}
+        assert "next Retry Full Text writes the report" in retry_text(outcome)
+
+        again, agent, reporter = retry(storage, {}, {})
+
+        assert agent.fetched == ["doc-3"]  # type: ignore[attr-defined]
+        assert (again.read, again.report) == (0, "New report.")
+        assert "an earlier retry read" in retry_text(again)
+        metadata = reporter.generate_report.call_args.args[2]
+        assert metadata.full_text_read_count == 2
+        stored = storage.get_checkpoint_for_question(QUESTION)
+        assert stored.report == "New report."
+        assert REPORT_PENDING_KEY not in stored.metadata
+
+    def test_a_report_that_failed_to_write_is_written_by_the_next_retry(
+        self, storage: LiteStorage
+    ) -> None:
+        """A provider outage at report time leaves the mark, not a stale report."""
+        reviewed(storage)
+        with pytest.raises(ConnectionError):
+            retry(storage, {"doc-1": "T1."}, {"doc-1": ["New 1."]},
+                  report_error=ConnectionError("down"))
+        assert storage.get_checkpoint_for_question(QUESTION).metadata[REPORT_PENDING_KEY] is True
+
+        again, _, _ = retry(storage, {}, {})
+
+        assert again.report == "New report."
+
+    def test_a_cancel_while_fetching_counts_only_the_papers_asked(
+        self, storage: LiteStorage
+    ) -> None:
+        """A paper never asked is not one whose full text was not obtained."""
+        reviewed(storage)
+        agent = FakeAgent({})
+        asked: list[str] = []
+
+        def fetch(doc: LiteDocument) -> str | None:
+            asked.append(doc.id)
+            return None
+
+        config = LiteConfig()
+        outcome = retry_full_texts(QUESTION, storage, config, fetch, agent, MagicMock(),
+                                   None, lambda: len(asked) >= 1)
+
+        assert outcome == FullTextRetry(asked=1, unavailable=1, cancelled=True)
+        assert retry_text(outcome) == (
+            "Asked for 1 full text: 0 read, 1 not obtained. " + CANCELLED_TEXT
+        )
+
+    def test_an_error_after_a_cancel_says_nothing_false(self) -> None:
+        """Not "every paper was already read" for a retry that asked for none."""
+        assert retry_text(FullTextRetry(cancelled=True)) == CANCELLED_TEXT
+
+    def test_a_text_with_nothing_before_its_references_is_not_obtained(
+        self, storage: LiteStorage
+    ) -> None:
+        """Not a paper that "could not be read", and no model call is spent on it."""
+        reviewed(storage)
+
+        outcome, agent, _ = retry(storage, {"doc-1": "## References\n- X."}, {})
+
+        assert outcome == FullTextRetry(asked=2, unavailable=2)
+        assert agent.calls == []
+
+    def test_why_a_text_could_not_be_read_is_said(self, storage: LiteStorage) -> None:
+        """The classified cause and what to do, never a bare count."""
+        reviewed(storage)
+
+        outcome, _, _ = retry(storage, {"doc-1": "T1."}, {"doc-1": ConnectionError("down")})
+
+        assert outcome.failures == (PassFailure(document_id="doc-1", cause=UNREACHABLE),)
+        assert UNREACHABLE.description in retry_text(outcome)
+
+    def test_a_failed_transparency_analysis_is_said(self, storage: LiteStorage) -> None:
+        """The paper is still read; the reader learns its assessment is the old one."""
+        reviewed(storage)
+
+        def assess(doc: LiteDocument, text: str) -> None:
+            raise ConnectionError("down")
+
+        outcome, _, _ = retry(storage, {"doc-1": "T1."}, {"doc-1": ["New 1."]}, assess=assess)
+
+        assert outcome.read == 1 and outcome.report == "New report."
+        assert [f.document_id for f in outcome.transparency_failures] == ["doc-1"]
+        assert "Transparency could not be analysed again for 1 paper" in retry_text(outcome)
+
+    def test_the_report_states_check_agains_retraction_answers(
+        self, storage: LiteStorage
+    ) -> None:
+        """Not the ones the report was first written with.
+
+        A paper found under an expression of concern since keeps its warning.
+        """
+        checkpoint_id = reviewed(storage)
+        stored = storage.get_checkpoint(checkpoint_id)
+        storage.update_checkpoint(checkpoint_id, metadata={
+            **stored.metadata,
+            CHECKPOINT_RETRACTION_SNAPSHOT_KEY: [{
+                "document_id": "doc-1", "status": RetractionStatus.CONCERN.value,
+                "excluded": False, "title": "Aspirin trial 1",
+            }],
+        }, touch=False)
+
+        _, _, reporter = retry(storage, {"doc-1": "T1."}, {"doc-1": ["New 1."]})
+
+        screen = reporter.generate_report.call_args.args[2].retraction_screen
+        assert [r["status"] for r in screen.to_snapshot()] == [RetractionStatus.CONCERN.value]
+        kept = storage.get_checkpoint(checkpoint_id).metadata
+        assert kept[CHECKPOINT_RETRACTION_SNAPSHOT_KEY][0]["document_id"] == "doc-1"
 
     def test_a_question_without_a_report_cannot_be_retried(self, storage: LiteStorage) -> None:
         """Said to the reader, not a crash."""
@@ -815,6 +1012,85 @@ class TestRetryFullText:
 
         assert outcome == FullTextRetry() and agent.calls == []
         assert retry_text(outcome).startswith("Every paper scored high enough")
+
+
+class TestTheRetryWorker:
+    """Exactly one ending, and the reader's words, never the provider's (#330)."""
+
+    def run_worker(self, monkeypatch: pytest.MonkeyPatch, retry: Any,
+                   cancel: bool = False) -> tuple[dict[str, list[tuple[Any, ...]]], list[Any]]:
+        """Run the worker in this thread over a scripted retry."""
+        pytest.importorskip("PySide6")
+        from bmlibrarian_lite import agents, full_text_retry
+        from bmlibrarian_lite.gui.workers import FullTextRetryWorker
+
+        monkeypatch.setattr(agents, "LiteCitationAgent", lambda **_: MagicMock())
+        monkeypatch.setattr(agents, "LiteReportingAgent", lambda **_: MagicMock())
+        monkeypatch.setattr(citation_full_texts, "full_text_fetcher", lambda config: None)
+        passed: list[Any] = []
+
+        def scripted(*args: Any) -> FullTextRetry:
+            passed.append(args)
+            if cancel:
+                worker.cancel()
+            return retry()
+
+        monkeypatch.setattr(full_text_retry, "retry_full_texts", scripted)
+        config = LiteConfig()
+        config.transparency.enabled = False
+        worker = FullTextRetryWorker(QUESTION, config, MagicMock())
+        ended: dict[str, list[tuple[Any, ...]]] = {}
+        for name in ("finished", "error", "cancelled"):
+            getattr(worker, name).connect(
+                lambda *args, name=name: ended.setdefault(name, []).append(args))
+        worker.run()
+        return ended, passed
+
+    def test_a_retry_that_ran_finishes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With transparency off, nothing is analysed again."""
+        outcome = FullTextRetry(asked=1, read=1, report="New report.")
+        ended, passed = self.run_worker(monkeypatch, lambda: outcome)
+        assert ended == {"finished": [(outcome,)]}
+        assert passed[0][6] is None
+
+    def test_a_retry_that_cannot_run_says_why(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The refusal's own sentence."""
+        def refuse() -> FullTextRetry:
+            raise RetryNotPossible(NOT_KEPT_TEXT)
+
+        ended, _ = self.run_worker(monkeypatch, refuse)
+        assert ended == {"error": [(NOT_KEPT_TEXT,)]}
+
+    def test_a_failure_is_told_in_the_readers_words(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The provider's text can carry the key; it stays in the log."""
+        def fail() -> FullTextRetry:
+            raise ConnectionError("POST https://api?key=sk-secret refused")
+
+        ended, _ = self.run_worker(monkeypatch, fail)
+        [(message,)] = ended["error"]
+        assert "sk-secret" not in message
+        assert message == failure_cause_text(classify_analysis_exception(
+            ConnectionError("POST https://api?key=sk-secret refused")))
+
+    def test_a_failure_after_a_cancel_is_a_cancel_that_names_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Not an orderly stop, and not "every paper was already read"."""
+        def fail() -> FullTextRetry:
+            raise ConnectionError("down")
+
+        ended, _ = self.run_worker(monkeypatch, fail, cancel=True)
+        [(outcome, error)] = ended["cancelled"]
+        assert outcome == FullTextRetry(cancelled=True) and error
+        assert retry_text(outcome) == CANCELLED_TEXT
+
+    def test_a_cancelled_retry_is_cancelled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With what it did before the cancel."""
+        outcome = FullTextRetry(asked=2, read=1, cancelled=True)
+        ended, _ = self.run_worker(monkeypatch, lambda: outcome)
+        assert ended == {"cancelled": [(outcome, "")]}
 
 
 # ---------------------------------------------------------------------------

@@ -72,12 +72,12 @@ def full_text_fetcher(config: LiteConfig) -> FullTextFetch:
     def fetch(doc: LiteDocument) -> str | None:
         result = discoverer.discover_fulltext(doc_dict=discovery_identifiers(doc))
         if result.set_aside_pdf_note:
-            # Logged only; the paper's transparency analysis, when on, tells the reader
+            # Logged only: no reader sees it from here (#621, item 2)
             logger.warning("%s: %s", doc.id, result.set_aside_pdf_note)
         if result.success and result.markdown_content:
             return result.markdown_content
         logger.info(
-            "No full text for %s (%s): its abstract is read",
+            "No full text for %s (%s)",
             doc.id,
             result.source_type.value,
         )

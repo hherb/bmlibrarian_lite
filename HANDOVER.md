@@ -48,7 +48,8 @@ a long text is read in windows, never cut):
   `CitationOutcome.read_full_text` names the papers read from full text.
 - **`citation_reads`** (`citation_reads_store.py`, one row per paper per
   checkpoint) records what each paper's last extraction read; no row means
-  an older run, read from its abstract. The run keeps its **`ReportMetadata`
+  no successful read is recorded (failed, cancelled, or an older run), and
+  the full text counts as unread. The run keeps its **`ReportMetadata`
   in the checkpoint** (`CHECKPOINT_REPORT_METADATA_KEY`), and the methodology
   says how many of the papers scored high enough were read from full text.
 - *Research Questions → Retry Full Text* (`full_text_retry.py`,
@@ -58,15 +59,24 @@ a long text is read in windows, never cut):
   old ones, either way it is recorded read; transparency is analysed again
   with the text; the report is written again (version + 1, recovered
   extraction failures dropped from the checkpoint and the shortfall) only
-  when a text was read. A run from before this branch cannot be retried
-  (no stored metadata; the reader is told to run the review again).
+  when a text was read. Before the first citation changes the checkpoint is
+  marked `full_text_report_pending`, so a cancel or a failure before the
+  report is written makes the next retry write it even when it reads
+  nothing new. The report is written from the checkpoint read again: *Check
+  again*'s retraction snapshot, not the screen the report first had.
+  `ReportMetadata.from_dict` turns the score distribution's JSON keys back
+  into ints and refuses impossible full-text counts. A run from before this
+  branch cannot be retried (no stored metadata; the reader is told to run
+  the review again).
 - `record_transparency_counts` moved to `transparency/assessment.py` (the
   worker's method delegates); `build_doc_metadata` delegates to
   `citation_full_texts.discovery_identifiers`.
 - **Still owed on the desktop:** *Upload Full Text* (Audit Trail cards) and
   *Find More Evidence* / repeated smart search (extending *Re-run Search*).
   Lodged: #620 (Ollama never sends `num_ctx`: a window is silently cut on a
-  small context), #621 (follow-ups of this branch).
+  small context), #621 (follow-ups of this branch), #624 (the reference cut
+  drops tables and appendices a PDF puts after its references; all three
+  platforms).
 Apple follow-ups: #612 (test seams), #613 (upload edge cases). Android
 divergences: #614, #615; follow-ups #617–#619.
 

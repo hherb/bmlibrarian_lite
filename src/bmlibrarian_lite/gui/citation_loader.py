@@ -57,7 +57,7 @@ def build_doc_metadata(citation: 'Citation') -> Dict[str, Any]:
 
     Example:
         metadata = build_doc_metadata(citation)
-        # {'id': 123, 'doi': '10.1038/...', 'pmid': '12345', ...}
+        # {'id': 'pmid-12345', 'doi': '10.1038/...', 'pmid': '12345', ...}
     """
     return discovery_identifiers(citation.document)
 

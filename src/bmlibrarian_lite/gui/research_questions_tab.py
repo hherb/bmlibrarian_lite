@@ -588,8 +588,8 @@ class ResearchQuestionsTab(QWidget):
         if self.config.discovery.citations_from_full_text:
             full_text_action.setToolTip(
                 "Fetch the full text of papers scored high enough whose "
-                "citations were read from their abstract, read them, and "
-                "write the report again"
+                "citations were not read from their full text, read them, "
+                "and write the report again"
             )
         else:
             full_text_action.setToolTip(FULL_TEXT_SETTING_OFF_TEXT)
@@ -1714,10 +1714,10 @@ class ResearchQuestionsTab(QWidget):
             RETRY_FULL_TEXT_ACTION,
             "The full text of each paper scored "
             f"{self.config.discovery.full_text_min_score} or higher (and at "
-            "least the review's threshold) whose citations were read from "
-            "its abstract is fetched again and read, a long text in several "
-            "model calls; the report is then written again. This can take a "
-            "while and costs model calls.",
+            "least the review's threshold) whose citations were not read from "
+            "its full text is fetched and read, a long text in several model "
+            "calls; the report is then written again. This can take a while "
+            "and costs model calls.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -1749,7 +1749,7 @@ class ResearchQuestionsTab(QWidget):
     def _on_full_text_finished(
         self, outcome: FullTextRetry, question: str, pubmed_query: str
     ) -> None:
-        """A retry that ran to its end: a new report is loaded into the tabs.
+        """A retry that ran to its end: a report it wrote is loaded into the tabs.
 
         Args:
             outcome: What it did.
@@ -1784,7 +1784,7 @@ class ResearchQuestionsTab(QWidget):
             error: The error that also ended it, or an empty string.
         """
         self._reset_ui()
-        message = retry_text(outcome) + (f" {error}" if error else "")
+        message = retry_text(outcome) + also_failed_text(error)
         self.progress_label.setText(message)
         if error:
             QMessageBox.warning(self, "Retry Full Text Cancelled", message)

@@ -1905,7 +1905,7 @@ class TransparencyReanalysisWorker(SingleOutcome, QThread):
 class FullTextRetryWorker(SingleOutcome, QThread):
     """Background worker for *Retry Full Text* on a reviewed question.
 
-    The rules are :func:`~bmlibrarian_lite.full_text_retry.retry_full_texts`'.
+    See :func:`~bmlibrarian_lite.full_text_retry.retry_full_texts` for the rules.
 
     Signals:
         progress: Emitted with (current, total, message) along the way
@@ -1988,8 +1988,10 @@ class FullTextRetryWorker(SingleOutcome, QThread):
 
         Returns:
             The assessment, through the body the review's manager runs; a
-            paper with neither a PMID nor a DOI is left as it is.
+            paper with neither a PMID (its own, or a ``pmid-`` id's) nor a
+            DOI is left as it is.
         """
+        from ..citation_full_texts import discovery_identifiers
         from ..transparency.assessment import (
             assess_document,
             contact_email,
@@ -2006,10 +2008,11 @@ class FullTextRetryWorker(SingleOutcome, QThread):
         )
 
         def assess(doc: "LiteDocument", text: str) -> None:
-            if doc.pmid or doc.doi:
+            pmid = discovery_identifiers(doc)["pmid"]
+            if pmid or doc.doi:
                 assess_document(
                     analyzer, self.storage, self.config.transparency,
-                    doc.id, doc.pmid, doc.doi, full_text=text,
+                    doc.id, pmid, doc.doi, full_text=text,
                 )
 
         return assess

@@ -457,8 +457,9 @@ class DiscoveryConfig:
     # stage 2). Off: entries still collect, for when it is on again (and for
     # stage 3's review window, not yet built).
     browser_rescue_hidden: bool = True
-    # Read the citations of papers scored full_text_min_score or higher from
-    # their full text, fetched for them (as on iOS/macOS and Android)
+    # Read the citations of papers scored full_text_min_score or higher (never
+    # below the review's relevance threshold) from their full text, fetched
+    # for them (as on iOS/macOS and Android)
     citations_from_full_text: bool = False
     full_text_min_score: int = DEFAULT_FULL_TEXT_MIN_SCORE
 

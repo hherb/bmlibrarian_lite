@@ -760,7 +760,7 @@ class WorkflowWorker(QThread):
             )
         except sqlite3.Error as e:
             # The report is saved; only a retry of its full texts cannot
-            # write it again, and it says why
+            # write it again
             logger.error(
                 "Could not keep the report metadata in checkpoint %s: %s",
                 checkpoint_id,
