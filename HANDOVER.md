@@ -33,6 +33,18 @@ a long text is read in windows, never cut):
   share of the vote). `chunk_text` no longer adds a tail chunk the last one
   holds (Interrogation's chunks too). Interrogation's 8,000/200 embedding
   chunks are retrieval, not map-reduce, and were left as they are.
+- **The apps read the same windows** (contract
+  `doc/cross_platform/llm_parity/text_windows.json`, generated from Python, in
+  Unicode code points; a CRLF heading counts): BioMedLit `TextWindows`
+  (`withoutReferences`, `analysisWindows`, `mergedWindowItems`) and Android
+  `util/TextWindows.kt`. Citation extraction on both no longer cuts at 40,000
+  (`maxCitationFullTextCharacters` / `MAX_CITATION_FULL_TEXT_CHARACTERS` and
+  the cut notice are gone): one call per window, labelled "(part i of n)",
+  usage summed, any window failing fails the paper, the abstract no longer
+  sits beside the full text, a references-only text counts as no full text,
+  and `fittingBudget` costs every window (the run budget still drops a full
+  text: it is the reader's own setting). Not windowed anywhere: relevance
+  scoring of abstracts (sent whole, never cut).
   `CitationOutcome.read_full_text` names the papers read from full text.
 - **`citation_reads`** (`citation_reads_store.py`, one row per paper per
   checkpoint) records what each paper's last extraction read; no row means
@@ -349,20 +361,11 @@ Open issues by family; each issue carries the detail. None blocks another.
 ### iOS/macOS storage, errors and tests (#282 and #285 rounds)
 
 **#289 blocks any model change lightweight migration cannot absorb** until
-each `VersionedSchema` snapshots its own model types. Around it: a store the
-app cannot open ends in `fatalError` (#297); `isMigrationError` matches
-`"migration"` as a bare substring (#292); `try? modelContext.save()` drops
-the failure that decides whether a shortfall is stored (#293); a set-aside
-store is unreachable on iOS and accumulates (#294);
-`ReportSearchCompleteness` is four states in `Bool × String? × String`
-(#295); the migration test's earlier-build store has no relationships
-(#296); a damaged shortfall record reads as an API error (#298). Also #287
-(four error paths that swallow or misreport), #286 (a non-`Sendable`
-formatter static — a Swift 6 error), #290 (`AppLogger` declared twice).
-**#281 / #288 — the workflow's own decisions are untested**; #288 measured
-six of ten are pure functions `private` by accident. The boundary that
-matters: `failedEuropePMCPage`'s `max(1, …)`, without which a failed later
-page reports as complete.
+each `VersionedSchema` snapshots its own model types. Around it: #297
+(`fatalError` on an unopenable store), #292, #293, #294, #295, #296, #298,
+#287, #286 (Swift 6 error), #290. **#281 / #288 — the workflow's own
+decisions are untested** (six of ten are pure functions `private` by
+accident; `failedEuropePMCPage`'s `max(1, …)` matters most).
 
 ### Identity, citations and the report renderer (#206 and #226 rounds)
 
@@ -385,17 +388,11 @@ routing, first rung only, PMC rung first. Also #214 / #215
 
 ### Extracted text and the transparency analyser (#198 round)
 
-All want one decision across Python, Swift and Kotlin. **#199** the
-extractors over-capture on PDF prose (`(?=\n\n|\z)` on text with no blank
-runs). **A bounded cap is already disproved** (0c2c268, reverted a2b5cd8):
-it cut "…all other authors declare no competing interests" off a well-formed
-disclosure. The repair is section segmentation
-(`doc/cross_platform/ios_bmlib_alignment.md`). **#203** a negative finding
-from partial text is recorded as absence; **#200** `isComplete` is satisfied
-by one character per page (and Python and Swift count a text-free page
-differently, deliberately — resolve together). **#244** `bmll -v` never
-enables DEBUG; **#245** the transparency CLIs take the NCBI key only as
-`--api-key`.
+One decision across all three platforms each: **#199** extractors over-capture
+on PDF prose (a bounded cap is disproved, 0c2c268/a2b5cd8; the repair is
+section segmentation, `doc/cross_platform/ios_bmlib_alignment.md`); **#203**
+partial text recorded as absence; **#200** `isComplete` from one character per
+page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
 
 ### Full-text retrieval and JATS
 
@@ -431,9 +428,8 @@ enables DEBUG; **#245** the transparency CLIs take the NCBI key only as
 
 ### Transparency parity and pricing
 
-#148 (`INDUSTRY_KEYWORDS` drift; wants a shared fixture), #159, #160, #150
-(`xfail(strict=True)`), #145; Android #116 slices, #109; pricing #136/#137
-(hardcoded, drifted), #138, #139; small #140, #126, #111, #225.
+#148, #159, #160, #150, #145; Android #116, #109; pricing #136/#137, #138,
+#139; small #140, #126, #111, #225.
 
 ### Verify
 

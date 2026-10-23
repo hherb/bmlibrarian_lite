@@ -58,13 +58,6 @@ enum WorkflowConstants {
     /// threshold: a paper the report would not use is not fetched.
     static let fullTextAutoFetchMinScore = 4
 
-    /// Most characters of a paper's full text handed to citation extraction.
-    ///
-    /// About 10,000 tokens. Bounds the cost per paper, since every relevant
-    /// paper is a separate paid call. A longer text is cut and the prompt says
-    /// so, so the model does not treat the cut as the end of the paper.
-    static let maxCitationFullTextCharacters = 40_000
-
     /// Folder, beside BioMedLit's PDF cache, holding the PDFs the reader uploaded.
     ///
     /// Apart from the cache, so clearing it never deletes a copy no source could supply.

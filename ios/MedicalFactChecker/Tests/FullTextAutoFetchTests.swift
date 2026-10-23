@@ -303,24 +303,22 @@ final class FullTextAutoFetchTests: XCTestCase {
         XCTAssertNil(FullTextAutoFetch.citationText(for: makeDocument()))
     }
 
-    func testAShortTextIsReturnedWhole() {
+    /// A publication is never cut: the windows read all of it.
+    func testALongTextIsReturnedWhole() {
         let document = makeDocument()
-        document.fullTextContent = "  Methods. Results.  "
+        let text = String(repeating: "Methods and results. ", count: 5_000) + "The last sentence."
+        document.fullTextContent = text
 
-        let result = FullTextAutoFetch.citationText(for: document, maxCharacters: 100)
-
-        XCTAssertEqual(result?.text, "Methods. Results.")
-        XCTAssertEqual(result?.truncated, false)
+        XCTAssertEqual(FullTextAutoFetch.citationText(for: document), text)
     }
 
-    func testALongTextIsCutAndSaysSo() {
+    /// A reference list is never analysed, so a text that is only one is no
+    /// full text: the abstract is read.
+    func testATextOfOnlyReferencesIsNoCitationText() {
         let document = makeDocument()
-        document.fullTextContent = String(repeating: "a", count: 50)
+        document.fullTextContent = "References\n1. Smith J. A paper. 2020."
 
-        let result = FullTextAutoFetch.citationText(for: document, maxCharacters: 10)
-
-        XCTAssertEqual(result?.text.count, 10)
-        XCTAssertEqual(result?.truncated, true)
+        XCTAssertNil(FullTextAutoFetch.citationText(for: document))
     }
 
     /// An abstract-only deposit's text is the abstract, already in the prompt;
@@ -338,33 +336,105 @@ final class FullTextAutoFetchTests: XCTestCase {
     func testWithoutFullTextThePromptReadsTheAbstractAsBefore() {
         let input = CitationInput(pmid: "1", title: "T", abstract: "Abs.", authors: "A", year: 2020)
 
-        let source = ParallelCitationService.sourceSection(for: input)
+        let source = ParallelCitationService.sourceSections(for: input)
 
         XCTAssertEqual(source.noun, "abstract")
-        XCTAssertEqual(source.body, "Abstract:\nAbs.")
+        XCTAssertEqual(source.bodies, ["Abstract:\nAbs."])
     }
 
-    func testWithFullTextThePromptCarriesBothAndNoCutNotice() {
+    /// The full text alone: nothing is cut, so the abstract is not needed beside it.
+    func testAShortFullTextIsOnePromptWithoutTheAbstract() {
         let input = CitationInput(
-            pmid: "1", title: "T", abstract: "Abs.", authors: "A", year: 2020,
-            fullText: "Body.", fullTextTruncated: false
+            pmid: "1", title: "T", abstract: "Abs.", authors: "A", year: 2020, fullText: "Body."
         )
 
-        let source = ParallelCitationService.sourceSection(for: input)
+        let source = ParallelCitationService.sourceSections(for: input)
 
         XCTAssertEqual(source.noun, "article")
-        XCTAssertTrue(source.body.contains("Abstract:\nAbs."))
-        XCTAssertTrue(source.body.contains("Full text:\nBody."))
-        XCTAssertFalse(source.body.contains("cut here"))
+        XCTAssertEqual(source.bodies, ["Full text:\nBody."])
     }
 
-    func testACutFullTextIsAnnouncedToTheModel() {
+    /// A text over one window is read in several calls, every part labelled,
+    /// and the end of the paper reaches the model.
+    func testALongFullTextIsReadInPartsToItsEnd() {
+        let text = String(repeating: "Methods and results. ", count: 2_000) + "The last sentence."
         let input = CitationInput(
-            pmid: "1", title: "T", abstract: "Abs.", authors: "A", year: 2020,
-            fullText: "Body", fullTextTruncated: true
+            pmid: "1", title: "T", abstract: "Abs.", authors: "A", year: 2020, fullText: text
         )
 
-        XCTAssertTrue(ParallelCitationService.sourceSection(for: input).body.contains("cut here"))
+        let prompts = ParallelCitationService.citationPrompts(input: input, claim: "C")
+
+        XCTAssertGreaterThan(prompts.count, 1)
+        XCTAssertTrue(prompts[0].contains("Full text (part 1 of \(prompts.count)):"))
+        XCTAssertTrue(prompts.last?.contains("The last sentence.") ?? false)
+        XCTAssertFalse(prompts.contains { $0.contains("Abstract:") })
+    }
+
+    func testAFullTextOfOnlyReferencesReadsTheAbstract() {
+        let input = CitationInput(
+            pmid: "1", title: "T", abstract: "Abs.", authors: "A", year: 2020,
+            fullText: "References\n1. Smith J."
+        )
+
+        XCTAssertEqual(ParallelCitationService.sourceSections(for: input).bodies, ["Abstract:\nAbs."])
+    }
+
+    /// An empty abstract is still asked about, as before.
+    func testAnEmptyAbstractIsStillOneCall() {
+        let input = CitationInput(pmid: "1", title: "T", abstract: "", authors: "A", year: 2020)
+
+        XCTAssertEqual(ParallelCitationService.citationPrompts(input: input, claim: "C").count, 1)
+    }
+
+    // MARK: - Reading the windows
+
+    private static func usage(_ input: Int) -> LLMUsage {
+        LLMUsage(model: "m", provider: nil, inputTokens: input, outputTokens: 1)
+    }
+
+    private static func reply(_ passages: String...) -> String {
+        let items = passages.map { "{\"text\": \"\($0)\", \"relevance\": \"r\"}" }
+        return "{\"passages\": [\(items.joined(separator: ", "))]}"
+    }
+
+    private static let longInput = CitationInput(
+        pmid: "1", title: "T", abstract: "Abs.", authors: "A", year: 2020,
+        fullText: String(repeating: "Methods and results. ", count: 2_000)
+    )
+
+    /// One call per window; the overlap's repeats are merged, the usage summed.
+    func testEveryWindowIsAskedAndThePassagesMerged() async throws {
+        let prompts = ParallelCitationService.citationPrompts(input: Self.longInput, claim: "C")
+        var calls = 0
+
+        let result = await ParallelCitationService.extractCitations(from: Self.longInput, claim: "C") { _ in
+            calls += 1
+            return calls == 1
+                ? (Self.reply("Stroke fell by 20%.", "Bleeding rose."), Self.usage(10))
+                : (Self.reply("stroke fell  by 20%."), Self.usage(10))
+        }
+
+        let success = try XCTUnwrap(result)
+        XCTAssertTrue(success.isSuccess)
+        XCTAssertEqual(calls, prompts.count)
+        XCTAssertEqual(success.passages.map(\.text), ["Stroke fell by 20%.", "Bleeding rose."])
+        XCTAssertEqual(success.usage?.inputTokens, 10 * prompts.count)
+    }
+
+    /// Passages from part of a paper would pass for the whole of it.
+    func testAFailingWindowFailsThePaper() async throws {
+        var calls = 0
+
+        let result = await ParallelCitationService.extractCitations(from: Self.longInput, claim: "C") { _ in
+            calls += 1
+            if calls == 2 { throw URLError(.badServerResponse) }
+            return (Self.reply("Stroke fell by 20%."), Self.usage(10))
+        }
+
+        let failure = try XCTUnwrap(result)
+        XCTAssertTrue(failure.isError)
+        XCTAssertTrue(failure.passages.isEmpty)
+        XCTAssertEqual(failure.usage?.inputTokens, 10)
     }
 
     // MARK: - Notice
@@ -401,16 +471,6 @@ final class FullTextAutoFetchTests: XCTestCase {
     }
 
     // MARK: - Citation text edges
-
-    func testATextOfExactlyTheLimitIsNotCut() {
-        let document = makeDocument()
-        document.fullTextContent = String(repeating: "a", count: 10)
-
-        let result = FullTextAutoFetch.citationText(for: document, maxCharacters: 10)
-
-        XCTAssertEqual(result?.text.count, 10)
-        XCTAssertEqual(result?.truncated, false)
-    }
 
     func testAWhitespaceOnlyTextIsNoCitationText() {
         let document = makeDocument()
@@ -605,8 +665,7 @@ final class FullTextAutoFetchTests: XCTestCase {
     private func input(_ pmid: String, fullTextCharacters: Int?) -> CitationInput {
         CitationInput(
             pmid: pmid, title: "T", abstract: "Abs.", authors: "A", year: 2020,
-            fullText: fullTextCharacters.map { String(repeating: "a", count: $0) },
-            fullTextTruncated: false
+            fullText: fullTextCharacters.map { String(repeating: "a", count: $0) }
         )
     }
 
@@ -631,9 +690,22 @@ final class FullTextAutoFetchTests: XCTestCase {
         XCTAssertEqual(result.droppedCount, 1)
         XCTAssertNotNil(result.inputs[0].fullText)
         XCTAssertNil(result.inputs[1].fullText)
-        XCTAssertFalse(result.inputs[1].fullTextTruncated)
         XCTAssertEqual(result.inputs[1].abstract, "Abs.")
         XCTAssertEqual(result.inputs[2].pmid, "3")
+    }
+
+    /// Every window is paid for, overlaps included: 40,000 characters are
+    /// read as 16,000 + 16,000 + 8,500 = 40,500, or 10,125 tokens.
+    func testTheEstimateCountsEveryWindow() {
+        let fits = FullTextAutoFetch.fittingBudget(
+            [input("1", fullTextCharacters: 40_000)], remainingUSD: 10_125, usdPerInputToken: 1
+        )
+        let over = FullTextAutoFetch.fittingBudget(
+            [input("1", fullTextCharacters: 40_000)], remainingUSD: 10_124, usdPerInputToken: 1
+        )
+
+        XCTAssertEqual(fits.droppedCount, 0)
+        XCTAssertEqual(over.droppedCount, 1)
     }
 
     func testTheBudgetNoticeCountsThePapers() {

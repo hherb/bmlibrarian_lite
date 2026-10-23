@@ -21,6 +21,7 @@ package com.bmlibrarian.factchecker.domain.workflow
 import com.bmlibrarian.factchecker.data.remote.llm.LLMService
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.TextWindows
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -148,13 +149,17 @@ class ParallelCitationService @Inject constructor(
     /**
      * Extract citations from a single document.
      *
+     * Its text is read in windows ([CitationInput.windows]), one call each, and
+     * the passages merged ([TextWindows.mergedWindowItems]); any window failing
+     * fails the paper, since its citations would miss what that window holds.
+     *
      * @param input The document citation input.
      * @param claim The claim to extract relevant passages for.
      * @param provider The LLM provider.
      * @param apiKey API key for authentication.
      * @param model Model ID to use.
      * @param modelInfo Model pricing info for cost calculation.
-     * @return Citation result with passages or error.
+     * @return Citation result with passages or error; its usage is that of the calls made.
      */
     private suspend fun extractCitationsFromDocument(
         input: CitationInput,
@@ -164,41 +169,49 @@ class ParallelCitationService @Inject constructor(
         model: String,
         modelInfo: com.bmlibrarian.factchecker.domain.model.ModelInfo?
     ): CitationResult {
-        val estimatedInput = ParallelScoringService.estimateTokens(claim + input.title + input.content)
-        val estimatedOutput = Constants.LLM_CITATION_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
-        val cost = modelInfo?.calculateCost(estimatedInput, estimatedOutput) ?: 0.0
+        val windows = input.windows
+        val extractions = mutableListOf<LLMService.CitationExtraction>()
+        var inputTokens = 0
+        var outputTokens = 0
+        var cost = 0.0
+        for ((index, window) in windows.withIndex()) {
+            val estimatedInput = ParallelScoringService.estimateTokens(claim + input.title + window)
+            val estimatedOutput = Constants.LLM_CITATION_MAX_TOKENS / Constants.OUTPUT_TOKEN_ESTIMATE_DIVISOR
+            inputTokens += estimatedInput
+            outputTokens += estimatedOutput
+            cost += modelInfo?.calculateCost(estimatedInput, estimatedOutput) ?: 0.0
 
-        val result = llmService.extractCitations(
-            provider = provider,
-            apiKey = apiKey,
-            model = model,
-            claim = claim,
-            title = input.title,
-            content = input.content.ifEmpty { null }
-        )
-
-        return result.fold(
-            onSuccess = { extractions ->
-                CitationResult.success(
-                    documentId = input.documentId,
-                    pmid = input.pmid,
-                    extractions = extractions,
-                    inputTokens = estimatedInput,
-                    outputTokens = estimatedOutput,
-                    costUsd = cost
-                )
-            },
-            onFailure = { error ->
-                CitationResult.failure(
+            val result = llmService.extractCitations(
+                provider = provider,
+                apiKey = apiKey,
+                model = model,
+                claim = claim,
+                title = input.title,
+                content = window.ifEmpty { null },
+                part = index + 1,
+                parts = windows.size
+            )
+            val error = result.exceptionOrNull()
+            if (error != null) {
+                return CitationResult.failure(
                     documentId = input.documentId,
                     pmid = input.pmid,
                     error = error,
                     isRetryable = ParallelScoringService.isRetryableError(error),
-                    inputTokens = estimatedInput,
-                    outputTokens = estimatedOutput,
+                    inputTokens = inputTokens,
+                    outputTokens = outputTokens,
                     costUsd = cost
                 )
             }
+            extractions += result.getOrThrow()
+        }
+        return CitationResult.success(
+            documentId = input.documentId,
+            pmid = input.pmid,
+            extractions = TextWindows.mergedWindowItems(extractions) { it.passage },
+            inputTokens = inputTokens,
+            outputTokens = outputTokens,
+            costUsd = cost
         )
     }
 

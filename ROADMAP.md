@@ -23,8 +23,8 @@ rules. Swift is the reference: `FactCheckWorkflow.swift`, `FullTextAutoFetch.swi
 
 **Python, decided 2026-10-23:** actions live on the Research Questions tab,
 the full-text rows first (done on this branch). Every LLM text path reads in
-16,000-character windows overlapping by 250 and reduces the answers (the
-apps still cut citations' full text at 40,000 characters): with references out, 40% of PMC texts and 45% of PDF texts
+16,000-character windows overlapping by 250 and reduces the answers, on the
+apps too (`text_windows.json`): with references out, 40% of PMC texts and 45% of PDF texts
 exceed 40,000 characters. Still owed: *Upload Full Text* (on the Audit Trail
 cards) and *Find More Evidence* / repeated smart search (extending *Re-run
 Search*).
