@@ -23,7 +23,7 @@ SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS {TABLE} (
     document_id TEXT PRIMARY KEY,
     text TEXT NOT NULL,
-    kind TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('pdf', 'html', 'text')),
     file_name TEXT NOT NULL,
     uploaded_at TEXT NOT NULL  -- ISO, UTC
 );

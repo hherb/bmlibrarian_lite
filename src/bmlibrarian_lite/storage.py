@@ -3454,15 +3454,22 @@ class LiteStorage:
         logger.debug(f"Saved citation {citation_id} for document {citation.document.id}")
         return citation_id
 
-    def record_citation_reads(self, checkpoint_id: str, reads: Mapping[str, bool]) -> None:
+    def record_citation_reads(
+        self,
+        checkpoint_id: str,
+        reads: Mapping[str, bool],
+        read_at: datetime | None = None,
+    ) -> None:
         """Record which text each paper's citations in a run were read from.
 
         Args:
             checkpoint_id: The run.
             reads: Each paper's id and whether its full text was read.
+            read_at: When the texts read were taken, in UTC; now when not
+                given.
         """
         with self._sqlite_connection() as conn:
-            citation_reads_store.record(conn, checkpoint_id, reads)
+            citation_reads_store.record(conn, checkpoint_id, reads, read_at)
             conn.commit()
 
     def get_citation_reads(self, checkpoint_id: str) -> dict[str, bool]:
@@ -3481,13 +3488,14 @@ class LiteStorage:
             return citation_reads_store.read(conn, checkpoint_id)
 
     def get_citation_full_text_read_at(self, checkpoint_id: str) -> dict[str, datetime]:
-        """When each paper of a run last had its citations read from its full text.
+        """When the texts of each paper's last extraction in a run were taken.
 
         Args:
             checkpoint_id: The run.
 
         Returns:
-            The time by paper id, for the papers read from full text.
+            The time by paper id, for the papers whose last extraction read
+            their full text.
         """
         with self._sqlite_connection() as conn:
             return citation_reads_store.full_text_read_at(conn, checkpoint_id)
@@ -3526,6 +3534,7 @@ class LiteStorage:
         checkpoint_id: str,
         document_id: str,
         citations: Sequence["Citation"],
+        read_at: datetime | None = None,
     ) -> None:
         """Replace a paper's citations in a run with ones read from its full text.
 
@@ -3536,6 +3545,8 @@ class LiteStorage:
             checkpoint_id: The run.
             document_id: The paper.
             citations: Its new citations, at least one.
+            read_at: When the text read was taken, in UTC; now when not
+                given.
 
         Raises:
             ValueError: If there are none, or one is another paper's.
@@ -3567,7 +3578,7 @@ class LiteStorage:
                     for citation in citations
                 ],
             )
-            citation_reads_store.record(conn, checkpoint_id, {document_id: True})
+            citation_reads_store.record(conn, checkpoint_id, {document_id: True}, read_at)
             conn.commit()
 
     def get_citations_for_question(

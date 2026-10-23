@@ -192,11 +192,20 @@ class AuditTrailTab(QWidget):
         try:
             # shortcut: read on the GUI thread, a long PDF holds it for seconds; move to a worker if that bites
             upload = read_upload(Path(path))
-            self.storage.save_uploaded_full_text(doc_id, upload)
         except UploadRefused as e:
             QApplication.restoreOverrideCursor()
             QMessageBox.warning(self, "Upload Full Text", str(e))
             return
+        except Exception:
+            QApplication.restoreOverrideCursor()
+            logger.exception("The full text uploaded for %s could not be read", doc_id)
+            QMessageBox.warning(
+                self, "Upload Full Text",
+                "The file could not be read, so it was not used; nothing was changed.",
+            )
+            return
+        try:
+            self.storage.save_uploaded_full_text(doc_id, upload)
         except Exception:
             QApplication.restoreOverrideCursor()
             logger.exception("The full text uploaded for %s could not be kept", doc_id)
@@ -210,8 +219,9 @@ class AuditTrailTab(QWidget):
             self,
             "Upload Full Text",
             f"The full text of \u201c{title}\u201d is kept ({upload.file_name}). "
-            "Retry Full Text on the Research Questions tab reads it and writes "
-            "the report again; a review run from now on reads it too.",
+            "When the paper scored at or above the review's threshold, Retry "
+            "Full Text on the Research Questions tab reads it and writes the "
+            "report again, and a review run from now on reads it too.",
         )
 
     # =========================================================================

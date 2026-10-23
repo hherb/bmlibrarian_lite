@@ -587,6 +587,7 @@ class DocumentCard(QFrame):
     def _show_context_menu(self, position) -> None:
         """Show right-click context menu."""
         menu = QMenu(self)
+        menu.setToolTipsVisible(True)
 
         interrogate_action = QAction("Send to Interrogator", self)
         interrogate_action.triggered.connect(self._request_interrogation)

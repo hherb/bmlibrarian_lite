@@ -2375,7 +2375,7 @@ class ResearchQuestionSummary:
     failed_documents: int = 0
 
 
-def _stored_full_text_reads(data: dict[str, Any]) -> tuple[int | None, int, int]:
+def _stored_full_text_reads(data: dict[str, Any]) -> tuple[int | None, int, int, int]:
     """Read a stored report's full-text figures, refusing ones that cannot all be true.
 
     They are printed into the methodology of a report a retry writes again,
@@ -2385,8 +2385,9 @@ def _stored_full_text_reads(data: dict[str, Any]) -> tuple[int | None, int, int]
         data: The stored metadata.
 
     Returns:
-        The full-text score, the papers scored that high, and how many of
-        them were read from their full text.
+        The full-text score, the papers scored that high, how many of them
+        were read from their full text, and how many papers were read from
+        a full text the reader uploaded.
 
     Raises:
         ValueError: If a figure is not a whole number, a count is negative
@@ -2395,14 +2396,18 @@ def _stored_full_text_reads(data: dict[str, Any]) -> tuple[int | None, int, int]
     minimum = data.get("full_text_min_score")
     papers = data.get("full_text_papers_read", 0)
     read = data.get("full_text_read_count", 0)
-    for value in (papers, read) if minimum is None else (minimum, papers, read):
+    uploaded = data.get("uploaded_full_text_read_count", 0)
+    counts = (papers, read, uploaded)
+    for value in counts if minimum is None else (minimum, *counts):
         if not isinstance(value, int) or isinstance(value, bool):
             raise ValueError("The full-text figures are whole numbers")
     if not 0 <= read <= papers:
         raise ValueError("No more papers are read from full text than were read")
+    if uploaded < 0:
+        raise ValueError("No fewer than no papers are read from an upload")
     if minimum is None and papers:
         raise ValueError("Papers counted against no full-text score")
-    return minimum, papers, read
+    return minimum, papers, read, uploaded
 
 
 @dataclass
@@ -2490,6 +2495,9 @@ class ReportMetadata:
             citations were extracted, how many
         full_text_read_count: Of those, how many were read from their full
             text; the rest were read from their abstracts
+        uploaded_full_text_read_count: Papers whose citations were read
+            from a full text the reader uploaded, whatever their score or
+            the setting
     """
 
     # Version info
@@ -2544,6 +2552,7 @@ class ReportMetadata:
     full_text_min_score: int | None = None
     full_text_papers_read: int = 0
     full_text_read_count: int = 0
+    uploaded_full_text_read_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -2598,6 +2607,7 @@ class ReportMetadata:
             "full_text_min_score": self.full_text_min_score,
             "full_text_papers_read": self.full_text_papers_read,
             "full_text_read_count": self.full_text_read_count,
+            "uploaded_full_text_read_count": self.uploaded_full_text_read_count,
         }
 
     @classmethod
@@ -2632,9 +2642,12 @@ class ReportMetadata:
         stored_distribution = data.get("score_distribution", {})
         if not isinstance(stored_distribution, dict):
             raise ValueError("score_distribution must be a mapping")
-        full_text_min_score, full_text_papers_read, full_text_read_count = (
-            _stored_full_text_reads(data)
-        )
+        (
+            full_text_min_score,
+            full_text_papers_read,
+            full_text_read_count,
+            uploaded_full_text_read_count,
+        ) = _stored_full_text_reads(data)
 
         return cls(
             retraction_screen=screen,
@@ -2690,4 +2703,5 @@ class ReportMetadata:
             full_text_min_score=full_text_min_score,
             full_text_papers_read=full_text_papers_read,
             full_text_read_count=full_text_read_count,
+            uploaded_full_text_read_count=uploaded_full_text_read_count,
         )

@@ -78,8 +78,8 @@ from ..retraction_text import (
 )
 from ..search_failures import describe_search_shortfalls
 from ..full_text_retry import (
-    FULL_TEXT_SETTING_OFF_TEXT,
     RETRY_FULL_TEXT_ACTION,
+    UPLOADS_ONLY_TEXT,
     FullTextRetry,
     retry_text,
 )
@@ -543,6 +543,7 @@ class ResearchQuestionsTab(QWidget):
         is_busy = self._is_busy()
 
         menu = QMenu(self)
+        menu.setToolTipsVisible(True)
 
         # Re-classify action
         reclassify_action = QAction("Re-classify Documents", self)
@@ -589,11 +590,11 @@ class ResearchQuestionsTab(QWidget):
             full_text_action.setToolTip(
                 "Fetch the full text of papers scored high enough whose "
                 "citations were not read from their full text, read them "
-                "and any full text uploaded on the Audit Trail's cards, "
-                "and write the report again"
+                "and any full text uploaded on the Audit Trail's cards since "
+                "its paper was last read, and write the report again"
             )
         else:
-            full_text_action.setToolTip(FULL_TEXT_SETTING_OFF_TEXT)
+            full_text_action.setToolTip(UPLOADS_ONLY_TEXT)
         full_text_action.triggered.connect(self._on_retry_full_text_clicked)
         full_text_action.setEnabled(not is_busy and question.total_documents > 0)
         menu.addAction(full_text_action)

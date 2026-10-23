@@ -8,8 +8,9 @@ The rules are the apps' (iOS/macOS's ``retryFullTextRetrieval``): every
 paper of the question's reviewed run scored at or above the full-text score
 whose citations were not read from its full text is asked for it again,
 when the full-text setting is on. A relevant paper whose uploaded full text
-is newer than its last read from full text is read from the upload, whatever
-the setting or score (``full_text_upload``). A paper whose text arrives
+(``uploaded_full_texts_store``) was stored after the texts of its last read
+from full text were taken, or that was never read from full text, is read
+from the upload, whatever the setting or score. A paper whose text arrives
 has its citations extracted from it; they replace its old ones only when
 the text yields passages, and either way it is recorded as read. Its
 transparency is analysed again with that text. When at least one full text
@@ -24,7 +25,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from .analysis_failures import pass_failure_detail
@@ -38,7 +39,7 @@ from .audit_records import (
 )
 from .chunking import analysis_windows
 from .citation_full_texts import FullTextFetch, fetch_full_texts
-from .citation_text import full_text_min_score, record_full_text_reads
+from .citation_text import full_text_min_score, record_full_text_reads, record_uploaded_reads
 from .data_models import (
     AnalysisStage,
     CitationOutcome,
@@ -68,14 +69,14 @@ AssessTransparency = Callable[["LiteDocument", str], None]
 REPORT_PENDING_KEY = "full_text_report_pending"
 
 RETRY_FULL_TEXT_ACTION = "Retry Full Text"
-FULL_TEXT_SETTING_OFF_TEXT = (
+UPLOADS_ONLY_TEXT = (
     "Read the full texts uploaded on the Audit Trail's cards, and write the "
     "report again. To fetch full texts too, turn on reading citations from "
     "full text in Settings > Full Text."
 )
 NOTHING_TO_READ_TEXT = (
-    "No paper of this question has an uploaded full text its citations have "
-    "not been read from. Upload one from a paper's card in the Audit Trail, "
+    "No paper of this question scored at or above its threshold has an "
+    "uploaded full text its citations have not been read from. Upload one from a paper's card in the Audit Trail, "
     "or turn on reading citations from full text in Settings > Full Text."
 )
 NO_REPORT_TEXT = "This question has no report to take further; run the review first."
@@ -100,8 +101,8 @@ class FullTextRetry:
     """What a retry of a question's full texts did.
 
     Attributes:
-        asked: Papers whose full text was asked for; a cancel can stop
-            before every paper due was asked.
+        asked: Papers whose full text was asked for, an upload's included;
+            a cancel can stop before every paper due was asked.
         read: Of those, papers whose citations were read from it.
         replaced: Of those, papers whose citations its passages replaced.
         unavailable: Papers for which no full text, or none with anything
@@ -147,7 +148,8 @@ def retry_text(outcome: FullTextRetry) -> str:
             + (f", {outcome.failed} could not be read" if outcome.failed else "")
             + "."
         )
-    elif not outcome.cancelled:
+    elif not outcome.cancelled and outcome.report is None:
+        # Only a retry that sought full texts gets here: one that did not is refused
         parts.append("Every paper scored high enough was already read from its full text.")
     if outcome.cancelled:
         parts.append(CANCELLED_PENDING_TEXT if outcome.read else CANCELLED_TEXT)
@@ -186,7 +188,7 @@ def retry_full_texts(
     Args:
         question: The research question.
         storage: The store the run is read from and written to.
-        config: The configuration, for the full-text score.
+        config: The configuration, for the full-text setting and score.
         fetch: Fetches one paper's full text.
         citation_agent: Extracts the citations.
         reporting_agent: Writes the report.
@@ -201,7 +203,8 @@ def retry_full_texts(
     Raises:
         RetryNotPossible: The question has no report, or its run did not
             keep the report's metadata, or it cannot be read back, or, with
-            the full-text setting off, it has no unread upload to read.
+            the full-text setting off, it has no unread upload to read and
+            no report owed (:data:`REPORT_PENDING_KEY`).
     """
     checkpoint = storage.get_checkpoint_for_question(question)
     if checkpoint is None or not checkpoint.report:
@@ -220,11 +223,13 @@ def retry_full_texts(
     scored = storage.get_scored_documents_for_question(question, checkpoint_id=checkpoint.id)
     seeking = config.discovery.citations_from_full_text
     read_at = storage.get_citation_full_text_read_at(checkpoint.id)
+    # Before the uploads are read: one stored after this is read next time
+    taken_at = datetime.now(UTC)
     uploads = storage.get_uploaded_full_texts([d.document.id for d in scored])
     targets = [
         d for d in scored
-        if is_due(d, min_score, threshold, seeking, uploads.get(d.document.id),
-                  read_at.get(d.document.id))
+        if is_due(d, min_score=min_score, threshold=threshold, seeking=seeking,
+                  upload=uploads.get(d.document.id), read_at=read_at.get(d.document.id))
     ]
     pending = checkpoint.metadata.get(REPORT_PENDING_KEY) is True
     if not targets and not seeking and not pending:
@@ -233,7 +238,7 @@ def retry_full_texts(
     if targets:
         outcome = _read_full_texts(
             question, storage, checkpoint.id, targets, min_score, fetch, uploads,
-            citation_agent, assess_transparency, should_stop, progress,
+            taken_at, citation_agent, assess_transparency, should_stop, progress,
         )
     if outcome.cancelled or should_stop():
         return replace(outcome, cancelled=True)
@@ -243,13 +248,14 @@ def retry_full_texts(
         progress(0, 1, "Writing the report again")
     report = _write_report_again(
         question, storage, checkpoint.id, metadata, scored, min_score, threshold,
-        seeking, reporting_agent,
+        seeking, set(uploads), reporting_agent,
     )
     return replace(outcome, report=report)
 
 
 def is_due(
     paper: ScoredDocument,
+    *,
     min_score: int,
     threshold: int,
     seeking: bool,
@@ -264,13 +270,14 @@ def is_due(
         threshold: The full-text score.
         seeking: Whether the full-text setting is on.
         upload: The paper's uploaded full text, if any.
-        read_at: When its citations were last read from its full text, if
-            ever.
+        read_at: When the texts of its last read from full text were
+            taken, if it was ever read from full text.
 
     Returns:
-        True for a relevant paper whose upload is newer than its last read
-        from full text, whatever the setting or score; otherwise, with the
-        setting on, for a paper at the full-text score never read from it.
+        True for a relevant paper with an upload that was never read from
+        full text, or whose upload was stored after that read's texts were
+        taken, whatever the setting or score; otherwise, with the setting
+        on, for a paper at the full-text score never read from full text.
     """
     if upload is not None and paper.score >= min_score:
         return read_at is None or (
@@ -287,6 +294,7 @@ def _read_full_texts(
     min_score: int,
     fetch: FullTextFetch,
     uploads: dict[str, UploadedFullText],
+    taken_at: datetime,
     citation_agent: LiteCitationAgent,
     assess_transparency: AssessTransparency | None,
     should_stop: Callable[[], bool],
@@ -307,6 +315,7 @@ def _read_full_texts(
         min_score: The run's relevance threshold.
         fetch: Fetches one paper's full text.
         uploads: The uploaded full texts by paper id.
+        taken_at: When the uploads were read; each read is recorded at it.
         citation_agent: Extracts the citations.
         assess_transparency: Analyses a paper's transparency, or None.
         should_stop: Asked between papers.
@@ -324,7 +333,7 @@ def _read_full_texts(
 
     def fetching(current: int, total: int) -> None:
         if progress:
-            progress(current, total, f"Fetching full text {current}/{total}")
+            progress(current, total, f"Getting full text {current}/{total}")
 
     fetched = fetch_full_texts(counted, [d.document for d in targets], should_stop, fetching)
     # A text with nothing before its references has nothing to read
@@ -349,11 +358,13 @@ def _read_full_texts(
             _mark_report_pending(storage, checkpoint_id)
             marked = True
         if extraction.citations:
-            storage.replace_document_citations(checkpoint_id, doc_id, extraction.citations)
+            storage.replace_document_citations(
+                checkpoint_id, doc_id, extraction.citations, read_at=taken_at
+            )
             outcome = replace(outcome, replaced=outcome.replaced + 1)
         else:
             # Read, and nothing quotable in it: the old citations stand
-            storage.record_citation_reads(checkpoint_id, {doc_id: True})
+            storage.record_citation_reads(checkpoint_id, {doc_id: True}, read_at=taken_at)
         outcome = replace(outcome, read=outcome.read + 1)
         if assess_transparency is not None:
             try:
@@ -395,6 +406,7 @@ def _write_report_again(
     min_score: int,
     threshold: int,
     seeking: bool,
+    uploaded: set[str],
     reporting_agent: LiteReportingAgent,
 ) -> str:
     """Write the run's report again from its stored citations, and keep it.
@@ -413,6 +425,7 @@ def _write_report_again(
         min_score: The run's relevance threshold.
         threshold: The full-text score.
         seeking: Whether the full-text setting is on.
+        uploaded: The ids of the papers with an uploaded full text.
         reporting_agent: Writes the report.
 
     Returns:
@@ -439,14 +452,12 @@ def _write_report_again(
             if s.stage is not AnalysisStage.CITATION_EXTRACTION
         ] + ([shortfall] if shortfall else [])
     failed_ids = {f.document.id for f in failures or []}
+    read_papers = [d for d in scored if d.score >= min_score and d.document.id not in failed_ids]
+    read_full_text = {doc_id for doc_id, read in reads.items() if read}
     if seeking or metadata.full_text_min_score is not None:
         # A run that sought no full text says nothing of texts not obtained
-        record_full_text_reads(
-            metadata,
-            threshold,
-            [d for d in scored if d.score >= min_score and d.document.id not in failed_ids],
-            {doc_id for doc_id, read in reads.items() if read},
-        )
+        record_full_text_reads(metadata, threshold, read_papers, read_full_text)
+    record_uploaded_reads(metadata, read_papers, read_full_text, uploaded)
 
     snapshot = recorded_retraction_snapshot(checkpoint.metadata)
     if snapshot:

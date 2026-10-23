@@ -22,6 +22,7 @@ literature, and citations sub-tabs.
 """
 
 import dataclasses
+from contextlib import nullcontext
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -543,3 +544,45 @@ class TestUploadFullText:
 
         mock_storage.save_uploaded_full_text.assert_not_called()
         assert not box.method_calls
+
+    @pytest.mark.parametrize("fails, said", [
+        ("read", "could not be read"),
+        ("save", "could not be saved"),
+    ])
+    def test_a_failure_says_which_step_failed_and_restores_the_cursor(
+        self, qapp, mock_config, mock_storage, sample_document, tmp_path, fails, said
+    ) -> None:
+        """A read failure is not called a database one; the wait cursor never stays."""
+        tab = AuditTrailTab(config=mock_config, storage=mock_storage)
+        path = tmp_path / "paper.txt"
+        path.write_text("Body.", encoding="utf-8")
+        if fails == "save":
+            mock_storage.save_uploaded_full_text.side_effect = RuntimeError("disk full")
+        reading = (
+            patch("bmlibrarian_lite.gui.audit_trail_tab.read_upload", side_effect=MemoryError)
+            if fails == "read" else nullcontext()
+        )
+
+        with patch("bmlibrarian_lite.gui.audit_trail_tab.QFileDialog.getOpenFileName",
+                   return_value=(str(path), "")), reading, \
+                patch("bmlibrarian_lite.gui.audit_trail_tab.QMessageBox") as box:
+            tab._on_upload_full_text(sample_document.id)
+
+        assert said in box.warning.call_args.args[2]
+        assert QApplication.overrideCursor() is None
+        if fails == "read":
+            mock_storage.save_uploaded_full_text.assert_not_called()
+
+    def test_the_cursor_is_restored_after_a_kept_or_refused_upload(
+        self, qapp, mock_config, mock_storage, sample_document, tmp_path
+    ) -> None:
+        """The control for the failures above."""
+        tab = AuditTrailTab(config=mock_config, storage=mock_storage)
+        for name, data in (("paper.txt", b"Body."), ("paper.docx", b"PK")):
+            path = tmp_path / name
+            path.write_bytes(data)
+            with patch("bmlibrarian_lite.gui.audit_trail_tab.QFileDialog.getOpenFileName",
+                       return_value=(str(path), "")), \
+                    patch("bmlibrarian_lite.gui.audit_trail_tab.QMessageBox"):
+                tab._on_upload_full_text(sample_document.id)
+            assert QApplication.overrideCursor() is None

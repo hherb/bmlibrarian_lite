@@ -14,16 +14,23 @@ in PR #622 (see *Recently landed*). **Upload Full Text is done on branch
 `feat/desktop-upload-full-text`**: *Audit Trail → Literature → right-click →
 Upload Full Text…* reads a PDF (its text), HTML (reduced to text), Markdown
 or plain text (`full_text_upload.read_upload`; UTF-8 only, BOM dropped, a
-NUL refused, `MAX_PDF_SIZE` cap, no text refused, never cut) and keeps it
+NUL refused, `MAX_PDF_SIZE` cap, no text or nothing before the references
+refused, never cut; an HTML end tag left out never drops the page) and keeps it
 in SQLite (`uploaded_full_texts_store`, one row per paper, the last upload),
 **not in the converter-stamped markdown cache**, which a converter bump
 drops. The review reads a relevant paper's upload whatever the setting and
 never fetches it; *Retry Full Text* (now enabled with the setting off) reads
 a relevant paper's upload when it is newer than the paper's last full-text
 read (`is_due`, `citation_reads_store.full_text_read_at`), fetches only with
-the setting on, refuses with `NOTHING_TO_READ_TEXT` when off with nothing
-due, and leaves the methodology's full-text line alone for a run that sought
-none. Follow-ups: #625. **Still owed:** *Find More Evidence* / repeated
+the setting on, and refuses with `NOTHING_TO_READ_TEXT` when off with nothing
+due and no report owed. **A read is recorded at the time the uploads were
+read** (`read_at`), not when it ends, so an upload replaced during a run is
+read next time. The methodology says how many papers were read from an
+upload (`ReportMetadata.uploaded_full_text_read_count`), and a review's
+transparency pass reads an upload for a paper with no stored result.
+Follow-ups: #625 (a stored transparency result is still reused after an
+upload; uploaded PDFs get no title check; an upload is orphaned when its
+paper's id changes from `doi-` to `pmid-`). **Still owed:** *Find More Evidence* / repeated
 smart search (extending *Re-run Search*).
 Lodged: #620 (Ollama never sends `num_ctx`; outside PR #623 proposes a fix),
 #621 (PR #622 follow-ups), #624 (the reference cut drops tables and
@@ -76,7 +83,7 @@ have landed):
   paper's last extraction read (no row = unread); the checkpoint keeps the
   run's `ReportMetadata`. *Research Questions → Retry Full Text*
   (`full_text_retry.py`, `FullTextRetryWorker`) re-extracts unread papers,
-  replaces citations in one transaction, redoes transparency, writes the
+  replaces citations in one transaction when the text yields passages, redoes transparency, writes the
   report again only when a text was read (`full_text_report_pending` survives
   a cancel). Runs from before PR #622 cannot be retried.
 - **Android: taking a fact check further** (PR #616, Room **10**): abstract

@@ -4,11 +4,12 @@
 
 """Upload Full Text on the desktop: reading a file the reader chose, and keeping it.
 
-The apps' rules (iOS/macOS and Android ``FullTextUpload``): PDF, HTML,
-Markdown or plain text; HTML is kept as its text; a file that is too large,
-not UTF-8 or holds no text is refused, never cut.
+Android's rules (``FullTextUpload.kt``): PDF, HTML, Markdown or plain text;
+HTML is kept as its text; a file that is too large, not UTF-8, holds no text
+or nothing before its references is refused, never cut.
 """
 
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,9 @@ from bmlibrarian_lite.full_text_upload import (
     NO_PDF_TEXT,
     NO_TEXT_TEXT,
     NOT_UTF8_TEXT,
+    ONLY_REFERENCES_TEXT,
     TOO_LARGE_TEXT,
+    UNREADABLE_FILE_TEXT,
     UNREADABLE_PDF_TEXT,
     UNSUPPORTED_TEXT,
     UploadedFullText,
@@ -98,6 +101,7 @@ class TestReading:
         ("paper.md", b"  \n\t", NO_TEXT_TEXT),
         ("paper.html", b"<script>only()</script>", NO_TEXT_TEXT),
         ("paper.pdf", b"%PDF-1.4 cut short", UNREADABLE_PDF_TEXT),
+        ("paper.md", b"## References\n- X.", ONLY_REFERENCES_TEXT),
     ])
     def test_what_cannot_be_a_full_text_is_refused(
         self, tmp_path: Path, name: str, data: bytes, message: str
@@ -110,7 +114,7 @@ class TestReading:
     def test_a_file_larger_than_an_upload_may_be_is_refused_never_cut(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The cap is the PDF download's; one byte over is refused, at it is read."""
+        """The cap is the PDF download's; one byte over is refused, one at it is read."""
         monkeypatch.setattr(full_text_upload, "MAX_PDF_SIZE", 4)
 
         assert read_upload(written(tmp_path, "ok.txt", b"four")).text == "four"
@@ -121,6 +125,48 @@ class TestReading:
     def test_runs_of_blank_lines_collapse(self) -> None:
         """Nested blocks do not leave a gap of empty lines."""
         assert html_to_text("<div><div><p>A</p></div></div><div><p>B</p></div>") == "A\n\nB"
+
+    @pytest.mark.parametrize("page, kept", [
+        # HTML may leave out </head>: <body> ends it
+        ("<html><head><title>T</title><body><p>Body.</p></body></html>", "Body."),
+        # No body tag either: the head never closed is kept, not the page lost
+        ("<html><head><meta charset=utf-8><title>T</title><p>Body.</p>", "T\nBody."),
+        # An element dropped when it closes, kept when it never does
+        ("<body><p>A.</p><noscript>x<p>After.</p></body>", "A.\nx\nAfter."),
+        ("<body><p>A.</p><svg><text>x</text></svg><p>After.</p></body>", "A.\n\nAfter."),
+    ])
+    def test_a_missing_end_tag_never_cuts_the_page(self, page: str, kept: str) -> None:
+        """The text after it is read, never dropped with the element."""
+        assert html_to_text(page) == kept
+
+    def test_a_file_that_cannot_be_read_is_refused(self, tmp_path: Path) -> None:
+        """Gone since it was chosen, say."""
+        with pytest.raises(UploadRefused) as refused:
+            read_upload(tmp_path / "gone.txt")
+        assert str(refused.value) == UNREADABLE_FILE_TEXT
+
+    def test_a_broken_install_is_not_called_a_bad_pdf(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """PyMuPDF missing raises, rather than blaming the reader's file."""
+        def missing(path: Path) -> str:
+            raise ImportError("No module named 'fitz'")
+
+        monkeypatch.setattr(full_text_upload, "extract_pdf_text", missing)
+        with pytest.raises(ImportError):
+            read_upload(written(tmp_path, "paper.pdf", b"%PDF-1.4"))
+
+    @pytest.mark.parametrize("fields", [
+        {"text": " \n", "kind": "text"},
+        {"text": "T.", "kind": "markdown"},
+        {"text": "T.", "kind": "text", "uploaded_at": datetime(2026, 10, 23)},
+    ])
+    def test_an_upload_the_analysis_could_not_read_is_not_made(
+        self, fields: dict[str, object]
+    ) -> None:
+        """No blank text, no unknown kind, no time without a zone."""
+        with pytest.raises(ValueError):
+            UploadedFullText(file_name="a.txt", **fields)  # type: ignore[arg-type]
 
 
 class TestKeeping:

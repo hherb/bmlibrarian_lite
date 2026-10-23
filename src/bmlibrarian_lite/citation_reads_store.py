@@ -29,15 +29,23 @@ CREATE TABLE IF NOT EXISTS {TABLE} (
 """
 
 
-def record(conn: sqlite3.Connection, checkpoint_id: str, reads: Mapping[str, bool]) -> None:
+def record(
+    conn: sqlite3.Connection,
+    checkpoint_id: str,
+    reads: Mapping[str, bool],
+    read_at: datetime | None = None,
+) -> None:
     """Record, or replace, what each paper's last extraction read.
 
     Args:
         conn: An open connection.
         checkpoint_id: The run.
         reads: Each paper's id and whether its full text was read.
+        read_at: When the texts read were taken, in UTC; now when not
+            given. An upload stored after it is newer than the read, so a
+            replacement made while the papers are read is read next time.
     """
-    now = datetime.now(UTC).isoformat()
+    now = (read_at or datetime.now(UTC)).isoformat()
     conn.executemany(
         f"INSERT OR REPLACE INTO {TABLE} "
         "(checkpoint_id, document_id, read_full_text, extracted_at) VALUES (?, ?, ?, ?)",
@@ -63,14 +71,15 @@ def read(conn: sqlite3.Connection, checkpoint_id: str) -> dict[str, bool]:
 
 
 def full_text_read_at(conn: sqlite3.Connection, checkpoint_id: str) -> dict[str, datetime]:
-    """When each paper of a run last had its citations read from its full text.
+    """When the texts of each paper's last extraction in a run were taken.
 
     Args:
         conn: An open connection.
         checkpoint_id: The run.
 
     Returns:
-        The time by paper id, for the papers read from full text.
+        The time by paper id, for the papers whose last extraction read
+        their full text.
     """
     rows = conn.execute(
         f"SELECT document_id, extracted_at FROM {TABLE} "

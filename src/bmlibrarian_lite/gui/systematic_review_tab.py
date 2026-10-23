@@ -106,11 +106,11 @@ from ..transparency import (
 )
 from ..transparency.assessment import contact_email, record_transparency_counts
 from ..citation_full_texts import fetch_full_texts, full_text_fetcher
-from ..citation_text import full_text_min_score, record_full_text_reads
+from ..citation_text import full_text_min_score, record_full_text_reads, record_uploaded_reads
 from ..retraction_checks import RetractionChecker, build_retraction_checker
 from ..retraction_screen import RetractionScreen, UnbuiltChecker, screen_with_fallback
 from ..retraction_text import retraction_check_line, run_summary_clause, with_retraction_notice
-from datetime import datetime
+from datetime import UTC, datetime
 
 from .quality_filter_panel import QualityFilterPanel
 from .quality_summary import QualitySummaryWidget
@@ -547,7 +547,9 @@ class WorkflowWorker(QThread):
 
             # Step 4: Extract citations, from the full text of the papers
             # scored high enough when the setting asks for it, and from any
-            # the reader uploaded whatever the setting
+            # the reader uploaded whatever the setting. The reads are recorded
+            # at the time the uploads were read: one stored after is read next
+            taken_at = datetime.now(UTC)
             uploads = self.storage.get_uploaded_full_texts(
                 [d.document.id for d in scored_docs]
             )
@@ -627,6 +629,7 @@ class WorkflowWorker(QThread):
                         d.document.id: d.document.id in extraction.read_full_text
                         for d in read_docs
                     },
+                    read_at=taken_at,
                 )
 
             self.step_complete.emit("citations", citations)
@@ -639,6 +642,7 @@ class WorkflowWorker(QThread):
                 record_full_text_reads(
                     metadata, full_text_min, read_docs, extraction.read_full_text
                 )
+            record_uploaded_reads(metadata, read_docs, extraction.read_full_text, uploads)
 
             # Collect transparency stats from available results
             counted_rows: dict[str, StoredTransparency] | None = None
@@ -2021,11 +2025,16 @@ class SystematicReviewTab(QWidget):
             logger.debug("Transparency analysis disabled, skipping")
             return
 
+        # An uploaded full text is read rather than one looked for. A stored
+        # result is still served as it is, even one made before the upload (#625)
+        uploads = self.storage.get_uploaded_full_texts([doc.id for doc in documents])
         for doc in documents:
+            upload = uploads.get(doc.id)
             self._transparency_manager.analyze_document(
                 document_id=doc.id,
                 pmid=doc.pmid,
                 doi=doc.doi,
+                full_text=upload.text if upload is not None else None,
             )
 
     def get_transparency_result(
