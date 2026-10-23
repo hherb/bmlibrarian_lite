@@ -71,6 +71,9 @@ from ..constants import (
     ELSEVIER_API_KEY_FROM_ENVIRONMENT,
     BROWSER_RESCUE_EXPLANATION,
     BROWSER_RESCUE_UNAVAILABLE_NOTE,
+    CITATIONS_FROM_FULL_TEXT_EXPLANATION,
+    SCORE_MAX,
+    SCORE_MIN,
     ELSEVIER_INSTTOKEN_EXPLANATION,
     ELSEVIER_INSTTOKEN_FROM_ENVIRONMENT,
     ENV_CORE_API_KEY,
@@ -784,6 +787,17 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(scaled(12), scaled(12), scaled(12), scaled(12))
         layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
+        self.citations_full_text_check = QCheckBox("Read citations from full text")
+        self.citations_full_text_check.setToolTip(CITATIONS_FROM_FULL_TEXT_EXPLANATION)
+        layout.addRow(self.citations_full_text_check)
+        self.full_text_min_score_spin = QSpinBox()
+        self.full_text_min_score_spin.setRange(SCORE_MIN, SCORE_MAX)
+        self.full_text_min_score_spin.setToolTip(CITATIONS_FROM_FULL_TEXT_EXPLANATION)
+        layout.addRow("Fetch Full Text From Score:", self.full_text_min_score_spin)
+        full_text_note = QLabel(f"<small>{CITATIONS_FROM_FULL_TEXT_EXPLANATION}</small>")
+        full_text_note.setWordWrap(True)
+        layout.addRow(full_text_note)
+
         self.unpaywall_email_input = QLineEdit()
         self.unpaywall_email_input.setPlaceholderText("your.email@example.com")
         self.unpaywall_email_input.setToolTip(UNPAYWALL_EMAIL_EXPLANATION)
@@ -1206,6 +1220,10 @@ class SettingsDialog(QDialog):
             self.api_key_input.setText(self.config.pubmed.api_key)
 
         # Full Text
+        self.citations_full_text_check.setChecked(
+            self.config.discovery.citations_from_full_text
+        )
+        self.full_text_min_score_spin.setValue(self.config.discovery.full_text_min_score)
         self.unpaywall_email_input.setText(self.config.discovery.unpaywall_email)
         if self.config.discovery.core_api_key:
             self.core_api_key_input.setText(self.config.discovery.core_api_key)
@@ -1328,7 +1346,11 @@ class SettingsDialog(QDialog):
         api_key = self.api_key_input.text().strip()
         self.config.pubmed.api_key = api_key if api_key else None
 
-        # Save Full Text keys
+        # Save Full Text settings and keys
+        self.config.discovery.citations_from_full_text = (
+            self.citations_full_text_check.isChecked()
+        )
+        self.config.discovery.full_text_min_score = self.full_text_min_score_spin.value()
         self.config.discovery.unpaywall_email = (
             self.unpaywall_email_input.text().strip()
         )

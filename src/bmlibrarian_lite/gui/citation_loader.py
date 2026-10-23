@@ -38,6 +38,7 @@ Usage:
 
 from typing import Any, Dict, Optional
 
+from ..citation_full_texts import discovery_identifiers
 from ..pdf_utils import format_abstract_as_document
 
 
@@ -58,20 +59,7 @@ def build_doc_metadata(citation: 'Citation') -> Dict[str, Any]:
         metadata = build_doc_metadata(citation)
         # {'id': 123, 'doi': '10.1038/...', 'pmid': '12345', ...}
     """
-    doc = citation.document
-    # Get PMID - fallback to extracting from doc ID if explicit field is empty
-    pmid = doc.pmid
-    if not pmid and doc.id and doc.id.startswith('pmid-'):
-        pmid = doc.id[5:]  # Extract '38906474' from 'pmid-38906474'
-    return {
-        'id': doc.id,
-        'doi': doc.doi,
-        'pmid': pmid,
-        'pmcid': doc.pmc_id,
-        'pmc_id': doc.pmc_id,
-        'title': doc.title,
-        'year': doc.year,
-    }
+    return discovery_identifiers(citation.document)
 
 
 def build_abstract_text(citation: 'Citation') -> str:

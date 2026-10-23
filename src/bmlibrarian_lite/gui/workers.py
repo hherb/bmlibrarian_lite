@@ -27,6 +27,7 @@ Provides QThread-based workers for long-running operations:
 - ReclassifyWorker: Re-run study design classification
 - RescoreWorker: Re-run relevance scoring
 - TransparencyReanalysisWorker: Re-analyse a question's pending transparency
+- FullTextRetryWorker: Read a reviewed question's unread full texts, and write its report again
 - RetractionCheckWorker: Check one paper's retraction status
 - RetractionRecheckWorker: Check a reopened question's papers again
 
@@ -1898,4 +1899,121 @@ class TransparencyReanalysisWorker(SingleOutcome, QThread):
 
     def cancel(self) -> None:
         """Request cancellation of the operation."""
+        self._cancelled = True
+
+
+class FullTextRetryWorker(SingleOutcome, QThread):
+    """Background worker for *Retry Full Text* on a reviewed question.
+
+    The rules are :func:`~bmlibrarian_lite.full_text_retry.retry_full_texts`'.
+
+    Signals:
+        progress: Emitted with (current, total, message) along the way
+        finished: Emitted with the :class:`FullTextRetry` when complete
+        error: Emitted with what to tell the reader when the retry could
+            not run, or failed
+        cancelled: Emitted with (outcome, error) when a cancel stopped it
+
+    Exactly one of ``finished``, ``error`` and ``cancelled`` ends a run.
+    """
+
+    progress = Signal(int, int, str)  # current, total, message
+    finished = Signal(object)  # FullTextRetry
+    error = Signal(str)
+    cancelled = Signal(object, str)  # FullTextRetry, error
+
+    def __init__(
+        self,
+        question: str,
+        config: "LiteConfig",
+        storage: "LiteStorage",
+        parent: QWidget | None = None,
+    ) -> None:
+        """Initialize the worker.
+
+        Args:
+            question: The reviewed research question.
+            config: The configuration: contacts, keys, the full-text score
+                and whether transparency is analysed.
+            storage: Where the run is read from and written to.
+            parent: Optional parent widget.
+        """
+        super().__init__(parent)
+        self.question = question
+        self.config = config
+        self.storage = storage
+        self._cancelled = False
+
+    def run(self) -> None:
+        """Execute the retry in a background thread."""
+        self._run_once(self._retry, lambda error: self._end(self.error, error))
+
+    def _retry(self) -> None:
+        """Retry, and end the run."""
+        from ..agents import LiteCitationAgent, LiteReportingAgent
+        from ..citation_full_texts import full_text_fetcher
+        from ..full_text_retry import FullTextRetry, RetryNotPossible, retry_full_texts
+
+        try:
+            outcome = retry_full_texts(
+                self.question,
+                self.storage,
+                self.config,
+                full_text_fetcher(self.config),
+                LiteCitationAgent(config=self.config),
+                LiteReportingAgent(config=self.config),
+                self._transparency_assessor() if self.config.transparency.enabled else None,
+                lambda: self._cancelled,
+                self.progress.emit,
+            )
+        except RetryNotPossible as e:
+            self._end(self.error, str(e))
+            return
+        except Exception as e:
+            # The provider's text stays in the log (#330)
+            cause = classify_analysis_exception(e)
+            logger.exception(f"Full-text retry failed ({cause.name})")
+            if self._cancelled:
+                self._end(self.cancelled, FullTextRetry(cancelled=True), failure_cause_text(cause))
+            else:
+                self._end(self.error, failure_cause_text(cause))
+            return
+        if outcome.cancelled:
+            self._end(self.cancelled, outcome, "")
+        else:
+            self._end(self.finished, outcome)
+
+    def _transparency_assessor(self) -> Callable[["LiteDocument", str], None]:
+        """Analyses a paper's transparency again with its full text.
+
+        Returns:
+            The assessment, through the body the review's manager runs; a
+            paper with neither a PMID nor a DOI is left as it is.
+        """
+        from ..transparency.assessment import (
+            assess_document,
+            contact_email,
+            create_background_analyzer,
+            unpaywall_contact_email,
+        )
+
+        analyzer = create_background_analyzer(
+            contact_email(self.config),
+            self.config.pubmed.api_key,
+            unpaywall_email=unpaywall_contact_email(self.config),
+            core_api_key=self.config.discovery.core_api_key or None,
+            elsevier_credentials=ElsevierCredentials.from_config(self.config.discovery),
+        )
+
+        def assess(doc: "LiteDocument", text: str) -> None:
+            if doc.pmid or doc.doi:
+                assess_document(
+                    analyzer, self.storage, self.config.transparency,
+                    doc.id, doc.pmid, doc.doi, full_text=text,
+                )
+
+        return assess
+
+    def cancel(self) -> None:
+        """Request cancellation; the retry stops before its next paper."""
         self._cancelled = True

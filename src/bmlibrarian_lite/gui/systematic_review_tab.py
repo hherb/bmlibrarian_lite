@@ -56,6 +56,7 @@ from bmlibrarian_lite.resources.styles.theme_colors import ThemeColors
 from ..audit_records import (
     CHECKPOINT_MIN_SCORE_KEY,
     checkpoint_metadata_with_extraction_failures,
+    checkpoint_metadata_with_report_metadata,
     checkpoint_metadata_with_retraction_snapshot,
 )
 from ..config import LiteConfig
@@ -102,9 +103,10 @@ from ..transparency import (
     StoredTransparency,
     TransparencyManager,
     TransparencyResult,
-    count_transparency_over,
 )
-from ..transparency.assessment import contact_email
+from ..transparency.assessment import contact_email, record_transparency_counts
+from ..citation_full_texts import fetch_full_texts, full_text_fetcher
+from ..citation_text import full_text_min_score, record_full_text_reads
 from ..retraction_checks import RetractionChecker, build_retraction_checker
 from ..retraction_screen import RetractionScreen, UnbuiltChecker, screen_with_fallback
 from ..retraction_text import retraction_check_line, run_summary_clause, with_retraction_notice
@@ -233,70 +235,8 @@ class WorkflowWorker(QThread):
         document_ids: list[str],
         cited_ids: list[str] | None = None,
     ) -> dict[str, StoredTransparency]:
-        """Record how the documents' transparency assessments are distributed.
-
-        A row an earlier version of the analyser wrote is counted apart from
-        the three risk levels, not under its stored one: that level is not
-        this build's finding, and the report names how many are waiting to
-        be re-analysed rather than dropping them silently (#360).
-
-        Every document the analysis was *asked* about is accounted for. This
-        used to return early when no row had been stored, leaving
-        ``transparency_analysis_applied`` False so the report said
-        "Transparency analysis was not applied" -- over an analysis that had
-        run against every study and failed on every one, which is a positive
-        false statement about the one artefact the reader keeps. A partial
-        outage was quieter and no better: the denominator simply shrank
-        (#361, #249).
-
-        The withheld counts are taken twice, over the documents reviewed and
-        over the ones cited. The reference list annotates the cited ones, so
-        a single figure over the reviewed set could exceed every annotation
-        the reader can find, with nothing saying why (#372).
-
-        Args:
-            metadata: The report metadata to fill in. The caller has already
-                established that transparency analysis was asked for.
-            document_ids: Every document the review assessed.
-            cited_ids: The documents the report cites, or None when it is
-                not known which; the report then names one population only.
-
-        Returns:
-            The stored rows the counts were taken from, over the reviewed and
-            the cited documents. The report annotates its references from
-            these same rows: background analyses are still storing results
-            while the review runs, and a second read could annotate a study
-            the count had put in another bucket (#372).
-        """
-        # Applied means asked, not answered. The caller only reaches here
-        # when the user turned transparency on.
-        metadata.transparency_analysis_applied = True
-        cited = list(cited_ids) if cited_ids is not None else []
-        results = self.storage.get_transparency_results_batch(
-            list(dict.fromkeys([*document_ids, *cited]))
-        )
-        counts = count_transparency_over(results, document_ids)
-        metadata.transparency_low_risk_count = counts.low
-        metadata.transparency_medium_risk_count = counts.medium
-        metadata.transparency_high_risk_count = counts.high
-        metadata.transparency_limited_count = counts.limited
-        metadata.transparency_provisional_count = counts.provisional
-        metadata.transparency_superseded_count = counts.superseded
-        # Whatever is left asked a question that never came back: the
-        # analysis failed, the document carried no identifier to look one up
-        # by, it had not finished, it reached no nameable risk level, or its
-        # stored row could not be decoded (#374). None of those is a study
-        # with nothing to declare, so none may leave the count without being
-        # named.
-        metadata.transparency_unassessed_count = counts.not_assessed
-        metadata.transparency_documents_considered = counts.considered
-        if cited_ids is not None:
-            cited_counts = count_transparency_over(results, cited)
-            metadata.transparency_superseded_cited_count = cited_counts.superseded
-            metadata.transparency_unassessed_cited_count = (
-                cited_counts.not_assessed
-            )
-        return results
+        """Record the documents' transparency counts; see ``record_transparency_counts``."""
+        return record_transparency_counts(self.storage, metadata, document_ids, cited_ids)
 
     def run(self) -> None:
         """Execute the systematic review workflow."""
@@ -605,7 +545,24 @@ class WorkflowWorker(QThread):
                 )
                 return
 
-            # Step 4: Extract citations
+            # Step 4: Extract citations, from the full text of the papers
+            # scored high enough when the setting asks for it
+            full_texts: dict[str, str] = {}
+            full_text_min: int | None = None
+            if self.config.discovery.citations_from_full_text:
+                full_text_min = full_text_min_score(
+                    self.min_score, self.config.discovery.full_text_min_score
+                )
+                full_texts = fetch_full_texts(
+                    full_text_fetcher(self.config),
+                    [d.document for d in scored_docs if d.score >= full_text_min],
+                    lambda: self._cancelled,
+                    lambda current, total: self.progress.emit("full_text", current, total),
+                )
+                if self._cancelled:
+                    self.finished.emit("Workflow cancelled.", metadata)
+                    return
+
             citation_agent = LiteCitationAgent(config=self.config)
 
             def citation_progress(current: int, total: int) -> None:
@@ -625,6 +582,7 @@ class WorkflowWorker(QThread):
                 progress_callback=citation_progress,
                 max_workers=citation_workers,
                 cancelled=self._cancel_event,
+                full_texts=full_texts,
             )
             citations = extraction.citations
 
@@ -649,12 +607,33 @@ class WorkflowWorker(QThread):
                 self.storage.save_citation(citation, checkpoint.id)
                 self.citation_extracted.emit(citation)
 
+            # Which text each paper read was read from, so a retry knows
+            # whose full text is still unread. Not for a cancelled run: it
+            # did not read every paper it would list.
+            failed_ids = {failure.document.id for failure in extraction.failed}
+            read_docs = [
+                d for d in scored_docs
+                if d.score >= self.min_score and d.document.id not in failed_ids
+            ]
+            if not self._cancelled:
+                self.storage.record_citation_reads(
+                    checkpoint.id,
+                    {
+                        d.document.id: d.document.id in extraction.read_full_text
+                        for d in read_docs
+                    },
+                )
+
             self.step_complete.emit("citations", citations)
 
             # Update metadata with citation stats
             metadata.citations_extracted = len(citations)
             unique_docs = set(c.document.id for c in citations)
             metadata.unique_sources_cited = len(unique_docs)
+            if full_text_min is not None:
+                record_full_text_reads(
+                    metadata, full_text_min, read_docs, extraction.read_full_text
+                )
 
             # Collect transparency stats from available results
             counted_rows: dict[str, StoredTransparency] | None = None
@@ -709,6 +688,9 @@ class WorkflowWorker(QThread):
                 report=report,
                 step="complete",
             )
+            self._keep_report_metadata(
+                checkpoint.id, checkpoint_metadata, list(extraction.failed), metadata
+            )
 
             self.finished.emit(report, metadata)
 
@@ -747,6 +729,40 @@ class WorkflowWorker(QThread):
             # restored later loses them, and it says "not recorded".
             logger.error(
                 "Could not keep the extraction failures in checkpoint %s: %s",
+                checkpoint_id,
+                e,
+            )
+
+    def _keep_report_metadata(
+        self,
+        checkpoint_id: str,
+        checkpoint_metadata: dict[str, Any],
+        failures: list[ExtractionFailure],
+        metadata: ReportMetadata,
+    ) -> None:
+        """Keep the report's metadata, so a retry can write the report again.
+
+        Args:
+            checkpoint_id: The run's checkpoint.
+            checkpoint_metadata: What the checkpoint kept before extraction.
+            failures: The documents whose extraction failed, kept with it.
+            metadata: The report's metadata.
+        """
+        try:
+            self.storage.update_checkpoint(
+                checkpoint_id=checkpoint_id,
+                metadata=checkpoint_metadata_with_report_metadata(
+                    checkpoint_metadata_with_extraction_failures(
+                        checkpoint_metadata, failures
+                    ),
+                    metadata,
+                ),
+            )
+        except sqlite3.Error as e:
+            # The report is saved; only a retry of its full texts cannot
+            # write it again, and it says why
+            logger.error(
+                "Could not keep the report metadata in checkpoint %s: %s",
                 checkpoint_id,
                 e,
             )
@@ -1236,6 +1252,7 @@ class SystematicReviewTab(QWidget):
             "search": "Searching PubMed",
             "quality_filter": "Assessing quality",
             "scoring": "Scoring documents",
+            "full_text": "Fetching full texts",
             "citations": "Extracting citations",
             "report": "Generating report",
         }

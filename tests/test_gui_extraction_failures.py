@@ -250,14 +250,16 @@ class TestTheWorker:
             for call in storage.update_checkpoint.call_args_list
             if "metadata" in call.kwargs
         ]
-        assert written == [
-            {
-                CHECKPOINT_MIN_SCORE_KEY: MIN_SCORE,
-                CHECKPOINT_EXTRACTION_FAILURES_KEY: [
-                    {"document_id": UNREAD.id, "error_code": UNREACHABLE.value}
-                ],
-            }
-        ]
+        recorded = {
+            CHECKPOINT_MIN_SCORE_KEY: MIN_SCORE,
+            CHECKPOINT_EXTRACTION_FAILURES_KEY: [
+                {"document_id": UNREAD.id, "error_code": UNREACHABLE.value}
+            ],
+        }
+        assert written[0] == recorded
+        # The report's metadata is kept beside them later, never instead
+        assert len(written) == 2
+        assert {k: v for k, v in written[1].items() if k != "report_metadata"} == recorded
 
 
 def review_tab(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> Any:

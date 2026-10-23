@@ -392,6 +392,21 @@ SCORE_MIN = 1
 SCORE_MAX = 5
 
 # =============================================================================
+# Citations From Full Text
+# =============================================================================
+
+# Papers scored this or higher have their citations read from their full text
+# when the setting is on (never below the review's relevance threshold), as on
+# iOS/macOS and Android. Off by default there too: every window is a call.
+DEFAULT_FULL_TEXT_MIN_SCORE = 4
+
+# Most characters of a full text one citation-extraction call reads. A longer
+# text is read in several windows, never cut: with the references left out,
+# 40% of PMC texts and 45% of PDF texts run past 40,000 characters (the
+# 2026-10-23 spike, 1,231 JATS articles and 400 PDFs). The apps' budget.
+CITATION_TEXT_WINDOW_CHARS = 40_000
+
+# =============================================================================
 # Network Retry Settings
 # =============================================================================
 
@@ -1266,6 +1281,15 @@ ELSEVIER_API_KEY_EXPLANATION = (
 ELSEVIER_INSTTOKEN_EXPLANATION = (
     "Optional. An institutional token from Elsevier lets the key use your "
     "institution's subscriptions away from its network."
+)
+CITATIONS_FROM_FULL_TEXT_EXPLANATION = (
+    "With this on, a review fetches the full text of each paper scored at "
+    "least the score below (and the review's threshold) and reads its "
+    "citations from it, not from the abstract; the reference list is left "
+    "out. A long text is read in several model calls, so a review costs more "
+    "and takes longer. A paper with no full text is read from its abstract, "
+    "and the report says how many were. Research Questions > Retry Full Text "
+    "reads what an earlier review could not."
 )
 BROWSER_RESCUE_EXPLANATION = (
     "Some open-access PDFs sit behind a robot check that blocks the app's "

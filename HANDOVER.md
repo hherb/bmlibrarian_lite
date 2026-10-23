@@ -8,54 +8,45 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Parity: taking a fact check further.** iOS/macOS landed in PR #611;
-**Android is done on branch `feat/android-fact-check-more-evidence-and-fulltext`**
-(PR #616). **The Python desktop is owed all five**, and is a design
-question first (`ROADMAP.md`): citations are abstract-only
-(`agents/citation_agent.py`), the `citations` table (`storage.py`) has no
-timestamp, and full text is fetched only for transparency
-(`study_transparency_analyzer`) and the Document Interrogation tab. Settle the
-design with the maintainer; the nearest existing pieces are
-`research_questions_tab.py` *Re-run Search* / `IncrementalSearchWorker`,
-`TransparencyReanalysisWorker`, `pdf_utils.save_fulltext_markdown`. Mirror the
-Swift tests (`WorkflowCancelTests` retry tests, `FullTextAutoFetchTests`,
-`FullTextUploadTests`, `ReportRetryOfferTests`, BioMedLit
-`AlternativeQueryPromptTests`) or Kotlin's (`FactCheckWorkflowFullTextTest`,
-`FullTextAutoFetchTest`, `FullTextUploadTest`, `AbstractHoldbackTest`).
-Apple follow-ups: #612 (test seams), #613 (upload edge cases).
-
-**What the Android branch binds** (Room **10**):
-- **Abstract holdback** (#384 part 1): a JATS deposit whose `<body>` renders
-  no paragraph (`JATSXMLParser.producedBody`, counted on what Android renders,
-  so unsectioned `<p>` does not count) is held, the PMC bucket is not asked,
-  and it is returned only when nothing better arrives, carrying the walk's
-  shortfall (a render that could not be downloaded is one). A PDF without text
-  gives way to it; one with text wins. Stored as `full_text_abstract_only`.
-- **PDF text** is read with iText (`PdfText.kt`) at every recording and stored
-  as `full_text_pdf_text`, written and cleared with `pdf_path`; a text over
-  `MAX_STORED_TEXT_BYTES` (1 MB, the row must fit Android's 2 MB cursor
-  window) is not kept, and a text upload over it is refused.
-  **`DocumentEntity.analysisFullText` is the one accessor citation extraction
-  reads** (markdown unless abstract-only, else PDF text); transparency's
-  `analyzableFullText` stays null until #384's back-matter half lands.
-- `citations_read_full_text` is written only by
-  `DocumentDao.updateCitationsReadFullText`, after the citations are saved;
-  `DocumentDao.update` keeps it while the text the analysis reads is unchanged
-  and clears it when an upload or fetch changes it. Citations are replaced in
-  one transaction (`CitationDao.replaceForDocument`), only when the text
-  yields passages. A retry also regenerates the report when it found
-  citations in an abstract (no Regenerate offer, #614); a retry that fails
-  keeps the report and the session completed.
-- An uploaded PDF opens in the viewer as itself, ahead of any cached PDF, and
-  no viewer fetch writes over an upload made meanwhile. Upload refusals and a
-  PDF stored without text are told on the fact-check screen
-  (`FactCheckUiState.actionMessage`).
-- Divergences from Swift, lodged: #615 (link-only PDFs re-fetched only on a
-  retry; textless Elsevier PDF or Europe PMC render; no transparency redo;
-  unsectioned body held as abstract-only), #614 (no Regenerate Report offer).
-  Follow-ups: #617 (unreadable stored text counts as full text; lazy PDF
-  text), #618 (the 40,000-character cut is not told to the reader; markdown
-  fallback), #619 (Get More Evidence from History; cancel).
+**Parity: taking a fact check further, Python desktop** (`ROADMAP.md`).
+iOS/macOS landed in PR #611, Android in PR #616. **The desktop's full-text
+rows are done on branch `feat/desktop-citations-from-full-text`** (decided
+with the maintainer 2026-10-23: actions on the Research Questions tab;
+a long text is read in windows, never cut):
+- *Settings → Full Text*: **Read citations from full text** (off, as on the
+  apps) and **Fetch Full Text From Score** (4; `citation_text.full_text_min_score`
+  never goes below the review's threshold). Config `discovery.citations_from_full_text`,
+  `discovery.full_text_min_score`; a bad stored value is the default.
+- The review (`WorkflowWorker`) fetches full texts through the discovery
+  chain (`citation_full_texts`, one paper at a time) before citations. The
+  agent reads a text **without its reference list** (the last references
+  heading; `jats_to_markdown` appends `## References`) in **40,000-character
+  windows** (`CITATION_TEXT_WINDOW_CHARS`; spike: 40% of PMC texts and 45% of
+  PDF texts are longer), one call each; **one window failing fails the paper**.
+  `CitationOutcome.read_full_text` names the papers read from full text.
+- **`citation_reads`** (`citation_reads_store.py`, one row per paper per
+  checkpoint) records what each paper's last extraction read; no row means
+  an older run, read from its abstract. The run keeps its **`ReportMetadata`
+  in the checkpoint** (`CHECKPOINT_REPORT_METADATA_KEY`), and the methodology
+  says how many of the papers scored high enough were read from full text.
+- *Research Questions → Retry Full Text* (`full_text_retry.py`,
+  `FullTextRetryWorker`): the reviewed run's papers at the full-text score
+  not read from full text are asked again; passages replace a paper's
+  citations (`replace_document_citations`, one transaction), none keep the
+  old ones, either way it is recorded read; transparency is analysed again
+  with the text; the report is written again (version + 1, recovered
+  extraction failures dropped from the checkpoint and the shortfall) only
+  when a text was read. A run from before this branch cannot be retried
+  (no stored metadata; the reader is told to run the review again).
+- `record_transparency_counts` moved to `transparency/assessment.py` (the
+  worker's method delegates); `build_doc_metadata` delegates to
+  `citation_full_texts.discovery_identifiers`.
+- **Still owed on the desktop:** *Upload Full Text* (Audit Trail cards) and
+  *Find More Evidence* / repeated smart search (extending *Re-run Search*).
+  Lodged: #620 (Ollama never sends `num_ctx`: a window is silently cut on a
+  small context), #621 (follow-ups of this branch).
+Apple follow-ups: #612 (test seams), #613 (upload edge cases). Android
+divergences: #614, #615; follow-ups #617–#619.
 
 **Owed by the maintainer** (stages C1 and C2 and the desktop browser rescue
 have landed):
@@ -90,6 +81,12 @@ have landed):
 
 ## Recently landed (context)
 
+- **Android: taking a fact check further** (PR #616, Room **10**): abstract
+  holdback (`full_text_abstract_only`), PDF text via iText
+  (`full_text_pdf_text`, 1 MB cap), `DocumentEntity.analysisFullText` is what
+  citation extraction reads, `citations_read_full_text` written only by
+  `updateCitationsReadFullText` after the citations are saved, citations
+  replaced in one transaction, an upload opens as itself in the viewer.
 - **bmlib: the FFI pin and the port set** (#583; PRs #564–#570, #572). The
   pin names bmlib `main` (`f767215`); `android-tests.yml` builds bmlib there
   and fails if `BmlibJatsFfiTest` skips; **the committed xcframework is
@@ -135,28 +132,17 @@ have landed):
   address-less entry, else v2 `entries`. **Stage A: PMC's open-data bucket**
   (PR #487): 81% of failed Unpaywall PDFs are bot walls (**re-analyse, never
   re-fetch**); **no stealth clients**; a listing 404 is unreachable.
-- **Unpaywall** (PRs #465–#482; `fulltext_retrieval.md`): a PDF not obtained
-  is refused, never a link; non-`%PDF` is `malformed_response`; **no absence
-  while an `OpenAccessShortfall` is set**; Room migrations register from
-  `AppDatabase.ALL_MIGRATIONS`. **iOS/macOS workflow** (PRs #458–#469): one
-  stop path, `stopWork(_:)`; **`session.errorMessage` means a failure only**.
-- **Europe PMC fetches, compressed** (PRs #433–#452). A typed XML fetch on all
-  three: served, absent (404) or unreachable. **Preprints are fetched by their
-  `PPR` ID.** A chain Europe PMC did not settle is **not** "no full text".
-  Closed text answers `fullTextXML` with a **500, not a 404**. **An `HTTP_STATUS`
-  is an answer except a 429 or a 5xx** (`RequestFailure.is_answer`, pinned by
-  `answered_lookup_verb.json`).
-- **A missing statement is charged only when the end matter is known**
-  (Python; PR #431, #428). `END_MATTER_MARKER` marks where end matter begins
-  (converter **5**); a COI/data charge needs every end-matter heading
-  classified. **No marker, no charge** (user's call); #430 plugs into
-  `segment_unmarked_end_matter`. Analyser **2.6**.
-- **Statements reach the analyser** (Python; PR #426, #420, #421).
-  **`jats_markdown.py` is the converter** (every `<back>` element but the
-  ref-list, plus PLOS's front statements, under headings). **Recognising
-  more end matter creates charges** (#359). **Bump
-  `JATS_MARKDOWN_CONVERTER_VERSION`** whenever the same XML converts
-  differently. **No full text, no data-availability request** (#421).
+- **Retrieval and statements, compressed** (PRs #426–#482). Unpaywall: a
+  PDF not obtained is refused, never a link; non-`%PDF` is
+  `malformed_response`; **no absence while an `OpenAccessShortfall` is set**.
+  Europe PMC: a typed XML fetch (served / absent 404 / unreachable); **preprints
+  by their `PPR` ID**; closed text answers `fullTextXML` with a **500**; **an
+  `HTTP_STATUS` is an answer except a 429 or a 5xx** (`answered_lookup_verb.json`).
+  iOS: one stop path, `stopWork(_:)`; `session.errorMessage` means a failure
+  only. Python: `jats_markdown.py` is the converter (bump
+  `JATS_MARKDOWN_CONVERTER_VERSION` when output changes); `END_MATTER_MARKER`
+  (converter **5**) — **no marker, no charge**; recognising more end matter
+  creates charges (#359); no full text, no data-availability request (#421).
 - **Transparency, compressed** (PRs #358–#419):
   - Every no-full-text rating says "Limited certainty because of lack of full
     text access". "Without full text" means nothing in it was recognised.

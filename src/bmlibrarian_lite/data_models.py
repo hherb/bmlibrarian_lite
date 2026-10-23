@@ -2085,11 +2085,15 @@ class CitationOutcome:
             listed, minus any the run was cancelled before.
         failed: The documents it could not read, each with why, in the order
             they failed. The count and the causes are read from these.
+        read_full_text: The ids of the documents whose extraction succeeded
+            reading their full text; every other one read was read from its
+            abstract.
     """
 
     citations: list["Citation"]
     documents_attempted: int
     failed: tuple[ExtractionFailure, ...] = ()
+    read_full_text: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         """Refuse an outcome whose numbers cannot all be true.
@@ -2100,8 +2104,9 @@ class CitationOutcome:
 
         Raises:
             ValueError: If the attempted count is negative, if more documents
-                were lost than attempted, if a document failed twice, or if a
-                document that failed was also cited.
+                were lost than attempted, if a document failed twice, if a
+                document that failed was also cited or read its full text,
+                or if more read their full text than were read.
         """
         object.__setattr__(self, "failed", tuple(self.failed))
         if self.documents_attempted < 0:
@@ -2115,6 +2120,10 @@ class CitationOutcome:
             raise ValueError("A document's extraction is attempted, and fails, once")
         if any(citation.document.id in failed_ids for citation in self.citations):
             raise ValueError("A document whose extraction failed cannot have been cited")
+        if self.read_full_text & set(failed_ids):
+            raise ValueError("A document whose extraction failed did not read its full text")
+        if len(self.read_full_text) > self.documents_attempted - len(failed_ids):
+            raise ValueError("More documents read their full text than were read")
 
     @property
     def documents_failed(self) -> int:
@@ -2442,6 +2451,13 @@ class ReportMetadata:
         model_configs: LLM configuration for each workflow task
         citations_extracted: Total citation passages extracted
         unique_sources_cited: Number of unique documents cited
+        full_text_min_score: Papers scored this or higher had their
+            citations read from their full text where one was found; None
+            when every paper was read from its abstract
+        full_text_papers_read: Of the papers scored that high whose
+            citations were extracted, how many
+        full_text_read_count: Of those, how many were read from their full
+            text; the rest were read from their abstracts
     """
 
     # Version info
@@ -2493,6 +2509,9 @@ class ReportMetadata:
     # Citations info
     citations_extracted: int = 0
     unique_sources_cited: int = 0
+    full_text_min_score: int | None = None
+    full_text_papers_read: int = 0
+    full_text_read_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -2544,6 +2563,9 @@ class ReportMetadata:
             "model_configs": self.model_configs,
             "citations_extracted": self.citations_extracted,
             "unique_sources_cited": self.unique_sources_cited,
+            "full_text_min_score": self.full_text_min_score,
+            "full_text_papers_read": self.full_text_papers_read,
+            "full_text_read_count": self.full_text_read_count,
         }
 
     @classmethod
@@ -2625,4 +2647,7 @@ class ReportMetadata:
             model_configs=data.get("model_configs", {}),
             citations_extracted=data.get("citations_extracted", 0),
             unique_sources_cited=data.get("unique_sources_cited", 0),
+            full_text_min_score=data.get("full_text_min_score"),
+            full_text_papers_read=data.get("full_text_papers_read", 0),
+            full_text_read_count=data.get("full_text_read_count", 0),
         )
