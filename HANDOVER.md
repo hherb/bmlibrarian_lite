@@ -9,74 +9,25 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **Parity: taking a fact check further, Python desktop** (`ROADMAP.md`).
-iOS/macOS landed in PR #611, Android in PR #616. **The desktop's full-text
-rows are done on branch `feat/desktop-citations-from-full-text`** (PR #622) (decided
-with the maintainer 2026-10-23: actions on the Research Questions tab;
-a long text is read in windows, never cut):
-- *Settings → Full Text*: **Read citations from full text** (off, as on the
-  apps) and **Fetch Full Text From Score** (4; `citation_text.full_text_min_score`
-  never goes below the review's threshold). Config `discovery.citations_from_full_text`,
-  `discovery.full_text_min_score`; a bad stored value is the default.
-- The review (`WorkflowWorker`) fetches full texts through the discovery
-  chain (`citation_full_texts`, one paper at a time) before citations.
-- **Every LLM text path map-reduces over `chunking.analysis_windows`**
-  (maintainer's rule): the text **without its reference list** (the last
-  references heading; `jats_to_markdown` appends `## References`) in sliding
-  **16,000-character windows overlapping by 250** (`TEXT_WINDOW_CHARS`,
-  `TEXT_WINDOW_OVERLAP_CHARS`; spike: 40% of PMC texts and 45% of PDF texts
-  exceed 40,000), one call each; **one window failing fails the paper**;
-  never `text[:N]`. Citations reduce by merge + dedupe
-  (`merged_window_citations`: a passage another contains is dropped); the
-  classifier, the detailed assessment and the quality benchmark (which cut
-  abstracts at 4,000 / 3,000) reduce by `quality/window_reduce.reduce_by_design_vote`
-  (confidence = the winner's support averaged over windows, no longer its
-  share of the vote). `chunk_text` no longer adds a tail chunk the last one
-  holds (Interrogation's chunks too). Interrogation's 8,000/200 embedding
-  chunks are retrieval, not map-reduce, and were left as they are.
-- **The apps read the same windows** (contract
-  `doc/cross_platform/llm_parity/text_windows.json`, generated from Python, in
-  Unicode code points; a CRLF heading counts): BioMedLit `TextWindows`
-  (`withoutReferences`, `analysisWindows`, `mergedWindowItems`) and Android
-  `util/TextWindows.kt`. Citation extraction on both no longer cuts at 40,000
-  (`maxCitationFullTextCharacters` / `MAX_CITATION_FULL_TEXT_CHARACTERS` and
-  the cut notice are gone): one call per window, labelled "(part i of n)",
-  usage summed, any window failing fails the paper, the abstract no longer
-  sits beside the full text, a references-only text counts as no full text,
-  and `fittingBudget` costs every window (the run budget still drops a full
-  text: it is the reader's own setting). Not windowed anywhere: relevance
-  scoring of abstracts (sent whole, never cut).
-  `CitationOutcome.read_full_text` names the papers read from full text.
-- **`citation_reads`** (`citation_reads_store.py`, one row per paper per
-  checkpoint) records what each paper's last extraction read; no row means
-  no successful read is recorded (failed, cancelled, or an older run), and
-  the full text counts as unread. The run keeps its **`ReportMetadata`
-  in the checkpoint** (`CHECKPOINT_REPORT_METADATA_KEY`), and the methodology
-  says how many of the papers scored high enough were read from full text.
-- *Research Questions → Retry Full Text* (`full_text_retry.py`,
-  `FullTextRetryWorker`): the reviewed run's papers at the full-text score
-  not read from full text are asked again; passages replace a paper's
-  citations (`replace_document_citations`, one transaction), none keep the
-  old ones, either way it is recorded read; transparency is analysed again
-  with the text; the report is written again (version + 1, recovered
-  extraction failures dropped from the checkpoint and the shortfall) only
-  when a text was read. Before the first citation changes the checkpoint is
-  marked `full_text_report_pending`, so a cancel or a failure before the
-  report is written makes the next retry write it even when it reads
-  nothing new. The report is written from the checkpoint read again: *Check
-  again*'s retraction snapshot, not the screen the report first had.
-  `ReportMetadata.from_dict` turns the score distribution's JSON keys back
-  into ints and refuses impossible full-text counts. A run from before this
-  branch cannot be retried (no stored metadata; the reader is told to run
-  the review again).
-- `record_transparency_counts` moved to `transparency/assessment.py` (the
-  worker's method delegates); `build_doc_metadata` delegates to
-  `citation_full_texts.discovery_identifiers`.
-- **Still owed on the desktop:** *Upload Full Text* (Audit Trail cards) and
-  *Find More Evidence* / repeated smart search (extending *Re-run Search*).
-  Lodged: #620 (Ollama never sends `num_ctx`: a window is silently cut on a
-  small context), #621 (follow-ups of this branch), #624 (the reference cut
-  drops tables and appendices a PDF puts after its references; all three
-  platforms).
+iOS/macOS landed in PR #611, Android in PR #616, the desktop's full-text rows
+in PR #622 (see *Recently landed*). **Upload Full Text is done on branch
+`feat/desktop-upload-full-text`**: *Audit Trail → Literature → right-click →
+Upload Full Text…* reads a PDF (its text), HTML (reduced to text), Markdown
+or plain text (`full_text_upload.read_upload`; UTF-8 only, BOM dropped, a
+NUL refused, `MAX_PDF_SIZE` cap, no text refused, never cut) and keeps it
+in SQLite (`uploaded_full_texts_store`, one row per paper, the last upload),
+**not in the converter-stamped markdown cache**, which a converter bump
+drops. The review reads a relevant paper's upload whatever the setting and
+never fetches it; *Retry Full Text* (now enabled with the setting off) reads
+a relevant paper's upload when it is newer than the paper's last full-text
+read (`is_due`, `citation_reads_store.full_text_read_at`), fetches only with
+the setting on, refuses with `NOTHING_TO_READ_TEXT` when off with nothing
+due, and leaves the methodology's full-text line alone for a run that sought
+none. Follow-ups: #625. **Still owed:** *Find More Evidence* / repeated
+smart search (extending *Re-run Search*).
+Lodged: #620 (Ollama never sends `num_ctx`; outside PR #623 proposes a fix),
+#621 (PR #622 follow-ups), #624 (the reference cut drops tables and
+appendices a PDF puts after its references; all three platforms).
 Apple follow-ups: #612 (test seams), #613 (upload edge cases). Android
 divergences: #614, #615; follow-ups #617–#619.
 
@@ -113,6 +64,21 @@ have landed):
 
 ## Recently landed (context)
 
+- **Desktop: citations from full text, Retry Full Text** (PR #622).
+  *Settings → Full Text*: **Read citations from full text** (off) and **Fetch
+  Full Text From Score** (4, never below the review's threshold). The review
+  fetches full texts through the discovery chain (`citation_full_texts`)
+  before citations. **Every LLM text path map-reduces over
+  `chunking.analysis_windows`**: the text without its reference list in
+  16,000-character windows overlapping by 250, one call each, **one window
+  failing fails the paper**, never `text[:N]` (contract `text_windows.json`;
+  the apps read the same windows). **`citation_reads`** records what each
+  paper's last extraction read (no row = unread); the checkpoint keeps the
+  run's `ReportMetadata`. *Research Questions → Retry Full Text*
+  (`full_text_retry.py`, `FullTextRetryWorker`) re-extracts unread papers,
+  replaces citations in one transaction, redoes transparency, writes the
+  report again only when a text was read (`full_text_report_pending` survives
+  a cancel). Runs from before PR #622 cannot be retried.
 - **Android: taking a fact check further** (PR #616, Room **10**): abstract
   holdback (`full_text_abstract_only`), PDF text via iText
   (`full_text_pdf_text`, 1 MB cap), `DocumentEntity.analysisFullText` is what

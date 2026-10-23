@@ -62,6 +62,24 @@ def read(conn: sqlite3.Connection, checkpoint_id: str) -> dict[str, bool]:
     return {doc_id: bool(flag) for doc_id, flag in rows}
 
 
+def full_text_read_at(conn: sqlite3.Connection, checkpoint_id: str) -> dict[str, datetime]:
+    """When each paper of a run last had its citations read from its full text.
+
+    Args:
+        conn: An open connection.
+        checkpoint_id: The run.
+
+    Returns:
+        The time by paper id, for the papers read from full text.
+    """
+    rows = conn.execute(
+        f"SELECT document_id, extracted_at FROM {TABLE} "
+        "WHERE checkpoint_id = ? AND read_full_text = 1",
+        (checkpoint_id,),
+    )
+    return {doc_id: datetime.fromisoformat(at) for doc_id, at in rows}
+
+
 def delete(conn: sqlite3.Connection, checkpoint_id: str) -> None:
     """Forget a run's records.
 

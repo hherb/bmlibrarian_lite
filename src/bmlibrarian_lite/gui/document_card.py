@@ -273,6 +273,7 @@ class DocumentCard(QFrame):
     Signals:
         clicked: Emitted when card is clicked (doc_id: str)
         send_to_interrogator: Emitted when user requests to interrogate document
+        upload_full_text: Emitted when the user asks to upload the paper's full text
 
     Attributes:
         document: The document this card represents
@@ -282,6 +283,7 @@ class DocumentCard(QFrame):
 
     clicked = Signal(str)  # Emits document ID
     send_to_interrogator = Signal(str)  # Emits document ID for interrogation
+    upload_full_text = Signal(str)  # Emits document ID
 
     def __init__(
         self,
@@ -590,6 +592,14 @@ class DocumentCard(QFrame):
         interrogate_action.triggered.connect(self._request_interrogation)
         menu.addAction(interrogate_action)
 
+        upload_action = QAction("Upload Full Text…", self)
+        upload_action.setToolTip(
+            "Give this paper's full text as a PDF, HTML, Markdown or text file; "
+            "Retry Full Text on the Research Questions tab reads it"
+        )
+        upload_action.triggered.connect(self._request_upload)
+        menu.addAction(upload_action)
+
         if self.document.pmid:
             copy_pmid_action = QAction(f"Copy PMID ({self.document.pmid})", self)
             copy_pmid_action.triggered.connect(self._copy_pmid)
@@ -617,6 +627,10 @@ class DocumentCard(QFrame):
         """Request to send this document to the interrogator."""
         logger.info(f"Requesting interrogation for document: {self.document.id}")
         self.send_to_interrogator.emit(self.document.id)
+
+    def _request_upload(self) -> None:
+        """Ask for this paper's full text to be uploaded."""
+        self.upload_full_text.emit(self.document.id)
 
     def _copy_pmid(self) -> None:
         """Copy PMID to clipboard."""

@@ -488,3 +488,58 @@ class TestAuditTrailTabTransparencySettings:
 
         card = tab.literature_tab.get_card(sample_document.id)
         assert UNEXPLAINED_RATING_CAVEAT in card._transparency_badge.toolTip()
+
+
+class TestUploadFullText:
+    """A card's Upload Full Text keeps the file's text as the paper's."""
+
+    def test_a_chosen_file_is_kept_for_the_paper(
+        self, qapp, mock_config, mock_storage, sample_document, tmp_path
+    ) -> None:
+        """Read, kept under the card's document, and the reader is told where it is read."""
+        tab = AuditTrailTab(config=mock_config, storage=mock_storage)
+        tab.on_documents_found([sample_document])
+        path = tmp_path / "paper.md"
+        path.write_text("# Methods\n\nWe did.", encoding="utf-8")
+        card = tab.literature_tab.get_card(sample_document.id)
+
+        with patch("bmlibrarian_lite.gui.audit_trail_tab.QFileDialog.getOpenFileName",
+                   return_value=(str(path), "")), \
+                patch("bmlibrarian_lite.gui.audit_trail_tab.QMessageBox") as box:
+            card.upload_full_text.emit(sample_document.id)
+
+        doc_id, upload = mock_storage.save_uploaded_full_text.call_args.args
+        assert (doc_id, upload.text, upload.file_name) == (
+            sample_document.id, "# Methods\n\nWe did.", "paper.md")
+        assert "Retry Full Text" in box.information.call_args.args[2]
+        box.warning.assert_not_called()
+
+    def test_a_refused_file_is_said_and_nothing_kept(
+        self, qapp, mock_config, mock_storage, sample_document, tmp_path
+    ) -> None:
+        """The refusal is the reader's sentence; the stored text is untouched."""
+        tab = AuditTrailTab(config=mock_config, storage=mock_storage)
+        path = tmp_path / "paper.docx"
+        path.write_bytes(b"PK")
+
+        with patch("bmlibrarian_lite.gui.audit_trail_tab.QFileDialog.getOpenFileName",
+                   return_value=(str(path), "")), \
+                patch("bmlibrarian_lite.gui.audit_trail_tab.QMessageBox") as box:
+            tab._on_upload_full_text(sample_document.id)
+
+        mock_storage.save_uploaded_full_text.assert_not_called()
+        assert "Unsupported file format" in box.warning.call_args.args[2]
+
+    def test_a_cancelled_dialog_does_nothing(
+        self, qapp, mock_config, mock_storage, sample_document
+    ) -> None:
+        """No file, no message."""
+        tab = AuditTrailTab(config=mock_config, storage=mock_storage)
+
+        with patch("bmlibrarian_lite.gui.audit_trail_tab.QFileDialog.getOpenFileName",
+                   return_value=("", "")), \
+                patch("bmlibrarian_lite.gui.audit_trail_tab.QMessageBox") as box:
+            tab._on_upload_full_text(sample_document.id)
+
+        mock_storage.save_uploaded_full_text.assert_not_called()
+        assert not box.method_calls

@@ -588,17 +588,14 @@ class ResearchQuestionsTab(QWidget):
         if self.config.discovery.citations_from_full_text:
             full_text_action.setToolTip(
                 "Fetch the full text of papers scored high enough whose "
-                "citations were not read from their full text, read them, "
+                "citations were not read from their full text, read them "
+                "and any full text uploaded on the Audit Trail's cards, "
                 "and write the report again"
             )
         else:
             full_text_action.setToolTip(FULL_TEXT_SETTING_OFF_TEXT)
         full_text_action.triggered.connect(self._on_retry_full_text_clicked)
-        full_text_action.setEnabled(
-            not is_busy
-            and question.total_documents > 0
-            and self.config.discovery.citations_from_full_text
-        )
+        full_text_action.setEnabled(not is_busy and question.total_documents > 0)
         menu.addAction(full_text_action)
 
         menu.addSeparator()
@@ -1709,15 +1706,21 @@ class ResearchQuestionsTab(QWidget):
         question = self._get_selected_question()
         if not question:
             return
-        reply = QMessageBox.question(
-            self,
-            RETRY_FULL_TEXT_ACTION,
+        fetching = (
             "The full text of each paper scored "
             f"{self.config.discovery.full_text_min_score} or higher (and at "
             "least the review's threshold) whose citations were not read from "
-            "its full text is fetched and read, a long text in several model "
-            "calls; the report is then written again. This can take a while "
-            "and costs model calls.",
+            "its full text is fetched and read, as is each full text uploaded "
+            "for a relevant paper since its citations were last read"
+            if self.config.discovery.citations_from_full_text
+            else "Each full text uploaded for a relevant paper since its "
+            "citations were last read is read"
+        )
+        reply = QMessageBox.question(
+            self,
+            RETRY_FULL_TEXT_ACTION,
+            f"{fetching}, a long text in several model calls; the report is "
+            "then written again. This can take a while and costs model calls.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )

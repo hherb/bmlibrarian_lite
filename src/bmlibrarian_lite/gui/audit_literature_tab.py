@@ -60,6 +60,7 @@ class AuditLiteratureTab(QWidget):
     Signals:
         document_clicked: Emitted when a document card is clicked (doc_id)
         send_to_interrogator: Emitted when user requests to interrogate document
+        upload_full_text: Emitted when user asks to upload a paper's full text (doc_id)
 
     Attributes:
         cards_by_doc_id: Dictionary mapping doc IDs to cards
@@ -67,6 +68,7 @@ class AuditLiteratureTab(QWidget):
 
     document_clicked = Signal(str)  # doc_id
     send_to_interrogator = Signal(str)  # doc_id for interrogation
+    upload_full_text = Signal(str)  # doc_id
 
     def __init__(
         self,
@@ -228,6 +230,7 @@ class AuditLiteratureTab(QWidget):
                 card.set_retraction_check(*self._retractions[document.id])
             card.clicked.connect(self._on_card_clicked)
             card.send_to_interrogator.connect(self._on_send_to_interrogator)
+            card.upload_full_text.connect(self.upload_full_text)
 
             # Store and display
             self._cards_by_doc_id[document.id] = card

@@ -65,12 +65,15 @@ from bmlibrarian_lite.full_text_retry import (
     NO_NEW_FULL_TEXT_TEXT,
     NO_REPORT_TEXT,
     NOT_KEPT_TEXT,
+    NOTHING_TO_READ_TEXT,
     REPORT_PENDING_KEY,
     FullTextRetry,
     RetryNotPossible,
+    is_due,
     retry_full_texts,
     retry_text,
 )
+from bmlibrarian_lite.full_text_upload import UploadedFullText
 from bmlibrarian_lite.storage import LiteStorage
 from bmlibrarian_lite.utils import classify_analysis_exception
 
@@ -587,8 +590,9 @@ class TestFetching:
 # ---------------------------------------------------------------------------
 
 
-def run_review(monkeypatch: pytest.MonkeyPatch, enabled: bool) -> dict[str, Any]:
-    """Run the review worker over three papers scored 5, 4 and 3."""
+def run_review(monkeypatch: pytest.MonkeyPatch, enabled: bool,
+               uploads: dict[str, str] | None = None) -> dict[str, Any]:
+    """Run the review worker over three papers scored 5, 4 and 3, with these uploads."""
     pytest.importorskip("PySide6")
     from bmlibrarian_lite.data_models import SearchSession
     from bmlibrarian_lite.gui import systematic_review_tab
@@ -629,6 +633,10 @@ def run_review(monkeypatch: pytest.MonkeyPatch, enabled: bool) -> dict[str, Any]
     monkeypatch.setattr(config.transparency, "enabled", False)
     storage = MagicMock()
     storage.create_checkpoint.return_value.id = "cp"
+    storage.get_uploaded_full_texts.return_value = {
+        doc_id: UploadedFullText(text=text, kind="text", file_name="up.txt")
+        for doc_id, text in (uploads or {}).items()
+    }
     worker = WorkflowWorker(question=QUESTION, config=config, storage=storage, min_score=3)
     finished: list[Any] = []
     worker.finished.connect(lambda report, metadata: finished.append(metadata))
@@ -685,6 +693,24 @@ class TestTheReview:
         assert run["asked"] == []
         assert run["extract"].kwargs["full_texts"] == {}
         assert run["report_metadata"].full_text_min_score is None
+
+    def test_an_upload_is_read_whatever_the_setting(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Off: the upload alone is read, below the full-text score too."""
+        run = run_review(monkeypatch, enabled=False, uploads={"doc-3": "Uploaded 3."})
+
+        assert run["asked"] == []
+        assert run["extract"].kwargs["full_texts"] == {"doc-3": "Uploaded 3."}
+
+    def test_a_paper_with_an_upload_is_never_fetched(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The fetch leaves a paper the reader uploaded for alone."""
+        run = run_review(monkeypatch, enabled=True, uploads={"doc-1": "Uploaded 1."})
+
+        assert run["asked"] == ["doc-2"]
+        assert run["extract"].kwargs["full_texts"] == {"doc-1": "Uploaded 1."}
 
 
 # ---------------------------------------------------------------------------
@@ -747,6 +773,7 @@ def reviewed(storage: LiteStorage, keep_metadata: bool = True,
 def retry(storage: LiteStorage, texts: dict[str, str], answers: dict[str, Any],
           stop_after: int | None = None, assessed: list[Any] | None = None,
           assess: Any = None, report_error: Exception | None = None,
+          seeking: bool = True,
           ) -> tuple[FullTextRetry, FakeAgent, MagicMock]:
     """Retry with scripted fetches, extractions and reports."""
     agent = FakeAgent(answers)
@@ -757,7 +784,7 @@ def retry(storage: LiteStorage, texts: dict[str, str], answers: dict[str, Any],
     if assessed is not None:
         assess = lambda doc, text: assessed.append((doc.id, text))  # noqa: E731
     config = LiteConfig()
-    config.discovery.citations_from_full_text = True
+    config.discovery.citations_from_full_text = seeking
     fetched: list[str] = []
 
     def fetch(doc: LiteDocument) -> str | None:
@@ -921,6 +948,7 @@ class TestRetryFullText:
             return None
 
         config = LiteConfig()
+        config.discovery.citations_from_full_text = True
         outcome = retry_full_texts(QUESTION, storage, config, fetch, agent, MagicMock(),
                                    None, lambda: len(asked) >= 1)
 
@@ -1012,6 +1040,113 @@ class TestRetryFullText:
 
         assert outcome == FullTextRetry() and agent.calls == []
         assert retry_text(outcome).startswith("Every paper scored high enough")
+
+
+def upload(storage: LiteStorage, pmid: str, text: str) -> None:
+    """The reader uploads a paper's full text."""
+    storage.save_uploaded_full_text(
+        f"doc-{pmid}", UploadedFullText(text=text, kind="text", file_name=f"{pmid}.txt"))
+
+
+class TestRetryReadsUploads:
+    """An upload is read whatever the full-text setting or score."""
+
+    def test_with_the_setting_off_only_unread_uploads_are_read(
+        self, storage: LiteStorage
+    ) -> None:
+        """Never fetched; a paper below the threshold is not cited, so not read."""
+        checkpoint_id = reviewed(storage)
+        upload(storage, "3", "Uploaded 3.")
+
+        outcome, agent, reporter = retry(storage, {}, {"doc-3": ["From the upload."]},
+                                         seeking=False)
+
+        assert agent.fetched == []  # type: ignore[attr-defined]
+        assert agent.calls == [("doc-3", {"doc-3": "Uploaded 3."})]
+        assert (outcome.read, outcome.report) == (1, "New report.")
+        assert passages_of(storage, checkpoint_id)["doc-3"] == {"From the upload."}
+
+    def test_an_upload_below_the_threshold_is_not_read(self, storage: LiteStorage) -> None:
+        """A paper scored under the run's threshold is not cited, so nothing is read."""
+        reviewed(storage)
+        storage.upsert_document(make_document("5"))
+        checkpoint = storage.get_checkpoint_for_question(QUESTION)
+        storage.save_scored_document(scored("5", 2), checkpoint.id)
+        upload(storage, "5", "Uploaded 5.")
+
+        with pytest.raises(RetryNotPossible) as refused:
+            retry(storage, {}, {}, seeking=False)
+        assert str(refused.value) == NOTHING_TO_READ_TEXT
+
+    def test_an_upload_after_a_full_text_read_is_read_again(
+        self, storage: LiteStorage
+    ) -> None:
+        """Paper 2 was read from a fetched text; the reader's upload is newer."""
+        reviewed(storage)
+        upload(storage, "2", "Uploaded 2.")
+
+        outcome, agent, _ = retry(storage, {}, {"doc-2": ["From the upload."]},
+                                  seeking=False)
+
+        assert agent.calls == [("doc-2", {"doc-2": "Uploaded 2."})]
+        assert outcome.read == 1
+
+    def test_an_upload_already_read_is_not_read_again(self, storage: LiteStorage) -> None:
+        """Read once; a second retry has nothing to do."""
+        reviewed(storage)
+        upload(storage, "3", "Uploaded 3.")
+        retry(storage, {}, {"doc-3": ["From the upload."]}, seeking=False)
+
+        with pytest.raises(RetryNotPossible):
+            retry(storage, {}, {}, seeking=False)
+
+    def test_with_the_setting_on_an_upload_is_read_instead_of_fetched(
+        self, storage: LiteStorage
+    ) -> None:
+        """The reader's copy wins over whatever a source serves."""
+        reviewed(storage)
+        upload(storage, "1", "Uploaded 1.")
+
+        _, agent, _ = retry(storage, {"doc-1": "Fetched 1."}, {"doc-1": ["U."]})
+
+        assert agent.calls[0] == ("doc-1", {"doc-1": "Uploaded 1."})
+
+    def test_a_run_that_sought_no_full_text_says_nothing_of_texts_not_obtained(
+        self, storage: LiteStorage
+    ) -> None:
+        """The methodology's full-text line stays as the run left it."""
+        checkpoint_id = reviewed(storage)
+        stored = storage.get_checkpoint(checkpoint_id)
+        metadata = recorded_report_metadata(stored.metadata)
+        metadata.full_text_min_score = None
+        storage.update_checkpoint(checkpoint_id, metadata={
+            **stored.metadata, CHECKPOINT_REPORT_METADATA_KEY: metadata.to_dict()}, touch=False)
+        upload(storage, "3", "Uploaded 3.")
+
+        _, _, reporter = retry(storage, {}, {"doc-3": ["U."]}, seeking=False)
+
+        assert full_text_summary(reporter.generate_report.call_args.args[2]) is None
+
+    @pytest.mark.parametrize("score, uploaded, read, seeking, due", [
+        (4, None, None, True, True),     # the control: at the score, never read
+        (4, None, None, False, False),   # the setting off fetches nothing
+        (4, None, 1, True, False),       # read from full text already
+        (3, None, None, True, False),    # under the full-text score
+        (3, 2, None, False, True),       # an upload, never read from full text
+        (3, 2, 1, False, True),          # an upload newer than the read
+        (3, 1, 2, False, False),         # read since the upload
+        (2, 2, None, True, False),       # below the threshold: never cited
+    ])
+    def test_what_is_due(self, score: int, uploaded: int | None, read: int | None,
+                         seeking: bool, due: bool) -> None:
+        """Threshold 3, full-text score 4; times are seconds."""
+        def at(seconds: int | None) -> datetime | None:
+            return None if seconds is None else datetime(2026, 10, 23, 0, 0, seconds)
+
+        up = None if uploaded is None else UploadedFullText(
+            text="T.", kind="text", file_name="t.txt", uploaded_at=at(uploaded))
+
+        assert is_due(scored("1", score), 3, 4, seeking, up, at(read)) is due
 
 
 class TestTheRetryWorker:

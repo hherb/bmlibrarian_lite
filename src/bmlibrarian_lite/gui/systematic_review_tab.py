@@ -546,19 +546,24 @@ class WorkflowWorker(QThread):
                 return
 
             # Step 4: Extract citations, from the full text of the papers
-            # scored high enough when the setting asks for it
-            full_texts: dict[str, str] = {}
+            # scored high enough when the setting asks for it, and from any
+            # the reader uploaded whatever the setting
+            uploads = self.storage.get_uploaded_full_texts(
+                [d.document.id for d in scored_docs]
+            )
+            full_texts = {doc_id: upload.text for doc_id, upload in uploads.items()}
             full_text_min: int | None = None
             if self.config.discovery.citations_from_full_text:
                 full_text_min = full_text_min_score(
                     self.min_score, self.config.discovery.full_text_min_score
                 )
-                full_texts = fetch_full_texts(
+                full_texts.update(fetch_full_texts(
                     full_text_fetcher(self.config),
-                    [d.document for d in scored_docs if d.score >= full_text_min],
+                    [d.document for d in scored_docs
+                     if d.score >= full_text_min and d.document.id not in uploads],
                     lambda: self._cancelled,
                     lambda current, total: self.progress.emit("full_text", current, total),
-                )
+                ))
                 if self._cancelled:
                     self.finished.emit("Workflow cancelled.", metadata)
                     return

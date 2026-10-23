@@ -47,7 +47,12 @@ from typing import TYPE_CHECKING, Any, Generator, Optional
 
 import sqlite_vec
 
-from . import citation_reads_store, rescue_queue_store, retraction_store
+from . import (
+    citation_reads_store,
+    rescue_queue_store,
+    retraction_store,
+    uploaded_full_texts_store,
+)
 from .browser_rescue import RescueEntry, RescueRequest, RescueState, RescueVerdict
 from .rescue_queue_store import RecordedVerdict
 from .retraction_store import PaperCheck
@@ -88,6 +93,7 @@ if TYPE_CHECKING:
     # inside the methods that need them, to keep this module importable
     # without pulling in the agents and the analyser.
     from .data_models import Citation
+    from .full_text_upload import UploadedFullText
     from .quality.data_models import QualityAssessment, StudyClassification
     from .transparency import (
         StoredTransparency,
@@ -267,6 +273,8 @@ class LiteStorage:
                 conn.executescript(retraction_store.SCHEMA)
                 # Which text each paper's citations were read from
                 conn.executescript(citation_reads_store.SCHEMA)
+                # The full texts readers uploaded for papers
+                conn.executescript(uploaded_full_texts_store.SCHEMA)
                 # Create sqlite-vec virtual tables for document and chunk embeddings
                 conn.execute(
                     f"""
@@ -2849,6 +2857,7 @@ class LiteStorage:
                 DELETE FROM documents;
                 DELETE FROM citations;
                 DELETE FROM citation_reads;
+                DELETE FROM uploaded_full_texts;
                 DELETE FROM scored_documents;
                 DELETE FROM review_checkpoints;
                 DELETE FROM search_sessions;
@@ -3470,6 +3479,47 @@ class LiteStorage:
         """
         with self._sqlite_connection() as conn:
             return citation_reads_store.read(conn, checkpoint_id)
+
+    def get_citation_full_text_read_at(self, checkpoint_id: str) -> dict[str, datetime]:
+        """When each paper of a run last had its citations read from its full text.
+
+        Args:
+            checkpoint_id: The run.
+
+        Returns:
+            The time by paper id, for the papers read from full text.
+        """
+        with self._sqlite_connection() as conn:
+            return citation_reads_store.full_text_read_at(conn, checkpoint_id)
+
+    def save_uploaded_full_text(self, document_id: str, upload: "UploadedFullText") -> datetime:
+        """Keep the full text a reader uploaded for a paper, replacing an earlier one.
+
+        Args:
+            document_id: The paper.
+            upload: Its full text.
+
+        Returns:
+            When it was stored.
+        """
+        with self._sqlite_connection() as conn:
+            stored_at = uploaded_full_texts_store.save(conn, document_id, upload)
+            conn.commit()
+        return stored_at
+
+    def get_uploaded_full_texts(
+        self, document_ids: Sequence[str]
+    ) -> dict[str, "UploadedFullText"]:
+        """The full texts readers uploaded for papers.
+
+        Args:
+            document_ids: The papers.
+
+        Returns:
+            Each paper's upload by its id, for those that have one.
+        """
+        with self._sqlite_connection() as conn:
+            return uploaded_full_texts_store.read(conn, document_ids)
 
     def replace_document_citations(
         self,
