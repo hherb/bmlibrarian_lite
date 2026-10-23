@@ -59,11 +59,12 @@ logger = logging.getLogger(__name__)
 
 #: A line that is only a reference-list heading: ``## References`` as the
 #: JATS converter writes it, or ``References`` / ``4. Bibliography`` as a PDF
-#: carries it.
+#: carries it. ``\r?``: a CRLF line is a line on Swift and Kotlin too
+#: (``doc/cross_platform/llm_parity/text_windows.json``).
 _REFERENCES_HEADING = re.compile(
     r"^[ \t]*(?:#{1,6}[ \t]*)?(?:\d+\.?[ \t]*)?"
     r"(?:references|bibliography|literature cited|works cited|references and notes)"
-    r"[ \t]*:?[ \t]*$",
+    r"[ \t]*:?[ \t]*\r?$",
     re.IGNORECASE | re.MULTILINE,
 )
 

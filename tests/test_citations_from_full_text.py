@@ -815,3 +815,49 @@ class TestRetryFullText:
 
         assert outcome == FullTextRetry() and agent.calls == []
         assert retry_text(outcome).startswith("Every paper scored high enough")
+
+
+# ---------------------------------------------------------------------------
+# The cross-platform contract
+# ---------------------------------------------------------------------------
+
+CONTRACT = Path(__file__).resolve().parents[1] / "doc/cross_platform/llm_parity/text_windows.json"
+
+
+class TestTheContract:
+    """``text_windows.json`` is what Python does; Swift and Kotlin read it too."""
+
+    def contract(self) -> dict[str, Any]:
+        """The shared rows."""
+        return json.loads(CONTRACT.read_text(encoding="utf-8"))
+
+    def test_the_bounds_are_the_constants(self) -> None:
+        """16,000 and 250, on every platform."""
+        from bmlibrarian_lite.constants import TEXT_WINDOW_CHARS, TEXT_WINDOW_OVERLAP_CHARS
+
+        contract = self.contract()
+        assert (contract["window_chars"], contract["overlap_chars"]) == (
+            TEXT_WINDOW_CHARS, TEXT_WINDOW_OVERLAP_CHARS)
+
+    def test_each_window_case(self) -> None:
+        """The windows, character for character."""
+        rows = self.contract()["windows"]
+        assert rows
+        for row in rows:
+            assert analysis_windows(
+                row["text"], row["window_chars"], row["overlap_chars"]) == row["windows"], row["name"]
+
+    def test_each_reference_case(self) -> None:
+        """Where the reference list is cut."""
+        rows = self.contract()["references"]
+        assert rows
+        for row in rows:
+            assert without_references(row["text"]) == row["without_references"], row["name"]
+
+    def test_each_merge_case(self) -> None:
+        """Which passages the reduce keeps."""
+        rows = self.contract()["merge"]
+        assert rows
+        for row in rows:
+            kept = merged_window_citations([cite("1", p) for p in row["passages"]])
+            assert [c.passage for c in kept] == row["kept"], row["name"]
