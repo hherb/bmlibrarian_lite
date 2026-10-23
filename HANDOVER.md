@@ -18,11 +18,21 @@ a long text is read in windows, never cut):
   never goes below the review's threshold). Config `discovery.citations_from_full_text`,
   `discovery.full_text_min_score`; a bad stored value is the default.
 - The review (`WorkflowWorker`) fetches full texts through the discovery
-  chain (`citation_full_texts`, one paper at a time) before citations. The
-  agent reads a text **without its reference list** (the last references
-  heading; `jats_to_markdown` appends `## References`) in **40,000-character
-  windows** (`CITATION_TEXT_WINDOW_CHARS`; spike: 40% of PMC texts and 45% of
-  PDF texts are longer), one call each; **one window failing fails the paper**.
+  chain (`citation_full_texts`, one paper at a time) before citations.
+- **Every LLM text path map-reduces over `chunking.analysis_windows`**
+  (maintainer's rule): the text **without its reference list** (the last
+  references heading; `jats_to_markdown` appends `## References`) in sliding
+  **16,000-character windows overlapping by 250** (`TEXT_WINDOW_CHARS`,
+  `TEXT_WINDOW_OVERLAP_CHARS`; spike: 40% of PMC texts and 45% of PDF texts
+  exceed 40,000), one call each; **one window failing fails the paper**;
+  never `text[:N]`. Citations reduce by merge + dedupe
+  (`merged_window_citations`: a passage another contains is dropped); the
+  classifier, the detailed assessment and the quality benchmark (which cut
+  abstracts at 4,000 / 3,000) reduce by `quality/window_reduce.reduce_by_design_vote`
+  (confidence = the winner's support averaged over windows, no longer its
+  share of the vote). `chunk_text` no longer adds a tail chunk the last one
+  holds (Interrogation's chunks too). Interrogation's 8,000/200 embedding
+  chunks are retrieval, not map-reduce, and were left as they are.
   `CitationOutcome.read_full_text` names the papers read from full text.
 - **`citation_reads`** (`citation_reads_store.py`, one row per paper per
   checkpoint) records what each paper's last extraction read; no row means
@@ -421,19 +431,9 @@ enables DEBUG; **#245** the transparency CLIs take the NCBI key only as
 
 ### Transparency parity and pricing
 
-- **#148** `INDUSTRY_KEYWORDS` drifted (`pharma…s?` on Python only) — wants a
-  shared fixture like `sponsor_patterns.json`; **#159** a ClinicalTrials.gov-only
-  industry sponsor reports "YES (0%)"; **#160** Swift never raises Python's
-  unrecognised-funder or trial-registry caveats; **#150** spelled-out NIH
-  institutes match no government pattern (pinned `xfail(strict=True)`);
-  **#145** stale transparency results feed report aggregates.
-- Android transparency, remaining **#116** slices; **#109** optional LLM
-  disambiguation of repository restrictions.
-- **#136/#137** pricing hardcoded in six places per platform, drifted (#136
-  needs current figures); **#138** model-list fetch has no retry; **#139** four
-  providers still filter models by whitelist.
-- Small: **#140**, **#126**, **#111**, **#225**; Swift's risk *level*
-  heuristic has no Python counterpart.
+#148 (`INDUSTRY_KEYWORDS` drift; wants a shared fixture), #159, #160, #150
+(`xfail(strict=True)`), #145; Android #116 slices, #109; pricing #136/#137
+(hardcoded, drifted), #138, #139; small #140, #126, #111, #225.
 
 ### Verify
 

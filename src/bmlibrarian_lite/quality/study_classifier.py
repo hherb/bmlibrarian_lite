@@ -33,6 +33,7 @@ import logging
 import re
 import time
 import warnings
+from dataclasses import replace
 from typing import Optional, Callable
 
 from ..agents.base import LiteBaseAgent
@@ -46,14 +47,13 @@ from ..constants import (
     JSON_MAX_RESPONSE_SIZE_BYTES,
     VALID_BLINDING_VALUES,
     CONFIDENCE_PARSE_FAILURE_DEFAULT,
-    ABSTRACT_MAX_SINGLE_PASS_LENGTH,
-    ABSTRACT_CHUNK_SIZE,
-    ABSTRACT_CHUNK_OVERLAP,
     CLASSIFICATION_MAX_RETRIES,
 )
 from ..exceptions import JSONParseError, RetryExhaustedError
 from ..utils import llm_retry, classify_llm_exception
+from ..chunking import analysis_windows
 from .data_models import StudyDesign, StudyClassification
+from .window_reduce import reduce_by_design_vote
 from .json_fields import as_bool, as_float, as_int, as_text, text_or
 
 logger = logging.getLogger(__name__)
@@ -174,9 +174,8 @@ class LiteStudyClassifier(LiteBaseAgent):
         """
         Classify study design for a document.
 
-        For long abstracts (> ABSTRACT_MAX_SINGLE_PASS_LENGTH), this method
-        uses a chunking strategy to process the full abstract without
-        information loss.
+        An abstract longer than one window (:func:`analysis_windows`) is
+        read window by window and the answers reduced, never cut.
 
         Args:
             document: The document to classify
@@ -200,11 +199,13 @@ class LiteStudyClassifier(LiteBaseAgent):
             abstract = abstract.encode("utf-8", errors="replace").decode("utf-8")
             title = title.encode("utf-8", errors="replace").decode("utf-8")
 
-        # Check if abstract needs chunked processing
-        if len(abstract) > ABSTRACT_MAX_SINGLE_PASS_LENGTH:
-            return self._classify_long_abstract(document, abstract, title, doc_id)
+        windows = analysis_windows(abstract)
+        if len(windows) > 1:
+            return self._classify_long_abstract(document, windows, title, doc_id)
 
-        return self._classify_single_pass(document, abstract, title, doc_id)
+        return self._classify_single_pass(
+            document, windows[0] if windows else abstract, title, doc_id
+        )
 
     def _classify_single_pass(
         self,
@@ -268,42 +269,36 @@ IMPORTANT: Classify what THIS study did, not studies it references."""
     def _classify_long_abstract(
         self,
         document: LiteDocument,
-        abstract: str,
+        windows: list[str],
         title: str,
         doc_id: str | int,
     ) -> StudyClassification:
         """
-        Classify document with a long abstract using chunked processing.
+        Classify a document whose abstract is longer than one window.
 
-        This implements a map-reduce strategy:
-        1. Process abstract in overlapping chunks
-        2. Collect design indicators from each chunk
-        3. Aggregate results with confidence weighting
+        Map-reduce: each window is classified, and the answers reduced by
+        :func:`reduce_by_design_vote`. A window that cannot be classified
+        fails the document: a vote over part of the abstract is not its
+        classification.
 
         Args:
             document: The document to classify
-            abstract: Full document abstract (not truncated)
+            windows: The abstract's windows
             title: Document title
             doc_id: Document identifier for error reporting
 
         Returns:
-            StudyClassification with aggregated results
+            StudyClassification with aggregated results, or the failure
+            sentinel (UNKNOWN, confidence 0)
         """
-        logger.info(
-            f"Document {doc_id}: Abstract length {len(abstract)} exceeds "
-            f"single-pass limit ({ABSTRACT_MAX_SINGLE_PASS_LENGTH}), "
-            "using chunked processing"
-        )
+        logger.info(f"Document {doc_id}: abstract read in {len(windows)} windows")
+        window_results: list[StudyClassification] = []
 
-        # Create overlapping chunks
-        chunks = self._create_abstract_chunks(abstract)
-        chunk_results: list[StudyClassification] = []
-
-        for i, chunk in enumerate(chunks):
+        for i, window in enumerate(windows):
             prompt = f"""Classify THIS paper's study design based on this section of the abstract.
 
 Title: {title}
-Abstract Section {i + 1}/{len(chunks)}: {chunk}
+Abstract Section {i + 1}/{len(windows)}: {window}
 
 Return JSON:
 {{
@@ -315,7 +310,7 @@ Return JSON:
 }}
 
 IMPORTANT: Classify what THIS study did, not studies it references.
-Note: This is part {i + 1} of {len(chunks)} sections from a long abstract."""
+Note: This is part {i + 1} of {len(windows)} sections from a long abstract."""
 
             try:
                 messages = [
@@ -329,104 +324,22 @@ Note: This is part {i + 1} of {len(chunks)} sections from a long abstract."""
                     json_mode=True,
                 )
                 result = self._parse_response(response, doc_id)
-                chunk_results.append(result)
             except Exception as e:
-                logger.warning(
-                    f"Document {doc_id}: Failed to classify chunk {i + 1}: {e}"
+                logger.error(f"Document {doc_id}: window {i + 1} could not be classified: {e}")
+                result = None
+            # The failure sentinel, as _parse_response returns it
+            if result is None or (
+                result.study_design is StudyDesign.UNKNOWN and result.confidence == 0.0
+            ):
+                return StudyClassification(
+                    study_design=StudyDesign.UNKNOWN,
+                    confidence=0.0,
+                    raw_response=f"Window {i + 1} of {len(windows)} could not be classified",
                 )
-                continue
+            window_results.append(result)
 
-        if not chunk_results:
-            logger.error(f"Document {doc_id}: All chunk classifications failed")
-            return StudyClassification(
-                study_design=StudyDesign.UNKNOWN,
-                confidence=0.0,
-                raw_response="All chunk classifications failed",
-            )
-
-        # Aggregate results using confidence-weighted voting
-        return self._aggregate_chunk_results(chunk_results, doc_id)
-
-    def _create_abstract_chunks(self, abstract: str) -> list[str]:
-        """
-        Split abstract into overlapping chunks for processing.
-
-        Args:
-            abstract: Full abstract text
-
-        Returns:
-            List of overlapping text chunks
-        """
-        chunks = []
-        start = 0
-        while start < len(abstract):
-            end = start + ABSTRACT_CHUNK_SIZE
-            chunk = abstract[start:end]
-            chunks.append(chunk)
-
-            # Move start position, accounting for overlap
-            start = end - ABSTRACT_CHUNK_OVERLAP
-            if start >= len(abstract):
-                break
-
-        return chunks
-
-    def _aggregate_chunk_results(
-        self,
-        results: list[StudyClassification],
-        doc_id: str | int,
-    ) -> StudyClassification:
-        """
-        Aggregate classification results from multiple chunks.
-
-        Uses confidence-weighted voting to determine final classification.
-
-        Args:
-            results: List of classifications from each chunk
-            doc_id: Document identifier for logging
-
-        Returns:
-            Aggregated StudyClassification
-        """
-        from collections import Counter
-
-        # Confidence-weighted vote for study design
-        design_weights: dict[StudyDesign, float] = {}
-        for result in results:
-            design = result.study_design
-            weight = result.confidence
-            design_weights[design] = design_weights.get(design, 0) + weight
-
-        # Select design with highest weighted vote
-        best_design = max(design_weights, key=design_weights.get)  # type: ignore
-
-        # Aggregate other fields from highest-confidence result for that design
-        best_result = max(
-            (r for r in results if r.study_design == best_design),
-            key=lambda r: r.confidence
-        )
-
-        # Calculate aggregate confidence (weighted average)
-        total_weight = sum(design_weights.values())
-        aggregate_confidence = design_weights[best_design] / total_weight if total_weight > 0 else 0.0
-
-        # Collect sample sizes (take maximum as most likely accurate)
-        sample_sizes = [r.sample_size for r in results if r.sample_size is not None]
-        final_sample_size = max(sample_sizes) if sample_sizes else None
-
-        logger.debug(
-            f"Document {doc_id}: Aggregated {len(results)} chunks, "
-            f"design={best_design.value}, confidence={aggregate_confidence:.2f}"
-        )
-
-        return StudyClassification(
-            study_design=best_design,
-            is_randomized=best_result.is_randomized,
-            is_blinded=best_result.is_blinded,
-            sample_size=final_sample_size,
-            confidence=aggregate_confidence,
-            raw_response=f"Aggregated from {len(results)} chunks",
-        )
+        reduced = reduce_by_design_vote(window_results)
+        return replace(reduced, raw_response=f"Aggregated from {len(window_results)} windows")
 
     def _parse_response(
         self, response: str, doc_id: str | int = "unknown"

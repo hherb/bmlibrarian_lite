@@ -26,9 +26,11 @@ import json
 import logging
 import re
 import time
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Callable, Optional
 
+from ..chunking import analysis_windows
 from ..config import LiteConfig
 from ..constants import (
     calculate_cost,
@@ -65,6 +67,7 @@ from ..quality.json_fields import (
     as_text,
 )
 from ..quality.study_classifier import stated_study_design
+from ..quality.window_reduce import reduce_by_design_vote
 from ..storage import LiteStorage
 from ..utils import classify_analysis_exception
 from .models import BenchmarkCancellation
@@ -587,13 +590,41 @@ class QualityBenchmarkRunner:
         if not evaluator.is_model:
             raise ValueError("Human evaluation not yet supported in runner")
 
-        abstract = (document.abstract or "")[:3000]  # Limit for classification
         title = document.title or "Untitled"
+        windows = analysis_windows(document.abstract or "") or [""]
+        return self._evaluate_windows(
+            document,
+            evaluator,
+            [
+                [
+                    LLMMessage(role="system", content=CLASSIFICATION_SYSTEM_PROMPT),
+                    LLMMessage(role="user", content=self._classification_prompt(
+                        title, window, i, len(windows))),
+                ]
+                for i, window in enumerate(windows, start=1)
+            ],
+            QUALITY_CLASSIFIER_MAX_TOKENS,
+            self._parse_classification_response,
+        )
 
-        user_prompt = f"""Classify THIS paper's study design:
+    @staticmethod
+    def _classification_prompt(title: str, abstract: str, part: int, parts: int) -> str:
+        """The prompt classifying one window of a paper's abstract.
+
+        Args:
+            title: The paper's title.
+            abstract: The window's text.
+            part: Which window, from 1.
+            parts: How many windows the abstract has.
+
+        Returns:
+            The user prompt.
+        """
+        section = f" (section {part} of {parts})" if parts > 1 else ""
+        return f"""Classify THIS paper's study design:
 
 Title: {title}
-Abstract: {abstract}
+Abstract{section}: {abstract}
 
 Return JSON:
 {{
@@ -605,19 +636,6 @@ Return JSON:
 }}
 
 IMPORTANT: Classify what THIS study did, not studies it references."""
-
-        messages = [
-            LLMMessage(role="system", content=CLASSIFICATION_SYSTEM_PROMPT),
-            LLMMessage(role="user", content=user_prompt),
-        ]
-
-        return self._evaluate(
-            document=document,
-            evaluator=evaluator,
-            messages=messages,
-            max_tokens=QUALITY_CLASSIFIER_MAX_TOKENS,
-            parse=self._parse_classification_response,
-        )
 
     def _assess_document(
         self,
@@ -637,13 +655,41 @@ IMPORTANT: Classify what THIS study did, not studies it references."""
         if not evaluator.is_model:
             raise ValueError("Human evaluation not yet supported in runner")
 
-        abstract = (document.abstract or "")[:4000]  # Allow more for detailed assessment
         title = document.title or "Untitled"
+        windows = analysis_windows(document.abstract or "") or [""]
+        return self._evaluate_windows(
+            document,
+            evaluator,
+            [
+                [
+                    LLMMessage(role="system", content=ASSESSMENT_SYSTEM_PROMPT),
+                    LLMMessage(role="user", content=self._assessment_prompt(
+                        title, window, i, len(windows))),
+                ]
+                for i, window in enumerate(windows, start=1)
+            ],
+            QUALITY_ASSESSOR_MAX_TOKENS,
+            self._parse_assessment_response,
+        )
 
-        user_prompt = f"""Assess this research paper's methodological quality:
+    @staticmethod
+    def _assessment_prompt(title: str, abstract: str, part: int, parts: int) -> str:
+        """The prompt assessing one window of a paper's abstract.
+
+        Args:
+            title: The paper's title.
+            abstract: The window's text.
+            part: Which window, from 1.
+            parts: How many windows the abstract has.
+
+        Returns:
+            The user prompt.
+        """
+        section = f" (section {part} of {parts})" if parts > 1 else ""
+        return f"""Assess this research paper's methodological quality:
 
 Title: {title}
-Abstract: {abstract}
+Abstract{section}: {abstract}
 
 Return JSON:
 {{
@@ -672,17 +718,47 @@ Return JSON:
 
 Focus on THIS study's methodology, not studies it references."""
 
-        messages = [
-            LLMMessage(role="system", content=ASSESSMENT_SYSTEM_PROMPT),
-            LLMMessage(role="user", content=user_prompt),
-        ]
+    def _evaluate_windows(
+        self,
+        document: LiteDocument,
+        evaluator: Evaluator,
+        prompts: list[list[LLMMessage]],
+        max_tokens: int,
+        parse: Callable[[str], QualityAssessment | EvaluationErrorCode],
+    ) -> QualityEvaluation:
+        """Evaluate a paper window by window, and reduce the answers to one.
 
-        return self._evaluate(
-            document=document,
-            evaluator=evaluator,
-            messages=messages,
-            max_tokens=QUALITY_ASSESSOR_MAX_TOKENS,
-            parse=self._parse_assessment_response,
+        A window that fails fails the paper, and no later window is asked: an
+        assessment of part of the abstract is not the paper's. Every call made
+        is counted in the latency, tokens and cost.
+
+        Args:
+            document: Document to assess
+            evaluator: Evaluator to use
+            prompts: One prompt per window
+            max_tokens: Token limit when the evaluator sets none
+            parse: Reads one answer
+
+        Returns:
+            The evaluation: the windows' answers reduced by
+            :func:`reduce_by_design_vote`, or the first window's failure.
+        """
+        done: list[QualityEvaluation] = []
+        for messages in prompts:
+            done.append(self._evaluate(document, evaluator, messages, max_tokens, parse))
+            if done[-1].failure is not None:
+                break
+        if len(done) == 1:
+            return done[0]
+        failed = done[-1].failure is not None
+        answers = [e.assessment for e in done if e.assessment is not None]
+        return replace(
+            done[-1] if failed else done[0],
+            assessment=None if failed else reduce_by_design_vote(answers),
+            latency_ms=sum(e.latency_ms for e in done),
+            tokens_input=sum(e.tokens_input for e in done),
+            tokens_output=sum(e.tokens_output for e in done),
+            cost_usd=sum(e.cost_usd for e in done),
         )
 
     def _evaluate(

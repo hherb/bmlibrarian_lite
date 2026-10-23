@@ -32,7 +32,7 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional, Callable
 
-from ..citation_text import citation_windows
+from ..chunking import analysis_windows
 from ..data_models import (
     Citation,
     CitationOutcome,
@@ -94,6 +94,29 @@ def readable_passages(data: object) -> list[dict[str, Any]] | None:
             f"passages in a shape that cannot be quoted: {passages!r}"
         )
     return readable
+
+
+def merged_window_citations(citations: list[Citation]) -> list[Citation]:
+    """Reduce the passages of a paper's windows to each passage once.
+
+    Consecutive windows share their overlap, so two can quote one sentence,
+    or one can quote part of what the other quotes whole. Kept in order;
+    a passage is dropped when an earlier one says the same, or a longer one
+    contains it.
+
+    Args:
+        citations: Every window's passages, in window order.
+
+    Returns:
+        The passages, each once.
+    """
+    normalised = [" ".join(c.passage.lower().split()) for c in citations]
+    return [
+        citation
+        for i, (citation, text) in enumerate(zip(citations, normalised, strict=True))
+        if text not in normalised[:i]
+        and not any(text != other and text in other for other in normalised)
+    ]
 
 
 # System prompt for citation extraction; SOURCE is what the paper is read from
@@ -181,9 +204,11 @@ class LiteCitationAgent(LiteBaseAgent):
         Args:
             question: Research question
             scored_doc: Document with relevance score
-            full_text: The paper's full text, read instead of its abstract
-                in windows (:func:`citation_windows`), one call each: every
-                window must be read, or the extraction failed.
+            full_text: The paper's full text, read instead of its abstract.
+                Either is read in windows (:func:`analysis_windows`), one
+                call each, and their passages merged
+                (:func:`merged_window_citations`): every window must be
+                read, or the extraction failed.
 
         Returns:
             The citations and ``None``; or an empty list and the error code
@@ -199,16 +224,19 @@ Journal: {doc.journal or 'Unknown'}
 Relevance Score: {scored_doc.score}/5
 """
         closing = "Extract the most relevant passages that help answer the research question."
-        windows = citation_windows(full_text) if full_text else []
-        if windows:
-            system_prompt = FULL_TEXT_SYSTEM_PROMPT
-            prompts = [
-                f"{header}\nFull Text (part {i} of {len(windows)}):\n{window}\n\n{closing}"
-                for i, window in enumerate(windows, start=1)
-            ]
-        else:
-            system_prompt = CITATION_SYSTEM_PROMPT
-            prompts = [f"{header}\nAbstract:\n{doc.abstract}\n\n{closing}"]
+        windows = analysis_windows(full_text) if full_text else []
+        label = "Full Text"
+        system_prompt = FULL_TEXT_SYSTEM_PROMPT
+        if not windows:
+            label, system_prompt = "Abstract", CITATION_SYSTEM_PROMPT
+            # An empty abstract is still asked about, as before
+            windows = analysis_windows(doc.abstract) or [doc.abstract]
+        prompts = [
+            f"{header}\n{label}"
+            + (f" (part {i} of {len(windows)})" if len(windows) > 1 else "")
+            + f":\n{window}\n\n{closing}"
+            for i, window in enumerate(windows, start=1)
+        ]
 
         try:
             passages: list[dict[str, Any]] = []
@@ -232,8 +260,7 @@ Relevance Score: {scored_doc.score}/5
                 )
                 citations.append(citation)
 
-            # Two windows can each quote a sentence the text repeats
-            return (self.deduplicate_citations(citations) if windows else citations), None
+            return merged_window_citations(citations), None
 
         except RetryExhaustedError as e:
             # See scoring_agent: the wrapper is not the cause, and only the
@@ -325,7 +352,7 @@ Relevance Score: {scored_doc.score}/5
 
         def reads_full_text(doc: ScoredDocument) -> bool:
             # A text with nothing before its references is read as no text
-            return bool(citation_windows(texts.get(doc.document.id) or ""))
+            return bool(analysis_windows(texts.get(doc.document.id) or ""))
         # Filter out documents with negative scores (error codes) and below
         # threshold. A document listed twice is one document: read twice, its
         # failure would be counted twice, which the outcome refuses -- and

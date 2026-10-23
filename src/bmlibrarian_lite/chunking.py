@@ -37,19 +37,82 @@ Usage:
         text="Document content...",
         document_id="doc-456",
     )
+
+    # Windows a model analyses, one call each (references left out)
+    windows = analysis_windows(full_text)
 """
 
 import logging
+import re
 import uuid
 from typing import Optional
 
 from .constants import (
     DEFAULT_CHUNK_SIZE,
     DEFAULT_CHUNK_OVERLAP,
+    TEXT_WINDOW_CHARS,
+    TEXT_WINDOW_OVERLAP_CHARS,
 )
 from .data_models import LiteChunk
 
 logger = logging.getLogger(__name__)
+
+#: A line that is only a reference-list heading: ``## References`` as the
+#: JATS converter writes it, or ``References`` / ``4. Bibliography`` as a PDF
+#: carries it.
+_REFERENCES_HEADING = re.compile(
+    r"^[ \t]*(?:#{1,6}[ \t]*)?(?:\d+\.?[ \t]*)?"
+    r"(?:references|bibliography|literature cited|works cited|references and notes)"
+    r"[ \t]*:?[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def without_references(text: str) -> str:
+    """The text up to its reference list, which no analysis reads.
+
+    A reference is another paper's claim, never this one's evidence.
+
+    Args:
+        text: Any text a model analyses: converted JATS markdown, PDF text,
+            CORE's text, an abstract.
+
+    Returns:
+        Everything before the last reference-list heading; the whole text
+        when it has none. The last, so a "References" line in the body
+        cannot take the rest of the article with it.
+    """
+    headings = list(_REFERENCES_HEADING.finditer(text))
+    return text[: headings[-1].start()].rstrip() if headings else text.strip()
+
+
+def analysis_windows(
+    text: str,
+    window_chars: int = TEXT_WINDOW_CHARS,
+    overlap_chars: int = TEXT_WINDOW_OVERLAP_CHARS,
+) -> list[str]:
+    """The windows a model reads of a text, one call each.
+
+    Every LLM analysis of a text maps over these and reduces the answers:
+    a sliding window that fits any provider's context, never a cut.
+
+    Args:
+        text: The text.
+        window_chars: The most characters in one window.
+        overlap_chars: Characters consecutive windows share.
+
+    Returns:
+        The text before its reference list, in overlapping windows broken
+        at natural boundaries (:func:`chunk_text`); none when nothing is
+        left to read.
+
+    Raises:
+        ValueError: If the window is not longer than the overlap.
+    """
+    return [
+        chunk.text
+        for chunk in chunk_text(without_references(text), "window", window_chars, overlap_chars)
+    ]
 
 
 def chunk_text(
@@ -147,6 +210,11 @@ def chunk_text(
             )
             chunks.append(chunk)
             chunk_index += 1
+
+        # The end is read; stepping back by the overlap would add a chunk the
+        # last one already holds
+        if end >= text_length:
+            break
 
         # Move start position with overlap
         # Make sure we always advance to avoid infinite loops

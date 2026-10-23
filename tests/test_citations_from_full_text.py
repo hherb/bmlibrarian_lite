@@ -9,9 +9,9 @@ above *Fetch Full Text From Score* (never below the review's threshold) have
 their citations read from their full text; which text each paper was read
 from is recorded; a retry asks again for those not read from it, replaces
 their citations only when the text yields passages, and writes the report
-again only when a full text was read. The desktop reads a long text in
-windows instead of cutting it (the 2026-10-23 spike), and never its
-reference list.
+again only when a full text was read. Every text a model analyses is read
+in sliding 16,000-character windows overlapping by 250 and the answers
+reduced (the maintainer's rule, 2026-10-23), never its reference list.
 """
 
 import json
@@ -27,6 +27,7 @@ from bmlibrarian_lite.agents.citation_agent import (
     CITATION_SYSTEM_PROMPT,
     FULL_TEXT_SYSTEM_PROMPT,
     LiteCitationAgent,
+    merged_window_citations,
 )
 from bmlibrarian_lite.agents.reporting_agent import LiteReportingAgent
 from bmlibrarian_lite.audit_records import (
@@ -35,12 +36,11 @@ from bmlibrarian_lite.audit_records import (
     CHECKPOINT_REPORT_METADATA_KEY,
     recorded_report_metadata,
 )
+from bmlibrarian_lite.chunking import analysis_windows, without_references
 from bmlibrarian_lite.citation_text import (
     full_text_min_score,
     full_text_summary,
     record_full_text_reads,
-    text_windows,
-    without_references,
 )
 from bmlibrarian_lite.config import LiteConfig
 from bmlibrarian_lite.data_models import (
@@ -144,35 +144,59 @@ class TestTheReferenceListIsNeverRead:
 
 
 class TestWindowsHoldAllOfTheText:
-    """A long text is read in windows, never cut (golden rule 13)."""
+    """Every text is read in overlapping windows, never cut (golden rule 13)."""
 
-    def test_every_paragraph_is_in_a_window_in_order(self) -> None:
-        """Paragraphs are packed whole."""
-        paragraphs = [f"Paragraph {i} " + "x" * 30 for i in range(10)]
-        windows = text_windows("\n\n".join(paragraphs), max_chars=100)
+    def test_the_defaults_are_16k_windows_overlapping_by_250(self) -> None:
+        """Small enough for any provider; every sentence whole in some window."""
+        sentences = [f"Sentence {i:05d} reports a finding about stroke." for i in range(1500)]
+        text = " ".join(sentences)
 
-        assert "\n\n".join(windows).split("\n\n") == paragraphs
-        assert all(len(window) <= 100 for window in windows)
+        windows = analysis_windows(text)
+
         assert len(windows) > 1
-
-    def test_a_paragraph_longer_than_a_window_is_split_not_dropped(self) -> None:
-        """The one place a paragraph is split, at the window's length."""
-        windows = text_windows("a" * 250, max_chars=100)
-
-        assert windows == ["a" * 100, "a" * 100, "a" * 50]
+        assert all(len(window) <= 16_000 for window in windows)
+        assert all(any(s in window for window in windows) for s in sentences)
+        for before, after in zip(windows, windows[1:], strict=False):
+            assert before[-200:] in after[:400]
 
     def test_a_short_text_is_one_window(self) -> None:
         """The common case: one call, as before."""
-        assert text_windows("One.\n\nTwo.") == ["One.\n\nTwo."]
+        assert analysis_windows("One.\n\nTwo.") == ["One.\n\nTwo."]
+
+    def test_the_reference_list_is_in_no_window(self) -> None:
+        """However long the article."""
+        text = "Body sentence. " * 2000 + "\n\n## References\n" + "- Ref. " * 2000
+
+        windows = analysis_windows(text)
+
+        assert len(windows) == 2
+        assert not any("- Ref." in window for window in windows)
 
     def test_nothing_makes_no_window(self) -> None:
-        """A text of blank lines has nothing to read."""
-        assert text_windows("\n\n  \n\n") == []
+        """A text of blank lines, or only references, has nothing to read."""
+        assert analysis_windows("\n\n  \n\n") == []
+        assert analysis_windows("## References\n- X.") == []
 
-    def test_a_window_holds_something(self) -> None:
-        """A zero-length window would never end."""
+    def test_a_window_is_longer_than_its_overlap(self) -> None:
+        """Otherwise the window would never advance."""
         with pytest.raises(ValueError):
-            text_windows("text", max_chars=0)
+            analysis_windows("text " * 100, window_chars=10, overlap_chars=10)
+
+
+class TestTheReduce:
+    """Merge every window's passages, each once."""
+
+    def test_a_passage_the_overlap_quotes_twice_is_kept_once(self) -> None:
+        """Same sentence from two windows, or a part of it from one."""
+        merged = merged_window_citations([
+            cite("1", "Stroke fell by 20% (95% CI 10-30)."),
+            cite("1", "stroke fell  by 20% (95% CI 10-30)."),
+            cite("1", "Stroke fell by 20%"),
+            cite("1", "Bleeding rose."),
+        ])
+
+        assert [c.passage for c in merged] == [
+            "Stroke fell by 20% (95% CI 10-30).", "Bleeding rose."]
 
 
 def test_the_full_text_score_is_never_below_the_threshold() -> None:
@@ -238,8 +262,8 @@ class TestTheAgentReadsTheFullText:
     ) -> None:
         """Nothing of the text is left unread; a repeated quote is kept once."""
         monkeypatch.setattr(
-            "bmlibrarian_lite.agents.citation_agent.citation_windows",
-            lambda text: text_windows(without_references(text), max_chars=24),
+            "bmlibrarian_lite.agents.citation_agent.analysis_windows",
+            lambda text: analysis_windows(text, window_chars=24, overlap_chars=2),
         )
         agent = LiteCitationAgent()
         llm = Recording([passage("Stroke fell 20%."), passage("Stroke fell 20%."),
@@ -296,8 +320,8 @@ class TestTheAgentReadsTheFullText:
     ) -> None:
         """Half a text read is not a full text read, and not a silent one."""
         monkeypatch.setattr(
-            "bmlibrarian_lite.agents.citation_agent.citation_windows",
-            lambda text: text_windows(text, max_chars=10),
+            "bmlibrarian_lite.agents.citation_agent.analysis_windows",
+            lambda text: analysis_windows(text, window_chars=10, overlap_chars=2),
         )
         agent = LiteCitationAgent()
         monkeypatch.setattr(
