@@ -803,6 +803,18 @@ public enum BioMedLitConstants {
     /// stripping it would corrupt the text it is meant to clean.
     public static let markdownEmphasisMarkers = ["**", "__"]
 
+    // MARK: - Text windows
+
+    /// The most code points a model reads of a text in one call
+    /// (``TextWindows``). A publication is never cut to fit a prompt: a longer
+    /// text is read in several windows, one call each, and the answers
+    /// reduced. Small enough for any provider's context. Python's
+    /// `TEXT_WINDOW_CHARS`; contract: `doc/cross_platform/llm_parity/text_windows.json`.
+    public static let textWindowChars = 16_000
+    /// Code points consecutive windows share, so a sentence broken at a
+    /// window's end is read whole in the next. Python's `TEXT_WINDOW_OVERLAP_CHARS`.
+    public static let textWindowOverlapChars = 250
+
     // MARK: - Scoring Constants
 
     /// Minimum valid relevance score.

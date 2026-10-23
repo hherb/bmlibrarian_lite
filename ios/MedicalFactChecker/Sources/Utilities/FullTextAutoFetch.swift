@@ -135,24 +135,20 @@ enum FullTextAutoFetch {
         return present(document.pmcId) || present(document.doi) || present(document.pmid)
     }
 
-    /// The article text to give citation extraction, and whether it was cut.
+    /// The article text to give citation extraction, whole: it is read in
+    /// ``TextWindows`` windows, never cut.
     ///
     /// Nil when the document has no analysable full text, which includes an
-    /// abstract-only deposit: its text is the abstract already in the prompt.
+    /// abstract-only deposit (its text is the abstract the prompt reads
+    /// anyway) and a text with nothing before its reference list, which no
+    /// analysis reads.
     ///
-    /// - Parameters:
-    ///   - document: The document to read.
-    ///   - maxCharacters: The longest text to return.
-    /// - Returns: The text and whether it was shortened to fit, or nil.
-    static func citationText(
-        for document: Document,
-        maxCharacters: Int = WorkflowConstants.maxCitationFullTextCharacters
-    ) -> (text: String, truncated: Bool)? {
-        guard let full = document.analyzableFullText?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !full.isEmpty else { return nil }
-        guard full.count > maxCharacters else { return (full, false) }
-        return (String(full.prefix(maxCharacters)), true)
+    /// - Parameter document: The document to read.
+    /// - Returns: The text, or nil.
+    static func citationText(for document: Document) -> String? {
+        guard let full = document.analyzableFullText,
+              !TextWindows.withoutReferences(full).isEmpty else { return nil }
+        return full
     }
 
     // MARK: - Settings gates
@@ -168,13 +164,13 @@ enum FullTextAutoFetch {
     ///   - autoFetchEnabled: The automatic full-text setting.
     ///   - minScoreThreshold: The user's relevance threshold (1-5).
     ///   - autoFetchMinScore: The user's full-text score (1-5).
-    /// - Returns: The text and whether it was cut, or nil to use the abstract.
+    /// - Returns: The text, or nil to use the abstract.
     static func citationFullText(
         for document: Document,
         autoFetchEnabled: Bool,
         minScoreThreshold: Int,
         autoFetchMinScore: Int = WorkflowConstants.fullTextAutoFetchMinScore
-    ) -> (text: String, truncated: Bool)? {
+    ) -> String? {
         guard document.holdsUploadedFullText
                 || (autoFetchEnabled && document.meetsThreshold(
                     minimumScore(minScoreThreshold: minScoreThreshold, autoFetchMinScore: autoFetchMinScore)
@@ -265,9 +261,11 @@ enum FullTextAutoFetch {
     /// Keep full texts only while the estimated input cost fits the budget left.
     ///
     /// The run budget is checked once before the citation calls are made, and
-    /// each of them is now up to a full text long, so the check alone no longer
-    /// bounds what the batch can spend. Texts are kept in order until the next
-    /// would cross the line; the rest fall back to their abstracts.
+    /// a full text is read whole, one call per window, so the check alone no
+    /// longer bounds what the batch can spend. A text's cost is that of every
+    /// window, overlaps included. Texts are kept in order until the next would
+    /// cross the line; the rest fall back to their abstracts: the budget is the
+    /// reader's own limit.
     ///
     /// - Parameters:
     ///   - inputs: The citation inputs, in the order they are paid for.
@@ -283,7 +281,8 @@ enum FullTextAutoFetch {
         var dropped = 0
         let fitted = inputs.map { input -> CitationInput in
             guard let text = input.fullText else { return input }
-            let tokens = Double(text.count) / Double(WorkflowConstants.charactersPerToken)
+            let characters = TextWindows.analysisWindows(text).reduce(0) { $0 + $1.unicodeScalars.count }
+            let tokens = Double(characters) / Double(WorkflowConstants.charactersPerToken)
             let cost = tokens * usdPerInputToken
             if cost <= remaining {
                 remaining -= cost

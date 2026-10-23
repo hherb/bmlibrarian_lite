@@ -77,12 +77,19 @@ from ..retraction_text import (
     with_pass_retraction_clause,
 )
 from ..search_failures import describe_search_shortfalls
+from ..full_text_retry import (
+    FULL_TEXT_SETTING_OFF_TEXT,
+    RETRY_FULL_TEXT_ACTION,
+    FullTextRetry,
+    retry_text,
+)
 from ..storage import LiteStorage
 from .workers import (
     IncrementalSearchWorker,
     ReclassifyWorker,
     RescoreWorker,
     TransparencyReanalysisWorker,
+    FullTextRetryWorker,
 )
 from .benchmark_dialog import BenchmarkWorker
 
@@ -378,6 +385,7 @@ class ResearchQuestionsTab(QWidget):
         self._reclassify_worker: Optional[ReclassifyWorker] = None
         self._rescore_worker: Optional[RescoreWorker] = None
         self._transparency_worker: TransparencyReanalysisWorker | None = None
+        self._full_text_worker: FullTextRetryWorker | None = None
         # What the running pass's retraction screen left out: the clause for its
         # final line, the titles for its dialog
         self._retraction_clause = ""
@@ -574,6 +582,25 @@ class ResearchQuestionsTab(QWidget):
             )
             menu.addAction(transparency_action)
 
+        # Read the unread full texts of the reviewed run, and write its report
+        # again (iOS/macOS's Retry Full Text Fetching)
+        full_text_action = QAction(RETRY_FULL_TEXT_ACTION, self)
+        if self.config.discovery.citations_from_full_text:
+            full_text_action.setToolTip(
+                "Fetch the full text of papers scored high enough whose "
+                "citations were not read from their full text, read them, "
+                "and write the report again"
+            )
+        else:
+            full_text_action.setToolTip(FULL_TEXT_SETTING_OFF_TEXT)
+        full_text_action.triggered.connect(self._on_retry_full_text_clicked)
+        full_text_action.setEnabled(
+            not is_busy
+            and question.total_documents > 0
+            and self.config.discovery.citations_from_full_text
+        )
+        menu.addAction(full_text_action)
+
         menu.addSeparator()
 
         # Re-run search action (same as button)
@@ -721,6 +748,7 @@ class ResearchQuestionsTab(QWidget):
             or self._reclassify_worker is not None
             or self._rescore_worker is not None
             or self._transparency_worker is not None
+            or self._full_text_worker is not None
         )
 
     def _on_selection_changed(self) -> None:
@@ -857,6 +885,7 @@ class ResearchQuestionsTab(QWidget):
             or self._reclassify_worker
             or self._rescore_worker
             or self._transparency_worker
+            or self._full_text_worker
             or self._benchmark_worker
         )
         if worker is None:
@@ -1673,6 +1702,100 @@ class ResearchQuestionsTab(QWidget):
             if self._transparency_worker.isRunning():
                 self._transparency_worker.wait(2000)
             self._transparency_worker = None
+            self._update_action_buttons()
+
+    def _on_retry_full_text_clicked(self) -> None:
+        """Read the reviewed run's unread full texts, and write its report again."""
+        question = self._get_selected_question()
+        if not question:
+            return
+        reply = QMessageBox.question(
+            self,
+            RETRY_FULL_TEXT_ACTION,
+            "The full text of each paper scored "
+            f"{self.config.discovery.full_text_min_score} or higher (and at "
+            "least the review's threshold) whose citations were not read from "
+            "its full text is fetched and read, a long text in several model "
+            "calls; the report is then written again. This can take a while "
+            "and costs model calls.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._full_text_worker = FullTextRetryWorker(
+            question=question.question,
+            config=self.config,
+            storage=self.storage,
+            parent=self,
+        )
+        worker = self._full_text_worker
+        worker.progress.connect(self._on_reclassify_progress)
+        worker.finished.connect(
+            lambda outcome: self._on_full_text_finished(
+                outcome, question.question, question.pubmed_query
+            )
+        )
+        worker.error.connect(self._on_full_text_error)
+        worker.cancelled.connect(self._on_full_text_cancelled)
+
+        self._set_busy_state()
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("Retrying full texts...")
+        worker.start()
+
+    def _on_full_text_finished(
+        self, outcome: FullTextRetry, question: str, pubmed_query: str
+    ) -> None:
+        """A retry that ran to its end: a report it wrote is loaded into the tabs.
+
+        Args:
+            outcome: What it did.
+            question: The question it retried.
+            pubmed_query: The question's query, for loading it.
+        """
+        self._reset_ui()
+        message = retry_text(outcome)
+        self.progress_label.setText(message)
+        QMessageBox.information(self, "Retry Full Text Complete", message)
+        if outcome.report is not None:
+            self.question_selected.emit(question, pubmed_query)
+        QTimer.singleShot(100, self._cleanup_full_text_worker)
+
+    def _on_full_text_error(self, error_message: str) -> None:
+        """A retry that could not run, or failed; the report stands.
+
+        Args:
+            error_message: What to tell the reader; never the provider's
+                own words (#330).
+        """
+        self._reset_ui()
+        self.progress_label.setText(f"Retry Full Text: {error_message}")
+        QMessageBox.warning(self, "Retry Full Text", error_message)
+        QTimer.singleShot(100, self._cleanup_full_text_worker)
+
+    def _on_full_text_cancelled(self, outcome: FullTextRetry, error: str = "") -> None:
+        """A cancelled retry: the citations it replaced stay, the report stands.
+
+        Args:
+            outcome: What it did before the cancel.
+            error: The error that also ended it, or an empty string.
+        """
+        self._reset_ui()
+        message = retry_text(outcome) + also_failed_text(error)
+        self.progress_label.setText(message)
+        if error:
+            QMessageBox.warning(self, "Retry Full Text Cancelled", message)
+        QTimer.singleShot(100, self._cleanup_full_text_worker)
+
+    def _cleanup_full_text_worker(self) -> None:
+        """Clean up the full-text retry worker after completion."""
+        if self._full_text_worker is not None:
+            if self._full_text_worker.isRunning():
+                self._full_text_worker.wait(2000)
+            self._full_text_worker = None
             self._update_action_buttons()
 
     # -------------------------------------------------------------------------

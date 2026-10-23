@@ -31,6 +31,8 @@ import logging
 from typing import Optional
 
 from ..agents.base import LiteBaseAgent
+from ..chunking import analysis_windows
+from ..llm import LLMMessage
 from ..data_models import LiteDocument
 from ..config import LiteConfig
 from ..constants import (
@@ -59,6 +61,7 @@ from .json_fields import (
     as_text,
 )
 from .study_classifier import stated_study_design
+from .window_reduce import reduce_by_design_vote
 
 logger = logging.getLogger(__name__)
 
@@ -119,14 +122,46 @@ class LiteQualityAgent(LiteBaseAgent):
         """
         doc_id = getattr(document, "id", None) or getattr(document, "pmid", "unknown")
 
-        # Prepare prompt with abstract (allow more text for detailed analysis)
-        abstract = (document.abstract or "")[:4000]
         title = document.title or "Untitled"
+        # Read whole, window by window, and the answers reduced: never cut
+        windows = analysis_windows(document.abstract or "") or [""]
+        try:
+            return reduce_by_design_vote([
+                self._assess_with_retry(self._assessment_messages(title, window, i, len(windows)))
+                for i, window in enumerate(windows, start=1)
+            ])
+        except RetryExhaustedError as e:
+            logger.error(
+                f"Document {doc_id}: Quality assessment failed after all retries: {e}"
+            )
+            return QualityAssessment.unclassified()
+        except Exception as e:
+            error_code = classify_llm_exception(e)
+            logger.error(
+                f"Document {doc_id}: Quality assessment failed with "
+                f"{error_code.name}: {e}"
+            )
+            return QualityAssessment.unclassified()
 
+    def _assessment_messages(
+        self, title: str, abstract: str, part: int, parts: int
+    ) -> list[LLMMessage]:
+        """The prompt assessing one window of a paper's abstract.
+
+        Args:
+            title: The paper's title.
+            abstract: The window's text.
+            part: Which window, from 1.
+            parts: How many windows the abstract has.
+
+        Returns:
+            The system and user messages.
+        """
+        section = f" (section {part} of {parts})" if parts > 1 else ""
         prompt = f"""Assess this research paper's methodological quality:
 
 Title: {title}
-Abstract: {abstract}
+Abstract{section}: {abstract}
 
 Return JSON:
 {{
@@ -155,25 +190,10 @@ Return JSON:
 
 Focus on THIS study's methodology, not studies it references."""
 
-        messages = [
+        return [
             self._create_system_message(ASSESSMENT_SYSTEM_PROMPT),
             self._create_user_message(prompt),
         ]
-
-        try:
-            return self._assess_with_retry(messages)
-        except RetryExhaustedError as e:
-            logger.error(
-                f"Document {doc_id}: Quality assessment failed after all retries: {e}"
-            )
-            return QualityAssessment.unclassified()
-        except Exception as e:
-            error_code = classify_llm_exception(e)
-            logger.error(
-                f"Document {doc_id}: Quality assessment failed with "
-                f"{error_code.name}: {e}"
-            )
-            return QualityAssessment.unclassified()
 
     @llm_retry(max_retries=3, retry_on_json_error=True)
     def _assess_with_retry(self, messages: list) -> QualityAssessment:

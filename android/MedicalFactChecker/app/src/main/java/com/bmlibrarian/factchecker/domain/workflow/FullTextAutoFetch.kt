@@ -21,14 +21,7 @@ package com.bmlibrarian.factchecker.domain.workflow
 import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.util.Constants
-
-/**
- * A full text for citation extraction, and whether it was cut to bound the call's cost.
- *
- * @property text The article text
- * @property truncated Whether it was shortened to fit
- */
-data class CitationFullText(val text: String, val truncated: Boolean)
+import com.bmlibrarian.factchecker.util.TextWindows
 
 /**
  * The rules of the automatic full-text step: which papers are fetched in full,
@@ -85,27 +78,19 @@ object FullTextAutoFetch {
     }
 
     /**
-     * The article text to give citation extraction, and whether it was cut.
+     * The article text to give citation extraction, whole: it is read in windows
+     * ([TextWindows.analysisWindows]), never cut.
      *
      * Null when the document has no full text the analysis may read
      * ([DocumentEntity.analysisFullText]), which includes an abstract-only
-     * deposit: its text is the abstract already in the prompt.
+     * deposit (its text is the abstract), and when nothing comes before the
+     * reference list, which is never read.
      *
      * @param document The document to read
-     * @param maxCharacters The longest text to return
-     * @return The text and whether it was shortened to fit, or null
+     * @return The text, or null
      */
-    fun citationText(
-        document: DocumentEntity,
-        maxCharacters: Int = Constants.MAX_CITATION_FULL_TEXT_CHARACTERS
-    ): CitationFullText? {
-        val full = document.analysisFullText ?: return null
-        return if (full.length > maxCharacters) {
-            CitationFullText(full.take(maxCharacters), truncated = true)
-        } else {
-            CitationFullText(full, truncated = false)
-        }
-    }
+    fun citationText(document: DocumentEntity): String? =
+        document.analysisFullText?.takeIf { TextWindows.analysisWindows(it).isNotEmpty() }
 
     /**
      * The article text citation extraction should read for one document.
@@ -116,9 +101,9 @@ object FullTextAutoFetch {
      *
      * @param document The document to read
      * @param config The run's configuration: the setting, the threshold and the full-text score
-     * @return The text and whether it was cut, or null to use the abstract
+     * @return The text, or null to use the abstract
      */
-    fun citationFullText(document: DocumentEntity, config: WorkflowConfig): CitationFullText? {
+    fun citationFullText(document: DocumentEntity, config: WorkflowConfig): String? {
         val covered = document.holdsUploadedFullText ||
             (config.autoFetchFullText &&
                 meetsThreshold(document, minimumScore(config.relevanceThreshold, config.fullTextAutoFetchMinScore)))
@@ -203,11 +188,11 @@ object FullTextAutoFetch {
     /**
      * Keep full texts only while the estimated input cost fits the budget left.
      *
-     * The run budget is checked once before the citation calls are made, and each
-     * of them is now up to a full text long, so the check alone no longer bounds
-     * what the batch can spend. Each text is kept while its estimated cost fits
-     * what is left; one that does not fit falls back to its abstract, and a later,
-     * shorter text may still be kept.
+     * The run budget is checked once before the citation calls are made, and a
+     * paper's calls read its whole full text, so the check alone no longer bounds
+     * what the batch can spend. Each text is kept while the estimated cost of all
+     * its windows (overlaps included) fits what is left; one that does not fit
+     * falls back to its abstract, and a later, shorter text may still be kept.
      *
      * @param inputs The citation inputs, in the order they are paid for
      * @param remainingUsd What the run may still spend
@@ -222,8 +207,9 @@ object FullTextAutoFetch {
         var remaining = remainingUsd
         var dropped = 0
         val fitted = inputs.map { input ->
-            val text = input.fullText?.text ?: return@map input
-            val cost = text.length.toDouble() / Constants.TOKEN_ESTIMATE_CHARS_PER_TOKEN * usdPerInputToken
+            if (input.fullText == null) return@map input
+            val characters = input.windows.sumOf { it.length }
+            val cost = characters.toDouble() / Constants.TOKEN_ESTIMATE_CHARS_PER_TOKEN * usdPerInputToken
             if (cost <= remaining) {
                 remaining -= cost
                 input

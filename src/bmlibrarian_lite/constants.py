@@ -392,6 +392,15 @@ SCORE_MIN = 1
 SCORE_MAX = 5
 
 # =============================================================================
+# Citations From Full Text
+# =============================================================================
+
+# Papers scored this or higher have their citations read from their full text
+# when the setting is on (never below the review's relevance threshold), as on
+# iOS/macOS and Android. Off by default there too: every window is a call.
+DEFAULT_FULL_TEXT_MIN_SCORE = 4
+
+# =============================================================================
 # Network Retry Settings
 # =============================================================================
 
@@ -533,15 +542,16 @@ CONFIDENCE_PARSE_FAILURE_DEFAULT = 0.0
 # Abstract Processing Settings
 # =============================================================================
 
-# Maximum abstract length for single-pass LLM processing
-# Abstracts longer than this will be processed in chunks
-ABSTRACT_MAX_SINGLE_PASS_LENGTH = 8000
+# Every text a model analyses -- full text, abstract or upload -- is read in
+# sliding windows of this many characters, one call each, then reduced; never
+# cut (golden rule 13). Small enough for any provider's context (~4k tokens).
+# With the references left out, 40% of PMC texts and 45% of PDF texts run past
+# 40,000 characters (the 2026-10-23 spike, 1,231 JATS articles and 400 PDFs).
+TEXT_WINDOW_CHARS = 16_000
 
-# Chunk size for processing long abstracts
-ABSTRACT_CHUNK_SIZE = 4000
-
-# Overlap between chunks for context preservation
-ABSTRACT_CHUNK_OVERLAP = 500
+# Characters consecutive windows share, so a sentence at a boundary is whole
+# in one of them
+TEXT_WINDOW_OVERLAP_CHARS = 250
 
 # =============================================================================
 # Batch Processing Retry Settings
@@ -1266,6 +1276,15 @@ ELSEVIER_API_KEY_EXPLANATION = (
 ELSEVIER_INSTTOKEN_EXPLANATION = (
     "Optional. An institutional token from Elsevier lets the key use your "
     "institution's subscriptions away from its network."
+)
+CITATIONS_FROM_FULL_TEXT_EXPLANATION = (
+    "With this on, a review fetches the full text of each paper scored at "
+    "least the score below (and the review's threshold) and reads its "
+    "citations from it, not from the abstract; the reference list is left "
+    "out. A long text is read in several model calls, so a review costs more "
+    "and takes longer. A paper with no full text is read from its abstract, "
+    "and the report says how many were. Research Questions > Retry Full Text "
+    "reads what an earlier review could not."
 )
 BROWSER_RESCUE_EXPLANATION = (
     "Some open-access PDFs sit behind a robot check that blocks the app's "

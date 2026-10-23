@@ -38,10 +38,9 @@ struct CitationInput: Sendable {
     let year: Int
 
     /// The article's full text, when it was retrieved; the abstract is used otherwise.
+    ///
+    /// Never cut: it is read in ``TextWindows`` windows, one call each.
     let fullText: String?
-
-    /// Whether ``fullText`` was cut to bound the cost of the call.
-    let fullTextTruncated: Bool
 
     /// Create citation input from document fields.
     ///
@@ -52,15 +51,13 @@ struct CitationInput: Sendable {
     ///   - authors: Formatted author string (e.g., "Smith et al.").
     ///   - year: Publication year.
     ///   - fullText: Retrieved article text, if any.
-    ///   - fullTextTruncated: Whether `fullText` was shortened.
     init(
         pmid: String,
         title: String,
         abstract: String,
         authors: String,
         year: Int,
-        fullText: String? = nil,
-        fullTextTruncated: Bool = false
+        fullText: String? = nil
     ) {
         self.pmid = pmid
         self.title = title
@@ -68,7 +65,6 @@ struct CitationInput: Sendable {
         self.authors = authors
         self.year = year
         self.fullText = fullText
-        self.fullTextTruncated = fullTextTruncated
     }
 }
 
@@ -325,29 +321,57 @@ actor ParallelCitationService {
         _ input: CitationInput,
         claim: String
     ) async -> CitationResult? {
-        let prompt = buildCitationPrompt(input: input, claim: claim)
-        let messages = [LLMService.userMessage(prompt)]
-
-        do {
-            let (response, usage) = try await llmService.chat(
-                messages: messages,
+        await Self.extractCitations(from: input, claim: claim) { [llmService] prompt in
+            try await llmService.chat(
+                messages: [LLMService.userMessage(prompt)],
                 temperature: 0.1,
                 maxTokens: 4096,
                 jsonMode: true
             )
+        }
+    }
 
-            // Parse the response using ResponseParser
-            let parsedPassages = ResponseParser.parsePassagesResponse(response)
-            let passages = parsedPassages.map { parsed in
-                ExtractedPassage(text: parsed.text, relevance: parsed.relevance)
+    /// Extract citations from a document, one call per window of its text.
+    ///
+    /// The paper is never cut: every window is read and the passages of all
+    /// of them merged (``TextWindows/mergedWindowItems(_:text:)``), since
+    /// consecutive windows share their overlap. Every window must be read, or
+    /// the extraction failed: passages from part of a paper would pass for
+    /// what the whole of it says.
+    ///
+    /// - Parameters:
+    ///   - input: The document citation input.
+    ///   - claim: The claim to extract relevant passages for.
+    ///   - chat: Sends one prompt and answers the reply and its usage.
+    /// - Returns: The merged passages and the usage of every call made; a
+    ///   failure if any window's call failed; `nil` when the calling task was
+    ///   cancelled before the extraction finished.
+    static func extractCitations(
+        from input: CitationInput,
+        claim: String,
+        chat: (String) async throws -> (content: String, usage: LLMUsage)
+    ) async -> CitationResult? {
+        var passages: [ExtractedPassage] = []
+        var usage: LLMUsage?
+        do {
+            for prompt in citationPrompts(input: input, claim: claim) {
+                let (response, callUsage) = try await chat(prompt)
+                usage = usage.map { summed in
+                    LLMUsage(
+                        model: summed.model, provider: summed.provider,
+                        inputTokens: summed.inputTokens + callUsage.inputTokens,
+                        outputTokens: summed.outputTokens + callUsage.outputTokens
+                    )
+                } ?? callUsage
+                passages += ResponseParser.parsePassagesResponse(response).map { parsed in
+                    ExtractedPassage(text: parsed.text, relevance: parsed.relevance)
+                }
             }
-
             return .success(
                 pmid: input.pmid,
-                passages: passages,
+                passages: TextWindows.mergedWindowItems(passages) { $0.text },
                 usage: usage
             )
-
         } catch where Task.isCancelled {
             // Stopped, not failed: the abandoned request throws
             // `URLError(.cancelled)`, LLMService's backoff a
@@ -355,64 +379,69 @@ actor ParallelCitationService {
             // a failure, below
             return nil
         } catch {
-            return .failure(
-                pmid: input.pmid,
-                error: error,
-                usage: nil
-            )
+            // The windows already read were paid for
+            return .failure(pmid: input.pmid, error: error, usage: usage)
         }
     }
 
-    /// Build the citation extraction prompt for a document.
+    /// The citation extraction prompts for a document, one per window.
     ///
     /// - Parameters:
     ///   - input: Document citation input.
     ///   - claim: The claim to extract relevant passages for.
-    /// - Returns: Formatted prompt string.
-    private func buildCitationPrompt(input: CitationInput, claim: String) -> String {
-        let source = Self.sourceSection(for: input)
-        return """
-        Extract 1-2 key passages from this \(source.noun) that are most relevant to the claim.
+    /// - Returns: The prompts, in window order.
+    static func citationPrompts(input: CitationInput, claim: String) -> [String] {
+        let source = sourceSections(for: input)
+        return source.bodies.map { body in
+            """
+            Extract 1-2 key passages from this \(source.noun) that are most relevant to the claim.
 
-        Claim: \(claim)
+            Claim: \(claim)
 
-        Document: \(input.title) (\(input.authors), \(input.year))
+            Document: \(input.title) (\(input.authors), \(input.year))
 
-        \(source.body)
+            \(body)
 
-        Extract exact or close quotes that:
-        1. Directly address the claim (whether supporting OR refuting it)
-        2. Contain specific findings, data, or conclusions
-        3. Could be quoted in an evidence summary
+            Extract exact or close quotes that:
+            1. Directly address the claim (whether supporting OR refuting it)
+            2. Contain specific findings, data, or conclusions
+            3. Could be quoted in an evidence summary
 
-        For each passage, also identify:
-        - Whether the finding SUPPORTS or REFUTES the claim (or is NEUTRAL/UNCLEAR)
-        - The study type if identifiable (e.g., systematic review, meta-analysis, RCT, cohort study, case-control, case report, narrative review)
-        - Sample size if mentioned (e.g., "n=500", "1,234 participants")
+            For each passage, also identify:
+            - Whether the finding SUPPORTS or REFUTES the claim (or is NEUTRAL/UNCLEAR)
+            - The study type if identifiable (e.g., systematic review, meta-analysis, RCT, cohort study, case-control, case report, narrative review)
+            - Sample size if mentioned (e.g., "n=500", "1,234 participants")
 
-        Respond in JSON format only:
-        {"passages": [{"text": "<quote>", "relevance": "<why relevant>", "direction": "<SUPPORTS|REFUTES|NEUTRAL>", "study_type": "<type or unknown>", "sample_size": "<size or unknown>"}]}
-        """
+            Respond in JSON format only:
+            {"passages": [{"text": "<quote>", "relevance": "<why relevant>", "direction": "<SUPPORTS|REFUTES|NEUTRAL>", "study_type": "<type or unknown>", "sample_size": "<size or unknown>"}]}
+            """
+        }
     }
 
-    /// What the prompt reads the paper from: the full text when there is one.
+    /// What the prompts read the paper from: the full text when there is one.
     ///
-    /// The abstract stays alongside the full text, which may be cut and so may
-    /// lack the conclusions an abstract states. A cut is announced, so the
-    /// model does not mistake the end of the excerpt for the end of the paper.
+    /// The full text alone, in windows: nothing is cut, so the abstract's
+    /// conclusions are no longer needed beside it. A full text with nothing
+    /// before its reference list counts as none. An empty abstract is still
+    /// asked about, as before.
     ///
     /// - Parameter input: The document's citation input.
-    /// - Returns: The noun for the instruction line and the text block.
-    static func sourceSection(for input: CitationInput) -> (noun: String, body: String) {
-        guard let fullText = input.fullText else {
-            return ("abstract", "Abstract:\n\(input.abstract)")
+    /// - Returns: The noun for the instruction line and one text block per
+    ///   window, labelled "(part i of n)" when there are several.
+    static func sourceSections(for input: CitationInput) -> (noun: String, bodies: [String]) {
+        var label = "Full text"
+        var noun = "article"
+        var windows = input.fullText.map { TextWindows.analysisWindows($0) } ?? []
+        if windows.isEmpty {
+            (label, noun) = ("Abstract", "abstract")
+            let abstractWindows = TextWindows.analysisWindows(input.abstract)
+            windows = abstractWindows.isEmpty ? [input.abstract] : abstractWindows
         }
-        let cut = input.fullTextTruncated
-            ? "\n[The full text is cut here for length; the rest of the article is not shown.]"
-            : ""
-        return (
-            "article",
-            "Abstract:\n\(input.abstract)\n\nFull text:\n\(fullText)\(cut)"
-        )
+        let bodies = windows.enumerated().map { index, window in
+            let part = windows.count > 1 ? " (part \(index + 1) of \(windows.count))" : ""
+            return "\(label)\(part):\n\(window)"
+        }
+        return (noun, bodies)
     }
 }
+

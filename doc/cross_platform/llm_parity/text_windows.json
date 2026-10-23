@@ -1,0 +1,216 @@
+{
+  "description": "Every text a model analyses is read without its reference list, in sliding windows (chunk_text), one call each; answers are reduced, never cut. Python (src/bmlibrarian_lite/chunking.py) is canonical; counts are Unicode code points.",
+  "window_chars": 16000,
+  "overlap_chars": 250,
+  "boundary_search_chars": 200,
+  "boundary_markers": [
+    "\n\n",
+    ".\n",
+    ". ",
+    "! ",
+    "? ",
+    ";\n",
+    "; ",
+    ",\n",
+    "\n",
+    ", ",
+    " "
+  ],
+  "windows": [
+    {
+      "name": "short text is one window",
+      "text": "  One short paragraph.  ",
+      "window_chars": 100,
+      "overlap_chars": 10,
+      "windows": [
+        "One short paragraph."
+      ]
+    },
+    {
+      "name": "sentence boundaries",
+      "text": "Sentence 0 reports that stroke fell in arm 0. Sentence 1 reports that stroke fell in arm 1. Sentence 2 reports that stroke fell in arm 2. Sentence 3 reports that stroke fell in arm 0. Sentence 4 reports that stroke fell in arm 1. Sentence 5 reports that stroke fell in arm 2. Sentence 6 reports that stroke fell in arm 0. Sentence 7 reports that stroke fell in arm 1. Sentence 8 reports that stroke fell in arm 2. Sentence 9 reports that stroke fell in arm 0. Sentence 10 reports that stroke fell in arm 1. Sentence 11 reports that stroke fell in arm 2.",
+      "window_chars": 120,
+      "overlap_chars": 20,
+      "windows": [
+        "Sentence 0 reports that stroke fell in arm 0. Sentence 1 reports that stroke fell in arm 1.",
+        "roke fell in arm 1. Sentence 2 reports that stroke fell in arm 2. Sentence 3 reports that stroke fell in arm 0.",
+        "roke fell in arm 0. Sentence 4 reports that stroke fell in arm 1. Sentence 5 reports that stroke fell in arm 2.",
+        "roke fell in arm 2. Sentence 6 reports that stroke fell in arm 0. Sentence 7 reports that stroke fell in arm 1.",
+        "roke fell in arm 1. Sentence 8 reports that stroke fell in arm 2. Sentence 9 reports that stroke fell in arm 0.",
+        "roke fell in arm 0. Sentence 10 reports that stroke fell in arm 1. Sentence 11 reports that stroke fell in arm 2."
+      ]
+    },
+    {
+      "name": "paragraph boundaries",
+      "text": "Paragraph 0: word word word word word word word word word word word word \n\nParagraph 1: word word word word word word word word word word word word \n\nParagraph 2: word word word word word word word word word word word word \n\nParagraph 3: word word word word word word word word word word word word \n\nParagraph 4: word word word word word word word word word word word word \n\nParagraph 5: word word word word word word word word word word word word \n\nParagraph 6: word word word word word word word word word word word word \n\nParagraph 7: word word word word word word word word word word word word ",
+      "window_chars": 150,
+      "overlap_chars": 25,
+      "windows": [
+        "Paragraph 0: word word word word word word word word word word word word \n\nParagraph 1: word word word word word word word word word word word word",
+        "rd word word word word \n\nParagraph 2: word word word word word word word word word word word word",
+        "rd word word word word \n\nParagraph 3: word word word word word word word word word word word word",
+        "rd word word word word \n\nParagraph 4: word word word word word word word word word word word word",
+        "rd word word word word \n\nParagraph 5: word word word word word word word word word word word word",
+        "rd word word word word \n\nParagraph 6: word word word word word word word word word word word word",
+        "rd word word word word \n\nParagraph 7: word word word word word word word word word word word word"
+      ]
+    },
+    {
+      "name": "mixed punctuation boundaries",
+      "text": "First clause; second clause, third clause\nnext line! question? end. First clause; second clause, third clause\nnext line! question? end. First clause; second clause, third clause\nnext line! question? end. First clause; second clause, third clause\nnext line! question? end. First clause; second clause, third clause\nnext line! question? end. First clause; second clause, third clause\nnext line! question? end. ",
+      "window_chars": 90,
+      "overlap_chars": 15,
+      "windows": [
+        "First clause; second clause, third clause\nnext line! question? end.",
+        "question? end. First clause; second clause, third clause\nnext line! question? end.",
+        "question? end. First clause; second clause, third clause\nnext line! question? end.",
+        "question? end. First clause; second clause, third clause\nnext line! question? end.",
+        "question? end. First clause; second clause, third clause\nnext line! question? end.",
+        "question? end. First clause; second clause, third clause\nnext line! question? end."
+      ]
+    },
+    {
+      "name": "no boundary splits at the window",
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "window_chars": 100,
+      "overlap_chars": 10,
+      "windows": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ]
+    },
+    {
+      "name": "text ending at a window end adds no tail",
+      "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb cccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "window_chars": 101,
+      "overlap_chars": 20,
+      "windows": [
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "bbbbbbbbbbbbbbbbbbb cccccccccccccccccccccccccccccccccccccccccccccccccc"
+      ]
+    },
+    {
+      "name": "non-ASCII counted in code points",
+      "text": "Étude 0: pression artérielle ↓ 😀 β-blocker. Étude 1: pression artérielle ↓ 😀 β-blocker. Étude 2: pression artérielle ↓ 😀 β-blocker. Étude 3: pression artérielle ↓ 😀 β-blocker. Étude 4: pression artérielle ↓ 😀 β-blocker. Étude 5: pression artérielle ↓ 😀 β-blocker. Étude 6: pression artérielle ↓ 😀 β-blocker. Étude 7: pression artérielle ↓ 😀 β-blocker.",
+      "window_chars": 80,
+      "overlap_chars": 12,
+      "windows": [
+        "Étude 0: pression artérielle ↓ 😀 β-blocker.",
+        "β-blocker. Étude 1: pression artérielle ↓ 😀 β-blocker.",
+        "β-blocker. Étude 2: pression artérielle ↓ 😀 β-blocker.",
+        "β-blocker. Étude 3: pression artérielle ↓ 😀 β-blocker.",
+        "β-blocker. Étude 4: pression artérielle ↓ 😀 β-blocker.",
+        "β-blocker. Étude 5: pression artérielle ↓ 😀 β-blocker.",
+        "β-blocker. Étude 6: pression artérielle ↓ 😀 β-blocker.",
+        "β-blocker. Étude 7: pression artérielle ↓ 😀 β-blocker."
+      ]
+    },
+    {
+      "name": "references are never a window",
+      "text": "Sentence 0 reports that stroke fell in arm 0. Sentence 1 reports that stroke fell in arm 1. Sentence 2 reports that stroke fell in arm 2. Sentence 3 reports that stroke fell in arm 0. Sentence 4 reports that stroke fell in arm 1. Sentence 5 reports that stroke fell in arm 2. Sentence 6 reports that stroke fell in arm 0. Sentence 7 reports that stroke fell in arm 1. Sentence 8 reports that stroke fell in arm 2. Sentence 9 reports that stroke fell in arm 0. Sentence 10 reports that stroke fell in arm 1. Sentence 11 reports that stroke fell in arm 2.\n\n## References\n- Smith J. 2020.\n- Jones K. 2021.",
+      "window_chars": 200,
+      "overlap_chars": 30,
+      "windows": [
+        "Sentence 0 reports that stroke fell in arm 0. Sentence 1 reports that stroke fell in arm 1. Sentence 2 reports that stroke fell in arm 2. Sentence 3 reports that stroke fell in arm 0.",
+        "ts that stroke fell in arm 0. Sentence 4 reports that stroke fell in arm 1. Sentence 5 reports that stroke fell in arm 2. Sentence 6 reports that stroke fell in arm 0.",
+        "ts that stroke fell in arm 0. Sentence 7 reports that stroke fell in arm 1. Sentence 8 reports that stroke fell in arm 2. Sentence 9 reports that stroke fell in arm 0.",
+        "ts that stroke fell in arm 0. Sentence 10 reports that stroke fell in arm 1. Sentence 11 reports that stroke fell in arm 2."
+      ]
+    },
+    {
+      "name": "only references is no window",
+      "text": "References\n1. A. 2. B.",
+      "window_chars": 100,
+      "overlap_chars": 10,
+      "windows": []
+    },
+    {
+      "name": "blank text is no window",
+      "text": " \n\n \t ",
+      "window_chars": 100,
+      "overlap_chars": 10,
+      "windows": []
+    }
+  ],
+  "references": [
+    {
+      "name": "converter heading",
+      "text": "# Title\n\nResults here.\n\n## References\n- Smith 2020.",
+      "without_references": "# Title\n\nResults here."
+    },
+    {
+      "name": "numbered PDF heading",
+      "text": "Body.\n7. References\n1. A.",
+      "without_references": "Body."
+    },
+    {
+      "name": "colon heading",
+      "text": "Body.\nBibliography:\n1. A.",
+      "without_references": "Body."
+    },
+    {
+      "name": "literature cited",
+      "text": "Body.\n  LITERATURE CITED  \n1. A.",
+      "without_references": "Body."
+    },
+    {
+      "name": "last heading wins",
+      "text": "Intro.\nReferences\nMore body.\nReferences\n1. A.",
+      "without_references": "Intro.\nReferences\nMore body."
+    },
+    {
+      "name": "a sentence is not a heading",
+      "text": "We checked the references of each trial.\nResults.",
+      "without_references": "We checked the references of each trial.\nResults."
+    },
+    {
+      "name": "CRLF heading",
+      "text": "Body line.\r\nReferences\r\n1. A.",
+      "without_references": "Body line."
+    },
+    {
+      "name": "no heading strips",
+      "text": "  Body only.  ",
+      "without_references": "Body only."
+    }
+  ],
+  "merge": [
+    {
+      "name": "overlap repeats are kept once",
+      "passages": [
+        "Stroke fell by 20% (95% CI 10-30).",
+        "stroke fell  by 20% (95% CI 10-30).",
+        "Stroke fell by 20%",
+        "Bleeding rose."
+      ],
+      "kept": [
+        "Stroke fell by 20% (95% CI 10-30).",
+        "Bleeding rose."
+      ]
+    },
+    {
+      "name": "distinct passages all kept",
+      "passages": [
+        "A finding.",
+        "Another finding.",
+        "A third."
+      ],
+      "kept": [
+        "A finding.",
+        "Another finding.",
+        "A third."
+      ]
+    },
+    {
+      "name": "a longer later passage keeps it, drops the earlier part",
+      "passages": [
+        "Mortality fell",
+        "Mortality fell by half at one year."
+      ],
+      "kept": [
+        "Mortality fell by half at one year."
+      ]
+    }
+  ]
+}

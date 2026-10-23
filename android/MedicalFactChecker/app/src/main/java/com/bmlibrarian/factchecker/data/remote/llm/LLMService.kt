@@ -282,7 +282,9 @@ class LLMService @Inject constructor(
      * @param model The model ID to use
      * @param claim The medical claim being evaluated
      * @param title Document title
-     * @param content Document content (abstract or full text)
+     * @param content One window of the document's content (abstract or full text)
+     * @param part Which window this is, from 1
+     * @param parts How many windows the content was read in
      * @return Result containing list of citation extractions
      */
     suspend fun extractCitations(
@@ -291,7 +293,9 @@ class LLMService @Inject constructor(
         model: String,
         claim: String,
         title: String,
-        content: String?
+        content: String?,
+        part: Int = 1,
+        parts: Int = 1
     ): Result<List<CitationExtraction>> {
         val systemPrompt = """
             You are extracting key passages from medical literature that are relevant to a claim.
@@ -307,7 +311,7 @@ class LLMService @Inject constructor(
             Claim: $claim
 
             Document Title: $title
-            Content: ${content ?: "No content available"}
+            Content${if (parts > 1) " (part $part of $parts)" else ""}: ${content ?: "No content available"}
         """.trimIndent()
 
         return chat(

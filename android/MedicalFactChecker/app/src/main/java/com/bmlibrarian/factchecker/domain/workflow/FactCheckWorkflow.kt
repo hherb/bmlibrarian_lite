@@ -1498,8 +1498,8 @@ class FactCheckWorkflow @Inject constructor(
      * Uses ParallelCitationService for concurrent extraction with configurable
      * concurrency (auto-detected based on provider: 3 for cloud, 1 for local).
      * A paper the full-text setting covers, or whose text the reader uploaded, is
-     * read from its full text ([FullTextAutoFetch.citationFullText]) while the run
-     * budget allows. A successful extraction records whether it read the full
+     * read from its whole full text ([FullTextAutoFetch.citationFullText]), in
+     * windows, while the run budget allows. A successful extraction records whether it read the full
      * text, even when it found nothing; a failed one leaves the paper as it was.
      *
      * @param documents The documents to extract from

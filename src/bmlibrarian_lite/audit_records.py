@@ -38,6 +38,7 @@ The companion of :mod:`~bmlibrarian_lite.analysis_failures`, whose contract is
 ``doc/cross_platform/analysis_failure_reporting.md``.
 """
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
@@ -49,9 +50,12 @@ from .data_models import (
     EvaluationErrorCode,
     ExtractionFailure,
     LiteDocument,
+    ReportMetadata,
     ScoredDocument,
 )
 from .retraction_screen import RetractionRecord, RetractionScreen, run_deciding_of, run_status_of
+
+logger = logging.getLogger(__name__)
 
 #: What a failure whose code this build cannot name is recorded as. The count
 #: never degrades, only the reason (the #301 rule); the code itself is kept
@@ -73,6 +77,10 @@ CHECKPOINT_MIN_SCORE_KEY = "min_score_threshold"
 #: not be extracted (#310), and where a review checkpoint keeps them.
 CITATION_EXTRACTION_FAILED_KEY = "citation_extraction_failed"
 CHECKPOINT_EXTRACTION_FAILURES_KEY = CITATION_EXTRACTION_FAILED_KEY
+
+#: Where a review checkpoint keeps its report's metadata, so a retry of its
+#: full texts can write the report again with the same methodology.
+CHECKPOINT_REPORT_METADATA_KEY = "report_metadata"
 
 #: The audit summary's count of those documents; None when not recorded.
 EXTRACTION_FAILED_COUNT_KEY = "documents_citation_extraction_failed"
@@ -799,3 +807,42 @@ def recorded_min_score(checkpoint_metadata: object) -> int | None:
     if not SCORE_MIN <= value <= SCORE_MAX:
         return None
     return value
+
+
+def checkpoint_metadata_with_report_metadata(
+    metadata: Mapping[str, Any],
+    report_metadata: ReportMetadata,
+) -> dict[str, Any]:
+    """A checkpoint's metadata with its report's metadata added.
+
+    Args:
+        metadata: What the checkpoint keeps so far, carried over whole.
+        report_metadata: The report's metadata.
+
+    Returns:
+        The new metadata.
+    """
+    return {**metadata, CHECKPOINT_REPORT_METADATA_KEY: report_metadata.to_dict()}
+
+
+def recorded_report_metadata(checkpoint_metadata: object) -> ReportMetadata | None:
+    """The report metadata a checkpoint kept.
+
+    Args:
+        checkpoint_metadata: The checkpoint's stored metadata -- JSON from
+            the database, so it is read as input (golden rule 1).
+
+    Returns:
+        The metadata; None when the checkpoint kept none (a run from before
+        it was kept) or one that cannot be read.
+    """
+    if not isinstance(checkpoint_metadata, Mapping):
+        return None
+    stored = checkpoint_metadata.get(CHECKPOINT_REPORT_METADATA_KEY)
+    if not isinstance(stored, Mapping):
+        return None
+    try:
+        return ReportMetadata.from_dict(dict(stored))
+    except (TypeError, ValueError, KeyError, AttributeError) as e:
+        logger.warning("A checkpoint's report metadata cannot be read: %s", e)
+        return None

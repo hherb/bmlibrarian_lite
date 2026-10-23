@@ -47,7 +47,7 @@ from typing import TYPE_CHECKING, Any, Generator, Optional
 
 import sqlite_vec
 
-from . import rescue_queue_store, retraction_store
+from . import citation_reads_store, rescue_queue_store, retraction_store
 from .browser_rescue import RescueEntry, RescueRequest, RescueState, RescueVerdict
 from .rescue_queue_store import RecordedVerdict
 from .retraction_store import PaperCheck
@@ -265,6 +265,8 @@ class LiteStorage:
                 conn.executescript(rescue_queue_store.SCHEMA)
                 # Stored retraction verdicts, kept beside their SQL
                 conn.executescript(retraction_store.SCHEMA)
+                # Which text each paper's citations were read from
+                conn.executescript(citation_reads_store.SCHEMA)
                 # Create sqlite-vec virtual tables for document and chunk embeddings
                 conn.execute(
                     f"""
@@ -2338,6 +2340,7 @@ class LiteStorage:
                     "DELETE FROM citations WHERE checkpoint_id = ?",
                     (checkpoint_id,),
                 )
+                citation_reads_store.delete(conn, checkpoint_id)
                 conn.execute(
                     "DELETE FROM scored_documents WHERE checkpoint_id = ?",
                     (checkpoint_id,),
@@ -2692,6 +2695,7 @@ class LiteStorage:
                     (checkpoint_id,),
                 )
                 deleted_citations += cursor.rowcount
+                citation_reads_store.delete(conn, checkpoint_id)
 
             # Delete the checkpoints
             cursor = conn.execute(
@@ -2844,6 +2848,7 @@ class LiteStorage:
                 DELETE FROM chunks;
                 DELETE FROM documents;
                 DELETE FROM citations;
+                DELETE FROM citation_reads;
                 DELETE FROM scored_documents;
                 DELETE FROM review_checkpoints;
                 DELETE FROM search_sessions;
@@ -3439,6 +3444,81 @@ class LiteStorage:
 
         logger.debug(f"Saved citation {citation_id} for document {citation.document.id}")
         return citation_id
+
+    def record_citation_reads(self, checkpoint_id: str, reads: Mapping[str, bool]) -> None:
+        """Record which text each paper's citations in a run were read from.
+
+        Args:
+            checkpoint_id: The run.
+            reads: Each paper's id and whether its full text was read.
+        """
+        with self._sqlite_connection() as conn:
+            citation_reads_store.record(conn, checkpoint_id, reads)
+            conn.commit()
+
+    def get_citation_reads(self, checkpoint_id: str) -> dict[str, bool]:
+        """Which text each paper's citations in a run were read from.
+
+        Args:
+            checkpoint_id: The run.
+
+        Returns:
+            Each recorded paper's id and whether its full text was read. A
+            paper missing has no record of a successful read (its extraction
+            failed, its run was cancelled, or it predates this record); its
+            full text counts as unread.
+        """
+        with self._sqlite_connection() as conn:
+            return citation_reads_store.read(conn, checkpoint_id)
+
+    def replace_document_citations(
+        self,
+        checkpoint_id: str,
+        document_id: str,
+        citations: Sequence["Citation"],
+    ) -> None:
+        """Replace a paper's citations in a run with ones read from its full text.
+
+        In one transaction, with the record that its full text was read: a
+        failure part-way leaves the old citations and their record.
+
+        Args:
+            checkpoint_id: The run.
+            document_id: The paper.
+            citations: Its new citations, at least one.
+
+        Raises:
+            ValueError: If there are none, or one is another paper's.
+        """
+        if not citations:
+            raise ValueError("A paper's citations are replaced only by new ones")
+        if any(citation.document.id != document_id for citation in citations):
+            raise ValueError("A citation of another paper cannot replace this one's")
+        with self._sqlite_connection() as conn:
+            conn.execute(
+                "DELETE FROM citations WHERE checkpoint_id = ? AND document_id = ?",
+                (checkpoint_id, document_id),
+            )
+            conn.executemany(
+                """
+                INSERT INTO citations
+                (id, checkpoint_id, document_id, passage, relevance_score, context)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        str(uuid.uuid4()),
+                        checkpoint_id,
+                        document_id,
+                        citation.passage,
+                        citation.relevance_score,
+                        citation.context,
+                    )
+                    for citation in citations
+                ],
+            )
+            citation_reads_store.record(conn, checkpoint_id, {document_id: True})
+            conn.commit()
 
     def get_citations_for_question(
         self,

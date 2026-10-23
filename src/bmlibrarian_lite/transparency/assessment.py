@@ -37,13 +37,16 @@ from ..study_transparency_analyzer.study_transparency_analyzer import (
 from ..transparency_terms import ScoreComponent, components_explain_score
 from .transparency_models import (
     COI_NOT_ASSESSED,
+    StoredTransparency,
     TransparencyResult,
     TransparencyRisk,
     calculate_risk_level,
+    count_transparency_over,
 )
 
 if TYPE_CHECKING:
     from ..config import LiteConfig
+    from ..data_models import ReportMetadata
     from ..storage import LiteStorage
     from .transparency_settings import TransparencySettings
 
@@ -267,3 +270,76 @@ def assess_document(
         report.fulltext_lookups,
     )
     return result
+
+
+def record_transparency_counts(
+    storage: "LiteStorage",
+    metadata: "ReportMetadata",
+    document_ids: list[str],
+    cited_ids: list[str] | None = None,
+) -> dict[str, StoredTransparency]:
+    """Record how the documents' transparency assessments are distributed.
+
+    A row an earlier version of the analyser wrote is counted apart from
+    the three risk levels, not under its stored one: that level is not
+    this build's finding, and the report names how many are waiting to
+    be re-analysed rather than dropping them silently (#360).
+
+    Every document the analysis was *asked* about is accounted for. This
+    used to return early when no row had been stored, leaving
+    ``transparency_analysis_applied`` False so the report said
+    "Transparency analysis was not applied" -- over an analysis that had
+    run against every study and failed on every one, which is a positive
+    false statement about the one artefact the reader keeps. A partial
+    outage was quieter and no better: the denominator simply shrank
+    (#361, #249).
+
+    The withheld counts are taken twice, over the documents reviewed and
+    over the ones cited. The reference list annotates the cited ones, so
+    a single figure over the reviewed set could exceed every annotation
+    the reader can find, with nothing saying why (#372).
+
+    Args:
+        storage: Where the rows are read from.
+        metadata: The report metadata to fill in. The caller has already
+            established that transparency analysis was asked for.
+        document_ids: Every document the review assessed.
+        cited_ids: The documents the report cites, or None when it is
+            not known which; the report then names one population only.
+
+    Returns:
+        The stored rows the counts were taken from, over the reviewed and
+        the cited documents. The report annotates its references from
+        these same rows: background analyses are still storing results
+        while the review runs, and a second read could annotate a study
+        the count had put in another bucket (#372).
+    """
+    # Applied means asked, not answered. The caller only reaches here
+    # when the user turned transparency on.
+    metadata.transparency_analysis_applied = True
+    cited = list(cited_ids) if cited_ids is not None else []
+    results = storage.get_transparency_results_batch(
+        list(dict.fromkeys([*document_ids, *cited]))
+    )
+    counts = count_transparency_over(results, document_ids)
+    metadata.transparency_low_risk_count = counts.low
+    metadata.transparency_medium_risk_count = counts.medium
+    metadata.transparency_high_risk_count = counts.high
+    metadata.transparency_limited_count = counts.limited
+    metadata.transparency_provisional_count = counts.provisional
+    metadata.transparency_superseded_count = counts.superseded
+    # Whatever is left asked a question that never came back: the
+    # analysis failed, the document carried no identifier to look one up
+    # by, it had not finished, it reached no nameable risk level, or its
+    # stored row could not be decoded (#374). None of those is a study
+    # with nothing to declare, so none may leave the count without being
+    # named.
+    metadata.transparency_unassessed_count = counts.not_assessed
+    metadata.transparency_documents_considered = counts.considered
+    if cited_ids is not None:
+        cited_counts = count_transparency_over(results, cited)
+        metadata.transparency_superseded_cited_count = cited_counts.superseded
+        metadata.transparency_unassessed_cited_count = (
+            cited_counts.not_assessed
+        )
+    return results

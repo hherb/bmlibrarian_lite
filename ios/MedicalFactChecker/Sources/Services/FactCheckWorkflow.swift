@@ -2558,13 +2558,12 @@ final class FactCheckWorkflow {
                 abstract: doc.abstract,
                 authors: doc.formattedAuthors,
                 year: doc.year ?? 0,
-                fullText: fullText?.text,
-                fullTextTruncated: fullText?.truncated ?? false
+                fullText: fullText
             )
         }
 
-        // The budget check above is made once, before every call; with full
-        // texts each call is long enough that it no longer bounds the batch.
+        // The budget check above is made once, before every call; a full text
+        // is read whole, a call per window, so it no longer bounds the batch.
         if inputs.contains(where: { $0.fullText != nil }) {
             let perToken = CostCalculator.calculateCost(
                 model: settings.llmModel,

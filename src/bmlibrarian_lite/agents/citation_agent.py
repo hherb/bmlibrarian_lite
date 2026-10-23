@@ -28,9 +28,11 @@ import json
 import logging
 import re
 import threading
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional, Callable
 
+from ..chunking import analysis_windows
 from ..data_models import (
     Citation,
     CitationOutcome,
@@ -94,8 +96,31 @@ def readable_passages(data: object) -> list[dict[str, Any]] | None:
     return readable
 
 
-# System prompt for citation extraction
-CITATION_SYSTEM_PROMPT = """You are a medical research citation extractor. Your task is to identify the most relevant passages from a document that help answer a research question.
+def merged_window_citations(citations: list[Citation]) -> list[Citation]:
+    """Reduce the passages of a paper's windows to each passage once.
+
+    Consecutive windows share their overlap, so two can quote one sentence,
+    or one can quote part of what the other quotes whole. Kept in order;
+    a passage is dropped when an earlier one says the same, or a longer one
+    contains it.
+
+    Args:
+        citations: Every window's passages, in window order.
+
+    Returns:
+        The passages, each once.
+    """
+    normalised = [" ".join(c.passage.lower().split()) for c in citations]
+    return [
+        citation
+        for i, (citation, text) in enumerate(zip(citations, normalised, strict=True))
+        if text not in normalised[:i]
+        and not any(text != other and text in other for other in normalised)
+    ]
+
+
+# System prompt for citation extraction; SOURCE is what the paper is read from
+_CITATION_SYSTEM_PROMPT_TEMPLATE = """You are a medical research citation extractor. Your task is to identify the most relevant passages from a document that help answer a research question.
 
 Extract 1-3 key passages that:
 1. Directly address the research question
@@ -104,7 +129,7 @@ Extract 1-3 key passages that:
 4. Could be quoted in a research summary
 
 Guidelines:
-- Extract exact quotes from the abstract when possible
+- Extract exact quotes from the SOURCE when possible
 - Focus on passages with specific numbers, percentages, or outcomes
 - Include key conclusions or recommendations
 - Each passage should add unique value
@@ -113,11 +138,14 @@ Respond in JSON format:
 {
     "passages": [
         {
-            "text": "<exact or close quote from the abstract>",
+            "text": "<exact or close quote from the SOURCE>",
             "relevance": "<brief explanation of why this passage is relevant>"
         }
     ]
 }"""
+
+CITATION_SYSTEM_PROMPT = _CITATION_SYSTEM_PROMPT_TEMPLATE.replace("SOURCE", "abstract")
+FULL_TEXT_SYSTEM_PROMPT = _CITATION_SYSTEM_PROMPT_TEMPLATE.replace("SOURCE", "text")
 
 
 class LiteCitationAgent(LiteBaseAgent):
@@ -165,6 +193,7 @@ class LiteCitationAgent(LiteBaseAgent):
         self,
         question: str,
         scored_doc: ScoredDocument,
+        full_text: str | None = None,
     ) -> tuple[list[Citation], EvaluationErrorCode | None]:
         """Extract citations from a document, keeping why it failed.
 
@@ -175,33 +204,52 @@ class LiteCitationAgent(LiteBaseAgent):
         Args:
             question: Research question
             scored_doc: Document with relevance score
+            full_text: The paper's full text, read instead of its abstract;
+                a text with nothing before its references is ignored and the
+                abstract read. Either is read in windows (:func:`analysis_windows`), one
+                call each, and their passages merged
+                (:func:`merged_window_citations`): every window must be
+                read, or the extraction failed.
 
         Returns:
             The citations and ``None``; or an empty list and the error code
             classifying the failure.
         """
         doc = scored_doc.document
-
-        user_prompt = f"""Research Question: {question}
+        header = f"""Research Question: {question}
 
 Document Title: {doc.title}
 Authors: {doc.formatted_authors}
 Year: {doc.year or 'Unknown'}
 Journal: {doc.journal or 'Unknown'}
 Relevance Score: {scored_doc.score}/5
-
-Abstract:
-{doc.abstract}
-
-Extract the most relevant passages that help answer the research question."""
-
-        messages = [
-            self._create_system_message(CITATION_SYSTEM_PROMPT),
-            self._create_user_message(user_prompt),
+"""
+        closing = "Extract the most relevant passages that help answer the research question."
+        windows = analysis_windows(full_text) if full_text else []
+        label = "Full Text"
+        system_prompt = FULL_TEXT_SYSTEM_PROMPT
+        if not windows:
+            label, system_prompt = "Abstract", CITATION_SYSTEM_PROMPT
+            # An empty abstract is still asked about, as before
+            windows = analysis_windows(doc.abstract) or [doc.abstract]
+        prompts = [
+            f"{header}\n{label}"
+            + (f" (part {i} of {len(windows)})" if len(windows) > 1 else "")
+            + f":\n{window}\n\n{closing}"
+            for i, window in enumerate(windows, start=1)
         ]
 
         try:
-            passages = self._extract_with_retry(messages)
+            passages: list[dict[str, Any]] = []
+            for prompt in prompts:
+                passages.extend(
+                    self._extract_with_retry(
+                        [
+                            self._create_system_message(system_prompt),
+                            self._create_user_message(prompt),
+                        ]
+                    )
+                )
 
             citations = []
             for passage in passages:
@@ -213,7 +261,7 @@ Extract the most relevant passages that help answer the research question."""
                 )
                 citations.append(citation)
 
-            return citations, None
+            return merged_window_citations(citations), None
 
         except RetryExhaustedError as e:
             # See scoring_agent: the wrapper is not the cause, and only the
@@ -272,6 +320,7 @@ Extract the most relevant passages that help answer the research question."""
         progress_callback: Optional[Callable[[int, int], None]] = None,
         max_workers: int = 1,
         cancelled: Optional[threading.Event] = None,
+        full_texts: Mapping[str, str] | None = None,
     ) -> CitationOutcome:
         """
         Extract citations from all scored documents, optionally in parallel.
@@ -288,14 +337,24 @@ Extract the most relevant passages that help answer the research question."""
             progress_callback: Optional callback(current, total)
             max_workers: Number of parallel workers (1=sequential)
             cancelled: Optional threading.Event; when set, stops processing
+            full_texts: Full texts by document id; a document with one is
+                read from it rather than from its abstract, unless it has
+                nothing before its references.
 
         Returns:
             The outcome: the citations, how many documents were attempted,
-            and which could not be read, with why.
+            which could not be read, with why, and which were read from
+            their full text.
         """
         all_citations: list[Citation] = []
         failed: list[ExtractionFailure] = []
+        read_full_text: set[str] = set()
         attempted = 0
+        texts = full_texts or {}
+
+        def reads_full_text(doc: ScoredDocument) -> bool:
+            # A text with nothing before its references is read as no text
+            return bool(analysis_windows(texts.get(doc.document.id) or ""))
         # Filter out documents with negative scores (error codes) and below
         # threshold. A document listed twice is one document: read twice, its
         # failure would be counted twice, which the outcome refuses -- and
@@ -322,7 +381,9 @@ Extract the most relevant passages that help answer the research question."""
                 if progress_callback:
                     progress_callback(i + 1, total)
 
-                citations, cause = self._extract_with_cause(question, scored_doc)
+                citations, cause = self._extract_with_cause(
+                    question, scored_doc, texts.get(scored_doc.document.id)
+                )
                 attempted += 1
 
                 if cause is not None:
@@ -333,6 +394,8 @@ Extract the most relevant passages that help answer the research question."""
                     )
                 else:
                     all_citations.extend(citations)
+                    if reads_full_text(scored_doc):
+                        read_full_text.add(scored_doc.document.id)
                     logger.debug(
                         f"Extracted {len(citations)} citations from "
                         f"{scored_doc.document.id}"
@@ -345,7 +408,7 @@ Extract the most relevant passages that help answer the research question."""
             def _extract_one(
                 doc: ScoredDocument,
             ) -> tuple[list[Citation], EvaluationErrorCode | None]:
-                return self._extract_with_cause(question, doc)
+                return self._extract_with_cause(question, doc, texts.get(doc.document.id))
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = {
@@ -376,6 +439,8 @@ Extract the most relevant passages that help answer the research question."""
                             )
                         else:
                             all_citations.extend(citations)
+                            if reads_full_text(eligible[idx]):
+                                read_full_text.add(doc_id)
                             logger.debug(
                                 f"Extracted {len(citations)} citations from {doc_id}"
                             )
@@ -396,6 +461,7 @@ Extract the most relevant passages that help answer the research question."""
             citations=all_citations,
             documents_attempted=attempted,
             failed=tuple(failed),
+            read_full_text=frozenset(read_full_text),
         )
 
     def _parse_citation_response(

@@ -53,6 +53,10 @@ search_failures.py    # RequestFailure from requests errors; shortfall clauses, 
 analysis_failures.py  # AnalysisShortfall → notice, advice (the stages after the search); also_failed_text
 audit_records.py      # What became of each document: accepted/rejected/failed/not scored
 search_merger.py      # Deduplication (PMID/DOI/PMC/title)
+citation_text.py      # Pure: full-text score, the methodology's full-text sentence
+citation_full_texts.py # Fetching the full texts citations read (discovery chain, one at a time)
+citation_reads_store.py # citation_reads table: which text each paper's citations were read from
+full_text_retry.py    # Retry Full Text: read a reviewed run's unread full texts, write its report again
 query_translator.py   # Natural language → structured query
 fulltext_discovery.py # Europe PMC XML → PMC open-data bucket → Europe PMC PDF → Elsevier's API (10.1016/, with a key) → Unpaywall PDFs → OpenAlex PDFs → DOI download → CORE text (with a key)
 pmc_open_data.py      # PmcOpenDataClient: PMC's open-data S3 bucket (JATS by PMC ID)
@@ -77,7 +81,7 @@ rescue_queue_store.py # The browser rescue queue's table
 rate_limit.py         # Host-keyed, thread-safe pacing for outbound requests
 polite_session.py     # PoliteAdapter + mount_politely for requests.Session
 embeddings.py         # LiteEmbedder (FastEmbed)
-chunking.py           # Text chunking utilities
+chunking.py           # Text chunking; analysis_windows (every LLM text path: no references, 16k windows, 250 overlap)
 pdf_utils.py          # PDF text extraction
 constants.py          # Application constants
 exceptions.py         # Custom exception hierarchy

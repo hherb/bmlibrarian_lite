@@ -64,6 +64,9 @@ from .constants import (
     PARALLEL_WORKERS_OLLAMA_DEFAULT,
     PARALLEL_WORKERS_CLOUD_DEFAULT,
     REDACTED_SECRET_PLACEHOLDER,
+    DEFAULT_FULL_TEXT_MIN_SCORE,
+    SCORE_MAX,
+    SCORE_MIN,
 )
 from .data_models import SearchProvider
 from .transparency import TransparencySettings, get_default_settings
@@ -454,6 +457,11 @@ class DiscoveryConfig:
     # stage 2). Off: entries still collect, for when it is on again (and for
     # stage 3's review window, not yet built).
     browser_rescue_hidden: bool = True
+    # Read the citations of papers scored full_text_min_score or higher (never
+    # below the review's relevance threshold) from their full text, fetched
+    # for them (as on iOS/macOS and Android)
+    citations_from_full_text: bool = False
+    full_text_min_score: int = DEFAULT_FULL_TEXT_MIN_SCORE
 
 
 @dataclass
@@ -842,6 +850,31 @@ class LiteConfig:
                     hidden,
                 )
                 hidden = True
+            from_full_text = discovery_data.get("citations_from_full_text", False)
+            if not isinstance(from_full_text, bool):
+                logger.warning(
+                    "discovery.citations_from_full_text is %r, not true or "
+                    "false; using the default, off",
+                    from_full_text,
+                )
+                from_full_text = False
+            min_score = discovery_data.get(
+                "full_text_min_score", DEFAULT_FULL_TEXT_MIN_SCORE
+            )
+            if (
+                isinstance(min_score, bool)
+                or not isinstance(min_score, int)
+                or not SCORE_MIN <= min_score <= SCORE_MAX
+            ):
+                logger.warning(
+                    "discovery.full_text_min_score is %r, not a score from "
+                    "%d to %d; using the default, %d",
+                    min_score,
+                    SCORE_MIN,
+                    SCORE_MAX,
+                    DEFAULT_FULL_TEXT_MIN_SCORE,
+                )
+                min_score = DEFAULT_FULL_TEXT_MIN_SCORE
             config.discovery = DiscoveryConfig(
                 unpaywall_email=discovery_data.get("unpaywall_email", ""),
                 core_api_key=_reject_redaction_placeholder(
@@ -860,6 +893,8 @@ class LiteConfig:
                     ENV_ELSEVIER_INSTTOKEN,
                 ),
                 browser_rescue_hidden=hidden,
+                citations_from_full_text=from_full_text,
+                full_text_min_score=min_score,
             )
 
         if "europepmc" in data:
@@ -1001,6 +1036,8 @@ class LiteConfig:
             "discovery": {
                 "unpaywall_email": self.discovery.unpaywall_email,
                 "browser_rescue_hidden": self.discovery.browser_rescue_hidden,
+                "citations_from_full_text": self.discovery.citations_from_full_text,
+                "full_text_min_score": self.discovery.full_text_min_score,
             },
             "openathens": {
                 "enabled": self.openathens.enabled,

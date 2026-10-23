@@ -172,7 +172,7 @@ class FactCheckWorkflowFullTextTest {
 
         workflow.retryFullTextRetrieval(WorkflowConfig(autoFetchFullText = false))
 
-        assertTrue(asked.single().single().content.contains("Full text:\nThe uploaded body."))
+        assertTrue(asked.single().single().fullText!!.contains("The uploaded body."))
         assertEquals(listOf("A new passage."), citations.map { it.passage })
         assertEquals(true, documents.getValue("d1").citationsReadFullText)
         assertEquals(WorkflowState.Completed(reportId = "report-new"), workflow.state.value)
@@ -240,7 +240,7 @@ class FactCheckWorkflowFullTextTest {
         workflow.retryFullTextRetrieval(WorkflowConfig(autoFetchFullText = true))
 
         coVerify(exactly = 1) { fullTextService.fetchFullText(any(), any(), "1", any(), any()) }
-        assertTrue(asked.single().single().content.contains("Full text:\nCORE's body."))
+        assertTrue(asked.single().single().fullText!!.contains("CORE's body."))
         assertEquals(listOf("A new passage."), citations.map { it.passage })
         // The control for the failure notice: a fetch that arrived names no failure
         assertNull(workflow.fullTextNotice.value)

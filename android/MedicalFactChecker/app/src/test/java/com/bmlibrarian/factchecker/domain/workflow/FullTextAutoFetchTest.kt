@@ -79,8 +79,8 @@ class FullTextAutoFetchTest {
         val uploaded = paper(2).copy(fullTextMarkdown = "Body text", fullTextSource = Constants.FULLTEXT_SOURCE_UPLOADED)
 
         assertNull(FullTextAutoFetch.citationFullText(fetched, off))
-        assertEquals("Body text", FullTextAutoFetch.citationFullText(uploaded, off)?.text)
-        assertEquals("Body text", FullTextAutoFetch.citationFullText(fetched, on)?.text)
+        assertEquals("Body text", FullTextAutoFetch.citationFullText(uploaded, off))
+        assertEquals("Body text", FullTextAutoFetch.citationFullText(fetched, on))
         assertNull("below the full-text score", FullTextAutoFetch.citationFullText(paper(3).copy(fullTextMarkdown = "Body"), on))
     }
 
@@ -90,17 +90,31 @@ class FullTextAutoFetchTest {
         val pdf = paper(5).copy(pdfPath = "/cache/a.pdf", pdfExtractedText = "PDF prose")
 
         assertNull(FullTextAutoFetch.citationFullText(deposit, on))
-        assertEquals("PDF prose", FullTextAutoFetch.citationFullText(pdf, on)?.text)
+        assertEquals("PDF prose", FullTextAutoFetch.citationFullText(pdf, on))
     }
 
     @Test
-    fun `a long full text is cut and says so`() {
-        val text = FullTextAutoFetch.citationText(paper(5).copy(fullTextMarkdown = "x".repeat(50)), maxCharacters = 10)
+    fun `a long full text is given whole, alone, and read in windows that reach its end`() {
+        val body = (1..2_000).joinToString(" ") { "Sentence $it of the body." } + " The last sentence."
+        val text = FullTextAutoFetch.citationText(paper(5).copy(fullTextMarkdown = body))
 
-        assertEquals(CitationFullText("x".repeat(10), truncated = true), text)
+        assertEquals(body, text)
         val input = CitationInput.fromDocument(paper(5).copy(abstractText = "The abstract"), text)
-        assertTrue(input.content.startsWith("Abstract:\nThe abstract\n\nFull text:\nxxxxxxxxxx"))
-        assertTrue(input.content.endsWith("[The full text is cut here for length; the rest of the article is not shown.]"))
+        assertEquals("the abstract is not placed beside it", body, input.content)
+        assertTrue(input.windows.size > 1)
+        assertTrue(input.windows.all { it.length <= Constants.TEXT_WINDOW_CHARS })
+        assertTrue(input.windows.last().endsWith("The last sentence."))
+    }
+
+    @Test
+    fun `a full text with nothing before its references is no full text`() {
+        assertNull(FullTextAutoFetch.citationText(paper(5).copy(fullTextMarkdown = "## References\n1. Smith 2020.")))
+    }
+
+    @Test
+    fun `an empty abstract is still asked about once, a short one in one window`() {
+        assertEquals(listOf(""), CitationInput(documentId = "d", pmid = null, title = "t", abstract = null).windows)
+        assertEquals(listOf("An abstract."), CitationInput(documentId = "d", pmid = null, title = "t", abstract = " An abstract. ").windows)
     }
 
     // ==================== The budget ====================
@@ -109,7 +123,7 @@ class FullTextAutoFetchTest {
     fun `full texts are kept in order while they fit the budget, the rest read the abstract`() {
         // 4 characters a token: 100 characters is 25 tokens, $0.25 at a cent a token
         val inputs = listOf("a", "b", "c").map {
-            CitationInput(documentId = it, pmid = null, title = it, abstract = "abstract", fullText = CitationFullText("y".repeat(100), truncated = false))
+            CitationInput(documentId = it, pmid = null, title = it, abstract = "abstract", fullText = "y".repeat(100))
         }
 
         val (fitted, dropped) = FullTextAutoFetch.fittingBudget(inputs, remainingUsd = 0.6, usdPerInputToken = 0.01)
@@ -122,13 +136,26 @@ class FullTextAutoFetchTest {
     @Test
     fun `a text that does not fit falls back, and a later shorter one that does is kept`() {
         val inputs = listOf(400, 100).map { length ->
-            CitationInput(documentId = "$length", pmid = null, title = "t", abstract = "abstract", fullText = CitationFullText("y".repeat(length), truncated = false))
+            CitationInput(documentId = "$length", pmid = null, title = "t", abstract = "abstract", fullText = "y".repeat(length))
         }
 
         val (fitted, dropped) = FullTextAutoFetch.fittingBudget(inputs, remainingUsd = 0.3, usdPerInputToken = 0.01)
 
         assertEquals(1, dropped)
         assertEquals(listOf(false, true), fitted.map { it.fullText != null })
+    }
+
+    @Test
+    fun `the budget counts every window, overlaps included`() {
+        // 40,000 characters with no boundary: windows of 16,000, 16,000 and 8,500 (two overlaps of 250)
+        val input = CitationInput(documentId = "d", pmid = null, title = "t", abstract = "abstract", fullText = "y".repeat(40_000))
+        assertEquals(40_500, input.windows.sumOf { it.length })
+
+        // 10,125 tokens at a cent: $101.25, over the $101 left though the text alone is $100
+        val (fitted, dropped) = FullTextAutoFetch.fittingBudget(listOf(input), remainingUsd = 101.0, usdPerInputToken = 0.01)
+
+        assertEquals(1, dropped)
+        assertNull(fitted.single().fullText)
     }
 
     // ==================== What the citations read ====================

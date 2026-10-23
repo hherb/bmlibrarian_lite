@@ -19,6 +19,7 @@
 package com.bmlibrarian.factchecker.domain.workflow
 
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
+import com.bmlibrarian.factchecker.util.TextWindows
 
 /**
  * Input data for extracting citations from a single document.
@@ -34,8 +35,7 @@ import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
  * @property abstract The document's abstract, if it has one.
  * @property markdownFallback What is read when there is neither an abstract nor
  *   a full text for the prompt: the stored markdown, as before full text was read.
- * @property fullText The article's full text, and whether it was cut to bound the
- *   cost of the call, when citation extraction is to read it.
+ * @property fullText The article's whole full text, when citation extraction is to read it.
  */
 data class CitationInput(
     val documentId: String,
@@ -43,26 +43,22 @@ data class CitationInput(
     val title: String,
     val abstract: String?,
     val markdownFallback: String? = null,
-    val fullText: CitationFullText? = null
+    val fullText: String? = null
 ) {
     /**
-     * What the prompt reads the paper from: the full text when there is one.
-     *
-     * The abstract stays alongside the full text, which may be cut and so may
-     * lack the conclusions an abstract states. A cut is announced, so the model
-     * does not mistake the end of the excerpt for the end of the paper. Swift's
-     * `sourceSection(for:)` lays it out the same way.
+     * What the paper is read from: the full text when there is one, read alone
+     * as Python reads it (nothing is cut, so the abstract adds nothing).
      */
     val content: String
-        get() = if (fullText == null) {
-            abstract ?: markdownFallback ?: ""
-        } else {
-            buildString {
-                abstract?.let { append("Abstract:\n").append(it).append("\n\n") }
-                append("Full text:\n").append(fullText.text)
-                if (fullText.truncated) append("\n[The full text is cut here for length; the rest of the article is not shown.]")
-            }
-        }
+        get() = fullText ?: abstract ?: markdownFallback ?: ""
+
+    /**
+     * The windows of [content] the model reads, one call each. Never empty: a
+     * paper with nothing to read (an empty abstract) is still asked about once,
+     * with no content, as before; a reference list is not read even then.
+     */
+    val windows: List<String>
+        get() = TextWindows.analysisWindows(content).ifEmpty { listOf("") }
 
     /** This input read from the abstract instead, as when the run budget leaves the full text out. */
     fun withoutFullText(): CitationInput = copy(fullText = null)
@@ -76,7 +72,7 @@ data class CitationInput(
          *   (or, with none, the stored markdown).
          * @return CitationInput with extracted fields.
          */
-        fun fromDocument(document: DocumentEntity, fullText: CitationFullText? = null): CitationInput {
+        fun fromDocument(document: DocumentEntity, fullText: String? = null): CitationInput {
             return CitationInput(
                 documentId = document.id,
                 pmid = document.pmid,

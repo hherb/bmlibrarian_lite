@@ -623,11 +623,19 @@ object Constants {
     const val FULLTEXT_AUTO_FETCH_MIN_SCORE = 4
 
     /**
-     * Longest full text given to citation extraction, in characters (about
-     * 10,000 tokens). A longer text is cut, and the prompt says so, so the model
-     * does not treat the cut as the end of the paper.
+     * The most characters (Unicode code points) in one window of a text a model
+     * analyses ([TextWindows]): one call each, the answers reduced. A publication
+     * is never cut before a prompt, so a long one is read in several windows; this
+     * size fits any provider's context. Equal to the shared contract's
+     * `window_chars` (`doc/cross_platform/llm_parity/text_windows.json`).
      */
-    const val MAX_CITATION_FULL_TEXT_CHARACTERS = 40_000
+    const val TEXT_WINDOW_CHARS = 16_000
+
+    /**
+     * Characters consecutive windows share, so a passage that straddles a window
+     * edge is whole in one of them. The contract's `overlap_chars`.
+     */
+    const val TEXT_WINDOW_OVERLAP_CHARS = 250
 
     /**
      * Folder in the app's files directory, not the cache directory that holds
