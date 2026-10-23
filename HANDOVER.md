@@ -10,7 +10,7 @@ its slice has landed; add a new section when handing off new work.
 
 **Parity: taking a fact check further, Python desktop** (`ROADMAP.md`).
 iOS/macOS landed in PR #611, Android in PR #616. **The desktop's full-text
-rows are done on branch `feat/desktop-citations-from-full-text`** (decided
+rows are done on branch `feat/desktop-citations-from-full-text`** (PR #622) (decided
 with the maintainer 2026-10-23: actions on the Research Questions tab;
 a long text is read in windows, never cut):
 - *Settings → Full Text*: **Read citations from full text** (off, as on the
