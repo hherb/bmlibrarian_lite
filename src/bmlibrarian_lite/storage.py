@@ -51,11 +51,13 @@ from . import (
     citation_reads_store,
     rescue_queue_store,
     retraction_store,
+    smart_search_store,
     uploaded_full_texts_store,
 )
 from .browser_rescue import RescueEntry, RescueRequest, RescueState, RescueVerdict
 from .rescue_queue_store import RecordedVerdict
 from .retraction_store import PaperCheck
+from .smart_search_store import RunQuery
 
 # Register adapters/converters for datetime to avoid Python 3.12 deprecation warning
 # The default converter expects space-separated format, but we use ISO format with 'T'
@@ -275,6 +277,8 @@ class LiteStorage:
                 conn.executescript(citation_reads_store.SCHEMA)
                 # The full texts readers uploaded for papers
                 conn.executescript(uploaded_full_texts_store.SCHEMA)
+                # The alternative queries smart search has run per question
+                conn.executescript(smart_search_store.SCHEMA)
                 # Create sqlite-vec virtual tables for document and chunk embeddings
                 conn.execute(
                     f"""
@@ -2349,6 +2353,7 @@ class LiteStorage:
                     (checkpoint_id,),
                 )
                 citation_reads_store.delete(conn, checkpoint_id)
+                smart_search_store.delete(conn, checkpoint_id)
                 conn.execute(
                     "DELETE FROM scored_documents WHERE checkpoint_id = ?",
                     (checkpoint_id,),
@@ -2704,6 +2709,7 @@ class LiteStorage:
                 )
                 deleted_citations += cursor.rowcount
                 citation_reads_store.delete(conn, checkpoint_id)
+                smart_search_store.delete(conn, checkpoint_id)
 
             # Delete the checkpoints
             cursor = conn.execute(
@@ -2857,6 +2863,7 @@ class LiteStorage:
                 DELETE FROM documents;
                 DELETE FROM citations;
                 DELETE FROM citation_reads;
+                DELETE FROM smart_search_run_queries;
                 DELETE FROM uploaded_full_texts;
                 DELETE FROM scored_documents;
                 DELETE FROM review_checkpoints;
@@ -3528,6 +3535,29 @@ class LiteStorage:
         """
         with self._sqlite_connection() as conn:
             return uploaded_full_texts_store.read(conn, document_ids)
+
+    def record_smart_search_query(self, checkpoint_id: str, run: RunQuery) -> None:
+        """Keep an alternative query smart search ran for a run.
+
+        Args:
+            checkpoint_id: The run's checkpoint.
+            run: The query, after those already kept.
+        """
+        with self._sqlite_connection() as conn:
+            smart_search_store.record(conn, checkpoint_id, run)
+            conn.commit()
+
+    def get_smart_search_queries(self, checkpoint_id: str) -> list[RunQuery]:
+        """The alternative queries smart search has run for a run.
+
+        Args:
+            checkpoint_id: The run's checkpoint.
+
+        Returns:
+            The queries in the order they ran; empty before the first round.
+        """
+        with self._sqlite_connection() as conn:
+            return smart_search_store.read(conn, checkpoint_id)
 
     def replace_document_citations(
         self,

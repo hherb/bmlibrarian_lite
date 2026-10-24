@@ -27,6 +27,7 @@ The tab provides:
 
 import logging
 import sqlite3
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Optional
 
@@ -83,9 +84,16 @@ from ..full_text_retry import (
     FullTextRetry,
     retry_text,
 )
+from ..more_evidence import (
+    FIND_MORE_EVIDENCE_ACTION,
+    MoreEvidence,
+    known_document_ids,
+    more_evidence_text,
+)
 from ..storage import LiteStorage
 from .workers import (
     IncrementalSearchWorker,
+    MoreEvidenceWorker,
     ReclassifyWorker,
     RescoreWorker,
     TransparencyReanalysisWorker,
@@ -94,6 +102,12 @@ from .workers import (
 from .benchmark_dialog import BenchmarkWorker
 
 logger = logging.getLogger(__name__)
+
+FIND_MORE_EVIDENCE_TIP = (
+    "Search for more documents for the reviewed question -- further along its "
+    "own query, or with alternative queries once that is used up -- score "
+    "them, read the relevant ones and write the report again"
+)
 
 
 def scored_count_text(question: ResearchQuestionSummary) -> str:
@@ -386,6 +400,7 @@ class ResearchQuestionsTab(QWidget):
         self._rescore_worker: Optional[RescoreWorker] = None
         self._transparency_worker: TransparencyReanalysisWorker | None = None
         self._full_text_worker: FullTextRetryWorker | None = None
+        self._evidence_worker: MoreEvidenceWorker | None = None
         # What the running pass's retraction screen left out: the clause for its
         # final line, the titles for its dialog
         self._retraction_clause = ""
@@ -474,6 +489,12 @@ class ResearchQuestionsTab(QWidget):
             "Search for new documents not yet scored for this question"
         )
         target_layout.addWidget(self.rerun_btn)
+
+        self.more_btn = QPushButton(FIND_MORE_EVIDENCE_ACTION)
+        self.more_btn.setEnabled(False)
+        self.more_btn.clicked.connect(self._on_find_more_clicked)
+        self.more_btn.setToolTip(FIND_MORE_EVIDENCE_TIP)
+        target_layout.addWidget(self.more_btn)
 
         self.benchmark_btn = QPushButton("Run Benchmark")
         self.benchmark_btn.setEnabled(False)
@@ -609,6 +630,12 @@ class ResearchQuestionsTab(QWidget):
         rerun_action.triggered.connect(self._on_rerun_clicked)
         rerun_action.setEnabled(not is_busy)
         menu.addAction(rerun_action)
+
+        more_action = QAction(FIND_MORE_EVIDENCE_ACTION, self)
+        more_action.setToolTip(FIND_MORE_EVIDENCE_TIP)
+        more_action.triggered.connect(self._on_find_more_clicked)
+        more_action.setEnabled(not is_busy and question.total_documents > 0)
+        menu.addAction(more_action)
 
         # Run benchmark action (if enabled)
         if self.config.benchmark.enabled and len(self.config.benchmark.models) > 0:
@@ -747,6 +774,7 @@ class ResearchQuestionsTab(QWidget):
             or self._rescore_worker is not None
             or self._transparency_worker is not None
             or self._full_text_worker is not None
+            or self._evidence_worker is not None
         )
 
     def _on_selection_changed(self) -> None:
@@ -764,6 +792,7 @@ class ResearchQuestionsTab(QWidget):
         selected = self.questions_table.selectedItems()
         has_selection = len(selected) > 0 and not self._is_busy()
         self.rerun_btn.setEnabled(has_selection)
+        self.more_btn.setEnabled(has_selection)
 
         # Enable benchmark button if question has documents available
         if has_selection:
@@ -884,6 +913,7 @@ class ResearchQuestionsTab(QWidget):
             or self._rescore_worker
             or self._transparency_worker
             or self._full_text_worker
+            or self._evidence_worker
             or self._benchmark_worker
         )
         if worker is None:
@@ -1802,6 +1832,180 @@ class ResearchQuestionsTab(QWidget):
             self._full_text_worker = None
             self._update_action_buttons()
 
+    def _on_find_more_clicked(self) -> None:
+        """Search further for the reviewed question, and write its report again.
+
+        The question's own query is paged further first (as *Re-run Search*
+        does); when that finds nothing new, the worker runs a round of
+        alternative queries.
+        """
+        question = self._get_selected_question()
+        if not question:
+            return
+        target = self.target_spin.value()
+        # Nothing from an earlier pass's screen reaches this one's lines
+        self._retraction_clause = ""
+        self._retraction_titles = []
+        reply = QMessageBox.question(
+            self,
+            FIND_MORE_EVIDENCE_ACTION,
+            f"Up to {target} new documents are searched for along the question's "
+            "own query. Once it has no more, the model proposes two or three "
+            f"alternative queries, each fetching up to {target} documents. What "
+            "is new is scored into the reviewed run, with any documents an "
+            "earlier stop left unscored; the relevant ones are read, and the "
+            "report is written again. This can take a while and costs model calls.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            known = known_document_ids(self.storage, question.question)
+        except (SQLiteError, sqlite3.Error) as e:
+            logger.error(f"Could not read the scores of the question: {e}")
+            QMessageBox.warning(
+                self,
+                FIND_MORE_EVIDENCE_ACTION,
+                "The scores recorded for this question could not be read, so "
+                "the search cannot tell which documents are new.",
+            )
+            return
+
+        self._worker = IncrementalSearchWorker(
+            question=question.question,
+            pubmed_query=question.pubmed_query,
+            target_new_docs=self.target_spin.value(),
+            already_scored_ids=known,
+            config=self.config,
+            storage=self.storage,
+            parent=self,
+        )
+        self._worker.progress.connect(self._on_progress)
+        self._worker.finished.connect(
+            lambda documents, lost: self._on_more_search_finished(question, documents, lost)
+        )
+        self._worker.error.connect(self._on_more_error)
+        self._worker.cancelled.connect(
+            lambda error: self._on_more_cancelled(MoreEvidence(cancelled=True), error)
+        )
+        self._set_busy_state()
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("Searching along the question's own query...")
+        self._worker.start()
+
+    def _on_more_search_finished(
+        self,
+        question: ResearchQuestionSummary,
+        documents: list[LiteDocument],
+        lost: list[RetrievalShortfall],
+    ) -> None:
+        """The question's own query is paged: the rest runs in its own worker.
+
+        Args:
+            question: The question.
+            documents: What the paging found new, possibly nothing.
+            lost: What it lost.
+        """
+        search = self._worker
+        # Let go before the next starts, so Cancel reaches the one running
+        self._worker = None
+        if search is not None:
+            QTimer.singleShot(100, lambda: search.wait(2000))
+            if search._cancelled is True:
+                # A cancel that came as the paging ended: nothing paid runs on
+                self._on_more_cancelled(MoreEvidence(cancelled=True))
+                return
+        self._evidence_worker = MoreEvidenceWorker(
+            question.question,
+            documents,
+            lost,
+            self.config,
+            self.storage,
+            parent=self,
+            retraction_checker=self._retraction_checker(),
+            max_results=self.target_spin.value(),
+        )
+        worker = self._evidence_worker
+        self._watch_retraction_screen(worker)
+        worker.progress.connect(self._on_reclassify_progress)
+        worker.finished.connect(
+            lambda outcome: self._on_more_finished(outcome, question.question, question.pubmed_query)
+        )
+        worker.error.connect(self._on_more_error)
+        worker.cancelled.connect(self._on_more_cancelled)
+        self.progress_label.setText(
+            f"Found {documents_text(len(documents))} along the question's own query..."
+            if documents
+            else "Nothing new along the question's own query..."
+        )
+        worker.start()
+
+    def _on_more_finished(self, outcome: MoreEvidence, question: str, pubmed_query: str) -> None:
+        """It ran to its end: a report it wrote is loaded into the tabs.
+
+        Args:
+            outcome: What it did.
+            question: The question.
+            pubmed_query: The question's query, for loading it.
+        """
+        self._reset_ui()
+        self._load_questions()
+        message = self._left_out(more_evidence_text(outcome))
+        self.progress_label.setText(message)
+        QMessageBox.information(
+            self, f"{FIND_MORE_EVIDENCE_ACTION} Complete", message + self._left_out_note()
+        )
+        if outcome.report is not None:
+            self.question_selected.emit(question, pubmed_query)
+        QTimer.singleShot(100, self._cleanup_evidence_worker)
+
+    def _on_more_error(self, error_message: str) -> None:
+        """It could not run, or failed; the report stands.
+
+        Args:
+            error_message: What to tell the reader; never the provider's
+                own words (#330).
+        """
+        self._reset_ui()
+        # What it scored before the failure is kept: the table shows it
+        self._load_questions()
+        message = self._left_out(f"{FIND_MORE_EVIDENCE_ACTION}: {error_message}")
+        self.progress_label.setText(message)
+        QMessageBox.warning(self, FIND_MORE_EVIDENCE_ACTION, message + self._left_out_note())
+        QTimer.singleShot(100, self._cleanup_evidence_worker)
+
+    def _on_more_cancelled(self, outcome: MoreEvidence, error: str = "") -> None:
+        """A cancel stopped it: what the run found and scored is kept.
+
+        A cancel while the question's own query is paged keeps only what the
+        paging stored and linked; nothing is held for the next run to score.
+
+        Args:
+            outcome: What it did before the cancel.
+            error: The error that also ended it, or an empty string.
+        """
+        self._reset_ui()
+        self._load_questions()
+        message = self._left_out(
+            more_evidence_text(replace(outcome, cancelled=True)) + also_failed_text(error)
+        )
+        self.progress_label.setText(message)
+        if error:
+            QMessageBox.warning(
+                self, f"{FIND_MORE_EVIDENCE_ACTION} Cancelled", message + self._left_out_note()
+            )
+        QTimer.singleShot(100, self._cleanup_evidence_worker)
+
+    def _cleanup_evidence_worker(self) -> None:
+        """Clean up the Find More Evidence worker after completion."""
+        if self._evidence_worker is not None:
+            if self._evidence_worker.isRunning():
+                self._evidence_worker.wait(2000)
+            self._evidence_worker = None
+            self._update_action_buttons()
+
     # -------------------------------------------------------------------------
     # Helper methods
     # -------------------------------------------------------------------------
@@ -1816,6 +2020,7 @@ class ResearchQuestionsTab(QWidget):
         Cancel is enabled for all of them.
         """
         self.rerun_btn.setEnabled(False)
+        self.more_btn.setEnabled(False)
         self.benchmark_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.questions_table.setEnabled(False)

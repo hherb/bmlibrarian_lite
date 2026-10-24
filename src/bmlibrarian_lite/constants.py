@@ -830,6 +830,20 @@ DEFAULT_TARGET_NEW_DOCUMENTS = 50
 MAX_PUBMED_SEARCH_OFFSET = 9999
 
 # =============================================================================
+# Smart Search (alternative queries; iOS/macOS's WorkflowConstants)
+# =============================================================================
+
+# A review with fewer relevant documents than this, and at least one judged,
+# runs a smart-search round
+SMART_SEARCH_THRESHOLD = 3
+# An answer holding no usable query is asked for again this many more times,
+# each a paid call
+SMART_SEARCH_MAX_QUERY_RETRIES = 2
+# The alternative-query request, as on the apps
+SMART_SEARCH_TEMPERATURE = 0.3
+SMART_SEARCH_MAX_TOKENS = 1024
+
+# =============================================================================
 # Search Failure Reporting (#247)
 # =============================================================================
 

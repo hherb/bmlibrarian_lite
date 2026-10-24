@@ -658,6 +658,18 @@ def _http_status_label(status_code: int) -> str:
 _SINGLE_SOURCE_PROVIDERS = (SearchProvider.PUBMED, SearchProvider.EUROPEPMC)
 
 
+class ShortfallQuery(Enum):
+    """Which query of a search a shortfall belongs to.
+
+    An alternative query smart search ran that fails must not read as the
+    source never having been searched, when the original query's results from
+    it are in the report (``doc/cross_platform/search_failure_reporting.md``).
+    """
+
+    ORIGINAL = "original"  # stores no marker
+    ALTERNATIVE = "alternative"  # persisted marker: never rename
+
+
 @dataclass(frozen=True)
 class RetrievalShortfall:
     """Part of a search that a failure left out (#247, #248).
@@ -671,6 +683,8 @@ class RetrievalShortfall:
         records_missing: How many records could not be retrieved, at least
             one; or ``None`` when the source could not be searched at all, so
             how many it holds is unknown.
+        query: Whether the loss belongs to the question's own query or to an
+            alternative query smart search ran.
 
     Raises:
         ValueError: On construction, if the provider is ``BOTH`` or the count
@@ -681,6 +695,7 @@ class RetrievalShortfall:
     provider: SearchProvider
     failure: RequestFailure
     records_missing: int | None = None
+    query: ShortfallQuery = ShortfallQuery.ORIGINAL
 
     def __post_init__(self) -> None:
         """Refuse a shortfall that names no single source or misses nothing."""
@@ -695,22 +710,31 @@ class RetrievalShortfall:
         Returns:
             For example ``"PubMed could not be searched (HTTP 429 Too Many
             Requests)"`` or ``"200 PubMed records could not be retrieved (the
-            request timed out)"``.
+            request timed out)"``; for an alternative query ``"an alternative
+            search of PubMed could not be completed (...)"`` or ``"200 PubMed
+            records from an alternative search could not be retrieved (...)"``.
         """
         source = self.provider.display_name
         reason = self.failure.describe()
+        alternative = self.query is ShortfallQuery.ALTERNATIVE
         if self.records_missing is None:
+            if alternative:
+                return f"an alternative search of {source} could not be completed ({reason})"
             return f"{source} could not be searched ({reason})"
         noun = "record" if self.records_missing == 1 else "records"
-        return f"{self.records_missing:,} {source} {noun} could not be retrieved ({reason})"
+        origin = " from an alternative search" if alternative else ""
+        return f"{self.records_missing:,} {source} {noun}{origin} could not be retrieved ({reason})"
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to a JSON-safe dictionary."""
-        return {
+        """Convert to a JSON-safe dictionary; ``query`` only for an alternative query."""
+        stored: dict[str, Any] = {
             "provider": self.provider.value,
             "failure": self.failure.to_dict(),
             "records_missing": self.records_missing,
         }
+        if self.query is ShortfallQuery.ALTERNATIVE:
+            stored["query"] = ShortfallQuery.ALTERNATIVE.value
+        return stored
 
     @classmethod
     def from_dict(cls, data: Any) -> "RetrievalShortfall":
@@ -718,7 +742,8 @@ class RetrievalShortfall:
 
         The failure and the count degrade: a count that is not a whole number
         of at least one becomes ``None``, which claims more is missing, never
-        less. The source cannot degrade, so an entry that names neither
+        less; a ``query`` that is not ``"alternative"`` reads as the original
+        query, whose clause claims more too. The source cannot degrade, so an entry that names neither
         PubMed nor Europe PMC (``both`` included) is refused.
 
         Args:
@@ -742,7 +767,12 @@ class RetrievalShortfall:
         missing = data.get("records_missing")
         if not _is_record_count(missing):
             missing = None
-        return cls(provider, RequestFailure.from_dict(data.get("failure")), missing)
+        query = (
+            ShortfallQuery.ALTERNATIVE
+            if data.get("query") == ShortfallQuery.ALTERNATIVE.value
+            else ShortfallQuery.ORIGINAL
+        )
+        return cls(provider, RequestFailure.from_dict(data.get("failure")), missing, query)
 
 
 def _is_record_count(value: object) -> bool:
@@ -2430,6 +2460,8 @@ class ReportMetadata:
             lower bound rather than an exact count (true for "Both" mode, where
             the PubMed/Europe PMC union size is unknowable without full retrieval)
         documents_retrieved: Number of documents actually retrieved
+        alternative_queries: The query strings smart search ran for the
+            report, in order; empty when it ran none
         search_shortfalls: What failed sources, batches or pages left out of
             the search (#247); empty when the search was complete
         analysis_shortfalls: What scoring and citation extraction could not
@@ -2511,6 +2543,7 @@ class ReportMetadata:
     total_results_available: int = 0
     total_is_lower_bound: bool = False
     documents_retrieved: int = 0
+    alternative_queries: list[str] = field(default_factory=list)
     search_shortfalls: list[RetrievalShortfall] = field(default_factory=list)
     analysis_shortfalls: list[AnalysisShortfall] = field(default_factory=list)
 
@@ -2569,6 +2602,7 @@ class ReportMetadata:
             "total_results_available": self.total_results_available,
             "total_is_lower_bound": self.total_is_lower_bound,
             "documents_retrieved": self.documents_retrieved,
+            "alternative_queries": list(self.alternative_queries),
             "search_shortfalls": [s.to_dict() for s in self.search_shortfalls],
             "analysis_shortfalls": [s.to_dict() for s in self.analysis_shortfalls],
             "documents_scored": self.documents_scored,
@@ -2634,6 +2668,13 @@ class ReportMetadata:
         if not isinstance(stored_analysis, list):
             raise ValueError("analysis_shortfalls must be a list")
 
+        # Metadata saved before smart search has none
+        stored_queries = data.get("alternative_queries", [])
+        if not isinstance(stored_queries, list) or not all(
+            isinstance(q, str) for q in stored_queries
+        ):
+            raise ValueError("alternative_queries must be a list of strings")
+
         stored_screen = data.get("retraction_screen")
         from .retraction_screen import RetractionSnapshot  # circular at import time
 
@@ -2659,6 +2700,7 @@ class ReportMetadata:
             total_results_available=data.get("total_results_available", 0),
             total_is_lower_bound=data.get("total_is_lower_bound", False),
             documents_retrieved=data.get("documents_retrieved", 0),
+            alternative_queries=list(stored_queries),
             search_shortfalls=[RetrievalShortfall.from_dict(s) for s in stored_shortfalls],
             analysis_shortfalls=[AnalysisShortfall.from_dict(s) for s in stored_analysis],
             documents_scored=data.get("documents_scored", 0),

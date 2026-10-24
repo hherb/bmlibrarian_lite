@@ -322,6 +322,32 @@ def screen_documents(
     return RetractionScreen(tuple(kept), tuple(excluded), dict(checks), failed)
 
 
+def merged_screen(first: RetractionScreen, then: RetractionScreen) -> RetractionScreen:
+    """One run's screen over two batches it checked (smart search's documents after the search's).
+
+    A batch whose check failed carries stand-in checks, which the screen
+    reads as real only when it is not failed: their time would be stored as a
+    check time, and their unchecked papers blamed on a source that was never
+    asked. So the merged screen is failed when either batch was: it reports
+    no check time, and every unchecked paper's cause is the failed check, the
+    checked batch's included -- more failure than there was, never less.
+
+    Args:
+        first: The earlier batch's screen.
+        then: The later batch's; a document in both keeps the earlier check.
+
+    Returns:
+        The screen over both, in order.
+    """
+    seen = {doc.id for doc in (*first.kept, *first.excluded)}
+    return RetractionScreen(
+        (*first.kept, *(d for d in then.kept if d.id not in seen)),
+        (*first.excluded, *(d for d in then.excluded if d.id not in seen)),
+        {**then.checks, **first.checks},
+        first.failed or then.failed,
+    )
+
+
 def unchecked_check() -> PaperCheck:
     """A check saying no lookup answered: the stand-in when checking failed."""
     return PaperCheck(

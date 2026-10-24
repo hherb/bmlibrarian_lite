@@ -798,6 +798,9 @@ Key passages:
             f"- **Total Results Available:** {total_prefix}{metadata.total_results_available:,}",
             f"- **Documents Retrieved:** {metadata.documents_retrieved:,}",
         ])
+        if metadata.alternative_queries:
+            lines.append("- **Alternative Queries (smart search):**")
+            lines.extend(f"  - `{query}`" for query in metadata.alternative_queries)
         if metadata.search_shortfalls:
             lines.append(
                 "- **Search Completeness:** Incomplete: "
