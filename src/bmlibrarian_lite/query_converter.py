@@ -33,7 +33,7 @@ Usage:
 import json
 import logging
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from bmlibrarian_lite.llm import LLMClient, LLMMessage
 from bmlibrarian_lite.pubmed.data_types import PubMedQuery
@@ -273,58 +273,8 @@ class LiteQueryConverter:
         return False
 
     def _build_query(self, data: dict) -> str:
-        """
-        Build a PubMed query string from parsed LLM data.
-
-        Args:
-            data: Parsed JSON with concepts and filters
-
-        Returns:
-            PubMed query string
-        """
-        concepts = data.get("concepts", [])
-        filters = data.get("filters", {})
-
-        if not concepts:
-            return ""
-
-        # Build clause for each concept
-        concept_clauses = []
-        for concept in concepts:
-            terms = []
-
-            # Add MeSH terms (limited)
-            mesh_terms = concept.get("mesh_terms", [])[:MAX_MESH_TERMS_PER_CONCEPT]
-            for term in mesh_terms:
-                terms.append(f'"{term}"[mh]')
-
-            # Add keywords (limited)
-            keywords = concept.get("keywords", [])[:MAX_KEYWORDS_PER_CONCEPT]
-            for kw in keywords:
-                # Quote multi-word phrases
-                if " " in kw:
-                    terms.append(f'"{kw}"[tiab]')
-                else:
-                    terms.append(f"{kw}[tiab]")
-
-            if terms:
-                # OR within concept
-                concept_clauses.append("(" + " OR ".join(terms) + ")")
-
-        if not concept_clauses:
-            return ""
-
-        # AND between concepts
-        query_parts = ["(" + " AND ".join(concept_clauses) + ")"]
-
-        # Add filters
-        if filters.get("humans_only", True):
-            query_parts.append("humans[mh]")
-
-        if filters.get("has_abstract", True):
-            query_parts.append("hasabstract")
-
-        return " AND ".join(query_parts)
+        """Build a PubMed query string from parsed LLM data; see :func:`build_query_string`."""
+        return build_query_string(data)
 
     def _create_fallback_query(self, question: str) -> PubMedQuery:
         """
@@ -365,3 +315,59 @@ class LiteQueryConverter:
             generation_model="fallback",
             confidence_score=0.4,
         )
+
+
+def build_query_string(data: dict[str, Any]) -> str:
+    """
+    Build a PubMed query string from parsed LLM data.
+
+    Args:
+        data: Parsed JSON with concepts and filters; the filters default to
+            humans only and abstracts only
+
+    Returns:
+        PubMed query string, empty when no concept has a term
+    """
+    concepts = data.get("concepts", [])
+    filters = data.get("filters", {})
+
+    if not concepts:
+        return ""
+
+    # Build clause for each concept
+    concept_clauses = []
+    for concept in concepts:
+        terms = []
+
+        # Add MeSH terms (limited)
+        mesh_terms = concept.get("mesh_terms", [])[:MAX_MESH_TERMS_PER_CONCEPT]
+        for term in mesh_terms:
+            terms.append(f'"{term}"[mh]')
+
+        # Add keywords (limited)
+        keywords = concept.get("keywords", [])[:MAX_KEYWORDS_PER_CONCEPT]
+        for kw in keywords:
+            # Quote multi-word phrases
+            if " " in kw:
+                terms.append(f'"{kw}"[tiab]')
+            else:
+                terms.append(f"{kw}[tiab]")
+
+        if terms:
+            # OR within concept
+            concept_clauses.append("(" + " OR ".join(terms) + ")")
+
+    if not concept_clauses:
+        return ""
+
+    # AND between concepts
+    query_parts = ["(" + " AND ".join(concept_clauses) + ")"]
+
+    # Add filters
+    if filters.get("humans_only", True):
+        query_parts.append("humans[mh]")
+
+    if filters.get("has_abstract", True):
+        query_parts.append("hasabstract")
+
+    return " AND ".join(query_parts)

@@ -37,6 +37,7 @@ from bmlibrarian_lite.pubmed import (
 )
 from ..storage import LiteStorage
 from ..config import LiteConfig
+from ..constants import SMART_SEARCH_MAX_TOKENS, SMART_SEARCH_TEMPERATURE
 from ..data_models import LiteDocument, DocumentSource, SearchSession, SearchProvider
 from ..embeddings import LiteEmbedder
 from ..query_converter import LiteQueryConverter
@@ -155,6 +156,22 @@ class LiteSearchAgent(LiteBaseAgent):
 
         logger.debug(f"Generated query: {query.query_string}")
         return query
+
+    def ask(self, prompt: str) -> str:
+        """One JSON answer from the query-conversion model (smart search's alternative queries).
+
+        Args:
+            prompt: The request.
+
+        Returns:
+            The answer's text.
+        """
+        return self._chat(
+            [self._create_user_message(prompt)],
+            temperature=SMART_SEARCH_TEMPERATURE,
+            max_tokens=SMART_SEARCH_MAX_TOKENS,
+            json_mode=True,
+        )
 
     def search(
         self,

@@ -286,7 +286,8 @@ class AuditTrailTab(QWidget):
             documents: List of found documents
         """
         logger.debug(f"Audit trail: {len(documents)} documents found")
-        self._documents_found_count = len(documents)
+        # Added to: smart search's documents follow the search's
+        self._documents_found_count += len(documents)
 
         self.literature_tab.add_documents(documents)
 

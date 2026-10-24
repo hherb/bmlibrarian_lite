@@ -273,6 +273,44 @@ class QualityFilter:
             use_detailed_assessment=data.get("use_detailed_assessment", False),
         )
 
+    @classmethod
+    def from_report_settings(cls, settings: object) -> "QualityFilter":
+        """The filter a report's metadata names (``quality_filter_settings``).
+
+        The review keeps only what decides a pass: the minimum tier by name,
+        the randomisation and blinding requirements and the sample size.
+        How a tier is found (metadata only, or a detailed assessment) is not
+        kept (#627 item 4), so the defaults stand in for it.
+
+        Args:
+            settings: The stored settings, read as input.
+
+        Returns:
+            The filter.
+
+        Raises:
+            ValueError: If the settings are not a mapping naming a known tier
+                and well-typed requirements.
+        """
+        if not isinstance(settings, dict):
+            raise ValueError("The quality filter settings are not a mapping")
+        try:
+            tier = QualityTier[settings["minimum_tier"]]
+        except (KeyError, TypeError) as e:
+            raise ValueError("The quality filter names no known tier") from e
+        size = settings.get("minimum_sample_size")
+        flags = (settings.get("require_randomization", False), settings.get("require_blinding", False))
+        if not all(isinstance(f, bool) for f in flags) or not (
+            size is None or (isinstance(size, int) and not isinstance(size, bool))
+        ):
+            raise ValueError("The quality filter's requirements are unreadable")
+        return cls(
+            minimum_tier=tier,
+            require_randomization=flags[0],
+            require_blinding=flags[1],
+            minimum_sample_size=size,
+        )
+
 
 @dataclass
 class StudyClassification:

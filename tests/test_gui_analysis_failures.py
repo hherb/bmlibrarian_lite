@@ -136,6 +136,9 @@ def workflow_worker(
     """
     search_agent = MagicMock()
     search_agent.search.return_value = (session_for(documents), documents)
+    # Too few relevant documents ask for alternative queries: none usable,
+    # so the review goes on without them
+    search_agent.ask.return_value = "[]"
     monkeypatch.setattr(systematic_review_tab, "LiteSearchAgent", lambda **_: search_agent)
 
     scoring_agent = MagicMock()

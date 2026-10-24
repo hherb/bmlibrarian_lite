@@ -8,34 +8,53 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Parity: taking a fact check further, Python desktop** (`ROADMAP.md`).
-iOS/macOS landed in PR #611, Android in PR #616, the desktop's full-text rows
-in PR #622 (see *Recently landed*). **Upload Full Text is done on branch
-`feat/desktop-upload-full-text`**: *Audit Trail → Literature → right-click →
-Upload Full Text…* reads a PDF (its text), HTML (reduced to text), Markdown
-or plain text (`full_text_upload.read_upload`; UTF-8 only, BOM dropped, a
-NUL refused, `MAX_PDF_SIZE` cap, no text or nothing before the references
-refused, never cut; an HTML end tag left out never drops the page) and keeps it
-in SQLite (`uploaded_full_texts_store`, one row per paper, the last upload),
-**not in the converter-stamped markdown cache**, which a converter bump
-drops. The review reads a relevant paper's upload whatever the setting and
-never fetches it; *Retry Full Text* (now enabled with the setting off) reads
-a relevant paper's upload when it is newer than the paper's last full-text
-read (`is_due`, `citation_reads_store.full_text_read_at`), fetches only with
-the setting on, and refuses with `NOTHING_TO_READ_TEXT` when off with nothing
-due and no report owed. **A read is recorded at the time the uploads were
-read** (`read_at`), not when it ends, so an upload replaced during a run is
-read next time. The methodology says how many papers were read from an
-upload (`ReportMetadata.uploaded_full_text_read_count`), and a review's
-transparency pass reads an upload for a paper with no stored result.
-Follow-ups: #625 (a stored transparency result is still reused after an
-upload; uploaded PDFs get no title check; an upload is orphaned when its
-paper's id changes from `doi-` to `pmid-`). **Still owed:** *Find More Evidence* / repeated
-smart search (extending *Re-run Search*).
-Lodged: #620 (Ollama never sends `num_ctx`; outside PR #623 proposes a fix),
-#621 (PR #622 follow-ups), #624 (the reference cut drops tables and
-appendices a PDF puts after its references; all three platforms).
-Apple follow-ups: #612 (test seams), #613 (upload edge cases). Android
+**Parity: taking a fact check further, Python desktop: done** (`ROADMAP.md`).
+iOS/macOS PR #611, Android PR #616; the desktop's full-text rows PR #622,
+Upload Full Text PR #626, and **Find More Evidence / repeated smart search on
+branch `feat/desktop-find-more-evidence`**:
+- `smart_search.py`: the apps' alternative-query prompt word for word, told of
+  every query already run **for the run** (`smart_search_store`, table
+  `smart_search_run_queries` keyed by checkpoint, as the apps keep them on the
+  session; deleted with the run or its question); an answer with no usable
+  query, or only repeats (`ONLY_REPEATS_TEXT`, desktop only), asked for twice
+  more; a failed request is `QUERY_GENERATION_FAILED_TEXT` plus its cause,
+  never a shortfall. Once the round ends a query is kept as run unless a source
+  could not answer it and it found nothing new; a round that breaks off keeps
+  none. Every query searched is in the methodology. **`RetrievalShortfall.query`** (`ShortfallQuery`) marks an
+  alternative search's loss: its own clauses, persisted as `"query":
+  "alternative"`, never combined with the original query's.
+- **The review runs a round itself** when fewer than `SMART_SEARCH_THRESHOLD`
+  (3) documents are relevant and at least one was judged; the new documents
+  are screened (a fresh checker: the run's is closed), quality-filtered and
+  scored with the rest (`WorkflowWorker._score_documents`); a round that
+  cannot run is `smart_search_notice`; the queries are in the methodology
+  (`ReportMetadata.alternative_queries`).
+- **Research Questions → Find More Evidence**: `IncrementalSearchWorker` pages
+  the question's own query, then `MoreEvidenceWorker` (`more_evidence.py`)
+  runs a round when that found nothing; the new documents are screened, run
+  through the run's quality filter (`QualityFilter.from_report_settings`; the
+  depth flags are not kept, #627 item 4; read before anything is searched,
+  so a refusal changes nothing), scored **into the reviewed run's
+  checkpoint**, the relevant ones and any relevant paper a stopped run never
+  read are extracted, new documents get transparency, and
+  `full_text_retry.write_report_again` writes the report from every citation
+  of the run. Counts are kept as they are learnt with `REPORT_PENDING_KEY`;
+  documents a stop left unscored are kept under `UNSCORED_KEY` and scored
+  first next time, with no paid round on top (nor while relevant papers are
+  unread or a report is owed). Documents the run holds (scored, in its
+  retraction snapshot, or under `CHECKPOINT_QUALITY_FILTERED_KEY`) are never
+  new (`known_document_ids`); after *Re-run Search*, the review's round treats
+  every judged document as known (#316). A paper whose extraction failed does
+  not owe a report (it is read again with the next run's papers), and the
+  merged retraction screen is failed when either batch's check was.
+  Follow-ups: #627 (MCP has no smart search; a round runs all its queries;
+  sequential scoring; quality filter depth; Audit Trail queries; Re-run
+  Search's report covers its batch only), #629 (PR #628 review: truncated
+  query answers, the review's smart-search notice not kept, transparency
+  failure rows, re-paged losses counted twice, per-document failed screens).
+Lodged: #620 closed by PR #623; #621 (PR #622 follow-ups), #624 (the
+reference cut drops tables and appendices after the references; all three),
+#625 (Upload Full Text follow-ups). Apple follow-ups: #612, #613. Android
 divergences: #614, #615; follow-ups #617–#619.
 
 **Owed by the maintainer** (stages C1 and C2 and the desktop browser rescue
@@ -71,6 +90,9 @@ have landed):
 
 ## Recently landed (context)
 
+- **Desktop: Upload Full Text** (PR #626): Audit Trail cards; kept in
+  `uploaded_full_texts`, apart from the converter-stamped cache; read whatever
+  the setting; *Retry Full Text* reads one newer than the paper's last read.
 - **Desktop: citations from full text, Retry Full Text** (PR #622).
   *Settings → Full Text*: **Read citations from full text** (off) and **Fetch
   Full Text From Score** (4, never below the review's threshold). The review

@@ -55,12 +55,13 @@ from bmlibrarian_lite.resources.styles.theme_colors import ThemeColors
 
 from ..audit_records import (
     CHECKPOINT_MIN_SCORE_KEY,
+    CHECKPOINT_QUALITY_FILTERED_KEY,
     checkpoint_metadata_with_extraction_failures,
     checkpoint_metadata_with_report_metadata,
     checkpoint_metadata_with_retraction_snapshot,
 )
 from ..config import LiteConfig
-from ..constants import KEPT_THREAD_EXIT_WAIT_MS
+from ..constants import KEPT_THREAD_EXIT_WAIT_MS, SMART_SEARCH_THRESHOLD
 from ..storage import LiteStorage
 from ..data_models import (
     TransparencyAnalysisFailure,
@@ -83,8 +84,10 @@ from ..analysis_failures import (
     also_failed_text,
     analysis_failure_advice,
     describe_analysis_shortfalls,
+    failure_cause_text,
     with_analysis_shortfall_notice,
 )
+from ..utils import classify_analysis_exception
 from ..agents import (
     LiteSearchAgent,
     LiteScoringAgent,
@@ -93,6 +96,7 @@ from ..agents import (
 )
 from ..exceptions import SearchFailedError
 from ..search_failures import (
+    combined_shortfalls,
     describe_search_shortfalls,
     format_search_failure_message,
     retrieval_shortfalls_from_metadata,
@@ -108,7 +112,13 @@ from ..transparency.assessment import contact_email, record_transparency_counts
 from ..citation_full_texts import fetch_full_texts, full_text_fetcher
 from ..citation_text import full_text_min_score, record_full_text_reads, record_uploaded_reads
 from ..retraction_checks import RetractionChecker, build_retraction_checker
-from ..retraction_screen import RetractionScreen, UnbuiltChecker, screen_with_fallback
+from ..retraction_screen import (
+    RetractionScreen,
+    UnbuiltChecker,
+    merged_screen,
+    screen_with_fallback,
+)
+from ..smart_search import SmartSearchContext, SmartSearchError, run_smart_search
 from ..retraction_text import retraction_check_line, run_summary_clause, with_retraction_notice
 from datetime import UTC, datetime
 
@@ -142,7 +152,9 @@ class WorkflowWorker(QThread):
     Executes the full workflow in a background thread:
     1. Search PubMed
     2. Quality filter (optional)
-    3. Score documents
+    3. Score documents; with fewer than ``SMART_SEARCH_THRESHOLD`` relevant
+       (and at least one judged), a round of alternative queries whose
+       documents are screened, filtered and scored likewise
     4. Extract citations
     5. Generate report
 
@@ -156,7 +168,10 @@ class WorkflowWorker(QThread):
         analysis_incomplete: Emitted when scoring or citation extraction
             could not read part of what the search found (#261, #262)
         retraction_screened: Emitted with the run's RetractionScreen once
-            the gathered documents are checked, before anything is scored
+            the gathered documents are checked, before anything is scored;
+            again, over every document, once smart search's are checked
+        smart_search_notice: Emitted when too few documents were relevant
+            and no alternative search could run, with why
     """
 
     progress = Signal(str, int, int)  # step, current, total
@@ -166,6 +181,7 @@ class WorkflowWorker(QThread):
     search_incomplete = Signal(str)  # what the search is missing (#247)
     analysis_incomplete = Signal(str)  # what the analysis could not read (#261)
     retraction_screened = Signal(object)  # RetractionScreen
+    smart_search_notice = Signal(str)  # why no alternative search ran
 
     # Granular signals for audit trail
     query_generated = Signal(str, str)  # (pubmed_query, nl_query)
@@ -335,6 +351,8 @@ class WorkflowWorker(QThread):
             if not documents:
                 self._finish_without_report("No documents found for this query.", metadata)
                 return
+            # Every document the search gathered, so smart search finds only others
+            gathered_ids = {doc.id for doc in documents}
 
             # The one choke point: retracted papers leave before anything is
             # filtered or scored, whichever path gathered the documents
@@ -359,6 +377,8 @@ class WorkflowWorker(QThread):
 
             # Track original document count before quality filtering
             original_doc_count = len(documents)
+            # What the quality filter leaves out, kept with the run
+            quality_filtered: list[str] = []
 
             # Step 2: Quality filtering (if enabled)
             if self.quality_filter and self.quality_manager:
@@ -415,6 +435,7 @@ class WorkflowWorker(QThread):
                         return
 
                     # Use filtered documents for scoring
+                    quality_filtered = [d.id for d in documents if d.id not in {f.id for f in filtered}]
                     documents = filtered
 
             # Step 3: Score documents
@@ -422,6 +443,8 @@ class WorkflowWorker(QThread):
             # immediately. It keeps the threshold, so a report restored from
             # it states the split it was made at instead of guessing (#302).
             checkpoint_metadata: dict[str, Any] = {CHECKPOINT_MIN_SCORE_KEY: self.min_score}
+            if quality_filtered:
+                checkpoint_metadata[CHECKPOINT_QUALITY_FILTERED_KEY] = quality_filtered
             if self.retraction_screen is not None:
                 checkpoint_metadata = checkpoint_metadata_with_retraction_snapshot(
                     checkpoint_metadata, self.retraction_screen
@@ -437,60 +460,21 @@ class WorkflowWorker(QThread):
             scoring_agent = LiteScoringAgent(config=self.config)
 
             # Score documents, persisting and emitting each result immediately
-            all_scored_docs: List[ScoredDocument] = []
-            scored_docs: List[ScoredDocument] = []
-            total = len(documents)
+            all_scored_docs = self._score_documents(scoring_agent, documents, checkpoint.id)
 
-            scoring_provider = self.config.models.get_task_config(
-                "document_scoring"
-            ).provider
-            scoring_workers = self.config.parallel.get_scoring_workers(
-                scoring_provider
-            )
-
-            if scoring_workers <= 1:
-                # Sequential path
-                for i, doc in enumerate(documents):
-                    if self._cancelled:
-                        break
-
-                    self.progress.emit("scoring", i + 1, total)
-                    scored_doc = scoring_agent.score_document(self.question, doc)
-                    self.storage.save_scored_document(scored_doc, checkpoint.id)
-                    self.document_scored.emit(scored_doc)
-                    all_scored_docs.append(scored_doc)
-                    if scored_doc.score >= self.min_score:
-                        scored_docs.append(scored_doc)
-            else:
-                # Parallel path — persist and emit each result as it completes
-                lock = threading.Lock()
-                completed = 0
-
-                def _score_one(doc: LiteDocument) -> ScoredDocument:
-                    return scoring_agent.score_document(self.question, doc)
-
-                with ThreadPoolExecutor(max_workers=scoring_workers) as executor:
-                    futures = {
-                        executor.submit(_score_one, doc): doc
-                        for doc in documents
-                    }
-                    for future in as_completed(futures):
-                        if self._cancelled:
-                            executor.shutdown(wait=False, cancel_futures=True)
-                            break
-
-                        scored_doc = future.result()
-
-                        with lock:
-                            completed += 1
-                            current = completed
-
-                        self.progress.emit("scoring", current, total)
-                        self.storage.save_scored_document(scored_doc, checkpoint.id)
-                        self.document_scored.emit(scored_doc)
-                        all_scored_docs.append(scored_doc)
-                        if scored_doc.score >= self.min_score:
-                            scored_docs.append(scored_doc)
+            # Too few relevant documents: a round of alternative queries, as on
+            # the apps; what it finds is screened, filtered and scored like the
+            # rest. Not when no document could be scored: the model is the trouble
+            relevant = sum(1 for d in all_scored_docs if d.score >= self.min_score)
+            judged = any(d.score >= 0 for d in all_scored_docs)
+            if not self._cancelled and judged and relevant < SMART_SEARCH_THRESHOLD:
+                more, checkpoint_metadata = self._smart_search(
+                    metadata, gathered_ids, relevant, checkpoint.id, checkpoint_metadata
+                )
+                if more:
+                    documents = [*documents, *more]
+                    all_scored_docs += self._score_documents(scoring_agent, more, checkpoint.id)
+            scored_docs = [d for d in all_scored_docs if d.score >= self.min_score]
 
             # Sort by score descending for downstream use
             scored_docs.sort(key=lambda x: x.score, reverse=True)
@@ -706,6 +690,214 @@ class WorkflowWorker(QThread):
         except Exception as e:
             logger.exception("Workflow error")
             self.error.emit("workflow", str(e))
+
+    def _score_documents(
+        self,
+        scoring_agent: LiteScoringAgent,
+        documents: list[LiteDocument],
+        checkpoint_id: str,
+    ) -> list[ScoredDocument]:
+        """Score documents, persisting and emitting each result as it arrives.
+
+        Args:
+            scoring_agent: Scores each document.
+            documents: The documents.
+            checkpoint_id: The run's checkpoint.
+
+        Returns:
+            Every score, failures included, in the order they arrived; after
+            a cancel, those that arrived before it.
+        """
+        all_scored_docs: List[ScoredDocument] = []
+        total = len(documents)
+
+        scoring_provider = self.config.models.get_task_config(
+            "document_scoring"
+        ).provider
+        scoring_workers = self.config.parallel.get_scoring_workers(
+            scoring_provider
+        )
+
+        if scoring_workers <= 1:
+            # Sequential path
+            for i, doc in enumerate(documents):
+                if self._cancelled:
+                    break
+
+                self.progress.emit("scoring", i + 1, total)
+                scored_doc = scoring_agent.score_document(self.question, doc)
+                self.storage.save_scored_document(scored_doc, checkpoint_id)
+                self.document_scored.emit(scored_doc)
+                all_scored_docs.append(scored_doc)
+        else:
+            # Parallel path — persist and emit each result as it completes
+            lock = threading.Lock()
+            completed = 0
+
+            def _score_one(doc: LiteDocument) -> ScoredDocument:
+                return scoring_agent.score_document(self.question, doc)
+
+            with ThreadPoolExecutor(max_workers=scoring_workers) as executor:
+                futures = {
+                    executor.submit(_score_one, doc): doc
+                    for doc in documents
+                }
+                for future in as_completed(futures):
+                    if self._cancelled:
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        break
+
+                    scored_doc = future.result()
+
+                    with lock:
+                        completed += 1
+                        current = completed
+
+                    self.progress.emit("scoring", current, total)
+                    self.storage.save_scored_document(scored_doc, checkpoint_id)
+                    self.document_scored.emit(scored_doc)
+                    all_scored_docs.append(scored_doc)
+        return all_scored_docs
+
+    def _smart_search(
+        self,
+        metadata: ReportMetadata,
+        gathered_ids: set[str],
+        relevant: int,
+        checkpoint_id: str,
+        checkpoint_metadata: dict[str, Any],
+    ) -> tuple[list[LiteDocument], dict[str, Any]]:
+        """Run a round of alternative queries for a review that found too little.
+
+        The review's own idea, not the reader's: what the queries lose is
+        recorded like any shortfall, and a round that could not run is said
+        and the review goes on on what it has.
+
+        Args:
+            metadata: The workflow's metadata; the round's queries, documents
+                and losses are added to it.
+            gathered_ids: The documents the search gathered; after *Re-run
+                Search*, every document judged for the question is known too,
+                so earlier runs' are never scored again (#316).
+            relevant: How many of them were scored relevant.
+            checkpoint_id: The run's checkpoint.
+            checkpoint_metadata: What the checkpoint keeps so far.
+
+        Returns:
+            The new documents to score, screened and filtered as the search's
+            were, and the checkpoint's metadata with their retraction rows.
+        """
+        self.progress.emit("smart_search", 0, 1)
+        context = SmartSearchContext(
+            question=self.question,
+            initial_query=metadata.pubmed_query,
+            total_results=metadata.total_results_available,
+            relevant_count=relevant,
+            checkpoint_id=checkpoint_id,
+        )
+        known = set(gathered_ids)
+        if self.preloaded_documents:
+            known |= self.storage.get_rerun_document_ids_for_question(self.question)[0]
+        try:
+            round_ = run_smart_search(
+                LiteSearchAgent(config=self.config, storage=self.storage),
+                self.storage,
+                context,
+                known,
+                asked=False,
+                max_results=self.max_results,
+                should_stop=lambda: self._cancelled,
+            )
+        except SmartSearchError as e:
+            self.smart_search_notice.emit(str(e))
+            return [], checkpoint_metadata
+        except Exception as e:
+            # The review's own idea: a round that broke does not sink the review
+            # it was to help. The cause, never the provider's text (#330)
+            cause = classify_analysis_exception(e)
+            logger.exception(f"Smart search failed ({cause.name})")
+            self.smart_search_notice.emit(
+                f"Alternative searches could not be completed. {failure_cause_text(cause)}"
+            )
+            return [], checkpoint_metadata
+        metadata.alternative_queries = list(round_.queries)
+        metadata.documents_retrieved += len(round_.documents)
+        if round_.shortfalls:
+            metadata.search_shortfalls = combined_shortfalls(
+                [*metadata.search_shortfalls, *round_.shortfalls]
+            )
+            self._report_incomplete_search(metadata)
+        new = list(round_.documents)
+        if not new or self._cancelled:
+            return [], checkpoint_metadata
+        self.step_complete.emit("smart_search", new)
+
+        excluded: list[LiteDocument] = []
+        if self.retraction_checker is not None and self.retraction_screen is not None:
+            screen = self._screen_retractions(self._fresh_retraction_checker(), new)
+            merged = merged_screen(self.retraction_screen, screen)
+            self.retraction_screen = merged
+            metadata.retraction_screen = merged
+            self.retraction_screened.emit(merged)
+            checkpoint_metadata = checkpoint_metadata_with_retraction_snapshot(
+                checkpoint_metadata, merged
+            )
+            self.storage.update_checkpoint(
+                checkpoint_id=checkpoint_id, metadata=checkpoint_metadata
+            )
+            new, excluded = list(screen.kept), list(screen.excluded)
+        self._hold_documents([*new, *excluded])
+
+        if new and metadata.quality_filter_applied and self.quality_filter and self.quality_manager:
+            assessed = new
+
+            def quality_progress(current: int, total: int, assessment: QualityAssessment) -> None:
+                self.progress.emit("quality_filter", current, total)
+                if assessment and 0 < current <= len(assessed):
+                    self.quality_assessed.emit(assessed[current - 1].id, assessment)
+
+            filtered, _assessments = self.quality_manager.filter_documents(
+                assessed,
+                self.quality_filter,
+                progress_callback=quality_progress,
+                should_cancel=lambda: self._cancelled,
+            )
+            if self._cancelled:
+                # The papers it never reached are not "left out by the filter"
+                return [], checkpoint_metadata
+            metadata.documents_filtered_by_quality += len(assessed) - len(filtered)
+            left_out = [d.id for d in assessed if d.id not in {f.id for f in filtered}]
+            if left_out:
+                checkpoint_metadata = {
+                    **checkpoint_metadata,
+                    CHECKPOINT_QUALITY_FILTERED_KEY: [
+                        *checkpoint_metadata.get(CHECKPOINT_QUALITY_FILTERED_KEY, []), *left_out
+                    ],
+                }
+                self.storage.update_checkpoint(
+                    checkpoint_id=checkpoint_id, metadata=checkpoint_metadata
+                )
+            new = filtered
+        if self._cancelled:
+            return [], checkpoint_metadata
+        return new, checkpoint_metadata
+
+    def _fresh_retraction_checker(self) -> RetractionChecker | UnbuiltChecker:
+        """A checker for smart search's documents: the run's own is closed after its one use.
+
+        Returns:
+            A new checker like the run's (it never downloads the export, which
+            the run's already did); a stand-in when the run's was one, or a
+            new one could not be built.
+        """
+        if not isinstance(self.retraction_checker, RetractionChecker):
+            return UnbuiltChecker()
+        try:
+            return build_retraction_checker(self.config, self.storage)
+        except Exception as e:
+            # the type only: provider text never reaches the reader or the log
+            logger.warning("Retraction checker not built (%s); every document unchecked", type(e).__name__)
+            return UnbuiltChecker()
 
     def _record_extraction_failures(
         self,
@@ -1200,6 +1392,7 @@ class SystematicReviewTab(QWidget):
         self._worker.search_incomplete.connect(self._on_search_incomplete)
         self._worker.analysis_incomplete.connect(self._on_analysis_incomplete)
         self._worker.retraction_screened.connect(self._on_retraction_screened)
+        self._worker.smart_search_notice.connect(self._on_smart_search_notice)
 
         # Connect worker audit trail signals to tab signals
         self._worker.query_generated.connect(self.query_generated)
@@ -1259,6 +1452,7 @@ class SystematicReviewTab(QWidget):
         """Handle progress updates from worker."""
         step_names = {
             "search": "Searching PubMed",
+            "smart_search": "Too few relevant documents; running alternative searches",
             "quality_filter": "Assessing quality",
             "scoring": "Scoring documents",
             "full_text": "Fetching full texts",
@@ -1285,6 +1479,16 @@ class SystematicReviewTab(QWidget):
 
             # Emit documents found signal for audit trail
             self.documents_found.emit(docs)
+        elif step == "smart_search":
+            # What alternative queries found, analysed and shown like the search's
+            more: List[LiteDocument] = result
+            self._documents_found = [*self._documents_found, *more]
+            self.progress_label.setText(
+                f"Alternative searches found {len(more)} more "
+                f"document{'s' if len(more) != 1 else ''}"
+            )
+            self.start_transparency_analysis(more)
+            self.documents_found.emit(more)
         elif step == "quality_filter":
             # Handle quality filtering results
             filtered_docs, assessments = result
@@ -1353,6 +1557,16 @@ class SystematicReviewTab(QWidget):
             f"Incomplete search: {missing}. The review continues on the records "
             "that were retrieved."
         )
+        self.search_notice_label.setVisible(True)
+
+    def _on_smart_search_notice(self, notice: str) -> None:
+        """Say why no alternative search ran; the review goes on without one.
+
+        Args:
+            notice: Why, as the reader's sentence.
+        """
+        shown = self.search_notice_label.text()
+        self.search_notice_label.setText(f"{shown}\n{notice}" if shown else notice)
         self.search_notice_label.setVisible(True)
 
     def _on_retraction_screened(self, screen: RetractionScreen) -> None:
