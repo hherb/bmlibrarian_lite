@@ -84,8 +84,10 @@ from ..analysis_failures import (
     also_failed_text,
     analysis_failure_advice,
     describe_analysis_shortfalls,
+    failure_cause_text,
     with_analysis_shortfall_notice,
 )
+from ..utils import classify_analysis_exception
 from ..agents import (
     LiteSearchAgent,
     LiteScoringAgent,
@@ -150,7 +152,9 @@ class WorkflowWorker(QThread):
     Executes the full workflow in a background thread:
     1. Search PubMed
     2. Quality filter (optional)
-    3. Score documents
+    3. Score documents; with fewer than ``SMART_SEARCH_THRESHOLD`` relevant
+       (and at least one judged), a round of alternative queries whose
+       documents are screened, filtered and scored likewise
     4. Extract citations
     5. Generate report
 
@@ -772,7 +776,9 @@ class WorkflowWorker(QThread):
         Args:
             metadata: The workflow's metadata; the round's queries, documents
                 and losses are added to it.
-            gathered_ids: The documents the search gathered.
+            gathered_ids: The documents the search gathered; after *Re-run
+                Search*, every document judged for the question is known too,
+                so earlier runs' are never scored again (#316).
             relevant: How many of them were scored relevant.
             checkpoint_id: The run's checkpoint.
             checkpoint_metadata: What the checkpoint keeps so far.
@@ -787,19 +793,32 @@ class WorkflowWorker(QThread):
             initial_query=metadata.pubmed_query,
             total_results=metadata.total_results_available,
             relevant_count=relevant,
+            checkpoint_id=checkpoint_id,
         )
+        known = set(gathered_ids)
+        if self.preloaded_documents:
+            known |= self.storage.get_rerun_document_ids_for_question(self.question)[0]
         try:
             round_ = run_smart_search(
                 LiteSearchAgent(config=self.config, storage=self.storage),
                 self.storage,
                 context,
-                gathered_ids,
+                known,
                 asked=False,
                 max_results=self.max_results,
                 should_stop=lambda: self._cancelled,
             )
         except SmartSearchError as e:
             self.smart_search_notice.emit(str(e))
+            return [], checkpoint_metadata
+        except Exception as e:
+            # The review's own idea: a round that broke does not sink the review
+            # it was to help. The cause, never the provider's text (#330)
+            cause = classify_analysis_exception(e)
+            logger.exception(f"Smart search failed ({cause.name})")
+            self.smart_search_notice.emit(
+                f"Alternative searches could not be completed. {failure_cause_text(cause)}"
+            )
             return [], checkpoint_metadata
         metadata.alternative_queries = list(round_.queries)
         metadata.documents_retrieved += len(round_.documents)
@@ -843,6 +862,9 @@ class WorkflowWorker(QThread):
                 progress_callback=quality_progress,
                 should_cancel=lambda: self._cancelled,
             )
+            if self._cancelled:
+                # The papers it never reached are not "left out by the filter"
+                return [], checkpoint_metadata
             metadata.documents_filtered_by_quality += len(assessed) - len(filtered)
             left_out = [d.id for d in assessed if d.id not in {f.id for f in filtered}]
             if left_out:
@@ -1462,7 +1484,8 @@ class SystematicReviewTab(QWidget):
             more: List[LiteDocument] = result
             self._documents_found = [*self._documents_found, *more]
             self.progress_label.setText(
-                f"Alternative searches found {len(more)} more documents"
+                f"Alternative searches found {len(more)} more "
+                f"document{'s' if len(more) != 1 else ''}"
             )
             self.start_transparency_analysis(more)
             self.documents_found.emit(more)

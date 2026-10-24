@@ -38,6 +38,7 @@ from bmlibrarian_lite.search_failures import (
 )
 from bmlibrarian_lite.smart_search import (
     NO_USABLE_QUERY_TEXT,
+    ONLY_REPEATS_TEXT,
     QUERY_GENERATION_FAILED_TEXT,
     SmartSearchContext,
     SmartSearchError,
@@ -50,8 +51,10 @@ from bmlibrarian_lite.smart_search_store import RunQuery
 from bmlibrarian_lite.storage import LiteStorage
 
 QUESTION = "Is drug A better than drug B for migraine?"
+RUN = "checkpoint-1"
 CONTEXT = SmartSearchContext(
-    question=QUESTION, initial_query="(migraine[tiab])", total_results=12, relevant_count=1
+    question=QUESTION, initial_query="(migraine[tiab])", total_results=12, relevant_count=1,
+    checkpoint_id=RUN,
 )
 TIMEOUT = RequestFailure(RequestFailureKind.TIMEOUT)
 
@@ -149,7 +152,7 @@ class TestThePrompt:
 
     def test_no_initial_query_reads_n_a(self) -> None:
         """As on the apps."""
-        context = SmartSearchContext(QUESTION, "", 0, 0)
+        context = SmartSearchContext(QUESTION, "", 0, 0, RUN)
         assert "Initial query: N/A\n" in alternative_queries_prompt(context, [])
 
 
@@ -205,11 +208,31 @@ class TestAskingForThem:
     """An unusable answer is asked for again; a failed request ends the round."""
 
     def test_an_unusable_answer_is_asked_for_twice_more(self) -> None:
-        """Three paid calls in all, then none."""
+        """Three paid calls in all, then none, and says why."""
         searcher = Searcher(["no", "[]", "{}", answer([("x", ["x"])])])
 
-        assert generate_alternative_queries(searcher, "p", lambda: False) == []
+        with pytest.raises(SmartSearchError) as raised:
+            generate_alternative_queries(searcher, "p", lambda: False)
+        assert str(raised.value) == NO_USABLE_QUERY_TEXT
         assert len(searcher.prompts) == 3
+
+    def test_an_answer_of_queries_already_run_is_asked_for_again(self) -> None:
+        """A repeat is no query: asked again, and a new one is taken."""
+        searcher = Searcher([answer([("x", ["x"])]), answer([("x", ["x"])], [("y", ["y"])])])
+
+        queries = generate_alternative_queries(
+            searcher, "p", lambda: False, {query_of(("x", ["x"]))})
+
+        assert [q.label for q in queries] == ["y"]
+        assert len(searcher.prompts) == 2
+
+    def test_only_repeats_are_said_to_be_repeats(self) -> None:
+        """Not "no usable query": the answers were usable."""
+        searcher = Searcher([answer([("x", ["x"])])] * 2 + ["[]"])
+
+        with pytest.raises(SmartSearchError) as raised:
+            generate_alternative_queries(searcher, "p", lambda: False, {query_of(("x", ["x"]))})
+        assert str(raised.value) == ONLY_REPEATS_TEXT
 
     def test_a_usable_answer_ends_the_asking(self) -> None:
         """The first one usable."""
@@ -218,13 +241,16 @@ class TestAskingForThem:
         assert [q.label for q in generate_alternative_queries(searcher, "p", lambda: False)] == ["x"]
         assert len(searcher.prompts) == 2
 
-    def test_a_failed_request_says_to_check_the_model(self) -> None:
-        """Never the provider's own words."""
+    def test_a_failed_request_says_why_and_what_to_do(self) -> None:
+        """Its classified cause, never the provider's own words (#330)."""
         searcher = Searcher([ConnectionError("key sk-secret refused")])
 
         with pytest.raises(SmartSearchError) as raised:
             generate_alternative_queries(searcher, "p", lambda: False)
-        assert str(raised.value) == QUERY_GENERATION_FAILED_TEXT
+        text = str(raised.value)
+        assert text.startswith(QUERY_GENERATION_FAILED_TEXT + " ")
+        assert len(text) > len(QUERY_GENERATION_FAILED_TEXT) + 1
+        assert "sk-secret" not in text
 
     def test_a_stop_asks_nothing(self) -> None:
         """Not even once."""
@@ -259,7 +285,7 @@ class TestARound:
         assert [d.id for d in round_.documents] == ["pmid-2", "pmid-3"]
         assert round_.queries == (qa, qb)
         assert round_.shortfalls == ()
-        assert storage.get_smart_search_queries(QUESTION) == [
+        assert storage.get_smart_search_queries(RUN) == [
             RunQuery("drug A", qa), RunQuery("drug B", qb)]
 
     def test_the_next_round_is_told_of_them_and_never_repeats_one(
@@ -277,14 +303,28 @@ class TestARound:
         assert round_.queries == (qb,)
 
     def test_the_questions_own_query_is_not_searched_again(self, storage: LiteStorage) -> None:
-        """It is the initial query."""
-        context = SmartSearchContext(QUESTION, query_of(*A), 1, 0)
-        searcher = Searcher([answer(A)])
+        """It is the initial query: asked for again, and said to be a repeat."""
+        context = SmartSearchContext(QUESTION, query_of(*A), 1, 0, RUN)
+        searcher = Searcher([answer(A)] * 3)
 
-        with pytest.raises(SmartSearchError):
+        with pytest.raises(SmartSearchError) as raised:
             run_smart_search(searcher, storage, context, (), asked=True, max_results=10,
                              should_stop=lambda: False)
+        assert str(raised.value) == ONLY_REPEATS_TEXT
         assert searcher.searched == []
+
+    def test_another_runs_queries_are_not_this_runs(self, storage: LiteStorage) -> None:
+        """Kept per run, as the apps keep them on the session: a new review starts afresh."""
+        qa = query_of(*A)
+        run(Searcher([answer(A)], {qa: [document("1")]}), storage)
+        other = SmartSearchContext(QUESTION, "(migraine[tiab])", 12, 1, "checkpoint-2")
+        searcher = Searcher([answer(A)], {qa: [document("1")]})
+
+        round_ = run_smart_search(searcher, storage, other, (), asked=True, max_results=10,
+                                  should_stop=lambda: False)
+
+        assert "already run" not in searcher.prompts[0]
+        assert searcher.searched == [qa] and round_.queries == (qa,)
 
     def test_no_usable_query_runs_no_search(self, storage: LiteStorage) -> None:
         """And says why."""
@@ -300,8 +340,8 @@ class TestARound:
 
         round_ = run(searcher, storage)
 
-        assert round_.queries == (qb,)
-        assert [r.query for r in storage.get_smart_search_queries(QUESTION)] == [qb]
+        assert round_.queries == (qa, qb)  # the report lists every query searched
+        assert [r.query for r in storage.get_smart_search_queries(RUN)] == [qb]
         assert round_.shortfalls == (
             RetrievalShortfall(SearchProvider.PUBMED, TIMEOUT, query=ShortfallQuery.ALTERNATIVE),)
 
@@ -345,13 +385,44 @@ class TestARound:
 
         assert round_.stopped
         assert round_.queries == (qa,)
+        assert [r.query for r in storage.get_smart_search_queries(RUN)] == [qa]
 
-    def test_the_queries_go_with_the_question(self, storage: LiteStorage) -> None:
-        """Deleting the question forgets them."""
-        storage.record_smart_search_query(QUESTION, RunQuery("a", "q"))
-        storage.add_question_documents(QUESTION, [])
-        storage.delete_research_question(QUESTION)
-        assert storage.get_smart_search_queries(QUESTION) == []
+    def test_a_stop_while_asking_is_a_stop_not_a_failure(self, storage: LiteStorage) -> None:
+        """No query, but nothing went wrong."""
+        searcher = Searcher([answer(A)])
+
+        round_ = run_smart_search(searcher, storage, CONTEXT, (), asked=True, max_results=10,
+                                  should_stop=lambda: len(searcher.prompts) >= 1)
+
+        assert round_.stopped and searcher.searched == []
+
+    def test_a_stop_does_not_excuse_reporting_a_failure(self, storage: LiteStorage) -> None:
+        """Asked for, left with nothing by a failure, then stopped: still a failed search (rule 8)."""
+        qa = query_of(*A)
+        lost = RetrievalShortfall(SearchProvider.PUBMED, TIMEOUT)
+        searcher = Searcher([answer(A, B)], {qa: [lost]})
+
+        with pytest.raises(SearchFailedError):
+            run_smart_search(searcher, storage, CONTEXT, (), asked=True, max_results=10,
+                             should_stop=lambda: len(searcher.searched) >= 1)
+
+    def test_a_round_that_breaks_off_keeps_no_query_as_run(self, storage: LiteStorage) -> None:
+        """Its documents are not held yet: the next round may ask the queries again."""
+        qa, qb = query_of(*A), query_of(*B)
+        searcher = Searcher([answer(A, B)], {qa: [document("1")], qb: RuntimeError("disk full")})
+
+        with pytest.raises(RuntimeError):
+            run(searcher, storage)
+        assert storage.get_smart_search_queries(RUN) == []
+
+    def test_the_queries_go_with_the_run(self, storage: LiteStorage) -> None:
+        """Deleting the run, or its question, forgets them."""
+        for delete in (storage.delete_checkpoint,
+                       lambda _id: storage.delete_research_question(QUESTION)):
+            checkpoint = storage.create_checkpoint(research_question=QUESTION)
+            storage.record_smart_search_query(checkpoint.id, RunQuery("a", "q"))
+            delete(checkpoint.id)
+            assert storage.get_smart_search_queries(checkpoint.id) == []
 
 
 class TestAnAlternativeSearchsLoss:
@@ -433,10 +504,13 @@ class TestTwoBatchesOneScreen:
         assert set(merged.checks) == {"pmid-1", "pmid-3"}
         assert not merged.failed
 
-    def test_it_failed_only_when_both_did(self) -> None:
-        """One batch checked is a run checked."""
-        failed = screen_documents([document("1")], {}, failed=True)
-        checked = screen_documents([document("2")], {})
+    def test_it_failed_when_either_did(self) -> None:
+        """A failed batch's stand-ins never read as checks: no check time, the failed cause."""
+        failed = screen_documents([document("1")], {"pmid-1": unchecked_check()}, failed=True)
+        checked = screen_documents([document("2")], {"pmid-2": unchecked_check()})
 
-        assert not merged_screen(failed, checked).failed
-        assert merged_screen(failed, failed).failed
+        for merged in (merged_screen(checked, failed), merged_screen(failed, checked)):
+            assert merged.failed
+            assert merged.checked_at is None
+            assert all(row["checked_at"] is None for row in merged.to_snapshot())
+        assert not merged_screen(checked, checked).failed

@@ -280,7 +280,7 @@ class QualityFilter:
         The review keeps only what decides a pass: the minimum tier by name,
         the randomisation and blinding requirements and the sample size.
         How a tier is found (metadata only, or a detailed assessment) is not
-        kept (#312), so the defaults stand in for it.
+        kept (#627 item 4), so the defaults stand in for it.
 
         Args:
             settings: The stored settings, read as input.

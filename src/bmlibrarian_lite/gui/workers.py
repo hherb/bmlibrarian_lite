@@ -44,6 +44,7 @@ left its caller waiting for a signal that never came.
 import logging
 import sqlite3
 import webbrowser
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
@@ -2058,19 +2059,23 @@ class MoreEvidenceWorker(SingleOutcome, QThread):
         storage: "LiteStorage",
         parent: QWidget | None = None,
         retraction_checker: Any = None,
+        max_results: int | None = None,
     ) -> None:
         """Initialize the worker.
 
         Args:
             question: The reviewed research question.
             documents: The new documents paging its own query found, stored
-                and linked to it; empty runs a round of alternative queries.
+                and linked to it. When none is new and nothing is held over
+                or owed, a round of alternative queries runs.
             search_shortfalls: What that paging lost.
             config: The configuration.
             storage: Where the run is read from and written to.
             parent: Optional parent widget.
             retraction_checker: Leaves retracted papers out before scoring;
                 ``None`` screens nothing.
+            max_results: How many results each alternative query fetches;
+                ``None`` fetches the search setting's maximum.
         """
         super().__init__(parent)
         self.question = question
@@ -2079,6 +2084,7 @@ class MoreEvidenceWorker(SingleOutcome, QThread):
         self.config = config
         self.storage = storage
         self.retraction_checker = retraction_checker
+        self.max_results = max_results
         self._cancelled = False
 
     def run(self) -> None:
@@ -2098,19 +2104,24 @@ class MoreEvidenceWorker(SingleOutcome, QThread):
         from ..full_text_retry import RetryNotPossible
         from ..more_evidence import MoreEvidence, find_more_evidence
         from ..search_failures import format_search_failure_message
-        from ..smart_search import SmartSearchContext, SmartSearchError, run_smart_search
+        from ..smart_search import (
+            SmartSearchContext,
+            SmartSearchError,
+            SmartSearchRound,
+            run_smart_search,
+        )
 
         def should_stop() -> bool:
             return self._cancelled
 
-        def smart_search(context: SmartSearchContext, known: Any) -> Any:
+        def smart_search(context: SmartSearchContext, known: Collection[str]) -> SmartSearchRound:
             return run_smart_search(
                 LiteSearchAgent(config=self.config, storage=self.storage),
                 self.storage,
                 context,
                 known,
                 asked=True,
-                max_results=self.config.search.max_results,
+                max_results=self.max_results or self.config.search.max_results,
                 should_stop=should_stop,
                 progress=lambda message: self.progress.emit(0, 0, message),
             )

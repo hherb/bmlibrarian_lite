@@ -833,7 +833,8 @@ MAX_PUBMED_SEARCH_OFFSET = 9999
 # Smart Search (alternative queries; iOS/macOS's WorkflowConstants)
 # =============================================================================
 
-# A review with fewer relevant documents than this runs a smart-search round
+# A review with fewer relevant documents than this, and at least one judged,
+# runs a smart-search round
 SMART_SEARCH_THRESHOLD = 3
 # An answer holding no usable query is asked for again this many more times,
 # each a paid call

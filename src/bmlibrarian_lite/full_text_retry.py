@@ -355,7 +355,7 @@ def _read_full_texts(
             ))
             continue
         if not marked:
-            mark_report_pending(storage, checkpoint_id)
+            _mark_report_pending(storage, checkpoint_id)
             marked = True
         if extraction.citations:
             storage.replace_document_citations(
@@ -378,7 +378,7 @@ def _read_full_texts(
     return outcome
 
 
-def mark_report_pending(storage: LiteStorage, checkpoint_id: str) -> None:
+def _mark_report_pending(storage: LiteStorage, checkpoint_id: str) -> None:
     """Mark the run as owing a report, before its citations change.
 
     A cancel or a failure after this leaves citations the report does not

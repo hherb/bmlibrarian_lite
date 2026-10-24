@@ -8,14 +8,17 @@ The rules are the apps' (iOS/macOS's ``executeSmartSearch``) and the
 *Alternative queries* section of ``doc/cross_platform/search_failure_reporting.md``:
 
 - The model is asked for two or three alternative queries, told of every one
-  already run for the question (``smart_search_store``), each named by its
-  concept names joined by AND. An answer holding no usable query is asked for
-  again up to ``SMART_SEARCH_MAX_QUERY_RETRIES`` more times, each a paid call;
-  a request that failed stops the round. Neither is a source's failure, so
-  neither records a shortfall.
-- Each query is searched with the configured provider. A query is kept as
-  run once it has run, unless a source could not answer it and it found
-  nothing new: a later round may ask it again.
+  already run for the run (``smart_search_store``; the apps keep them on the
+  session), each named by its concept names joined by AND. An answer holding
+  no usable query, or only queries already run (or the question's own), is
+  asked for again up to ``SMART_SEARCH_MAX_QUERY_RETRIES`` more times, each a
+  paid call; the apps search a repeat again, the desktop never does. A
+  request that failed stops the round. None of these is a source's failure,
+  so none records a shortfall.
+- Each query is searched with the configured provider. Once the round ends,
+  a query is kept as run unless a source could not answer it and it found
+  nothing new: a later round may ask it again. Kept at the end, so a round
+  that breaks off keeps none, and the next may ask them again.
 - What the queries lose is marked as an alternative search's. When the reader
   asked for more evidence and failures left the round with nothing new, the
   search failed: nothing it lost is kept, and :class:`SearchFailedError` is
@@ -33,12 +36,14 @@ from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
+from .analysis_failures import failure_cause_text
 from .constants import SMART_SEARCH_MAX_QUERY_RETRIES
 from .data_models import ShortfallQuery
 from .exceptions import SearchFailedError
 from .query_converter import MAX_TOTAL_QUERY_LENGTH, build_query_string
 from .search_failures import combined_shortfalls, retrieval_shortfalls_from_metadata
 from .smart_search_store import RunQuery
+from .utils import classify_analysis_exception
 
 if TYPE_CHECKING:
     from .data_models import LiteDocument, RetrievalShortfall, SearchSession
@@ -51,9 +56,14 @@ NO_USABLE_QUERY_TEXT = (
     "The model's answers held no usable alternative search query, "
     "so no alternative search was run."
 )
+#: Followed by the cause and what to do about it
 QUERY_GENERATION_FAILED_TEXT = (
-    "Alternative searches could not be run: the model could not be asked for them. "
-    "Check the model and its key in Settings."
+    "Alternative searches could not be run: the model could not be asked for them."
+)
+#: The desktop's own: the apps search a repeated query again
+ONLY_REPEATS_TEXT = (
+    "The model proposed only alternative search queries already run, "
+    "so no alternative search was run."
 )
 NO_NEW_EVIDENCE_TEXT = (
     "The alternative searches found no documents beyond those already found. "
@@ -103,19 +113,21 @@ class SmartSearchError(Exception):
 
 @dataclass(frozen=True)
 class SmartSearchContext:
-    """What the prompt tells the model about the question's search so far.
+    """The run a round searches for, and what the prompt tells the model of its search so far.
 
     Attributes:
         question: The research question.
         initial_query: The question's own query.
         total_results: How many results it had.
         relevant_count: How many documents were found relevant.
+        checkpoint_id: The run's checkpoint, which keeps the queries run.
     """
 
     question: str
     initial_query: str
     total_results: int
     relevant_count: int
+    checkpoint_id: str
 
 
 @dataclass(frozen=True)
@@ -124,7 +136,8 @@ class SmartSearchRound:
 
     Attributes:
         documents: The documents new to the question, stored and linked to it.
-        queries: The query strings the round ran, in order.
+        queries: The query strings the round searched, in order, whether or
+            not a source answered (a report lists every one it tried).
         shortfalls: What its queries lost, each marked as an alternative
             search's; empty when the reader asked and nothing new was found.
         stopped: Whether a stop ended it before every query ran.
@@ -237,20 +250,24 @@ def generate_alternative_queries(
     searcher: SmartSearcher,
     prompt: str,
     should_stop: Callable[[], bool],
+    run_before: Collection[str] = (),
 ) -> list[RunQuery]:
-    """Ask the model for alternative queries, asking again for an unusable answer.
+    """Ask the model for alternative queries, asking again for an answer with none new.
 
     Args:
         searcher: Asks the model.
         prompt: The request.
         should_stop: Asked before each request.
+        run_before: Query strings already run; never searched again.
 
     Returns:
-        The queries; empty when no answer held one, or a stop came first.
+        The new queries; empty only when a stop came first.
 
     Raises:
-        SmartSearchError: The request to the model failed.
+        SmartSearchError: The request to the model failed, or no answer held
+            a usable query not already run.
     """
+    only_repeats = False
     for _attempt in range(SMART_SEARCH_MAX_QUERY_RETRIES + 1):
         if should_stop():
             return []
@@ -259,12 +276,15 @@ def generate_alternative_queries(
         except Exception as e:
             # the type only: provider text can carry a credential (#330)
             logger.warning("Alternative queries could not be asked for (%s)", type(e).__name__)
-            raise SmartSearchError(QUERY_GENERATION_FAILED_TEXT) from e
-        queries = parse_alternative_queries(answer)
+            cause = failure_cause_text(classify_analysis_exception(e))
+            raise SmartSearchError(f"{QUERY_GENERATION_FAILED_TEXT} {cause}") from e
+        usable = parse_alternative_queries(answer)
+        queries = [q for q in usable if q.query not in run_before]
         if queries:
             return queries
-        logger.warning("The model's answer held no usable alternative query")
-    return []
+        only_repeats = only_repeats or bool(usable)
+        logger.warning("The model's answer held no usable alternative query not already run")
+    raise SmartSearchError(ONLY_REPEATS_TEXT if only_repeats else NO_USABLE_QUERY_TEXT)
 
 
 def run_smart_search(
@@ -295,29 +315,28 @@ def run_smart_search(
         What the round found.
 
     Raises:
-        SmartSearchError: No usable query, or the model could not be asked.
+        SmartSearchError: No usable query not already run, or the model could
+            not be asked.
         SearchFailedError: The reader asked, and failures left the round with
-            nothing new.
+            nothing new, a stop or not (a cancel does not excuse reporting them).
     """
     tell = progress or (lambda _message: None)
-    tried = storage.get_smart_search_queries(context.question)
+    tried = storage.get_smart_search_queries(context.checkpoint_id)
     tell("Generating alternative search strategies...")
-    run_before = {t.query for t in tried} | {context.initial_query}
-    alternatives = [
-        q for q in generate_alternative_queries(
-            searcher, alternative_queries_prompt(context, [t.label for t in tried]), should_stop
-        )
-        if q.query not in run_before
-    ]
-    if should_stop():
+    alternatives = generate_alternative_queries(
+        searcher,
+        alternative_queries_prompt(context, [t.label for t in tried]),
+        should_stop,
+        {t.query for t in tried} | {context.initial_query},
+    )
+    if should_stop() or not alternatives:
         return SmartSearchRound(stopped=True)
-    if not alternatives:
-        raise SmartSearchError(NO_USABLE_QUERY_TEXT)
 
     seen = set(known_ids)
     found: list[LiteDocument] = []
     lost: list[RetrievalShortfall] = []
     ran: list[str] = []
+    completed: list[RunQuery] = []
     stopped = False
     for index, alternative in enumerate(alternatives, start=1):
         if should_stop():
@@ -338,14 +357,16 @@ def run_smart_search(
         seen.update(d.id for d in new)
         found.extend(new)
         lost.extend(replace(s, query=ShortfallQuery.ALTERNATIVE) for s in losses)
+        ran.append(alternative.query)
         # A query a source could not answer has not run: a later round may ask it again
         if new or not losses:
-            storage.record_smart_search_query(context.question, alternative)
-            ran.append(alternative.query)
+            completed.append(alternative)
 
+    for alternative in completed:
+        storage.record_smart_search_query(context.checkpoint_id, alternative)
     shortfalls = combined_shortfalls(lost)
     if asked and not found:
-        if shortfalls and not stopped:
+        if shortfalls:
             raise SearchFailedError(shortfalls)
         # A request for more evidence that found nothing keeps nothing
         shortfalls = []

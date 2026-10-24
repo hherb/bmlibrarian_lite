@@ -2353,6 +2353,7 @@ class LiteStorage:
                     (checkpoint_id,),
                 )
                 citation_reads_store.delete(conn, checkpoint_id)
+                smart_search_store.delete(conn, checkpoint_id)
                 conn.execute(
                     "DELETE FROM scored_documents WHERE checkpoint_id = ?",
                     (checkpoint_id,),
@@ -2708,6 +2709,7 @@ class LiteStorage:
                 )
                 deleted_citations += cursor.rowcount
                 citation_reads_store.delete(conn, checkpoint_id)
+                smart_search_store.delete(conn, checkpoint_id)
 
             # Delete the checkpoints
             cursor = conn.execute(
@@ -2725,7 +2727,6 @@ class LiteStorage:
                 (question_hash,),
             )
             deleted_associations = cursor.rowcount
-            smart_search_store.delete(conn, question_hash)
 
             conn.commit()
 
@@ -2862,6 +2863,7 @@ class LiteStorage:
                 DELETE FROM documents;
                 DELETE FROM citations;
                 DELETE FROM citation_reads;
+                DELETE FROM smart_search_run_queries;
                 DELETE FROM uploaded_full_texts;
                 DELETE FROM scored_documents;
                 DELETE FROM review_checkpoints;
@@ -3534,28 +3536,28 @@ class LiteStorage:
         with self._sqlite_connection() as conn:
             return uploaded_full_texts_store.read(conn, document_ids)
 
-    def record_smart_search_query(self, question: str, run: RunQuery) -> None:
-        """Keep an alternative query smart search ran for a question.
+    def record_smart_search_query(self, checkpoint_id: str, run: RunQuery) -> None:
+        """Keep an alternative query smart search ran for a run.
 
         Args:
-            question: The research question.
+            checkpoint_id: The run's checkpoint.
             run: The query, after those already kept.
         """
         with self._sqlite_connection() as conn:
-            smart_search_store.record(conn, compute_question_hash(question), run)
+            smart_search_store.record(conn, checkpoint_id, run)
             conn.commit()
 
-    def get_smart_search_queries(self, question: str) -> list[RunQuery]:
-        """The alternative queries smart search has run for a question.
+    def get_smart_search_queries(self, checkpoint_id: str) -> list[RunQuery]:
+        """The alternative queries smart search has run for a run.
 
         Args:
-            question: The research question.
+            checkpoint_id: The run's checkpoint.
 
         Returns:
             The queries in the order they ran; empty before the first round.
         """
         with self._sqlite_connection() as conn:
-            return smart_search_store.read(conn, compute_question_hash(question))
+            return smart_search_store.read(conn, checkpoint_id)
 
     def replace_document_citations(
         self,

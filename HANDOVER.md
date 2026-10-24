@@ -13,11 +13,14 @@ iOS/macOS PR #611, Android PR #616; the desktop's full-text rows PR #622,
 Upload Full Text PR #626, and **Find More Evidence / repeated smart search on
 branch `feat/desktop-find-more-evidence`**:
 - `smart_search.py`: the apps' alternative-query prompt word for word, told of
-  every query already run for the question (`smart_search_store`, table
-  `smart_search_queries`, deleted with the question); an unusable answer asked
-  for twice more; a failed request is `QUERY_GENERATION_FAILED_TEXT`, never a
-  shortfall. A query is kept as run unless a source could not answer it and it
-  found nothing new. **`RetrievalShortfall.query`** (`ShortfallQuery`) marks an
+  every query already run **for the run** (`smart_search_store`, table
+  `smart_search_run_queries` keyed by checkpoint, as the apps keep them on the
+  session; deleted with the run or its question); an answer with no usable
+  query, or only repeats (`ONLY_REPEATS_TEXT`, desktop only), asked for twice
+  more; a failed request is `QUERY_GENERATION_FAILED_TEXT` plus its cause,
+  never a shortfall. Once the round ends a query is kept as run unless a source
+  could not answer it and it found nothing new; a round that breaks off keeps
+  none. Every query searched is in the methodology. **`RetrievalShortfall.query`** (`ShortfallQuery`) marks an
   alternative search's loss: its own clauses, persisted as `"query":
   "alternative"`, never combined with the original query's.
 - **The review runs a round itself** when fewer than `SMART_SEARCH_THRESHOLD`
@@ -30,7 +33,8 @@ branch `feat/desktop-find-more-evidence`**:
   the question's own query, then `MoreEvidenceWorker` (`more_evidence.py`)
   runs a round when that found nothing; the new documents are screened, run
   through the run's quality filter (`QualityFilter.from_report_settings`; the
-  depth flags are not kept, #312), scored **into the reviewed run's
+  depth flags are not kept, #627 item 4; read before anything is searched,
+  so a refusal changes nothing), scored **into the reviewed run's
   checkpoint**, the relevant ones and any relevant paper a stopped run never
   read are extracted, new documents get transparency, and
   `full_text_retry.write_report_again` writes the report from every citation
@@ -39,9 +43,15 @@ branch `feat/desktop-find-more-evidence`**:
   first next time, with no paid round on top (nor while relevant papers are
   unread or a report is owed). Documents the run holds (scored, in its
   retraction snapshot, or under `CHECKPOINT_QUALITY_FILTERED_KEY`) are never
-  new (`known_document_ids`). Follow-ups: #627 (MCP has no smart search; a
-  round runs all its queries; sequential scoring; quality filter depth;
-  Audit Trail queries; Re-run Search's report covers its batch only).
+  new (`known_document_ids`); after *Re-run Search*, the review's round treats
+  every judged document as known (#316). A paper whose extraction failed does
+  not owe a report (it is read again with the next run's papers), and the
+  merged retraction screen is failed when either batch's check was.
+  Follow-ups: #627 (MCP has no smart search; a round runs all its queries;
+  sequential scoring; quality filter depth; Audit Trail queries; Re-run
+  Search's report covers its batch only), #629 (PR #628 review: truncated
+  query answers, the review's smart-search notice not kept, transparency
+  failure rows, re-paged losses counted twice, per-document failed screens).
 Lodged: #620 closed by PR #623; #621 (PR #622 follow-ups), #624 (the
 reference cut drops tables and appendices after the references; all three),
 #625 (Upload Full Text follow-ups). Apple follow-ups: #612, #613. Android

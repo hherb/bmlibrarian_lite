@@ -29,7 +29,9 @@ from bmlibrarian_lite.data_models import (
     CitationOutcome,
     DocumentSource,
     EvaluationErrorCode,
+    ExtractionFailure,
     LiteDocument,
+    PassFailure,
     ReportMetadata,
     RequestFailure,
     RequestFailureKind,
@@ -42,6 +44,8 @@ from bmlibrarian_lite.data_models import (
 from bmlibrarian_lite.exceptions import SearchFailedError
 from bmlibrarian_lite.full_text_retry import NO_REPORT_TEXT, REPORT_PENDING_KEY, RetryNotPossible
 from bmlibrarian_lite.more_evidence import (
+    CANCELLED_UNCHANGED_TEXT,
+    CAUGHT_UP_TEXT,
     UNSCORED_KEY,
     MoreEvidence,
     find_more_evidence,
@@ -136,19 +140,23 @@ class Scorer:
 
 
 class Extractor:
-    """Quotes each paper it reads."""
+    """Quotes each paper it reads; a pmid in ``failing`` cannot be read."""
 
-    def __init__(self) -> None:
+    def __init__(self, failing: tuple[str, ...] = ()) -> None:
         """Nothing read yet."""
         self.read: list[str] = []
+        self.failing = failing
 
     def extract_all_citations(self, question: str, docs: list[ScoredDocument], min_score: int,
                               **kwargs: Any) -> CitationOutcome:
         """Quote each paper."""
         self.read.extend(d.document.id for d in docs)
         return CitationOutcome(
-            citations=[cite(d.document.pmid or "") for d in docs],
+            citations=[cite(d.document.pmid or "") for d in docs
+                       if d.document.pmid not in self.failing],
             documents_attempted=len(docs),
+            failed=[ExtractionFailure(d.document, EvaluationErrorCode.API_CONNECTION_ERROR)
+                    for d in docs if d.document.pmid in self.failing],
         )
 
 
@@ -157,18 +165,20 @@ class Run:
 
     def __init__(self, storage: LiteStorage, *, rounds: list[SmartSearchRound] | None = None,
                  screen: Any = None, failing: tuple[str, ...] = (),
-                 stop: Any = None, assessed: list[str] | None = None) -> None:
+                 stop: Any = None, assessed: list[str] | None = None,
+                 unreadable: tuple[str, ...] = (), assess: Any = None) -> None:
         """Script the rounds, the screen, the failures, the stop and the assessments."""
         self.storage = storage
         self.rounds = list(rounds or [])
         self.contexts: list[tuple[SmartSearchContext, set[str]]] = []
         self.scorer = Scorer(failing)
-        self.extractor = Extractor()
+        self.extractor = Extractor(unreadable)
         self.reporter = MagicMock()
         self.reporter.generate_report.return_value = "New report."
         self.screen = screen
         self.stop = stop or (lambda run: False)
         self.assessed = assessed
+        self.assess = assess
         self.filtered: list[tuple[list[str], QualityFilter]] = []
 
     def quality_filter(self, documents: list[LiteDocument],
@@ -185,7 +195,7 @@ class Run:
     def __call__(self, documents: list[LiteDocument],
                  lost: list[RetrievalShortfall] | None = None) -> MoreEvidence:
         """Run once."""
-        assess = None
+        assess = self.assess
         if self.assessed is not None:
             assess = lambda doc, text: self.assessed.append(doc.id)  # noqa: E731
         return find_more_evidence(
@@ -273,15 +283,15 @@ class TestAlternativeQueries:
     """With nothing new along its own query, a round of alternative queries runs."""
 
     def test_the_round_is_told_of_the_search_so_far(self, storage: LiteStorage) -> None:
-        """Its query, its results, how many were relevant, what is already known."""
-        reviewed(storage)
+        """Its query, its results, how many were relevant, what is already known, its run."""
+        checkpoint_id = reviewed(storage)
         run = Run(storage, rounds=[SmartSearchRound((make_document("5"),), ("(q[tiab])",))])
         found(storage, "5")
 
         outcome = run([])
 
         context, known = run.contexts[0]
-        assert context == SmartSearchContext(QUESTION, "aspirin AND stroke", 3, 2)
+        assert context == SmartSearchContext(QUESTION, "aspirin AND stroke", 3, 2, checkpoint_id)
         assert known == {"doc-1", "doc-2", "doc-3"}
         assert outcome.queries == ("(q[tiab])",)
         assert run.metadata.alternative_queries == ["(q[tiab])"]
@@ -314,6 +324,32 @@ class TestAlternativeQueries:
 
         assert run.metadata.search_shortfalls == [lost]
 
+    def test_what_paging_lost_is_kept_beside_the_rounds(self, storage: LiteStorage) -> None:
+        """Paging found only known documents, and lost a page: both losses are said."""
+        reviewed(storage)
+        paged = RetrievalShortfall(SearchProvider.PUBMED,
+                                   RequestFailure(RequestFailureKind.TIMEOUT), records_missing=3)
+        alternative = RetrievalShortfall(SearchProvider.EUROPEPMC,
+                                         RequestFailure(RequestFailureKind.TIMEOUT),
+                                         query=ShortfallQuery.ALTERNATIVE)
+        run = Run(storage, rounds=[SmartSearchRound((make_document("5"),), ("q",), (alternative,))])
+        found(storage, "5")
+
+        outcome = run([make_document("1")], [paged])
+
+        assert set(outcome.search_shortfalls) == {paged, alternative}
+        assert set(run.metadata.search_shortfalls) == {paged, alternative}
+
+    def test_a_cancelled_round_is_a_cancel_not_nothing_new(self, storage: LiteStorage) -> None:
+        """A stop is never read as the searches having found nothing."""
+        reviewed(storage)
+        run = Run(storage, rounds=[SmartSearchRound(stopped=True)])
+
+        outcome = run([])
+
+        assert outcome.cancelled and outcome.notice is None
+        assert more_evidence_text(outcome) == CANCELLED_UNCHANGED_TEXT
+
 
 class TestWhatIsFoundIsScreened:
     """Retracted papers stay out of the run, and its snapshot gains the new rows."""
@@ -337,6 +373,27 @@ class TestWhatIsFoundIsScreened:
         assert {(r["document_id"], r["excluded"]) for r in rows} == {
             ("doc-5", False), ("doc-6", True)}
         assert "1 left out as retracted." in more_evidence_text(outcome)
+
+    def test_a_row_a_stopped_screen_wrote_is_replaced(self, storage: LiteStorage) -> None:
+        """Held over unchecked, then found retracted: the report reads it as left out."""
+        checkpoint_id = reviewed(storage)
+        screens: list[bool] = []
+
+        def unchecked(documents: list[LiteDocument]) -> RetractionScreen:
+            screens.append(True)
+            return RetractionScreen(kept=tuple(documents), excluded=(), checks={})
+
+        Run(storage, screen=unchecked, stop=lambda run: bool(screens))(found(storage, "5"))
+        assert storage.get_checkpoint(checkpoint_id).metadata[UNSCORED_KEY] == ["doc-5"]
+
+        def retracted(documents: list[LiteDocument]) -> RetractionScreen:
+            return RetractionScreen(kept=(), excluded=tuple(documents), checks={})
+
+        outcome = Run(storage, screen=retracted)([])
+
+        rows = storage.get_checkpoint(checkpoint_id).metadata[CHECKPOINT_RETRACTION_SNAPSHOT_KEY]
+        assert [(r["document_id"], r["excluded"]) for r in rows] == [("doc-5", True)]
+        assert outcome.left_out == 1
 
 
 class TestTheRunsQualityFilter:
@@ -381,9 +438,13 @@ class TestTheRunsQualityFilter:
             stored.quality_filter_settings = None
             storage.update_checkpoint(checkpoint_id=checkpoint.id, metadata={
                 **checkpoint.metadata, CHECKPOINT_REPORT_METADATA_KEY: stored.to_dict()})
+        before = storage.get_checkpoint_for_question(QUESTION).metadata
 
+        run = Run(storage, rounds=[SmartSearchRound((make_document("5"),), ("q",))])
         with pytest.raises(RetryNotPossible):
-            Run(storage)(found(storage, "5"))
+            run(found(storage, "5"))
+        assert run.contexts == []  # nothing paid for
+        assert storage.get_checkpoint_for_question(QUESTION).metadata == before
 
 
 class TestWhatTheRunAlreadyHolds:
@@ -417,6 +478,49 @@ class TestWhatTheRunAlreadyHolds:
         assert run.contexts == []
         assert run.extractor.read == ["doc-5"]
         assert outcome.report == "New report."
+        assert CAUGHT_UP_TEXT in more_evidence_text(outcome)
+
+    def test_a_report_owed_after_extraction_is_written_without_reading_again(
+        self, storage: LiteStorage
+    ) -> None:
+        """The report failed once its papers were read: only the flag owes it."""
+        checkpoint_id = reviewed(storage)
+        failing = Run(storage)
+        failing.reporter.generate_report.side_effect = RuntimeError("model gone")
+        with pytest.raises(RuntimeError):
+            failing(found(storage, "5"))
+        assert storage.get_checkpoint(checkpoint_id).metadata[REPORT_PENDING_KEY] is True
+
+        run = Run(storage)
+        outcome = run([])
+
+        assert run.contexts == [] and run.extractor.read == []
+        assert outcome.report == "New report."
+        quotes = storage.get_citations_for_question(QUESTION, checkpoint_id=checkpoint_id)
+        assert sorted(c.document.id for c in quotes) == ["doc-1", "doc-2", "doc-5"]
+
+
+class TestAnExtractionThatFailed:
+    """Said, never read as read, and never in the way of a search."""
+
+    def test_it_is_said_and_retried_with_the_next_runs_papers(self, storage: LiteStorage) -> None:
+        """A paper that always fails would otherwise block every round."""
+        checkpoint_id = reviewed(storage)
+        first = Run(storage, unreadable=("5",))
+
+        outcome = first(found(storage, "5"))
+
+        assert outcome.extraction_failures == (
+            PassFailure(document_id="doc-5", cause=EvaluationErrorCode.API_CONNECTION_ERROR),)
+        assert "Citations could not be extracted from 1 relevant paper." in more_evidence_text(outcome)
+        assert "doc-5" not in storage.get_citation_reads(checkpoint_id)
+
+        searching = Run(storage, rounds=[SmartSearchRound((make_document("7"),), ("q",))])
+        found(storage, "7")
+        searching([])
+
+        assert len(searching.contexts) == 1
+        assert sorted(searching.extractor.read) == ["doc-5", "doc-7"]
 
 
 class TestAStop:
@@ -448,6 +552,37 @@ class TestAStop:
         assert outcome.report == "New report."
         assert second.metadata.documents_scored == 6
         assert UNSCORED_KEY not in storage.get_checkpoint(checkpoint_id).metadata
+        assert (outcome.found, outcome.resumed) == (0, 2)
+        assert "Carried on with 2 documents an earlier stop left unscored." in (
+            more_evidence_text(outcome))
+
+    def test_held_over_documents_paging_finds_again_are_scored_once(
+        self, storage: LiteStorage
+    ) -> None:
+        """The tab's known ids leave them out, so paging hands them back."""
+        checkpoint_id = reviewed(storage)
+        Run(storage, stop=lambda run: len(run.scorer.scored) >= 1)(found(storage, "5", "6", "7"))
+
+        second = Run(storage)
+        outcome = second(found(storage, "6", "7"))
+
+        assert second.scorer.scored == ["doc-6", "doc-7"]
+        assert outcome.found == 0
+        assert (second.metadata.documents_retrieved, second.metadata.documents_scored) == (6, 6)
+        assert UNSCORED_KEY not in storage.get_checkpoint(checkpoint_id).metadata
+
+    def test_a_stopped_extraction_keeps_nothing(self, storage: LiteStorage) -> None:
+        """What it read is not known paper by paper: the next run reads them."""
+        checkpoint_id = reviewed(storage)
+
+        stopped = Run(storage, stop=lambda run: bool(run.extractor.read))(found(storage, "5"))
+
+        assert stopped.cancelled
+        assert "doc-5" not in storage.get_citation_reads(checkpoint_id)
+        assert cited(storage, checkpoint_id) == ["doc-1", "doc-2"]
+        run = Run(storage)
+        run([])
+        assert run.contexts == [] and run.extractor.read == ["doc-5"]
 
     def test_a_stop_before_anything_was_found_leaves_the_report(self) -> None:
         """Said plainly."""
@@ -467,6 +602,22 @@ class TestTransparency:
 
         assert assessed == ["doc-5", "doc-6"]
 
+    def test_a_failure_is_counted_in_the_readers_words(self, storage: LiteStorage) -> None:
+        """Its cause, never the provider's text (#330)."""
+        reviewed(storage)
+
+        def assess(doc: LiteDocument, text: str | None) -> None:
+            if doc.id == "doc-6":
+                raise ConnectionError("https://api.example/?key=sk-secret")
+
+        outcome = Run(storage, assess=assess)(found(storage, "5", "6"))
+
+        assert outcome.transparency_failures == (
+            PassFailure(document_id="doc-6", cause=EvaluationErrorCode.API_CONNECTION_ERROR),)
+        text = more_evidence_text(outcome)
+        assert "Transparency could not be analysed for 1 document." in text
+        assert "sk-secret" not in text
+
 
 # ---------------------------------------------------------------------------
 # The review's own smart search
@@ -474,10 +625,18 @@ class TestTransparency:
 
 
 def review(monkeypatch: pytest.MonkeyPatch, scores: dict[str, int],
-           answers: list[str], results: dict[str, list[LiteDocument]] | None = None) -> Any:
-    """Run a review whose agents are scripted; returns (worker, search agent, finished)."""
+           answers: list[str], results: dict[str, Any] | None = None, *,
+           checker: Any = None, screens: list[Any] | None = None,
+           rerun_judged: set[str] | None = None) -> Any:
+    """Run a review whose agents are scripted; returns (search agent, scorer, finished, notices).
+
+    A query's result is its documents, an exception it raises, or the
+    shortfalls it lost. ``rerun_judged`` runs it as *Re-run Search*'s review,
+    the question's earlier runs having judged those documents.
+    """
     from bmlibrarian_lite.gui import systematic_review_tab
     from bmlibrarian_lite.gui.systematic_review_tab import WorkflowWorker
+    from bmlibrarian_lite.search_failures import retrieval_shortfalls_to_metadata
 
     documents = [make_document(p) for p in scores if p in ("1", "2", "3")]
     session = SearchSession(id="s", query="aspirin AND stroke", natural_language_query=QUESTION,
@@ -486,7 +645,20 @@ def review(monkeypatch: pytest.MonkeyPatch, scores: dict[str, int],
     agent = MagicMock()
     agent.search.return_value = (session, documents)
     agent.ask.side_effect = list(answers)
-    agent.search_with_query.side_effect = lambda q, **_: (session, (results or {}).get(q, []))
+
+    def search_with_query(query: str, **_: Any) -> Any:
+        result = (results or {}).get(query, [])
+        if isinstance(result, Exception):
+            raise result
+        if result and isinstance(result[0], RetrievalShortfall):
+            lost = SearchSession(id="s2", query=query, natural_language_query=QUESTION,
+                                 created_at=datetime.now(UTC), document_count=0,
+                                 metadata={"provider": "pubmed",
+                                           **retrieval_shortfalls_to_metadata(result)})
+            return lost, []
+        return session, list(result)
+
+    agent.search_with_query.side_effect = search_with_query
     monkeypatch.setattr(systematic_review_tab, "LiteSearchAgent", lambda **_: agent)
     scorer = MagicMock()
     scorer.score_document.side_effect = lambda question, doc: ScoredDocument(
@@ -505,13 +677,58 @@ def review(monkeypatch: pytest.MonkeyPatch, scores: dict[str, int],
     storage = MagicMock()
     storage.get_smart_search_queries.return_value = []
     storage.get_uploaded_full_texts.return_value = {}
-    worker = WorkflowWorker(question=QUESTION, config=config, storage=storage, min_score=3)
+    storage.get_rerun_document_ids_for_question.return_value = (rerun_judged or set(), set())
+    if checker is not None:
+        monkeypatch.setattr(WorkflowWorker, "_fresh_retraction_checker", lambda self: checker)
+    worker = WorkflowWorker(
+        question=QUESTION, config=config, storage=storage, min_score=3,
+        retraction_checker=checker,
+        preloaded_documents=documents if rerun_judged is not None else None,
+        pubmed_query="aspirin AND stroke" if rerun_judged is not None else None,
+    )
     finished: list[Any] = []
     notices: list[str] = []
     worker.finished.connect(lambda report, metadata: finished.append(metadata))
     worker.smart_search_notice.connect(notices.append)
+    if screens is not None:
+        worker.retraction_screened.connect(screens.append)
     worker.run()
     return agent, scorer, finished, notices
+
+
+class RetractingChecker:
+    """Says the papers named are retracted, every other one clear."""
+
+    def __init__(self, *retracted: str) -> None:
+        """Retract these document ids."""
+        self.retracted = retracted
+
+    def check(self, documents: list[LiteDocument], **_: Any) -> dict[str, Any]:
+        """Each document's verdict."""
+        from bmlib.publications.retraction_status import (
+            RetractionEvidence,
+            RetractionKind,
+            RetractionSource,
+            RetractionStatus,
+            RetractionVerdict,
+        )
+
+        from bmlibrarian_lite.retraction_store import PaperCheck
+
+        evidence = RetractionEvidence(source=RetractionSource.RETRACTION_WATCH_EXPORT,
+                                      kind=RetractionKind.RETRACTION, date="2026-03-09",
+                                      notice_doi="10.9/notice")
+        return {
+            d.id: PaperCheck(
+                RetractionVerdict(RetractionStatus.RETRACTED, evidence) if d.id in self.retracted
+                else RetractionVerdict(RetractionStatus.CLEAR),
+                datetime.now(UTC), None, None,
+            )
+            for d in documents
+        }
+
+    def close(self) -> None:
+        """Nothing to close."""
 
 
 ALTERNATIVE = '[{"concepts": [{"name": "aspirin", "mesh_terms": ["Aspirin"], "keywords": []}]}]'
@@ -551,6 +768,63 @@ class TestTheReviewsOwnSmartSearch:
         assert agent.ask.call_count == 3
         assert len(notices) == 1 and "no usable alternative search query" in notices[0]
         assert finished and finished[0].documents_accepted == 1
+
+    def test_a_retracted_paper_it_finds_is_never_scored(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Screened like the search's, and the run's screen covers both."""
+        query = '(("Aspirin"[mh])) AND humans[mh] AND hasabstract'
+        screens: list[Any] = []
+        _, scorer, finished, _ = review(
+            monkeypatch, {"1": 5, "2": 2, "5": 5, "6": 4}, [ALTERNATIVE],
+            {query: [make_document("5"), make_document("6")]},
+            checker=RetractingChecker("doc-5"), screens=screens,
+        )
+
+        assert "doc-5" not in [c.args[1].id for c in scorer.score_document.call_args_list]
+        merged = screens[-1]
+        assert [d.id for d in merged.excluded] == ["doc-5"]
+        assert {"doc-1", "doc-2", "doc-6"} <= {d.id for d in merged.kept}
+        assert finished[0].retraction_screen is merged
+
+    def test_after_a_rerun_earlier_runs_papers_are_not_scored_again(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Re-run Search scores only what no run has judged (#316)."""
+        query = '(("Aspirin"[mh])) AND humans[mh] AND hasabstract'
+        _, scorer, _, _ = review(
+            monkeypatch, {"1": 5, "2": 2, "5": 5, "9": 5}, [ALTERNATIVE],
+            {query: [make_document("9"), make_document("5")]}, rerun_judged={"doc-9"},
+        )
+
+        assert [c.args[1].id for c in scorer.score_document.call_args_list] == [
+            "doc-1", "doc-2", "doc-5"]
+
+    def test_a_round_that_breaks_is_said_and_the_review_goes_on(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Its idea, not the reader's: never the review's end, nor the provider's text."""
+        query = '(("Aspirin"[mh])) AND humans[mh] AND hasabstract'
+        _, _, finished, notices = review(
+            monkeypatch, {"1": 5, "2": 2}, [ALTERNATIVE],
+            {query: RuntimeError("https://api.example/?key=sk-secret")},
+        )
+
+        assert finished and finished[0].documents_accepted == 1
+        assert len(notices) == 1 and notices[0].startswith("Alternative searches could not")
+        assert "sk-secret" not in notices[0]
+
+    def test_what_its_queries_lose_is_kept(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Recorded as an alternative search's, and the review goes on."""
+        query = '(("Aspirin"[mh])) AND humans[mh] AND hasabstract'
+        lost = RetrievalShortfall(SearchProvider.EUROPEPMC,
+                                  RequestFailure(RequestFailureKind.TIMEOUT), records_missing=4)
+        _, _, finished, _ = review(monkeypatch, {"1": 5, "2": 2}, [ALTERNATIVE], {query: [lost]})
+
+        assert finished[0].search_shortfalls == [
+            RetrievalShortfall(SearchProvider.EUROPEPMC, RequestFailure(RequestFailureKind.TIMEOUT),
+                               records_missing=4, query=ShortfallQuery.ALTERNATIVE)]
+        assert finished[0].alternative_queries == [query]
 
 
 class TestTheWorker:
@@ -630,6 +904,21 @@ class TestTheWorker:
         ended = self.run_worker(monkeypatch, lambda: outcome, cancel=True)
         assert ended == {"cancelled": [(outcome, "")]}
 
+    def test_a_failed_search_after_a_cancel_is_still_said(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A cancel does not excuse reporting a failure (rule 8)."""
+        lost = RetrievalShortfall(SearchProvider.PUBMED,
+                                  RequestFailure(RequestFailureKind.TIMEOUT),
+                                  query=ShortfallQuery.ALTERNATIVE)
+
+        def fail() -> MoreEvidence:
+            raise SearchFailedError([lost])
+
+        ended = self.run_worker(monkeypatch, fail, cancel=True)
+        assert list(ended) == ["cancelled"]
+        assert "an alternative search of PubMed could not be completed" in ended["cancelled"][0][1]
+
 
 # ---------------------------------------------------------------------------
 # The Research Questions tab
@@ -693,9 +982,21 @@ class TestTheTab:
         assert tab._worker is None
         evidence = tab._evidence_worker
         assert evidence.args[:3] == (QUESTION, documents, [])
+        assert evidence.kwargs["max_results"] == tab.target_spin.value()
         evidence.start.assert_called_once_with()
         tab._on_cancel_clicked()
         evidence.cancel.assert_called_once_with()
+
+    def test_a_cancel_as_the_paging_ends_runs_nothing_paid(self, tab: Any) -> None:
+        """The paging finished despite the cancel: no second worker starts."""
+        tab._on_find_more_clicked()
+        tab._worker.__dict__["_cancelled"] = True
+
+        tab._on_more_search_finished(tab._get_selected_question(), [make_document("5")], [])
+
+        assert tab._evidence_worker is None
+        assert tab.progress_label.text() == CANCELLED_UNCHANGED_TEXT
+        assert tab.more_btn.isEnabled()
 
     def test_a_report_written_again_is_loaded(self, tab: Any) -> None:
         """And the tab is ready again."""

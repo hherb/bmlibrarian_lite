@@ -1842,15 +1842,19 @@ class ResearchQuestionsTab(QWidget):
         question = self._get_selected_question()
         if not question:
             return
+        target = self.target_spin.value()
+        # Nothing from an earlier pass's screen reaches this one's lines
+        self._retraction_clause = ""
+        self._retraction_titles = []
         reply = QMessageBox.question(
             self,
             FIND_MORE_EVIDENCE_ACTION,
-            "Up to "
-            f"{self.target_spin.value()} new documents are searched for along the "
-            "question's own query, or, once it has no more, with alternative "
-            "queries the model proposes. They are scored into the reviewed run, "
-            "the relevant ones are read, and the report is written again. This "
-            "can take a while and costs model calls.",
+            f"Up to {target} new documents are searched for along the question's "
+            "own query. Once it has no more, the model proposes two or three "
+            f"alternative queries, each fetching up to {target} documents. What "
+            "is new is scored into the reviewed run, with any documents an "
+            "earlier stop left unscored; the relevant ones are read, and the "
+            "report is written again. This can take a while and costs model calls.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -1909,6 +1913,10 @@ class ResearchQuestionsTab(QWidget):
         self._worker = None
         if search is not None:
             QTimer.singleShot(100, lambda: search.wait(2000))
+            if search._cancelled is True:
+                # A cancel that came as the paging ended: nothing paid runs on
+                self._on_more_cancelled(MoreEvidence(cancelled=True))
+                return
         self._evidence_worker = MoreEvidenceWorker(
             question.question,
             documents,
@@ -1917,6 +1925,7 @@ class ResearchQuestionsTab(QWidget):
             self.storage,
             parent=self,
             retraction_checker=self._retraction_checker(),
+            max_results=self.target_spin.value(),
         )
         worker = self._evidence_worker
         self._watch_retraction_screen(worker)
@@ -1929,7 +1938,7 @@ class ResearchQuestionsTab(QWidget):
         self.progress_label.setText(
             f"Found {documents_text(len(documents))} along the question's own query..."
             if documents
-            else "Nothing new along the question's own query; trying alternative searches..."
+            else "Nothing new along the question's own query..."
         )
         worker.start()
 
@@ -1960,12 +1969,18 @@ class ResearchQuestionsTab(QWidget):
                 own words (#330).
         """
         self._reset_ui()
-        self.progress_label.setText(f"{FIND_MORE_EVIDENCE_ACTION}: {error_message}")
-        QMessageBox.warning(self, FIND_MORE_EVIDENCE_ACTION, error_message)
+        # What it scored before the failure is kept: the table shows it
+        self._load_questions()
+        message = self._left_out(f"{FIND_MORE_EVIDENCE_ACTION}: {error_message}")
+        self.progress_label.setText(message)
+        QMessageBox.warning(self, FIND_MORE_EVIDENCE_ACTION, message + self._left_out_note())
         QTimer.singleShot(100, self._cleanup_evidence_worker)
 
     def _on_more_cancelled(self, outcome: MoreEvidence, error: str = "") -> None:
-        """A cancel stopped it: what it found and scored is kept.
+        """A cancel stopped it: what the run found and scored is kept.
+
+        A cancel while the question's own query is paged keeps only what the
+        paging stored and linked; nothing is held for the next run to score.
 
         Args:
             outcome: What it did before the cancel.
@@ -1973,10 +1988,14 @@ class ResearchQuestionsTab(QWidget):
         """
         self._reset_ui()
         self._load_questions()
-        message = more_evidence_text(replace(outcome, cancelled=True)) + also_failed_text(error)
+        message = self._left_out(
+            more_evidence_text(replace(outcome, cancelled=True)) + also_failed_text(error)
+        )
         self.progress_label.setText(message)
         if error:
-            QMessageBox.warning(self, f"{FIND_MORE_EVIDENCE_ACTION} Cancelled", message)
+            QMessageBox.warning(
+                self, f"{FIND_MORE_EVIDENCE_ACTION} Cancelled", message + self._left_out_note()
+            )
         QTimer.singleShot(100, self._cleanup_evidence_worker)
 
     def _cleanup_evidence_worker(self) -> None:

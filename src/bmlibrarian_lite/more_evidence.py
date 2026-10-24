@@ -13,16 +13,18 @@ report the question shows:
   already run; a round that finds nothing new leaves the report as it is and
   says so. Documents an earlier run found and a stop left unscored are
   scored first, and while there are any, or papers it scored are still to be
-  read, or its report is owed, no paid round runs on top of them. A document
-  the run already holds (scored, screened or left out by its quality filter)
-  is never new.
+  read, or its report is owed, no paid round runs on top of them (a paper
+  whose citations could not be extracted is not owed: it is extracted again
+  with the next run's, never in place of a search). A document the run
+  already holds (scored, screened or left out by its quality filter) is
+  never new.
 - The new documents are screened for retractions, scored into the run, and
   the relevant ones have their citations extracted (from a full text as the
   review would: an upload whatever the setting, a fetched one with it on).
   A relevant paper of the run whose citations were never read (a cancelled
-  run's) is extracted with them. Transparency is analysed for the new
-  documents without a stored result. The report is then written again from
-  every citation of the run.
+  run's) is extracted with them. Transparency is analysed for the documents
+  scored now (held over and new) that have a PMID or DOI and no stored
+  result. The report is then written again from every citation of the run.
 - What the run learns is kept as it is learnt: the scores and the report's
   counts after scoring, marked as owing a report, so a stop or a failure
   before the report leaves the next *Find More Evidence* or *Retry Full
@@ -108,6 +110,10 @@ CANCELLED_TEXT = (
     "Cancelled. What was found and scored is kept; the next Find More Evidence "
     "carries on from it and writes the report."
 )
+CAUGHT_UP_TEXT = (
+    "No alternative search was run: this finished what an earlier stop left. "
+    "The next Find More Evidence searches further."
+)
 
 
 @dataclass(frozen=True)
@@ -116,12 +122,19 @@ class MoreEvidence:
 
     Attributes:
         found: Documents new to the question.
-        left_out: Of those, papers left out as retracted.
+        resumed: Documents an earlier stop left unscored, taken up again.
+        caught_up: Whether no alternative search ran because the run first
+            finished what an earlier stop left (documents to score, papers to
+            read, a report owed).
+        left_out: Of the documents screened (held over and new), papers left
+            out as retracted.
         filtered_out: Of those, documents the run's quality filter left out.
         scored: Documents the model scored.
         relevant: Of those, documents scored at or above the run's threshold.
         scoring_failures: Documents the model could not score.
-        queries: The alternative queries smart search ran, if it ran.
+        extraction_failures: Relevant papers whose citations could not be
+            extracted.
+        queries: The alternative queries smart search searched, if it ran.
         search_shortfalls: What the search lost.
         transparency_failures: Documents whose transparency could not be
             analysed.
@@ -131,11 +144,14 @@ class MoreEvidence:
     """
 
     found: int = 0
+    resumed: int = 0
+    caught_up: bool = False
     left_out: int = 0
     filtered_out: int = 0
     scored: int = 0
     relevant: int = 0
     scoring_failures: tuple[PassFailure, ...] = ()
+    extraction_failures: tuple[PassFailure, ...] = ()
     queries: tuple[str, ...] = ()
     search_shortfalls: tuple[RetrievalShortfall, ...] = ()
     transparency_failures: tuple[PassFailure, ...] = ()
@@ -161,6 +177,11 @@ def more_evidence_text(outcome: MoreEvidence) -> str:
         parts.append(f"Ran {count} alternative search{'es' if count != 1 else ''}.")
     if outcome.found:
         parts.append(f"Found {outcome.found} new document{'s' if outcome.found != 1 else ''}.")
+    if outcome.resumed:
+        parts.append(
+            f"Carried on with {outcome.resumed} document{'s' if outcome.resumed != 1 else ''} "
+            "an earlier stop left unscored."
+        )
     if outcome.left_out:
         parts.append(f"{outcome.left_out} left out as retracted.")
     if outcome.filtered_out:
@@ -172,14 +193,26 @@ def more_evidence_text(outcome: MoreEvidence) -> str:
     if outcome.notice:
         parts.append(outcome.notice)
     elif outcome.cancelled:
-        parts.append(CANCELLED_TEXT if outcome.found or outcome.scored else CANCELLED_UNCHANGED_TEXT)
+        parts.append(
+            CANCELLED_TEXT if outcome.found or outcome.resumed or outcome.scored
+            else CANCELLED_UNCHANGED_TEXT
+        )
     elif outcome.report is not None:
         parts.append("The report was written again.")
+        if outcome.caught_up:
+            parts.append(CAUGHT_UP_TEXT)
     if outcome.scoring_failures:
         count = len(outcome.scoring_failures)
         parts.append(
             f"{count} document{'s' if count != 1 else ''} could not be scored. "
             + pass_failure_detail(outcome.scoring_failures)
+        )
+    if outcome.extraction_failures:
+        count = len(outcome.extraction_failures)
+        parts.append(
+            f"Citations could not be extracted from {count} relevant "
+            f"paper{'s' if count != 1 else ''}. "
+            + pass_failure_detail(outcome.extraction_failures)
         )
     if outcome.transparency_failures:
         count = len(outcome.transparency_failures)
@@ -216,12 +249,13 @@ def find_more_evidence(
         storage: The store the run is read from and written to.
         config: The configuration, for the full-text setting and score.
         documents: The new documents paging the question's own query found,
-            stored and linked to it; empty runs a round of alternative queries.
+            stored and linked to it. When none is new and nothing is held
+            over or owed, a round of alternative queries runs.
         search_shortfalls: What that paging lost.
         smart_search: Runs a round of alternative queries.
         screen: Leaves retracted papers out; None screens nothing.
         quality_filter: Applies the run's quality filter, when it applied
-            one, to the new documents.
+            one, to the documents to score (held over and new).
         scoring_agent: Scores the new documents.
         citation_agent: Extracts the citations.
         reporting_agent: Writes the report.
@@ -247,6 +281,13 @@ def find_more_evidence(
     metadata = recorded_report_metadata(checkpoint.metadata)
     if metadata is None:
         raise RetryNotPossible(NOT_KEPT_TEXT)
+    settings: QualityFilter | None = None
+    if metadata.quality_filter_applied:
+        # Before anything is searched or kept: a refusal changes nothing
+        try:
+            settings = QualityFilter.from_report_settings(metadata.quality_filter_settings)
+        except ValueError as e:
+            raise RetryNotPossible(QUALITY_FILTER_UNREADABLE_TEXT) from e
     stored_min = checkpoint.metadata.get(CHECKPOINT_MIN_SCORE_KEY)
     min_score = (
         stored_min
@@ -267,8 +308,15 @@ def find_more_evidence(
     reads = storage.get_citation_reads(checkpoint.id)
     cited = {c.document.id for c in storage.get_citations_for_question(
         question, checkpoint_id=checkpoint.id)}
+    # A paper whose extraction failed is extracted again with the next run's,
+    # never in place of a search: one that always fails would block every round
+    failed_extraction = {
+        f.document.id for f in recorded_extraction_failures(
+            checkpoint.metadata, {d.document.id: d.document for d in before}) or []
+    }
     owed = checkpoint.metadata.get(REPORT_PENDING_KEY) is True or any(
         d.score >= min_score and d.document.id not in reads and d.document.id not in cited
+        and d.document.id not in failed_extraction
         for d in before
     )
     if not found and not unscored and not owed:
@@ -277,15 +325,17 @@ def find_more_evidence(
             initial_query=metadata.pubmed_query,
             total_results=metadata.total_results_available,
             relevant_count=sum(1 for d in before if d.score >= min_score),
+            checkpoint_id=checkpoint.id,
         )
         round_ = smart_search(context, known | scored_ids)
-        found, lost = list(round_.documents), list(round_.shortfalls)
+        found, lost = list(round_.documents), [*lost, *round_.shortfalls]
         outcome = replace(outcome, queries=round_.queries)
         if not found:
             return replace(outcome, cancelled=round_.stopped,
                            notice=None if round_.stopped else NO_NEW_EVIDENCE_TEXT)
         metadata.alternative_queries = [*metadata.alternative_queries, *round_.queries]
-    outcome = replace(outcome, found=len(found),
+    outcome = replace(outcome, found=len(found), resumed=len(unscored),
+                      caught_up=not found and (bool(unscored) or owed),
                       search_shortfalls=tuple(combined_shortfalls(lost)))
     metadata.documents_retrieved += len(found)
     metadata.search_shortfalls = combined_shortfalls([*metadata.search_shortfalls, *lost])
@@ -306,11 +356,7 @@ def find_more_evidence(
     if should_stop():
         return replace(outcome, cancelled=True)
 
-    if metadata.quality_filter_applied and kept:
-        try:
-            settings = QualityFilter.from_report_settings(metadata.quality_filter_settings)
-        except ValueError as e:
-            raise RetryNotPossible(QUALITY_FILTER_UNREADABLE_TEXT) from e
+    if settings is not None and kept:
         tell(0, len(kept), "Assessing quality...")
         passed = quality_filter(kept, settings)
         if should_stop():
@@ -337,10 +383,12 @@ def find_more_evidence(
         if d.score >= min_score and d.document.id not in reads
         and (d.document.id in new_ids or d.document.id not in cited)
     ]
-    texts = _extract(question, storage, config, checkpoint.id, targets, scored, min_score,
-                     fetch, citation_agent, should_stop, tell)
-    if texts is None:
+    extracted = _extract(question, storage, config, checkpoint.id, targets, scored, min_score,
+                         fetch, citation_agent, should_stop, tell)
+    if extracted is None:
         return replace(outcome, cancelled=True)
+    texts, extraction_failures = extracted
+    outcome = replace(outcome, extraction_failures=extraction_failures)
 
     if assess_transparency is not None:
         outcome = _assess(storage, kept, texts, assess_transparency, outcome, should_stop, tell)
@@ -469,17 +517,18 @@ def _extract(
     citation_agent: LiteCitationAgent,
     should_stop: Callable[[], bool],
     tell: Callable[[int, int, str], None],
-) -> dict[str, str] | None:
+) -> tuple[dict[str, str], tuple[PassFailure, ...]] | None:
     """Extract the targets' citations as the review would, and keep them.
 
     A stopped extraction keeps nothing: what it read is not known paper by
     paper, and its papers stay unread, so the next run extracts them.
 
     Returns:
-        The full texts read by paper id, or None when a stop came first.
+        The full texts read by paper id and the papers whose extraction
+        failed, or None when a stop came first.
     """
     if not targets:
-        return {}
+        return {}, ()
     # Before the uploads are read: one stored after this is read next time
     taken_at = datetime.now(UTC)
     uploads = storage.get_uploaded_full_texts([d.document.id for d in targets])
@@ -533,7 +582,10 @@ def _extract(
         ),
         touch=False,
     )
-    return {doc_id: text for doc_id, text in texts.items() if doc_id in extraction.read_full_text}
+    read = {doc_id: text for doc_id, text in texts.items() if doc_id in extraction.read_full_text}
+    return read, tuple(
+        PassFailure(document_id=f.document.id, cause=f.cause) for f in extraction.failed
+    )
 
 
 def _assess(
@@ -545,7 +597,10 @@ def _assess(
     should_stop: Callable[[], bool],
     tell: Callable[[int, int, str], None],
 ) -> MoreEvidence:
-    """Analyse the transparency of the new documents without a stored result.
+    """Analyse the transparency of the documents scored now without a stored result.
+
+    A document with neither a PMID nor a DOI is not analysed: nothing
+    identifies it to the sources the analysis reads.
 
     Returns:
         The outcome with the documents that could not be analysed.
@@ -579,7 +634,9 @@ def _with_scoring_failures(
             return others
         return [*others, replace(earlier, documents_attempted=earlier.documents_attempted + attempted)]
     failed = len(failures) + (earlier.documents_failed if earlier else 0)
-    # Before this run's failures, every document scored was attempted
+    # With no earlier scoring shortfall, every document scored before this run
+    # was attempted and none failed; documents_scored already includes this
+    # run's judged ones, so they are taken off
     attempted_before = earlier.documents_attempted if earlier else metadata.documents_scored - (
         attempted - len(failures)
     )
@@ -628,16 +685,19 @@ def _stored_ids(value: object) -> list[str]:
 def _merge_retraction_snapshot(
     storage: LiteStorage, checkpoint_id: str, screen: RetractionScreen
 ) -> None:
-    """Add the new documents' rows to the run's retraction snapshot.
+    """Put the screened documents' rows in the run's retraction snapshot.
 
     A run checked for retractions keeps a row per document it held; a run
-    from before the check keeps none, so it gains only the new ones.
+    from before the check keeps none, so it gains only these. A screened
+    document's row replaces any it had: only documents held over from an
+    earlier *Find More Evidence* have one, written by a screen a stop may
+    have cut short, never by the review.
     """
     current = storage.get_checkpoint(checkpoint_id)
     stored = current.metadata if current is not None else {}
     rows = recorded_retraction_snapshot(stored)
     for row in screen.to_snapshot():
-        rows.setdefault(row["document_id"], row)
+        rows[row["document_id"]] = row
     storage.update_checkpoint(
         checkpoint_id=checkpoint_id,
         metadata={**stored, CHECKPOINT_RETRACTION_SNAPSHOT_KEY: list(rows.values())},
