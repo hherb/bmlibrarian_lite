@@ -237,6 +237,16 @@ response = client.chat(
 print(response.content)
 ```
 
+For Ollama, `client.chat(..., context_window=32768)` passes the fixed token
+budget as `options.num_ctx`. `LiteBaseAgent._chat` supplies the effective
+`TaskModelConfig.context_window`, including task overrides, through this same
+client path. The provider rejects booleans, non-integers and non-positive values
+before making a request. `None` omits the option and keeps the server/model
+default; Anthropic does not receive an Ollama context option. Prompt contents,
+output-token limits and token-usage accounting remain unchanged. No character
+count is used to guess a token limit or to claim that the server read a prompt
+in full.
+
 #### Agent System (`agents/`)
 
 All agents inherit from `LiteBaseAgent`:

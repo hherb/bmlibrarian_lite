@@ -152,6 +152,7 @@ class LLMClient:
         max_tokens: int = 4096,
         top_p: Optional[float] = None,
         json_mode: bool = False,
+        context_window: int | None = None,
     ) -> LLMResponse:
         """Send a chat request to the LLM.
 
@@ -162,6 +163,8 @@ class LLMClient:
             max_tokens: Maximum tokens to generate.
             top_p: Nucleus sampling parameter (optional).
             json_mode: Request JSON-formatted output.
+            context_window: Ollama context size in tokens. None keeps the
+                server/model default; other providers ignore this option.
 
         Returns:
             LLMResponse with the model's reply.
@@ -177,6 +180,9 @@ class LLMClient:
 
         # Get provider and make request
         provider = self._get_provider(provider_name)
+        provider_options: dict[str, object] = {}
+        if provider_name == PROVIDER_OLLAMA and context_window is not None:
+            provider_options["context_window"] = context_window
         response = provider.chat(
             messages=messages,
             model=model_name,
@@ -184,6 +190,7 @@ class LLMClient:
             max_tokens=max_tokens,
             top_p=top_p,
             json_mode=json_mode,
+            **provider_options,
         )
 
         # Track token usage with cost from provider

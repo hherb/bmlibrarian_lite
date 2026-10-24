@@ -151,12 +151,24 @@ class OllamaProvider(BaseProvider):
             model: Model ID to use. Defaults to medgemma4B_it_q8.
             temperature: Sampling temperature (0.0 to 1.0).
             max_tokens: Maximum tokens in the response.
-            **kwargs: Additional parameters (top_p, json_mode).
+            **kwargs: Additional parameters (top_p, json_mode, context_window).
+                context_window is a positive integer token limit; None keeps
+                Ollama's server/model default.
 
         Returns:
             LLMResponse with the model's response.
+
+        Raises:
+            ValueError: If context_window is not a positive integer or None.
         """
         model = model or self.default_model
+        context_window = kwargs.get("context_window")
+        if context_window is not None and (
+            isinstance(context_window, bool)
+            or not isinstance(context_window, int)
+            or context_window <= 0
+        ):
+            raise ValueError("context_window must be a positive integer or None")
         client = self._get_client()
 
         # Extract optional parameters
@@ -176,6 +188,8 @@ class OllamaProvider(BaseProvider):
 
         if top_p is not None:
             options["top_p"] = top_p
+        if context_window is not None:
+            options["num_ctx"] = context_window
 
         # Build request kwargs
         request_kwargs: dict[str, object] = {

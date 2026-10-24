@@ -143,6 +143,7 @@ class LiteBaseAgent:
             max_tokens=max_tokens if max_tokens is not None else task_config.max_tokens,
             top_p=task_config.top_p,
             json_mode=json_mode,
+            context_window=task_config.context_window,
         )
         return response.content
 

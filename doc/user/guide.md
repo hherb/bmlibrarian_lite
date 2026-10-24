@@ -55,6 +55,30 @@ BMLibrarian Lite requires an LLM provider. Choose one of the following:
    export OLLAMA_HOST="http://localhost:11434"
    ```
 
+For long documents, set a fixed `context_window` for each Ollama task in
+`~/.bmlibrarian_lite/config.json`, for example in the existing `models.tasks`
+configuration:
+
+```json
+{
+  "citation_extraction": {
+    "provider": "ollama",
+    "model": "llama3.2",
+    "context_window": 32768
+  }
+}
+```
+
+The value is a positive integer number of tokens, sent as Ollama's `num_ctx`.
+Use a size supported by the model and available memory, allowing room for both
+the prompt and the generated answer. Other task IDs include `report_generation`
+and `document_qa`; configure their limits separately if needed. A missing or
+`null` value keeps Ollama's server/model default, which may be too small for
+long prompts and may silently truncate them. This setting does not detect
+server-side truncation or resize the context automatically. Changing the
+context size can reload the model, so prefer a stable value for each task.
+Anthropic requests are unaffected.
+
 #### PubMed Email (Recommended)
 
 Set your email for PubMed API access to avoid rate limiting:

@@ -11,6 +11,13 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 
 ## [Unreleased]
 
+### Fixed
+
+- Ollama requests now honor the configured per-task `context_window` as
+  `options.num_ctx` instead of silently ignoring it (#620). Invalid configured
+  limits fail before the request; an unset limit preserves the server/model
+  default. No prompt data is shortened or automatic context size inferred.
+
 ### Added
 
 - **A hidden built-in browser for bot-walled PDFs (#480).** An open-access PDF
