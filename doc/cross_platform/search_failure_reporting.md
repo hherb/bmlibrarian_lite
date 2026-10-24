@@ -318,10 +318,11 @@ search:
 
 ## Alternative queries (smart search)
 
-Android and Swift run *smart search*: when the claim's own query finds too
-little, an LLM proposes alternative queries and each is searched. Python has no
-such step. An alternative query's source that fails must not read as "PubMed
-could not be searched" when the original query's PubMed results are in the
+All three platforms run *smart search*: when the question's own query finds
+too little, an LLM proposes alternative queries and each is searched (Python:
+`smart_search.py`, run by the review and by *Find More Evidence*). An
+alternative query's source that fails must not read as "PubMed could not be
+searched" when the original query's PubMed results are in the
 report (user's decision, 2026-09-15). So a shortfall also records which query
 it belongs to:
 
@@ -343,7 +344,7 @@ struct RetrievalShortfall:    # the failure record above, plus
 - Persisted as `"query": "alternative"` on the entry, written only for an
   alternative query. Reading back, a `query` that is not that string, or no
   `query`, reads as the original query, whose clause claims more is missing,
-  never less. Python writes none and ignores the key.
+  never less.
 - One alternative query failing does not end smart search: the next is still
   tried. When smart search runs on its own (too few relevant documents), what
   its queries lost is recorded like any shortfall. When the user asked for more
@@ -371,6 +372,14 @@ relevant documents, rather than the user asking for more evidence — its failur
 is shown and the session proceeds to the report on the documents it already
 scored. Only where the user asked for smart search is its failure the outcome
 of what they asked for.
+
+**Python** keeps the queries run per question (`smart_search_store`), which is
+the whole of the record: a review runs one round when fewer than
+`SMART_SEARCH_THRESHOLD` (3) documents are relevant, and *Find More Evidence*
+always runs a fresh one, so no "marked as tried" flag is needed. A round runs
+every query it was given and its documents are scored after it, rather than
+stopping once enough are relevant; the round's queries are listed in the
+report's methodology.
 
 ## Android
 

@@ -39,6 +39,7 @@ The contract, which the Swift and Android ports mirror, is in
 """
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from http import HTTPStatus
 from typing import Any
 
@@ -137,9 +138,10 @@ def combined_shortfalls(shortfalls: Sequence[RetrievalShortfall]) -> list[Retrie
 
     Returns:
         The shortfalls in first-seen order, with the counts of those naming
-        the same source and failure added together. A source that could not
-        be searched at all (no count) is never merged into a count, and is
-        reported once for each failure however often it failed.
+        the same source, failure and query added together: an alternative
+        query's loss is never merged into the original query's. A source
+        that could not be searched at all (no count) is never merged into a
+        count, and is reported once for each failure however often it failed.
     """
     combined: list[RetrievalShortfall] = []
     for shortfall in shortfalls:
@@ -149,12 +151,12 @@ def combined_shortfalls(shortfalls: Sequence[RetrievalShortfall]) -> list[Retrie
             if (
                 earlier.provider is shortfall.provider
                 and earlier.failure == shortfall.failure
+                and earlier.query is shortfall.query
                 and earlier.records_missing is not None
                 and shortfall.records_missing is not None
             ):
-                combined[index] = RetrievalShortfall(
-                    earlier.provider,
-                    earlier.failure,
+                combined[index] = replace(
+                    earlier,
                     records_missing=earlier.records_missing + shortfall.records_missing,
                 )
                 break

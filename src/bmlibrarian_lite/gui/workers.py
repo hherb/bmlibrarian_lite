@@ -28,6 +28,7 @@ Provides QThread-based workers for long-running operations:
 - RescoreWorker: Re-run relevance scoring
 - TransparencyReanalysisWorker: Re-analyse a question's pending transparency
 - FullTextRetryWorker: Read a reviewed question's unread full texts, and write its report again
+- MoreEvidenceWorker: Take a reviewed question further (Find More Evidence), and write its report again
 - RetractionCheckWorker: Check one paper's retraction status
 - RetractionRecheckWorker: Check a reopened question's papers again
 
@@ -75,7 +76,7 @@ from ..retraction_text import run_summary_clause
 
 if TYPE_CHECKING:
     from ..config import LiteConfig
-    from ..data_models import LiteDocument
+    from ..data_models import LiteDocument, RetrievalShortfall
     from ..quality.data_models import QualityFilter, QualityAssessment
     from ..quality.quality_manager import QualityManager
     from ..storage import LiteStorage
@@ -2019,4 +2020,192 @@ class FullTextRetryWorker(SingleOutcome, QThread):
 
     def cancel(self) -> None:
         """Request cancellation; the retry stops before its next paper."""
+        self._cancelled = True
+
+
+class MoreEvidenceWorker(SingleOutcome, QThread):
+    """Background worker for *Find More Evidence* on a reviewed question.
+
+    See :func:`~bmlibrarian_lite.more_evidence.find_more_evidence` for the
+    rules. The documents paging the question's own query found come from the
+    tab's :class:`IncrementalSearchWorker`; with none, a round of alternative
+    queries runs here.
+
+    Signals:
+        retractions_screened: Emitted, before the new documents are scored,
+            with what the retraction screen left out; not terminal
+        progress: Emitted with (current, total, message) along the way
+        finished: Emitted with the :class:`MoreEvidence` when complete
+        error: Emitted with what to tell the reader when it could not run,
+            or failed; the report stands
+        cancelled: Emitted with (outcome, error) when a cancel stopped it
+
+    Exactly one of ``finished``, ``error`` and ``cancelled`` ends a run.
+    """
+
+    progress = Signal(int, int, str)  # current, total, message
+    finished = Signal(object)  # MoreEvidence
+    error = Signal(str)
+    cancelled = Signal(object, str)  # MoreEvidence, error
+    retractions_screened = Signal(str, list)  # run_summary_clause or "", left-out titles
+
+    def __init__(
+        self,
+        question: str,
+        documents: list["LiteDocument"],
+        search_shortfalls: list["RetrievalShortfall"],
+        config: "LiteConfig",
+        storage: "LiteStorage",
+        parent: QWidget | None = None,
+        retraction_checker: Any = None,
+    ) -> None:
+        """Initialize the worker.
+
+        Args:
+            question: The reviewed research question.
+            documents: The new documents paging its own query found, stored
+                and linked to it; empty runs a round of alternative queries.
+            search_shortfalls: What that paging lost.
+            config: The configuration.
+            storage: Where the run is read from and written to.
+            parent: Optional parent widget.
+            retraction_checker: Leaves retracted papers out before scoring;
+                ``None`` screens nothing.
+        """
+        super().__init__(parent)
+        self.question = question
+        self.documents = documents
+        self.search_shortfalls = search_shortfalls
+        self.config = config
+        self.storage = storage
+        self.retraction_checker = retraction_checker
+        self._cancelled = False
+
+    def run(self) -> None:
+        """Execute it in a background thread."""
+        self._run_once(self._find, lambda error: self._end(self.error, error))
+
+    def _find(self) -> None:
+        """Find more evidence, and end the run."""
+        from ..agents import (
+            LiteCitationAgent,
+            LiteReportingAgent,
+            LiteScoringAgent,
+            LiteSearchAgent,
+        )
+        from ..citation_full_texts import full_text_fetcher
+        from ..exceptions import SearchFailedError
+        from ..full_text_retry import RetryNotPossible
+        from ..more_evidence import MoreEvidence, find_more_evidence
+        from ..search_failures import format_search_failure_message
+        from ..smart_search import SmartSearchContext, SmartSearchError, run_smart_search
+
+        def should_stop() -> bool:
+            return self._cancelled
+
+        def smart_search(context: SmartSearchContext, known: Any) -> Any:
+            return run_smart_search(
+                LiteSearchAgent(config=self.config, storage=self.storage),
+                self.storage,
+                context,
+                known,
+                asked=True,
+                max_results=self.config.search.max_results,
+                should_stop=should_stop,
+                progress=lambda message: self.progress.emit(0, 0, message),
+            )
+
+        def screen(documents: list["LiteDocument"]) -> RetractionScreen:
+            result = screen_with_fallback(self.retraction_checker, documents, should_stop)
+            self.retractions_screened.emit(
+                run_summary_clause(result) or "", [doc.title for doc in result.excluded]
+            )
+            return result
+
+        def quality_filter(
+            documents: list["LiteDocument"], settings: "QualityFilter"
+        ) -> list["LiteDocument"]:
+            from ..quality import QualityManager
+
+            passed, _assessments = QualityManager(self.config).filter_documents(
+                documents, settings, should_cancel=should_stop
+            )
+            return passed
+
+        try:
+            outcome = find_more_evidence(
+                self.question,
+                self.storage,
+                self.config,
+                self.documents,
+                self.search_shortfalls,
+                smart_search=smart_search,
+                screen=screen if self.retraction_checker is not None else None,
+                quality_filter=quality_filter,
+                scoring_agent=LiteScoringAgent(config=self.config),
+                citation_agent=LiteCitationAgent(config=self.config),
+                reporting_agent=LiteReportingAgent(config=self.config),
+                fetch=full_text_fetcher(self.config),
+                assess_transparency=(
+                    self._transparency_assessor() if self.config.transparency.enabled else None
+                ),
+                should_stop=should_stop,
+                progress=self.progress.emit,
+            )
+        except (RetryNotPossible, SmartSearchError) as e:
+            self._end(self.error, str(e))
+            return
+        except SearchFailedError as e:
+            # Nothing it lost is kept, and the report stands
+            if self._cancelled:
+                self._end(self.cancelled, MoreEvidence(cancelled=True), format_search_failure_message(e))
+            else:
+                self._end(self.error, format_search_failure_message(e))
+            return
+        except Exception as e:
+            # The provider's text stays in the log (#330)
+            cause = classify_analysis_exception(e)
+            logger.exception(f"Find More Evidence failed ({cause.name})")
+            if self._cancelled:
+                self._end(self.cancelled, MoreEvidence(cancelled=True), failure_cause_text(cause))
+            else:
+                self._end(self.error, failure_cause_text(cause))
+            return
+        if outcome.cancelled:
+            self._end(self.cancelled, outcome, "")
+        else:
+            self._end(self.finished, outcome)
+
+    def _transparency_assessor(self) -> Callable[["LiteDocument", "str | None"], None]:
+        """Analyses a document's transparency, with its full text when one was read.
+
+        Returns:
+            The assessment, through the body the review's manager runs.
+        """
+        from ..citation_full_texts import discovery_identifiers
+        from ..transparency.assessment import (
+            assess_document,
+            contact_email,
+            create_background_analyzer,
+            unpaywall_contact_email,
+        )
+
+        analyzer = create_background_analyzer(
+            contact_email(self.config),
+            self.config.pubmed.api_key,
+            unpaywall_email=unpaywall_contact_email(self.config),
+            core_api_key=self.config.discovery.core_api_key or None,
+            elsevier_credentials=ElsevierCredentials.from_config(self.config.discovery),
+        )
+
+        def assess(doc: "LiteDocument", text: "str | None") -> None:
+            assess_document(
+                analyzer, self.storage, self.config.transparency,
+                doc.id, discovery_identifiers(doc)["pmid"], doc.doi, full_text=text,
+            )
+
+        return assess
+
+    def cancel(self) -> None:
+        """Request cancellation; it stops before its next step or document."""
         self._cancelled = True

@@ -59,6 +59,9 @@ citation_reads_store.py # citation_reads table: which text each paper's citation
 full_text_retry.py    # Retry Full Text: read a reviewed run's unread full texts (and uploads), write its report again
 full_text_upload.py   # Upload Full Text: a reader's PDF/HTML/Markdown/text file read into text, or refused
 uploaded_full_texts_store.py # uploaded_full_texts table: each paper's last uploaded full text
+smart_search.py       # Alternative queries when a question's own finds too little (prompt, parse, a round); shortfalls marked alternative
+smart_search_store.py # smart_search_queries table: the alternative queries run per question
+more_evidence.py      # Find More Evidence: more documents scored into a reviewed run, its report written again
 query_translator.py   # Natural language → structured query
 fulltext_discovery.py # Europe PMC XML → PMC open-data bucket → Europe PMC PDF → Elsevier's API (10.1016/, with a key) → Unpaywall PDFs → OpenAlex PDFs → DOI download → CORE text (with a key)
 pmc_open_data.py      # PmcOpenDataClient: PMC's open-data S3 bucket (JATS by PMC ID)

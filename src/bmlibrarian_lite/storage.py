@@ -51,11 +51,13 @@ from . import (
     citation_reads_store,
     rescue_queue_store,
     retraction_store,
+    smart_search_store,
     uploaded_full_texts_store,
 )
 from .browser_rescue import RescueEntry, RescueRequest, RescueState, RescueVerdict
 from .rescue_queue_store import RecordedVerdict
 from .retraction_store import PaperCheck
+from .smart_search_store import RunQuery
 
 # Register adapters/converters for datetime to avoid Python 3.12 deprecation warning
 # The default converter expects space-separated format, but we use ISO format with 'T'
@@ -275,6 +277,8 @@ class LiteStorage:
                 conn.executescript(citation_reads_store.SCHEMA)
                 # The full texts readers uploaded for papers
                 conn.executescript(uploaded_full_texts_store.SCHEMA)
+                # The alternative queries smart search has run per question
+                conn.executescript(smart_search_store.SCHEMA)
                 # Create sqlite-vec virtual tables for document and chunk embeddings
                 conn.execute(
                     f"""
@@ -2721,6 +2725,7 @@ class LiteStorage:
                 (question_hash,),
             )
             deleted_associations = cursor.rowcount
+            smart_search_store.delete(conn, question_hash)
 
             conn.commit()
 
@@ -3528,6 +3533,29 @@ class LiteStorage:
         """
         with self._sqlite_connection() as conn:
             return uploaded_full_texts_store.read(conn, document_ids)
+
+    def record_smart_search_query(self, question: str, run: RunQuery) -> None:
+        """Keep an alternative query smart search ran for a question.
+
+        Args:
+            question: The research question.
+            run: The query, after those already kept.
+        """
+        with self._sqlite_connection() as conn:
+            smart_search_store.record(conn, compute_question_hash(question), run)
+            conn.commit()
+
+    def get_smart_search_queries(self, question: str) -> list[RunQuery]:
+        """The alternative queries smart search has run for a question.
+
+        Args:
+            question: The research question.
+
+        Returns:
+            The queries in the order they ran; empty before the first round.
+        """
+        with self._sqlite_connection() as conn:
+            return smart_search_store.read(conn, compute_question_hash(question))
 
     def replace_document_citations(
         self,

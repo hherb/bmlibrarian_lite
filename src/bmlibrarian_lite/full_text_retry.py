@@ -246,7 +246,7 @@ def retry_full_texts(
         return outcome
     if progress:
         progress(0, 1, "Writing the report again")
-    report = _write_report_again(
+    report = write_report_again(
         question, storage, checkpoint.id, metadata, scored, min_score, threshold,
         seeking, set(uploads), reporting_agent,
     )
@@ -355,7 +355,7 @@ def _read_full_texts(
             ))
             continue
         if not marked:
-            _mark_report_pending(storage, checkpoint_id)
+            mark_report_pending(storage, checkpoint_id)
             marked = True
         if extraction.citations:
             storage.replace_document_citations(
@@ -378,7 +378,7 @@ def _read_full_texts(
     return outcome
 
 
-def _mark_report_pending(storage: LiteStorage, checkpoint_id: str) -> None:
+def mark_report_pending(storage: LiteStorage, checkpoint_id: str) -> None:
     """Mark the run as owing a report, before its citations change.
 
     A cancel or a failure after this leaves citations the report does not
@@ -397,7 +397,7 @@ def _mark_report_pending(storage: LiteStorage, checkpoint_id: str) -> None:
     )
 
 
-def _write_report_again(
+def write_report_again(
     question: str,
     storage: LiteStorage,
     checkpoint_id: str,

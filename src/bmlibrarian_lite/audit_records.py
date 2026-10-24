@@ -89,6 +89,10 @@ EXTRACTION_FAILED_COUNT_KEY = "documents_citation_extraction_failed"
 #: every document it held, excluded ones included.
 CHECKPOINT_RETRACTION_SNAPSHOT_KEY = "retraction_snapshot"
 
+#: Where a review checkpoint keeps the ids of the documents its run's quality
+#: filter left out, so a search for more does not find them again as new.
+CHECKPOINT_QUALITY_FILTERED_KEY = "quality_filtered_out"
+
 #: How older builds began the explanation of a scoring call that raised,
 #: stored with a score of 1: the benchmark runner until #306, and the review
 #: scorer until 2025-12-23. What followed was the raw exception text.
