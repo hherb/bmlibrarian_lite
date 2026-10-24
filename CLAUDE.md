@@ -56,7 +56,9 @@ search_merger.py      # Deduplication (PMID/DOI/PMC/title)
 citation_text.py      # Pure: full-text score, the methodology's full-text sentence
 citation_full_texts.py # Fetching the full texts citations read (discovery chain, one at a time)
 citation_reads_store.py # citation_reads table: which text each paper's citations were read from
-full_text_retry.py    # Retry Full Text: read a reviewed run's unread full texts, write its report again
+full_text_retry.py    # Retry Full Text: read a reviewed run's unread full texts (and uploads), write its report again
+full_text_upload.py   # Upload Full Text: a reader's PDF/HTML/Markdown/text file read into text, or refused
+uploaded_full_texts_store.py # uploaded_full_texts table: each paper's last uploaded full text
 query_translator.py   # Natural language → structured query
 fulltext_discovery.py # Europe PMC XML → PMC open-data bucket → Europe PMC PDF → Elsevier's API (10.1016/, with a key) → Unpaywall PDFs → OpenAlex PDFs → DOI download → CORE text (with a key)
 pmc_open_data.py      # PmcOpenDataClient: PMC's open-data S3 bucket (JATS by PMC ID)

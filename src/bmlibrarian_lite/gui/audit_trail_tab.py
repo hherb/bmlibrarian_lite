@@ -29,16 +29,21 @@ its sub-tabs in real-time during workflow execution.
 
 import logging
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, List, Optional
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QMessageBox,
     QWidget,
     QVBoxLayout,
     QTabWidget,
 )
 
 from ..config import LiteConfig
+from ..full_text_upload import UPLOAD_FILE_FILTER, UploadRefused, read_upload
 from ..storage import LiteStorage
 from ..analysis_failures import transparency_failure_text
 from ..data_models import (
@@ -142,6 +147,7 @@ class AuditTrailTab(QWidget):
 
         # Connect send to interrogator signal
         self.literature_tab.send_to_interrogator.connect(self._on_send_to_interrogator)
+        self.literature_tab.upload_full_text.connect(self._on_upload_full_text)
 
         layout.addWidget(self.tab_widget)
 
@@ -168,6 +174,55 @@ class AuditTrailTab(QWidget):
         """
         logger.info(f"Document requested for interrogation: {doc_id}")
         self.document_requested.emit(doc_id)
+
+    def _on_upload_full_text(self, doc_id: str) -> None:
+        """Ask for a file, and keep it as the paper's full text.
+
+        Args:
+            doc_id: The paper.
+        """
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Upload Full Text", str(Path.home()), UPLOAD_FILE_FILTER
+        )
+        if not path:
+            return
+        document = self.literature_tab.get_document(doc_id)
+        title = document.title if document else doc_id
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            # shortcut: read on the GUI thread, a long PDF holds it for seconds; move to a worker if that bites
+            upload = read_upload(Path(path))
+        except UploadRefused as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "Upload Full Text", str(e))
+            return
+        except Exception:
+            QApplication.restoreOverrideCursor()
+            logger.exception("The full text uploaded for %s could not be read", doc_id)
+            QMessageBox.warning(
+                self, "Upload Full Text",
+                "The file could not be read, so it was not used; nothing was changed.",
+            )
+            return
+        try:
+            self.storage.save_uploaded_full_text(doc_id, upload)
+        except Exception:
+            QApplication.restoreOverrideCursor()
+            logger.exception("The full text uploaded for %s could not be kept", doc_id)
+            QMessageBox.warning(
+                self, "Upload Full Text",
+                "The full text could not be saved; nothing was changed.",
+            )
+            return
+        QApplication.restoreOverrideCursor()
+        QMessageBox.information(
+            self,
+            "Upload Full Text",
+            f"The full text of \u201c{title}\u201d is kept ({upload.file_name}). "
+            "When the paper scored at or above the review's threshold, Retry "
+            "Full Text on the Research Questions tab reads it and writes the "
+            "report again, and a review run from now on reads it too.",
+        )
 
     # =========================================================================
     # Workflow Event Handlers

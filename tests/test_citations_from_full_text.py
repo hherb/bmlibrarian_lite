@@ -15,11 +15,11 @@ reduced (the maintainer's rule, 2026-10-23), never its reference list.
 """
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from bmlib.publications.retraction_status import RetractionStatus
@@ -45,6 +45,7 @@ from bmlibrarian_lite.citation_text import (
     full_text_min_score,
     full_text_summary,
     record_full_text_reads,
+    record_uploaded_reads,
 )
 from bmlibrarian_lite.config import LiteConfig
 from bmlibrarian_lite.data_models import (
@@ -65,12 +66,17 @@ from bmlibrarian_lite.full_text_retry import (
     NO_NEW_FULL_TEXT_TEXT,
     NO_REPORT_TEXT,
     NOT_KEPT_TEXT,
+    NOTHING_TO_READ_TEXT,
     REPORT_PENDING_KEY,
+    RETRY_FULL_TEXT_ACTION,
+    UPLOADS_ONLY_TEXT,
     FullTextRetry,
     RetryNotPossible,
+    is_due,
     retry_full_texts,
     retry_text,
 )
+from bmlibrarian_lite.full_text_upload import UploadedFullText
 from bmlibrarian_lite.storage import LiteStorage
 from bmlibrarian_lite.utils import classify_analysis_exception
 
@@ -457,6 +463,36 @@ class TestTheMethodologySaysWhatWasRead:
         with pytest.raises(ValueError):
             ReportMetadata.from_dict(figures)
 
+    def test_papers_read_from_an_upload_are_said(self) -> None:
+        """Whatever the setting: alone, or after what the run sought."""
+        metadata = ReportMetadata()
+        record_uploaded_reads(
+            metadata, [scored("1", 5), scored("2", 3), scored("3", 3)],
+            {"doc-1", "doc-2"}, {"doc-2", "doc-3"},
+        )
+
+        # Paper 3 has an upload but was not read from it
+        assert metadata.uploaded_full_text_read_count == 1
+        assert full_text_summary(metadata) == (
+            "The citations of 1 paper were read from a full text the reader uploaded."
+        )
+        metadata.uploaded_full_text_read_count = 2
+        record_full_text_reads(metadata, 4, [scored("1", 5)], {"doc-1"})
+        assert full_text_summary(metadata) == (
+            "The citations of the paper scored 4 or higher were read from its "
+            "full text. The citations of 2 papers were read from full texts "
+            "the reader uploaded."
+        )
+
+    def test_the_upload_count_survives_the_checkpoint(self) -> None:
+        """And a count that cannot be is refused."""
+        metadata = ReportMetadata(uploaded_full_text_read_count=2)
+        again = ReportMetadata.from_dict(json.loads(json.dumps(metadata.to_dict())))
+        assert again.uploaded_full_text_read_count == 2
+        for bad in (-1, "2", True):
+            with pytest.raises(ValueError):
+                ReportMetadata.from_dict({"uploaded_full_text_read_count": bad})
+
     def test_one_paper_not_read_from_full_text(self) -> None:
         """Not "0 of the 1 papers"."""
         metadata = ReportMetadata(full_text_min_score=4, full_text_papers_read=1,
@@ -587,8 +623,10 @@ class TestFetching:
 # ---------------------------------------------------------------------------
 
 
-def run_review(monkeypatch: pytest.MonkeyPatch, enabled: bool) -> dict[str, Any]:
-    """Run the review worker over three papers scored 5, 4 and 3."""
+def run_review(monkeypatch: pytest.MonkeyPatch, enabled: bool,
+               uploads: dict[str, str] | None = None,
+               uploads_read_at: list[datetime] | None = None) -> dict[str, Any]:
+    """Run the review worker over three papers scored 5, 4 and 3, with these uploads."""
     pytest.importorskip("PySide6")
     from bmlibrarian_lite.data_models import SearchSession
     from bmlibrarian_lite.gui import systematic_review_tab
@@ -629,6 +667,17 @@ def run_review(monkeypatch: pytest.MonkeyPatch, enabled: bool) -> dict[str, Any]
     monkeypatch.setattr(config.transparency, "enabled", False)
     storage = MagicMock()
     storage.create_checkpoint.return_value.id = "cp"
+    stored_uploads = {
+        doc_id: UploadedFullText(text=text, kind="text", file_name="up.txt")
+        for doc_id, text in (uploads or {}).items()
+    }
+
+    def get_uploads(ids: list[str]) -> dict[str, UploadedFullText]:
+        if uploads_read_at is not None:
+            uploads_read_at.append(datetime.now(UTC))
+        return stored_uploads
+
+    storage.get_uploaded_full_texts.side_effect = get_uploads
     worker = WorkflowWorker(question=QUESTION, config=config, storage=storage, min_score=3)
     finished: list[Any] = []
     worker.finished.connect(lambda report, metadata: finished.append(metadata))
@@ -660,9 +709,9 @@ class TestTheReview:
         """Every paper read is recorded, full text or abstract."""
         run = run_review(monkeypatch, enabled=True)
 
-        run["storage"].record_citation_reads.assert_called_once_with(
-            "cp", {"doc-1": True, "doc-2": False, "doc-3": False}
-        )
+        call = run["storage"].record_citation_reads.call_args
+        assert call.args == ("cp", {"doc-1": True, "doc-2": False, "doc-3": False})
+        assert call.kwargs["read_at"].tzinfo is not None
         metadata = run["report_metadata"]
         assert (metadata.full_text_min_score, metadata.full_text_papers_read,
                 metadata.full_text_read_count) == (4, 2, 1)
@@ -685,6 +734,53 @@ class TestTheReview:
         assert run["asked"] == []
         assert run["extract"].kwargs["full_texts"] == {}
         assert run["report_metadata"].full_text_min_score is None
+
+    def test_an_upload_is_read_whatever_the_setting(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Off: the upload alone is read, below the full-text score too."""
+        run = run_review(monkeypatch, enabled=False, uploads={"doc-3": "Uploaded 3."})
+
+        assert run["asked"] == []
+        assert run["extract"].kwargs["full_texts"] == {"doc-3": "Uploaded 3."}
+
+    def test_a_paper_with_an_upload_is_never_fetched(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The fetch leaves a paper the reader uploaded for alone."""
+        run = run_review(monkeypatch, enabled=True, uploads={"doc-1": "Uploaded 1."})
+
+        assert run["asked"] == ["doc-2"]
+        assert run["extract"].kwargs["full_texts"] == {"doc-1": "Uploaded 1."}
+        assert run["report_metadata"].uploaded_full_text_read_count == 1
+
+    def test_transparency_reads_an_upload_rather_than_looking_for_one(self) -> None:
+        """A paper without one is looked for as before."""
+        pytest.importorskip("PySide6")
+        from bmlibrarian_lite.gui.systematic_review_tab import SystematicReviewTab
+
+        tab = MagicMock()
+        tab.config.transparency.enabled = True
+        tab.storage.get_uploaded_full_texts.return_value = {
+            "doc-1": UploadedFullText(text="Uploaded 1.", kind="text", file_name="u.txt")}
+
+        SystematicReviewTab.start_transparency_analysis(
+            tab, [make_document("1"), make_document("2")])
+
+        texts = {c.kwargs["document_id"]: c.kwargs["full_text"]
+                 for c in tab._transparency_manager.analyze_document.call_args_list}
+        assert texts == {"doc-1": "Uploaded 1.", "doc-2": None}
+
+    def test_the_reads_are_recorded_at_the_time_the_uploads_were_read(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Not when the extraction ended: an upload stored meanwhile is newer."""
+        uploads_read_at: list[datetime] = []
+        run = run_review(monkeypatch, enabled=True, uploads={"doc-1": "Uploaded 1."},
+                         uploads_read_at=uploads_read_at)
+
+        read_at = run["storage"].record_citation_reads.call_args.kwargs["read_at"]
+        assert read_at <= uploads_read_at[0]
 
 
 # ---------------------------------------------------------------------------
@@ -747,9 +843,10 @@ def reviewed(storage: LiteStorage, keep_metadata: bool = True,
 def retry(storage: LiteStorage, texts: dict[str, str], answers: dict[str, Any],
           stop_after: int | None = None, assessed: list[Any] | None = None,
           assess: Any = None, report_error: Exception | None = None,
+          seeking: bool = True, agent: FakeAgent | None = None,
           ) -> tuple[FullTextRetry, FakeAgent, MagicMock]:
     """Retry with scripted fetches, extractions and reports."""
-    agent = FakeAgent(answers)
+    agent = agent or FakeAgent(answers)
     reporter = MagicMock()
     reporter.generate_report.return_value = "New report."
     if report_error is not None:
@@ -757,7 +854,7 @@ def retry(storage: LiteStorage, texts: dict[str, str], answers: dict[str, Any],
     if assessed is not None:
         assess = lambda doc, text: assessed.append((doc.id, text))  # noqa: E731
     config = LiteConfig()
-    config.discovery.citations_from_full_text = True
+    config.discovery.citations_from_full_text = seeking
     fetched: list[str] = []
 
     def fetch(doc: LiteDocument) -> str | None:
@@ -921,6 +1018,7 @@ class TestRetryFullText:
             return None
 
         config = LiteConfig()
+        config.discovery.citations_from_full_text = True
         outcome = retry_full_texts(QUESTION, storage, config, fetch, agent, MagicMock(),
                                    None, lambda: len(asked) >= 1)
 
@@ -1012,6 +1110,214 @@ class TestRetryFullText:
 
         assert outcome == FullTextRetry() and agent.calls == []
         assert retry_text(outcome).startswith("Every paper scored high enough")
+
+
+def upload(storage: LiteStorage, pmid: str, text: str) -> None:
+    """The reader uploads a paper's full text."""
+    storage.save_uploaded_full_text(
+        f"doc-{pmid}", UploadedFullText(text=text, kind="text", file_name=f"{pmid}.txt"))
+
+
+class TestRetryReadsUploads:
+    """An upload is read whatever the full-text setting or score."""
+
+    def test_with_the_setting_off_only_unread_uploads_are_read(
+        self, storage: LiteStorage
+    ) -> None:
+        """Never fetched; the upload is read and its passages kept."""
+        checkpoint_id = reviewed(storage)
+        upload(storage, "3", "Uploaded 3.")
+
+        outcome, agent, reporter = retry(storage, {}, {"doc-3": ["From the upload."]},
+                                         seeking=False)
+
+        assert agent.fetched == []  # type: ignore[attr-defined]
+        assert agent.calls == [("doc-3", {"doc-3": "Uploaded 3."})]
+        assert (outcome.read, outcome.report) == (1, "New report.")
+        assert passages_of(storage, checkpoint_id)["doc-3"] == {"From the upload."}
+
+    def test_an_upload_below_the_threshold_is_not_read(self, storage: LiteStorage) -> None:
+        """A paper scored under the run's threshold is not cited, so nothing is read."""
+        reviewed(storage)
+        storage.upsert_document(make_document("5"))
+        checkpoint = storage.get_checkpoint_for_question(QUESTION)
+        storage.save_scored_document(scored("5", 2), checkpoint.id)
+        upload(storage, "5", "Uploaded 5.")
+
+        with pytest.raises(RetryNotPossible) as refused:
+            retry(storage, {}, {}, seeking=False)
+        assert str(refused.value) == NOTHING_TO_READ_TEXT
+
+    def test_an_upload_after_a_full_text_read_is_read_again(
+        self, storage: LiteStorage
+    ) -> None:
+        """Paper 2 was read from a fetched text; the reader's upload is newer."""
+        reviewed(storage)
+        upload(storage, "2", "Uploaded 2.")
+
+        outcome, agent, _ = retry(storage, {}, {"doc-2": ["From the upload."]},
+                                  seeking=False)
+
+        assert agent.calls == [("doc-2", {"doc-2": "Uploaded 2."})]
+        assert outcome.read == 1
+
+    def test_an_upload_already_read_is_not_read_again(self, storage: LiteStorage) -> None:
+        """Read once; a second retry has nothing to do."""
+        reviewed(storage)
+        upload(storage, "3", "Uploaded 3.")
+        retry(storage, {}, {"doc-3": ["From the upload."]}, seeking=False)
+
+        with pytest.raises(RetryNotPossible):
+            retry(storage, {}, {}, seeking=False)
+
+    def test_with_the_setting_on_an_upload_is_read_instead_of_fetched(
+        self, storage: LiteStorage
+    ) -> None:
+        """The reader's copy wins over whatever a source serves."""
+        reviewed(storage)
+        upload(storage, "1", "Uploaded 1.")
+
+        _, agent, _ = retry(storage, {"doc-1": "Fetched 1."}, {"doc-1": ["U."]})
+
+        assert agent.calls[0] == ("doc-1", {"doc-1": "Uploaded 1."})
+        assert "doc-1" not in agent.fetched  # type: ignore[attr-defined]
+
+    def test_a_run_that_sought_no_full_text_says_only_what_was_uploaded(
+        self, storage: LiteStorage
+    ) -> None:
+        """Nothing of texts not obtained; the upload read is said."""
+        checkpoint_id = reviewed(storage)
+        stored = storage.get_checkpoint(checkpoint_id)
+        metadata = recorded_report_metadata(stored.metadata)
+        metadata.full_text_min_score = None
+        storage.update_checkpoint(checkpoint_id, metadata={
+            **stored.metadata, CHECKPOINT_REPORT_METADATA_KEY: metadata.to_dict()}, touch=False)
+        upload(storage, "3", "Uploaded 3.")
+
+        _, _, reporter = retry(storage, {}, {"doc-3": ["U."]}, seeking=False)
+
+        assert full_text_summary(reporter.generate_report.call_args.args[2]) == (
+            "The citations of 1 paper were read from a full text the reader uploaded."
+        )
+
+    @pytest.mark.parametrize("passages", [["From the first."], []])
+    def test_an_upload_replaced_while_it_is_read_is_read_next_time(
+        self, storage: LiteStorage, passages: list[str]
+    ) -> None:
+        """The read is recorded at the time the uploads were read, not after it.
+
+        Whether its passages replace the old ones or it holds none.
+        """
+        reviewed(storage)
+        upload(storage, "3", "First 3.")
+        agent = FakeAgent({"doc-3": passages})
+        extract = agent.extract_all_citations
+
+        def replaced_meanwhile(*args: Any, **kwargs: Any) -> CitationOutcome:
+            upload(storage, "3", "Second 3.")
+            return extract(*args, **kwargs)
+
+        agent.extract_all_citations = replaced_meanwhile  # type: ignore[method-assign]
+        retry(storage, {}, {}, seeking=False, agent=agent)
+
+        _, again, _ = retry(storage, {}, {"doc-3": ["From the second."]}, seeking=False)
+
+        assert again.calls == [("doc-3", {"doc-3": "Second 3."})]
+
+    def test_with_the_setting_off_a_report_owed_is_written(
+        self, storage: LiteStorage
+    ) -> None:
+        """Nothing to read, but an earlier retry's citations are not yet in it."""
+        checkpoint_id = reviewed(storage)
+        stored = storage.get_checkpoint(checkpoint_id)
+        storage.update_checkpoint(checkpoint_id, metadata={
+            **stored.metadata, REPORT_PENDING_KEY: True}, touch=False)
+
+        outcome, agent, _ = retry(storage, {}, {}, seeking=False)
+
+        assert agent.calls == [] and outcome.report == "New report."
+        assert retry_text(outcome) == (
+            "The report was written again with the citations an earlier retry read."
+        )
+
+    def test_a_preprint_without_a_pmid_has_its_upload_read(
+        self, storage: LiteStorage
+    ) -> None:
+        """Keyed by its DOI id, as every per-paper record is."""
+        reviewed(storage)
+        preprint = make_document("9")
+        preprint.id, preprint.pmid = "doi-10.1101_2024.01.01.24300001", None
+        storage.upsert_document(preprint)
+        checkpoint = storage.get_checkpoint_for_question(QUESTION)
+        storage.save_scored_document(
+            ScoredDocument(document=preprint, score=4, explanation="."), checkpoint.id)
+        storage.save_uploaded_full_text(preprint.id, UploadedFullText(
+            text="Preprint body.", kind="text", file_name="preprint.txt"))
+
+        _, agent, _ = retry(storage, {}, {preprint.id: ["From the preprint."]},
+                            seeking=False)
+
+        assert agent.calls == [(preprint.id, {preprint.id: "Preprint body."})]
+
+    @pytest.mark.parametrize("score, uploaded, read, seeking, due", [
+        (4, None, None, True, True),     # the control: at the score, never read
+        (4, None, None, False, False),   # the setting off fetches nothing
+        (4, None, 1, True, False),       # read from full text already
+        (3, None, None, True, False),    # under the full-text score
+        (3, 2, None, False, True),       # an upload, never read from full text
+        (3, 2, 1, False, True),          # an upload newer than the read
+        (3, 1, 2, False, False),         # read since the upload
+        (2, 2, None, True, False),       # below the threshold: never cited
+    ])
+    def test_what_is_due(self, score: int, uploaded: int | None, read: int | None,
+                         seeking: bool, due: bool) -> None:
+        """Threshold 3, full-text score 4; times are seconds."""
+        def at(seconds: int | None) -> datetime | None:
+            return None if seconds is None else datetime(2026, 10, 23, 0, 0, seconds, tzinfo=UTC)
+
+        up = None if uploaded is None else UploadedFullText(
+            text="T.", kind="text", file_name="t.txt", uploaded_at=at(uploaded))
+
+        assert is_due(scored("1", score), min_score=3, threshold=4, seeking=seeking,
+                      upload=up, read_at=at(read)) is due
+
+
+def retry_menu_action(seeking: bool, busy: bool = False) -> Any:
+    """The Research Questions menu's Retry Full Text, built with stand-in actions."""
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import QPoint
+
+    from bmlibrarian_lite.gui import research_questions_tab as module
+
+    actions: dict[str, Any] = {}
+
+    def make_action(label: str, _parent: Any) -> Any:
+        actions[label] = MagicMock()
+        return actions[label]
+
+    tab = MagicMock()
+    tab.config.discovery.citations_from_full_text = seeking
+    tab._is_busy.return_value = busy
+    tab._get_selected_question.return_value.total_documents = 3
+    with patch.object(module, "QAction", side_effect=make_action), \
+            patch.object(module, "QMenu"):
+        module.ResearchQuestionsTab._show_context_menu(tab, QPoint())
+    return actions[RETRY_FULL_TEXT_ACTION]
+
+
+class TestTheRetryMenuAction:
+    """Offered with the setting off too: the uploads are read whatever it is."""
+
+    def test_offered_with_the_setting_off(self) -> None:
+        """Saying it reads the uploads only."""
+        action = retry_menu_action(seeking=False)
+
+        action.setEnabled.assert_called_once_with(True)
+        action.setToolTip.assert_called_once_with(UPLOADS_ONLY_TEXT)
+
+    def test_it_waits_for_a_running_pass(self) -> None:
+        """The control: busy is still refused."""
+        retry_menu_action(seeking=False, busy=True).setEnabled.assert_called_once_with(False)
 
 
 class TestTheRetryWorker:

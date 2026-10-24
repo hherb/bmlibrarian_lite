@@ -370,6 +370,17 @@ The Research Questions tab lets you manage and revisit past searches:
   and the badges of a loaded question update as each study comes back. A
   study whose sources could not all be read is reported as **provisional**:
   its result is shown with that caveat, and it stays pending
+- **Retry Full Text** (context menu) reads full texts the question's report
+  was not written from, then writes the report again. With **Read citations
+  from full text** on (Settings → Full Text), it fetches the full text of each
+  paper scored at **Fetch Full Text From Score** or higher whose citations
+  were not read from it. Whatever the setting, it reads each full text you
+  uploaded for a paper scored at or above the review's threshold (Audit
+  Trail → Literature → right-click → **Upload Full Text…**) since that
+  paper's citations were last read from a full text, or that was never read
+  from one. A long
+  text is read in several model calls and never cut. When no full text was
+  read, the report stays as it was
 
 ### Audit Trail
 
@@ -406,6 +417,15 @@ Displays document cards for all retrieved articles:
 - **Left-click**: Expand/collapse the card to show abstract
 - **Right-click**: Context menu with options:
   - Send to Interrogator (opens document for Q&A)
+  - Upload Full Text… (a PDF, HTML, Markdown or plain-text file of the
+    paper, for one no source had). Its text is kept with the paper. HTML,
+    Markdown and text files must be UTF-8, and a file over 100 MB, holding
+    no text (a scanned PDF) or nothing before its reference list is refused.
+    When the paper scored at or above the review's threshold, **Retry Full
+    Text** on the Research Questions tab reads it and writes the report
+    again, and every review run from then on reads it in place of fetching
+    one, whatever the full-text setting. The report's methodology says how
+    many papers were read from an upload
   - Copy PMID / Copy DOI
   - Expand / Collapse
 
