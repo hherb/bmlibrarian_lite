@@ -117,15 +117,21 @@ class RetractionScreen:
         kept: Everything not retracted, in input order.
         excluded: The retracted papers, in input order.
         checks: Each checked document's verdict, keyed by ``LiteDocument.id``.
-        failed: The check itself failed: every check is a stand-in (unchecked,
-            or retracted by the record's own label), and the screen reports
-            no check time.
+        failed_ids: The documents whose check itself failed: their checks are
+            stand-ins (unchecked, or retracted by the record's own label),
+            whose times are no check times.
     """
 
     kept: tuple[LiteDocument, ...]
     excluded: tuple[LiteDocument, ...]
     checks: Mapping[str, PaperCheck]
-    failed: bool = False
+    failed_ids: frozenset[str] = frozenset()
+
+    @property
+    def failed(self) -> bool:
+        """The check failed for every document held (and there was one)."""
+        held = {doc.id for doc in (*self.kept, *self.excluded)}
+        return bool(held) and held <= self.failed_ids
 
     @property
     def unchecked_count(self) -> int:
@@ -148,10 +154,11 @@ class RetractionScreen:
 
     @property
     def checked_at(self) -> datetime | None:
-        """The oldest ``checked_at`` among the checks; ``None`` without any, or when the check failed."""
-        if self.failed:
-            return None
-        return min((as_utc(c.checked_at) for c in self.checks.values()), default=None)
+        """The oldest ``checked_at`` among the checks whose check did not fail; ``None`` without any."""
+        return min(
+            (as_utc(c.checked_at) for doc_id, c in self.checks.items() if doc_id not in self.failed_ids),
+            default=None,
+        )
 
     def to_snapshot(self) -> list[dict[str, Any]]:
         """Rows for the report and audit trail, one per held document.
@@ -180,7 +187,7 @@ class RetractionScreen:
                     "status": (check.verdict.status if check else RetractionStatus.UNCHECKED).value,
                     "checked_at": (
                         as_utc(check.checked_at).isoformat()
-                        if check and not self.failed
+                        if check and doc.id not in self.failed_ids
                         else None
                     ),
                     "deciding": deciding.to_dict() if deciding else None,
@@ -319,18 +326,17 @@ def screen_documents(
         check = checks.get(doc.id)
         retracted = check is not None and check.verdict.status is RetractionStatus.RETRACTED
         (excluded if retracted else kept).append(doc)
-    return RetractionScreen(tuple(kept), tuple(excluded), dict(checks), failed)
+    held = frozenset(doc.id for doc in (*kept, *excluded))
+    return RetractionScreen(tuple(kept), tuple(excluded), dict(checks), held if failed else frozenset())
 
 
 def merged_screen(first: RetractionScreen, then: RetractionScreen) -> RetractionScreen:
     """One run's screen over two batches it checked (smart search's documents after the search's).
 
-    A batch whose check failed carries stand-in checks, which the screen
-    reads as real only when it is not failed: their time would be stored as a
-    check time, and their unchecked papers blamed on a source that was never
-    asked. So the merged screen is failed when either batch was: it reports
-    no check time, and every unchecked paper's cause is the failed check, the
-    checked batch's included -- more failure than there was, never less.
+    A batch whose check failed carries stand-in checks: their time is no
+    check time, and their unchecked papers are not a source's to blame. The
+    merged screen keeps which documents those are, so the batch that was
+    checked keeps its times and causes.
 
     Args:
         first: The earlier batch's screen.
@@ -344,7 +350,7 @@ def merged_screen(first: RetractionScreen, then: RetractionScreen) -> Retraction
         (*first.kept, *(d for d in then.kept if d.id not in seen)),
         (*first.excluded, *(d for d in then.excluded if d.id not in seen)),
         {**then.checks, **first.checks},
-        first.failed or then.failed,
+        first.failed_ids | (then.failed_ids - seen),
     )
 
 

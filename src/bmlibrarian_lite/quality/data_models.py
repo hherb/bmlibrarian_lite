@@ -273,6 +273,22 @@ class QualityFilter:
             use_detailed_assessment=data.get("use_detailed_assessment", False),
         )
 
+    def to_report_settings(self) -> dict[str, Any]:
+        """What a report keeps of the filter (``quality_filter_settings``).
+
+        Read back by :meth:`from_report_settings`; the tier is kept by name.
+
+        Returns:
+            The minimum tier, the randomisation and blinding requirements and
+            the sample size.
+        """
+        return {
+            "minimum_tier": self.minimum_tier.name,
+            "require_randomization": self.require_randomization,
+            "require_blinding": self.require_blinding,
+            "minimum_sample_size": self.minimum_sample_size,
+        }
+
     @classmethod
     def from_report_settings(cls, settings: object) -> "QualityFilter":
         """The filter a report's metadata names (``quality_filter_settings``).

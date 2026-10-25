@@ -8,6 +8,7 @@ import pytest
 from bmlibrarian_lite.agents.base import LiteBaseAgent
 from bmlibrarian_lite.config import LiteConfig, TaskModelConfig
 from bmlibrarian_lite.llm import LLMClient, LLMMessage
+from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS
 from bmlibrarian_lite.llm.providers.anthropic import AnthropicProvider
 from bmlibrarian_lite.llm.providers.ollama import OllamaProvider
 
@@ -135,3 +136,18 @@ def test_anthropic_request_does_not_receive_ollama_context_option(
         [LLMMessage(role="user", content="evidence")],
     ) == "answer"
     assert set(sdk.messages.create.call_args.kwargs) == {"model", "messages", "max_tokens", "temperature"}
+
+
+@pytest.mark.parametrize(("done_reason", "stop_reason"), [
+    ("length", STOP_REASON_MAX_TOKENS), ("stop", "stop"), (None, "stop"),
+])
+def test_an_answer_cut_off_by_num_predict_says_so(
+    done_reason: str | None, stop_reason: str, sdk: MagicMock, tracker: MagicMock,
+) -> None:
+    """Ollama's "length" reads as Anthropic's max_tokens; any other ending as a stop."""
+    sdk.chat.return_value = {**sdk.chat.return_value, "done_reason": done_reason}
+
+    agent = LiteBaseAgent(config=LiteConfig._from_dict({"models": {"tasks": {"default": {
+        "provider": "ollama", "model": "test-model"}}}}), llm_client=_client(sdk))
+
+    assert agent._chat_response([LLMMessage(role="user", content="q")]).stop_reason == stop_reason

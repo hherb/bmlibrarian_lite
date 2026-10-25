@@ -334,6 +334,8 @@ def find_more_evidence(
             return replace(outcome, cancelled=round_.stopped,
                            notice=None if round_.stopped else NO_NEW_EVIDENCE_TEXT)
         metadata.alternative_queries = [*metadata.alternative_queries, *round_.queries]
+        # The review's round could not run; this one did
+        metadata.smart_search_notice = None
     outcome = replace(outcome, found=len(found), resumed=len(unscored),
                       caught_up=not found and (bool(unscored) or owed),
                       search_shortfalls=tuple(combined_shortfalls(lost)))

@@ -801,6 +801,8 @@ Key passages:
         if metadata.alternative_queries:
             lines.append("- **Alternative Queries (smart search):**")
             lines.extend(f"  - `{query}`" for query in metadata.alternative_queries)
+        if metadata.smart_search_notice:
+            lines.append(f"- **Alternative Queries (smart search):** {metadata.smart_search_notice}")
         if metadata.search_shortfalls:
             lines.append(
                 "- **Search Completeness:** Incomplete: "

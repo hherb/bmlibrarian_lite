@@ -69,6 +69,11 @@ paper with its `retraction_status`.
   built, the database raised) still leaves out a paper its label retracts.
 - **A failed store is not a failed check.** The verdicts are returned even
   when they could not be stored.
+- **A failed check is failed document by document.** `RetractionScreen.failed_ids`
+  holds the papers whose checks are a failed check's stand-ins: no check time,
+  and "the check failed" as their cause. When the review screens smart
+  search's documents after the search's (`merged_screen`), a batch that was
+  checked keeps its times and causes; `failed` means every paper held failed.
 - **Only the review-like workflows download the export.** A copy older than
   `RETRACTION_WATCH_MAX_AGE_DAYS` (35) is not consulted; the review's checker,
   *Check again* and MCP's `fact_check_claim` download a new one (about 68 MB)

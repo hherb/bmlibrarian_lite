@@ -65,12 +65,14 @@ def _unchecked_causes(screen: RetractionScreen) -> list[str]:
     Returns:
         The causes, in that order; empty when no kept paper is unchecked.
     """
-    if screen.failed:
-        return [_FAILED_CAUSE]
     found: set[str] = set()
     crossref: list[str] = []
     for doc in screen.kept:
         check = screen.checks.get(doc.id)
+        if doc.id in screen.failed_ids:
+            if check is None or check.verdict.status is RetractionStatus.UNCHECKED:
+                found.add(_FAILED_CAUSE)
+            continue
         if check is None:
             found.add(_CANCELLED_CAUSE)  # the cancelled check never reached it
             continue
@@ -92,7 +94,7 @@ def _unchecked_causes(screen: RetractionScreen) -> list[str]:
                 found.add(_NO_DOI_CAUSE)
             else:
                 found.add(_CROSSREF_SILENT_CAUSE)
-    causes = [c for c in (_EXPORT_CAUSE, _EXPORT_NOTICE_CAUSE) if c in found]
+    causes = [c for c in (_FAILED_CAUSE, _EXPORT_CAUSE, _EXPORT_NOTICE_CAUSE) if c in found]
     if crossref:
         causes.append(f"{_CROSSREF} could not be used ({', '.join(crossref)})")
     order = (_NO_DOI_CAUSE, _CROSSREF_SILENT_CAUSE, _NO_IDS_CAUSE, _CANCELLED_CAUSE)

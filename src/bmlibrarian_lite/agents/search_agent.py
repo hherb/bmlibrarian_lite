@@ -40,6 +40,8 @@ from ..config import LiteConfig
 from ..constants import SMART_SEARCH_MAX_TOKENS, SMART_SEARCH_TEMPERATURE
 from ..data_models import LiteDocument, DocumentSource, SearchSession, SearchProvider
 from ..embeddings import LiteEmbedder
+from ..exceptions import TruncatedResponseError
+from ..llm.data_types import STOP_REASON_MAX_TOKENS
 from ..query_converter import LiteQueryConverter
 from ..search_service import SearchService, UnifiedSearchResult
 from ..search_failures import describe_search_shortfalls, retrieval_shortfalls_to_metadata
@@ -165,13 +167,19 @@ class LiteSearchAgent(LiteBaseAgent):
 
         Returns:
             The answer's text.
+
+        Raises:
+            TruncatedResponseError: The answer reached its token limit.
         """
-        return self._chat(
+        response = self._chat_response(
             [self._create_user_message(prompt)],
             temperature=SMART_SEARCH_TEMPERATURE,
             max_tokens=SMART_SEARCH_MAX_TOKENS,
             json_mode=True,
         )
+        if response.stop_reason == STOP_REASON_MAX_TOKENS:
+            raise TruncatedResponseError("The alternative-query answer reached its token limit")
+        return response.content
 
     def search(
         self,
