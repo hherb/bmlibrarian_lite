@@ -394,13 +394,13 @@ ways:
   may ask them again. A failed request names its cause and what to do, rather
   than always pointing at Settings.
 - An answer cut off at its token limit (Anthropic's `max_tokens`, Ollama's
-  `done_reason` `length`) is not asked for again, since the same limit cuts it
-  off again: the user is told the answer was cut off, not that it held no
-  usable query.
-- When the review's own round could not run, the report's methodology says
-  why (`ReportMetadata.smart_search_notice`), so a reopened report shows that
-  more searching was tried; a later *Find More Evidence* round that runs
-  clears it.
+  `done_reason` `length`) is not asked for again, since the same limit likely
+  cuts it off again, each time paid: the user is told the answer was cut off,
+  not that it held no usable query.
+- When the review's own round could not run or broke off, the report's
+  methodology says why (`ReportMetadata.smart_search_notice`), so a reopened
+  report shows that more searching was tried; a later *Find More Evidence*
+  round that finds documents (and so writes the report again) clears it.
 
 ## Android
 

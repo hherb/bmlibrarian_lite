@@ -14,7 +14,7 @@ The rules are the apps' (iOS/macOS's ``executeSmartSearch``) and the
   asked for again up to ``SMART_SEARCH_MAX_QUERY_RETRIES`` more times, each a
   paid call; the apps search a repeat again, the desktop never does. A
   request that failed, or an answer cut off at its token limit (asked again,
-  it is cut off again), stops the round. None of these is a source's failure,
+  it is likely cut off again, each time paid), stops the round. None of these is a source's failure,
   so none records a shortfall.
 - Each query is searched with the configured provider. Once the round ends,
   a query is kept as run unless a source could not answer it and it found
@@ -66,10 +66,12 @@ ONLY_REPEATS_TEXT = (
     "The model proposed only alternative search queries already run, "
     "so no alternative search was run."
 )
-#: The desktop's own: a cut-off answer is cut off again, so it is not asked for again
+#: The desktop's own: a cut-off answer is likely cut off again, so it is not asked for again
 ANSWER_CUT_OFF_TEXT = (
     "The model's answer was cut off at its length limit before it held a "
-    "complete alternative search query, so no alternative search was run."
+    "complete alternative search query, so no alternative search was run. "
+    "A model that writes out its reasoning first can use up that limit; "
+    "another Query Conversion model in Settings may help."
 )
 NO_NEW_EVIDENCE_TEXT = (
     "The alternative searches found no documents beyond those already found. "
@@ -159,7 +161,11 @@ class SmartSearcher(Protocol):
     """What a round needs of the search agent."""
 
     def ask(self, prompt: str) -> str:
-        """One answer from the query model."""
+        """One answer from the query model.
+
+        Raises:
+            TruncatedResponseError: The answer reached its token limit.
+        """
         ...
 
     def search_with_query(
@@ -281,7 +287,7 @@ def generate_alternative_queries(
         try:
             answer = searcher.ask(prompt)
         except TruncatedResponseError as e:
-            logger.warning("The alternative-query answer was cut off at its token limit")
+            logger.warning("%s", e)  # our own text, never the provider's
             raise SmartSearchError(ANSWER_CUT_OFF_TEXT) from e
         except Exception as e:
             # the type only: provider text can carry a credential (#330)
@@ -325,8 +331,8 @@ def run_smart_search(
         What the round found.
 
     Raises:
-        SmartSearchError: No usable query not already run, or the model could
-            not be asked.
+        SmartSearchError: No usable query not already run, an answer cut off
+            at its token limit, or the model could not be asked.
         SearchFailedError: The reader asked, and failures left the round with
             nothing new, a stop or not (a cancel does not excuse reporting them).
     """

@@ -129,7 +129,11 @@ class RetractionScreen:
 
     @property
     def failed(self) -> bool:
-        """The check failed for every document held (and there was one)."""
+        """The check failed for every document held (and there was one).
+
+        An empty screen is never failed: with nothing held, no row can be
+        mistaken for a check.
+        """
         held = {doc.id for doc in (*self.kept, *self.excluded)}
         return bool(held) and held <= self.failed_ids
 
@@ -154,7 +158,7 @@ class RetractionScreen:
 
     @property
     def checked_at(self) -> datetime | None:
-        """The oldest ``checked_at`` among the checks whose check did not fail; ``None`` without any."""
+        """The oldest ``checked_at`` among documents not in ``failed_ids``; ``None`` without any."""
         return min(
             (as_utc(c.checked_at) for doc_id, c in self.checks.items() if doc_id not in self.failed_ids),
             default=None,
@@ -163,8 +167,9 @@ class RetractionScreen:
     def to_snapshot(self) -> list[dict[str, Any]]:
         """Rows for the report and audit trail, one per held document.
 
-        A document with no check, or whose check failed, is an unchecked row
-        with ``checked_at`` ``None``.
+        A document with no check is an unchecked row; a document whose check
+        failed keeps its stand-in's status (unchecked, or retracted by its
+        label). Either has ``checked_at`` ``None``.
         ``excluded`` is a fact of the run: a later re-check may rewrite
         ``status``, never this, so readers decide exclusion from it alone.
 
@@ -340,7 +345,8 @@ def merged_screen(first: RetractionScreen, then: RetractionScreen) -> Retraction
 
     Args:
         first: The earlier batch's screen.
-        then: The later batch's; a document in both keeps the earlier check.
+        then: The later batch's; a document in both keeps the earlier check,
+            or the later one, failed or not, when the earlier has none.
 
     Returns:
         The screen over both, in order.
@@ -350,7 +356,7 @@ def merged_screen(first: RetractionScreen, then: RetractionScreen) -> Retraction
         (*first.kept, *(d for d in then.kept if d.id not in seen)),
         (*first.excluded, *(d for d in then.excluded if d.id not in seen)),
         {**then.checks, **first.checks},
-        first.failed_ids | (then.failed_ids - seen),
+        first.failed_ids | {i for i in then.failed_ids if i not in first.checks},
     )
 
 
@@ -523,8 +529,8 @@ def rechecked_snapshot(
     knowledge; the checker's own rule), and a
     document the check did not reach keeps its row. Only the run's own
     documents are written: a document another run linked gets a row only
-    when the run has no snapshot (it predates the check). A failed check
-    changes nothing.
+    when the run has no snapshot (it predates the check). A document whose
+    check failed keeps its row.
 
     Args:
         snapshot: The run's snapshot rows by document id.
@@ -534,12 +540,10 @@ def rechecked_snapshot(
         The new snapshot.
     """
     rows = {doc_id: dict(row) for doc_id, row in snapshot.items()}
-    if screen.failed:
-        return RetractionSnapshot(tuple(rows.values()))
     for row in screen.to_snapshot():
         doc_id = row["document_id"]
         check = screen.checks.get(doc_id)
-        if check is None or (snapshot and doc_id not in snapshot):
+        if check is None or doc_id in screen.failed_ids or (snapshot and doc_id not in snapshot):
             continue
         old = rows.get(doc_id, {})
         if (

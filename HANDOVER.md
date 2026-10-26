@@ -15,7 +15,7 @@ token limit (`LLMResponse.stop_reason == STOP_REASON_MAX_TOKENS`; Ollama's
 `done_reason` `length` maps to it) raises `TruncatedResponseError` from
 `LiteSearchAgent.ask` and ends the round with `ANSWER_CUT_OFF_TEXT`, never
 asked again; the review's notice is kept as `ReportMetadata.smart_search_notice`
-and in the methodology (a Find More Evidence round that runs clears it);
+and in the methodology (a Find More Evidence round that finds documents clears it);
 `RetractionScreen.failed_ids` replaces the screen-wide flag (`failed` is now
 "every held paper failed"), so `merged_screen` keeps the checked batch's
 times and causes; `QualityFilter.to_report_settings()` beside
@@ -30,7 +30,8 @@ Open: #627 (MCP has no smart search; a round runs all its queries;
 sequential scoring; quality filter depth; Audit Trail queries; Re-run
 Search's report covers its batch only). Lodged: #621 (PR #622 follow-ups),
 #624 (the reference cut drops tables and appendices after the references;
-all three), #625 (Upload Full Text follow-ups). Apple follow-ups: #612,
+all three), #625 (Upload Full Text follow-ups), #631 (PR #630's review: the
+other agents' cut-off answers, other stop reasons). Apple follow-ups: #612,
 #613. Android divergences: #614, #615; follow-ups #617–#619.
 
 **Owed by the maintainer** (stages C1 and C2 and the desktop browser rescue

@@ -335,8 +335,8 @@ class JSONParseError(LLMError):
 class TruncatedResponseError(LLMError):
     """The model's answer reached its token limit, so it is incomplete.
 
-    Asking again with the same limit is cut off the same way, so a caller
-    that would retry an unusable answer stops instead.
+    Asked again with the same limit, it is likely cut off again, each time
+    paid, so a caller that would retry an unusable answer stops instead.
     """
 
 

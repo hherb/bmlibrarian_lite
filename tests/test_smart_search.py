@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from bmlib.publications.retraction_status import RetractionStatus, RetractionVerdict
 
 from bmlibrarian_lite.agents.reporting_agent import LiteReportingAgent
 from bmlibrarian_lite.agents.search_agent import LiteSearchAgent
@@ -34,8 +35,18 @@ from bmlibrarian_lite.data_models import (
 from bmlibrarian_lite.exceptions import SearchFailedError, TruncatedResponseError
 from bmlibrarian_lite.llm import LLMResponse
 from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS
-from bmlibrarian_lite.retraction_screen import merged_screen, screen_documents, unchecked_check
-from bmlibrarian_lite.retraction_text import run_summary_clause
+from bmlibrarian_lite.retraction_screen import (
+    RetractionSnapshot,
+    merged_screen,
+    screen_documents,
+    unchecked_check,
+)
+from bmlibrarian_lite.retraction_store import PaperCheck
+from bmlibrarian_lite.retraction_text import (
+    checked_on_line,
+    retraction_methods_line,
+    run_summary_clause,
+)
 from bmlibrarian_lite.search_failures import (
     combined_shortfalls,
     retrieval_shortfalls_to_metadata,
@@ -569,6 +580,32 @@ class TestTwoBatchesOneScreen:
             assert "the check failed" in clause and "Crossref" in clause
         assert merged_screen(failed, failed).failed
         assert not merged_screen(checked, checked).failed
+
+    def test_a_failed_batch_beside_a_decided_one(self) -> None:
+        """Only the failed batch's paper is blamed on the failed check; live and reopened agree on the date."""
+        clear = PaperCheck(RetractionVerdict(RetractionStatus.CLEAR), datetime.now(UTC), None, None)
+        failed = screen_documents([document("1")], {"pmid-1": unchecked_check()}, failed=True)
+        checked = screen_documents([document("2")], {"pmid-2": clear})
+
+        for merged in (merged_screen(checked, failed), merged_screen(failed, checked)):
+            assert run_summary_clause(merged) == (
+                "1 paper's retraction status could not be checked: the check failed")
+            reopened = RetractionSnapshot.from_rows(merged.to_snapshot())
+            assert retraction_methods_line(merged) == retraction_methods_line(reopened)
+            assert retraction_methods_line(merged) == checked_on_line(clear.checked_at)
+        assert retraction_methods_line(merged_screen(failed, failed)) == "Retraction status could not be checked"
+
+    def test_the_later_failed_check_of_a_paper_the_first_did_not_reach(self) -> None:
+        """Its stand-in is used, so it stays failed: no check time, no source blamed (#629)."""
+        first = screen_documents([document("1")], {})  # a cancel stopped before it
+        failed = screen_documents([document("1")], {"pmid-1": unchecked_check()}, failed=True)
+
+        merged = merged_screen(first, failed)
+
+        assert merged.failed_ids == {"pmid-1"}
+        assert merged.checked_at is None
+        assert merged.to_snapshot()[0]["checked_at"] is None
+        assert run_summary_clause(merged) == "1 paper's retraction status could not be checked: the check failed"
 
     def test_a_document_in_both_keeps_the_first_batchs_check(self) -> None:
         """And whether that check failed."""

@@ -314,6 +314,20 @@ class TestAlternativeQueries:
 
         assert run.metadata.smart_search_notice is None
 
+    def test_a_run_without_a_round_keeps_the_reviews_notice(self, storage: LiteStorage) -> None:
+        """The search's own new documents say nothing of the review's alternative searches."""
+        reviewed(storage)
+        checkpoint = storage.get_checkpoint_for_question(QUESTION)
+        stored = recorded_report_metadata(checkpoint.metadata)
+        stored.smart_search_notice = "No alternative search was run."
+        storage.update_checkpoint(checkpoint_id=checkpoint.id, metadata={
+            **checkpoint.metadata, CHECKPOINT_REPORT_METADATA_KEY: stored.to_dict()})
+        run = Run(storage, rounds=[])
+
+        run([make_document("5")])
+
+        assert run.metadata.smart_search_notice == "No alternative search was run."
+
     def test_a_round_finding_nothing_leaves_the_report(self, storage: LiteStorage) -> None:
         """And says so."""
         reviewed(storage)
@@ -434,7 +448,7 @@ class TestTheRunsQualityFilter:
 
     def test_what_the_review_keeps_is_read_back(self) -> None:
         """One encoding, written and read beside each other (#629 item 6)."""
-        kept = QualityFilter(minimum_tier=QualityTier.TIER_2_OBSERVATIONAL,
+        kept = QualityFilter(minimum_tier=QualityTier.TIER_2_OBSERVATIONAL, require_randomization=True,
                              require_blinding=True, minimum_sample_size=20)
 
         assert kept.to_report_settings()["minimum_tier"] == "TIER_2_OBSERVATIONAL"
@@ -825,6 +839,22 @@ class RetractingChecker:
         """Nothing to close."""
 
 
+class FailingSecondChecker(RetractingChecker):
+    """Clears the first batch; checking the second fails."""
+
+    def __init__(self) -> None:
+        """Retract nothing."""
+        super().__init__()
+        self.calls = 0
+
+    def check(self, documents: list[LiteDocument], **kwargs: Any) -> dict[str, Any]:
+        """The first batch's verdicts; then the check fails."""
+        self.calls += 1
+        if self.calls > 1:
+            raise RuntimeError("checker down")
+        return super().check(documents, **kwargs)
+
+
 ALTERNATIVE = '[{"concepts": [{"name": "aspirin", "mesh_terms": ["Aspirin"], "keywords": []}]}]'
 
 
@@ -856,13 +886,17 @@ class TestTheReviewsOwnSmartSearch:
     def test_a_round_that_cannot_run_is_said_and_the_review_goes_on(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """No usable query, after asking twice more."""
-        agent, _, finished, notices = review(monkeypatch, {"1": 5, "2": 2}, ["[]", "[]", "[]"])
+        """No usable query, after asking twice more; the notice is kept with the run."""
+        stored: list[dict[str, Any]] = []
+        agent, _, finished, notices = review(monkeypatch, {"1": 5, "2": 2}, ["[]", "[]", "[]"],
+                                             stored=stored)
 
         assert agent.ask.call_count == 3
         assert len(notices) == 1 and "no usable alternative search query" in notices[0]
         assert finished and finished[0].documents_accepted == 1
         assert finished[0].smart_search_notice == notices[0]
+        assert any(m.get(CHECKPOINT_REPORT_METADATA_KEY, {}).get("smart_search_notice") == notices[0]
+                   for m in stored)
 
     def test_a_retracted_paper_it_finds_is_never_scored(
         self, monkeypatch: pytest.MonkeyPatch
@@ -881,6 +915,23 @@ class TestTheReviewsOwnSmartSearch:
         assert [d.id for d in merged.excluded] == ["doc-5"]
         assert {"doc-1", "doc-2", "doc-6"} <= {d.id for d in merged.kept}
         assert finished[0].retraction_screen is merged
+
+    def test_a_failed_check_of_its_papers_leaves_the_searchs_checked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only smart search's papers are failed; the search's keep their check time (#629)."""
+        query = '(("Aspirin"[mh])) AND humans[mh] AND hasabstract'
+        screens: list[Any] = []
+        _, _, finished, _ = review(
+            monkeypatch, {"1": 5, "2": 2, "5": 5, "6": 4}, [ALTERNATIVE],
+            {query: [make_document("5"), make_document("6")]},
+            checker=FailingSecondChecker(), screens=screens,
+        )
+
+        merged = screens[-1]
+        assert merged.failed_ids == {"doc-5", "doc-6"}
+        assert not merged.failed
+        assert finished[0].retraction_screen.checked_at is not None
 
     def test_after_a_rerun_earlier_runs_papers_are_not_scored_again(
         self, monkeypatch: pytest.MonkeyPatch

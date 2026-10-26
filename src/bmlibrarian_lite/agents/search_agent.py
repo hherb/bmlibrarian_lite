@@ -178,7 +178,10 @@ class LiteSearchAgent(LiteBaseAgent):
             json_mode=True,
         )
         if response.stop_reason == STOP_REASON_MAX_TOKENS:
-            raise TruncatedResponseError("The alternative-query answer reached its token limit")
+            raise TruncatedResponseError(
+                f"The alternative-query answer from {response.model} reached its token limit "
+                f"({response.output_tokens} of {SMART_SEARCH_MAX_TOKENS} tokens)"
+            )
         return response.content
 
     def search(

@@ -250,6 +250,24 @@ def test_rechecked_snapshot_keeps_what_the_run_did() -> None:
     assert {r["document_id"]: r for r in rechecked_snapshot(snapshot, failed).to_snapshot()} == snapshot
 
 
+def test_a_document_whose_check_failed_keeps_its_row() -> None:
+    """A failed check's stand-ins are never written, wherever in the screen they sit (#629)."""
+    snapshot = run_snapshot()
+    stand_ins = {d.id: check(RetractionStatus.UNCHECKED, NOW) for d in DOCUMENTS}
+    failed = screen_documents(DOCUMENTS, {**stand_ins, LEFT_OUT.id: check(RetractionStatus.RETRACTED, NOW)},
+                              failed=True)
+    assert {r["document_id"]: r for r in rechecked_snapshot(snapshot, failed).to_snapshot()} == snapshot
+    # a screen failed for one paper only writes the others
+    unchecked_run = {d: {**row, "status": "unchecked", "checked_at": None} for d, row in snapshot.items()}
+    partly = replace(
+        screen_documents(DOCUMENTS, {d.id: check(RetractionStatus.CLEAR, NOW) for d in DOCUMENTS}),
+        failed_ids=frozenset({CITED.id}),
+    )
+    rows = {r["document_id"]: r for r in rechecked_snapshot(unchecked_run, partly).to_snapshot()}
+    assert rows[CITED.id] == unchecked_run[CITED.id]
+    assert rows[UNCITED.id]["status"] == "clear" and rows[UNCITED.id]["checked_at"] == NOW.isoformat()
+
+
 def test_an_outage_never_replaces_a_decided_row() -> None:
     """Unchecked answers keep the decided rows whole; an unchecked row may still be decided over."""
     snapshot = run_snapshot()
