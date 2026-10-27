@@ -332,6 +332,14 @@ class JSONParseError(LLMError):
         self.raw_response = raw_response
 
 
+class TruncatedResponseError(LLMError):
+    """The model's answer reached its token limit, so it is incomplete.
+
+    Asked again with the same limit, it is likely cut off again, each time
+    paid, so a caller that would retry an unusable answer stops instead.
+    """
+
+
 class APIError(LLMError):
     """
     LLM API call failed.

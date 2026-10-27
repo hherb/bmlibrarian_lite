@@ -32,9 +32,12 @@ from .base import (
     ProviderCapabilities,
     describe_request_failure,
 )
-from ..data_types import LLMMessage, LLMResponse, strip_thinking_tags
+from ..data_types import STOP_REASON_MAX_TOKENS, LLMMessage, LLMResponse, strip_thinking_tags
 
 logger = logging.getLogger(__name__)
+
+#: An Ollama chat answer's ``done_reason`` when it was cut off (``num_predict`` or the context)
+OLLAMA_DONE_REASON_LENGTH = "length"
 
 
 class OllamaProvider(BaseProvider):
@@ -214,13 +217,20 @@ class OllamaProvider(BaseProvider):
             "prompt_eval_count", self._estimate_tokens(messages)
         )
         output_tokens = response.get("eval_count", len(content) // 4)
+        done_reason = response.get("done_reason")
 
         return LLMResponse(
             content=content,
             model=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            stop_reason="stop",
+            # Ollama says "length" when the answer was cut off; an older server
+            # says nothing, which stays None rather than claiming a stop
+            stop_reason=(
+                STOP_REASON_MAX_TOKENS
+                if done_reason == OLLAMA_DONE_REASON_LENGTH
+                else done_reason if isinstance(done_reason, str) else None
+            ),
         )
 
     def _estimate_tokens(self, messages: list[LLMMessage]) -> int:

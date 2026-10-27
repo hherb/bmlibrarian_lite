@@ -69,6 +69,13 @@ paper with its `retraction_status`.
   built, the database raised) still leaves out a paper its label retracts.
 - **A failed store is not a failed check.** The verdicts are returned even
   when they could not be stored.
+- **A failed check is failed document by document.** `RetractionScreen.failed_ids`
+  holds the papers whose checks are a failed check's stand-ins: no check time,
+  and "the check failed" as the cause of each kept, unchecked one (a paper
+  its label retracts is still left out). When the review screens smart
+  search's documents after the search's (`merged_screen`), a batch that was
+  checked keeps its times and causes. `failed` means every paper held failed
+  (an empty screen never has); *Check again* writes no failed paper's row.
 - **Only the review-like workflows download the export.** A copy older than
   `RETRACTION_WATCH_MAX_AGE_DAYS` (35) is not consulted; the review's checker,
   *Check again* and MCP's `fact_check_claim` download a new one (about 68 MB)
@@ -80,9 +87,10 @@ paper with its `retraction_status`.
   `RETRACTION_WATCH_MIN_KEEP_RATIO` (95%) of the old copy's notices is a
   partial download; the old copy is kept.
 - **Every unchecked paper has a named cause** in the run's summary
-  (`_unchecked_causes`): the copy, an unreadable notice, Crossref's failure,
-  no DOI, no usable Crossref answer, no identifiers, or a cancel. A restored
-  report gives the count only, as its snapshot does not record why.
+  (`_unchecked_causes`): the check failed, the copy, an unreadable notice,
+  Crossref's failure, no DOI, no usable Crossref answer, no identifiers, or a
+  cancel. A restored report gives the count only, as its snapshot does not
+  record why.
 - **`excluded` is a fact of the run.** Snapshot rows record whether the run
   left a paper out; a later re-check (*Check again*) may change `status`,
   never that. *Check again* keeps the run's own status and notice as

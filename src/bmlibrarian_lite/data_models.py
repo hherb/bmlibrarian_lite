@@ -2462,6 +2462,9 @@ class ReportMetadata:
         documents_retrieved: Number of documents actually retrieved
         alternative_queries: The query strings smart search ran for the
             report, in order; empty when it ran none
+        smart_search_notice: Why the review's own round of alternative
+            queries could not run or broke off, as the reader's sentence;
+            None when it ran, was not needed, or a later round found documents
         search_shortfalls: What failed sources, batches or pages left out of
             the search (#247); empty when the search was complete
         analysis_shortfalls: What scoring and citation extraction could not
@@ -2544,6 +2547,7 @@ class ReportMetadata:
     total_is_lower_bound: bool = False
     documents_retrieved: int = 0
     alternative_queries: list[str] = field(default_factory=list)
+    smart_search_notice: str | None = None
     search_shortfalls: list[RetrievalShortfall] = field(default_factory=list)
     analysis_shortfalls: list[AnalysisShortfall] = field(default_factory=list)
 
@@ -2603,6 +2607,7 @@ class ReportMetadata:
             "total_is_lower_bound": self.total_is_lower_bound,
             "documents_retrieved": self.documents_retrieved,
             "alternative_queries": list(self.alternative_queries),
+            "smart_search_notice": self.smart_search_notice,
             "search_shortfalls": [s.to_dict() for s in self.search_shortfalls],
             "analysis_shortfalls": [s.to_dict() for s in self.analysis_shortfalls],
             "documents_scored": self.documents_scored,
@@ -2674,6 +2679,9 @@ class ReportMetadata:
             isinstance(q, str) for q in stored_queries
         ):
             raise ValueError("alternative_queries must be a list of strings")
+        stored_notice = data.get("smart_search_notice")
+        if stored_notice is not None and not isinstance(stored_notice, str):
+            raise ValueError("smart_search_notice must be a string")
 
         stored_screen = data.get("retraction_screen")
         from .retraction_screen import RetractionSnapshot  # circular at import time
@@ -2701,6 +2709,7 @@ class ReportMetadata:
             total_is_lower_bound=data.get("total_is_lower_bound", False),
             documents_retrieved=data.get("documents_retrieved", 0),
             alternative_queries=list(stored_queries),
+            smart_search_notice=stored_notice,
             search_shortfalls=[RetrievalShortfall.from_dict(s) for s in stored_shortfalls],
             analysis_shortfalls=[AnalysisShortfall.from_dict(s) for s in stored_analysis],
             documents_scored=data.get("documents_scored", 0),

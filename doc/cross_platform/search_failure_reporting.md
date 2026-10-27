@@ -379,7 +379,7 @@ review runs one round when fewer than `SMART_SEARCH_THRESHOLD` (3) documents
 are relevant and at least one was judged, and *Find More Evidence* runs a fresh
 one when its own query finds nothing new and nothing is held over from an
 earlier stop or owed (documents to score, papers to read, a report), so no
-"marked as tried" flag is needed. Python differs from the contract in three
+"marked as tried" flag is needed. Python differs from the contract in five
 ways:
 
 - A round runs every query it was given and its documents are scored after
@@ -393,6 +393,14 @@ ways:
   that breaks off partway keeps none of its queries as run, so the next round
   may ask them again. A failed request names its cause and what to do, rather
   than always pointing at Settings.
+- An answer cut off at its token limit (Anthropic's `max_tokens`, Ollama's
+  `done_reason` `length`) is not asked for again, since the same limit likely
+  cuts it off again, each time paid: the user is told the answer was cut off,
+  not that it held no usable query.
+- When the review's own round could not run or broke off, the report's
+  methodology says why (`ReportMetadata.smart_search_notice`), so a reopened
+  report shows that more searching was tried; a later *Find More Evidence*
+  round that finds documents (and so writes the report again) clears it.
 
 ## Android
 

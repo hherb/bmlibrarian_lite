@@ -64,6 +64,10 @@ class LLMMessage:
     content: str
 
 
+#: ``LLMResponse.stop_reason`` when the answer reached its token limit (Anthropic's word)
+STOP_REASON_MAX_TOKENS = "max_tokens"
+
+
 @dataclass
 class LLMResponse:
     """Response from an LLM request.

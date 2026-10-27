@@ -13,7 +13,8 @@ The rules are the apps' (iOS/macOS's ``executeSmartSearch``) and the
   no usable query, or only queries already run (or the question's own), is
   asked for again up to ``SMART_SEARCH_MAX_QUERY_RETRIES`` more times, each a
   paid call; the apps search a repeat again, the desktop never does. A
-  request that failed stops the round. None of these is a source's failure,
+  request that failed, or an answer cut off at its token limit (asked again,
+  it is likely cut off again, each time paid), stops the round. None of these is a source's failure,
   so none records a shortfall.
 - Each query is searched with the configured provider. Once the round ends,
   a query is kept as run unless a source could not answer it and it found
@@ -39,7 +40,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from .analysis_failures import failure_cause_text
 from .constants import SMART_SEARCH_MAX_QUERY_RETRIES
 from .data_models import ShortfallQuery
-from .exceptions import SearchFailedError
+from .exceptions import SearchFailedError, TruncatedResponseError
 from .query_converter import MAX_TOTAL_QUERY_LENGTH, build_query_string
 from .search_failures import combined_shortfalls, retrieval_shortfalls_from_metadata
 from .smart_search_store import RunQuery
@@ -64,6 +65,13 @@ QUERY_GENERATION_FAILED_TEXT = (
 ONLY_REPEATS_TEXT = (
     "The model proposed only alternative search queries already run, "
     "so no alternative search was run."
+)
+#: The desktop's own: a cut-off answer is likely cut off again, so it is not asked for again
+ANSWER_CUT_OFF_TEXT = (
+    "The model's answer was cut off at its length limit before it held a "
+    "complete alternative search query, so no alternative search was run. "
+    "A model that writes out its reasoning first can use up that limit; "
+    "another Query Conversion model in Settings may help."
 )
 NO_NEW_EVIDENCE_TEXT = (
     "The alternative searches found no documents beyond those already found. "
@@ -153,7 +161,11 @@ class SmartSearcher(Protocol):
     """What a round needs of the search agent."""
 
     def ask(self, prompt: str) -> str:
-        """One answer from the query model."""
+        """One answer from the query model.
+
+        Raises:
+            TruncatedResponseError: The answer reached its token limit.
+        """
         ...
 
     def search_with_query(
@@ -264,8 +276,9 @@ def generate_alternative_queries(
         The new queries; empty only when a stop came first.
 
     Raises:
-        SmartSearchError: The request to the model failed, or no answer held
-            a usable query not already run.
+        SmartSearchError: The request to the model failed, an answer was cut
+            off at its token limit, or no answer held a usable query not
+            already run.
     """
     only_repeats = False
     for _attempt in range(SMART_SEARCH_MAX_QUERY_RETRIES + 1):
@@ -273,6 +286,9 @@ def generate_alternative_queries(
             return []
         try:
             answer = searcher.ask(prompt)
+        except TruncatedResponseError as e:
+            logger.warning("%s", e)  # our own text, never the provider's
+            raise SmartSearchError(ANSWER_CUT_OFF_TEXT) from e
         except Exception as e:
             # the type only: provider text can carry a credential (#330)
             logger.warning("Alternative queries could not be asked for (%s)", type(e).__name__)
@@ -315,8 +331,8 @@ def run_smart_search(
         What the round found.
 
     Raises:
-        SmartSearchError: No usable query not already run, or the model could
-            not be asked.
+        SmartSearchError: No usable query not already run, an answer cut off
+            at its token limit, or the model could not be asked.
         SearchFailedError: The reader asked, and failures left the round with
             nothing new, a stop or not (a cancel does not excuse reporting them).
     """

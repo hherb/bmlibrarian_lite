@@ -6,8 +6,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from bmlibrarian_lite.agents.base import LiteBaseAgent
+from bmlibrarian_lite.agents.search_agent import LiteSearchAgent
 from bmlibrarian_lite.config import LiteConfig, TaskModelConfig
+from bmlibrarian_lite.constants import SMART_SEARCH_MAX_TOKENS
+from bmlibrarian_lite.exceptions import TruncatedResponseError
 from bmlibrarian_lite.llm import LLMClient, LLMMessage
+from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS
 from bmlibrarian_lite.llm.providers.anthropic import AnthropicProvider
 from bmlibrarian_lite.llm.providers.ollama import OllamaProvider
 
@@ -135,3 +139,65 @@ def test_anthropic_request_does_not_receive_ollama_context_option(
         [LLMMessage(role="user", content="evidence")],
     ) == "answer"
     assert set(sdk.messages.create.call_args.kwargs) == {"model", "messages", "max_tokens", "temperature"}
+
+
+@pytest.mark.parametrize(("done_reason", "stop_reason"), [
+    ("length", STOP_REASON_MAX_TOKENS), ("stop", "stop"), (None, None), (7, None),
+])
+def test_an_answer_cut_off_by_num_predict_says_so(
+    done_reason: object, stop_reason: str | None, sdk: MagicMock, tracker: MagicMock,
+) -> None:
+    """Ollama's "length" reads as Anthropic's max_tokens; any other ending as Ollama said it, if text."""
+    sdk.chat.return_value = {**sdk.chat.return_value, "done_reason": done_reason}
+
+    agent = LiteBaseAgent(config=LiteConfig._from_dict({"models": {"tasks": {"default": {
+        "provider": "ollama", "model": "test-model"}}}}), llm_client=_client(sdk))
+
+    assert agent._chat_response([LLMMessage(role="user", content="q")]).stop_reason == stop_reason
+
+
+def _search_agent(provider: str, client: LLMClient) -> LiteSearchAgent:
+    """The search agent with only what ``ask`` reads: its config and client."""
+    agent = LiteSearchAgent.__new__(LiteSearchAgent)
+    agent.config = LiteConfig()
+    agent.config.models.tasks[LiteSearchAgent.TASK_ID] = TaskModelConfig(provider=provider, model="test-model")
+    agent._llm_client = client
+    return agent
+
+
+@pytest.mark.parametrize(("stop_reason", "cut_off"), [("max_tokens", True), ("end_turn", False)])
+def test_anthropics_cut_off_answer_reaches_ask(stop_reason: str, cut_off: bool, tracker: MagicMock) -> None:
+    """Anthropic's own stop reason, through the real client, decides whether ``ask`` refuses."""
+    sdk = MagicMock()
+    sdk.messages.create.return_value = SimpleNamespace(
+        content=[SimpleNamespace(text='[{"concepts": [')],
+        usage=SimpleNamespace(input_tokens=12, output_tokens=SMART_SEARCH_MAX_TOKENS), stop_reason=stop_reason,
+    )
+    provider = AnthropicProvider(api_key="synthetic-test-key")
+    provider._client = sdk
+    client = LLMClient()
+    client._providers["anthropic"] = provider
+    agent = _search_agent("anthropic", client)
+
+    if cut_off:
+        with pytest.raises(TruncatedResponseError):
+            agent.ask("p")
+    else:
+        assert agent.ask("p") == '[{"concepts": ['
+    assert sdk.messages.create.call_args.kwargs["max_tokens"] == SMART_SEARCH_MAX_TOKENS
+
+
+@pytest.mark.parametrize(("done_reason", "cut_off"), [("length", True), ("stop", False), (None, False)])
+def test_ollamas_cut_off_answer_reaches_ask(
+    done_reason: str | None, cut_off: bool, sdk: MagicMock, tracker: MagicMock,
+) -> None:
+    """Ollama's "length", through the real client, makes ``ask`` refuse; nothing else does."""
+    sdk.chat.return_value = {**sdk.chat.return_value, "done_reason": done_reason}
+    agent = _search_agent("ollama", _client(sdk))
+
+    if cut_off:
+        with pytest.raises(TruncatedResponseError):
+            agent.ask("p")
+    else:
+        assert agent.ask("p") == "answer"
+    assert sdk.chat.call_args.kwargs["options"]["num_predict"] == SMART_SEARCH_MAX_TOKENS

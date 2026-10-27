@@ -25,7 +25,7 @@ interface and configuration management.
 import logging
 from typing import Optional
 
-from bmlibrarian_lite.llm import LLMClient, LLMMessage
+from bmlibrarian_lite.llm import LLMClient, LLMMessage, LLMResponse
 from ..config import LiteConfig, TaskModelConfig
 
 logger = logging.getLogger(__name__)
@@ -135,8 +135,30 @@ class LiteBaseAgent:
         Returns:
             Response text from the LLM
         """
+        return self._chat_response(messages, task_id, temperature, max_tokens, json_mode).content
+
+    def _chat_response(
+        self,
+        messages: list[LLMMessage],
+        task_id: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        json_mode: bool = False,
+    ) -> LLMResponse:
+        """Send a chat request as :meth:`_chat` does, keeping the whole response.
+
+        Args:
+            messages: List of conversation messages
+            task_id: Task identifier for config lookup (uses class TASK_ID if None)
+            temperature: Optional temperature override
+            max_tokens: Optional max tokens override
+            json_mode: Request JSON-formatted output
+
+        Returns:
+            The response, with why the model stopped
+        """
         task_config = self._get_task_config(task_id)
-        response = self.llm_client.chat(
+        return self.llm_client.chat(
             messages=messages,
             model=f"{task_config.provider}:{task_config.model}",
             temperature=temperature if temperature is not None else task_config.temperature,
@@ -145,7 +167,6 @@ class LiteBaseAgent:
             json_mode=json_mode,
             context_window=task_config.context_window,
         )
-        return response.content
 
     def _create_system_message(self, content: str) -> LLMMessage:
         """

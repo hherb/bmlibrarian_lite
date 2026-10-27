@@ -18,12 +18,14 @@ import pytest
 
 from bmlibrarian_lite.audit_records import (
     CHECKPOINT_MIN_SCORE_KEY,
+    CHECKPOINT_QUALITY_FILTERED_KEY,
     CHECKPOINT_REPORT_METADATA_KEY,
     CHECKPOINT_RETRACTION_SNAPSHOT_KEY,
     recorded_report_metadata,
 )
 from bmlibrarian_lite.config import LiteConfig
 from bmlibrarian_lite.data_models import (
+    AnalysisShortfall,
     AnalysisStage,
     Citation,
     CitationOutcome,
@@ -297,6 +299,35 @@ class TestAlternativeQueries:
         assert run.metadata.alternative_queries == ["(q[tiab])"]
         assert outcome.report == "New report."
 
+    def test_a_round_that_ran_ends_the_reviews_notice(self, storage: LiteStorage) -> None:
+        """The review's "no alternative search could run" is no longer true of the report."""
+        reviewed(storage)
+        checkpoint = storage.get_checkpoint_for_question(QUESTION)
+        stored = recorded_report_metadata(checkpoint.metadata)
+        stored.smart_search_notice = "No alternative search was run."
+        storage.update_checkpoint(checkpoint_id=checkpoint.id, metadata={
+            **checkpoint.metadata, CHECKPOINT_REPORT_METADATA_KEY: stored.to_dict()})
+        run = Run(storage, rounds=[SmartSearchRound((make_document("5"),), ("(q[tiab])",))])
+        found(storage, "5")
+
+        run([])
+
+        assert run.metadata.smart_search_notice is None
+
+    def test_a_run_without_a_round_keeps_the_reviews_notice(self, storage: LiteStorage) -> None:
+        """The search's own new documents say nothing of the review's alternative searches."""
+        reviewed(storage)
+        checkpoint = storage.get_checkpoint_for_question(QUESTION)
+        stored = recorded_report_metadata(checkpoint.metadata)
+        stored.smart_search_notice = "No alternative search was run."
+        storage.update_checkpoint(checkpoint_id=checkpoint.id, metadata={
+            **checkpoint.metadata, CHECKPOINT_REPORT_METADATA_KEY: stored.to_dict()})
+        run = Run(storage, rounds=[])
+
+        run([make_document("5")])
+
+        assert run.metadata.smart_search_notice == "No alternative search was run."
+
     def test_a_round_finding_nothing_leaves_the_report(self, storage: LiteStorage) -> None:
         """And says so."""
         reviewed(storage)
@@ -414,6 +445,14 @@ class TestTheRunsQualityFilter:
         assert (outcome.filtered_out, run.scorer.scored) == (1, ["doc-5"])
         assert run.metadata.documents_filtered_by_quality == 1
         assert "1 left out by the review's quality filter." in more_evidence_text(outcome)
+
+    def test_what_the_review_keeps_is_read_back(self) -> None:
+        """One encoding, written and read beside each other (#629 item 6)."""
+        kept = QualityFilter(minimum_tier=QualityTier.TIER_2_OBSERVATIONAL, require_randomization=True,
+                             require_blinding=True, minimum_sample_size=20)
+
+        assert kept.to_report_settings()["minimum_tier"] == "TIER_2_OBSERVATIONAL"
+        assert QualityFilter.from_report_settings(kept.to_report_settings()) == kept
 
     def test_an_unfiltered_run_filters_nothing(self, storage: LiteStorage) -> None:
         """No filter asked for."""
@@ -617,6 +656,65 @@ class TestTransparency:
         text = more_evidence_text(outcome)
         assert "Transparency could not be analysed for 1 document." in text
         assert "sk-secret" not in text
+        # No row is written, so the Research Questions re-analysis picks it up (#629)
+        assert "doc-6" in storage.get_documents_pending_transparency(QUESTION)
+
+
+    def test_a_stored_result_or_no_identifier_is_not_analysed(
+        self, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A stored result is reused; nothing identifies a document without PMID or DOI."""
+        from bmlibrarian_lite.more_evidence import _assess
+
+        unidentified = LiteDocument(id="doc-x", title="No ids", abstract="A.",
+                                    source=DocumentSource.PUBMED)
+        by_doi = LiteDocument(id="doc-d", title="By DOI", abstract="A.", doi="10.1/d",
+                              source=DocumentSource.PUBMED)
+        monkeypatch.setattr(storage, "get_transparency_results_batch",
+                            lambda ids: {"doc-5": object()})
+        assessed: list[str] = []
+
+        outcome = _assess(storage, [make_document("5"), unidentified, by_doi, make_document("6")],
+                          {}, lambda doc, text: assessed.append(doc.id), MoreEvidence(),
+                          lambda: False, lambda *_: None)
+
+        assert assessed == ["doc-d", "doc-6"]
+        assert outcome.transparency_failures == ()
+
+
+class TestScoringFailuresAddUp:
+    """A run's scoring shortfall grows with each Find More Evidence that cannot score."""
+
+    def test_new_failures_are_added_to_an_earlier_shortfall(self) -> None:
+        """Counts and causes both, and the other stages' shortfalls are kept."""
+        from bmlibrarian_lite.more_evidence import _with_scoring_failures
+
+        earlier = AnalysisShortfall(stage=AnalysisStage.SCORING, documents_failed=1,
+                                    documents_attempted=10,
+                                    causes=(EvaluationErrorCode.API_TIMEOUT,))
+        citations = AnalysisShortfall(stage=AnalysisStage.CITATION_EXTRACTION, documents_failed=1,
+                                      documents_attempted=3,
+                                      causes=(EvaluationErrorCode.API_TIMEOUT,))
+        metadata = ReportMetadata(analysis_shortfalls=[citations, earlier], documents_scored=12)
+        failed = ScoredDocument(make_document("5"), EvaluationErrorCode.API_CONNECTION_ERROR.value, "")
+
+        shortfalls = _with_scoring_failures(metadata, [failed], attempted=4)
+
+        assert shortfalls == [citations, AnalysisShortfall(
+            stage=AnalysisStage.SCORING, documents_failed=2, documents_attempted=14,
+            causes=(EvaluationErrorCode.API_TIMEOUT, EvaluationErrorCode.API_CONNECTION_ERROR))]
+
+    def test_none_failing_still_counts_as_attempted(self) -> None:
+        """The share that failed shrinks; it is not dropped."""
+        from bmlibrarian_lite.more_evidence import _with_scoring_failures
+
+        earlier = AnalysisShortfall(stage=AnalysisStage.SCORING, documents_failed=1,
+                                    documents_attempted=10,
+                                    causes=(EvaluationErrorCode.API_TIMEOUT,))
+
+        assert _with_scoring_failures(ReportMetadata(analysis_shortfalls=[earlier]), [], 4) == [
+            AnalysisShortfall(stage=AnalysisStage.SCORING, documents_failed=1,
+                              documents_attempted=14, causes=(EvaluationErrorCode.API_TIMEOUT,))]
 
 
 # ---------------------------------------------------------------------------
@@ -627,12 +725,15 @@ class TestTransparency:
 def review(monkeypatch: pytest.MonkeyPatch, scores: dict[str, int],
            answers: list[str], results: dict[str, Any] | None = None, *,
            checker: Any = None, screens: list[Any] | None = None,
-           rerun_judged: set[str] | None = None) -> Any:
+           rerun_judged: set[str] | None = None, quality: Any = None,
+           stored: list[dict[str, Any]] | None = None) -> Any:
     """Run a review whose agents are scripted; returns (search agent, scorer, finished, notices).
 
     A query's result is its documents, an exception it raises, or the
     shortfalls it lost. ``rerun_judged`` runs it as *Re-run Search*'s review,
-    the question's earlier runs having judged those documents.
+    the question's earlier runs having judged those documents. ``quality``
+    is the run's quality manager (its ``worker`` is set to the review's);
+    ``stored`` collects the checkpoint metadata the review writes.
     """
     from bmlibrarian_lite.gui import systematic_review_tab
     from bmlibrarian_lite.gui.systematic_review_tab import WorkflowWorker
@@ -678,6 +779,8 @@ def review(monkeypatch: pytest.MonkeyPatch, scores: dict[str, int],
     storage.get_smart_search_queries.return_value = []
     storage.get_uploaded_full_texts.return_value = {}
     storage.get_rerun_document_ids_for_question.return_value = (rerun_judged or set(), set())
+    if stored is not None:
+        storage.update_checkpoint.side_effect = lambda **kwargs: stored.append(kwargs.get("metadata") or {})
     if checker is not None:
         monkeypatch.setattr(WorkflowWorker, "_fresh_retraction_checker", lambda self: checker)
     worker = WorkflowWorker(
@@ -685,7 +788,12 @@ def review(monkeypatch: pytest.MonkeyPatch, scores: dict[str, int],
         retraction_checker=checker,
         preloaded_documents=documents if rerun_judged is not None else None,
         pubmed_query="aspirin AND stroke" if rerun_judged is not None else None,
+        quality_filter=QualityFilter(minimum_tier=QualityTier.TIER_2_OBSERVATIONAL)
+        if quality is not None else None,
+        quality_manager=quality,
     )
+    if quality is not None:
+        quality.worker = worker
     finished: list[Any] = []
     notices: list[str] = []
     worker.finished.connect(lambda report, metadata: finished.append(metadata))
@@ -731,6 +839,22 @@ class RetractingChecker:
         """Nothing to close."""
 
 
+class FailingSecondChecker(RetractingChecker):
+    """Clears the first batch; checking the second fails."""
+
+    def __init__(self) -> None:
+        """Retract nothing."""
+        super().__init__()
+        self.calls = 0
+
+    def check(self, documents: list[LiteDocument], **kwargs: Any) -> dict[str, Any]:
+        """The first batch's verdicts; then the check fails."""
+        self.calls += 1
+        if self.calls > 1:
+            raise RuntimeError("checker down")
+        return super().check(documents, **kwargs)
+
+
 ALTERNATIVE = '[{"concepts": [{"name": "aspirin", "mesh_terms": ["Aspirin"], "keywords": []}]}]'
 
 
@@ -750,7 +874,7 @@ class TestTheReviewsOwnSmartSearch:
         metadata = finished[0]
         assert metadata.alternative_queries == [query]
         assert (metadata.documents_retrieved, metadata.documents_accepted) == (3, 2)
-        assert notices == []
+        assert notices == [] and metadata.smart_search_notice is None
 
     def test_enough_relevant_runs_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Nothing asked, nothing paid."""
@@ -762,12 +886,17 @@ class TestTheReviewsOwnSmartSearch:
     def test_a_round_that_cannot_run_is_said_and_the_review_goes_on(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """No usable query, after asking twice more."""
-        agent, _, finished, notices = review(monkeypatch, {"1": 5, "2": 2}, ["[]", "[]", "[]"])
+        """No usable query, after asking twice more; the notice is kept with the run."""
+        stored: list[dict[str, Any]] = []
+        agent, _, finished, notices = review(monkeypatch, {"1": 5, "2": 2}, ["[]", "[]", "[]"],
+                                             stored=stored)
 
         assert agent.ask.call_count == 3
         assert len(notices) == 1 and "no usable alternative search query" in notices[0]
         assert finished and finished[0].documents_accepted == 1
+        assert finished[0].smart_search_notice == notices[0]
+        assert any(m.get(CHECKPOINT_REPORT_METADATA_KEY, {}).get("smart_search_notice") == notices[0]
+                   for m in stored)
 
     def test_a_retracted_paper_it_finds_is_never_scored(
         self, monkeypatch: pytest.MonkeyPatch
@@ -786,6 +915,23 @@ class TestTheReviewsOwnSmartSearch:
         assert [d.id for d in merged.excluded] == ["doc-5"]
         assert {"doc-1", "doc-2", "doc-6"} <= {d.id for d in merged.kept}
         assert finished[0].retraction_screen is merged
+
+    def test_a_failed_check_of_its_papers_leaves_the_searchs_checked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only smart search's papers are failed; the search's keep their check time (#629)."""
+        query = '(("Aspirin"[mh])) AND humans[mh] AND hasabstract'
+        screens: list[Any] = []
+        _, _, finished, _ = review(
+            monkeypatch, {"1": 5, "2": 2, "5": 5, "6": 4}, [ALTERNATIVE],
+            {query: [make_document("5"), make_document("6")]},
+            checker=FailingSecondChecker(), screens=screens,
+        )
+
+        merged = screens[-1]
+        assert merged.failed_ids == {"doc-5", "doc-6"}
+        assert not merged.failed
+        assert finished[0].retraction_screen.checked_at is not None
 
     def test_after_a_rerun_earlier_runs_papers_are_not_scored_again(
         self, monkeypatch: pytest.MonkeyPatch
@@ -813,6 +959,7 @@ class TestTheReviewsOwnSmartSearch:
         assert finished and finished[0].documents_accepted == 1
         assert len(notices) == 1 and notices[0].startswith("Alternative searches could not")
         assert "sk-secret" not in notices[0]
+        assert finished[0].smart_search_notice == notices[0]
 
     def test_what_its_queries_lose_is_kept(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Recorded as an alternative search's, and the review goes on."""
@@ -825,6 +972,57 @@ class TestTheReviewsOwnSmartSearch:
             RetrievalShortfall(SearchProvider.EUROPEPMC, RequestFailure(RequestFailureKind.TIMEOUT),
                                records_missing=4, query=ShortfallQuery.ALTERNATIVE)]
         assert finished[0].alternative_queries == [query]
+
+
+class LeavingOut:
+    """A quality manager that leaves paper 6 out; ``cancel_at`` cancels the review in that call."""
+
+    def __init__(self, cancel_at: int | None = None) -> None:
+        """Cancel the review during the ``cancel_at``-th filtering (1-based), if given."""
+        self.cancel_at = cancel_at
+        self.calls: list[list[str]] = []
+        self.worker: Any = None
+
+    def filter_documents(self, documents: list[LiteDocument], _settings: Any,
+                         progress_callback: Any = None, should_cancel: Any = None) -> Any:
+        """Pass every paper but 6."""
+        self.calls.append([d.id for d in documents])
+        if len(self.calls) == self.cancel_at:
+            self.worker.cancel()
+            return [], []
+        return [d for d in documents if d.pmid != "6"], []
+
+
+class TestTheReviewsSmartSearchQualityFilter:
+    """Smart search's documents pass the review's quality filter, as the search's did."""
+
+    QUERY = '(("Aspirin"[mh])) AND humans[mh] AND hasabstract'
+
+    def test_what_it_leaves_out_is_kept_with_the_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Never scored, and the checkpoint says the filter left it out."""
+        quality, stored = LeavingOut(), []
+        _, scorer, finished, _ = review(
+            monkeypatch, {"1": 5, "2": 2, "5": 5, "6": 4}, [ALTERNATIVE],
+            {self.QUERY: [make_document("5"), make_document("6")]}, quality=quality, stored=stored,
+        )
+
+        assert quality.calls == [["doc-1", "doc-2"], ["doc-5", "doc-6"]]
+        assert "doc-6" not in [c.args[1].id for c in scorer.score_document.call_args_list]
+        assert any(m.get(CHECKPOINT_QUALITY_FILTERED_KEY) == ["doc-6"] for m in stored)
+        assert finished[0].documents_filtered_by_quality == 1
+
+    def test_a_cancel_while_filtering_leaves_nothing_out(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The papers it never reached are not "left out by the filter", and none is scored."""
+        quality, stored = LeavingOut(cancel_at=2), []
+        _, scorer, _, _ = review(
+            monkeypatch, {"1": 5, "2": 2, "5": 5, "6": 4}, [ALTERNATIVE],
+            {self.QUERY: [make_document("5"), make_document("6")]}, quality=quality, stored=stored,
+        )
+
+        assert [c.args[1].id for c in scorer.score_document.call_args_list] == ["doc-1", "doc-2"]
+        assert not any(CHECKPOINT_QUALITY_FILTERED_KEY in m for m in stored)
 
 
 class TestTheWorker:

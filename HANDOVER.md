@@ -8,54 +8,31 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Parity: taking a fact check further, Python desktop: done** (`ROADMAP.md`).
-iOS/macOS PR #611, Android PR #616; the desktop's full-text rows PR #622,
-Upload Full Text PR #626, and **Find More Evidence / repeated smart search on
-branch `feat/desktop-find-more-evidence`**:
-- `smart_search.py`: the apps' alternative-query prompt word for word, told of
-  every query already run **for the run** (`smart_search_store`, table
-  `smart_search_run_queries` keyed by checkpoint, as the apps keep them on the
-  session; deleted with the run or its question); an answer with no usable
-  query, or only repeats (`ONLY_REPEATS_TEXT`, desktop only), asked for twice
-  more; a failed request is `QUERY_GENERATION_FAILED_TEXT` plus its cause,
-  never a shortfall. Once the round ends a query is kept as run unless a source
-  could not answer it and it found nothing new; a round that breaks off keeps
-  none. Every query searched is in the methodology. **`RetrievalShortfall.query`** (`ShortfallQuery`) marks an
-  alternative search's loss: its own clauses, persisted as `"query":
-  "alternative"`, never combined with the original query's.
-- **The review runs a round itself** when fewer than `SMART_SEARCH_THRESHOLD`
-  (3) documents are relevant and at least one was judged; the new documents
-  are screened (a fresh checker: the run's is closed), quality-filtered and
-  scored with the rest (`WorkflowWorker._score_documents`); a round that
-  cannot run is `smart_search_notice`; the queries are in the methodology
-  (`ReportMetadata.alternative_queries`).
-- **Research Questions → Find More Evidence**: `IncrementalSearchWorker` pages
-  the question's own query, then `MoreEvidenceWorker` (`more_evidence.py`)
-  runs a round when that found nothing; the new documents are screened, run
-  through the run's quality filter (`QualityFilter.from_report_settings`; the
-  depth flags are not kept, #627 item 4; read before anything is searched,
-  so a refusal changes nothing), scored **into the reviewed run's
-  checkpoint**, the relevant ones and any relevant paper a stopped run never
-  read are extracted, new documents get transparency, and
-  `full_text_retry.write_report_again` writes the report from every citation
-  of the run. Counts are kept as they are learnt with `REPORT_PENDING_KEY`;
-  documents a stop left unscored are kept under `UNSCORED_KEY` and scored
-  first next time, with no paid round on top (nor while relevant papers are
-  unread or a report is owed). Documents the run holds (scored, in its
-  retraction snapshot, or under `CHECKPOINT_QUALITY_FILTERED_KEY`) are never
-  new (`known_document_ids`); after *Re-run Search*, the review's round treats
-  every judged document as known (#316). A paper whose extraction failed does
-  not owe a report (it is read again with the next run's papers), and the
-  merged retraction screen is failed when either batch's check was.
-  Follow-ups: #627 (MCP has no smart search; a round runs all its queries;
-  sequential scoring; quality filter depth; Audit Trail queries; Re-run
-  Search's report covers its batch only), #629 (PR #628 review: truncated
-  query answers, the review's smart-search notice not kept, transparency
-  failure rows, re-paged losses counted twice, per-document failed screens).
-Lodged: #620 closed by PR #623; #621 (PR #622 follow-ups), #624 (the
-reference cut drops tables and appendices after the references; all three),
-#625 (Upload Full Text follow-ups). Apple follow-ups: #612, #613. Android
-divergences: #614, #615; follow-ups #617–#619.
+**Parity: taking a fact check further, Python desktop: done** (`ROADMAP.md`;
+landed below). **PR #628's review follow-ups (#629) on branch
+`fix/desktop-find-more-evidence-followups`**: a model answer cut off at its
+token limit (`LLMResponse.stop_reason == STOP_REASON_MAX_TOKENS`; Ollama's
+`done_reason` `length` maps to it) raises `TruncatedResponseError` from
+`LiteSearchAgent.ask` and ends the round with `ANSWER_CUT_OFF_TEXT`, never
+asked again; the review's notice is kept as `ReportMetadata.smart_search_notice`
+and in the methodology (a Find More Evidence round that finds documents clears it);
+`RetractionScreen.failed_ids` replaces the screen-wide flag (`failed` is now
+"every held paper failed"), so `merged_screen` keeps the checked batch's
+times and causes; `QualityFilter.to_report_settings()` beside
+`from_report_settings`; tests for the review's smart-search quality filter,
+`_assess`, `_with_scoring_failures` and `build_query_string`. Item 3 was not
+a defect: no failure row exists anywhere, and a document with no row is
+already pending (pinned by a test). **Left open in #629, the maintainer's
+decision**: item 4 (a re-lost page is counted twice; shortfalls keep no
+offset, and any rule without one can understate) and item 7 (counts lost
+when an error follows a cancel).
+Open: #627 (MCP has no smart search; a round runs all its queries;
+sequential scoring; quality filter depth; Audit Trail queries; Re-run
+Search's report covers its batch only). Lodged: #621 (PR #622 follow-ups),
+#624 (the reference cut drops tables and appendices after the references;
+all three), #625 (Upload Full Text follow-ups), #631 (PR #630's review: the
+other agents' cut-off answers, other stop reasons). Apple follow-ups: #612,
+#613. Android divergences: #614, #615; follow-ups #617–#619.
 
 **Owed by the maintainer** (stages C1 and C2 and the desktop browser rescue
 have landed):
@@ -90,6 +67,17 @@ have landed):
 
 ## Recently landed (context)
 
+- **Desktop: Find More Evidence and repeated smart search** (PR #628).
+  `smart_search.py` asks for the apps' alternative queries, told of every
+  query already run for the run (`smart_search_run_queries`, by checkpoint);
+  an alternative search's loss is `ShortfallQuery.ALTERNATIVE`, never merged
+  into the original query's. The review runs a round itself below
+  `SMART_SEARCH_THRESHOLD` (3) relevant; *Research Questions → Find More
+  Evidence* (`more_evidence.py`) pages the question's own query, else runs a
+  round, and scores **into the reviewed run's checkpoint** (screened, the
+  run's quality filter, `known_document_ids` never new), then writes the
+  report from every citation of the run. A stop keeps what was found under
+  `UNSCORED_KEY`, scored first next time.
 - **Desktop: Upload Full Text** (PR #626): Audit Trail cards; kept in
   `uploaded_full_texts`, apart from the converter-stamped cache; read whatever
   the setting; *Retry Full Text* reads one newer than the paper's last read.

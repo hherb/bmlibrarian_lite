@@ -385,12 +385,7 @@ class WorkflowWorker(QThread):
                 # Only apply quality filter if minimum tier is set
                 if self.quality_filter.minimum_tier.value > 0:
                     metadata.quality_filter_applied = True
-                    metadata.quality_filter_settings = {
-                        "minimum_tier": self.quality_filter.minimum_tier.name,
-                        "require_randomization": self.quality_filter.require_randomization,
-                        "require_blinding": self.quality_filter.require_blinding,
-                        "minimum_sample_size": self.quality_filter.minimum_sample_size,
-                    }
+                    metadata.quality_filter_settings = self.quality_filter.to_report_settings()
 
                     self.progress.emit("quality_filter", 0, len(documents))
 
@@ -809,16 +804,18 @@ class WorkflowWorker(QThread):
                 should_stop=lambda: self._cancelled,
             )
         except SmartSearchError as e:
-            self.smart_search_notice.emit(str(e))
+            metadata.smart_search_notice = str(e)
+            self.smart_search_notice.emit(metadata.smart_search_notice)
             return [], checkpoint_metadata
         except Exception as e:
             # The review's own idea: a round that broke does not sink the review
             # it was to help. The cause, never the provider's text (#330)
             cause = classify_analysis_exception(e)
             logger.exception(f"Smart search failed ({cause.name})")
-            self.smart_search_notice.emit(
+            metadata.smart_search_notice = (
                 f"Alternative searches could not be completed. {failure_cause_text(cause)}"
             )
+            self.smart_search_notice.emit(metadata.smart_search_notice)
             return [], checkpoint_metadata
         metadata.alternative_queries = list(round_.queries)
         metadata.documents_retrieved += len(round_.documents)
@@ -1642,10 +1639,7 @@ class SystematicReviewTab(QWidget):
         # Build quality filter settings dict for the signal
         quality_filter = self.quality_filter_panel.get_filter()
         quality_filter_settings = {
-            "minimum_tier": quality_filter.minimum_tier.name,
-            "require_randomization": quality_filter.require_randomization,
-            "require_blinding": quality_filter.require_blinding,
-            "minimum_sample_size": quality_filter.minimum_sample_size,
+            **quality_filter.to_report_settings(),
             "use_metadata_only": quality_filter.use_metadata_only,
             "use_llm_classification": quality_filter.use_llm_classification,
             "use_detailed_assessment": quality_filter.use_detailed_assessment,

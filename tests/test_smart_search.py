@@ -16,8 +16,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from bmlib.publications.retraction_status import RetractionStatus, RetractionVerdict
 
 from bmlibrarian_lite.agents.reporting_agent import LiteReportingAgent
+from bmlibrarian_lite.agents.search_agent import LiteSearchAgent
 from bmlibrarian_lite.config import LiteConfig
 from bmlibrarian_lite.data_models import (
     DocumentSource,
@@ -30,13 +32,27 @@ from bmlibrarian_lite.data_models import (
     SearchSession,
     ShortfallQuery,
 )
-from bmlibrarian_lite.exceptions import SearchFailedError
-from bmlibrarian_lite.retraction_screen import merged_screen, screen_documents, unchecked_check
+from bmlibrarian_lite.exceptions import SearchFailedError, TruncatedResponseError
+from bmlibrarian_lite.llm import LLMResponse
+from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS
+from bmlibrarian_lite.retraction_screen import (
+    RetractionSnapshot,
+    merged_screen,
+    screen_documents,
+    unchecked_check,
+)
+from bmlibrarian_lite.retraction_store import PaperCheck
+from bmlibrarian_lite.retraction_text import (
+    checked_on_line,
+    retraction_methods_line,
+    run_summary_clause,
+)
 from bmlibrarian_lite.search_failures import (
     combined_shortfalls,
     retrieval_shortfalls_to_metadata,
 )
 from bmlibrarian_lite.smart_search import (
+    ANSWER_CUT_OFF_TEXT,
     NO_USABLE_QUERY_TEXT,
     ONLY_REPEATS_TEXT,
     QUERY_GENERATION_FAILED_TEXT,
@@ -204,6 +220,25 @@ class TestTheAnswer:
         ]
 
 
+class TestTheAgentsAnswer:
+    """``LiteSearchAgent.ask`` refuses an answer cut off at its token limit."""
+
+    @pytest.mark.parametrize(("stop_reason", "cut_off"), [
+        (STOP_REASON_MAX_TOKENS, True), ("end_turn", False), (None, False),
+    ])
+    def test_a_cut_off_answer_is_refused(self, stop_reason: str | None, cut_off: bool) -> None:
+        """Its half a JSON array is never parsed as "no usable query"."""
+        agent = LiteSearchAgent.__new__(LiteSearchAgent)
+        agent._chat_response = lambda *_a, **_k: LLMResponse(  # type: ignore[method-assign]
+            content="[{", stop_reason=stop_reason)
+
+        if cut_off:
+            with pytest.raises(TruncatedResponseError):
+                agent.ask("p")
+        else:
+            assert agent.ask("p") == "[{"
+
+
 class TestAskingForThem:
     """An unusable answer is asked for again; a failed request ends the round."""
 
@@ -251,6 +286,15 @@ class TestAskingForThem:
         assert text.startswith(QUERY_GENERATION_FAILED_TEXT + " ")
         assert len(text) > len(QUERY_GENERATION_FAILED_TEXT) + 1
         assert "sk-secret" not in text
+
+    def test_a_cut_off_answer_is_not_asked_for_again(self) -> None:
+        """Asked again with the same limit it is cut off again: one paid call, and says so."""
+        searcher = Searcher([TruncatedResponseError("limit"), answer([("x", ["x"])])])
+
+        with pytest.raises(SmartSearchError) as raised:
+            generate_alternative_queries(searcher, "p", lambda: False)
+        assert str(raised.value) == ANSWER_CUT_OFF_TEXT
+        assert len(searcher.prompts) == 1
 
     def test_a_stop_asks_nothing(self) -> None:
         """Not even once."""
@@ -475,6 +519,21 @@ class TestTheReportSaysWhichQueriesRan:
         del stored["alternative_queries"]
         assert ReportMetadata.from_dict(stored).alternative_queries == []
 
+    def test_a_round_that_could_not_run_is_said(self) -> None:
+        """Kept with the report, so a reopened one says more searching was tried."""
+        metadata = ReportMetadata(pubmed_query="p", smart_search_notice=NO_USABLE_QUERY_TEXT)
+        agent = LiteReportingAgent.__new__(LiteReportingAgent)
+
+        restored = ReportMetadata.from_dict(metadata.to_dict())
+        assert restored.smart_search_notice == NO_USABLE_QUERY_TEXT
+        assert (f"- **Alternative Queries (smart search):** {NO_USABLE_QUERY_TEXT}"
+                in agent.format_methodology_section(restored))
+        stored = metadata.to_dict()
+        del stored["smart_search_notice"]
+        assert ReportMetadata.from_dict(stored).smart_search_notice is None
+        with pytest.raises(ValueError):
+            ReportMetadata.from_dict({**stored, "smart_search_notice": 3})
+
     def test_a_damaged_list_is_refused(self) -> None:
         """Not read as no queries."""
         with pytest.raises(ValueError):
@@ -504,13 +563,54 @@ class TestTwoBatchesOneScreen:
         assert set(merged.checks) == {"pmid-1", "pmid-3"}
         assert not merged.failed
 
-    def test_it_failed_when_either_did(self) -> None:
-        """A failed batch's stand-ins never read as checks: no check time, the failed cause."""
+    def test_a_failed_batch_is_failed_document_by_document(self) -> None:
+        """Its stand-ins never read as checks; the checked batch keeps its times and causes (#629)."""
         failed = screen_documents([document("1")], {"pmid-1": unchecked_check()}, failed=True)
         checked = screen_documents([document("2")], {"pmid-2": unchecked_check()})
 
         for merged in (merged_screen(checked, failed), merged_screen(failed, checked)):
-            assert merged.failed
-            assert merged.checked_at is None
-            assert all(row["checked_at"] is None for row in merged.to_snapshot())
+            assert not merged.failed
+            assert merged.failed_ids == {"pmid-1"}
+            assert merged.checked_at == checked.checked_at
+            rows = {row["document_id"]: row for row in merged.to_snapshot()}
+            assert rows["pmid-1"]["checked_at"] is None
+            assert rows["pmid-2"]["checked_at"] is not None
+            clause = run_summary_clause(merged)
+            assert clause is not None
+            assert "the check failed" in clause and "Crossref" in clause
+        assert merged_screen(failed, failed).failed
         assert not merged_screen(checked, checked).failed
+
+    def test_a_failed_batch_beside_a_decided_one(self) -> None:
+        """Only the failed batch's paper is blamed on the failed check; live and reopened agree on the date."""
+        clear = PaperCheck(RetractionVerdict(RetractionStatus.CLEAR), datetime.now(UTC), None, None)
+        failed = screen_documents([document("1")], {"pmid-1": unchecked_check()}, failed=True)
+        checked = screen_documents([document("2")], {"pmid-2": clear})
+
+        for merged in (merged_screen(checked, failed), merged_screen(failed, checked)):
+            assert run_summary_clause(merged) == (
+                "1 paper's retraction status could not be checked: the check failed")
+            reopened = RetractionSnapshot.from_rows(merged.to_snapshot())
+            assert retraction_methods_line(merged) == retraction_methods_line(reopened)
+            assert retraction_methods_line(merged) == checked_on_line(clear.checked_at)
+        assert retraction_methods_line(merged_screen(failed, failed)) == "Retraction status could not be checked"
+
+    def test_the_later_failed_check_of_a_paper_the_first_did_not_reach(self) -> None:
+        """Its stand-in is used, so it stays failed: no check time, no source blamed (#629)."""
+        first = screen_documents([document("1")], {})  # a cancel stopped before it
+        failed = screen_documents([document("1")], {"pmid-1": unchecked_check()}, failed=True)
+
+        merged = merged_screen(first, failed)
+
+        assert merged.failed_ids == {"pmid-1"}
+        assert merged.checked_at is None
+        assert merged.to_snapshot()[0]["checked_at"] is None
+        assert run_summary_clause(merged) == "1 paper's retraction status could not be checked: the check failed"
+
+    def test_a_document_in_both_keeps_the_first_batchs_check(self) -> None:
+        """And whether that check failed."""
+        failed = screen_documents([document("1")], {"pmid-1": unchecked_check()}, failed=True)
+        checked = screen_documents([document("1")], {"pmid-1": unchecked_check()})
+
+        assert merged_screen(checked, failed).failed_ids == frozenset()
+        assert merged_screen(failed, checked).failed_ids == {"pmid-1"}
