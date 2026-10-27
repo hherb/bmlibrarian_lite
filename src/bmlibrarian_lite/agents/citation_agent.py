@@ -297,6 +297,7 @@ Relevance Score: {scored_doc.score}/5
         Raises:
             JSONParseError: If response cannot be parsed
             RetryExhaustedError: If all retries exhausted
+            TruncatedResponseError: The answer reached its token limit (not retried)
         """
         response = self._chat(messages, temperature=0.1, json_mode=True)
         passages = self._parse_citation_response(response)

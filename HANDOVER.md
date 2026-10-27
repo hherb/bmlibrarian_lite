@@ -12,11 +12,14 @@ its slice has landed; add a new section when handing off new work.
 landed below). **#631 item 1 on branch `fix/desktop-cut-off-answers`**:
 `LiteBaseAgent._chat` raises `TruncatedResponseError` on
 `STOP_REASON_MAX_TOKENS`, classified as `RESPONSE_TOO_LARGE` (−14, "cut off
-at its length limit", its own advice: raise Max Tokens in Settings → Tasks),
-never retried; prose paths (report, brief summary, interrogation answer and
+at its length limit", its own advice naming the model: no setting reaches
+the scoring or citation limit, #633), never retried; the benchmark runners
+record it too. Prose paths (report, brief summary, interrogation answer and
 summary) use `_chat_prose`, which keeps the text and appends
-`CUT_OFF_PROSE_NOTE`. **A test stubbing the reporting or interrogation model
-patches `_chat_prose`, not `_chat`.** #631 items 2–6 stay open. **#629 stays open for the maintainer's
+`CUT_OFF_PROSE_NOTE` (an answer with no prose before the limit raises).
+Query expansion reads `_chat_response` and keeps a cut-off answer's complete
+lines. **A test stubbing the reporting or interrogation answer patches
+`_chat_prose`, not `_chat`.** #631 items 2–6 stay open. **#629 stays open for the maintainer's
 decision** on item 4 (a re-lost page is counted twice; shortfalls keep no
 offset, and any rule without one can understate) and item 7 (counts lost
 when an error follows a cancel). **`bmlib drift` has failed since
@@ -27,8 +30,10 @@ Open: #627 (MCP has no smart search; a round runs all its queries;
 sequential scoring; quality filter depth; Audit Trail queries; Re-run
 Search's report covers its batch only). Lodged: #621 (PR #622 follow-ups),
 #624 (the reference cut drops tables and appendices after the references;
-all three), #625 (Upload Full Text follow-ups), #631 (PR #630's review: items 2–6,
-other stop reasons, Ollama without `done_reason`). Apple follow-ups: #612,
+all three), #625 (Upload Full Text follow-ups), #631 (PR #630's review: items 2–6),
+#633 (no setting reaches the tasks' token limits), #634 (a classifier
+failure read as "no design" or as failing the quality filter), #635 (query
+conversion and MCP payloads around the cut-off guard). Apple follow-ups: #612,
 #613. Android divergences: #614, #615; follow-ups #617–#619.
 
 **Owed by the maintainer** (stages C1 and C2 and the desktop browser rescue

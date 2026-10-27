@@ -47,6 +47,7 @@ from ..data_models import (
     LiteDocument,
 )
 from ..llm import LLMClient, LLMMessage
+from ..llm.data_types import STOP_REASON_MAX_TOKENS
 from ..quality.data_models import (
     BiasRisk,
     CLASSIFIER_ASSESSMENT_TIER,
@@ -817,16 +818,20 @@ Focus on THIS study's methodology, not studies it references."""
             response.output_tokens,
         )
 
-        # One answer the parser did not foresee is that document's failure,
-        # not the end of the whole run
-        try:
-            parsed = parse(response.content)
-        except Exception:
-            logger.exception(
-                f"Unexpected error reading {evaluator.display_name}'s "
-                f"assessment of document {document.id}"
-            )
-            parsed = EvaluationErrorCode.INVALID_RESPONSE_FORMAT
+        # As the review's _chat records it: what a cut-off answer holds is not its verdict
+        if response.stop_reason == STOP_REASON_MAX_TOKENS:
+            parsed: QualityAssessment | EvaluationErrorCode = EvaluationErrorCode.RESPONSE_TOO_LARGE
+        else:
+            # One answer the parser did not foresee is that document's failure,
+            # not the end of the whole run
+            try:
+                parsed = parse(response.content)
+            except Exception:
+                logger.exception(
+                    f"Unexpected error reading {evaluator.display_name}'s "
+                    f"assessment of document {document.id}"
+                )
+                parsed = EvaluationErrorCode.INVALID_RESPONSE_FORMAT
         if isinstance(parsed, EvaluationErrorCode):
             logger.warning(
                 f"{evaluator.display_name} gave no readable assessment of "

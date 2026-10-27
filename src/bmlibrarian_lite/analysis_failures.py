@@ -192,9 +192,10 @@ _UNREACHABLE_ADVICE = (
 _UNREADABLE_ADVICE = (
     "The model's answers could not be read: a different model may do better."
 )
+# Not "raise the limit": no setting reaches the scoring or citation limit (#633)
 _CUT_OFF_ADVICE = (
-    "The model's answers were cut off at their length limit: "
-    "raise Max Tokens in Settings → Tasks."
+    "A model that writes out its reasoning first can use up the "
+    "length limit: another model may finish within it."
 )
 _FALLBACK_ADVICE = "Try again later."
 
@@ -219,8 +220,8 @@ def analysis_failure_advice(shortfalls: Sequence[AnalysisShortfall]) -> str:
     Returns:
         One or more sentences, each at most once, in this order: checking a
         refused API key; waiting out a rate limit; checking the provider is
-        reachable; trying another model; raising the token limit. Otherwise,
-        trying again later.
+        reachable; trying another model; one that finishes within the length
+        limit. Otherwise, trying again later.
     """
     return advice_for_causes(
         cause for shortfall in shortfalls for cause in shortfall.causes
@@ -240,8 +241,8 @@ def advice_for_causes(causes: Iterable[EvaluationErrorCode]) -> str:
     Returns:
         One or more sentences, each at most once, in this order: checking a
         refused API key; waiting out a rate limit; checking the provider is
-        reachable; trying another model; raising the token limit. Otherwise,
-        trying again later.
+        reachable; trying another model; one that finishes within the length
+        limit. Otherwise, trying again later.
     """
     seen = set(causes)
     advice: list[str] = []

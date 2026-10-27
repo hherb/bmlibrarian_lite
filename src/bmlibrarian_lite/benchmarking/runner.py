@@ -41,6 +41,7 @@ from ..data_models import (
 )
 from ..exceptions import StoredResultUnreadableError
 from ..llm import LLMClient, LLMMessage
+from ..llm.data_types import STOP_REASON_MAX_TOKENS
 from ..storage import LiteStorage
 from ..utils import classify_analysis_exception
 from .models import (
@@ -692,12 +693,18 @@ Evaluate the relevance of this document to the research question."""
             response.output_tokens,
         )
 
-        parsed = parse_score_response(response.content)
+        # As the review's _chat records it: what a cut-off answer holds is not its verdict
+        if response.stop_reason == STOP_REASON_MAX_TOKENS:
+            parsed = None
+            failure = EvaluationErrorCode.RESPONSE_TOO_LARGE
+        else:
+            parsed = parse_score_response(response.content)
+            failure = EvaluationErrorCode.JSON_PARSE_ERROR
         if parsed is None:
             return self._failed_score(
                 document,
                 evaluator,
-                EvaluationErrorCode.JSON_PARSE_ERROR,
+                failure,
                 latency_ms=latency_ms,
                 tokens_input=response.input_tokens,
                 tokens_output=response.output_tokens,

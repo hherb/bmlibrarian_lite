@@ -900,7 +900,8 @@ class EvaluationErrorCode(Enum):
     JSON_PARSE_ERROR = -11
     INVALID_RESPONSE_FORMAT = -12
     EMPTY_RESPONSE = -13
-    #: The model's answer reached its token limit, so it is incomplete (#631)
+    #: The model's answer reached its token limit, so it is incomplete (#631).
+    #: Named before it had this meaning; the value is stored, so never renumber it.
     RESPONSE_TOO_LARGE = -14
 
     # Retry exhaustion (-21 to -30)

@@ -28,7 +28,7 @@ from typing import Optional
 from bmlibrarian_lite.llm import LLMClient, LLMMessage, LLMResponse
 from ..config import LiteConfig, TaskModelConfig
 from ..exceptions import TruncatedResponseError
-from ..llm.data_types import STOP_REASON_MAX_TOKENS
+from ..llm.data_types import STOP_REASON_MAX_TOKENS, strip_unclosed_thinking
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +165,8 @@ class LiteBaseAgent:
 
         Unlike :meth:`_chat`, an answer cut off at its token limit is kept:
         what the model wrote is still read, and :data:`CUT_OFF_PROSE_NOTE`
-        after it says it is incomplete.
+        after it says it is incomplete. Reasoning it never closed is dropped,
+        and a code block it never closed is closed, so the note renders as text.
 
         Args:
             messages: List of conversation messages
@@ -175,15 +176,27 @@ class LiteBaseAgent:
 
         Returns:
             The answer's text, followed by the note when it was cut off
+
+        Raises:
+            TruncatedResponseError: The answer reached its token limit before
+                any prose: kept, it would be a note standing in for the text.
         """
         response = self._chat_response(messages, task_id, temperature, max_tokens)
-        if response.stop_reason == STOP_REASON_MAX_TOKENS:
-            logger.warning(
+        if response.stop_reason != STOP_REASON_MAX_TOKENS:
+            return response.content
+        prose = strip_unclosed_thinking(response.content).rstrip()
+        if not prose:
+            raise TruncatedResponseError(
                 f"The answer from {response.model} reached its token limit "
-                f"({response.output_tokens} tokens); shown with a note"
+                f"({response.output_tokens} tokens) before it wrote anything"
             )
-            return f"{response.content}\n\n{CUT_OFF_PROSE_NOTE}"
-        return response.content
+        if prose.count("```") % 2:
+            prose += "\n```"
+        logger.warning(
+            f"The answer from {response.model} reached its token limit "
+            f"({response.output_tokens} tokens); shown with a note"
+        )
+        return f"{prose}\n\n{CUT_OFF_PROSE_NOTE}"
 
     def _chat_response(
         self,
@@ -193,7 +206,10 @@ class LiteBaseAgent:
         max_tokens: int | None = None,
         json_mode: bool = False,
     ) -> LLMResponse:
-        """Send a chat request as :meth:`_chat` does, keeping the whole response.
+        """Send a chat request and return the whole response, unchecked.
+
+        :meth:`_chat` and :meth:`_chat_prose` check why the model stopped;
+        a caller of this one reads ``stop_reason`` itself.
 
         Args:
             messages: List of conversation messages

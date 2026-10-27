@@ -326,6 +326,7 @@ Evaluate the relevance of this document to the research question."""
             JSONParseError: If response cannot be parsed
             APIError: If API call fails
             RetryExhaustedError: If all retries exhausted
+            TruncatedResponseError: The answer reached its token limit (not retried)
         """
         response = self._chat(messages, temperature=0.1, json_mode=True)
         parsed = parse_score_response(response)

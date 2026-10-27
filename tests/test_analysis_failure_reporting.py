@@ -664,20 +664,24 @@ class TestTheReport:
     ) -> None:
         """#263: the error text was checkpointed, auto-saved and returned as one."""
         agent = LiteReportingAgent()
-        monkeypatch.setattr(agent, "_chat_prose", ScriptedLLM([unreachable()]))
+        script = ScriptedLLM([unreachable()])
+        monkeypatch.setattr(agent, "_chat_prose", script)
 
         with pytest.raises(APIError):
             agent.generate_report(QUESTION, [make_citation()])
+        assert not script.answers, "the scripted model was never asked"
 
     def test_a_summary_that_could_not_be_generated_is_not_a_summary(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The same defect, one method over."""
         agent = LiteReportingAgent()
-        monkeypatch.setattr(agent, "_chat_prose", ScriptedLLM([unreachable()]))
+        script = ScriptedLLM([unreachable()])
+        monkeypatch.setattr(agent, "_chat_prose", script)
 
         with pytest.raises(APIError):
             agent.generate_brief_summary(QUESTION, [make_citation()])
+        assert not script.answers, "the scripted model was never asked"
 
 
 class TestTheMcpFactCheck:

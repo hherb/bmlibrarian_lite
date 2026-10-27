@@ -66,6 +66,7 @@ from bmlibrarian_lite.data_models import (
 )
 from bmlibrarian_lite.exceptions import APIError, RetryExhaustedError
 from bmlibrarian_lite.llm import LLMResponse
+from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS
 from bmlibrarian_lite.quality.data_models import (
     QualityAssessment,
     QualityTier,
@@ -159,11 +160,12 @@ def failed(
 class ScriptedClient:
     """An LLM client answering each call from a script, recording the calls."""
 
-    def __init__(self, *answers: "str | Exception") -> None:
+    def __init__(self, *answers: "str | LLMResponse | Exception") -> None:
         """Answer the calls in order; the last answer repeats.
 
         Args:
-            answers: A response body to return, or an exception to raise.
+            answers: A response body or a whole response to return, or an
+                exception to raise.
         """
         self._answers = list(answers)
         self.calls: list[str] = []
@@ -185,6 +187,8 @@ class ScriptedClient:
         answer = self._answers[min(len(self.calls), len(self._answers)) - 1]
         if isinstance(answer, Exception):
             raise answer
+        if isinstance(answer, LLMResponse):
+            return answer
         return LLMResponse(content=answer, input_tokens=100, output_tokens=20)
 
 
@@ -294,6 +298,13 @@ class TestAFailureIsRecordedAsOne:
         evaluation = classify_once(ScriptedClient(RCT_ANSWER))
         assert evaluation.study_design is StudyDesign.RCT
         assert evaluation.failure is None
+
+    def test_a_cut_off_answer_is_not_a_classification(self) -> None:
+        """Recorded as unreadable, it blamed the model for running out of room (#631)."""
+        cut_off = LLMResponse(content=RCT_ANSWER, stop_reason=STOP_REASON_MAX_TOKENS)
+
+        assert classify_once(ScriptedClient(cut_off)).failure is EvaluationErrorCode.RESPONSE_TOO_LARGE
+        assert assess_once(ScriptedClient(cut_off)).failure is EvaluationErrorCode.RESPONSE_TOO_LARGE
 
     def test_a_provider_failure_is_its_error_code(self) -> None:
         """An outage is a failure, not the model's "unknown"."""

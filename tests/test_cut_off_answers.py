@@ -1,17 +1,20 @@
 """An answer the model stopped at its token limit is never read as a whole one (#631).
 
-The JSON paths (scoring, citations) record it as its own cause, asked once:
-asked again with the same limit, it is cut off again, each time paid. The
-prose paths (the report, the summaries, a document answer) keep what the
-model wrote and say it stopped.
+The paths whose answer code reads (scoring, citations, the benchmarks) record
+it as its own cause, asked once: asked again with the same limit, it is
+likely cut off again, each time paid. The prose paths (the report, the
+summaries, a document answer) keep what the model wrote and say it stopped.
 """
 
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
 from bmlibrarian_lite.agents.base import CUT_OFF_PROSE_NOTE, LiteBaseAgent
 from bmlibrarian_lite.agents.citation_agent import LiteCitationAgent
+from bmlibrarian_lite.agents.interrogation_agent import LiteInterrogationAgent
 from bmlibrarian_lite.agents.reporting_agent import LiteReportingAgent
 from bmlibrarian_lite.agents.scoring_agent import LiteScoringAgent
 from bmlibrarian_lite.analysis_failures import advice_for_causes
@@ -19,10 +22,12 @@ from bmlibrarian_lite.data_models import (
     Citation,
     DocumentSource,
     EvaluationErrorCode,
+    LiteChunk,
     LiteDocument,
     ScoredDocument,
 )
 from bmlibrarian_lite.exceptions import TruncatedResponseError
+from bmlibrarian_lite.gui.report_tab import ReportTab
 from bmlibrarian_lite.llm import LLMMessage, LLMResponse
 from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS
 
@@ -94,6 +99,29 @@ class TestTheBaseAgent:
 
         assert agent._chat_prose(MESSAGES) == f"Aspirin reduced\n\n{CUT_OFF_PROSE_NOTE}"
 
+    @pytest.mark.parametrize("content", ["", "  \n", "<think>\nThe user asks about aspirin, so"])
+    def test_a_cut_off_answer_with_no_prose_is_refused(self, content: str) -> None:
+        """Nothing written, or only reasoning never closed, is not a report with a note."""
+        agent = LiteBaseAgent.__new__(LiteBaseAgent)
+        agent._chat_response = answers(cut_off(content))  # type: ignore[method-assign]
+
+        with pytest.raises(TruncatedResponseError, match="token limit"):
+            agent._chat_prose(MESSAGES)
+
+    def test_unclosed_reasoning_after_the_prose_is_dropped(self) -> None:
+        """The provider strips a closed block only; an open one is not the answer."""
+        agent = LiteBaseAgent.__new__(LiteBaseAgent)
+        agent._chat_response = answers(cut_off("Aspirin reduced stroke.\n<thinking>Now the next"))  # type: ignore[method-assign]
+
+        assert agent._chat_prose(MESSAGES) == f"Aspirin reduced stroke.\n\n{CUT_OFF_PROSE_NOTE}"
+
+    def test_a_cut_off_code_block_is_closed_before_the_note(self) -> None:
+        """Otherwise the note and everything after it render as code."""
+        agent = LiteBaseAgent.__new__(LiteBaseAgent)
+        agent._chat_response = answers(cut_off("Doses:\n```\n75 mg"))  # type: ignore[method-assign]
+
+        assert agent._chat_prose(MESSAGES) == f"Doses:\n```\n75 mg\n```\n\n{CUT_OFF_PROSE_NOTE}"
+
     def test_a_cut_off_greeting_still_proves_a_connection(self) -> None:
         """The connection test asks for ten tokens; the limit is expected."""
         agent = LiteBaseAgent.__new__(LiteBaseAgent)
@@ -128,15 +156,28 @@ class TestTheJsonPaths:
         assert outcome.causes == (EvaluationErrorCode.RESPONSE_TOO_LARGE,)
         assert chat.calls == 1
 
-    def test_the_advice_names_the_limit_not_the_model(self) -> None:
-        """"Another model may do better" is not what helps a cut-off answer."""
+    def test_the_advice_is_not_the_unreadable_advice(self) -> None:
+        """A cut-off answer was readable as far as it went; it ran out of room.
+
+        No setting raises the scoring or citation limit (#633), so the advice
+        names what the reader can change: the model.
+        """
         advice = advice_for_causes([EvaluationErrorCode.RESPONSE_TOO_LARGE])
 
         assert advice == (
-            "The model's answers were cut off at their length limit: "
-            "raise Max Tokens in Settings → Tasks."
+            "A model that writes out its reasoning first can use up the "
+            "length limit: another model may finish within it."
         )
-        assert "different model" not in advice
+
+    def test_the_advice_comes_last_of_the_model_sentences(self) -> None:
+        """Each sentence once, in the documented order, whatever order the causes came in."""
+        advice = advice_for_causes([
+            EvaluationErrorCode.RESPONSE_TOO_LARGE,
+            EvaluationErrorCode.JSON_PARSE_ERROR,
+            EvaluationErrorCode.API_TIMEOUT,
+        ])
+
+        assert advice.index("reachable") < advice.index("could not be read") < advice.index("length limit")
 
 
 class TestTheReport:
@@ -152,3 +193,58 @@ class TestTheReport:
 
         assert report.index("Aspirin reduced stroke in") < report.index(CUT_OFF_PROSE_NOTE)
         assert report.index(CUT_OFF_PROSE_NOTE) < report.index("## References")
+
+
+class TestDocumentInterrogation:
+    """A document answer is prose; its query expansion keeps what it can."""
+
+    @staticmethod
+    def agent_with(response: LLMResponse) -> LiteInterrogationAgent:
+        """An agent with one loaded chunk, answering with ``response``."""
+        agent = LiteInterrogationAgent.__new__(LiteInterrogationAgent)
+        agent._current_document_id = "d"
+        agent._embedder = object()  # type: ignore[assignment]
+        agent.storage = MagicMock()
+        chunk = LiteChunk(id="d_0", document_id="d", text="Aspirin reduced stroke.", chunk_index=0, start_char=0, end_char=23)
+        agent.storage.search_chunks.return_value = [(chunk, 0.1)]
+        agent._chat_response = answers(response)  # type: ignore[method-assign]
+        return agent
+
+    def test_a_cut_off_answer_is_shown_with_the_note(self) -> None:
+        """Not raised at the reader: what the model wrote is still read."""
+        agent = self.agent_with(cut_off("Aspirin reduced"))
+
+        answer, _ = agent.ask(QUESTION, use_query_expansion=False)
+
+        assert answer == f"Aspirin reduced\n\n{CUT_OFF_PROSE_NOTE}"
+
+    def test_a_cut_off_expansion_keeps_its_complete_lines(self) -> None:
+        """The last line may stop mid-query; the ones before it are whole."""
+        agent = self.agent_with(cut_off("Aspirin and stroke risk\nAntiplatelet therapy in stroke\nAcetylsal"))
+
+        assert agent._expand_query(QUESTION) == [
+            QUESTION, "Aspirin and stroke risk", "Antiplatelet therapy in stroke",
+        ]
+
+    def test_a_cut_off_expansion_still_reasoning_adds_nothing(self) -> None:
+        """Reasoning lines are not search queries."""
+        agent = self.agent_with(cut_off("<think>\nThe user wants\nalternatives for"))
+
+        assert agent._expand_query(QUESTION) == [QUESTION]
+
+
+class TestTheReportTab:
+    """The note survives the tab's citation links."""
+
+    def test_a_link_cut_off_mid_id_does_not_swallow_the_note(self) -> None:
+        """An unclosed ``(docid:`` once matched up to the first year's ``)``."""
+        tab = SimpleNamespace(_citations_by_doc_id={}, _find_document_by_citation=lambda _text: None)
+        report = (
+            f"Aspirin lowered risk [Smith et al., 2021](docid:pmid-1234\n\n{CUT_OFF_PROSE_NOTE}"
+            "\n\n## References\n\n1. Smith J (2021). Title."
+        )
+
+        html = ReportTab._make_citations_clickable(tab, report)  # type: ignore[arg-type]
+
+        assert "stopped at its length limit" in html
+        assert "References</h2>" in html

@@ -29,6 +29,7 @@ from ..config import LiteConfig
 from ..data_models import LiteChunk
 from ..chunking import chunk_document_for_interrogation
 from ..embeddings import LiteEmbedder
+from ..llm.data_types import STOP_REASON_MAX_TOKENS, strip_unclosed_thinking
 from .base import LiteBaseAgent
 
 logger = logging.getLogger(__name__)
@@ -179,17 +180,21 @@ class LiteInterrogationAgent(LiteBaseAgent):
                 self._create_user_message(f"Question: {question}"),
             ]
 
-            response = self._chat(
+            response = self._chat_response(
                 messages,
                 task_id="query_expansion",
                 temperature=0.3,
                 max_tokens=200,
             )
+            lines = response.content.strip().split('\n')
+            if response.stop_reason == STOP_REASON_MAX_TOKENS:
+                # The last line may stop mid-query; the complete ones before it still serve
+                lines = strip_unclosed_thinking(response.content).split('\n')[:-1]
 
             # Parse response into list of queries
             alternatives = [
                 line.strip()
-                for line in response.strip().split('\n')
+                for line in lines
                 if line.strip() and not line.strip().startswith(('Alternative', '-', '*', '•'))
             ]
 
