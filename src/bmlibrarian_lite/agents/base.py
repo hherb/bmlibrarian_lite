@@ -27,8 +27,14 @@ from typing import Optional
 
 from bmlibrarian_lite.llm import LLMClient, LLMMessage, LLMResponse
 from ..config import LiteConfig, TaskModelConfig
+from ..exceptions import TruncatedResponseError
+from ..llm.data_types import STOP_REASON_MAX_TOKENS, strip_unclosed_thinking
 
 logger = logging.getLogger(__name__)
+
+#: What follows a prose answer the model stopped at its token limit, so the
+#: reader never takes the part for the whole (#631)
+CUT_OFF_PROSE_NOTE = "*The model's answer stopped at its length limit: the rest of it is missing.*"
 
 
 class LiteBaseAgent:
@@ -134,8 +140,63 @@ class LiteBaseAgent:
 
         Returns:
             Response text from the LLM
+
+        Raises:
+            TruncatedResponseError: The answer reached its token limit. Asked
+                again with the same limit it is likely cut off again, so a
+                caller that retries an unreadable answer must not retry this.
         """
-        return self._chat_response(messages, task_id, temperature, max_tokens, json_mode).content
+        response = self._chat_response(messages, task_id, temperature, max_tokens, json_mode)
+        if response.stop_reason == STOP_REASON_MAX_TOKENS:
+            raise TruncatedResponseError(
+                f"The answer from {response.model} reached its token limit "
+                f"({response.output_tokens} tokens)"
+            )
+        return response.content
+
+    def _chat_prose(
+        self,
+        messages: list[LLMMessage],
+        task_id: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        """Send a chat request for text the reader reads as written.
+
+        Unlike :meth:`_chat`, an answer cut off at its token limit is kept:
+        what the model wrote is still read, and :data:`CUT_OFF_PROSE_NOTE`
+        after it says it is incomplete. Reasoning it never closed is dropped,
+        and a code block it never closed is closed, so the note renders as text.
+
+        Args:
+            messages: List of conversation messages
+            task_id: Task identifier for config lookup (uses class TASK_ID if None)
+            temperature: Optional temperature override
+            max_tokens: Optional max tokens override
+
+        Returns:
+            The answer's text, followed by the note when it was cut off
+
+        Raises:
+            TruncatedResponseError: The answer reached its token limit before
+                any prose: kept, it would be a note standing in for the text.
+        """
+        response = self._chat_response(messages, task_id, temperature, max_tokens)
+        if response.stop_reason != STOP_REASON_MAX_TOKENS:
+            return response.content
+        prose = strip_unclosed_thinking(response.content).rstrip()
+        if not prose:
+            raise TruncatedResponseError(
+                f"The answer from {response.model} reached its token limit "
+                f"({response.output_tokens} tokens) before it wrote anything"
+            )
+        if prose.count("```") % 2:
+            prose += "\n```"
+        logger.warning(
+            f"The answer from {response.model} reached its token limit "
+            f"({response.output_tokens} tokens); shown with a note"
+        )
+        return f"{prose}\n\n{CUT_OFF_PROSE_NOTE}"
 
     def _chat_response(
         self,
@@ -145,7 +206,10 @@ class LiteBaseAgent:
         max_tokens: int | None = None,
         json_mode: bool = False,
     ) -> LLMResponse:
-        """Send a chat request as :meth:`_chat` does, keeping the whole response.
+        """Send a chat request and return the whole response, unchecked.
+
+        :meth:`_chat` and :meth:`_chat_prose` check why the model stopped;
+        a caller of this one reads ``stop_reason`` itself.
 
         Args:
             messages: List of conversation messages
@@ -214,7 +278,8 @@ class LiteBaseAgent:
         try:
             # Simple test message
             messages = [self._create_user_message("Hello")]
-            self._chat(messages, max_tokens=10)
+            # Not _chat: an answer cut off at ten tokens still proves a connection
+            self._chat_response(messages, max_tokens=10)
             return True
         except Exception as e:
             logger.warning(f"LLM connection test failed: {e}")

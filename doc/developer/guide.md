@@ -274,6 +274,10 @@ class CustomAgent(LiteBaseAgent):
         return self._chat(messages)
 ```
 
+`_chat` raises `TruncatedResponseError` when the answer reaches its token
+limit: use it for answers code parses. Text the reader reads as written goes
+through `_chat_prose`, which keeps a cut-off answer and notes that it stopped.
+
 Available agents:
 - `SearchAgent`: Converts natural language to PubMed/Europe PMC queries
 - `ScoringAgent`: Scores document relevance

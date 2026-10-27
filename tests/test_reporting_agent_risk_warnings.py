@@ -102,7 +102,7 @@ def low_risk_transparency():
 class TestReportingAgentRiskWarnings:
     """Tests for risk warning integration."""
 
-    @patch.object(LiteReportingAgent, "_chat")
+    @patch.object(LiteReportingAgent, "_chat_prose")
     def test_generate_report_with_transparency_results(
         self,
         mock_chat,
@@ -134,7 +134,7 @@ class TestReportingAgentRiskWarnings:
         # Low-risk should not have warning
         assert "pmid-67890" in report
 
-    @patch.object(LiteReportingAgent, "_chat")
+    @patch.object(LiteReportingAgent, "_chat_prose")
     def test_llm_prompt_includes_risk_context(
         self,
         mock_chat,
@@ -160,7 +160,7 @@ class TestReportingAgentRiskWarnings:
         user_message = messages[1].content  # LLMMessage has content attribute
         assert "Transparency Concerns" in user_message
 
-    @patch.object(LiteReportingAgent, "_chat")
+    @patch.object(LiteReportingAgent, "_chat_prose")
     def test_respects_risk_threshold_setting(
         self,
         mock_chat,
@@ -192,7 +192,7 @@ class TestReportingAgentRiskWarnings:
         # Medium risk with HIGH threshold should not show warning
         assert "HIGH RISK" not in report
 
-    @patch.object(LiteReportingAgent, "_chat")
+    @patch.object(LiteReportingAgent, "_chat_prose")
     def test_annotated_references_format(
         self,
         mock_chat,

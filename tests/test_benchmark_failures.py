@@ -75,6 +75,7 @@ from bmlibrarian_lite.exceptions import (
     StoredResultUnreadableError,
 )
 from bmlibrarian_lite.llm import LLMResponse
+from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS
 from bmlibrarian_lite.storage import LiteStorage
 
 QUESTION = "Does aspirin prevent stroke?"
@@ -135,11 +136,12 @@ def failure(
 class ScriptedClient:
     """An LLM client answering each call from a script, recording the calls."""
 
-    def __init__(self, *answers: "str | Exception") -> None:
+    def __init__(self, *answers: "str | LLMResponse | Exception") -> None:
         """Answer the calls in order; the last answer repeats.
 
         Args:
-            answers: A response body to return, or an exception to raise.
+            answers: A response body or a whole response to return, or an
+                exception to raise.
         """
         self._answers = list(answers)
         self.calls: list[str] = []
@@ -161,6 +163,8 @@ class ScriptedClient:
         answer = self._answers[min(len(self.calls), len(self._answers)) - 1]
         if isinstance(answer, Exception):
             raise answer
+        if isinstance(answer, LLMResponse):
+            return answer
         return LLMResponse(content=answer, input_tokens=100, output_tokens=20)
 
 
@@ -287,6 +291,15 @@ class TestAFailureIsRecordedAsOne:
         )
 
         assert scored.score == EvaluationErrorCode.API_AUTH_ERROR.value
+
+    def test_a_cut_off_answer_is_not_a_score(self) -> None:
+        """Read anyway, it was a valid score in the benchmark and a failure in the review (#631)."""
+        cut_off = LLMResponse(
+            content='{"score": 4, "explanation": "On topic"}', stop_reason=STOP_REASON_MAX_TOKENS
+        )
+        scored = score_once(ScriptedClient(cut_off))
+
+        assert scored.score == EvaluationErrorCode.RESPONSE_TOO_LARGE.value
 
     def test_an_unreadable_answer_is_a_parse_failure(self) -> None:
         """Defaulted to 1, the model's garbled answer read as a judgement."""

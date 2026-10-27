@@ -192,6 +192,11 @@ _UNREACHABLE_ADVICE = (
 _UNREADABLE_ADVICE = (
     "The model's answers could not be read: a different model may do better."
 )
+# Not "raise the limit": no setting reaches the scoring or citation limit (#633)
+_CUT_OFF_ADVICE = (
+    "A model that writes out its reasoning first can use up the "
+    "length limit: another model may finish within it."
+)
 _FALLBACK_ADVICE = "Try again later."
 
 _UNREACHABLE_CAUSES = (
@@ -203,7 +208,6 @@ _UNREADABLE_CAUSES = (
     EvaluationErrorCode.JSON_PARSE_ERROR,
     EvaluationErrorCode.INVALID_RESPONSE_FORMAT,
     EvaluationErrorCode.EMPTY_RESPONSE,
-    EvaluationErrorCode.RESPONSE_TOO_LARGE,
 )
 
 
@@ -216,7 +220,8 @@ def analysis_failure_advice(shortfalls: Sequence[AnalysisShortfall]) -> str:
     Returns:
         One or more sentences, each at most once, in this order: checking a
         refused API key; waiting out a rate limit; checking the provider is
-        reachable; trying another model. Otherwise, trying again later.
+        reachable; trying another model; one that finishes within the length
+        limit. Otherwise, trying again later.
     """
     return advice_for_causes(
         cause for shortfall in shortfalls for cause in shortfall.causes
@@ -236,7 +241,8 @@ def advice_for_causes(causes: Iterable[EvaluationErrorCode]) -> str:
     Returns:
         One or more sentences, each at most once, in this order: checking a
         refused API key; waiting out a rate limit; checking the provider is
-        reachable; trying another model. Otherwise, trying again later.
+        reachable; trying another model; one that finishes within the length
+        limit. Otherwise, trying again later.
     """
     seen = set(causes)
     advice: list[str] = []
@@ -248,6 +254,8 @@ def advice_for_causes(causes: Iterable[EvaluationErrorCode]) -> str:
         advice.append(_UNREACHABLE_ADVICE)
     if seen.intersection(_UNREADABLE_CAUSES):
         advice.append(_UNREADABLE_ADVICE)
+    if EvaluationErrorCode.RESPONSE_TOO_LARGE in seen:
+        advice.append(_CUT_OFF_ADVICE)
     return " ".join(advice) if advice else _FALLBACK_ADVICE
 
 

@@ -127,7 +127,7 @@ class TestTheReport:
     def test_a_synthesised_report_leads_with_the_notice(self) -> None:
         """The LLM's summary follows the notice; the notice is not left to the LLM."""
         agent = LiteReportingAgent(config=MagicMock())
-        agent._chat = MagicMock(return_value="Aspirin reduced stroke.")  # type: ignore[method-assign]
+        agent._chat_prose = MagicMock(return_value="Aspirin reduced stroke.")  # type: ignore[method-assign]
         document = make_document()
         citation = Citation(document=document, passage="Aspirin reduced stroke.", relevance_score=5)
         metadata = ReportMetadata(search_shortfalls=[PUBMED_DOWN])

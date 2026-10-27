@@ -34,6 +34,26 @@ _THINKING_TAG_RE = re.compile(
 )
 
 
+# An opening tag never closed: the answer stopped while the model was still reasoning
+_UNCLOSED_THINKING_RE = re.compile(r"<think(?:ing)?>.*\Z", re.DOTALL)
+
+
+def strip_unclosed_thinking(text: str) -> str:
+    """Remove reasoning that a cut-off answer never closed.
+
+    :func:`strip_thinking_tags` removes closed blocks only; an answer stopped
+    at its token limit inside one keeps the opening tag and everything after it.
+
+    Args:
+        text: Answer text, closed thinking blocks already removed.
+
+    Returns:
+        The text before an unclosed ``<think>``/``<thinking>`` tag, or the
+        text unchanged when there is none.
+    """
+    return _UNCLOSED_THINKING_RE.sub("", text)
+
+
 def strip_thinking_tags(text: str) -> str:
     """Remove thinking/reasoning tags from LLM responses.
 

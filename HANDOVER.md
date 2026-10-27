@@ -9,29 +9,31 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **Parity: taking a fact check further, Python desktop: done** (`ROADMAP.md`;
-landed below). **PR #628's review follow-ups (#629) on branch
-`fix/desktop-find-more-evidence-followups`**: a model answer cut off at its
-token limit (`LLMResponse.stop_reason == STOP_REASON_MAX_TOKENS`; Ollama's
-`done_reason` `length` maps to it) raises `TruncatedResponseError` from
-`LiteSearchAgent.ask` and ends the round with `ANSWER_CUT_OFF_TEXT`, never
-asked again; the review's notice is kept as `ReportMetadata.smart_search_notice`
-and in the methodology (a Find More Evidence round that finds documents clears it);
-`RetractionScreen.failed_ids` replaces the screen-wide flag (`failed` is now
-"every held paper failed"), so `merged_screen` keeps the checked batch's
-times and causes; `QualityFilter.to_report_settings()` beside
-`from_report_settings`; tests for the review's smart-search quality filter,
-`_assess`, `_with_scoring_failures` and `build_query_string`. Item 3 was not
-a defect: no failure row exists anywhere, and a document with no row is
-already pending (pinned by a test). **Left open in #629, the maintainer's
-decision**: item 4 (a re-lost page is counted twice; shortfalls keep no
+landed below). **#631 item 1 on branch `fix/desktop-cut-off-answers`**:
+`LiteBaseAgent._chat` raises `TruncatedResponseError` on
+`STOP_REASON_MAX_TOKENS`, classified as `RESPONSE_TOO_LARGE` (−14, "cut off
+at its length limit", its own advice naming the model: no setting reaches
+the scoring or citation limit, #633), never retried; the benchmark runners
+record it too. Prose paths (report, brief summary, interrogation answer and
+summary) use `_chat_prose`, which keeps the text and appends
+`CUT_OFF_PROSE_NOTE` (an answer with no prose before the limit raises).
+Query expansion reads `_chat_response` and keeps a cut-off answer's complete
+lines. **A test stubbing the reporting or interrogation answer patches
+`_chat_prose`, not `_chat`.** #631 items 2–6 stay open. **#629 stays open for the maintainer's
+decision** on item 4 (a re-lost page is counted twice; shortfalls keep no
 offset, and any rule without one can understate) and item 7 (counts lost
-when an error follows a cancel).
+when an error follows a cancel). **`bmlib drift` has failed since
+2026-10-19**: bmlib changes await triage into
+`doc/cross_platform/bmlib_sync/ledger.json`
+(`scripts/check_bmlib_ledger.py --bmlib ~/src/bmlib`).
 Open: #627 (MCP has no smart search; a round runs all its queries;
 sequential scoring; quality filter depth; Audit Trail queries; Re-run
 Search's report covers its batch only). Lodged: #621 (PR #622 follow-ups),
 #624 (the reference cut drops tables and appendices after the references;
-all three), #625 (Upload Full Text follow-ups), #631 (PR #630's review: the
-other agents' cut-off answers, other stop reasons). Apple follow-ups: #612,
+all three), #625 (Upload Full Text follow-ups), #631 (PR #630's review: items 2–6),
+#633 (no setting reaches the tasks' token limits), #634 (a classifier
+failure read as "no design" or as failing the quality filter), #635 (query
+conversion and MCP payloads around the cut-off guard). Apple follow-ups: #612,
 #613. Android divergences: #614, #615; follow-ups #617–#619.
 
 **Owed by the maintainer** (stages C1 and C2 and the desktop browser rescue
@@ -67,6 +69,12 @@ have landed):
 
 ## Recently landed (context)
 
+- **PR #628's review follow-ups** (#629; PR #630): a model answer cut off
+  at its token limit (`STOP_REASON_MAX_TOKENS`; Ollama's `length`) raises
+  `TruncatedResponseError` from `LiteSearchAgent.ask` and ends the round with
+  `ANSWER_CUT_OFF_TEXT`, never asked again; `ReportMetadata.smart_search_notice`
+  is kept and in the methodology; `RetractionScreen.failed_ids` replaces the
+  screen-wide flag; `QualityFilter.to_report_settings()`.
 - **Desktop: Find More Evidence and repeated smart search** (PR #628).
   `smart_search.py` asks for the apps' alternative queries, told of every
   query already run for the run (`smart_search_run_queries`, by checkpoint);

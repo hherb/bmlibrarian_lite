@@ -384,7 +384,7 @@ IMPORTANT: Use ONLY the exact Source and Document ID values provided above. Do n
         ]
 
         try:
-            report = self._chat(messages, temperature=0.3, max_tokens=4096)
+            report = self._chat_prose(messages, temperature=0.3, max_tokens=4096)
 
             # Add references section with risk annotations
             concerns = {}
@@ -482,7 +482,7 @@ CITATION FORMAT: Use [Source](docid:Document ID) with exact values from above.""
         ]
 
         try:
-            return self._chat(messages, temperature=0.2, max_tokens=1024)
+            return self._chat_prose(messages, temperature=0.2, max_tokens=1024)
         except Exception:
             logger.exception("Failed to generate summary")
             raise

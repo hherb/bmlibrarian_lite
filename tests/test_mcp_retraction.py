@@ -487,7 +487,7 @@ def test_fact_check_puts_each_notice_on_once_with_the_real_report(
         citations=[_make_citation(good), _make_citation(concern)], failed=[], shortfall=None
     )
     agent = LiteReportingAgent(config=MagicMock())
-    agent._chat = MagicMock(return_value="BODYTEXT")  # type: ignore[method-assign]
+    agent._chat_prose = MagicMock(return_value="BODYTEXT")  # type: ignore[method-assign]
     ctx.reporting_agent = agent
 
     out = mcp_server._handle_fact_check({"claim": "c"}, ctx)

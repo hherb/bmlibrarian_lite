@@ -645,7 +645,8 @@ class ReportTab(QWidget):
         import markdown
 
         # Step 1: Convert docid: links to bmlibrarian:// links BEFORE markdown processing
-        docid_pattern = r'\[([^\]]+)\]\(docid:([^)]+)\)'
+        # No whitespace in an id: a link cut off mid-id must not run on to a later ")" (#631)
+        docid_pattern = r'\[([^\]]+)\]\(docid:([^)\s]+)\)'
 
         def replace_docid_link(match: re.Match) -> str:
             citation_text = match.group(1)

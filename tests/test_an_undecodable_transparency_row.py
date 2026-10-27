@@ -640,7 +640,7 @@ class TestTheReportCountsAndAnnotatesIt:
         metadata.transparency_analysis_applied = True
 
         with patch.object(
-            LiteReportingAgent, "_chat", return_value="Body [A](docid:newer)."
+            LiteReportingAgent, "_chat_prose", return_value="Body [A](docid:newer)."
         ):
             report = LiteReportingAgent(config=config).generate_report(
                 "Q", [citation], metadata, transparency_results={"newer": NEWER}
@@ -665,7 +665,7 @@ class TestTheReportCountsAndAnnotatesIt:
 
         with patch.object(
             LiteReportingAgent,
-            "_chat",
+            "_chat_prose",
             return_value="Body [A](docid:newer) [B](docid:risky).",
         ):
             report = LiteReportingAgent(config=config).generate_report(
