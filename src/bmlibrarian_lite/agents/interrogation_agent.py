@@ -279,7 +279,7 @@ Answer the question based on the context above. If the context doesn't contain s
             self._create_user_message(user_prompt),
         ]
 
-        answer = self._chat(messages, temperature=0.2)
+        answer = self._chat_prose(messages, temperature=0.2)
 
         return answer, context_chunks
 
@@ -330,7 +330,7 @@ Provide a brief summary of what this document appears to be about. Include the m
             self._create_user_message(user_prompt),
         ]
 
-        return self._chat(
+        return self._chat_prose(
             messages,
             task_id="document_summary",
             temperature=0.2,

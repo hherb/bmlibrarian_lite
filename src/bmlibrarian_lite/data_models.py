@@ -900,6 +900,7 @@ class EvaluationErrorCode(Enum):
     JSON_PARSE_ERROR = -11
     INVALID_RESPONSE_FORMAT = -12
     EMPTY_RESPONSE = -13
+    #: The model's answer reached its token limit, so it is incomplete (#631)
     RESPONSE_TOO_LARGE = -14
 
     # Retry exhaustion (-21 to -30)
@@ -940,7 +941,7 @@ class EvaluationErrorCode(Enum):
             self.JSON_PARSE_ERROR: "Failed to parse JSON response",
             self.INVALID_RESPONSE_FORMAT: "Invalid response format",
             self.EMPTY_RESPONSE: "Empty response received",
-            self.RESPONSE_TOO_LARGE: "Response exceeded size limit",
+            self.RESPONSE_TOO_LARGE: "The model's answer was cut off at its length limit",
             self.RETRY_EXHAUSTED: "All retry attempts exhausted",
             self.UNKNOWN_ERROR: "Unknown error occurred",
             self.INVALID_INPUT: "Invalid input provided",

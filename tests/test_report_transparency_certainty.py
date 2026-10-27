@@ -209,7 +209,7 @@ class TestGenerateReportHighRiskSection:
         )
         return config
 
-    @patch.object(LiteReportingAgent, "_chat")
+    @patch.object(LiteReportingAgent, "_chat_prose")
     def test_lists_the_current_high_only(self, mock_chat, mock_config) -> None:
         """The current High is explained; the superseded High and the Low are not."""
         documents = [
@@ -298,7 +298,7 @@ class TestGenerateReportHighRiskSection:
         assert "Lee, 2020" not in section
         assert "Jones, 2024" not in section
 
-    @patch.object(LiteReportingAgent, "_chat")
+    @patch.object(LiteReportingAgent, "_chat_prose")
     def test_explains_by_the_users_settings_and_leaves_out_a_medium(
         self, mock_chat, mock_config
     ) -> None:

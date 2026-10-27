@@ -1274,7 +1274,7 @@ class TestEveryCountedStudyCanBeFoundInTheReferences:
         metadata.transparency_analysis_applied = True
 
         with patch.object(
-            LiteReportingAgent, "_chat", return_value="Body [A](docid:gone)."
+            LiteReportingAgent, "_chat_prose", return_value="Body [A](docid:gone)."
         ):
             report = LiteReportingAgent(config=config).generate_report(
                 "Q", [citation], metadata, transparency_results={}
@@ -1296,7 +1296,7 @@ class TestEveryCountedStudyCanBeFoundInTheReferences:
         )
 
         with patch.object(
-            LiteReportingAgent, "_chat", return_value="Body [A](docid:gone)."
+            LiteReportingAgent, "_chat_prose", return_value="Body [A](docid:gone)."
         ):
             report = LiteReportingAgent(config=config).generate_report(
                 "Q", [citation], ReportMetadata(research_question="Q"),

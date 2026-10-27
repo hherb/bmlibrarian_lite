@@ -78,7 +78,7 @@ def _screen(**statuses):
 def _report(screen, citations=None, **meta) -> str:
     """Report with a stubbed model."""
     agent = LiteReportingAgent(config=MagicMock())
-    agent._chat = MagicMock(return_value="Aspirin reduced stroke.")  # type: ignore[method-assign]
+    agent._chat_prose = MagicMock(return_value="Aspirin reduced stroke.")  # type: ignore[method-assign]
     if citations is None:
         citations = [Citation(document=_doc("ok"), passage="p", relevance_score=5)]
     metadata = ReportMetadata(retraction_screen=screen, **meta)

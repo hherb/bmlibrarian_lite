@@ -849,8 +849,17 @@ once, in this order:
 | `API_AUTH_ERROR` | The provider refused the credentials: check the API key in Settings. |
 | `API_RATE_LIMIT` | The provider is limiting how often it can be called: wait a minute. |
 | `API_TIMEOUT`, `API_CONNECTION_ERROR`, `API_SERVER_ERROR` | Check that the provider is reachable — Ollama running, or the connection. |
-| `JSON_PARSE_ERROR`, `INVALID_RESPONSE_FORMAT`, `EMPTY_RESPONSE`, `RESPONSE_TOO_LARGE` | The answers could not be read: another model may do better. |
+| `JSON_PARSE_ERROR`, `INVALID_RESPONSE_FORMAT`, `EMPTY_RESPONSE` | The answers could not be read: another model may do better. |
+| `RESPONSE_TOO_LARGE` | The answers were cut off at their length limit: raise Max Tokens in Settings → Tasks. |
 | anything else | Try again later. |
+
+**A cut-off answer is its own cause** (#631). When the model stops at its
+token limit (Anthropic's `max_tokens`, Ollama's `done_reason` `length`), the
+answer is incomplete and asked again with the same limit it is cut off again,
+so it is recorded as `RESPONSE_TOO_LARGE` and **never retried**, rather than
+failing to parse and being retried as unreadable. Prose the reader reads as
+written (the report, a summary, a document answer) is kept, followed by a
+note that it stopped at its length limit. Python only so far.
 
 **Spent retries are not a cause.** Every provider failure is retried, so each
 one reaches the agent wrapped in a `RetryExhaustedError`. Recording that

@@ -79,6 +79,7 @@ from .exceptions import (
     APIError,
     JSONParseError,
     LLMError,
+    TruncatedResponseError,
 )
 
 if TYPE_CHECKING:
@@ -466,6 +467,9 @@ def classify_llm_exception(exc: BaseException) -> "EvaluationErrorCode":
     # Check specific exception types first
     if isinstance(exc, JSONParseError):
         return EvaluationErrorCode.JSON_PARSE_ERROR
+
+    if isinstance(exc, TruncatedResponseError):
+        return EvaluationErrorCode.RESPONSE_TOO_LARGE
 
     if isinstance(exc, APIError):
         if exc.status_code == 401 or exc.status_code == 403:

@@ -168,7 +168,7 @@ def citation_agent(
 def reporting_agent(monkeypatch: pytest.MonkeyPatch, answer: str) -> LiteReportingAgent:
     """A reporting agent whose model answers with the given report body."""
     agent = LiteReportingAgent()
-    monkeypatch.setattr(agent, "_chat", ScriptedLLM([answer]))
+    monkeypatch.setattr(agent, "_chat_prose", ScriptedLLM([answer]))
     return agent
 
 
@@ -664,7 +664,7 @@ class TestTheReport:
     ) -> None:
         """#263: the error text was checkpointed, auto-saved and returned as one."""
         agent = LiteReportingAgent()
-        monkeypatch.setattr(agent, "_chat", ScriptedLLM([unreachable()]))
+        monkeypatch.setattr(agent, "_chat_prose", ScriptedLLM([unreachable()]))
 
         with pytest.raises(APIError):
             agent.generate_report(QUESTION, [make_citation()])
@@ -674,7 +674,7 @@ class TestTheReport:
     ) -> None:
         """The same defect, one method over."""
         agent = LiteReportingAgent()
-        monkeypatch.setattr(agent, "_chat", ScriptedLLM([unreachable()]))
+        monkeypatch.setattr(agent, "_chat_prose", ScriptedLLM([unreachable()]))
 
         with pytest.raises(APIError):
             agent.generate_brief_summary(QUESTION, [make_citation()])
