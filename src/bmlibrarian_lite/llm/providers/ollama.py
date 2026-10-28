@@ -38,6 +38,8 @@ logger = logging.getLogger(__name__)
 
 #: An Ollama chat answer's ``done_reason`` when it was cut off (``num_predict`` or the context)
 OLLAMA_DONE_REASON_LENGTH = "length"
+#: An Ollama chat answer's ``done_reason`` when it finished
+OLLAMA_DONE_REASON_STOP = "stop"
 
 
 def ollama_stop_reason(done_reason: object, eval_count: object, num_predict: int) -> str | None:
@@ -52,11 +54,14 @@ def ollama_stop_reason(done_reason: object, eval_count: object, num_predict: int
         :data:`STOP_REASON_MAX_TOKENS` when it was cut off: Ollama says
         ``length``, or, from a server that sends no ``done_reason``, it
         generated the whole limit. Otherwise the server's reason, or ``None``
-        when it gave none, rather than claiming a stop.
+        when it gave none, rather than claiming a stop. A reason this app
+        does not know is read as finished and logged (#637).
     """
     if done_reason == OLLAMA_DONE_REASON_LENGTH:
         return STOP_REASON_MAX_TOKENS
     if isinstance(done_reason, str):
+        if done_reason != OLLAMA_DONE_REASON_STOP:
+            logger.warning("Ollama answer stopped for an unknown reason (%.40r); read as finished", done_reason)
         return done_reason
     if isinstance(eval_count, int) and num_predict > 0 and eval_count >= num_predict:
         return STOP_REASON_MAX_TOKENS

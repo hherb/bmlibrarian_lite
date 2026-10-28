@@ -138,7 +138,8 @@ class MoreEvidence:
         search_shortfalls: What the search lost.
         transparency_failures: Documents whose transparency could not be
             analysed.
-        notice: Why the report is unchanged, when nothing new was found.
+        notice: Why the report is unchanged, when nothing new was found,
+            after a cut-off answer's notice when the round had one (#637).
         report: The report written again, or None when it was not.
         cancelled: Whether a cancel stopped it before its end.
     """
@@ -331,11 +332,11 @@ def find_more_evidence(
         found, lost = list(round_.documents), [*lost, *round_.shortfalls]
         outcome = replace(outcome, queries=round_.queries)
         if not found:
-            return replace(outcome, cancelled=round_.stopped,
-                           notice=None if round_.stopped else NO_NEW_EVIDENCE_TEXT)
+            notice = None if round_.stopped else " ".join(filter(None, [round_.notice, NO_NEW_EVIDENCE_TEXT]))
+            return replace(outcome, cancelled=round_.stopped, notice=notice)
         metadata.alternative_queries = [*metadata.alternative_queries, *round_.queries]
-        # This round found documents, so the report is written again without the review's notice
-        metadata.smart_search_notice = None
+        # This round found documents, so the report is written again with its notice, not the review's
+        metadata.smart_search_notice = round_.notice
     outcome = replace(outcome, found=len(found), resumed=len(unscored),
                       caught_up=not found and (bool(unscored) or owed),
                       search_shortfalls=tuple(combined_shortfalls(lost)))

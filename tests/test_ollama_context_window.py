@@ -12,7 +12,7 @@ from bmlibrarian_lite.constants import SMART_SEARCH_MAX_TOKENS
 from bmlibrarian_lite.exceptions import RefusedResponseError, TruncatedResponseError
 from bmlibrarian_lite.llm import LLMClient, LLMMessage
 from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS
-from bmlibrarian_lite.llm.providers.anthropic import AnthropicProvider
+from bmlibrarian_lite.llm.providers.anthropic import AnthropicProvider, anthropic_stop_reason
 from bmlibrarian_lite.llm.providers.ollama import OllamaProvider, ollama_stop_reason
 
 CONTEXT_WINDOW = 32768
@@ -217,6 +217,36 @@ def test_a_server_without_done_reason_is_cut_off_at_its_whole_limit(
 ) -> None:
     """#631 item 4: generating all of ``num_predict`` is the cut-off an older server does not name."""
     assert ollama_stop_reason(done_reason, eval_count, 1024) == stop_reason
+
+
+@pytest.mark.parametrize(("reason", "warned"), [
+    ("end_turn", False), ("stop_sequence", False), ("max_tokens", False), ("refusal", False),
+    ("model_context_window_exceeded", False), (None, False), ("pause_turn", True), ("new_reason", True),
+])
+def test_an_unknown_anthropic_stop_reason_is_read_as_finished_and_logged(
+    reason: str | None, warned: bool, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#637 item 1: a reason added later is seen in the log, never fails the call."""
+    with caplog.at_level("WARNING", logger="bmlibrarian_lite.llm.providers.anthropic"):
+        stop_reason = anthropic_stop_reason(reason)
+
+    assert stop_reason == (STOP_REASON_MAX_TOKENS if reason == "model_context_window_exceeded" else reason)
+    assert ("unknown reason" in caplog.text) == warned
+
+
+@pytest.mark.parametrize(("done_reason", "warned"), [
+    ("stop", False), ("length", False), (None, False), (7, False), ("load", True),
+])
+def test_an_unknown_ollama_done_reason_is_read_as_finished_and_logged(
+    done_reason: object, warned: bool, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#637 item 1: as Anthropic's, the server's own reason passed on and logged."""
+    with caplog.at_level("WARNING", logger="bmlibrarian_lite.llm.providers.ollama"):
+        stop_reason = ollama_stop_reason(done_reason, 7, 1024)
+
+    assert ("unknown reason" in caplog.text) == warned
+    if warned:
+        assert stop_reason == done_reason
 
 
 @pytest.mark.parametrize(("done_reason", "eval_count", "cut_off"), [

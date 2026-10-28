@@ -35,12 +35,40 @@ from .base import (
     describe_request_failure,
 )
 from ...constants import ANTHROPIC_MODELS_PAGE_LIMIT, anthropic_model_pricing
-from ..data_types import STOP_REASON_MAX_TOKENS, LLMMessage, LLMResponse, strip_thinking_tags
+from ..data_types import (
+    STOP_REASON_MAX_TOKENS,
+    STOP_REASON_REFUSAL,
+    LLMMessage,
+    LLMResponse,
+    strip_thinking_tags,
+)
 
 logger = logging.getLogger(__name__)
 
 #: A Messages answer's ``stop_reason`` when the context window ran out mid-answer
 ANTHROPIC_STOP_CONTEXT_EXCEEDED = "model_context_window_exceeded"
+#: The ``stop_reason`` values this app knows the meaning of; ``None`` too
+ANTHROPIC_KNOWN_STOP_REASONS = frozenset({
+    "end_turn", "stop_sequence", STOP_REASON_MAX_TOKENS, STOP_REASON_REFUSAL,
+    ANTHROPIC_STOP_CONTEXT_EXCEEDED,
+})
+
+
+def anthropic_stop_reason(stop_reason: str | None) -> str | None:
+    """Why a Messages answer stopped, in ``LLMResponse.stop_reason``'s words.
+
+    Args:
+        stop_reason: The answer's own ``stop_reason``.
+
+    Returns:
+        :data:`STOP_REASON_MAX_TOKENS` when the context window ran out, as
+        the token limit does (Ollama's "length" covers both); otherwise the
+        answer's own. One this app does not know is read as finished and
+        logged (#637), so a new one is seen rather than failing every call.
+    """
+    if stop_reason is not None and stop_reason not in ANTHROPIC_KNOWN_STOP_REASONS:
+        logger.warning("Anthropic answer stopped for an unknown reason (%.40r); read as finished", stop_reason)
+    return STOP_REASON_MAX_TOKENS if stop_reason == ANTHROPIC_STOP_CONTEXT_EXCEEDED else stop_reason
 
 
 class AnthropicProvider(BaseProvider):
@@ -227,13 +255,7 @@ class AnthropicProvider(BaseProvider):
             model=model,
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
-            # Running out of context window cuts the answer off as the token
-            # limit does (Ollama's "length" covers both)
-            stop_reason=(
-                STOP_REASON_MAX_TOKENS
-                if response.stop_reason == ANTHROPIC_STOP_CONTEXT_EXCEEDED
-                else response.stop_reason
-            ),
+            stop_reason=anthropic_stop_reason(response.stop_reason),
         )
 
     def _extract_json(self, text: str) -> str:
