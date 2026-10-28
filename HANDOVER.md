@@ -11,13 +11,18 @@ its slice has landed; add a new section when handing off new work.
 **#637 on branch `fix/desktop-unknown-stop-reasons-637`** (maintainer's
 choices: warn, never raise; tell the reader): each provider names the stop
 reasons it knows (`ANTHROPIC_KNOWN_STOP_REASONS` via `anthropic_stop_reason`;
-Ollama's `stop`/`length`) and logs any other, read as finished; `None` is
-silent. A cut-off smart-search answer whose complete queries were searched
-returns `cut_off_queries_notice(n)` with them (`generate_alternative_queries`
-now returns `(queries, notice)`), carried as `SmartSearchRound.notice` into
-`smart_search_notice` (review and Find More Evidence; a round finding nothing
-puts it before `NO_NEW_EVIDENCE_TEXT`). **A test stubbing the reporting or
-interrogation answer patches `_chat_prose`, not `_chat`.** **#629 stays open
+Ollama's `stop`/`length`) and logs any other, read as finished unless the
+whole token limit was generated (then cut off); `None` is silent. A cut-off
+smart-search answer holding complete queries returns
+`cut_off_queries_notice(n)` with them (`generate_alternative_queries` now
+returns `(queries, notice)`), carried as `SmartSearchRound.notice`: into the
+review's `smart_search_notice` (emitted after the incomplete-search notice,
+whose label text replaces), into Find More Evidence's
+`MoreEvidence.cut_off_notice` (its dialog) and, when it found documents, the
+report's `smart_search_notice`. The report puts the notice on the one
+"Alternative Queries (smart search)" heading, above the queries run. **A
+test stubbing the reporting or interrogation answer patches `_chat_prose`,
+not `_chat`.** **#629 stays open
 for the maintainer's decision** on item 4 (a re-lost page is counted twice;
 shortfalls keep no offset, and any rule without one can understate) and item
 7 (counts lost when an error follows a cancel). **`bmlib drift` has failed
@@ -31,8 +36,9 @@ Search's report covers its batch only). Lodged: #621 (PR #622 follow-ups),
 all three), #625 (Upload Full Text follow-ups),
 #633 (no setting reaches the tasks' token limits), #634 (a classifier
 failure read as "no design" or as failing the quality filter), #635 (query
-conversion and MCP payloads around the cut-off guard; refusals too). Apple
-follow-ups: #612, #613. Android divergences: #614, #615; follow-ups
+conversion and MCP payloads around the cut-off guard; refusals too), #639
+(Find More Evidence: a cut-off answer's notice lost when every search
+fails). Apple follow-ups: #612, #613. Android divergences: #614, #615; follow-ups
 #617–#619. The apps have no refusal handling yet (the Python-only rows in
 `doc/cross_platform/analysis_failure_reporting.md`).
 

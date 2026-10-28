@@ -798,11 +798,11 @@ Key passages:
             f"- **Total Results Available:** {total_prefix}{metadata.total_results_available:,}",
             f"- **Documents Retrieved:** {metadata.documents_retrieved:,}",
         ])
-        if metadata.alternative_queries:
-            lines.append("- **Alternative Queries (smart search):**")
+        if metadata.alternative_queries or metadata.smart_search_notice:
+            # One heading: the notice, when there is one, then the queries run
+            notice = f" {metadata.smart_search_notice}" if metadata.smart_search_notice else ""
+            lines.append(f"- **Alternative Queries (smart search):**{notice}")
             lines.extend(f"  - `{query}`" for query in metadata.alternative_queries)
-        if metadata.smart_search_notice:
-            lines.append(f"- **Alternative Queries (smart search):** {metadata.smart_search_notice}")
         if metadata.search_shortfalls:
             lines.append(
                 "- **Search Completeness:** Incomplete: "

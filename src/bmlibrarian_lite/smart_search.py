@@ -163,8 +163,9 @@ class SmartSearchRound:
         shortfalls: What its queries lost, each marked as an alternative
             search's; empty when the reader asked and nothing new was found.
         stopped: Whether a stop ended it before every query ran.
-        notice: The reader's sentence when the model's answer was cut off
-            after the queries searched, so it may have proposed more; else None.
+        notice: The reader's sentence when the model's answer was cut off,
+            so the complete queries it held may not be all it would have
+            proposed; else None.
     """
 
     documents: tuple[LiteDocument, ...] = ()
@@ -314,8 +315,8 @@ def generate_alternative_queries(
 
     Returns:
         The new queries, empty only when a stop came first; and the reader's
-        sentence when they are the complete ones of an answer cut off at its
-        token limit (#637), else None.
+        sentence when they are the complete queries not already run of an
+        answer cut off at its token limit (#637), else None.
 
     Raises:
         SmartSearchError: The request to the model failed, the model
@@ -353,7 +354,10 @@ def generate_alternative_queries(
 
 
 def cut_off_queries_notice(count: int) -> str:
-    """The reader's sentence for a cut-off answer whose complete queries were searched.
+    """The reader's sentence for a cut-off answer that held complete queries.
+
+    It says nothing of how many were searched: a stop may end the round
+    first, and the report lists those that were.
 
     Args:
         count: How many complete queries not already run it held.
@@ -365,7 +369,7 @@ def cut_off_queries_notice(count: int) -> str:
         f"{count} complete alternative search queries")
     return (
         f"The model's answer was cut off at its length limit after {held} "
-        f"not already run; only those were searched. {CUT_OFF_ADVICE_TEXT}"
+        f"not already run, so it may have proposed more. {CUT_OFF_ADVICE_TEXT}"
     )
 
 
@@ -398,7 +402,8 @@ def run_smart_search(
 
     Raises:
         SmartSearchError: No usable query not already run, an answer cut off
-            at its token limit, or the model could not be asked.
+            at its token limit before a complete query not already run, or the
+            model could not be asked.
         SearchFailedError: The reader asked, and failures left the round with
             nothing new, a stop or not (a cancel does not excuse reporting them).
     """

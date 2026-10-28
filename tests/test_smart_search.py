@@ -649,6 +649,16 @@ class TestTheReportSaysWhichQueriesRan:
         assert "- **Alternative Queries (smart search):**\n  - `(a[tiab])`" in section
         assert "Alternative Queries" not in agent.format_methodology_section(ReportMetadata())
 
+    def test_a_cut_off_answers_notice_heads_its_queries(self) -> None:
+        """#637: one heading, the notice on it and the queries run under it."""
+        agent = LiteReportingAgent.__new__(LiteReportingAgent)
+        notice = cut_off_queries_notice(1)
+        section = agent.format_methodology_section(ReportMetadata(
+            pubmed_query="p", alternative_queries=["(a[tiab])"], smart_search_notice=notice))
+
+        assert f"- **Alternative Queries (smart search):** {notice}\n  - `(a[tiab])`" in section
+        assert section.count("Alternative Queries (smart search)") == 1
+
 
 class TestTwoBatchesOneScreen:
     """The review screens smart search's documents after the search's."""
