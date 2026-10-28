@@ -297,9 +297,18 @@ def test_a_failed_check_says_so_in_the_summary_and_the_methods_line():
     restored = RetractionSnapshot.from_rows(screen.to_snapshot())
     assert retraction_methods_line(restored) == "Retraction status could not be checked"
     # control: a run that checked says when
-    checked = _screen(1, 1)
-    assert retraction_methods_line(checked) == "Retraction status checked 2026-10-18"
+    assert retraction_methods_line(_screen(1, 0)) == "Retraction status checked 2026-10-18"
     assert retraction_methods_line(screen_documents([], {})) == "Retraction status never checked"
+
+
+def test_a_partly_checked_run_counts_its_unchecked_papers_in_the_methods_line():
+    """#631 item 6: the methods line alone never reads as complete."""
+    assert retraction_methods_line(_screen(1, 1)) == (
+        "Retraction status checked 2026-10-18; 1 paper could not be checked"
+    )
+    assert retraction_methods_line(_screen(1, 2)).endswith("; 2 papers could not be checked")
+    restored = RetractionSnapshot.from_rows(_screen(1, 2).to_snapshot())
+    assert retraction_methods_line(restored) == retraction_methods_line(_screen(1, 2))
 
 
 @pytest.mark.parametrize(

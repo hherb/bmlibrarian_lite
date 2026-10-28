@@ -903,6 +903,8 @@ class EvaluationErrorCode(Enum):
     #: The model's answer reached its token limit, so it is incomplete (#631).
     #: Named before it had this meaning; the value is stored, so never renumber it.
     RESPONSE_TOO_LARGE = -14
+    #: The model declined to answer (Anthropic's ``refusal``); never retried
+    MODEL_REFUSED = -15
 
     # Retry exhaustion (-21 to -30)
     RETRY_EXHAUSTED = -21
@@ -943,6 +945,7 @@ class EvaluationErrorCode(Enum):
             self.INVALID_RESPONSE_FORMAT: "Invalid response format",
             self.EMPTY_RESPONSE: "Empty response received",
             self.RESPONSE_TOO_LARGE: "The model's answer was cut off at its length limit",
+            self.MODEL_REFUSED: "The model declined to answer",
             self.RETRY_EXHAUSTED: "All retry attempts exhausted",
             self.UNKNOWN_ERROR: "Unknown error occurred",
             self.INVALID_INPUT: "Invalid input provided",

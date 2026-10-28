@@ -79,6 +79,7 @@ from .exceptions import (
     APIError,
     JSONParseError,
     LLMError,
+    RefusedResponseError,
     TruncatedResponseError,
 )
 
@@ -470,6 +471,9 @@ def classify_llm_exception(exc: BaseException) -> "EvaluationErrorCode":
 
     if isinstance(exc, TruncatedResponseError):
         return EvaluationErrorCode.RESPONSE_TOO_LARGE
+
+    if isinstance(exc, RefusedResponseError):
+        return EvaluationErrorCode.MODEL_REFUSED
 
     if isinstance(exc, APIError):
         if exc.status_code == 401 or exc.status_code == 403:

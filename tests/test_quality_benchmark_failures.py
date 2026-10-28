@@ -66,7 +66,7 @@ from bmlibrarian_lite.data_models import (
 )
 from bmlibrarian_lite.exceptions import APIError, RetryExhaustedError
 from bmlibrarian_lite.llm import LLMResponse
-from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS
+from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS, STOP_REASON_REFUSAL
 from bmlibrarian_lite.quality.data_models import (
     QualityAssessment,
     QualityTier,
@@ -305,6 +305,13 @@ class TestAFailureIsRecordedAsOne:
 
         assert classify_once(ScriptedClient(cut_off)).failure is EvaluationErrorCode.RESPONSE_TOO_LARGE
         assert assess_once(ScriptedClient(cut_off)).failure is EvaluationErrorCode.RESPONSE_TOO_LARGE
+
+    def test_a_declined_answer_is_not_a_classification(self) -> None:
+        """What a model wrote before declining is not its verdict (#631 item 3)."""
+        declined = LLMResponse(content=RCT_ANSWER, stop_reason=STOP_REASON_REFUSAL)
+
+        assert classify_once(ScriptedClient(declined)).failure is EvaluationErrorCode.MODEL_REFUSED
+        assert assess_once(ScriptedClient(declined)).failure is EvaluationErrorCode.MODEL_REFUSED
 
     def test_a_provider_failure_is_its_error_code(self) -> None:
         """An outage is a failure, not the model's "unknown"."""

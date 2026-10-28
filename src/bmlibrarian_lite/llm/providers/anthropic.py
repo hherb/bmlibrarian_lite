@@ -35,9 +35,12 @@ from .base import (
     describe_request_failure,
 )
 from ...constants import ANTHROPIC_MODELS_PAGE_LIMIT, anthropic_model_pricing
-from ..data_types import LLMMessage, LLMResponse, strip_thinking_tags
+from ..data_types import STOP_REASON_MAX_TOKENS, LLMMessage, LLMResponse, strip_thinking_tags
 
 logger = logging.getLogger(__name__)
+
+#: A Messages answer's ``stop_reason`` when the context window ran out mid-answer
+ANTHROPIC_STOP_CONTEXT_EXCEEDED = "model_context_window_exceeded"
 
 
 class AnthropicProvider(BaseProvider):
@@ -224,7 +227,13 @@ class AnthropicProvider(BaseProvider):
             model=model,
             input_tokens=response.usage.input_tokens,
             output_tokens=response.usage.output_tokens,
-            stop_reason=response.stop_reason,
+            # Running out of context window cuts the answer off as the token
+            # limit does (Ollama's "length" covers both)
+            stop_reason=(
+                STOP_REASON_MAX_TOKENS
+                if response.stop_reason == ANTHROPIC_STOP_CONTEXT_EXCEEDED
+                else response.stop_reason
+            ),
         )
 
     def _extract_json(self, text: str) -> str:

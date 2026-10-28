@@ -8,18 +8,18 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Parity: taking a fact check further, Python desktop: done** (`ROADMAP.md`;
-landed below). **#631 item 1 on branch `fix/desktop-cut-off-answers`**:
-`LiteBaseAgent._chat` raises `TruncatedResponseError` on
-`STOP_REASON_MAX_TOKENS`, classified as `RESPONSE_TOO_LARGE` (−14, "cut off
-at its length limit", its own advice naming the model: no setting reaches
-the scoring or citation limit, #633), never retried; the benchmark runners
-record it too. Prose paths (report, brief summary, interrogation answer and
-summary) use `_chat_prose`, which keeps the text and appends
-`CUT_OFF_PROSE_NOTE` (an answer with no prose before the limit raises).
-Query expansion reads `_chat_response` and keeps a cut-off answer's complete
-lines. **A test stubbing the reporting or interrogation answer patches
-`_chat_prose`, not `_chat`.** #631 items 2–6 stay open. **#629 stays open for the maintainer's
+**#631 on branch `fix/desktop-stop-reasons-631`** (item 1 landed in PR #632,
+items 2–6 here): `TruncatedResponseError.content` keeps what a cut-off answer
+wrote, and smart search searches the complete queries it held
+(`cut_off_alternative_queries`: each whole value of its first JSON array).
+Anthropic's `model_context_window_exceeded` is read as `STOP_REASON_MAX_TOKENS`.
+`refusal` raises `RefusedResponseError` from `_chat`/`_chat_prose`, which is
+`MODEL_REFUSED` (−15) and never retried (smart search: `ANSWER_REFUSED_TEXT`;
+the benchmarks and query expansion check for it too). Ollama with no
+`done_reason` counts as cut off when `eval_count >= num_predict`
+(`ollama_stop_reason`). A cut-off answer after earlier repeats says both. The
+retraction methods line gives the unchecked count. **A test stubbing the
+reporting or interrogation answer patches `_chat_prose`, not `_chat`.** **#629 stays open for the maintainer's
 decision** on item 4 (a re-lost page is counted twice; shortfalls keep no
 offset, and any rule without one can understate) and item 7 (counts lost
 when an error follows a cancel). **`bmlib drift` has failed since
@@ -30,7 +30,7 @@ Open: #627 (MCP has no smart search; a round runs all its queries;
 sequential scoring; quality filter depth; Audit Trail queries; Re-run
 Search's report covers its batch only). Lodged: #621 (PR #622 follow-ups),
 #624 (the reference cut drops tables and appendices after the references;
-all three), #625 (Upload Full Text follow-ups), #631 (PR #630's review: items 2–6),
+all three), #625 (Upload Full Text follow-ups),
 #633 (no setting reaches the tasks' token limits), #634 (a classifier
 failure read as "no design" or as failing the quality filter), #635 (query
 conversion and MCP payloads around the cut-off guard). Apple follow-ups: #612,

@@ -393,10 +393,17 @@ ways:
   that breaks off partway keeps none of its queries as run, so the next round
   may ask them again. A failed request names its cause and what to do, rather
   than always pointing at Settings.
-- An answer cut off at its token limit (Anthropic's `max_tokens`, Ollama's
-  `done_reason` `length`) is not asked for again, since the same limit likely
-  cuts it off again, each time paid: the user is told the answer was cut off,
-  not that it held no usable query.
+- An answer cut off at its token limit (Anthropic's `max_tokens` or
+  `model_context_window_exceeded`, Ollama's `done_reason` `length`, or, from
+  a server that sends no `done_reason`, an answer of the whole `num_predict`)
+  is not asked for again, since the same limit likely cuts it off again, each
+  time paid. The complete queries it held before the limit (each whole value
+  of its first JSON array) are still searched; with none new, the user is told
+  the answer was cut off before it held one not already run, not that it held
+  no usable query, and that an earlier answer held only repeats if one did.
+- An answer the model declined (Anthropic's `refusal`) is not asked for again
+  either: the user is told the model declined, and that another Query
+  Conversion model may answer.
 - When the review's own round could not run or broke off, the report's
   methodology says why (`ReportMetadata.smart_search_notice`), so a reopened
   report shows that more searching was tried; a later *Find More Evidence*

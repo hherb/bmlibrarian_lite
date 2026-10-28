@@ -851,10 +851,13 @@ once, in this order:
 | `API_TIMEOUT`, `API_CONNECTION_ERROR`, `API_SERVER_ERROR` | Check that the provider is reachable — Ollama running, or the connection. |
 | `JSON_PARSE_ERROR`, `INVALID_RESPONSE_FORMAT`, `EMPTY_RESPONSE` | The answers could not be read: another model may do better. |
 | `RESPONSE_TOO_LARGE` | A model that writes out its reasoning first can use up the length limit: another model may finish within it. |
+| `MODEL_REFUSED` | Another model may answer what this one declined. |
 | anything else | Try again later. |
 
 **A cut-off answer is its own cause** (#631). When the model stops at its
-token limit (Anthropic's `max_tokens`, Ollama's `done_reason` `length`), the
+token limit (Anthropic's `max_tokens` or `model_context_window_exceeded`,
+Ollama's `done_reason` `length`, or an answer of the whole `num_predict` from
+a server that sends no `done_reason`), the
 answer is incomplete, and asked again with the same limit it is likely cut
 off again. So an analysis stage's answer (scoring, citation extraction) is
 recorded as `RESPONSE_TOO_LARGE` and **never retried**, rather than failing to
@@ -864,7 +867,9 @@ reaches the limit these stages use (#633). Prose the reader reads as written
 (the report, a summary, a document answer) is kept, followed by a note that
 it stopped at its length limit; reasoning it never closed is dropped, and an
 answer cut off before any prose fails instead. Query expansion keeps the
-complete lines of a cut-off answer. Python only so far.
+complete lines of a cut-off answer. **A declined answer** (Anthropic's
+`refusal`) is `MODEL_REFUSED` (−15), never retried, and never kept as prose:
+what a model wrote before declining is not its answer. Python only so far.
 
 **Spent retries are not a cause.** Every provider failure is retried, so each
 one reaches the agent wrapped in a `RetryExhaustedError`. Recording that

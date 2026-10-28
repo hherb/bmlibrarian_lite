@@ -203,21 +203,27 @@ def saved_work_line(rows: Iterable[Mapping[str, Any]]) -> str:
     checked_at = decided_checked_at(rows)
     if checked_at is None:
         return "Retraction status could not be checked"
-    line = checked_on_line(checked_at)
-    if unchecked:
-        line += f"; {'1 paper' if unchecked == 1 else f'{unchecked:,} papers'} could not be checked"
-    return line
+    return checked_on_line(checked_at) + _not_checked_clause(unchecked)
 
 
 def retraction_methods_line(record: RetractionRecord) -> str:
-    """The report's methods line: when the run's status was checked.
+    """The report's methods line: when the run's status was checked, and how many were not.
 
     A run that held papers and has no check time could not check any (the
-    check failed, or was cancelled first); that is said, never a date.
+    check failed, or was cancelled first); that is said, never a date. One
+    checked in part says how many papers it kept unchecked, as
+    :func:`saved_work_line` does, so the line alone never reads as complete.
     """
-    if record.checked_at is None and record.to_snapshot():
-        return "Retraction status could not be checked"
-    return checked_on_line(record.checked_at)
+    if record.checked_at is None:
+        return "Retraction status could not be checked" if record.to_snapshot() else checked_on_line(None)
+    return checked_on_line(record.checked_at) + _not_checked_clause(record.unchecked_count)
+
+
+def _not_checked_clause(count: int) -> str:
+    """"; N papers could not be checked", or "" for none."""
+    if not count:
+        return ""
+    return f"; {'1 paper' if count == 1 else f'{count:,} papers'} could not be checked"
 
 
 _LABEL = " (PubMed's label)"

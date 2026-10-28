@@ -13,9 +13,11 @@ The rules are the apps' (iOS/macOS's ``executeSmartSearch``) and the
   no usable query, or only queries already run (or the question's own), is
   asked for again up to ``SMART_SEARCH_MAX_QUERY_RETRIES`` more times, each a
   paid call; the apps search a repeat again, the desktop never does. A
-  request that failed, or an answer cut off at its token limit (asked again,
-  it is likely cut off again, each time paid), stops the round. None of these is a source's failure,
-  so none records a shortfall.
+  request that failed, an answer the model declined, or an answer cut off at
+  its token limit (asked again, it is likely cut off again, each time paid),
+  stops the round; the complete queries a cut-off answer held before the
+  limit are still searched. None of these is a source's failure, so none
+  records a shortfall.
 - Each query is searched with the configured provider. Once the round ends,
   a query is kept as run unless a source could not answer it and it found
   nothing new: a later round may ask it again. Kept at the end, so a round
@@ -40,7 +42,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 from .analysis_failures import failure_cause_text
 from .constants import SMART_SEARCH_MAX_QUERY_RETRIES
 from .data_models import ShortfallQuery
-from .exceptions import SearchFailedError, TruncatedResponseError
+from .exceptions import RefusedResponseError, SearchFailedError, TruncatedResponseError
+from .llm.data_types import strip_unclosed_thinking
 from .query_converter import MAX_TOTAL_QUERY_LENGTH, build_query_string
 from .search_failures import combined_shortfalls, retrieval_shortfalls_from_metadata
 from .smart_search_store import RunQuery
@@ -69,9 +72,17 @@ ONLY_REPEATS_TEXT = (
 #: The desktop's own: a cut-off answer is likely cut off again, so it is not asked for again
 ANSWER_CUT_OFF_TEXT = (
     "The model's answer was cut off at its length limit before it held a "
-    "complete alternative search query, so no alternative search was run. "
+    "complete alternative search query not already run, so no alternative "
+    "search was run. "
     "A model that writes out its reasoning first can use up that limit; "
     "another Query Conversion model in Settings may help."
+)
+#: Put before ANSWER_CUT_OFF_TEXT when an earlier answer held only repeats
+EARLIER_REPEATS_TEXT = "Earlier, the model proposed only alternative search queries already run."
+#: The desktop's own: asked again, the model likely declines again
+ANSWER_REFUSED_TEXT = (
+    "The model declined to propose alternative search queries, so no "
+    "alternative search was run. Another Query Conversion model in Settings may answer."
 )
 NO_NEW_EVIDENCE_TEXT = (
     "The alternative searches found no documents beyond those already found. "
@@ -220,7 +231,28 @@ def parse_alternative_queries(answer: str) -> list[RunQuery]:
         The queries, each labelled by its concept names joined by AND; empty
         when none is usable.
     """
-    data = _loads(answer)
+    return _queries_from(_loads(answer))
+
+
+def cut_off_alternative_queries(answer: str) -> list[RunQuery]:
+    """The usable queries an answer cut off at its token limit completed.
+
+    The whole answer is read first, as :func:`parse_alternative_queries`
+    reads it; otherwise each complete value in its first JSON array, in
+    order, up to the one the limit broke off.
+
+    Args:
+        answer: What the model wrote before the limit, untrusted.
+
+    Returns:
+        The queries; empty when none was complete and usable.
+    """
+    answer = strip_unclosed_thinking(answer)
+    return parse_alternative_queries(answer) or _queries_from(_complete_items(answer))
+
+
+def _queries_from(data: Any) -> list[RunQuery]:
+    """The usable queries in a parsed answer (see :func:`parse_alternative_queries`)."""
     if isinstance(data, dict):
         lists = [v for v in data.values() if isinstance(v, list)]
         items: list[Any] = lists[0] if "concepts" not in data and lists else [data]
@@ -276,9 +308,9 @@ def generate_alternative_queries(
         The new queries; empty only when a stop came first.
 
     Raises:
-        SmartSearchError: The request to the model failed, an answer was cut
-            off at its token limit, or no answer held a usable query not
-            already run.
+        SmartSearchError: The request to the model failed, the model
+            declined, an answer was cut off at its token limit before a
+            usable query not already run, or no answer held one.
     """
     only_repeats = False
     for _attempt in range(SMART_SEARCH_MAX_QUERY_RETRIES + 1):
@@ -288,7 +320,14 @@ def generate_alternative_queries(
             answer = searcher.ask(prompt)
         except TruncatedResponseError as e:
             logger.warning("%s", e)  # our own text, never the provider's
-            raise SmartSearchError(ANSWER_CUT_OFF_TEXT) from e
+            queries = [q for q in cut_off_alternative_queries(e.content) if q.query not in run_before]
+            if queries:
+                return queries
+            text = f"{EARLIER_REPEATS_TEXT} {ANSWER_CUT_OFF_TEXT}" if only_repeats else ANSWER_CUT_OFF_TEXT
+            raise SmartSearchError(text) from e
+        except RefusedResponseError as e:
+            logger.warning("%s", e)
+            raise SmartSearchError(ANSWER_REFUSED_TEXT) from e
         except Exception as e:
             # the type only: provider text can carry a credential (#330)
             logger.warning("Alternative queries could not be asked for (%s)", type(e).__name__)
@@ -394,6 +433,24 @@ def _strings(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [s.strip() for s in value if isinstance(s, str) and s.strip()]
+
+
+def _complete_items(answer: str) -> list[Any]:
+    """Each complete value in the first JSON array of an answer cut off part-way."""
+    start = answer.find("[")
+    if start < 0:
+        return []
+    decoder = json.JSONDecoder()
+    items: list[Any] = []
+    pos = start + 1
+    while True:
+        while pos < len(answer) and answer[pos] in " \t\r\n,":
+            pos += 1
+        try:
+            item, pos = decoder.raw_decode(answer, pos)
+        except json.JSONDecodeError:
+            return items
+        items.append(item)
 
 
 def _loads(answer: str) -> Any:
