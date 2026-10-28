@@ -245,11 +245,15 @@ class SearchFailedError(NetworkError):
         raise SearchFailedError([RetrievalShortfall(provider, failure)])
     """
 
-    def __init__(self, shortfalls: "Iterable[RetrievalShortfall]") -> None:
+    def __init__(
+        self, shortfalls: "Iterable[RetrievalShortfall]", notice: str | None = None
+    ) -> None:
         """Initialize the search failed error.
 
         Args:
             shortfalls: What failed, at least one.
+            notice: What else the reader must be told about the search, such
+                as that the model's answer naming its queries was cut off.
 
         Raises:
             ValueError: If there are no shortfalls: a failure that names
@@ -266,6 +270,7 @@ class SearchFailedError(NetworkError):
             f"The search could not be completed: {describe_search_shortfalls(recorded)}."
         )
         self.shortfalls = recorded
+        self.notice = notice
 
 
 class RetryExhaustedError(NetworkError):

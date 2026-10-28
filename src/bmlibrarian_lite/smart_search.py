@@ -405,7 +405,8 @@ def run_smart_search(
             at its token limit before a complete query not already run, or the
             model could not be asked.
         SearchFailedError: The reader asked, and failures left the round with
-            nothing new, a stop or not (a cancel does not excuse reporting them).
+            nothing new, a stop or not (a cancel does not excuse reporting them);
+            its ``notice`` is the round's.
     """
     tell = progress or (lambda _message: None)
     tried = storage.get_smart_search_queries(context.checkpoint_id)
@@ -454,7 +455,7 @@ def run_smart_search(
     shortfalls = combined_shortfalls(lost)
     if asked and not found:
         if shortfalls:
-            raise SearchFailedError(shortfalls)
+            raise SearchFailedError(shortfalls, notice)
         # A request for more evidence that found nothing keeps nothing
         shortfalls = []
     return SmartSearchRound(tuple(found), tuple(ran), tuple(shortfalls), stopped, notice)

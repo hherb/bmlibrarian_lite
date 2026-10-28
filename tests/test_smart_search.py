@@ -501,6 +501,18 @@ class TestARound:
         with pytest.raises(SearchFailedError) as raised:
             run(searcher, storage)
         assert raised.value.shortfalls[0].query is ShortfallQuery.ALTERNATIVE
+        assert raised.value.notice is None
+
+    def test_a_cut_off_answers_failed_queries_keep_its_notice(self, storage: LiteStorage) -> None:
+        """#639: the failure is told, and so is the cut-off answer behind it."""
+        qa = query_of(*A)
+        lost = RetrievalShortfall(SearchProvider.EUROPEPMC, TIMEOUT, records_missing=4)
+        searcher = Searcher([TruncatedResponseError("limit", content=answer(A)[:-1] + ", {")],
+                            {qa: SearchFailedError([lost])})
+
+        with pytest.raises(SearchFailedError) as raised:
+            run(searcher, storage)
+        assert raised.value.notice == cut_off_queries_notice(1)
 
     def test_on_its_own_the_review_keeps_what_the_queries_lost(
         self, storage: LiteStorage

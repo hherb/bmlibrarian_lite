@@ -1179,6 +1179,23 @@ class TestTheWorker:
         assert list(ended) == ["error"]
         assert "an alternative search of PubMed could not be completed" in ended["error"][0][0]
 
+    def test_a_failed_search_after_a_cut_off_answer_says_both(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """#639: the dialog also tells that the model may have proposed more, and what to do."""
+        lost = RetrievalShortfall(SearchProvider.PUBMED,
+                                  RequestFailure(RequestFailureKind.TIMEOUT),
+                                  query=ShortfallQuery.ALTERNATIVE)
+
+        def fail() -> MoreEvidence:
+            raise SearchFailedError([lost], cut_off_queries_notice(1))
+
+        ended = self.run_worker(monkeypatch, fail)
+        assert list(ended) == ["error"]
+        text = ended["error"][0][0]
+        assert "an alternative search of PubMed could not be completed" in text
+        assert cut_off_queries_notice(1) in text
+
     def test_a_failure_is_told_in_the_readers_words(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Never the provider's."""
         def fail() -> MoreEvidence:

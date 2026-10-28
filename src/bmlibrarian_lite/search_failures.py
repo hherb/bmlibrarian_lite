@@ -336,9 +336,11 @@ def format_search_failure_message(error: SearchFailedError) -> str:
         error: The failed search.
 
     Returns:
-        The error's sentence, a blank line, and the advice.
+        The error's sentence, its notice if any, and the advice, each a
+        paragraph.
     """
-    return f"{error}\n\n{search_failure_advice(error.shortfalls)}"
+    notice = f"{error.notice}\n\n" if error.notice else ""
+    return f"{error}\n\n{notice}{search_failure_advice(error.shortfalls)}"
 
 
 def retrieval_shortfalls_to_metadata(
