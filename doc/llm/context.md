@@ -166,6 +166,8 @@ class MyAgent(LiteBaseAgent):
 `_chat` raises `TruncatedResponseError` when the answer reaches its token
 limit: use it for answers code parses. Text the reader reads as written goes
 through `_chat_prose`, which keeps a cut-off answer and notes that it stopped.
+Both raise `RefusedResponseError` when the model declines (`MODEL_REFUSED`,
+never retried); a declined answer is never kept as prose.
 
 ### Creating a Document Card
 

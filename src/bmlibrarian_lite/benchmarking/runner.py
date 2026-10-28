@@ -693,7 +693,7 @@ Evaluate the relevance of this document to the research question."""
             response.output_tokens,
         )
 
-        # As the review's _chat records it: what a cut-off answer holds is not its verdict
+        # As the review's _chat records it: a cut-off or declined answer holds no verdict
         if response.stop_reason == STOP_REASON_MAX_TOKENS:
             parsed = None
             failure = EvaluationErrorCode.RESPONSE_TOO_LARGE

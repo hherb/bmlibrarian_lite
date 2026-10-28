@@ -29,6 +29,7 @@ from bmlibrarian_lite.retraction_text import (
     paper_status_line,
     retraction_methods_line,
     run_summary_clause,
+    saved_work_line,
     with_retraction_notice,
     without_retraction_notice,
 )
@@ -307,8 +308,20 @@ def test_a_partly_checked_run_counts_its_unchecked_papers_in_the_methods_line():
         "Retraction status checked 2026-10-18; 1 paper could not be checked"
     )
     assert retraction_methods_line(_screen(1, 2)).endswith("; 2 papers could not be checked")
+    assert retraction_methods_line(_screen(1, 1234)).endswith("; 1,234 papers could not be checked")
     restored = RetractionSnapshot.from_rows(_screen(1, 2).to_snapshot())
     assert retraction_methods_line(restored) == retraction_methods_line(_screen(1, 2))
+
+
+@pytest.mark.parametrize(("retracted", "unchecked"), [(0, 3), (1, 2)])
+def test_the_methods_line_says_what_the_saved_work_line_says(retracted, unchecked):
+    """An unanswered check is no check time: no paper decided reads as could not be checked."""
+    screen = _screen(retracted, unchecked)
+    expected = saved_work_line(screen.to_snapshot())
+    assert retraction_methods_line(screen) == expected
+    assert retraction_methods_line(RetractionSnapshot.from_rows(screen.to_snapshot())) == expected
+    if not retracted:
+        assert expected == "Retraction status could not be checked"
 
 
 @pytest.mark.parametrize(

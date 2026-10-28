@@ -11,14 +11,18 @@ its slice has landed; add a new section when handing off new work.
 **#631 on branch `fix/desktop-stop-reasons-631`** (item 1 landed in PR #632,
 items 2–6 here): `TruncatedResponseError.content` keeps what a cut-off answer
 wrote, and smart search searches the complete queries it held
-(`cut_off_alternative_queries`: each whole value of its first JSON array).
+(`cut_off_alternative_queries`: each whole value after its first `[`).
 Anthropic's `model_context_window_exceeded` is read as `STOP_REASON_MAX_TOKENS`.
 `refusal` raises `RefusedResponseError` from `_chat`/`_chat_prose`, which is
 `MODEL_REFUSED` (−15) and never retried (smart search: `ANSWER_REFUSED_TEXT`;
-the benchmarks and query expansion check for it too). Ollama with no
+the benchmarks and the interrogation agent's query expansion check for it
+too; a refused or cut-off interrogation answer gives the advice, in the GUI
+and in MCP's `advice`). Ollama with no
 `done_reason` counts as cut off when `eval_count >= num_predict`
 (`ollama_stop_reason`). A cut-off answer after earlier repeats says both. The
-retraction methods line gives the unchecked count. **A test stubbing the
+retraction methods line gives the unchecked count, and both records'
+`checked_at` count decided checks only, so a run none was decided for reads
+"could not be checked", as the Report tab does. **A test stubbing the
 reporting or interrogation answer patches `_chat_prose`, not `_chat`.** **#629 stays open for the maintainer's
 decision** on item 4 (a re-lost page is counted twice; shortfalls keep no
 offset, and any rule without one can understate) and item 7 (counts lost
@@ -33,7 +37,9 @@ Search's report covers its batch only). Lodged: #621 (PR #622 follow-ups),
 all three), #625 (Upload Full Text follow-ups),
 #633 (no setting reaches the tasks' token limits), #634 (a classifier
 failure read as "no design" or as failing the quality filter), #635 (query
-conversion and MCP payloads around the cut-off guard). Apple follow-ups: #612,
+conversion and MCP payloads around the cut-off guard; refusals too), #637
+(unknown stop reasons read as finished; a partly-used cut-off smart-search
+answer is not told to the reader). Apple follow-ups: #612,
 #613. Android divergences: #614, #615; follow-ups #617–#619.
 
 **Owed by the maintainer** (stages C1 and C2 and the desktop browser rescue
@@ -72,7 +78,8 @@ have landed):
 - **PR #628's review follow-ups** (#629; PR #630): a model answer cut off
   at its token limit (`STOP_REASON_MAX_TOKENS`; Ollama's `length`) raises
   `TruncatedResponseError` from `LiteSearchAgent.ask` and ends the round with
-  `ANSWER_CUT_OFF_TEXT`, never asked again; `ReportMetadata.smart_search_notice`
+  `ANSWER_CUT_OFF_TEXT`, never asked again (since #636 its complete queries
+  are still searched); `ReportMetadata.smart_search_notice`
   is kept and in the methodology; `RetractionScreen.failed_ids` replaces the
   screen-wide flag; `QualityFilter.to_report_settings()`.
 - **Desktop: Find More Evidence and repeated smart search** (PR #628).

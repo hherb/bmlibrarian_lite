@@ -167,7 +167,9 @@ class LiteSearchAgent(LiteBaseAgent):
             The answer's text.
 
         Raises:
-            TruncatedResponseError: The answer reached its token limit.
+            TruncatedResponseError: The answer reached its token limit;
+                ``content`` carries what it wrote.
+            RefusedResponseError: The model declined to answer.
         """
         return self._chat(
             [self._create_user_message(prompt)],

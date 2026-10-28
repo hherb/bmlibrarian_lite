@@ -312,7 +312,18 @@ class TestAskingForThem:
         assert len(searcher.prompts) == 1
 
     @pytest.mark.parametrize("content", [
-        "", '[{"concepts": [{"name": "x", "keywords": ["x', '{"concepts": [{"name": "x", "keywords": ["x"]}, {"na',
+        json.dumps(json.loads(answer([("x", ["x"])]))[0]),
+        f"```json\n{answer([('x', ['x'])])}\n```",
+        '{"queries": ' + answer([("x", ["x"])])[:-1] + ', {"conc',
+    ], ids=["single-object", "fenced", "cut-off-wrapper"])
+    def test_a_cut_off_answer_read_whole_or_wrapped_is_searched(self, content: str) -> None:
+        """An answer that completed at the limit is read as a whole one; a wrapper's array as its own."""
+        searcher = Searcher([TruncatedResponseError("limit", content=content)])
+
+        assert [q.label for q in generate_alternative_queries(searcher, "p", lambda: False)] == ["x"]
+
+    @pytest.mark.parametrize("content", [
+        "", '[{"concepts": [{"name": "x", "keywords": ["x','{"concepts": [{"name": "x", "keywords": ["x"]}, {"na',
         '<think>[{"concepts": [{"name": "x", "keywords": ["x"]}]}, ',
     ])
     def test_a_cut_off_answer_with_no_complete_query_is_not_searched(self, content: str) -> None:
@@ -322,6 +333,24 @@ class TestAskingForThem:
         with pytest.raises(SmartSearchError) as raised:
             generate_alternative_queries(searcher, "p", lambda: False)
         assert str(raised.value) == ANSWER_CUT_OFF_TEXT
+
+    def test_a_cut_off_answer_of_repeats_says_it_held_none_not_run(self) -> None:
+        """Its complete queries were all run already: cut off before one that was not."""
+        searcher = Searcher([TruncatedResponseError("limit", content=answer([("x", ["x"])])[:-1] + ", {")])
+
+        with pytest.raises(SmartSearchError) as raised:
+            generate_alternative_queries(searcher, "p", lambda: False, {query_of(("x", ["x"]))})
+        assert str(raised.value) == ANSWER_CUT_OFF_TEXT
+
+    def test_a_cut_off_answer_after_repeats_is_still_searched(self) -> None:
+        """An earlier answer of repeats does not lose the next one's complete queries."""
+        searcher = Searcher([
+            answer([("x", ["x"])]),
+            TruncatedResponseError("limit", content=answer([("y", ["y"])])[:-1] + ", {"),
+        ])
+
+        queries = generate_alternative_queries(searcher, "p", lambda: False, {query_of(("x", ["x"]))})
+        assert [q.label for q in queries] == ["y"]
 
     def test_a_cut_off_answer_after_repeats_says_both(self) -> None:
         """#631 item 5: the earlier answer's repeats are not left out."""

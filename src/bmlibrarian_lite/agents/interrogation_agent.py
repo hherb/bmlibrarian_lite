@@ -187,6 +187,7 @@ class LiteInterrogationAgent(LiteBaseAgent):
                 max_tokens=200,
             )
             if response.stop_reason == STOP_REASON_REFUSAL:
+                logger.warning("The model %s declined to expand the question", response.model)
                 return [question]  # what it wrote before declining is no query
             lines = response.content.strip().split('\n')
             if response.stop_reason == STOP_REASON_MAX_TOKENS:

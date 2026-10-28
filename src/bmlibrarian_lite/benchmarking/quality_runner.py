@@ -818,7 +818,7 @@ Focus on THIS study's methodology, not studies it references."""
             response.output_tokens,
         )
 
-        # As the review's _chat records it: what a cut-off answer holds is not its verdict
+        # As the review's _chat records it: a cut-off or declined answer holds no verdict
         if response.stop_reason == STOP_REASON_MAX_TOKENS:
             parsed: QualityAssessment | EvaluationErrorCode = EvaluationErrorCode.RESPONSE_TOO_LARGE
         elif response.stop_reason == STOP_REASON_REFUSAL:

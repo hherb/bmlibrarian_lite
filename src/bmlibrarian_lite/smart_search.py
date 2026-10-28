@@ -16,7 +16,7 @@ The rules are the apps' (iOS/macOS's ``executeSmartSearch``) and the
   request that failed, an answer the model declined, or an answer cut off at
   its token limit (asked again, it is likely cut off again, each time paid),
   stops the round; the complete queries a cut-off answer held before the
-  limit are still searched. None of these is a source's failure, so none
+  limit (those not already run) are still searched. None of these is a source's failure, so none
   records a shortfall.
 - Each query is searched with the configured provider. Once the round ends,
   a query is kept as run unless a source could not answer it and it found
@@ -175,7 +175,9 @@ class SmartSearcher(Protocol):
         """One answer from the query model.
 
         Raises:
-            TruncatedResponseError: The answer reached its token limit.
+            TruncatedResponseError: The answer reached its token limit;
+                ``content`` carries what it wrote.
+            RefusedResponseError: The model declined to answer.
         """
         ...
 
@@ -238,8 +240,8 @@ def cut_off_alternative_queries(answer: str) -> list[RunQuery]:
     """The usable queries an answer cut off at its token limit completed.
 
     The whole answer is read first, as :func:`parse_alternative_queries`
-    reads it; otherwise each complete value in its first JSON array, in
-    order, up to the one the limit broke off.
+    reads it; otherwise each complete value after the answer's first
+    ``[``, in order, up to the one the limit broke off or the array's end.
 
     Args:
         answer: What the model wrote before the limit, untrusted.

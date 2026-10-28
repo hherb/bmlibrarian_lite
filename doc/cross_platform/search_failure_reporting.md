@@ -379,7 +379,7 @@ review runs one round when fewer than `SMART_SEARCH_THRESHOLD` (3) documents
 are relevant and at least one was judged, and *Find More Evidence* runs a fresh
 one when its own query finds nothing new and nothing is held over from an
 earlier stop or owed (documents to score, papers to read, a report), so no
-"marked as tried" flag is needed. Python differs from the contract in five
+"marked as tried" flag is needed. Python differs from the contract in six
 ways:
 
 - A round runs every query it was given and its documents are scored after
@@ -398,7 +398,7 @@ ways:
   a server that sends no `done_reason`, an answer of the whole `num_predict`)
   is not asked for again, since the same limit likely cuts it off again, each
   time paid. The complete queries it held before the limit (each whole value
-  of its first JSON array) are still searched; with none new, the user is told
+  after its first `[`) are still searched; with none new, the user is told
   the answer was cut off before it held one not already run, not that it held
   no usable query, and that an earlier answer held only repeats if one did.
 - An answer the model declined (Anthropic's `refusal`) is not asked for again

@@ -896,14 +896,15 @@ class EvaluationErrorCode(Enum):
     API_CONNECTION_ERROR = -4
     API_SERVER_ERROR = -5
 
-    # Response parsing errors (-11 to -20)
+    # Response errors (-11 to -20)
     JSON_PARSE_ERROR = -11
     INVALID_RESPONSE_FORMAT = -12
     EMPTY_RESPONSE = -13
     #: The model's answer reached its token limit, so it is incomplete (#631).
     #: Named before it had this meaning; the value is stored, so never renumber it.
     RESPONSE_TOO_LARGE = -14
-    #: The model declined to answer (Anthropic's ``refusal``); never retried
+    #: The model declined to answer (Anthropic's ``refusal``); never retried.
+    #: The value is stored, so never renumber it.
     MODEL_REFUSED = -15
 
     # Retry exhaustion (-21 to -30)

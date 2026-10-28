@@ -206,7 +206,8 @@ class LiteBaseAgent:
         if not prose:
             raise TruncatedResponseError(
                 f"The answer from {response.model} reached its token limit "
-                f"({response.output_tokens} tokens) before it wrote anything"
+                f"({response.output_tokens} tokens) before it wrote anything",
+                content=response.content,
             )
         if prose.count("```") % 2:
             prose += "\n```"

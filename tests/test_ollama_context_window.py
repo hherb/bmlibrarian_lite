@@ -219,12 +219,18 @@ def test_a_server_without_done_reason_is_cut_off_at_its_whole_limit(
     assert ollama_stop_reason(done_reason, eval_count, 1024) == stop_reason
 
 
-@pytest.mark.parametrize(("done_reason", "cut_off"), [("length", True), ("stop", False), (None, False)])
+@pytest.mark.parametrize(("done_reason", "eval_count", "cut_off"), [
+    ("length", 7, True), ("stop", 7, False), (None, 7, False),
+    # an older server names no reason: the whole limit generated is the cut-off (#631 item 4)
+    (None, SMART_SEARCH_MAX_TOKENS, True), (None, SMART_SEARCH_MAX_TOKENS - 1, False),
+])
 def test_ollamas_cut_off_answer_reaches_ask(
-    done_reason: str | None, cut_off: bool, sdk: MagicMock, tracker: MagicMock,
+    done_reason: str | None, eval_count: int, cut_off: bool, sdk: MagicMock, tracker: MagicMock,
 ) -> None:
     """Ollama's "length", through the real client, makes ``ask`` refuse; nothing else does."""
-    sdk.chat.return_value = {**sdk.chat.return_value, "done_reason": done_reason}
+    sdk.chat.return_value = {
+        **sdk.chat.return_value, "done_reason": done_reason, "eval_count": eval_count,
+    }
     agent = _search_agent("ollama", _client(sdk))
 
     if cut_off:

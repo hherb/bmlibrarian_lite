@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from bmlibrarian_lite import mcp_server
 from bmlibrarian_lite.agents.base import CUT_OFF_PROSE_NOTE, LiteBaseAgent
 from bmlibrarian_lite.agents.citation_agent import LiteCitationAgent
 from bmlibrarian_lite.agents.interrogation_agent import LiteInterrogationAgent
@@ -51,6 +52,11 @@ def answers(*responses: LLMResponse) -> Any:
 def cut_off(content: str) -> LLMResponse:
     """An answer stopped at its token limit."""
     return LLMResponse(content=content, model="m", output_tokens=1024, stop_reason=STOP_REASON_MAX_TOKENS)
+
+
+def declined(content: str) -> LLMResponse:
+    """An answer the model declined to give."""
+    return LLMResponse(content=content, model="m", stop_reason=STOP_REASON_REFUSAL)
 
 
 def finished(content: str) -> LLMResponse:
@@ -101,6 +107,15 @@ class TestTheBaseAgent:
         with pytest.raises(TruncatedResponseError) as raised:
             agent._chat(MESSAGES)
         assert raised.value.content == '[{"a": 1}, {"b"'
+
+    def test_chat_prose_keeps_what_an_answer_with_no_prose_wrote(self) -> None:
+        """Unclosed reasoning is no prose, but it is what the model wrote."""
+        agent = LiteBaseAgent.__new__(LiteBaseAgent)
+        agent._chat_response = answers(cut_off("<think>\nThe user"))  # type: ignore[method-assign]
+
+        with pytest.raises(TruncatedResponseError) as raised:
+            agent._chat_prose(MESSAGES)
+        assert raised.value.content == "<think>\nThe user"
 
     @pytest.mark.parametrize("method", ["_chat", "_chat_prose"])
     def test_a_declined_answer_is_refused_and_never_kept(self, method: str) -> None:
@@ -182,6 +197,45 @@ class TestTheJsonPaths:
 
         assert outcome.causes == (EvaluationErrorCode.RESPONSE_TOO_LARGE,)
         assert chat.calls == 1
+
+    def test_scoring_records_a_declined_answer_and_asks_once(self, without_retry_delays: None) -> None:
+        """Content that would parse as a score is still no score (#631 item 3)."""
+        agent = LiteScoringAgent()
+        chat = answers(declined('{"score": 4, "explanation": "On topic."}'))
+        agent._chat_response = chat  # type: ignore[method-assign]
+
+        scored = agent.score_document(QUESTION, make_document())
+
+        assert scored.score == EvaluationErrorCode.MODEL_REFUSED.value
+        assert chat.calls == 1
+
+    def test_citations_record_a_declined_answer_and_ask_once(self, without_retry_delays: None) -> None:
+        """The same, one stage later."""
+        agent = LiteCitationAgent()
+        chat = answers(declined('{"passages": [{"text": "Aspirin reduced stroke."}]}'))
+        agent._chat_response = chat  # type: ignore[method-assign]
+        scored = ScoredDocument(document=make_document(), score=4, explanation="On topic.")
+
+        outcome = agent.extract_all_citations(QUESTION, [scored], min_score=3)
+
+        assert outcome.causes == (EvaluationErrorCode.MODEL_REFUSED,)
+        assert chat.calls == 1
+
+    @pytest.mark.parametrize(
+        ("error", "advice"),
+        [
+            (RefusedResponseError("declined"), "Another model may answer what this one declined."),
+            (TruncatedResponseError("cut off"), advice_for_causes([EvaluationErrorCode.RESPONSE_TOO_LARGE])),
+        ],
+        ids=["declined", "cut-off"],
+    )
+    def test_a_tool_call_ended_by_its_answer_says_what_to_do(self, error: Exception, advice: str) -> None:
+        """Document interrogation through MCP raises these unwrapped."""
+        assert mcp_server._error_payload(error)["advice"] == advice
+
+    def test_any_other_failed_tool_call_gets_no_model_advice(self) -> None:
+        """The control."""
+        assert "advice" not in mcp_server._error_payload(RuntimeError("Boom"))
 
     def test_the_advice_is_not_the_unreadable_advice(self) -> None:
         """A cut-off answer was readable as far as it went; it ran out of room.

@@ -209,10 +209,11 @@ def saved_work_line(rows: Iterable[Mapping[str, Any]]) -> str:
 def retraction_methods_line(record: RetractionRecord) -> str:
     """The report's methods line: when the run's status was checked, and how many were not.
 
-    A run that held papers and has no check time could not check any (the
-    check failed, or was cancelled first); that is said, never a date. One
-    checked in part says how many papers it kept unchecked, as
-    :func:`saved_work_line` does, so the line alone never reads as complete.
+    A run that held papers and decided none could not check any (the check
+    failed or went unanswered, or was cancelled first); that is said, never a
+    date. One checked in part says how many kept papers could not be checked,
+    with :func:`saved_work_line`'s clause, so the line alone never reads as
+    complete.
     """
     if record.checked_at is None:
         return "Retraction status could not be checked" if record.to_snapshot() else checked_on_line(None)
@@ -220,7 +221,7 @@ def retraction_methods_line(record: RetractionRecord) -> str:
 
 
 def _not_checked_clause(count: int) -> str:
-    """"; N papers could not be checked", or "" for none."""
+    """The clause "; N papers could not be checked" ("1 paper" for one), or "" for none."""
     if not count:
         return ""
     return f"; {'1 paper' if count == 1 else f'{count:,} papers'} could not be checked"

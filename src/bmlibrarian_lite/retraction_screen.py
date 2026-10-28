@@ -101,7 +101,7 @@ class RetractionRecord(Protocol):
 
     @property
     def checked_at(self) -> datetime | None:
-        """The oldest check time; ``None`` without any."""
+        """The oldest decided check's time; ``None`` without one (an unchecked answer's never counts)."""
         ...
 
     def to_snapshot(self) -> list[dict[str, Any]]:
@@ -158,9 +158,13 @@ class RetractionScreen:
 
     @property
     def checked_at(self) -> datetime | None:
-        """The oldest ``checked_at`` among documents not in ``failed_ids``; ``None`` without any."""
+        """The oldest ``checked_at`` among decided checks not in ``failed_ids``; ``None`` without one."""
         return min(
-            (as_utc(c.checked_at) for doc_id, c in self.checks.items() if doc_id not in self.failed_ids),
+            (
+                as_utc(c.checked_at)
+                for doc_id, c in self.checks.items()
+                if doc_id not in self.failed_ids and c.verdict.status is not RetractionStatus.UNCHECKED
+            ),
             default=None,
         )
 
@@ -283,11 +287,8 @@ class RetractionSnapshot:
 
     @property
     def checked_at(self) -> datetime | None:
-        """The oldest check time; ``None`` without any."""
-        return min(
-            (as_utc(datetime.fromisoformat(r["checked_at"])) for r in self.rows if r.get("checked_at")),
-            default=None,
-        )
+        """The oldest decided row's check time; ``None`` without one."""
+        return decided_checked_at(self.rows)
 
     def to_snapshot(self) -> list[dict[str, Any]]:
         """The rows, as given."""
