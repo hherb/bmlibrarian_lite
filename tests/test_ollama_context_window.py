@@ -12,7 +12,7 @@ from bmlibrarian_lite.constants import SMART_SEARCH_MAX_TOKENS
 from bmlibrarian_lite.exceptions import RefusedResponseError, TruncatedResponseError
 from bmlibrarian_lite.llm import LLMClient, LLMMessage
 from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS
-from bmlibrarian_lite.llm.providers.anthropic import AnthropicProvider
+from bmlibrarian_lite.llm.providers.anthropic import AnthropicProvider, anthropic_stop_reason
 from bmlibrarian_lite.llm.providers.ollama import OllamaProvider, ollama_stop_reason
 
 CONTEXT_WINDOW = 32768
@@ -167,6 +167,8 @@ def _search_agent(provider: str, client: LLMClient) -> LiteSearchAgent:
 
 @pytest.mark.parametrize(("stop_reason", "cut_off"), [
     ("max_tokens", True), ("model_context_window_exceeded", True), ("end_turn", False),
+    # unknown, with the whole limit generated (#637)
+    ("new_reason", True),
 ])
 def test_anthropics_cut_off_answer_reaches_ask(stop_reason: str, cut_off: bool, tracker: MagicMock) -> None:
     """Anthropic's own stop reason, through the real client, decides whether ``ask`` refuses.
@@ -217,6 +219,42 @@ def test_a_server_without_done_reason_is_cut_off_at_its_whole_limit(
 ) -> None:
     """#631 item 4: generating all of ``num_predict`` is the cut-off an older server does not name."""
     assert ollama_stop_reason(done_reason, eval_count, 1024) == stop_reason
+
+
+@pytest.mark.parametrize(("reason", "output_tokens", "stop_reason", "warned"), [
+    ("end_turn", 1024, "end_turn", False), ("stop_sequence", 7, "stop_sequence", False),
+    ("max_tokens", 1024, STOP_REASON_MAX_TOKENS, False), ("refusal", 7, "refusal", False),
+    ("model_context_window_exceeded", 7, STOP_REASON_MAX_TOKENS, False), (None, 1024, None, False),
+    ("pause_turn", 7, "pause_turn", True), ("new_reason", 7, "new_reason", True),
+    # an unknown reason with the whole limit generated may be a cut-off one
+    ("new_reason", 1024, STOP_REASON_MAX_TOKENS, True), ("new_reason", None, "new_reason", True),
+])
+def test_an_unknown_anthropic_stop_reason_is_logged(
+    reason: str | None, output_tokens: object, stop_reason: str | None, warned: bool,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#637 item 1: a reason added later is seen in the log, never fails the call."""
+    with caplog.at_level("WARNING", logger="bmlibrarian_lite.llm.providers.anthropic"):
+        assert anthropic_stop_reason(reason, output_tokens, 1024) == stop_reason
+
+    assert ("unknown reason" in caplog.text) == warned
+
+
+@pytest.mark.parametrize(("done_reason", "eval_count", "stop_reason", "warned"), [
+    ("stop", 1024, "stop", False), ("length", 7, STOP_REASON_MAX_TOKENS, False), (None, 7, None, False),
+    (7, 7, None, False), ("load", 7, "load", True),
+    # an unknown reason with the whole limit generated may be a cut-off one
+    ("load", 1024, STOP_REASON_MAX_TOKENS, True),
+])
+def test_an_unknown_ollama_done_reason_is_logged(
+    done_reason: object, eval_count: int, stop_reason: str | None, warned: bool,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#637 item 1: as Anthropic's, the server's own reason passed on and logged."""
+    with caplog.at_level("WARNING", logger="bmlibrarian_lite.llm.providers.ollama"):
+        assert ollama_stop_reason(done_reason, eval_count, 1024) == stop_reason
+
+    assert ("unknown reason" in caplog.text) == warned
 
 
 @pytest.mark.parametrize(("done_reason", "eval_count", "cut_off"), [

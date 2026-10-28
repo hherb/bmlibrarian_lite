@@ -135,6 +135,8 @@ class MoreEvidence:
         extraction_failures: Relevant papers whose citations could not be
             extracted.
         queries: The alternative queries smart search searched, if it ran.
+        cut_off_notice: That the model's answer for them was cut off, so it
+            may have proposed more (#637); None when it was not.
         search_shortfalls: What the search lost.
         transparency_failures: Documents whose transparency could not be
             analysed.
@@ -153,6 +155,7 @@ class MoreEvidence:
     scoring_failures: tuple[PassFailure, ...] = ()
     extraction_failures: tuple[PassFailure, ...] = ()
     queries: tuple[str, ...] = ()
+    cut_off_notice: str | None = None
     search_shortfalls: tuple[RetrievalShortfall, ...] = ()
     transparency_failures: tuple[PassFailure, ...] = ()
     notice: str | None = None
@@ -175,6 +178,8 @@ def more_evidence_text(outcome: MoreEvidence) -> str:
     if outcome.queries:
         count = len(outcome.queries)
         parts.append(f"Ran {count} alternative search{'es' if count != 1 else ''}.")
+    if outcome.cut_off_notice:
+        parts.append(outcome.cut_off_notice)
     if outcome.found:
         parts.append(f"Found {outcome.found} new document{'s' if outcome.found != 1 else ''}.")
     if outcome.resumed:
@@ -329,13 +334,14 @@ def find_more_evidence(
         )
         round_ = smart_search(context, known | scored_ids)
         found, lost = list(round_.documents), [*lost, *round_.shortfalls]
-        outcome = replace(outcome, queries=round_.queries)
+        outcome = replace(outcome, queries=round_.queries, cut_off_notice=round_.notice)
         if not found:
             return replace(outcome, cancelled=round_.stopped,
                            notice=None if round_.stopped else NO_NEW_EVIDENCE_TEXT)
         metadata.alternative_queries = [*metadata.alternative_queries, *round_.queries]
-        # This round found documents, so the report is written again without the review's notice
-        metadata.smart_search_notice = None
+        # This round found documents, so the report is written again with this
+        # round's notice (None unless its answer was cut off), not the review's
+        metadata.smart_search_notice = round_.notice
     outcome = replace(outcome, found=len(found), resumed=len(unscored),
                       caught_up=not found and (bool(unscored) or owed),
                       search_shortfalls=tuple(combined_shortfalls(lost)))

@@ -171,7 +171,8 @@ class WorkflowWorker(QThread):
             the gathered documents are checked, before anything is scored;
             again, over every document, once smart search's are checked
         smart_search_notice: Emitted when too few documents were relevant
-            and no alternative search could run, with why
+            and no alternative search could run, with why, or when a cut-off
+            answer's queries were searched and it may have held more
     """
 
     progress = Signal(str, int, int)  # step, current, total
@@ -181,7 +182,7 @@ class WorkflowWorker(QThread):
     search_incomplete = Signal(str)  # what the search is missing (#247)
     analysis_incomplete = Signal(str)  # what the analysis could not read (#261)
     retraction_screened = Signal(object)  # RetractionScreen
-    smart_search_notice = Signal(str)  # why no alternative search ran
+    smart_search_notice = Signal(str)  # why no alternative search ran, or a cut-off answer's
 
     # Granular signals for audit trail
     query_generated = Signal(str, str)  # (pubmed_query, nl_query)
@@ -824,6 +825,10 @@ class WorkflowWorker(QThread):
                 [*metadata.search_shortfalls, *round_.shortfalls]
             )
             self._report_incomplete_search(metadata)
+        # After the incomplete search's, whose label text replaces what it showed
+        if round_.notice:
+            metadata.smart_search_notice = round_.notice
+            self.smart_search_notice.emit(round_.notice)
         new = list(round_.documents)
         if not new or self._cancelled:
             return [], checkpoint_metadata
@@ -1557,7 +1562,7 @@ class SystematicReviewTab(QWidget):
         self.search_notice_label.setVisible(True)
 
     def _on_smart_search_notice(self, notice: str) -> None:
-        """Say why no alternative search ran; the review goes on without one.
+        """Say why no alternative search ran, or that a cut-off answer may have held more.
 
         Args:
             notice: Why, as the reader's sentence.

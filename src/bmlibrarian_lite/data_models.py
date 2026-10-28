@@ -2468,9 +2468,12 @@ class ReportMetadata:
         documents_retrieved: Number of documents actually retrieved
         alternative_queries: The query strings smart search ran for the
             report, in order; empty when it ran none
-        smart_search_notice: Why the review's own round of alternative
-            queries could not run or broke off, as the reader's sentence;
-            None when it ran, was not needed, or a later round found documents
+        smart_search_notice: Why the review's round of alternative queries
+            could not run or broke off, or that a cut-off answer may have
+            proposed more than its queries (#637), as the reader's sentence.
+            A later round that found documents replaces it with its own,
+            None unless that round's answer was cut off. None when nothing
+            needs saying
         search_shortfalls: What failed sources, batches or pages left out of
             the search (#247); empty when the search was complete
         analysis_shortfalls: What scoring and citation extraction could not

@@ -69,13 +69,16 @@ ONLY_REPEATS_TEXT = (
     "The model proposed only alternative search queries already run, "
     "so no alternative search was run."
 )
+#: What to do about an answer cut off at its length limit
+CUT_OFF_ADVICE_TEXT = (
+    "A model that writes out its reasoning first can use up that limit; "
+    "another Query Conversion model in Settings may help."
+)
 #: The desktop's own: a cut-off answer is likely cut off again, so it is not asked for again
 ANSWER_CUT_OFF_TEXT = (
     "The model's answer was cut off at its length limit before it held a "
     "complete alternative search query not already run, so no alternative "
-    "search was run. "
-    "A model that writes out its reasoning first can use up that limit; "
-    "another Query Conversion model in Settings may help."
+    f"search was run. {CUT_OFF_ADVICE_TEXT}"
 )
 #: Put before ANSWER_CUT_OFF_TEXT when an earlier answer held only repeats
 EARLIER_REPEATS_TEXT = "Earlier, the model proposed only alternative search queries already run."
@@ -160,12 +163,16 @@ class SmartSearchRound:
         shortfalls: What its queries lost, each marked as an alternative
             search's; empty when the reader asked and nothing new was found.
         stopped: Whether a stop ended it before every query ran.
+        notice: The reader's sentence when the model's answer was cut off,
+            so the complete queries it held may not be all it would have
+            proposed; else None.
     """
 
     documents: tuple[LiteDocument, ...] = ()
     queries: tuple[str, ...] = ()
     shortfalls: tuple[RetrievalShortfall, ...] = ()
     stopped: bool = False
+    notice: str | None = None
 
 
 class SmartSearcher(Protocol):
@@ -297,7 +304,7 @@ def generate_alternative_queries(
     prompt: str,
     should_stop: Callable[[], bool],
     run_before: Collection[str] = (),
-) -> list[RunQuery]:
+) -> tuple[list[RunQuery], str | None]:
     """Ask the model for alternative queries, asking again for an answer with none new.
 
     Args:
@@ -307,7 +314,9 @@ def generate_alternative_queries(
         run_before: Query strings already run; never searched again.
 
     Returns:
-        The new queries; empty only when a stop came first.
+        The new queries, empty only when a stop came first; and the reader's
+        sentence when they are the complete queries not already run of an
+        answer cut off at its token limit (#637), else None.
 
     Raises:
         SmartSearchError: The request to the model failed, the model
@@ -317,14 +326,14 @@ def generate_alternative_queries(
     only_repeats = False
     for _attempt in range(SMART_SEARCH_MAX_QUERY_RETRIES + 1):
         if should_stop():
-            return []
+            return [], None
         try:
             answer = searcher.ask(prompt)
         except TruncatedResponseError as e:
             logger.warning("%s", e)  # our own text, never the provider's
             queries = [q for q in cut_off_alternative_queries(e.content) if q.query not in run_before]
             if queries:
-                return queries
+                return queries, cut_off_queries_notice(len(queries))
             text = f"{EARLIER_REPEATS_TEXT} {ANSWER_CUT_OFF_TEXT}" if only_repeats else ANSWER_CUT_OFF_TEXT
             raise SmartSearchError(text) from e
         except RefusedResponseError as e:
@@ -338,10 +347,30 @@ def generate_alternative_queries(
         usable = parse_alternative_queries(answer)
         queries = [q for q in usable if q.query not in run_before]
         if queries:
-            return queries
+            return queries, None
         only_repeats = only_repeats or bool(usable)
         logger.warning("The model's answer held no usable alternative query not already run")
     raise SmartSearchError(ONLY_REPEATS_TEXT if only_repeats else NO_USABLE_QUERY_TEXT)
+
+
+def cut_off_queries_notice(count: int) -> str:
+    """The reader's sentence for a cut-off answer that held complete queries.
+
+    It says nothing of how many were searched: a stop may end the round
+    first, and the report lists those that were.
+
+    Args:
+        count: How many complete queries not already run it held.
+
+    Returns:
+        That the model may have proposed more, and what to do about it.
+    """
+    held = "1 complete alternative search query" if count == 1 else (
+        f"{count} complete alternative search queries")
+    return (
+        f"The model's answer was cut off at its length limit after {held} "
+        f"not already run, so it may have proposed more. {CUT_OFF_ADVICE_TEXT}"
+    )
 
 
 def run_smart_search(
@@ -373,14 +402,15 @@ def run_smart_search(
 
     Raises:
         SmartSearchError: No usable query not already run, an answer cut off
-            at its token limit, or the model could not be asked.
+            at its token limit before a complete query not already run, or the
+            model could not be asked.
         SearchFailedError: The reader asked, and failures left the round with
             nothing new, a stop or not (a cancel does not excuse reporting them).
     """
     tell = progress or (lambda _message: None)
     tried = storage.get_smart_search_queries(context.checkpoint_id)
     tell("Generating alternative search strategies...")
-    alternatives = generate_alternative_queries(
+    alternatives, notice = generate_alternative_queries(
         searcher,
         alternative_queries_prompt(context, [t.label for t in tried]),
         should_stop,
@@ -427,7 +457,7 @@ def run_smart_search(
             raise SearchFailedError(shortfalls)
         # A request for more evidence that found nothing keeps nothing
         shortfalls = []
-    return SmartSearchRound(tuple(found), tuple(ran), tuple(shortfalls), stopped)
+    return SmartSearchRound(tuple(found), tuple(ran), tuple(shortfalls), stopped, notice)
 
 
 def _strings(value: object) -> list[str]:
