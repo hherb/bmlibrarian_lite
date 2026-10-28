@@ -32,7 +32,11 @@ from bmlibrarian_lite.data_models import (
     SearchSession,
     ShortfallQuery,
 )
-from bmlibrarian_lite.exceptions import SearchFailedError, TruncatedResponseError
+from bmlibrarian_lite.exceptions import (
+    RefusedResponseError,
+    SearchFailedError,
+    TruncatedResponseError,
+)
 from bmlibrarian_lite.llm import LLMResponse
 from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS
 from bmlibrarian_lite.retraction_screen import (
@@ -53,6 +57,8 @@ from bmlibrarian_lite.search_failures import (
 )
 from bmlibrarian_lite.smart_search import (
     ANSWER_CUT_OFF_TEXT,
+    ANSWER_REFUSED_TEXT,
+    EARLIER_REPEATS_TEXT,
     NO_USABLE_QUERY_TEXT,
     ONLY_REPEATS_TEXT,
     QUERY_GENERATION_FAILED_TEXT,
@@ -294,6 +300,73 @@ class TestAskingForThem:
         with pytest.raises(SmartSearchError) as raised:
             generate_alternative_queries(searcher, "p", lambda: False)
         assert str(raised.value) == ANSWER_CUT_OFF_TEXT
+        assert len(searcher.prompts) == 1
+
+    def test_a_cut_off_answers_complete_queries_are_searched(self) -> None:
+        """#631 item 2: the queries finished before the limit are used, the broken one never."""
+        whole = answer([("x", ["x"])], [("y", ["y"])])
+        searcher = Searcher([TruncatedResponseError("limit", content=whole[:-1] + ', {"concepts": [{"na')])
+
+        queries = generate_alternative_queries(searcher, "p", lambda: False, {query_of(("x", ["x"]))})
+        assert [q.label for q in queries] == ["y"]
+        assert len(searcher.prompts) == 1
+
+    @pytest.mark.parametrize("content", [
+        json.dumps(json.loads(answer([("x", ["x"])]))[0]),
+        f"```json\n{answer([('x', ['x'])])}\n```",
+        '{"queries": ' + answer([("x", ["x"])])[:-1] + ', {"conc',
+    ], ids=["single-object", "fenced", "cut-off-wrapper"])
+    def test_a_cut_off_answer_read_whole_or_wrapped_is_searched(self, content: str) -> None:
+        """An answer that completed at the limit is read as a whole one; a wrapper's array as its own."""
+        searcher = Searcher([TruncatedResponseError("limit", content=content)])
+
+        assert [q.label for q in generate_alternative_queries(searcher, "p", lambda: False)] == ["x"]
+
+    @pytest.mark.parametrize("content", [
+        "", '[{"concepts": [{"name": "x", "keywords": ["x','{"concepts": [{"name": "x", "keywords": ["x"]}, {"na',
+        '<think>[{"concepts": [{"name": "x", "keywords": ["x"]}]}, ',
+    ])
+    def test_a_cut_off_answer_with_no_complete_query_is_not_searched(self, content: str) -> None:
+        """Half a query, a concept outside its query, or reasoning never closed is no query."""
+        searcher = Searcher([TruncatedResponseError("limit", content=content)])
+
+        with pytest.raises(SmartSearchError) as raised:
+            generate_alternative_queries(searcher, "p", lambda: False)
+        assert str(raised.value) == ANSWER_CUT_OFF_TEXT
+
+    def test_a_cut_off_answer_of_repeats_says_it_held_none_not_run(self) -> None:
+        """Its complete queries were all run already: cut off before one that was not."""
+        searcher = Searcher([TruncatedResponseError("limit", content=answer([("x", ["x"])])[:-1] + ", {")])
+
+        with pytest.raises(SmartSearchError) as raised:
+            generate_alternative_queries(searcher, "p", lambda: False, {query_of(("x", ["x"]))})
+        assert str(raised.value) == ANSWER_CUT_OFF_TEXT
+
+    def test_a_cut_off_answer_after_repeats_is_still_searched(self) -> None:
+        """An earlier answer of repeats does not lose the next one's complete queries."""
+        searcher = Searcher([
+            answer([("x", ["x"])]),
+            TruncatedResponseError("limit", content=answer([("y", ["y"])])[:-1] + ", {"),
+        ])
+
+        queries = generate_alternative_queries(searcher, "p", lambda: False, {query_of(("x", ["x"]))})
+        assert [q.label for q in queries] == ["y"]
+
+    def test_a_cut_off_answer_after_repeats_says_both(self) -> None:
+        """#631 item 5: the earlier answer's repeats are not left out."""
+        searcher = Searcher([answer([("x", ["x"])]), TruncatedResponseError("limit")])
+
+        with pytest.raises(SmartSearchError) as raised:
+            generate_alternative_queries(searcher, "p", lambda: False, {query_of(("x", ["x"]))})
+        assert str(raised.value) == f"{EARLIER_REPEATS_TEXT} {ANSWER_CUT_OFF_TEXT}"
+
+    def test_a_declined_answer_is_not_asked_for_again(self) -> None:
+        """#631 item 3: asked again, the model likely declines again."""
+        searcher = Searcher([RefusedResponseError("declined"), answer([("x", ["x"])])])
+
+        with pytest.raises(SmartSearchError) as raised:
+            generate_alternative_queries(searcher, "p", lambda: False)
+        assert str(raised.value) == ANSWER_REFUSED_TEXT
         assert len(searcher.prompts) == 1
 
     def test_a_stop_asks_nothing(self) -> None:
@@ -592,7 +665,9 @@ class TestTwoBatchesOneScreen:
                 "1 paper's retraction status could not be checked: the check failed")
             reopened = RetractionSnapshot.from_rows(merged.to_snapshot())
             assert retraction_methods_line(merged) == retraction_methods_line(reopened)
-            assert retraction_methods_line(merged) == checked_on_line(clear.checked_at)
+            # the methods line alone names the unchecked paper too (#631 item 6)
+            assert retraction_methods_line(merged) == (
+                f"{checked_on_line(clear.checked_at)}; 1 paper could not be checked")
         assert retraction_methods_line(merged_screen(failed, failed)) == "Retraction status could not be checked"
 
     def test_the_later_failed_check_of_a_paper_the_first_did_not_reach(self) -> None:

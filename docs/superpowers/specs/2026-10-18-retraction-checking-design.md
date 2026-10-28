@@ -203,8 +203,9 @@ section and caveat. A restored session gets the same last-checked line and
   *Check again* can find them. Today the desktop's `add_question_documents`
   links only scored documents.
 - On reopening, a session or report shows the oldest snapshot `checked_at`:
-  "Retraction status checked 2026-10-18". A session older than this feature
-  says "Retraction status never checked".
+  "Retraction status checked 2026-10-18", followed by "; 2 papers could not be
+  checked" when some were not, in the report's methods line too (#631). A
+  session older than this feature says "Retraction status never checked".
 - **"Used" means cited in the run's report** (the fact-check verdict's
   citations on the apps). Only a used paper's change warrants a warning. A
   scored but uncited paper changed nothing the reader sees.

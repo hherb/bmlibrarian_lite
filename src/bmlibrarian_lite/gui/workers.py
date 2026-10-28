@@ -51,7 +51,7 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 from PySide6.QtCore import QThread, Signal, SignalInstance
 from PySide6.QtWidgets import QWidget
 
-from ..analysis_failures import failure_cause_text
+from ..analysis_failures import advice_for_causes, failure_cause_text
 from ..data_models import (
     EvaluationErrorCode,
     LookupRecord,
@@ -66,7 +66,8 @@ from ..pdf_discovery import PDFDiscoverer, DiscoveryResult
 from ..pdf_library_check import set_aside_download_note
 from ..pdf_utils import generate_pdf_path
 from ..fulltext_discovery import FulltextDiscoverer, FulltextResult, FulltextSourceType
-from ..utils import classify_analysis_exception
+from ..exceptions import RefusedResponseError, TruncatedResponseError
+from ..utils import classify_analysis_exception, classify_llm_exception
 from ..retraction_screen import (
     RetractionScreen,
     screen_documents,
@@ -338,7 +339,10 @@ class AnswerWorker(SingleOutcome, QThread):
             answer, sources = self.agent.ask(self.question)
         except Exception as e:
             logger.exception("Answer generation error")
-            self._end(self.error, str(e))
+            message = str(e)
+            if isinstance(e, (TruncatedResponseError, RefusedResponseError)):
+                message += f". {advice_for_causes([classify_llm_exception(e)])}"
+            self._end(self.error, message)
             return
         self._end(self.finished, answer, sources)
 

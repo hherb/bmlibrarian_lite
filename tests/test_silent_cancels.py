@@ -53,7 +53,11 @@ from bmlibrarian_lite.data_models import (  # noqa: E402
     PassOutcome,
     ScoredDocument,
 )
-from bmlibrarian_lite.exceptions import APIError, RetryExhaustedError  # noqa: E402
+from bmlibrarian_lite.exceptions import (  # noqa: E402
+    APIError,
+    RefusedResponseError,
+    RetryExhaustedError,
+)
 from bmlibrarian_lite.gui import workers as workers_module  # noqa: E402
 from bmlibrarian_lite.gui.workers import (  # noqa: E402
     AnswerWorker,
@@ -225,6 +229,20 @@ class TestAWorkerThatCannotBeCancelled:
         worker.run()
 
         assert recorder.only() == ("error", ("no model configured",))
+
+    def test_a_declined_answer_says_what_to_do(self) -> None:
+        """#631: the reader is told another model may answer."""
+        agent = MagicMock()
+        agent.ask.side_effect = RefusedResponseError("The model m declined to answer")
+        worker = AnswerWorker(agent=agent, question="Does aspirin help?")
+        recorder = Recorder(worker)
+
+        worker.run()
+
+        assert recorder.only() == (
+            "error",
+            ("The model m declined to answer. Another model may answer what this one declined.",),
+        )
 
     def test_an_answer_is_still_an_answer(self) -> None:
         """The control on the ordinary path."""

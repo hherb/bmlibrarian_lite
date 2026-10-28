@@ -9,11 +9,11 @@ from bmlibrarian_lite.agents.base import LiteBaseAgent
 from bmlibrarian_lite.agents.search_agent import LiteSearchAgent
 from bmlibrarian_lite.config import LiteConfig, TaskModelConfig
 from bmlibrarian_lite.constants import SMART_SEARCH_MAX_TOKENS
-from bmlibrarian_lite.exceptions import TruncatedResponseError
+from bmlibrarian_lite.exceptions import RefusedResponseError, TruncatedResponseError
 from bmlibrarian_lite.llm import LLMClient, LLMMessage
 from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS
 from bmlibrarian_lite.llm.providers.anthropic import AnthropicProvider
-from bmlibrarian_lite.llm.providers.ollama import OllamaProvider
+from bmlibrarian_lite.llm.providers.ollama import OllamaProvider, ollama_stop_reason
 
 CONTEXT_WINDOW = 32768
 REPORT_CONTEXT_WINDOW = 65536
@@ -165,9 +165,14 @@ def _search_agent(provider: str, client: LLMClient) -> LiteSearchAgent:
     return agent
 
 
-@pytest.mark.parametrize(("stop_reason", "cut_off"), [("max_tokens", True), ("end_turn", False)])
+@pytest.mark.parametrize(("stop_reason", "cut_off"), [
+    ("max_tokens", True), ("model_context_window_exceeded", True), ("end_turn", False),
+])
 def test_anthropics_cut_off_answer_reaches_ask(stop_reason: str, cut_off: bool, tracker: MagicMock) -> None:
-    """Anthropic's own stop reason, through the real client, decides whether ``ask`` refuses."""
+    """Anthropic's own stop reason, through the real client, decides whether ``ask`` refuses.
+
+    Running out of context window cuts the answer off as the token limit does (#631 item 3).
+    """
     sdk = MagicMock()
     sdk.messages.create.return_value = SimpleNamespace(
         content=[SimpleNamespace(text='[{"concepts": [')],
@@ -187,12 +192,45 @@ def test_anthropics_cut_off_answer_reaches_ask(stop_reason: str, cut_off: bool, 
     assert sdk.messages.create.call_args.kwargs["max_tokens"] == SMART_SEARCH_MAX_TOKENS
 
 
-@pytest.mark.parametrize(("done_reason", "cut_off"), [("length", True), ("stop", False), (None, False)])
+def test_anthropics_refusal_reaches_ask(tracker: MagicMock) -> None:
+    """A declined answer is its own error, never parsed as "no usable query" (#631 item 3)."""
+    sdk = MagicMock()
+    sdk.messages.create.return_value = SimpleNamespace(
+        content=[], usage=SimpleNamespace(input_tokens=12, output_tokens=0), stop_reason="refusal",
+    )
+    provider = AnthropicProvider(api_key="synthetic-test-key")
+    provider._client = sdk
+    client = LLMClient()
+    client._providers["anthropic"] = provider
+
+    with pytest.raises(RefusedResponseError):
+        _search_agent("anthropic", client).ask("p")
+
+
+@pytest.mark.parametrize(("done_reason", "eval_count", "stop_reason"), [
+    (None, 1024, STOP_REASON_MAX_TOKENS), (None, 2000, STOP_REASON_MAX_TOKENS),
+    (None, 1023, None), (None, None, None), (None, "1024", None),
+    ("stop", 1024, "stop"), ("length", 3, STOP_REASON_MAX_TOKENS),
+])
+def test_a_server_without_done_reason_is_cut_off_at_its_whole_limit(
+    done_reason: str | None, eval_count: object, stop_reason: str | None,
+) -> None:
+    """#631 item 4: generating all of ``num_predict`` is the cut-off an older server does not name."""
+    assert ollama_stop_reason(done_reason, eval_count, 1024) == stop_reason
+
+
+@pytest.mark.parametrize(("done_reason", "eval_count", "cut_off"), [
+    ("length", 7, True), ("stop", 7, False), (None, 7, False),
+    # an older server names no reason: the whole limit generated is the cut-off (#631 item 4)
+    (None, SMART_SEARCH_MAX_TOKENS, True), (None, SMART_SEARCH_MAX_TOKENS - 1, False),
+])
 def test_ollamas_cut_off_answer_reaches_ask(
-    done_reason: str | None, cut_off: bool, sdk: MagicMock, tracker: MagicMock,
+    done_reason: str | None, eval_count: int, cut_off: bool, sdk: MagicMock, tracker: MagicMock,
 ) -> None:
     """Ollama's "length", through the real client, makes ``ask`` refuse; nothing else does."""
-    sdk.chat.return_value = {**sdk.chat.return_value, "done_reason": done_reason}
+    sdk.chat.return_value = {
+        **sdk.chat.return_value, "done_reason": done_reason, "eval_count": eval_count,
+    }
     agent = _search_agent("ollama", _client(sdk))
 
     if cut_off:

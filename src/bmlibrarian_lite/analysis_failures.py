@@ -197,6 +197,7 @@ _CUT_OFF_ADVICE = (
     "A model that writes out its reasoning first can use up the "
     "length limit: another model may finish within it."
 )
+_REFUSED_ADVICE = "Another model may answer what this one declined."
 _FALLBACK_ADVICE = "Try again later."
 
 _UNREACHABLE_CAUSES = (
@@ -221,7 +222,8 @@ def analysis_failure_advice(shortfalls: Sequence[AnalysisShortfall]) -> str:
         One or more sentences, each at most once, in this order: checking a
         refused API key; waiting out a rate limit; checking the provider is
         reachable; trying another model; one that finishes within the length
-        limit. Otherwise, trying again later.
+        limit; one that answers what this one declined. Otherwise, trying
+        again later.
     """
     return advice_for_causes(
         cause for shortfall in shortfalls for cause in shortfall.causes
@@ -242,7 +244,8 @@ def advice_for_causes(causes: Iterable[EvaluationErrorCode]) -> str:
         One or more sentences, each at most once, in this order: checking a
         refused API key; waiting out a rate limit; checking the provider is
         reachable; trying another model; one that finishes within the length
-        limit. Otherwise, trying again later.
+        limit; one that answers what this one declined. Otherwise, trying
+        again later.
     """
     seen = set(causes)
     advice: list[str] = []
@@ -256,6 +259,8 @@ def advice_for_causes(causes: Iterable[EvaluationErrorCode]) -> str:
         advice.append(_UNREADABLE_ADVICE)
     if EvaluationErrorCode.RESPONSE_TOO_LARGE in seen:
         advice.append(_CUT_OFF_ADVICE)
+    if EvaluationErrorCode.MODEL_REFUSED in seen:
+        advice.append(_REFUSED_ADVICE)
     return " ".join(advice) if advice else _FALLBACK_ADVICE
 
 

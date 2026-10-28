@@ -40,6 +40,29 @@ logger = logging.getLogger(__name__)
 OLLAMA_DONE_REASON_LENGTH = "length"
 
 
+def ollama_stop_reason(done_reason: object, eval_count: object, num_predict: int) -> str | None:
+    """Why an Ollama answer stopped, in ``LLMResponse.stop_reason``'s words.
+
+    Args:
+        done_reason: The answer's ``done_reason``, if the server sent one.
+        eval_count: How many tokens it generated, if the server said.
+        num_predict: The token limit asked for.
+
+    Returns:
+        :data:`STOP_REASON_MAX_TOKENS` when it was cut off: Ollama says
+        ``length``, or, from a server that sends no ``done_reason``, it
+        generated the whole limit. Otherwise the server's reason, or ``None``
+        when it gave none, rather than claiming a stop.
+    """
+    if done_reason == OLLAMA_DONE_REASON_LENGTH:
+        return STOP_REASON_MAX_TOKENS
+    if isinstance(done_reason, str):
+        return done_reason
+    if isinstance(eval_count, int) and num_predict > 0 and eval_count >= num_predict:
+        return STOP_REASON_MAX_TOKENS
+    return None
+
+
 class OllamaProvider(BaseProvider):
     """Ollama local model provider.
 
@@ -224,13 +247,7 @@ class OllamaProvider(BaseProvider):
             model=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            # Ollama says "length" when the answer was cut off; an older server
-            # says nothing, which stays None rather than claiming a stop
-            stop_reason=(
-                STOP_REASON_MAX_TOKENS
-                if done_reason == OLLAMA_DONE_REASON_LENGTH
-                else done_reason if isinstance(done_reason, str) else None
-            ),
+            stop_reason=ollama_stop_reason(done_reason, response.get("eval_count"), max_tokens),
         )
 
     def _estimate_tokens(self, messages: list[LLMMessage]) -> int:

@@ -27,14 +27,24 @@ from typing import Optional
 
 from bmlibrarian_lite.llm import LLMClient, LLMMessage, LLMResponse
 from ..config import LiteConfig, TaskModelConfig
-from ..exceptions import TruncatedResponseError
-from ..llm.data_types import STOP_REASON_MAX_TOKENS, strip_unclosed_thinking
+from ..exceptions import RefusedResponseError, TruncatedResponseError
+from ..llm.data_types import (
+    STOP_REASON_MAX_TOKENS,
+    STOP_REASON_REFUSAL,
+    strip_unclosed_thinking,
+)
 
 logger = logging.getLogger(__name__)
 
 #: What follows a prose answer the model stopped at its token limit, so the
 #: reader never takes the part for the whole (#631)
 CUT_OFF_PROSE_NOTE = "*The model's answer stopped at its length limit: the rest of it is missing.*"
+
+
+def _raise_if_refused(response: LLMResponse) -> None:
+    """Raise :class:`RefusedResponseError` when the model declined to answer."""
+    if response.stop_reason == STOP_REASON_REFUSAL:
+        raise RefusedResponseError(f"The model {response.model} declined to answer")
 
 
 class LiteBaseAgent:
@@ -145,12 +155,17 @@ class LiteBaseAgent:
             TruncatedResponseError: The answer reached its token limit. Asked
                 again with the same limit it is likely cut off again, so a
                 caller that retries an unreadable answer must not retry this.
+                It carries what the model wrote.
+            RefusedResponseError: The model declined to answer; never retried
+                either.
         """
         response = self._chat_response(messages, task_id, temperature, max_tokens, json_mode)
+        _raise_if_refused(response)
         if response.stop_reason == STOP_REASON_MAX_TOKENS:
             raise TruncatedResponseError(
                 f"The answer from {response.model} reached its token limit "
-                f"({response.output_tokens} tokens)"
+                f"({response.output_tokens} tokens)",
+                content=response.content,
             )
         return response.content
 
@@ -180,15 +195,19 @@ class LiteBaseAgent:
         Raises:
             TruncatedResponseError: The answer reached its token limit before
                 any prose: kept, it would be a note standing in for the text.
+            RefusedResponseError: The model declined to answer: what it wrote
+                before declining is not the answer.
         """
         response = self._chat_response(messages, task_id, temperature, max_tokens)
+        _raise_if_refused(response)
         if response.stop_reason != STOP_REASON_MAX_TOKENS:
             return response.content
         prose = strip_unclosed_thinking(response.content).rstrip()
         if not prose:
             raise TruncatedResponseError(
                 f"The answer from {response.model} reached its token limit "
-                f"({response.output_tokens} tokens) before it wrote anything"
+                f"({response.output_tokens} tokens) before it wrote anything",
+                content=response.content,
             )
         if prose.count("```") % 2:
             prose += "\n```"

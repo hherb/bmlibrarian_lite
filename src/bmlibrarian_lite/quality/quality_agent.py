@@ -213,6 +213,7 @@ Focus on THIS study's methodology, not studies it references."""
             JSONParseError: If response cannot be parsed
             RetryExhaustedError: If all retries exhausted
             TruncatedResponseError: The answer reached its token limit (not retried)
+            RefusedResponseError: The model declined to answer (not retried)
         """
         response = self._chat(
             messages=messages,

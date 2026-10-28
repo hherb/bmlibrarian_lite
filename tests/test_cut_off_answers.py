@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from bmlibrarian_lite import mcp_server
 from bmlibrarian_lite.agents.base import CUT_OFF_PROSE_NOTE, LiteBaseAgent
 from bmlibrarian_lite.agents.citation_agent import LiteCitationAgent
 from bmlibrarian_lite.agents.interrogation_agent import LiteInterrogationAgent
@@ -26,10 +27,11 @@ from bmlibrarian_lite.data_models import (
     LiteDocument,
     ScoredDocument,
 )
-from bmlibrarian_lite.exceptions import TruncatedResponseError
+from bmlibrarian_lite.exceptions import RefusedResponseError, TruncatedResponseError
 from bmlibrarian_lite.gui.report_tab import ReportTab
 from bmlibrarian_lite.llm import LLMMessage, LLMResponse
-from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS
+from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS, STOP_REASON_REFUSAL
+from bmlibrarian_lite.utils import classify_llm_exception
 
 QUESTION = "Does aspirin prevent stroke?"
 MESSAGES = [LLMMessage(role="user", content="q")]
@@ -50,6 +52,11 @@ def answers(*responses: LLMResponse) -> Any:
 def cut_off(content: str) -> LLMResponse:
     """An answer stopped at its token limit."""
     return LLMResponse(content=content, model="m", output_tokens=1024, stop_reason=STOP_REASON_MAX_TOKENS)
+
+
+def declined(content: str) -> LLMResponse:
+    """An answer the model declined to give."""
+    return LLMResponse(content=content, model="m", stop_reason=STOP_REASON_REFUSAL)
 
 
 def finished(content: str) -> LLMResponse:
@@ -91,6 +98,41 @@ class TestTheBaseAgent:
 
         with pytest.raises(TruncatedResponseError, match="token limit"):
             agent._chat(MESSAGES)
+
+    def test_chat_keeps_what_a_cut_off_answer_wrote_on_the_error(self) -> None:
+        """A caller that can use its complete parts gets them (#631 item 2)."""
+        agent = LiteBaseAgent.__new__(LiteBaseAgent)
+        agent._chat_response = answers(cut_off('[{"a": 1}, {"b"'))  # type: ignore[method-assign]
+
+        with pytest.raises(TruncatedResponseError) as raised:
+            agent._chat(MESSAGES)
+        assert raised.value.content == '[{"a": 1}, {"b"'
+
+    def test_chat_prose_keeps_what_an_answer_with_no_prose_wrote(self) -> None:
+        """Unclosed reasoning is no prose, but it is what the model wrote."""
+        agent = LiteBaseAgent.__new__(LiteBaseAgent)
+        agent._chat_response = answers(cut_off("<think>\nThe user"))  # type: ignore[method-assign]
+
+        with pytest.raises(TruncatedResponseError) as raised:
+            agent._chat_prose(MESSAGES)
+        assert raised.value.content == "<think>\nThe user"
+
+    @pytest.mark.parametrize("method", ["_chat", "_chat_prose"])
+    def test_a_declined_answer_is_refused_and_never_kept(self, method: str) -> None:
+        """What a model wrote before declining is neither parsed nor shown (#631 item 3)."""
+        agent = LiteBaseAgent.__new__(LiteBaseAgent)
+        agent._chat_response = answers(LLMResponse(  # type: ignore[method-assign]
+            content="Aspirin", model="m", stop_reason=STOP_REASON_REFUSAL))
+
+        with pytest.raises(RefusedResponseError, match="declined"):
+            getattr(agent, method)(MESSAGES)
+
+    def test_a_declined_answer_is_its_own_cause_with_its_own_advice(self) -> None:
+        """Not a cut-off, not unreadable: another model may answer."""
+        cause = classify_llm_exception(RefusedResponseError("declined"))
+        assert cause is EvaluationErrorCode.MODEL_REFUSED
+        assert cause.value == -15 and not cause.is_retryable
+        assert advice_for_causes([cause]) == "Another model may answer what this one declined."
 
     def test_chat_prose_keeps_a_cut_off_answer_and_says_so(self) -> None:
         """What the model wrote is kept, and the note follows it."""
@@ -155,6 +197,45 @@ class TestTheJsonPaths:
 
         assert outcome.causes == (EvaluationErrorCode.RESPONSE_TOO_LARGE,)
         assert chat.calls == 1
+
+    def test_scoring_records_a_declined_answer_and_asks_once(self, without_retry_delays: None) -> None:
+        """Content that would parse as a score is still no score (#631 item 3)."""
+        agent = LiteScoringAgent()
+        chat = answers(declined('{"score": 4, "explanation": "On topic."}'))
+        agent._chat_response = chat  # type: ignore[method-assign]
+
+        scored = agent.score_document(QUESTION, make_document())
+
+        assert scored.score == EvaluationErrorCode.MODEL_REFUSED.value
+        assert chat.calls == 1
+
+    def test_citations_record_a_declined_answer_and_ask_once(self, without_retry_delays: None) -> None:
+        """The same, one stage later."""
+        agent = LiteCitationAgent()
+        chat = answers(declined('{"passages": [{"text": "Aspirin reduced stroke."}]}'))
+        agent._chat_response = chat  # type: ignore[method-assign]
+        scored = ScoredDocument(document=make_document(), score=4, explanation="On topic.")
+
+        outcome = agent.extract_all_citations(QUESTION, [scored], min_score=3)
+
+        assert outcome.causes == (EvaluationErrorCode.MODEL_REFUSED,)
+        assert chat.calls == 1
+
+    @pytest.mark.parametrize(
+        ("error", "advice"),
+        [
+            (RefusedResponseError("declined"), "Another model may answer what this one declined."),
+            (TruncatedResponseError("cut off"), advice_for_causes([EvaluationErrorCode.RESPONSE_TOO_LARGE])),
+        ],
+        ids=["declined", "cut-off"],
+    )
+    def test_a_tool_call_ended_by_its_answer_says_what_to_do(self, error: Exception, advice: str) -> None:
+        """Document interrogation through MCP raises these unwrapped."""
+        assert mcp_server._error_payload(error)["advice"] == advice
+
+    def test_any_other_failed_tool_call_gets_no_model_advice(self) -> None:
+        """The control."""
+        assert "advice" not in mcp_server._error_payload(RuntimeError("Boom"))
 
     def test_the_advice_is_not_the_unreadable_advice(self) -> None:
         """A cut-off answer was readable as far as it went; it ran out of room.
@@ -225,6 +306,12 @@ class TestDocumentInterrogation:
         assert agent._expand_query(QUESTION) == [
             QUESTION, "Aspirin and stroke risk", "Antiplatelet therapy in stroke",
         ]
+
+    def test_a_declined_expansion_adds_nothing(self) -> None:
+        """What a model wrote before declining is no query (#631 item 3)."""
+        agent = self.agent_with(LLMResponse(content="Aspirin and stroke risk\nAnti", stop_reason=STOP_REASON_REFUSAL))
+
+        assert agent._expand_query(QUESTION) == [QUESTION]
 
     def test_a_cut_off_expansion_still_reasoning_adds_nothing(self) -> None:
         """Reasoning lines are not search queries."""

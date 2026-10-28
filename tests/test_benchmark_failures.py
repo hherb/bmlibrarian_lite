@@ -75,7 +75,7 @@ from bmlibrarian_lite.exceptions import (
     StoredResultUnreadableError,
 )
 from bmlibrarian_lite.llm import LLMResponse
-from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS
+from bmlibrarian_lite.llm.data_types import STOP_REASON_MAX_TOKENS, STOP_REASON_REFUSAL
 from bmlibrarian_lite.storage import LiteStorage
 
 QUESTION = "Does aspirin prevent stroke?"
@@ -300,6 +300,12 @@ class TestAFailureIsRecordedAsOne:
         scored = score_once(ScriptedClient(cut_off))
 
         assert scored.score == EvaluationErrorCode.RESPONSE_TOO_LARGE.value
+
+    def test_a_declined_answer_is_not_a_score(self) -> None:
+        """What a model wrote before declining is not its judgement (#631 item 3)."""
+        declined = LLMResponse(content='{"score": 4, "explanation": "On topic"}', stop_reason=STOP_REASON_REFUSAL)
+
+        assert score_once(ScriptedClient(declined)).score == EvaluationErrorCode.MODEL_REFUSED.value
 
     def test_an_unreadable_answer_is_a_parse_failure(self) -> None:
         """Defaulted to 1, the model's garbled answer read as a judgement."""

@@ -277,6 +277,8 @@ class CustomAgent(LiteBaseAgent):
 `_chat` raises `TruncatedResponseError` when the answer reaches its token
 limit: use it for answers code parses. Text the reader reads as written goes
 through `_chat_prose`, which keeps a cut-off answer and notes that it stopped.
+Both raise `RefusedResponseError` when the model declines (`MODEL_REFUSED`,
+never retried); a declined answer is never kept as prose.
 
 Available agents:
 - `SearchAgent`: Converts natural language to PubMed/Europe PMC queries
@@ -442,8 +444,9 @@ cards follow (#307).
 **The quality benchmark follows the same rule** (#314). A `QualityEvaluation`
 holds an `assessment` or a `failure` (an `EvaluationErrorCode`), exactly one,
 checked in `__post_init__` (the dataclass is frozen, and an `"unknown"` design
-is refused); the runner classifies a raised call as the review does. An
-answer is `EMPTY_RESPONSE` when blank, `JSON_PARSE_ERROR` when it holds no
+is refused); the runner classifies a raised call as the review does. A
+cut-off answer is `RESPONSE_TOO_LARGE` and a declined one `MODEL_REFUSED`,
+neither parsed. Otherwise an answer is `EMPTY_RESPONSE` when blank, `JSON_PARSE_ERROR` when it holds no
 JSON, and `INVALID_RESPONSE_FORMAT` when it is JSON naming no design the
 classifier's mapping recognises -- `"unknown"` included
 (`parse_study_design()`) -- or has a malformed field. Anything else a parser

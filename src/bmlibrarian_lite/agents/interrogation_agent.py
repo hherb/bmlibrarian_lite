@@ -29,7 +29,7 @@ from ..config import LiteConfig
 from ..data_models import LiteChunk
 from ..chunking import chunk_document_for_interrogation
 from ..embeddings import LiteEmbedder
-from ..llm.data_types import STOP_REASON_MAX_TOKENS, strip_unclosed_thinking
+from ..llm.data_types import STOP_REASON_MAX_TOKENS, STOP_REASON_REFUSAL, strip_unclosed_thinking
 from .base import LiteBaseAgent
 
 logger = logging.getLogger(__name__)
@@ -186,6 +186,9 @@ class LiteInterrogationAgent(LiteBaseAgent):
                 temperature=0.3,
                 max_tokens=200,
             )
+            if response.stop_reason == STOP_REASON_REFUSAL:
+                logger.warning("The model %s declined to expand the question", response.model)
+                return [question]  # what it wrote before declining is no query
             lines = response.content.strip().split('\n')
             if response.stop_reason == STOP_REASON_MAX_TOKENS:
                 # The last line may stop mid-query; the complete ones before it still serve

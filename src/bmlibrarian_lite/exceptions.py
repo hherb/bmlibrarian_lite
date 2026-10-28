@@ -337,6 +337,28 @@ class TruncatedResponseError(LLMError):
 
     Asked again with the same limit, it is likely cut off again, each time
     paid, so a caller that would retry an unusable answer stops instead.
+
+    Attributes:
+        content: What the model wrote before the limit, for a caller that can
+            use its complete parts.
+    """
+
+    def __init__(self, message: str, content: str = "") -> None:
+        """Initialize a cut-off answer error.
+
+        Args:
+            message: Error message (our own text, never the provider's)
+            content: What the model wrote before the limit
+        """
+        super().__init__(message)
+        self.content = content
+
+
+class RefusedResponseError(LLMError):
+    """The model declined to answer (Anthropic's ``refusal`` stop reason).
+
+    Asked again with the same request, it likely declines again, so it is
+    never retried.
     """
 
 

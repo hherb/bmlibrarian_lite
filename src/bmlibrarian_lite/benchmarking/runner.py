@@ -41,7 +41,7 @@ from ..data_models import (
 )
 from ..exceptions import StoredResultUnreadableError
 from ..llm import LLMClient, LLMMessage
-from ..llm.data_types import STOP_REASON_MAX_TOKENS
+from ..llm.data_types import STOP_REASON_MAX_TOKENS, STOP_REASON_REFUSAL
 from ..storage import LiteStorage
 from ..utils import classify_analysis_exception
 from .models import (
@@ -693,10 +693,13 @@ Evaluate the relevance of this document to the research question."""
             response.output_tokens,
         )
 
-        # As the review's _chat records it: what a cut-off answer holds is not its verdict
+        # As the review's _chat records it: a cut-off or declined answer holds no verdict
         if response.stop_reason == STOP_REASON_MAX_TOKENS:
             parsed = None
             failure = EvaluationErrorCode.RESPONSE_TOO_LARGE
+        elif response.stop_reason == STOP_REASON_REFUSAL:
+            parsed = None
+            failure = EvaluationErrorCode.MODEL_REFUSED
         else:
             parsed = parse_score_response(response.content)
             failure = EvaluationErrorCode.JSON_PARSE_ERROR

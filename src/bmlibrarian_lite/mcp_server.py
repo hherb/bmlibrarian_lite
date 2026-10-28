@@ -45,6 +45,7 @@ from bmlibrarian_lite.agents.reporting_agent import LiteReportingAgent
 from bmlibrarian_lite.agents.scoring_agent import LiteScoringAgent
 from bmlibrarian_lite.agents.search_agent import LiteSearchAgent
 from bmlibrarian_lite.analysis_failures import (
+    advice_for_causes,
     analysis_failure_advice,
     with_analysis_shortfall_notice,
     without_analysis_shortfall_notice,
@@ -59,7 +60,13 @@ from bmlibrarian_lite.data_models import (
     SearchProvider,
 )
 from bmlibrarian_lite.elsevier_api import ElsevierCredentials
-from bmlibrarian_lite.exceptions import AnalysisFailedError, LiteError, SearchFailedError
+from bmlibrarian_lite.exceptions import (
+    AnalysisFailedError,
+    LiteError,
+    RefusedResponseError,
+    SearchFailedError,
+    TruncatedResponseError,
+)
 from bmlibrarian_lite.fulltext_discovery import FulltextDiscoverer
 from bmlibrarian_lite.identifiers import canonical_pmid, read_caller_ids
 from bmlibrarian_lite.llm import LLMClient
@@ -82,6 +89,7 @@ from bmlibrarian_lite.search_failures import (
     with_search_shortfall_notice,
 )
 from bmlibrarian_lite.storage import LiteStorage
+from bmlibrarian_lite.utils import classify_llm_exception
 
 logger = logging.getLogger(__name__)
 
@@ -1035,7 +1043,8 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
     Returns:
         The error message and type; for a failed search also what failed
         (``retrieval_shortfalls``) and what to do about it (``advice``); for
-        a failed analysis, the same in ``analysis_shortfalls``. A failure
+        a failed analysis, the same in ``analysis_shortfalls``; for an answer
+        cut off or declined, the ``advice`` alone. A failure
         that came after an incomplete stage carries that stage's shortfalls
         too, so what was already lost is not lost again with it.
     """
@@ -1046,6 +1055,8 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
     if isinstance(exc, AnalysisFailedError):
         payload["analysis_shortfalls"] = _analysis_shortfalls_payload([exc.shortfall])
         payload["advice"] = analysis_failure_advice([exc.shortfall])
+    if isinstance(exc, (TruncatedResponseError, RefusedResponseError)):
+        payload["advice"] = advice_for_causes([classify_llm_exception(exc)])
     carried = _carried_analysis_shortfalls(exc)
     if carried and "analysis_shortfalls" not in payload:
         payload["analysis_shortfalls"] = _analysis_shortfalls_payload(carried)
