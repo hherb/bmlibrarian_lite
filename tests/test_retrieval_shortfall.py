@@ -423,6 +423,15 @@ class TestSearchFailedError:
             f"(HTTP 429 Too Many Requests).\n\n{RATE_LIMIT_ADVICE} {PUBMED_KEY_ADVICE}"
         )
 
+    def test_the_failure_message_tells_its_notice_before_the_advice(self) -> None:
+        """#639: what failed, what else happened, then what to do."""
+        message = format_search_failure_message(SearchFailedError([PUBMED_DOWN], "Cut off."))
+
+        assert message == (
+            "The search could not be completed: PubMed could not be searched "
+            f"(HTTP 429 Too Many Requests).\n\nCut off.\n\n{RATE_LIMIT_ADVICE} {PUBMED_KEY_ADVICE}"
+        )
+
 
 class TestShortfallsInSessionMetadata:
     """Shortfalls are stored as JSON-safe dicts and read back validated."""

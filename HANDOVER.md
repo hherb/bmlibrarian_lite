@@ -8,25 +8,14 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#637 on branch `fix/desktop-unknown-stop-reasons-637`** (maintainer's
-choices: warn, never raise; tell the reader): each provider names the stop
-reasons it knows (`ANTHROPIC_KNOWN_STOP_REASONS` via `anthropic_stop_reason`;
-Ollama's `stop`/`length`) and logs any other, read as finished unless the
-whole token limit was generated (then cut off); `None` is silent. A cut-off
-smart-search answer holding complete queries returns
-`cut_off_queries_notice(n)` with them (`generate_alternative_queries` now
-returns `(queries, notice)`), carried as `SmartSearchRound.notice`: into the
-review's `smart_search_notice` (emitted after the incomplete-search notice,
-whose label text replaces), into Find More Evidence's
-`MoreEvidence.cut_off_notice` (its dialog) and, when it found documents, the
-report's `smart_search_notice`. The report puts the notice on the one
-"Alternative Queries (smart search)" heading, above the queries run. **A
-test stubbing the reporting or interrogation answer patches `_chat_prose`,
-not `_chat`.** **#629 stays open
-for the maintainer's decision** on item 4 (a re-lost page is counted twice;
-shortfalls keep no offset, and any rule without one can understate) and item
-7 (counts lost when an error follows a cancel). **`bmlib drift` has failed
-since 2026-10-19**: bmlib changes await triage into
+**#639 on branch `fix/find-more-evidence-cut-off-notice-639`**: a cut-off
+answer's notice now rides on `SearchFailedError.notice` when every one of its
+searches fails, and `format_search_failure_message` tells it between the
+failure and the advice (both workers' dialogs). **#629 stays open for the
+maintainer's decision** on item 4 (a re-lost page is counted twice; shortfalls
+keep no offset, and any rule without one can understate) and item 7 (counts
+lost when an error follows a cancel). **`bmlib drift` has failed since
+2026-10-19**: bmlib changes await triage into
 `doc/cross_platform/bmlib_sync/ledger.json`
 (`scripts/check_bmlib_ledger.py --bmlib ~/src/bmlib`).
 Open: #627 (MCP has no smart search; a round runs all its queries;
@@ -36,9 +25,8 @@ Search's report covers its batch only). Lodged: #621 (PR #622 follow-ups),
 all three), #625 (Upload Full Text follow-ups),
 #633 (no setting reaches the tasks' token limits), #634 (a classifier
 failure read as "no design" or as failing the quality filter), #635 (query
-conversion and MCP payloads around the cut-off guard; refusals too), #639
-(Find More Evidence: a cut-off answer's notice lost when every search
-fails). Apple follow-ups: #612, #613. Android divergences: #614, #615; follow-ups
+conversion and MCP payloads around the cut-off guard; refusals too). Apple
+follow-ups: #612, #613. Android divergences: #614, #615; follow-ups
 #617–#619. The apps have no refusal handling yet (the Python-only rows in
 `doc/cross_platform/analysis_failure_reporting.md`).
 
@@ -75,6 +63,14 @@ have landed):
 
 ## Recently landed (context)
 
+- **Unknown stop reasons** (#637, PR #638): each provider names the stop
+  reasons it knows (`ANTHROPIC_KNOWN_STOP_REASONS`; Ollama's `stop`/`length`)
+  and logs any other, read as finished unless the whole token limit was
+  generated; `None` is silent. A cut-off smart-search answer holding complete
+  queries returns `cut_off_queries_notice(n)` (`SmartSearchRound.notice`) into
+  the review's and the report's `smart_search_notice` and Find More
+  Evidence's `MoreEvidence.cut_off_notice`. **A test stubbing the reporting or
+  interrogation answer patches `_chat_prose`, not `_chat`.**
 - **Cut-off and refused answers** (#629, #631; PRs #630, #632, #636): a
   cut-off answer (`STOP_REASON_MAX_TOKENS`, Anthropic's
   `model_context_window_exceeded`, Ollama's `length` or a whole `num_predict`)
