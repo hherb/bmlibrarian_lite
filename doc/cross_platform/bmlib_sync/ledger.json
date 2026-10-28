@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "bmlib_commit": "f76721545a76eceb683d9c460fb1f47e5c925cdb",
+  "bmlib_commit": "8845ba857b9cb7c7999e9bd332ff173b448a92da",
   "from_bmlib": [
     {
       "id": "lite:pubmed-articleid-reference-list",
@@ -1801,6 +1801,240 @@
       "android": "owed",
       "issue": null,
       "note": "The rule lives in bmlib (`bmlib.publications.retraction_status`); the desktop consumes it by import and tests its copy of the contract `retraction_parity/retraction_status.json`. The apps are the next plans (spec docs/superpowers/specs/2026-10-18-retraction-checking-design.md)."
+    },
+    {
+      "id": "bmlib#453",
+      "title": "`extract_study_type` reads a review by how it searched",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's standalone rule-based extractors; lite has none (the desktop classifies by LLM)."
+    },
+    {
+      "id": "bmlib#498",
+      "title": "A title-only abstract section is kept, by decision, and both arms that flush one are pinned",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#598",
+      "note": "Swift and Kotlin flush an abstract section only when it has prose; the desktop's `jats_markdown._front_matter` prints no abstract section title at all (`text_of` skips titles). #598 covers all three."
+    },
+    {
+      "id": "bmlib#500",
+      "title": "A caller value faking `str` as its class is refused as not text",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Guards on bmlib's `fetch_fulltext` and `analyze()`, which lite does not call."
+    },
+    {
+      "id": "bmlib#503",
+      "title": "The PDF-title corpus's `biorxiv` rows are a `/pubs` draw",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's corpus and sampler; both ship rules still hold and nothing in bmlib moves, so `pdf_title_check.json` is unchanged."
+    },
+    {
+      "id": "bmlib#507",
+      "title": "A retraction evidence date that is not ISO is refused",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "The desktop takes it by import (bmlib pin `8845ba8`); every date it builds evidence from comes from bmlib's own parsers. bmlib files the Rust/FFI half separately. The apps' retraction plans consume bmlib's Rust through the FFI (#588), so they take this with that pin."
+    },
+    {
+      "id": "bmlib#509",
+      "title": "`import_retraction_watch_export()`: one export replaces the stored notices",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "The desktop builds each refresh into a fresh file with `import_retraction_watch_export` (`retraction_export._build`), so an export with no recognised `RetractionNature`, DOI or PMID is refused and the old copy kept; the 1% removal guard is moot over an empty table, and the desktop's 5% shrink guard stands. The apps' retraction plans consume bmlib's Rust through the FFI (#588), so they take this with that pin."
+    },
+    {
+      "id": "bmlib#510",
+      "title": "`import_retraction_watch_export()`: one export replaces the stored notices",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "The desktop rebuilds its copy whole on every refresh, so a dropped record was already gone; it now builds with the function itself (see bmlib#509). The apps' retraction plans consume bmlib's Rust through the FFI (#588), so they take this with that pin."
+    },
+    {
+      "id": "bmlib#514",
+      "title": "An abstract section's title is whitespace-normalised, as a body section's is",
+      "python": "n/a",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#641",
+      "note": "Swift and Kotlin store the trimmed title; the desktop prints no abstract section title (see bmlib#498)."
+    },
+    {
+      "id": "bmlib#516",
+      "title": "Every exhibit, formula, reference and footnote `<label>` and the journal title are whitespace-normalised",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#641",
+      "note": "Swift and Kotlin store the trimmed label and journal title; the desktop collapses labels (`text_of`) but prints `<journal-title>` raw, waiting on the next converter bump since bmlib measured none wrapped."
+    },
+    {
+      "id": "bmlib#518",
+      "title": "A cited `<source>` is whitespace-normalised, as the article's own journal title is",
+      "python": "equivalent",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#641",
+      "note": "The desktop prints each citation whitespace-collapsed whole; Swift and Kotlin store the trimmed `source`."
+    },
+    {
+      "id": "bmlib#522",
+      "title": "The Rust `RetractionIndex::build` refuses an export in which no notice carries a nature this version recognises",
+      "python": "equivalent",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "Python's import refuses the same (see bmlib#509). The apps' retraction plans consume bmlib's Rust through the FFI (#588), so they take this with that pin."
+    },
+    {
+      "id": "bmlib#523",
+      "title": "A retraction notice's own PMID is stored without leading zeros, as the paper's is",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "The desktop takes it by import (bmlib pin `8845ba8`). The apps' retraction plans consume bmlib's Rust through the FFI (#588), so they take this with that pin."
+    },
+    {
+      "id": "bmlib#530",
+      "title": "An embedding that is NaN, infinite or zero is refused, not stored",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "`bmlib.embed` is unreleased; lite embeds with FastEmbed (desktop) and NLEmbedding (apps)."
+    },
+    {
+      "id": "bmlib#532",
+      "title": "`bmlib.embed`'s errors can be told apart by type, as Rust's are",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "`bmlib.embed` is unreleased; lite embeds with FastEmbed (desktop) and NLEmbedding (apps)."
+    },
+    {
+      "id": "bmlib#533",
+      "title": "`find_passage`'s long-input tests bound work, not wall time",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib#540",
+      "title": "The extractor sampler measures PubMed's bare `Review`",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib:unreleased-canonical-from-segmented-pdf",
+      "title": "Canonical text from a segmented PDF",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "StudyAnalyzer's canonical text; no lite platform mirrors it."
+    },
+    {
+      "id": "bmlib:unreleased-canonical-chunks",
+      "title": "Chunks of a canonical text, for retrieval",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "StudyAnalyzer's canonical text; no lite platform mirrors it (the desktop's own windows are `chunking.analysis_windows`)."
+    },
+    {
+      "id": "bmlib:unreleased-canonical-text",
+      "title": "Canonical text: one string per paper, every piece a span",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "StudyAnalyzer's canonical text; no lite platform mirrors it."
+    },
+    {
+      "id": "bmlib:unreleased-jats-table-rows",
+      "title": "`JATSTableInfo.header_rows` and `body_rows`",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "New data fields; `to_html()` reads neither, and no lite parser is asked for cell rows."
+    },
+    {
+      "id": "bmlib:unreleased-fulltext-result-jats-xml",
+      "title": "`FullTextResult.jats_xml`: the JATS a result was rendered from",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's retrieval; lite's platforms keep the JATS they fetch themselves."
+    },
+    {
+      "id": "bmlib:unreleased-embedder",
+      "title": "`bmlib.embed.Embedder`: in-process embedding over llama-cpp-python",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite embeds with FastEmbed (desktop) and NLEmbedding (apps)."
+    },
+    {
+      "id": "bmlib:unreleased-embed-constants",
+      "title": "`bmlib.embed`: embedding constants, vector rules and a verified model download",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite embeds with FastEmbed (desktop) and NLEmbedding (apps)."
+    },
+    {
+      "id": "bmlib:unreleased-find-passage",
+      "title": "`bmlib.citations.find_passage` locates an LLM's near-verbatim quote in its source",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": "#642",
+      "note": "The desktop's `gui/text_highlighting.find_passage_in_abstract` returns a span into the whitespace-collapsed abstract, so a highlight is misplaced; the apps locate no passage."
+    },
+    {
+      "id": "bmlib:unreleased-retraction-short-row",
+      "title": "A download cut part-way through a row is refused, not stored",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "The desktop takes it by import (bmlib pin `8845ba8`); `tests/test_retraction_export.py` refuses a cut row and keeps the old copy. The apps' retraction plans consume bmlib's Rust through the FFI (#588), so they take this with that pin."
+    },
+    {
+      "id": "bmlib:unreleased-retraction-padded-zero-pmid",
+      "title": "A padded zero PubMed ID is the export's \"absent\" sentinel, as `\"0\"` is",
+      "python": "ported",
+      "swift": "owed",
+      "android": "owed",
+      "issue": null,
+      "note": "The desktop takes it by import (bmlib pin `8845ba8`); its rebuilt copy holds ~4% fewer notices (the October export's 2,913 sentinel-only rows), inside its 5% shrink guard. The apps' retraction plans consume bmlib's Rust through the FFI (#588), so they take this with that pin."
     }
   ],
   "to_bmlib": [
