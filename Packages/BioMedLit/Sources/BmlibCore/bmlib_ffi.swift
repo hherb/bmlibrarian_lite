@@ -2046,6 +2046,16 @@ public struct JatsTable: Equatable, Hashable {
      * The table's notes; see [`JatsFigure::footnotes`] for the marker rule.
      */
     public let footnotes: [String]
+    /**
+     * The header rows as cell texts, as the reader reads them (see the crate's
+     * `JATSTableInfo::header_rows`); empty for an image-only table.
+     */
+    public let headerRows: [[String]]
+    /**
+     * The body rows as cell texts, read as `header_rows` are; empty for an
+     * image-only table.
+     */
+    public let bodyRows: [[String]]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -2069,13 +2079,23 @@ public struct JatsTable: Equatable, Hashable {
          */graphicUrl: String?, 
         /**
          * The table's notes; see [`JatsFigure::footnotes`] for the marker rule.
-         */footnotes: [String]) {
+         */footnotes: [String], 
+        /**
+         * The header rows as cell texts, as the reader reads them (see the crate's
+         * `JATSTableInfo::header_rows`); empty for an image-only table.
+         */headerRows: [[String]], 
+        /**
+         * The body rows as cell texts, read as `header_rows` are; empty for an
+         * image-only table.
+         */bodyRows: [[String]]) {
         self.id = id
         self.label = label
         self.caption = caption
         self.htmlContent = htmlContent
         self.graphicUrl = graphicUrl
         self.footnotes = footnotes
+        self.headerRows = headerRows
+        self.bodyRows = bodyRows
     }
 
     
@@ -2099,7 +2119,9 @@ public struct FfiConverterTypeJatsTable: FfiConverterRustBuffer {
                 caption: FfiConverterString.read(from: &buf), 
                 htmlContent: FfiConverterString.read(from: &buf), 
                 graphicUrl: FfiConverterOptionString.read(from: &buf), 
-                footnotes: FfiConverterSequenceString.read(from: &buf)
+                footnotes: FfiConverterSequenceString.read(from: &buf), 
+                headerRows: FfiConverterSequenceSequenceString.read(from: &buf), 
+                bodyRows: FfiConverterSequenceSequenceString.read(from: &buf)
         )
     }
 
@@ -2110,6 +2132,8 @@ public struct FfiConverterTypeJatsTable: FfiConverterRustBuffer {
         FfiConverterString.write(value.htmlContent, into: &buf)
         FfiConverterOptionString.write(value.graphicUrl, into: &buf)
         FfiConverterSequenceString.write(value.footnotes, into: &buf)
+        FfiConverterSequenceSequenceString.write(value.headerRows, into: &buf)
+        FfiConverterSequenceSequenceString.write(value.bodyRows, into: &buf)
     }
 }
 
@@ -3585,6 +3609,31 @@ fileprivate struct FfiConverterSequenceTypeRetractionLookup: FfiConverterRustBuf
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [[String]]
+
+    public static func write(_ value: [[String]], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterSequenceString.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [[String]] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [[String]]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterSequenceString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterDictionaryStringTypeCrossrefResult: FfiConverterRustBuffer {
     public static func write(_ value: [String: CrossrefResult], into buf: inout [UInt8]) {
         let len = Int32(value.count)
@@ -3671,9 +3720,10 @@ public func parseJatsAudited(xml: String, knownPmcId: String)throws  -> JatsPars
  * # Errors
  *
  * The CSV is not UTF-8 or is malformed, `data_as_of` is blank, no row was
- * usable, or no notice carries a paper DOI (or none a PMID): a renamed
- * column. Keep the previous index, if any. A download truncated on a row
- * boundary builds: compare `notice_count()` with the index it replaces.
+ * usable, or no notice carries a paper DOI, none a PMID, or none a
+ * `RetractionNature` this version recognises: a renamed column. Keep the
+ * previous index, if any. A download truncated on a row boundary builds:
+ * compare `notice_count()` with the index it replaces.
  */
 public func buildRetractionIndex(csv: Data, dataAsOf: String)throws  -> RetractionIndexBuild  {
     return try  FfiConverterTypeRetractionIndexBuild_lift(try rustCallWithError(FfiConverterTypeRetractionIndexError_lift) {
@@ -3753,7 +3803,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bmlib_ffi_checksum_func_parse_jats_audited() != 54867) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bmlib_ffi_checksum_func_build_retraction_index() != 8662) {
+    if (uniffi_bmlib_ffi_checksum_func_build_retraction_index() != 50609) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bmlib_ffi_checksum_func_crossref_retraction_requests() != 23667) {

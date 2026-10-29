@@ -877,7 +877,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_bmlib_ffi_checksum_func_parse_jats_audited() and 0xFFFF) != 54867) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_bmlib_ffi_checksum_func_build_retraction_index() and 0xFFFF) != 8662) {
+    if ((lib.uniffi_bmlib_ffi_checksum_func_build_retraction_index() and 0xFFFF) != 50609) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_bmlib_ffi_checksum_func_crossref_retraction_requests() and 0xFFFF) != 23667) {
@@ -2479,6 +2479,18 @@ data class JatsTable (
      * The table's notes; see [`JatsFigure::footnotes`] for the marker rule.
      */
     val `footnotes`: List<kotlin.String>
+    , 
+    /**
+     * The header rows as cell texts, as the reader reads them (see the crate's
+     * `JATSTableInfo::header_rows`); empty for an image-only table.
+     */
+    val `headerRows`: List<List<kotlin.String>>
+    , 
+    /**
+     * The body rows as cell texts, read as `header_rows` are; empty for an
+     * image-only table.
+     */
+    val `bodyRows`: List<List<kotlin.String>>
     
 ){
     
@@ -2501,6 +2513,8 @@ public object FfiConverterTypeJatsTable: FfiConverterRustBuffer<JatsTable> {
             FfiConverterString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterSequenceString.read(buf),
+            FfiConverterSequenceSequenceString.read(buf),
+            FfiConverterSequenceSequenceString.read(buf),
         )
     }
 
@@ -2510,7 +2524,9 @@ public object FfiConverterTypeJatsTable: FfiConverterRustBuffer<JatsTable> {
             FfiConverterString.allocationSize(value.`caption`) +
             FfiConverterString.allocationSize(value.`htmlContent`) +
             FfiConverterOptionalString.allocationSize(value.`graphicUrl`) +
-            FfiConverterSequenceString.allocationSize(value.`footnotes`)
+            FfiConverterSequenceString.allocationSize(value.`footnotes`) +
+            FfiConverterSequenceSequenceString.allocationSize(value.`headerRows`) +
+            FfiConverterSequenceSequenceString.allocationSize(value.`bodyRows`)
     )
 
     override fun write(value: JatsTable, buf: ByteBuffer) {
@@ -2520,6 +2536,8 @@ public object FfiConverterTypeJatsTable: FfiConverterRustBuffer<JatsTable> {
             FfiConverterString.write(value.`htmlContent`, buf)
             FfiConverterOptionalString.write(value.`graphicUrl`, buf)
             FfiConverterSequenceString.write(value.`footnotes`, buf)
+            FfiConverterSequenceSequenceString.write(value.`headerRows`, buf)
+            FfiConverterSequenceSequenceString.write(value.`bodyRows`, buf)
     }
 }
 
@@ -3777,6 +3795,34 @@ public object FfiConverterSequenceTypeRetractionLookup: FfiConverterRustBuffer<L
 /**
  * @suppress
  */
+public object FfiConverterSequenceSequenceString: FfiConverterRustBuffer<List<List<kotlin.String>>> {
+    override fun read(buf: ByteBuffer): List<List<kotlin.String>> {
+        val len = buf.getInt()
+        return List<List<kotlin.String>>(len) {
+            FfiConverterSequenceString.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<List<kotlin.String>>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterSequenceString.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<List<kotlin.String>>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterSequenceString.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterMapStringTypeCrossrefResult: FfiConverterRustBuffer<Map<kotlin.String, CrossrefResult>> {
     override fun read(buf: ByteBuffer): Map<kotlin.String, CrossrefResult> {
         val len = buf.getInt()
@@ -3884,9 +3930,10 @@ public object FfiConverterMapStringTypeCrossrefResult: FfiConverterRustBuffer<Ma
          * # Errors
          *
          * The CSV is not UTF-8 or is malformed, `data_as_of` is blank, no row was
-         * usable, or no notice carries a paper DOI (or none a PMID): a renamed
-         * column. Keep the previous index, if any. A download truncated on a row
-         * boundary builds: compare `notice_count()` with the index it replaces.
+         * usable, or no notice carries a paper DOI, none a PMID, or none a
+         * `RetractionNature` this version recognises: a renamed column. Keep the
+         * previous index, if any. A download truncated on a row boundary builds:
+         * compare `notice_count()` with the index it replaces.
          */
     @Throws(RetractionIndexException::class) fun `buildRetractionIndex`(`csv`: kotlin.ByteArray, `dataAsOf`: kotlin.String): RetractionIndexBuild {
             return FfiConverterTypeRetractionIndexBuild.lift(
