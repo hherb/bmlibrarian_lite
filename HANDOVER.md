@@ -105,8 +105,9 @@ The apps follow (above).
   holdback, PDF text via iText (1 MB cap); citations read
   `DocumentEntity.analysisFullText` and are replaced in one transaction.
 - **bmlib: the FFI pin and the port set** (#583; PRs #564–#570, #572). The
-  pin names bmlib `main` (`f767215`); `android-tests.yml` builds bmlib there
-  and fails if `BmlibJatsFfiTest` skips; **the committed xcframework is
+  pin names bmlib `main` (`83cd2b3`, PR #646); `android-tests.yml` builds
+  bmlib there, fails if either bmlib FFI test skips, and fails if the
+  retraction contract copy is not the pin's; **the committed xcframework is
   `bmlib-xcframework.yml`'s own build** (re-pin from its artifact as its
   header says). **`doc/cross_platform/bmlib_sync/ledger.json` records every
   bmlib change per platform**: a sync bumps `bmlib_commit` and triages every

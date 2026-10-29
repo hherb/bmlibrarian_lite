@@ -65,6 +65,14 @@ jobs:
           ref: ${{ steps.pin.outputs.commit }}
           path: bmlib-checkout
 
+      - name: The retraction contract copy is the pinned bmlib's
+        # Swift and Kotlin assert the pin's Rust against this copy; a stale or cut copy would pass.
+        working-directory: .
+        run: |
+          cmp doc/cross_platform/retraction_parity/retraction_status.json \
+            bmlib-checkout/tests/fixtures/retraction_status.json \
+            || { echo "::error::retraction_status.json differs from bmlib at the FFI pin"; exit 1; }
+
       - uses: actions/cache@v4
         with:
           path: |

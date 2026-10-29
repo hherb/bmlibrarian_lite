@@ -657,7 +657,7 @@
       "swift": "owed",
       "android": "owed",
       "issue": null,
-      "note": "WP 7. Spec docs/superpowers/specs/2026-10-18-retraction-checking-design.md; the rule is bmlib#504 (see its row). Desktop PR 1 (#594: the bmlib dependency, the contract copy, stored publication types) and PR 2 (#597: export copy, Crossref lookups, stored verdicts, the review, MCP, interrogation, report and bmll retractions-update) consume it; PR 3, saved work (last checked, Check again), follows. The apps are the next plans."
+      "note": "WP 7. Spec docs/superpowers/specs/2026-10-18-retraction-checking-design.md; the rule is bmlib#504 (see its row). Desktop PR 1 (#594: the bmlib dependency, the contract copy, stored publication types) and PR 2 (#597: export copy, Crossref lookups, stored verdicts, the review, MCP, interrogation, report and bmll retractions-update) consume it, and PR 3 (#605: saved work, last checked, Check again) finishes it. The apps' plan is docs/superpowers/plans/2026-10-29-retraction-checking-apple.md (iOS/macOS); Android follows."
     },
     {
       "id": "bmlib:0.8.0-citation-styles",
@@ -1845,7 +1845,7 @@
       "swift": "owed",
       "android": "owed",
       "issue": null,
-      "note": "The desktop takes it by import (bmlib pin `8845ba8`); every date it builds evidence from comes from bmlib's own parsers. bmlib files the Rust/FFI half separately. The apps' retraction plans consume bmlib's Rust through the FFI; its pin (`83cd2b3`, PR #646) carries this, owed until the apps call it."
+      "note": "The desktop takes it by import (bmlib pin `8845ba8`); every date it builds evidence from comes from bmlib's own parsers. bmlib files the Rust/FFI half separately. The apps' retraction plans consume bmlib's Rust through the FFI, and its pin (`83cd2b3`, PR #646) does not carry this: the Rust half is bmlib#537 (open). Owed until a re-pin carries bmlib#537; the apps do not refuse dates themselves."
     },
     {
       "id": "bmlib#509",

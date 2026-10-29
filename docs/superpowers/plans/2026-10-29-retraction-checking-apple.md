@@ -21,18 +21,18 @@
 - The export is downloaded **over Wi-Fi only**: `URLSessionConfiguration.allowsExpensiveNetworkAccess = false` and `allowsConstrainedNetworkAccess = false`. **A run never waits for it.**
 - Crossref requests carry the same mailto User-Agent as `CrossRefService` (`AppSettings.ncbiEmail`, with the existing fallback). They are paced at `TransparencyConstants.minimumRequestInterval`. A failed batch leaves every DOI in it `.unreachable`, classified by `SearchTransport.failure(for:)`. No status is ever inferred from a failure.
 - SwiftData changes are **new optional properties only** (SchemaVersions.swift:109-136: no new version). #289 blocks anything else. HANDOVER's *Touching a SwiftData model* rule applies: `StoreMigrationTests` must write a store in the pre-change shape and open it.
-- Reader-facing text carries no provider text (golden rule 13). `CrossrefResult.unreachable(reason:)` goes to the log only.
+- Reader-facing text carries no provider text (golden rule 13). `CrossrefResult.unreachable(reason:)` goes to the log only. What the reader is told about a Crossref failure is the app's own `RequestFailure.describe()`, stored per paper as the desktop's `PaperCheck.crossref_failure` is.
 - A check failure never stops a run. Each document is checked at most once per run, and the trace (notice, report, badge) sees every exclusion.
 - No test talks to live Crossref or downloads the export. Use a `URLProtocol` stub (pattern: `DocumentFullTextRequestTests:23`) and an injected checker closure. Before the PR, run once with the dead-proxy memory's `HTTPS_PROXY`.
 - Gates: `swift test` in `Packages/BioMedLit` and in `ios/MedicalFactChecker`; `xcodebuild -scheme MedicalFactChecker -destination 'platform=macOS' build`; and an iOS Simulator build, because the badge and banner views are behind `#if os(iOS)`.
-- One branch per PR, never stacked. **PR 4a = Tasks 1–7, PR 4b = Tasks 8–9.** The ledger rows `bmlib:0.7.0-retraction-watch`, bmlib#504, #507, #509, #510, #522, #523, `…-short-row` and `…-padded-zero-pmid` become `swift: ported` in PR 4a.
+- One branch per PR, never stacked. **PR 4a = Tasks 1–7, PR 4b = Tasks 8–9.** The ledger rows `bmlib:0.7.0-retraction-watch`, bmlib#504, #509, #510, #522, #523, `…-short-row` and `…-padded-zero-pmid` become `swift: ported` in PR 4a. bmlib#507 (a non-ISO evidence date is refused) stays `owed`: its Rust half is bmlib#537, open, so the pin does not carry it. The apps do not refuse dates themselves (one rule, in bmlib); the row is ported by the re-pin that carries bmlib#537.
 
 ## Review Focus
 
 1. **A document with neither DOI nor PMID** (a medRxiv record): `unchecked`, counted in the notice, scored, never `clear`. Owner: Task 3, `testNoIdentifierIsUncheckedAndCounted`.
 2. **No usable export** (first launch on cellular, a refused download): every paper still reaches Crossref and the label. None is `clear`. The notice says the Retraction Watch data could not be used, and the run goes on. Owner: Task 3, `testNoIndexMeansExportNotConsulted`.
 3. **One failed batch among several** (a 429, then a served batch): only that batch's DOIs are unchecked, and the count is exact. Owner: Task 2, `testOneFailedBatchLeavesOnlyItsDOIsUnreachable`.
-4. **Smart search documents** reach scoring through `scoreNewDocuments(_:)` (W:3427), not `scoreDocuments()`. A retracted one there must be screened too. Owner: Task 5, `testSmartSearchDocumentsAreScreened`.
+4. **Smart search documents** reach scoring through `scoreNewDocuments(_:)` (`FactCheckWorkflow.swift:3427`), not `scoreDocuments()`. A retracted one there must be screened too. Owner: Task 5, `testSmartSearchDocumentsAreScreened`.
 5. **Cancel during the check**: the run stops through the existing `stopWork` path. No snapshot claims the papers were checked, and no document is marked clear. Owner: Task 5, `testCancelDuringTheCheckRecordsNothing`.
 
 ---
@@ -44,7 +44,7 @@
 **Files:**
 - Modify: `Packages/BioMedLit/Sources/BioMedLit/Services/PubMedService.swift` (XML delegate ~594-716), `Services/EuropePMCService.swift` (`EuropePMCResult` ~547, mapping ~362), `Models/SearchProvider.swift` (`SearchArticle` :56), `Models/StructuredQuery.swift` (`defaultExcludeTypes` :336-375)
 - Modify: `ios/MedicalFactChecker/Sources/Utilities/BioMedLitAdapters.swift` (`UnifiedArticleMetadata` :103, conversion ~282), `Sources/Models/Document.swift` (`applySearchMetadata` :657)
-- Test: `Packages/BioMedLit/Tests/BioMedLitTests/PublicationTypeParsingTests.swift`, `ios/MedicalFactChecker/Tests/…/StoreMigrationTests.swift`
+- Test: `Packages/BioMedLit/Tests/BioMedLitTests/PublicationTypeParsingTests.swift`, `ios/MedicalFactChecker/Tests/StoreMigrationTests.swift`
 
 **Interfaces:**
 - Produces:
@@ -72,8 +72,9 @@
 **Interfaces:**
 - Produces: `public actor RetractionCrossrefLookup`
   - `init(email: String, session: URLSession = .shared)`
-  - `func results(for dois: [String]) async throws -> [String: CrossrefResult]`: keyed by bmlib's normalised DOI; an unsendable DOI is absent from the map. It throws only `CancellationError`.
-  - Each `CrossrefBatch` is sent in order and paced. The answer goes to `parseCrossrefRetractionResponse(status:body:requestedDois:)`. A transport error maps to `.unreachable(reason: failure.describe())` for every DOI in the batch. Retries follow `RetryHelper.retry(.networkDefault)`, as `CrossRefService` does.
+  - `public struct CrossrefAnswer: Sendable { result: CrossrefResult; failure: RequestFailure? }`: `failure` is set exactly when `result` is `.unreachable`.
+  - `func results(for dois: [String]) async throws -> [String: CrossrefAnswer]`: keyed by bmlib's normalised DOI; an unsendable DOI is absent from the map. It throws only `CancellationError`.
+  - Each `CrossrefBatch` is sent in order and paced. The answer goes to `parseCrossrefRetractionResponse(status:body:requestedDois:)`. A transport error gives every DOI in the batch `.unreachable(reason: failure.describe())` with `failure = SearchTransport.failure(for:)`. An answer bmlib refuses to parse keeps bmlib's `reason` for the log and carries an app-worded failure of kind `.malformedResponse`. Retries follow `RetryHelper.retry(.networkDefault)`, as `CrossRefService` does.
 
 - [ ] **Step 1: Failing tests** (`URLProtocol` stub):
   - `testServedBatchParses`: one item retracted, one not known.
@@ -99,12 +100,13 @@
   - `public actor RetractionIndexStore`
     - `init(directory: URL, session: URLSession)`. Production uses Application Support/`BioMedLitConstants.appSupportFolderName`/`retraction/`, as `FullTextService.pdfCacheDirectory` does, with a Wi-Fi-only session.
     - `func currentIndex(now: Date) -> RetractionIndex?`: `nil` when the file is missing, unreadable (`RetractionIndex.fromBytes` throws) or older than `retractionWatchMaxAgeDays` by its `dataAsOf()`.
-    - `func refreshIfStale(now: Date) async -> RetractionIndexRefresh`, an enum: `.fresh`, `.refreshed(noticeCount:)`, `.refused(String)`, `.failed(RequestFailure)`. A refresh downloads the CSV, then calls `buildRetractionIndex(csv:dataAsOf:)` with the download's date and checks `noticeCount() >= retractionWatchMinKeepRatio × the old count`. It writes `toBytes()` to a temporary file and swaps it in atomically. **Any refusal keeps the previous file.**
+    - `func refreshIfStale(now: Date) async -> RetractionIndexRefresh`, an enum: `.fresh`, `.refreshed(noticeCount:)`, `.refused(String)`, `.failed(RequestFailure)`. A refresh downloads the CSV, then calls `buildRetractionIndex(csv:dataAsOf:)` with the download's date. That returns a `RetractionIndexBuild`: take its `.index`, log `skippedRows`, and log a non-empty `unknownNatures` as a warning (their notices decide nothing, and a paper they name reads "a Retraction Watch notice could not be read"). Then check `index.noticeCount() >= retractionWatchMinKeepRatio × the old count`. It writes `toBytes()` to a temporary file and swaps it in atomically. **Any refusal keeps the previous file.**
   - `public struct RetractionPaper: Hashable, Sendable { doi: String?; pmid: String?; publicationTypes: [String] }`
   - `public struct PaperRetractionCheck: Codable, Equatable, Sendable`, the stored form:
     - `status: String`: the contract name.
     - `deciding: StoredRetractionEvidence?`: source, kind, date, noticeDOI, recordID, rawKind.
     - `unanswered: [String]`, `checkedAt: Date`, `exportDataAsOf: String?`.
+    - `crossrefFailure: String?`: the `CrossrefAnswer.failure`'s `describe()`, `nil` when Crossref answered or was not asked.
     - Plus `var retractionStatus: RetractionStatus`.
   - `public struct RetractionChecker: Sendable`
     - `init(index: RetractionIndex?, crossref: RetractionCrossrefLookup)`
@@ -132,14 +134,15 @@
 - Test: `Packages/BioMedLit/Tests/BioMedLitTests/RetractionTextTests.swift`
 
 **Interfaces:**
-- Produces: `public enum RetractionText`. Each function is a port of the desktop's function of the same name in `retraction_text.py`, with the same sentences. Only the export cause changes: "the Retraction Watch data is not on this device yet (it downloads over Wi-Fi)" replaces the `bmll retractions-update` hint.
-  - `static func runSummaryClause(excluded: Int, uncheckedCauses: [String: Int]) -> String?`
-  - `static func paperStatusLine(_ check: PaperRetractionCheck) -> String`
-  - `static func checkedOnLine(_ date: Date?) -> String`: "Retraction status never checked" for `nil`.
-  - `static func methodsLine(checkedAt: Date?, notChecked: Int) -> String`
-  - `static let leftOutHeading = "## Left out as retracted"`
-  - `static func leftOutEntry(title: String, check: PaperRetractionCheck) -> String`
-  - `static func concernCaveat(_ check: PaperRetractionCheck) -> String`
+- Produces: `public enum RetractionText`. Each function ports the `retraction_text.py` function named beside it, with the same sentences. Only the export cause changes: "the Retraction Watch data is not on this device yet (it downloads over Wi-Fi)" replaces the `bmll retractions-update` hint.
+  - `static func uncheckedCauses(_ papers: [(paper: RetractionPaper, check: PaperRetractionCheck?)], failed: Set<RetractionPaper>) -> [String]` (`_unchecked_causes`): an ordered list, each cause once, in the desktop's order; distinct `crossrefFailure`s are joined into the one "Crossref could not be used (…)" cause.
+  - `static func runSummaryClause(excluded: Int, unchecked: Int, causes: [String]) -> String?` (`run_summary_clause`); a restored snapshot passes `causes: []`.
+  - `static func paperStatusLine(_ check: PaperRetractionCheck) -> String` (`paper_status_line`)
+  - `static func checkedOnLine(_ date: Date?) -> String` (`checked_on_line`): "Retraction status never checked" for `nil`.
+  - `static func methodsLine(checkedAt: Date?, notChecked: Int, heldPapers: Bool) -> String` (`retraction_methods_line`)
+  - `static let leftOutHeading = "## Left out as retracted"` (`LEFT_OUT_HEADING`)
+  - `static func leftOutEntry(title: String, check: PaperRetractionCheck) -> String`: one entry of `format_retracted_section`.
+  - `static func concernCaveat(_ check: PaperRetractionCheck) -> String` (`format_reference_concern_annotation`)
 
 - [ ] **Step 1:** Failing tests that assert **whole sentences** copied from `tests/test_retraction_text.py`'s expectations, one per function, including the unchecked-causes order. **Step 2:** FAIL. **Step 3:** Implement. **Step 4:** PASS.
 - [ ] **Step 5: Commit.** `feat(apple): retraction sentences, worded as the desktop's`
@@ -148,7 +151,7 @@
 
 **Files:**
 - Modify: `ios/MedicalFactChecker/Sources/Models/Document.swift`, `Models/FactCheckSession.swift` (`unscoredDocuments` :287), `Services/FactCheckWorkflow.swift` (`scoreDocuments` :2280, `scoreNewDocuments` :3427, `useServices` :1005, notices ~109-145)
-- Test: `ios/MedicalFactChecker/Tests/…/RetractionScreenWorkflowTests.swift`, `StoreMigrationTests.swift`
+- Test: `ios/MedicalFactChecker/Tests/RetractionScreenWorkflowTests.swift`, `StoreMigrationTests.swift`
 
 **Interfaces:**
 - Consumes: `RetractionCheck`, `RetractionPaper`, `PaperRetractionCheck` (Task 3); `RetractionText` (Task 4).
@@ -169,7 +172,7 @@
   - `testCancelDuringTheCheckRecordsNothing`: the closure awaits cancellation. After it, `retractionSnapshotJSON` is `nil` and no document has a check.
   - In `StoreMigrationTests`: the two new properties read `nil` from a pre-change store.
 - [ ] **Step 2:** `swift test --package-path ios/MedicalFactChecker --filter RetractionScreen`. Expected: FAIL.
-- [ ] **Step 3: Implement.** At app start, after settings load (`MedicalFactCheckerApp.swift:117`, Mac `:179`), start `RetractionIndexStore.refreshIfStale` in a detached, low-priority task; log its outcome.
+- [ ] **Step 3: Implement.** At app start, after settings load (`MedicalFactCheckerApp.swift:117`; Mac `macOS/App/MedicalFactCheckerMacApp.swift:179`, `configureBioMedLit`), start `RetractionIndexStore.refreshIfStale` in a detached, low-priority task; log its outcome.
 - [ ] **Step 4:** PASS, and the full `swift test` suite stays green.
 - [ ] **Step 5: Commit.** `feat(apple): retracted papers are left out before scoring, counted and stored`
 
@@ -198,8 +201,8 @@
 
 **Files:**
 - Create: `ios/MedicalFactChecker/Sources/Views/Components/RetractionBadge.swift`: a shared view (RETRACTED / CONCERN / NOT CHECKED, following the desktop's `retraction_badge`).
-- Modify: `Views/FactCheck/ScoredDocumentsView.swift` (`DocumentScoreRow` :259, badges :296), `macOS/Views/FactCheck/MacScoredDocumentsView.swift` (`MacDocumentCard` :172), `Views/FullText/FullTextViewer.swift` :58, `macOS/…/MacFullTextViewer.swift` :177 (a `ParseWarningBanner`-style banner, :175/:278), `doc/cross_platform/bmlib_sync/ledger.json`
-- Test: `ios/MedicalFactChecker/Tests/…/RetractionBadgeTests.swift`, which tests the badge's pure `RetractionBadge.Content.init(check:)`.
+- Modify: `Views/FactCheck/ScoredDocumentsView.swift` (`DocumentScoreRow` :259, badges :296), `macOS/Views/FactCheck/MacScoredDocumentsView.swift` (`MacDocumentCard` :172), `Views/FactCheck/FullTextViewer.swift` :58 (`#if os(iOS)`), `macOS/…/MacFullTextViewer.swift` :177 (a `ParseWarningBanner`-style banner, :175/:278), `doc/cross_platform/bmlib_sync/ledger.json`
+- Test: `ios/MedicalFactChecker/Tests/RetractionBadgeTests.swift`, which tests the badge's pure `RetractionBadge.Content.init(check:)`.
 
 - [ ] **Step 1:** Failing test `testBadgeContentPerStatus`: `clear` shows nothing, and `nil` (never checked) shows NOT CHECKED only in the detail view.
 - [ ] **Step 2:** FAIL. **Step 3:** Implement. A retracted document stays visible in the list, badged, below the scored ones. **Step 4:** PASS. Run `xcodebuild … 'platform=macOS' build` and an iOS Simulator build.
@@ -214,7 +217,7 @@
 
 **Files:**
 - Modify: `Views/FactCheck/FactCheckView.swift` (`ResumedSessionBanner` :587), `macOS/Views/FactCheck/MacFactCheckView.swift` (`MacResumedSessionBanner` :873), `Services/FactCheckWorkflow.swift` (`restoreForViewing` :386)
-- Test: `ios/MedicalFactChecker/Tests/…/RetractionSavedWorkTests.swift`
+- Test: `ios/MedicalFactChecker/Tests/RetractionSavedWorkTests.swift`
 
 **Interfaces:**
 - Produces: `FactCheckWorkflow.retractionSavedWorkLine: String?` and `retractionSavedWorkWarning: String?`, both set by `restoreForViewing`:
@@ -236,7 +239,7 @@
 - Test: `RetractionSavedWorkTests.swift`
 
 **Interfaces:**
-- Produces: `func checkRetractionsAgain() async`, in a `runAsWorkflowTask` entry point (W:977). It checks every document of the session through the injected `RetractionCheck`. It updates each `Document.retractionCheckJSON` and the snapshot, and sets the warning for cited papers now `retracted` or `concern`. **The report is never rewritten.** The warning suggests re-running the question. A failure keeps the old snapshot and appends the desktop's `CHECK_AGAIN_FAILED` clause.
+- Produces: `func checkRetractionsAgain() async`, in a `runAsWorkflowTask` entry point (`FactCheckWorkflow.swift:977`). It checks every document of the session through the injected `RetractionCheck`. It updates each `Document.retractionCheckJSON` and the snapshot, and sets the warning for cited papers now `retracted` or `concern`. **The report is never rewritten.** The warning suggests re-running the question. A failure keeps the old snapshot and appends the desktop's `CHECK_AGAIN_FAILED` clause.
 
 - [ ] **Step 1: Failing tests.**
   - `testCheckAgainUpdatesSnapshotAndWarns`.

@@ -22,8 +22,9 @@ import XCTest
 ///
 /// The fixture is copied verbatim from bmlib and never edited here; these
 /// runners mirror the desktop's `tests/test_retraction_contract.py`. Results
-/// are compared as the fixture's own JSON shape, so a field the bindings add
-/// or drop fails here rather than passing unseen.
+/// are compared as the fixture's own JSON shape, so an expected field the
+/// mapping lacks, or a value that differs, fails here rather than passing
+/// unseen. `android-tests.yml` checks the copy is bmlib's file at the FFI pin.
 final class RetractionContractTests: XCTestCase {
 
     private enum ContractError: Error {
