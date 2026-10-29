@@ -305,6 +305,38 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         XCTAssertNotNil(documents[1].scoredAt)
     }
 
+    /// A stored row this build cannot read is kept against a fresh verdict
+    /// that left a lookup unanswered, yet the run leaves the paper out by the
+    /// verdict it used: the notice and the exclusion never disagree. A fresh
+    /// verdict every lookup answered replaces such a row.
+    func testAnUnreadableRowIsKeptAndTheRunExcludesByItsOwnVerdict() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b"])
+        for document in documents { document.retractionCheckJSON = "{\"status\": 7}" }
+        let workflow = restore(session, check: Self.answering([
+            "10.1000/a": Self.retracted(unanswered: ["crossref"]), "10.1000/b": Self.clear(),
+        ]))
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        XCTAssertEqual(documents[0].retractionCheckJSON, "{\"status\": 7}", "an outage never overwrites a row")
+        XCTAssertNil(documents[0].scoredAt, "left out as the notice says")
+        XCTAssertEqual(workflow.retractionNotice, "Retraction check: 1 retracted paper left out.")
+        XCTAssertEqual(documents[1].retractionCheck?.isClear, true)
+        XCTAssertNotNil(documents[1].scoredAt)
+    }
+
+    /// The stop prompt's "remaining" and the progress bar do not count a
+    /// retracted paper as still to score.
+    func testARetractedPaperIsNotCountedAsRemaining() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b"])
+        documents[0].retractionCheck = Self.retracted()
+        session.documentsScored = 1
+        session.currentStep = .scoringDocuments
+
+        XCTAssertEqual(session.documentsToScore, 1)
+        XCTAssertEqual(session.progressPercent, 60, accuracy: 0.001)
+    }
+
     // MARK: - Failure and cancel
 
     /// Ruling 3: a check that throws leaves every paper it was given

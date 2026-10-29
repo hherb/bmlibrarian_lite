@@ -561,6 +561,17 @@ extension BMLPubMedService {
     }
 }
 
+extension RetractionIndexStore {
+    /// The app's one Retraction Watch store, over one Wi-Fi-only session,
+    /// shared by the launch refresh and every run's check. Built at first use
+    /// with the settings' contact address; a changed address reaches the
+    /// next launch's refresh (a run only reads the file).
+    static let app: RetractionIndexStore = {
+        let settings = AppSettings.shared
+        return production(email: settings.ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : settings.ncbiEmail)
+    }()
+}
+
 extension BMLEuropePMCService {
     /// Create a configured Europe PMC service.
     ///

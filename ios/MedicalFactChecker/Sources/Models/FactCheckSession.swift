@@ -299,6 +299,12 @@ final class FactCheckSession {
         (documents ?? []).filter { $0.relevanceScore == nil && !$0.isRetracted }
     }
 
+    /// Documents found that are to be scored: retracted ones are left out,
+    /// so they are neither "remaining" nor part of the scoring progress.
+    var documentsToScore: Int {
+        documentsFound - (documents ?? []).filter(\.isRetracted).count
+    }
+
     /// Progress percentage (0-100) for the current workflow.
     ///
     /// The claim is analysed and the search runs before any document exists,
@@ -306,8 +312,9 @@ final class FactCheckSession {
     /// an early return of 0 held the bar empty through both, the first of
     /// which waits on the model, and the app read as hung.
     var progressPercent: Double {
-        let scoringProgress = documentsFound > 0
-            ? Double(documentsScored) / Double(documentsFound)
+        let toScore = documentsToScore
+        let scoringProgress = toScore > 0
+            ? Double(documentsScored) / Double(toScore)
             : 0
         let citationProgress = relevantDocumentsFound > 0
             ? Double(citationsExtracted) / Double(relevantDocumentsFound)

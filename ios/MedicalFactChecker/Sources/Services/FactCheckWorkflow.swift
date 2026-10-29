@@ -857,7 +857,7 @@ final class FactCheckWorkflow {
         isRunning = false
 
         let scored = session?.documentsScored ?? 0
-        let remaining = (session?.documentsFound ?? 0) - scored
+        let remaining = (session?.documentsToScore ?? 0) - scored
         if let session {
             pendingStop = PendingStop(cause: cause, report: session.report)
             showStop(of: session, cause: cause)
@@ -879,7 +879,7 @@ final class FactCheckWorkflow {
             userDecisionPrompt = Self.stopPrompt(
                 cause,
                 scored: session.documentsScored,
-                remaining: session.documentsFound - session.documentsScored
+                remaining: session.documentsToScore - session.documentsScored
             )
             stopNotice = nil
         } else {
@@ -2342,7 +2342,8 @@ final class FactCheckWorkflow {
         )
 
         // Filter documents that haven't been scored, haven't failed parsing, and are not retracted
-        let unscoredDocs = session.unscoredDocuments.filter { !$0.scoreParseFailed }
+        let leftOut = retractionLeavesOut()
+        let unscoredDocs = session.unscoredDocuments.filter { !$0.scoreParseFailed && !leftOut($0) }
         guard !unscoredDocs.isEmpty else { return }
 
         // Check budget before starting parallel scoring
@@ -3493,7 +3494,8 @@ final class FactCheckWorkflow {
             pmids.contains($0.pmid) && $0.relevanceScore == nil && !$0.scoreParseFailed
         }
         try await screenForRetraction(candidates)
-        let docsToScore = candidates.filter { !$0.isRetracted }
+        let leftOut = retractionLeavesOut()
+        let docsToScore = candidates.filter { !leftOut($0) }
         guard !docsToScore.isEmpty else { return }
 
         // Check budget before starting
@@ -3641,6 +3643,16 @@ final class FactCheckWorkflow {
         retractionNotice = retractionRun.notice
     }
 
+    /// Whether this run leaves a document out as retracted: by the check the
+    /// run used, as the desktop excludes by the verdicts its run returns, and
+    /// by the stored check for a document the run did not screen. The stored
+    /// check can differ: a row this build cannot read is kept against a
+    /// verdict that left a lookup unanswered.
+    private func retractionLeavesOut() -> (Document) -> Bool {
+        let used = Dictionary(retractionRun.used.map { ($0.id, $0.check.isRetracted) }) { _, new in new }
+        return { used[$0.id] ?? $0.isRetracted }
+    }
+
     /// The production retraction check: the current Retraction Watch index
     /// (never waited for; the app refreshes it at launch), Crossref and the
     /// paper's label, with the contact address `CrossRefService` sends.
@@ -3648,7 +3660,7 @@ final class FactCheckWorkflow {
         let email = settings.ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : settings.ncbiEmail
         return { papers in
             let now = Date()
-            let index = await RetractionIndexStore.production(email: email).currentIndex(now: now)
+            let index = await RetractionIndexStore.app.currentIndex(now: now)
             return try await RetractionChecker(index: index, crossref: RetractionCrossrefLookup(email: email))
                 .check(papers, now: now)
         }
