@@ -359,6 +359,27 @@ final class Document {
     /// Used to display availability indicator before user attempts to fetch full text.
     var hasFullTextInPMC: Bool = false
 
+    // MARK: - Publication Types
+
+    /// The publication types the source listed, as a JSON array of strings.
+    ///
+    /// `nil` means not recorded (an older row, or a source that gave no list);
+    /// never `"[]"` for an absent list. Optional so no schema version is needed.
+    var publicationTypesJSON: String?
+
+    /// ``publicationTypesJSON`` decoded; `nil` when not recorded or unreadable.
+    var publicationTypes: [String]? {
+        get {
+            guard let data = publicationTypesJSON?.data(using: .utf8) else { return nil }
+            return try? JSONDecoder().decode([String].self, from: data)
+        }
+        set {
+            publicationTypesJSON = newValue
+                .flatMap { try? JSONEncoder().encode($0) }
+                .flatMap { String(data: $0, encoding: .utf8) }
+        }
+    }
+
     // MARK: - Transparency Analysis
 
     /// JSON-encoded transparency analysis result.
@@ -663,6 +684,7 @@ final class Document {
         publicationDate = metadata.publicationDate
         isPreprint = metadata.isPreprint
         identifierKind = metadata.identifierKind
+        publicationTypes = metadata.publicationTypes
         searchSource = provider.rawValue
     }
 

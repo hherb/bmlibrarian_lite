@@ -172,6 +172,9 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
     let hasFullTextInPMC: Bool
 
     /// Batch number for pagination tracking.
+    /// Publication types the source listed; `nil` when it gave no list.
+    let publicationTypes: [String]?
+
     let batchNumber: Int
 
     /// Position within search results (0-indexed).
@@ -195,6 +198,7 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
     ///   - source: Provider that returned this article.
     ///   - isPreprint: Whether this is a preprint.
     ///   - hasFullTextInPMC: Whether full text is available in PMC.
+    ///   - publicationTypes: Publication types the source listed, or nil.
     ///   - batchNumber: Batch number for tracking.
     ///   - resultPosition: Position in search results.
     init(
@@ -212,6 +216,7 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
         isPreprint: Bool = false,
         identifierKind: ArticleIdentifierKind? = nil,
         hasFullTextInPMC: Bool = false,
+        publicationTypes: [String]? = nil,
         batchNumber: Int = 1,
         resultPosition: Int = 0
     ) {
@@ -229,6 +234,7 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
         self.isPreprint = isPreprint
         self.identifierKind = identifierKind
         self.hasFullTextInPMC = hasFullTextInPMC
+        self.publicationTypes = publicationTypes
         self.batchNumber = batchNumber
         self.resultPosition = resultPosition
     }
@@ -317,6 +323,7 @@ enum BioMedLitAdapters {
             ) == .preprint,
             identifierKind: article.identifierKind,
             hasFullTextInPMC: article.hasFullText,
+            publicationTypes: article.publicationTypes,
             batchNumber: batchNumber,
             resultPosition: resultPosition
         )

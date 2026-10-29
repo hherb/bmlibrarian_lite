@@ -374,7 +374,8 @@ public actor EuropePMCService {
             source: .europePMC,
             pdfRenderURL: extractFreePDFURL(from: result),
             identifierKind: ArticleIdentifierKind(europePMCSource: result.source),
-            europePMCRecordID: result.id
+            europePMCRecordID: result.id,
+            publicationTypes: result.pubTypeList?.pubType
         )
     }
 
@@ -561,6 +562,12 @@ struct EuropePMCResult: Codable {
     let inPMC: String?
     let hasPDF: String?
     let fullTextUrlList: EuropePMCFullTextUrlList?
+    let pubTypeList: EuropePMCPubTypeList?
+}
+
+/// Europe PMC publication-type list wrapper.
+struct EuropePMCPubTypeList: Codable {
+    let pubType: [String]?
 }
 
 /// Europe PMC full-text URL list wrapper.

@@ -117,6 +117,13 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
     /// (#434).
     public let europePMCRecordID: String?
 
+    /// The publication types the source listed for the record.
+    ///
+    /// `nil` means the source gave no list (not recorded); `[]` means it
+    /// listed none. The `Retracted Publication` label alone retracts a paper,
+    /// so the list is kept rather than filtered out of the query.
+    public let publicationTypes: [String]?
+
     public init(
         pmid: String,
         pmcId: String? = nil,
@@ -132,7 +139,8 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
         source: SearchProvider,
         pdfRenderURL: String? = nil,
         identifierKind: ArticleIdentifierKind? = nil,
-        europePMCRecordID: String? = nil
+        europePMCRecordID: String? = nil,
+        publicationTypes: [String]? = nil
     ) {
         self.id = pmid
         self.pmid = pmid
@@ -150,6 +158,7 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
         self.pdfRenderURL = pdfRenderURL
         self.identifierKind = identifierKind
         self.europePMCRecordID = europePMCRecordID
+        self.publicationTypes = publicationTypes
     }
 }
 

@@ -198,6 +198,8 @@ final class StoreMigrationTests: XCTestCase {
         XCTAssertEqual(document.title, "An earlier study")
         XCTAssertTrue(document.isLinkOnly)
         XCTAssertNil(document.fullTextOpenAccessShortfallJSON)
+        XCTAssertNil(document.publicationTypesJSON)
+        XCTAssertNil(document.publicationTypes, "an older row has not recorded types")
         XCTAssertNil(document.cachedRetrievalNotice.openAccessShortfall)
         XCTAssertNil(document.fullTextPDFNotSavedFrom)
         XCTAssertNil(document.storedPDFNotSavedNote)
