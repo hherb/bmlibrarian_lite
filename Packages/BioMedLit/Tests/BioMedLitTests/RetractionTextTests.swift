@@ -22,7 +22,7 @@ import XCTest
 final class RetractionTextTests: XCTestCase {
     private let when = Date(timeIntervalSince1970: 1_792_315_800) // 2026-10-18 09:30 UTC
     private let both = ["retraction_watch_export", "crossref"]
-    private let rwCause = "the Retraction Watch data is not on this device yet (it downloads over Wi-Fi)"
+    private let rwCause = "the Retraction Watch data could not be used (it downloads over Wi-Fi)"
 
     private func evidence(
         source: String = "retraction_watch_export", kind: String = "retraction",

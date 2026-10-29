@@ -294,15 +294,18 @@ final class FactCheckSession {
 
     /// Documents that haven't been scored yet and are not retracted.
     ///
-    /// A retracted document is never scored; it stays in the session.
+    /// A retracted document (by ``shownRetractionChecks()``) is never scored;
+    /// it stays in the session.
     var unscoredDocuments: [Document] {
-        (documents ?? []).filter { $0.relevanceScore == nil && !$0.isRetracted }
+        let checks = shownRetractionChecks()
+        return (documents ?? []).filter { $0.relevanceScore == nil && checks[$0.id]?.isRetracted != true }
     }
 
     /// Documents found that are to be scored: retracted ones are left out,
     /// so they are neither "remaining" nor part of the scoring progress.
     var documentsToScore: Int {
-        documentsFound - (documents ?? []).filter(\.isRetracted).count
+        let checks = shownRetractionChecks()
+        return documentsFound - (documents ?? []).filter { checks[$0.id]?.isRetracted == true }.count
     }
 
     /// Progress percentage (0-100) for the current workflow.
@@ -394,6 +397,25 @@ final class FactCheckSession {
     /// Adds what a run used to the snapshot; a document checked again is replaced.
     ///
     /// - Parameter checks: The checks used, keyed by `Document.id`; nothing is written for none.
+    /// The check each document is shown and counted by, keyed by `Document.id`:
+    /// the one its run used (the snapshot), else the stored one. Decode it
+    /// once per view or computation, not per row.
+    func shownRetractionChecks() -> [String: PaperRetractionCheck] {
+        var checks = retractionSnapshot()
+        for document in documents ?? [] where checks[document.id] == nil {
+            checks[document.id] = document.retractionCheck
+        }
+        return checks
+    }
+
+    /// Retracted papers left out before scoring, by `checks`: listed after
+    /// the scored ones, badged.
+    ///
+    /// - Parameter checks: ``shownRetractionChecks()``.
+    func retractedUnscoredDocuments(by checks: [String: PaperRetractionCheck]) -> [Document] {
+        (documents ?? []).filter { !$0.isScored && checks[$0.id]?.isRetracted == true }
+    }
+
     func recordRetractionSnapshot(_ checks: [String: PaperRetractionCheck]) {
         guard !checks.isEmpty,
               let data = try? JSONEncoder().encode(retractionSnapshot().merging(checks) { _, new in new })

@@ -114,8 +114,3 @@ struct RetractionBanner: View {
         }
     }
 }
-
-extension Document {
-    /// Retracted papers left out before scoring: listed after the scored ones, badged.
-    var isRetractedUnscored: Bool { isRetracted && !isScored }
-}

@@ -60,16 +60,32 @@ final class ReportFormatterRetractionTests: XCTestCase {
     func testNoExclusionsAddsOnlyTheMethodsLine() {
         let text = report(section([("Fine", check("clear"))]))
         XCTAssertFalse(text.contains("## Left out as retracted"))
-        XCTAssertTrue(text.contains("- **Retraction Check:** Retraction status checked 2026-10-18\n\n## References"))
+        XCTAssertTrue(text.contains(
+            "The analysis.\n\n## Methodology\n\n- **Retraction Check:** Retraction status checked 2026-10-18\n\n## References"),
+            "a complete search's report heads the line itself")
         XCTAssertEqual(report(nil), "The analysis.\n\n## References\n\n**1.** Ref")
+    }
+
+    /// An incomplete search's Methodology holds both lines under one heading.
+    func testRetractionLineJoinsTheSearchMethodology() {
+        let text = ReportFormatter.fullReport(
+            analysis: "The analysis.", references: "**1.** Ref",
+            shortfalls: [RetrievalShortfall(source: .pubmed, failure: .forHTTPStatus(429))],
+            retraction: section([("Fine", check("clear"))]))
+        XCTAssertEqual(text.components(separatedBy: "## Methodology").count, 2, "one heading")
+        let completeness = text.range(of: "- **Search Completeness:**")!.lowerBound
+        let retraction = text.range(of: "- **Retraction Check:**")!.lowerBound
+        XCTAssertLessThan(text.range(of: "## Methodology")!.lowerBound, completeness)
+        XCTAssertLessThan(completeness, retraction)
+        XCTAssertLessThan(retraction, text.range(of: "## References")!.lowerBound)
     }
 
     func testStandInReportCarriesTheSection() {
         let text = ReportFormatter.standInReport(
             "No evidence.", shortfalls: [],
             retraction: section([("Bad trial", check("retracted", deciding: notice))]))
-        XCTAssertTrue(text.hasPrefix("No evidence."))
-        XCTAssertTrue(text.contains("- **Retraction Check:** Retraction status checked 2026-10-18"))
+        XCTAssertTrue(text.hasPrefix(
+            "No evidence.\n\n## Methodology\n\n- **Retraction Check:** Retraction status checked 2026-10-18"))
         XCTAssertTrue(text.contains("## Left out as retracted\n\n- Bad trial. Retracted 2026-03-09; notice 10.9/n"))
     }
 

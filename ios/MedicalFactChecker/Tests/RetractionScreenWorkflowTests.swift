@@ -181,7 +181,7 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         XCTAssertEqual(
             workflow.retractionNotice,
             "Retraction check: 2 papers' retraction status could not be checked: "
-                + "the Retraction Watch data is not on this device yet (it downloads over Wi-Fi); no DOI or PMID."
+                + "the Retraction Watch data could not be used (it downloads over Wi-Fi); no DOI or PMID."
         )
     }
 
@@ -272,6 +272,10 @@ final class RetractionScreenWorkflowTests: XCTestCase {
 
         XCTAssertEqual(documents[0].retractionCheck, stored, "storage keeps the answered check")
         XCTAssertEqual(session.retractionSnapshot()[documents[0].id]?.isUnchecked, true)
+        XCTAssertEqual(
+            RetractionBadge.Content(check: session.shownRetractionChecks()[documents[0].id])?.text,
+            "NOT CHECKED", "badged by the run's check, not the stored clear"
+        )
         XCTAssertNotNil(documents[0].scoredAt)
         XCTAssertEqual(
             workflow.retractionNotice,
@@ -320,6 +324,12 @@ final class RetractionScreenWorkflowTests: XCTestCase {
 
         XCTAssertEqual(documents[0].retractionCheckJSON, "{\"status\": 7}", "an outage never overwrites a row")
         XCTAssertNil(documents[0].scoredAt, "left out as the notice says")
+        XCTAssertEqual(
+            session.retractedUnscoredDocuments(by: session.shownRetractionChecks()).map(\.id), [documents[0].id],
+            "listed as left out, as the notice and report name it"
+        )
+        XCTAssertEqual(session.documentsToScore, 1, "not counted as still to score")
+        XCTAssertFalse(session.unscoredDocuments.contains { $0 === documents[0] })
         XCTAssertEqual(workflow.retractionNotice, "Retraction check: 1 retracted paper left out.")
         XCTAssertEqual(documents[1].retractionCheck?.isClear, true)
         XCTAssertNotNil(documents[1].scoredAt)

@@ -354,8 +354,7 @@ public enum ReportFormatter {
     ) -> String {
         let blocks = [
             analysis,
-            SearchFailureReporting.searchCompletenessMethodology(shortfalls),
-            retraction?.methodsMarkdown ?? "",
+            methodology(SearchFailureReporting.searchCompletenessMethodology(shortfalls), retraction),
             retraction?.leftOutMarkdown ?? "",
             referencesHeading + reportBlockSeparator + references,
         ].filter { !$0.isEmpty }
@@ -378,10 +377,17 @@ public enum ReportFormatter {
     public static func standInReport(
         _ text: String, shortfalls: [RetrievalShortfall], retraction: RetractionReportSection? = nil
     ) -> String {
-        let blocks = [text, retraction?.methodsMarkdown ?? "", retraction?.leftOutMarkdown ?? ""]
+        let blocks = [text, methodology("", retraction), retraction?.leftOutMarkdown ?? ""]
             .filter { !$0.isEmpty }
         return SearchFailureReporting.withNotice(
             blocks.joined(separator: reportBlockSeparator), shortfalls: shortfalls)
+    }
+
+    /// The Methodology section: `search`'s, with the retraction line added,
+    /// or the heading over the retraction line alone; `""` when neither has one.
+    private static func methodology(_ search: String, _ retraction: RetractionReportSection?) -> String {
+        guard let line = retraction?.methodsMarkdown else { return search }
+        return (search.isEmpty ? SearchFailureConstants.methodologyHeading : search) + reportBlockSeparator + line
     }
 
     // MARK: - No Evidence Content

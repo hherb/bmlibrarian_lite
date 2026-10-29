@@ -37,6 +37,8 @@ public actor RetractionIndexStore {
     private let directory: URL
     private let session: URLSession
     private let email: String
+    /// The download under way, which every caller meanwhile awaits.
+    private var inFlight: Task<RetractionIndexRefresh, Never>?
 
     /// - Parameters:
     ///   - directory: Where the index file lives.
@@ -113,11 +115,25 @@ public actor RetractionIndexStore {
     /// ``BioMedLitConstants/retractionWatchMinKeepRatio`` of the stored
     /// index's notices is refused as truncated.
     ///
+    /// One download at a time: a call made while one is under way awaits
+    /// it (the launch's and a run's refresh never download twice). The
+    /// download is not the caller's task, so cancelling a caller leaves it
+    /// running for the others.
+    ///
     /// - Parameter now: The current time.
     /// - Returns: What happened; on anything but `.refreshed` the file is
-    ///   untouched. A cancelled download returns `.failed` too (this never
-    ///   throws): a caller that cancelled must not report it as a shortfall.
+    ///   untouched. This never throws.
     public func refreshIfStale(now: Date) async -> RetractionIndexRefresh {
+        if let inFlight { return await inFlight.value }
+        let task = Task { await self.refresh(now: now) }
+        inFlight = task
+        let outcome = await task.value
+        inFlight = nil
+        return outcome
+    }
+
+    /// ``refreshIfStale(now:)``'s work, run once per download.
+    private func refresh(now: Date) async -> RetractionIndexRefresh {
         if currentIndex(now: now) != nil { return .fresh }
         var components = URLComponents(string: BioMedLitConstants.retractionWatchExportURL)
         components?.queryItems = [URLQueryItem(name: "mailto", value: email)]
@@ -174,6 +190,11 @@ public actor RetractionIndexStore {
         }
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            // downloaded again on a new device, never backed up
+            var folder = directory
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try? folder.setResourceValues(values)
             // `.atomic` writes beside the file and renames over it.
             try build.index.toBytes().write(to: file, options: .atomic)
         } catch {

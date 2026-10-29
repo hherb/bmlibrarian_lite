@@ -171,10 +171,10 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
     /// Used to show availability badge before user attempts to fetch full text.
     let hasFullTextInPMC: Bool
 
-    /// Batch number for pagination tracking.
     /// Publication types the source listed; `nil` when it gave no list.
     let publicationTypes: [String]?
 
+    /// Batch number for pagination tracking.
     let batchNumber: Int
 
     /// Position within search results (0-indexed).
@@ -563,13 +563,28 @@ extension BMLPubMedService {
 
 extension RetractionIndexStore {
     /// The app's one Retraction Watch store, over one Wi-Fi-only session,
-    /// shared by the launch refresh and every run's check. Built at first use
+    /// shared by every refresh and every run's check. Built at first use
     /// with the settings' contact address; a changed address reaches the
-    /// next launch's refresh (a run only reads the file).
+    /// next launch.
     static let app: RetractionIndexStore = {
         let settings = AppSettings.shared
         return production(email: settings.ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : settings.ncbiEmail)
     }()
+
+    /// Refreshes ``app``'s copy in the background unless it is current (Wi-Fi
+    /// only). Never awaited: a run uses the copy it finds. Called at launch
+    /// and by a run that finds no usable copy; calls meanwhile share one download.
+    static func refreshAppCopyInBackground() {
+        Task.detached(priority: .background) {
+            let outcome = await app.refreshIfStale(now: Date())
+            refreshLogger.info("Retraction Watch data: \(String(describing: outcome), privacy: .public)")
+        }
+    }
+
+    /// `AppLogger.network`'s subsystem and category; `AppLogger` is per platform and absent from the package build.
+    private static let refreshLogger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.medicalfactchecker", category: "Network"
+    )
 }
 
 extension BMLEuropePMCService {

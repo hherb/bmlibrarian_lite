@@ -144,6 +144,37 @@ final class RetractionIndexStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
     }
 
+    /// Launch and a run may both ask while the copy is stale: one download serves both.
+    func testConcurrentRefreshesDownloadOnce() async throws {
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv())
+        let store = store()
+        async let first = store.refreshIfStale(now: RetractionFixture.now)
+        async let second = store.refreshIfStale(now: RetractionFixture.now)
+        _ = await (first, second)
+        XCTAssertEqual(StubURLProtocol.requestedURLs.count, 1)
+        let index = await store.currentIndex(now: RetractionFixture.now)
+        XCTAssertEqual(index?.dataAsOf(), RetractionFixture.today)
+    }
+
+    /// Control: the guard lasts one download; a failed one is tried again by the next call.
+    func testAFailedRefreshIsTriedAgain() async throws {
+        StubURLProtocol.stubbed = (404, Data())
+        let store = store()
+        _ = await store.refreshIfStale(now: RetractionFixture.now)
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv())
+        let outcome = await store.refreshIfStale(now: RetractionFixture.now)
+        XCTAssertEqual(outcome, .refreshed(noticeCount: 3))
+        XCTAssertEqual(StubURLProtocol.requestedURLs.count, 2)
+    }
+
+    /// The ~68 MB copy is downloaded again, never backed up.
+    func testIndexFolderIsExcludedFromBackup() async throws {
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv())
+        _ = await store().refreshIfStale(now: RetractionFixture.now)
+        let values = try URL(fileURLWithPath: directory.path).resourceValues(forKeys: [.isExcludedFromBackupKey])
+        XCTAssertEqual(values.isExcludedFromBackup, true)
+    }
+
     func testRefreshUsesAWiFiOnlySession() {
         let config = RetractionIndexStore.wifiOnlyConfiguration()
         XCTAssertFalse(config.allowsExpensiveNetworkAccess)

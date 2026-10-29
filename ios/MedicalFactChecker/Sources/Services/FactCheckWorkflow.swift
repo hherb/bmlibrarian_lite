@@ -350,8 +350,9 @@ final class FactCheckWorkflow {
 
     /// The work of ``startFactCheck(claim:searchOptions:)``, run as ``workflowTask`` so a cancel reaches it.
     private func startFactCheckWork(claim: String, searchOptions: SearchOptions?) async {
-        // A new claim answers for itself: the last run's notice is not this run's
+        // A new claim answers for itself: the last run's notices are not this run's
         smartSearchNotice = nil
+        retractionNotice = nil
 
         // Initialize services
         do {
@@ -3663,13 +3664,16 @@ final class FactCheckWorkflow {
     }
 
     /// The production retraction check: the current Retraction Watch index
-    /// (never waited for; the app refreshes it at launch), Crossref and the
-    /// paper's label, with the contact address `CrossRefService` sends.
+    /// (never waited for: refreshed at launch, and in the background when a
+    /// run finds no usable copy), Crossref and the paper's label, with the
+    /// contact address `CrossRefService` sends.
     private func productionRetractionCheck() -> RetractionCheck {
         let email = settings.ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : settings.ncbiEmail
         return { papers in
             let now = Date()
             let index = await RetractionIndexStore.app.currentIndex(now: now)
+            // a failed or aged-out refresh is tried again, for the next run
+            if index == nil { RetractionIndexStore.refreshAppCopyInBackground() }
             return try await RetractionChecker(index: index, crossref: RetractionCrossrefLookup(email: email))
                 .check(papers, now: now)
         }

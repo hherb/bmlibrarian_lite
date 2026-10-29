@@ -401,6 +401,12 @@ final class Document {
         }
     }
 
+    /// The check this document is shown by: the one its run used (the
+    /// session's snapshot), else the stored one, which can differ (see
+    /// ``takeRetractionCheck(_:)``). A list decodes
+    /// ``FactCheckSession/shownRetractionChecks()`` once instead.
+    var shownRetractionCheck: PaperRetractionCheck? { session?.retractionSnapshot()[id] ?? retractionCheck }
+
     /// Whether the stored check says retracted; never true for unchecked.
     var isRetracted: Bool { retractionCheck?.isRetracted ?? false }
 

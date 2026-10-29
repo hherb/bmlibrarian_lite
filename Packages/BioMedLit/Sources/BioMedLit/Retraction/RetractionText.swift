@@ -31,7 +31,7 @@ public enum RetractionText {
 
     private static let failedCause = "the check failed"
     /// Replaces the desktop's `bmll retractions-update` hint: the app downloads the data itself.
-    private static let exportCause = "the Retraction Watch data is not on this device yet (it downloads over Wi-Fi)"
+    private static let exportCause = "the Retraction Watch data could not be used (it downloads over Wi-Fi)"
     private static let exportNoticeCause = "a Retraction Watch notice could not be read"
     private static let noIDsCause = "no DOI or PMID"
     private static let noDOICause = "no DOI, which Crossref needs"

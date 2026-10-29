@@ -51,14 +51,18 @@ struct MacScoredDocumentsView: View {
 
     @State private var filterThreshold: Int = 1
 
-    private var scoredDocuments: [Document] {
+    /// The scored documents shown, then the papers left out as retracted.
+    ///
+    /// - Parameter checks: The session's ``FactCheckSession/shownRetractionChecks()``.
+    private func scoredDocuments(_ checks: [String: PaperRetractionCheck]) -> [Document] {
         (session.documents ?? [])
             .filter { $0.isScored && ($0.relevanceScore ?? 0) >= filterThreshold }
             .sorted(by: sortOption)
-            + (session.documents ?? []).filter(\.isRetractedUnscored)
+            + session.retractedUnscoredDocuments(by: checks)
     }
 
     var body: some View {
+        let checks = session.shownRetractionChecks()
         VStack(spacing: 0) {
             // Toolbar
             toolbar
@@ -71,9 +75,10 @@ struct MacScoredDocumentsView: View {
             // Documents list
             ScrollView {
                 LazyVStack(spacing: MacSpacing.cardSpacing) {
-                    ForEach(scoredDocuments, id: \.id) { document in
+                    ForEach(scoredDocuments(checks), id: \.id) { document in
                         MacDocumentCard(
                             document: document,
+                            retractionCheck: checks[document.id],
                             isExpanded: expandedDocumentId == document.id,
                             showEmbeddingScore: showEmbeddingScores,
                             onToggleExpand: {
@@ -113,7 +118,7 @@ struct MacScoredDocumentsView: View {
             Spacer()
 
             // Count
-            Text("\(scoredDocuments.count) documents")
+            Text("\(scoredDocuments(session.shownRetractionChecks()).count) documents")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -174,6 +179,8 @@ struct MacDocumentCard: View {
     // MARK: - Properties
 
     let document: Document
+    /// The check the card is badged by: ``FactCheckSession/shownRetractionChecks()``'s.
+    let retractionCheck: PaperRetractionCheck?
     let isExpanded: Bool
     let showEmbeddingScore: Bool
     let onToggleExpand: () -> Void
@@ -257,7 +264,7 @@ struct MacDocumentCard: View {
                     // Search provider badge
                     MacProviderBadge(provider: documentProvider)
 
-                    RetractionBadge(check: document.retractionCheck)
+                    RetractionBadge(check: retractionCheck)
 
                     // PMC full text availability indicator (only if not already fetched)
                     if document.hasFullTextInPMC && !document.hasFullText && !document.fullTextUnavailable {
