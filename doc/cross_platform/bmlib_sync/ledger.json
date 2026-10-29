@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "bmlib_commit": "8845ba857b9cb7c7999e9bd332ff173b448a92da",
+  "bmlib_commit": "83cd2b3b229d7a487fa9fc66054730cab9ae26ed",
   "from_bmlib": [
     {
       "id": "lite:pubmed-articleid-reference-list",
@@ -1945,6 +1945,15 @@
       "android": "n/a",
       "issue": null,
       "note": "bmlib measurement script or sampler, or a comment/test pin; no library behaviour moves."
+    },
+    {
+      "id": "bmlib:unreleased-canonical-from-html",
+      "title": "Canonical text from an HTML page, and a full-text check",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "StudyAnalyzer's canonical text; no lite platform mirrors it."
     },
     {
       "id": "bmlib:unreleased-canonical-from-segmented-pdf",

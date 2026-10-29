@@ -8,11 +8,12 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**bmlib sync to `8845ba8` on branch `chore/bmlib-ledger-sync`**: the ledger
-(`doc/cross_platform/bmlib_sync/ledger.json`) and the desktop's bmlib
-dependency (`pyproject.toml`, `uv.lock`) both name bmlib `main` at `8845ba8`;
-the apps' FFI pin (`BmlibFFI.pin.json`) stays at `f767215` until the apps'
-retraction work re-pins it (#588). The desktop's Retraction Watch copy is now
+**bmlib sync on branch `chore/bmlib-ledger-sync`**: the ledger
+(`doc/cross_platform/bmlib_sync/ledger.json`) names bmlib `main` at `83cd2b3`
+(canonical text from HTML, n/a here), the desktop's bmlib dependency
+(`pyproject.toml`, `uv.lock`) `8845ba8`; the apps' FFI pin
+(`BmlibFFI.pin.json`) stays at `f767215` until the apps' retraction work
+re-pins it (#588). The desktop's Retraction Watch copy is now
 built with `import_retraction_watch_export`, which refuses an export whose
 `RetractionNature` column was renamed (bmlib#509), and the bump brings bmlib's
 refusal of a cut row and its `00000000` PMID sentinel. Lodged: #641 (JATS
