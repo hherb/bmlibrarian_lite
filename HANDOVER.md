@@ -8,32 +8,22 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**bmlib sync on branch `chore/bmlib-ledger-sync`**: the ledger
-(`doc/cross_platform/bmlib_sync/ledger.json`) names bmlib `main` at `83cd2b3`
-(canonical text from HTML, n/a here), the desktop's bmlib dependency
-(`pyproject.toml`, `uv.lock`) `8845ba8`; the apps' FFI pin
-(`BmlibFFI.pin.json`) stays at `f767215` until the apps' retraction work
-re-pins it (#588). The desktop's Retraction Watch copy is now
-built with `import_retraction_watch_export`, which refuses an export whose
-`RetractionNature` column was renamed (bmlib#509), and the bump brings bmlib's
-refusal of a cut row and its `00000000` PMID sentinel. Lodged: #641 (JATS
-whitespace in abstract titles, labels, journal title and cited source; Swift,
-Kotlin, desktop journal title), #642 (the desktop's citation highlight is
-misplaced; use bmlib's `find_passage`); #598 widened to Kotlin and the
-desktop. **#629 stays open for the maintainer's decision** on item 4 (a
-re-lost page is counted twice; shortfalls keep no offset, and any rule without
-one can understate) and item 7 (counts lost when an error follows a cancel).
-Open: #627 (MCP has no smart search; a round runs all its queries;
-sequential scoring; quality filter depth; Audit Trail queries; Re-run
-Search's report covers its batch only). Lodged: #621 (PR #622 follow-ups),
-#624 (the reference cut drops tables and appendices after the references;
-all three), #625 (Upload Full Text follow-ups),
-#633 (no setting reaches the tasks' token limits), #634 (a classifier
-failure read as "no design" or as failing the quality filter), #635 (query
-conversion and MCP payloads around the cut-off guard; refusals too). Apple
-follow-ups: #612, #613. Android divergences: #614, #615; follow-ups
-#617–#619. The apps have no refusal handling yet (the Python-only rows in
-`doc/cross_platform/analysis_failure_reporting.md`).
+**Re-pin and contract on branch `chore/bmlib-ffi-repin-retraction-contract`
+(PR #646)**: the apps' FFI pin (`BmlibFFI.pin.json`) names bmlib `main` at
+`83cd2b3`, the ledger's `bmlib_commit` (the desktop's own dependency stays at
+`8845ba8`); the xcframework, `bmlib_ffi.swift` and `bmlib_ffi.kt` are
+`bmlib-xcframework.yml`'s build of it. Swift (`RetractionContractTests`) and
+Kotlin (`BmlibRetractionContractTest`) assert `retraction_status.json` through
+the FFI; `android-tests.yml` fails a skipped run of either FFI test. The iOS
+plan is `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`.
+**Next:** execute it (spec PR 4), then the Android plan (PR 5).
+**#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
+counted twice; shortfalls keep no offset) and item 7 (counts lost when an
+error follows a cancel). Open, lodged by recent rounds: #641 (JATS whitespace,
+Swift, Kotlin, desktop journal title), #642 (citation highlight; use bmlib's
+`find_passage`), #598, #621, #624, #625, #627, #633–#635; Apple #612, #613;
+Android #614, #615, #617–#619. The apps have no refusal handling yet (the
+Python-only rows in `doc/cross_platform/analysis_failure_reporting.md`).
 
 **Owed by the maintainer** (stages C1 and C2 and the desktop browser rescue
 have landed):
@@ -63,11 +53,12 @@ have landed):
 (`8845ba8`; a git pin blocks a PyPI upload). Snapshot rows keep
 `run_status`/`run_deciding` as facts of the run, set once; a `None`
 `run_status` stays "not recorded". Open: #590–#593, #595, #599–#604, #607.
-**Next:** the iOS and Android plans (they consume bmlib's FFI; pin and CI are
-#588), against the same contract.
+The apps follow (above).
 
 ## Recently landed (context)
 
+- **bmlib ledger sync** (PR #643): ledger at bmlib `83cd2b3`, the desktop's
+  dependency `8845ba8` (`import_retraction_watch_export` builds the copy).
 - **Find More Evidence keeps a cut-off answer's notice** (#639, PR #640):
   when every one of its searches fails, the notice rides on
   `SearchFailedError.notice` and `format_search_failure_message` tells it
