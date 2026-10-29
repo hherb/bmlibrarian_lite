@@ -100,6 +100,33 @@ paper with its `retraction_status`.
   rows were decided by, so a re-check on another machine does not clear a
   paper only its label retracts.
 
+## iOS/macOS
+
+The apps share bmlib's rule, Crossref parsing and export index through
+BioMedLit; the app never imports `BmlibCore`.
+
+- `Packages/BioMedLit/Sources/BioMedLit/Retraction/`: `RetractionCrossrefLookup`
+  (Crossref over a URLSession), `RetractionIndexStore` (the export as bmlib's
+  index file in Application Support, excluded from backup), `RetractionChecker`,
+  `RetractionText` (the desktop's sentences), `RetractionNames` and
+  `RetractionReportSection` (the report's methods line and "Left out as
+  retracted").
+- The screen is the app's `FactCheckWorkflow.screenForRetraction`, before
+  scoring. Each paper's latest check is `Document.retractionCheckJSON` (the
+  `retraction_checks` row); what the run used is
+  `FactCheckSession.retractionSnapshotJSON`. They can differ: a stored clear
+  stands in storage against an outage, but the run is shown unchecked.
+- Views badge (`RetractionBadge`, `RetractionBanner`) and count from the run's
+  snapshot first, then the stored check (`FactCheckSession.shownRetractionChecks`,
+  `Document.shownRetractionCheck`).
+- The export downloads over Wi-Fi only (no cellular, no Low Data Mode). It is
+  refreshed at launch and, in the background, by a run that finds no usable
+  copy; a run never waits for it. `RetractionIndexStore.refreshIfStale` is
+  single-flight: calls meanwhile share one download.
+
+Tests: `RetractionScreenWorkflowTests` (app) and `Retraction*Tests` (BioMedLit),
+over URLProtocol stubs and injected checks, never the network.
+
 ## Tests
 
 `tests/test_retraction_*.py`, `tests/test_mcp_retraction.py`,
