@@ -214,6 +214,25 @@ interface SessionDao {
     )
 
     /**
+     * Record the retraction checks the session's runs used.
+     *
+     * @param id Session ID
+     * @param snapshotJson The snapshot, as `RetractionSnapshot` JSON
+     * @param updatedAt Timestamp for the update
+     */
+    @Query("""
+        UPDATE sessions SET
+            retraction_snapshot_json = :snapshotJson,
+            updated_at = :updatedAt
+        WHERE id = :id
+    """)
+    suspend fun updateRetractionSnapshot(
+        id: String,
+        snapshotJson: String,
+        updatedAt: Long = System.currentTimeMillis()
+    )
+
+    /**
      * Set error message and mark session as failed.
      *
      * @param id Session ID

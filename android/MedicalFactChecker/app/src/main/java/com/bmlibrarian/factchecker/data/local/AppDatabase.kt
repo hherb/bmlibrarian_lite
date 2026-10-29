@@ -29,6 +29,7 @@ import com.bmlibrarian.factchecker.data.local.dao.DocumentDao
 import com.bmlibrarian.factchecker.data.local.dao.ProcessingCheckpointDao
 import com.bmlibrarian.factchecker.data.local.dao.ProcessingErrorDao
 import com.bmlibrarian.factchecker.data.local.dao.ReportDao
+import com.bmlibrarian.factchecker.data.local.dao.RetractionCheckDao
 import com.bmlibrarian.factchecker.data.local.dao.SessionDao
 import com.bmlibrarian.factchecker.data.local.dao.UsageRecordDao
 import com.bmlibrarian.factchecker.data.local.entity.CitationEntity
@@ -36,6 +37,7 @@ import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.local.entity.ProcessingCheckpointEntity
 import com.bmlibrarian.factchecker.data.local.entity.ProcessingErrorEntity
 import com.bmlibrarian.factchecker.data.local.entity.ReportEntity
+import com.bmlibrarian.factchecker.data.local.entity.RetractionCheckEntity
 import com.bmlibrarian.factchecker.data.local.entity.SessionEntity
 import com.bmlibrarian.factchecker.data.local.entity.UsageRecordEntity
 
@@ -50,6 +52,7 @@ import com.bmlibrarian.factchecker.data.local.entity.UsageRecordEntity
  * - UsageRecords: API usage and cost tracking
  * - ProcessingCheckpoints: Checkpoint data for workflow resumption
  * - ProcessingErrors: Error tracking for retry functionality
+ * - RetractionChecks: Each paper's latest retraction check
  *
  * Schema is exported to $projectDir/schemas for migration tracking.
  */
@@ -61,7 +64,8 @@ import com.bmlibrarian.factchecker.data.local.entity.UsageRecordEntity
         ReportEntity::class,
         UsageRecordEntity::class,
         ProcessingCheckpointEntity::class,
-        ProcessingErrorEntity::class
+        ProcessingErrorEntity::class,
+        RetractionCheckEntity::class
     ],
     version = AppDatabase.DATABASE_VERSION,
     exportSchema = true
@@ -118,12 +122,19 @@ abstract class AppDatabase : RoomDatabase() {
      */
     abstract fun processingErrorDao(): ProcessingErrorDao
 
+    /**
+     * Get the Retraction Check DAO.
+     *
+     * @return RetractionCheckDao for each paper's latest retraction check
+     */
+    abstract fun retractionCheckDao(): RetractionCheckDao
+
     companion object {
         /** Database file name. */
         const val DATABASE_NAME = "medical_factchecker.db"
 
         /** The schema version; [ALL_MIGRATIONS] must reach it. */
-        const val DATABASE_VERSION = 10
+        const val DATABASE_VERSION = 11
 
         /**
          * Migration from version 1 to 2.
@@ -308,6 +319,25 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 10 to 11.
+         *
+         * Adds what retraction checking keeps: each document's publication
+         * types (none recorded for existing rows), each session's snapshot of
+         * the checks its runs used (none: never checked), and each paper's
+         * latest check, shared across sessions.
+         */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE documents ADD COLUMN publication_types_json TEXT")
+                database.execSQL("ALTER TABLE sessions ADD COLUMN retraction_snapshot_json TEXT")
+                database.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `retraction_checks` (`paper_key` TEXT NOT NULL, " +
+                        "`check_json` TEXT NOT NULL, PRIMARY KEY(`paper_key`))"
+                )
+            }
+        }
+
+        /**
          * Every migration, in order, as the database is built with them.
          *
          * One list, so a migration added here is registered and one left out is
@@ -324,7 +354,8 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_6_7,
             MIGRATION_7_8,
             MIGRATION_8_9,
-            MIGRATION_9_10
+            MIGRATION_9_10,
+            MIGRATION_10_11
         )
     }
 }

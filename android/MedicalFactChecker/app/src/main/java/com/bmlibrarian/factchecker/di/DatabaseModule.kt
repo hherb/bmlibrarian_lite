@@ -26,6 +26,7 @@ import com.bmlibrarian.factchecker.data.local.dao.DocumentDao
 import com.bmlibrarian.factchecker.data.local.dao.ProcessingCheckpointDao
 import com.bmlibrarian.factchecker.data.local.dao.ProcessingErrorDao
 import com.bmlibrarian.factchecker.data.local.dao.ReportDao
+import com.bmlibrarian.factchecker.data.local.dao.RetractionCheckDao
 import com.bmlibrarian.factchecker.data.local.dao.SessionDao
 import com.bmlibrarian.factchecker.data.local.dao.UsageRecordDao
 import dagger.Module
@@ -115,6 +116,17 @@ object DatabaseModule {
     @Provides
     fun provideReportDao(database: AppDatabase): ReportDao {
         return database.reportDao()
+    }
+
+    /**
+     * Provides the Retraction Check DAO.
+     *
+     * @param database The AppDatabase instance
+     * @return RetractionCheckDao for each paper's latest retraction check
+     */
+    @Provides
+    fun provideRetractionCheckDao(database: AppDatabase): RetractionCheckDao {
+        return database.retractionCheckDao()
     }
 
     /**

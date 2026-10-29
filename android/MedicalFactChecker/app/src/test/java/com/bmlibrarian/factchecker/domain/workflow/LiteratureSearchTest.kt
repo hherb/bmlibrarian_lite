@@ -23,6 +23,7 @@ import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCApi
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCArticle
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCResultList
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCSearchResponse
+import com.bmlibrarian.factchecker.data.remote.europepmc.PubTypeList
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
 import com.bmlibrarian.factchecker.data.remote.pubmed.ESearchResponse
 import com.bmlibrarian.factchecker.data.remote.pubmed.ESearchResult
@@ -137,6 +138,36 @@ class LiteratureSearchTest {
 
         assertEquals(listOf("1", "2"), page.documents.map { it.pmid })
         assertEquals("PubMed's copy is the one kept", "T1", page.documents.first().title)
+    }
+
+    @Test
+    fun `a duplicate Europe PMC record gives its publication types to PubMed's copy`() = runTest {
+        coEvery { pubMedApi.search(any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            Response.success(ESearchResponse(ESearchResult(count = "1", idList = listOf("1"))))
+        coEvery { pubMedApi.fetch(any(), any(), any(), any(), any(), any()) } returns Response.success(
+            "<PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>1</PMID><Article><ArticleTitle>T1</ArticleTitle>" +
+                "<PublicationTypeList><PublicationType>Journal Article</PublicationType></PublicationTypeList>" +
+                "</Article></MedlineCitation></PubmedArticle></PubmedArticleSet>"
+        )
+        coEvery { europePMCApi.search(any(), any(), any(), any(), any()) } returns Response.success(
+            EuropePMCSearchResponse(
+                hitCount = 1,
+                nextCursorMark = null,
+                resultList = EuropePMCResultList(
+                    result = listOf(
+                        EuropePMCArticle(
+                            pmid = "1", title = "E1", source = "MED",
+                            pubTypeList = PubTypeList(listOf("Retracted Publication", "Journal Article"))
+                        )
+                    )
+                )
+            )
+        )
+
+        val page = search.searchPage(request(SearchProvider.BOTH, batchSize = 4))
+
+        assertEquals(listOf("T1"), page.documents.map { it.title })
+        assertEquals(listOf("Journal Article", "Retracted Publication"), page.documents.single().publicationTypes)
     }
 
     @Test

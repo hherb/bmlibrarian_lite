@@ -26,6 +26,10 @@ import androidx.room.PrimaryKey
 import com.bmlibrarian.factchecker.domain.model.FullTextLinkKind
 import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
 import com.bmlibrarian.factchecker.util.Constants
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
 import java.util.Date
 import java.util.UUID
 
@@ -224,6 +228,19 @@ data class DocumentEntity(
     @ColumnInfo(name = "citations_read_full_text")
     val citationsReadFullText: Boolean? = null,
 
+    // ==================== Retraction ====================
+
+    /**
+     * The publication types the source listed, as a JSON array of strings
+     * ([encodePublicationTypes]); the retraction check reads PubMed's
+     * "Retracted Publication" label from them.
+     *
+     * Null means not recorded (a row saved before they were kept, or a source
+     * that gave no list), never `"[]"` for an absent list.
+     */
+    @ColumnInfo(name = "publication_types_json")
+    val publicationTypesJson: String? = null,
+
     // ==================== Transparency Analysis ====================
 
     /**
@@ -408,6 +425,18 @@ data class DocumentEntity(
             else -> fullTextSource
         }
 
+    /** [publicationTypesJson] decoded; null when not recorded or unreadable. */
+    val publicationTypes: List<String>?
+        get() = publicationTypesJson?.let {
+            try {
+                Json.decodeFromString(ListSerializer(String.serializer()), it)
+            } catch (e: SerializationException) {
+                null
+            } catch (e: IllegalArgumentException) {
+                null
+            }
+        }
+
     /**
      * Check if this document has been scored.
      *
@@ -423,4 +452,15 @@ data class DocumentEntity(
      */
     val isRelevant: Boolean
         get() = (relevanceScore ?: 0) >= Constants.SCORING_MIN_RELEVANT_SCORE
+
+    companion object {
+        /**
+         * The stored form of a source's publication types.
+         *
+         * @param types The types listed, or null when the source gave no list
+         * @return The JSON array, or null for no list
+         */
+        fun encodePublicationTypes(types: List<String>?): String? =
+            types?.let { Json.encodeToString(ListSerializer(String.serializer()), it) }
+    }
 }

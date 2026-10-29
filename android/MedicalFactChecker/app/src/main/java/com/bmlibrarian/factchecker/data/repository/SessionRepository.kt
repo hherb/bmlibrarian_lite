@@ -187,6 +187,16 @@ class SessionRepository @Inject constructor(
     }
 
     /**
+     * Record the retraction checks the session's runs used.
+     *
+     * @param sessionId Session ID
+     * @param snapshotJson The whole snapshot, as `RetractionSnapshot` JSON
+     */
+    suspend fun updateRetractionSnapshot(sessionId: String, snapshotJson: String) {
+        sessionDao.updateRetractionSnapshot(sessionId, snapshotJson)
+    }
+
+    /**
      * Add token usage to a session.
      *
      * @param sessionId Session ID

@@ -163,6 +163,14 @@ data class SessionEntity(
     @ColumnInfo(name = "retrieval_shortfalls_json")
     val retrievalShortfallsJson: String? = null,
 
+    /**
+     * The retraction check each document's run used, keyed by document id, as
+     * `RetractionSnapshot` JSON: the run's record, which a later check of the
+     * paper never rewrites. Null for a session never checked.
+     */
+    @ColumnInfo(name = "retraction_snapshot_json")
+    val retractionSnapshotJson: String? = null,
+
     // ==================== Timestamps ====================
 
     /** When this session was created. */
