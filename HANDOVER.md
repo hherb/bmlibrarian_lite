@@ -8,16 +8,21 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**#639 on branch `fix/find-more-evidence-cut-off-notice-639`**: a cut-off
-answer's notice now rides on `SearchFailedError.notice` when every one of its
-searches fails, and `format_search_failure_message` tells it between the
-failure and the advice (both workers' dialogs). **#629 stays open for the
-maintainer's decision** on item 4 (a re-lost page is counted twice; shortfalls
-keep no offset, and any rule without one can understate) and item 7 (counts
-lost when an error follows a cancel). **`bmlib drift` has failed since
-2026-10-19**: bmlib changes await triage into
-`doc/cross_platform/bmlib_sync/ledger.json`
-(`scripts/check_bmlib_ledger.py --bmlib ~/src/bmlib`).
+**bmlib sync on branch `chore/bmlib-ledger-sync`**: the ledger
+(`doc/cross_platform/bmlib_sync/ledger.json`) names bmlib `main` at `83cd2b3`
+(canonical text from HTML, n/a here), the desktop's bmlib dependency
+(`pyproject.toml`, `uv.lock`) `8845ba8`; the apps' FFI pin
+(`BmlibFFI.pin.json`) stays at `f767215` until the apps' retraction work
+re-pins it (#588). The desktop's Retraction Watch copy is now
+built with `import_retraction_watch_export`, which refuses an export whose
+`RetractionNature` column was renamed (bmlib#509), and the bump brings bmlib's
+refusal of a cut row and its `00000000` PMID sentinel. Lodged: #641 (JATS
+whitespace in abstract titles, labels, journal title and cited source; Swift,
+Kotlin, desktop journal title), #642 (the desktop's citation highlight is
+misplaced; use bmlib's `find_passage`); #598 widened to Kotlin and the
+desktop. **#629 stays open for the maintainer's decision** on item 4 (a
+re-lost page is counted twice; shortfalls keep no offset, and any rule without
+one can understate) and item 7 (counts lost when an error follows a cancel).
 Open: #627 (MCP has no smart search; a round runs all its queries;
 sequential scoring; quality filter depth; Audit Trail queries; Re-run
 Search's report covers its batch only). Lodged: #621 (PR #622 follow-ups),
@@ -55,7 +60,7 @@ have landed):
 `docs/superpowers/specs/2026-10-18-retraction-checking-design.md`, doc
 `doc/developer/retraction_checking.md`; contract
 `doc/cross_platform/retraction_parity/`). bmlib is a git dependency
-(`f767215`; a git pin blocks a PyPI upload). Snapshot rows keep
+(`8845ba8`; a git pin blocks a PyPI upload). Snapshot rows keep
 `run_status`/`run_deciding` as facts of the run, set once; a `None`
 `run_status` stays "not recorded". Open: #590–#593, #595, #599–#604, #607.
 **Next:** the iOS and Android plans (they consume bmlib's FFI; pin and CI are
@@ -63,6 +68,10 @@ have landed):
 
 ## Recently landed (context)
 
+- **Find More Evidence keeps a cut-off answer's notice** (#639, PR #640):
+  when every one of its searches fails, the notice rides on
+  `SearchFailedError.notice` and `format_search_failure_message` tells it
+  between the failure and the advice.
 - **Unknown stop reasons** (#637, PR #638): each provider names the stop
   reasons it knows (`ANTHROPIC_KNOWN_STOP_REASONS`; Ollama's `stop`/`length`)
   and logs any other, read as finished unless the whole token limit was
@@ -80,19 +89,12 @@ have landed):
   `ReportMetadata.smart_search_notice` is in the methodology;
   `RetractionScreen.failed_ids`; `QualityFilter.to_report_settings()`.
 - **Desktop: Find More Evidence and repeated smart search** (PR #628).
-  `smart_search.py` asks for the apps' alternative queries, told of every
-  query already run for the run (`smart_search_run_queries`, by checkpoint);
-  an alternative search's loss is `ShortfallQuery.ALTERNATIVE`, never merged
-  into the original query's. The review runs a round itself below
-  `SMART_SEARCH_THRESHOLD` (3) relevant; *Research Questions → Find More
-  Evidence* (`more_evidence.py`) pages the question's own query, else runs a
-  round, and scores **into the reviewed run's checkpoint** (screened, the
-  run's quality filter, `known_document_ids` never new), then writes the
-  report from every citation of the run. A stop keeps what was found under
-  `UNSCORED_KEY`, scored first next time.
-- **Desktop: Upload Full Text** (PR #626): Audit Trail cards; kept in
-  `uploaded_full_texts`, apart from the converter-stamped cache; read whatever
-  the setting; *Retry Full Text* reads one newer than the paper's last read.
+  `smart_search.py` is told every query already run (`smart_search_run_queries`);
+  an alternative search's loss is `ShortfallQuery.ALTERNATIVE`. Find More
+  Evidence (`more_evidence.py`) scores **into the reviewed run's checkpoint**,
+  then writes the report from every citation of the run.
+- **Desktop: Upload Full Text** (PR #626): kept in `uploaded_full_texts`;
+  *Retry Full Text* reads one newer than the paper's last read.
 - **Desktop: citations from full text, Retry Full Text** (PR #622).
   *Settings → Full Text*: **Read citations from full text** (off) and **Fetch
   Full Text From Score** (4, never below the review's threshold). The review
@@ -109,11 +111,8 @@ have landed):
   report again only when a text was read (`full_text_report_pending` survives
   a cancel). Runs from before PR #622 cannot be retried.
 - **Android: taking a fact check further** (PR #616, Room **10**): abstract
-  holdback (`full_text_abstract_only`), PDF text via iText
-  (`full_text_pdf_text`, 1 MB cap), `DocumentEntity.analysisFullText` is what
-  citation extraction reads, `citations_read_full_text` written only by
-  `updateCitationsReadFullText` after the citations are saved, citations
-  replaced in one transaction, an upload opens as itself in the viewer.
+  holdback, PDF text via iText (1 MB cap); citations read
+  `DocumentEntity.analysisFullText` and are replaced in one transaction.
 - **bmlib: the FFI pin and the port set** (#583; PRs #564–#570, #572). The
   pin names bmlib `main` (`f767215`); `android-tests.yml` builds bmlib there
   and fails if `BmlibJatsFfiTest` skips; **the committed xcframework is

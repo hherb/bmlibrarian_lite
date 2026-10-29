@@ -69,7 +69,7 @@ wheels = [
 [[package]]
 name = "bmlib"
 version = "0.11.0"
-source = { git = "https://github.com/hherb/bmlib?rev=f76721545a76eceb683d9c460fb1f47e5c925cdb#f76721545a76eceb683d9c460fb1f47e5c925cdb" }
+source = { git = "https://github.com/hherb/bmlib?rev=8845ba857b9cb7c7999e9bd332ff173b448a92da#8845ba857b9cb7c7999e9bd332ff173b448a92da" }
 dependencies = [
     { name = "jinja2" },
 ]
@@ -109,7 +109,7 @@ dev = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.34.0" },
     { name = "backoff", specifier = ">=2.2.1" },
-    { name = "bmlib", git = "https://github.com/hherb/bmlib?rev=f76721545a76eceb683d9c460fb1f47e5c925cdb" },
+    { name = "bmlib", git = "https://github.com/hherb/bmlib?rev=8845ba857b9cb7c7999e9bd332ff173b448a92da" },
     { name = "fastembed", specifier = ">=0.3.0" },
     { name = "markdown", specifier = ">=3.5.0" },
     { name = "mcp", specifier = ">=1.0.0,<2.0" },

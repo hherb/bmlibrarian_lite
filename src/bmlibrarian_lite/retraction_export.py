@@ -25,11 +25,7 @@ from pathlib import Path
 import requests
 from bmlib.db import connect_sqlite
 from bmlib.publications.retraction_status import RetractionEvidence, evidence_from_notices
-from bmlib.publications.retractions import (
-    lookup_retractions,
-    parse_retraction_watch_csv,
-    store_retraction_notices,
-)
+from bmlib.publications.retractions import import_retraction_watch_export, lookup_retractions
 from bmlib.publications.schema import ensure_schema
 
 from .constants import (
@@ -207,10 +203,10 @@ def _build(csv_path: Path, target: Path, today: date, existing_count: int | None
     conn = connect_sqlite(target, wal_mode=False)
     try:
         ensure_schema(conn)
-        store_retraction_notices(conn, parse_retraction_watch_csv(csv_path))
+        # refuses an export with no usable row, or none carrying a DOI, a PMID
+        # or a nature this bmlib recognises (a renamed column, bmlib#509)
+        import_retraction_watch_export(conn, csv_path)
         stored = int(conn.execute("SELECT COUNT(*) FROM retraction_notices").fetchone()[0])
-        if not stored:
-            raise ValueError("the export parsed to no notices")
         if existing_count and stored < existing_count * RETRACTION_WATCH_MIN_KEEP_RATIO:
             raise ValueError(f"the export shrank from {existing_count} to {stored} notices")
         conn.execute(

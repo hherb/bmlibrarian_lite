@@ -69,6 +69,10 @@ def test_refresh_builds_a_current_copy(tmp_path):
         _Session(body=_HEADER.encode()[:40]),
         _Session(body=_HEADER.encode()),
         _Session(status=503, body=b""),
+        # a renamed RetractionNature column: every notice would read "Other"
+        _Session(body=(_HEADER.replace("RetractionNature", "NoticeKind") + _ROW).encode()),
+        # a row cut part-way, as a truncated download leaves it
+        _Session(body=(_HEADER + _ROW + _ROW.replace("1,", "2,", 1)[:60]).encode()),
     ],
 )
 def test_a_refused_download_keeps_the_previous_copy(tmp_path, bad):
@@ -170,10 +174,10 @@ def test_a_store_error_keeps_the_previous_copy(tmp_path, monkeypatch):
     _refresh(tmp_path, _Session(), today=TODAY - timedelta(days=3))
     before = (tmp_path / "retraction_watch.db").read_bytes()
 
-    def boom(conn, notices):
+    def boom(conn, source):
         raise RuntimeError("disk full")
 
-    monkeypatch.setattr("bmlibrarian_lite.retraction_export.store_retraction_notices", boom)
+    monkeypatch.setattr("bmlibrarian_lite.retraction_export.import_retraction_watch_export", boom)
     _refresh(tmp_path, _Session())
     _assert_untouched(tmp_path, before)
 

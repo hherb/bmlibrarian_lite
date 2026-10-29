@@ -63,7 +63,7 @@ dependencies = [
     # The maintainer's shared library: owns the retraction rule
     # (bmlib.publications.retraction_status). Pinned to a commit until
     # bmlib 0.12.0 is on PyPI; then "bmlib>=0.12.0" and drop the hatch setting.
-    "bmlib @ git+https://github.com/hherb/bmlib@f76721545a76eceb683d9c460fb1f47e5c925cdb",
+    "bmlib @ git+https://github.com/hherb/bmlib@8845ba857b9cb7c7999e9bd332ff173b448a92da",
 ]
 
 [project.optional-dependencies]
