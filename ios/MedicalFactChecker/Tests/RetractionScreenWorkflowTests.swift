@@ -328,9 +328,25 @@ final class RetractionScreenWorkflowTests: XCTestCase {
 
         XCTAssertTrue(made)
         let report = try XCTUnwrap(session.report?.fullReport)
+        XCTAssertTrue(report.hasPrefix("> **Retraction check:** 1 retracted paper left out.\n\n"), report)
         XCTAssertTrue(report.contains(RetractionText.leftOutHeading), report)
         XCTAssertTrue(report.contains("- Study 0. Retracted 2024-01-02; notice 10.1000/notice"), report)
         XCTAssertFalse(report.contains("- Study 1."), "control: the clear paper is not left out")
+    }
+
+    /// A report the screening run writes itself names why papers are
+    /// unchecked, as the run's notice does.
+    func testTheRunsOwnReportNamesTheCauses() async throws {
+        let (session, _) = makeSession([nil])
+        let workflow = restore(session, check: Self.answering([
+            nil: Self.unchecked(["retraction_watch_export", "crossref"]),
+        ]))
+
+        await workflow.proceedWithCurrentDocuments()
+
+        let report = try XCTUnwrap(session.report?.fullReport)
+        XCTAssertTrue(report.hasPrefix(
+            "> **Retraction check:** 1 paper's retraction status could not be checked: no DOI or PMID.\n\n"), report)
     }
 
     /// Control for the rule above: it covers a label verdict only. A stored

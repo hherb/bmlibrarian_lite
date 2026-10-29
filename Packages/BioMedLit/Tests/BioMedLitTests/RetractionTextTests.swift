@@ -195,4 +195,62 @@ final class RetractionTextTests: XCTestCase {
             "    ⚠️ Expression of concern")
         XCTAssertEqual(RetractionText.concernCaveat(check("concern")), "    ⚠️ Expression of concern")
     }
+    // MARK: - Saved work
+
+    func testSavedWorkLine() {
+        XCTAssertEqual(RetractionText.savedWorkLine([]), "Retraction status never checked")
+        XCTAssertEqual(
+            RetractionText.savedWorkLine([check("unchecked", unanswered: both)]),
+            "Retraction status could not be checked")
+        let older = PaperRetractionCheck(
+            status: "clear", deciding: nil, unanswered: [], checkedAt: when.addingTimeInterval(-86_400),
+            exportDataAsOf: nil, crossrefFailure: nil)
+        XCTAssertEqual(
+            RetractionText.savedWorkLine([check("retracted", evidence()), older, check("unchecked", unanswered: both)]),
+            "Retraction status checked 2026-10-17; 1 paper could not be checked",
+            "the oldest decided check, never an unchecked one's time")
+    }
+
+    func testNotCheckedAgainClause() {
+        XCTAssertEqual(RetractionText.notCheckedAgainClause(0), "")
+        XCTAssertEqual(RetractionText.notCheckedAgainClause(1), "; 1 paper could not be checked again")
+        XCTAssertEqual(RetractionText.notCheckedAgainClause(1_200), "; 1,200 papers could not be checked again")
+    }
+
+    func testSavedWorkWarning() {
+        XCTAssertNil(RetractionText.savedWorkWarning([]))
+        XCTAssertEqual(
+            RetractionText.savedWorkWarning([(title: "A\n  trial", check: check("retracted", evidence()))]),
+            "Since this report was written, 1 paper this report cites has a retraction warning:\n"
+                + "• A trial: Retracted on 2026-03-09 (notice 10.9/n); Retraction Watch data as of 2026-10-01\n"
+                + "The report has not been changed; re-run the question to bring it up to date.")
+        let two = RetractionText.savedWorkWarning([
+            (title: "A", check: check("retracted", evidence())),
+            (title: "B", check: check("concern", evidence(kind: "expression_of_concern"), asOf: nil)),
+        ])
+        XCTAssertTrue(two?.hasPrefix("Since this report was written, 2 papers this report cites have") == true)
+        XCTAssertTrue(two?.contains("• B: Expression of concern, 2026-03-09 (notice 10.9/n)\n") == true)
+    }
+
+    func testExcludedLine() {
+        let run = check("retracted", evidence(notice: "10.9/notice"), asOf: nil)
+        let runLine = "Excluded: retracted. Retracted on 2026-03-09 (notice 10.9/notice)"
+        XCTAssertEqual(RetractionText.excludedLine(runCheck: run, current: run), runLine)
+        XCTAssertEqual(
+            RetractionText.excludedLine(runCheck: run, current: check("clear", asOf: nil)),
+            "\(runLine). Checked again: No retraction found")
+    }
+
+    func testReportNotice() {
+        XCTAssertEqual(
+            RetractionText.reportNotice("1 retracted paper left out"),
+            "> **Retraction check:** 1 retracted paper left out.")
+    }
+
+    func testPaperKey() {
+        XCTAssertEqual(paper("https://doi.org/10.1/X").paperKey, paper("10.1/x").paperKey)
+        XCTAssertEqual(paper(nil, pmid: "123").paperKey, "pmid:123")
+        XCTAssertNil(paper(nil, pmid: "x").paperKey, "a PMID that is not canonical is no PMID")
+        XCTAssertNil(paper(nil).paperKey)
+    }
 }

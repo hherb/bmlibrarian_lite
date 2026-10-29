@@ -109,8 +109,9 @@ BioMedLit; the app never imports `BmlibCore`.
   (Crossref over a URLSession), `RetractionIndexStore` (the export as bmlib's
   index file in Application Support, excluded from backup), `RetractionChecker`,
   `RetractionText` (the desktop's sentences), `RetractionNames` and
-  `RetractionReportSection` (the report's methods line and "Left out as
-  retracted").
+  `RetractionReportSection` (the report's notice, methods line and "Left out
+  as retracted"), `RetractionSavedWork` (a restored session's line and
+  warning).
 - The screen is the app's `FactCheckWorkflow.screenForRetraction`, before
   scoring. Each document's latest check is `Document.retractionCheckJSON`:
   per document, so per session, not per paper as the desktop's
@@ -120,12 +121,23 @@ BioMedLit; the app never imports `BmlibCore`.
 - Views badge (`RetractionBadge`, `RetractionBanner`) and count from the run's
   snapshot first, then the stored check (`FactCheckSession.shownRetractionChecks`,
   `Document.shownRetractionCheck`).
+- A restored session (`FactCheckWorkflow.restoreForViewing`) shows
+  `retractionSavedWorkLine` and, for cited papers whose latest stored check
+  (this session's, or another document's with the same `RetractionPaper.paperKey`)
+  is now retracted or concern where the run's was not,
+  `retractionSavedWorkWarning`; no request is made. **Check again**
+  (`checkRetractionsAgain`) stores each answer by
+  `Document.takeRetractionCheck` and never rewrites the snapshot or the
+  report: the snapshot stays what the run saw (the desktop's `run_status`).
+  The rules are BioMedLit's `RetractionSavedWork`. A left-out row says
+  `RetractionText.excludedLine`; the report opens with
+  `RetractionReportSection.notice`.
 - The export downloads over Wi-Fi only (no cellular, no Low Data Mode). It is
   refreshed at launch and, in the background, by a run that finds no usable
   copy; a run never waits for it. `RetractionIndexStore.refreshIfStale` is
   single-flight: calls meanwhile share one download.
 
-Tests: `RetractionScreenWorkflowTests` and `RetractionBadgeTests` (app);
+Tests: `RetractionScreenWorkflowTests`, `RetractionSavedWorkTests` and `RetractionBadgeTests` (app);
 `Retraction*Tests`, `ReportFormatterRetractionTests` and
 `PublicationTypeParsingTests` (BioMedLit). They run over URLProtocol stubs and
 injected checks, never the network.

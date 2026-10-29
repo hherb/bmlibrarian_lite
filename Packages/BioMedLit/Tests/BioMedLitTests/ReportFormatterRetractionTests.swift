@@ -85,7 +85,8 @@ final class ReportFormatterRetractionTests: XCTestCase {
             "No evidence.", shortfalls: [],
             retraction: section([("Bad trial", check("retracted", deciding: notice))]))
         XCTAssertTrue(text.hasPrefix(
-            "No evidence.\n\n## Methodology\n\n- **Retraction Check:** Retraction status checked 2026-10-18"))
+            "> **Retraction check:** 1 retracted paper left out.\n\n"
+                + "No evidence.\n\n## Methodology\n\n- **Retraction Check:** Retraction status checked 2026-10-18"))
         XCTAssertTrue(text.contains("## Left out as retracted\n\n- Bad trial. Retracted 2026-03-09; notice 10.9/n"))
     }
 
@@ -94,5 +95,26 @@ final class ReportFormatterRetractionTests: XCTestCase {
         XCTAssertEqual(mixed.methodsLine, "Retraction status checked 2026-10-18; 2 papers could not be checked")
         let none = section([("B", check("unchecked"))])
         XCTAssertEqual(none.methodsLine, "Retraction status could not be checked")
+    }
+
+    /// The report opens with the notice (the desktop's `with_retraction_notice`),
+    /// inside the search's own notice; a run that left nothing out and checked
+    /// every paper has none.
+    func testReportOpensWithTheNotice() {
+        let mixed = section([("A", check("retracted", deciding: notice)), ("B", check("unchecked"))])
+        XCTAssertTrue(report(mixed).hasPrefix(
+            "> **Retraction check:** 1 retracted paper left out; 1 paper's retraction status could not be checked."
+                + "\n\nThe analysis."))
+        let named = RetractionReportSection(papers: [("B", check("unchecked"))], causes: ["no DOI or PMID"])
+        XCTAssertEqual(
+            named.notice, "> **Retraction check:** 1 paper's retraction status could not be checked: no DOI or PMID.")
+        XCTAssertTrue(report(section([("Fine", check("clear"))])).hasPrefix("The analysis."))
+
+        let incomplete = ReportFormatter.fullReport(
+            analysis: "The analysis.", references: "**1.** Ref",
+            shortfalls: [RetrievalShortfall(source: .pubmed, failure: .forHTTPStatus(429))], retraction: mixed)
+        let retraction = incomplete.range(of: "> **Retraction check:**")!.lowerBound
+        XCTAssertGreaterThan(retraction, incomplete.startIndex, "the search's notice comes first")
+        XCTAssertLessThan(retraction, incomplete.range(of: "The analysis.")!.lowerBound)
     }
 }

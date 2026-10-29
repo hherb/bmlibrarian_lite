@@ -408,6 +408,18 @@ final class Document {
     /// ``FactCheckSession/shownRetractionChecks()`` once instead.
     var shownRetractionCheck: PaperRetractionCheck? { session?.retractionSnapshot()[id] ?? retractionCheck }
 
+    /// The line a list shows under this document when `shown` left it out
+    /// as retracted (``RetractionText/excludedLine(runCheck:current:)``): the
+    /// run's evidence, then the stored check when *Check again* has changed
+    /// it. `nil` for a scored document or one not left out.
+    ///
+    /// - Parameter shown: The check the list shows it by (``FactCheckSession/shownRetractionChecks()``'s).
+    func retractionExcludedLine(shown: PaperRetractionCheck?) -> String? {
+        guard !isScored, let shown, shown.isRetracted else { return nil }
+        let current = retractionCheck.flatMap { $0.checkedAt >= shown.checkedAt ? $0 : nil } ?? shown
+        return RetractionText.excludedLine(runCheck: shown, current: current)
+    }
+
     /// Whether the stored check says retracted; never true for unchecked.
     var isRetracted: Bool { retractionCheck?.isRetracted ?? false }
 

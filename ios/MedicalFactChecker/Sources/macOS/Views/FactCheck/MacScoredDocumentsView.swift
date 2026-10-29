@@ -281,6 +281,13 @@ struct MacDocumentCard: View {
                         MacBatchBadge(batchNumber: document.batchNumber)
                     }
                 }
+
+                if let excluded = document.retractionExcludedLine(shown: retractionCheck) {
+                    Text(excluded)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             Spacer()

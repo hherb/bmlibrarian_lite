@@ -654,10 +654,10 @@
       "id": "bmlib:0.7.0-retraction-watch",
       "title": "Retraction Watch",
       "python": "ported",
-      "swift": "owed",
+      "swift": "ported",
       "android": "owed",
       "issue": null,
-      "note": "WP 7. Spec docs/superpowers/specs/2026-10-18-retraction-checking-design.md; the rule is bmlib#504 (see its row). Desktop PR 1 (#594: the bmlib dependency, the contract copy, stored publication types) and PR 2 (#597: export copy, Crossref lookups, stored verdicts, the review, MCP, interrogation, report and bmll retractions-update) consume it, and PR 3 (#605: saved work, last checked, Check again) finishes it. The apps' plan is docs/superpowers/plans/2026-10-29-retraction-checking-apple.md (iOS/macOS); Android follows. Swift: PR 4a (iOS/macOS) ports the screen before scoring, the stored verdicts, the badges and the report's methods line and left-out section; owed until PR 4b ports saved work, last checked, Check again, the report-opening notice and the excluded line (#648)."
+      "note": "WP 7. Spec docs/superpowers/specs/2026-10-18-retraction-checking-design.md; the rule is bmlib#504 (see its row). Desktop PR 1 (#594: the bmlib dependency, the contract copy, stored publication types) and PR 2 (#597: export copy, Crossref lookups, stored verdicts, the review, MCP, interrogation, report and bmll retractions-update) consume it, and PR 3 (#605: saved work, last checked, Check again) finishes it. The apps' plan is docs/superpowers/plans/2026-10-29-retraction-checking-apple.md (iOS/macOS); Android follows. Swift: PR 4a (iOS/macOS) ports the screen before scoring, the stored verdicts, the badges and the report's methods line and left-out section; PR 4b ports saved work (last checked, the warning from the stored checks, Check again), the report-opening notice and the excluded line. Swift keeps the run's checks in the snapshot and writes Check again's into each Document, so the snapshot never needs the desktop's run_status."
     },
     {
       "id": "bmlib:0.8.0-citation-styles",

@@ -15,7 +15,8 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 import Foundation
 
-/// What a report says about retraction: the papers the run left out and the methods line.
+/// What a report says about retraction: the opening notice, the papers the
+/// run left out and the methods line.
 ///
 /// Built from the checks the run used, not from what is stored now, so the
 /// report states what the run saw (the desktop builds it from its screen).
@@ -24,15 +25,26 @@ public struct RetractionReportSection: Sendable {
     public let leftOut: [(title: String, check: PaperRetractionCheck)]
     /// ``RetractionText/methodsLine(checkedAt:notChecked:heldPapers:)`` for the run.
     public let methodsLine: String
+    /// The report's opening notice (``RetractionText/reportNotice(_:)``), or
+    /// `nil` when nothing was left out and every paper was checked.
+    public let notice: String?
 
-    /// - Parameter papers: Every paper the run held (kept and left out) with the check it used.
-    public init(papers: [(title: String, check: PaperRetractionCheck)]) {
+    /// - Parameters:
+    ///   - papers: Every paper the run held (kept and left out) with the check it used.
+    ///   - causes: Why kept papers are unchecked (``RetractionText/uncheckedCauses(_:failed:)``),
+    ///     when the live run knows; empty gives the count alone, as the desktop's restored snapshot does.
+    public init(papers: [(title: String, check: PaperRetractionCheck)], causes: [String] = []) {
         leftOut = papers.filter { $0.check.isRetracted }
         // As the desktop: the oldest *decided* check; an unchecked answer's time never counts.
-        let checkedAt = papers.map(\.check).filter { !$0.isUnchecked }.map(\.checkedAt).min()
-        methodsLine = RetractionText.methodsLine(
-            checkedAt: checkedAt, notChecked: papers.filter { $0.check.isUnchecked }.count,
-            heldPapers: !papers.isEmpty)
+        methodsLine = RetractionText.savedWorkLine(papers.map(\.check))
+        notice = RetractionText.runSummaryClause(
+            excluded: leftOut.count, unchecked: papers.filter { $0.check.isUnchecked }.count, causes: causes
+        ).map(RetractionText.reportNotice)
+    }
+
+    /// `text` with the notice in front (the desktop's `with_retraction_notice`).
+    func withNotice(_ text: String) -> String {
+        notice.map { "\($0)\n\n\(text)" } ?? text
     }
 
     /// The left-out section, or `""` when nothing was left out.

@@ -31,6 +31,14 @@ public struct RetractionPaper: Hashable, Sendable {
         self.pmid = pmid
         self.publicationTypes = publicationTypes
     }
+
+    /// The key this paper's checks are shared under (the desktop's
+    /// `paper_key`): `doi:` and the Crossref key, else `pmid:` and the
+    /// canonical PMID; `nil` with neither.
+    public var paperKey: String? {
+        if let key = doi.flatMap(RetractionChecker.doiKey) { return "doi:\(key)" }
+        return pmid.flatMap { PMID.canonical($0).pmid }.map { "pmid:\($0)" }
+    }
 }
 
 /// The notice a verdict rests on, by contract names.

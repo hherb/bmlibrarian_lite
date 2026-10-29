@@ -344,8 +344,9 @@ public enum ReportFormatter {
     ///   - references: The reference list, one entry per relevant document.
     ///   - shortfalls: What the session's searches failed to retrieve.
     ///   - retraction: The retraction methods line and the papers left out, or `nil` when never checked.
-    /// - Returns: The notice (if any), the analysis, the Methodology section (if
-    ///   any), the "Left out as retracted" section (if any) and the references.
+    /// - Returns: The search notice (if any), the retraction notice (if any),
+    ///   the analysis, the Methodology section (if any), the "Left out as
+    ///   retracted" section (if any) and the references.
     public static func fullReport(
         analysis: String,
         references: String,
@@ -358,9 +359,8 @@ public enum ReportFormatter {
             retraction?.leftOutMarkdown ?? "",
             referencesHeading + reportBlockSeparator + references,
         ].filter { !$0.isEmpty }
-        return SearchFailureReporting.withNotice(
-            blocks.joined(separator: reportBlockSeparator), shortfalls: shortfalls
-        )
+        let body = blocks.joined(separator: reportBlockSeparator)
+        return SearchFailureReporting.withNotice(retraction?.withNotice(body) ?? body, shortfalls: shortfalls)
     }
 
     /// Build the text of a message saved in place of a report.
@@ -374,15 +374,16 @@ public enum ReportFormatter {
     ///   - shortfalls: What the session's searches failed to retrieve.
     ///   - retraction: As for ``fullReport(analysis:references:shortfalls:retraction:)``.
     /// - Returns: The message, opening with the notice when the search was
-    ///   incomplete, then the retraction Methodology line and the "Left out as
-    ///   retracted" section when there are any.
+    ///   incomplete and the retraction notice when there is one, then the
+    ///   retraction Methodology line and the "Left out as retracted" section
+    ///   when there are any.
     public static func standInReport(
         _ text: String, shortfalls: [RetrievalShortfall], retraction: RetractionReportSection? = nil
     ) -> String {
         let blocks = [text, methodology("", retraction), retraction?.leftOutMarkdown ?? ""]
             .filter { !$0.isEmpty }
-        return SearchFailureReporting.withNotice(
-            blocks.joined(separator: reportBlockSeparator), shortfalls: shortfalls)
+        let body = blocks.joined(separator: reportBlockSeparator)
+        return SearchFailureReporting.withNotice(retraction?.withNotice(body) ?? body, shortfalls: shortfalls)
     }
 
     /// The Methodology section: `search`'s, with the retraction line added,
