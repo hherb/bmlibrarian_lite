@@ -170,7 +170,7 @@ struct MacFullTextViewer: View {
     @ViewBuilder
     private var content: some View {
         VStack(spacing: 0) {
-            RetractionBanner(check: document.shownRetractionCheck)
+            RetractionBanner(check: document.badgedRetractionCheck(shown: document.shownRetractionCheck))
             // This viewer renders from the cached `Document` and never sees the
             // in-flight result, which is why the warnings are persisted rather
             // than carried alongside the text (#181). Without that, macOS would

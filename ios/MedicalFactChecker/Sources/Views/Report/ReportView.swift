@@ -98,6 +98,7 @@ struct ReportContentView: View {
             if let notice = workflow?.stopNotice {
                 IncompleteSearchNotice(text: notice)
             }
+            RetractionSavedWorkSection(workflow: workflow, session: report.session)
 
             // Verdict Badge
             HStack {
@@ -344,6 +345,7 @@ struct ReportView: View {
                     if let notice = workflow?.stopNotice {
                         IncompleteSearchNotice(text: notice)
                     }
+                    RetractionSavedWorkSection(workflow: workflow, session: report.session)
 
                     // Verdict Badge
                     HStack {

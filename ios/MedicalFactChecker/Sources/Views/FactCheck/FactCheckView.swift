@@ -109,6 +109,7 @@ struct FactCheckView: View {
                         if let notice = workflow.retractionNotice {
                             IncompleteSearchNotice(text: notice)
                         }
+                        RetractionSavedWorkSection(workflow: workflow, session: workflow.session)
                         if let notice = workflow.fullTextNotice {
                             IncompleteSearchNotice(text: notice)
                         }
@@ -577,61 +578,6 @@ struct StepIndicator: View {
         case .generatingReport: return "Report"
         default: return ""
         }
-    }
-}
-
-/// Banner displayed when continuing a search from history.
-///
-/// Shows information about the resumed session including:
-/// - Document count and scored count
-/// - Indicator if more evidence is available
-///
-/// Styled with a light blue background to distinguish from other UI elements.
-struct ResumedSessionBanner: View {
-    /// The session being resumed.
-    let session: FactCheckSession
-
-    /// Called when user wants to start a new question instead.
-    var onNewQuestion: (() -> Void)?
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "arrow.uturn.forward.circle.fill")
-                .font(.title2)
-                .foregroundColor(.blue)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Continuing previous search")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-
-                let docCount = session.documents?.count ?? 0
-                let scoredCount = session.documents?.filter { $0.isScored }.count ?? 0
-                Text("\(docCount) documents found, \(scoredCount) scored")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            if let onNewQuestion {
-                Button(action: onNewQuestion) {
-                    Text("New Question")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-
-            if session.canGetMoreEvidence {
-                Image(systemName: "plus.circle")
-                    .foregroundColor(.green)
-            }
-        }
-        .padding()
-        .background(Color.blue.opacity(0.1))
-        .cornerRadius(12)
     }
 }
 

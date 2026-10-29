@@ -162,6 +162,7 @@ struct MacFactCheckView: View {
                     if let notice = workflow.retractionNotice {
                         MacIncompleteSearchNotice(text: notice)
                     }
+                    RetractionSavedWorkSection(workflow: workflow, session: workflow.session)
                     if let notice = workflow.fullTextNotice {
                         MacIncompleteSearchNotice(text: notice)
                     }
@@ -859,68 +860,6 @@ struct MacRegenerateReportSection: View {
         }
         .padding(MacSpacing.large)
         .background(Color.orange.opacity(MacOpacity.light))
-        .cornerRadius(MacCornerRadius.large)
-    }
-}
-
-// MARK: - Resumed Session Banner
-
-/// Banner displayed when continuing a search from history.
-///
-/// Shows information about the resumed session including:
-/// - Document count and scored count
-/// - Indicator if more evidence is available
-/// - "New Question" button to start fresh
-///
-/// Styled with a light blue background to distinguish from other UI elements.
-struct MacResumedSessionBanner: View {
-    /// The session being resumed.
-    let session: FactCheckSession
-
-    /// Called when user wants to start a new question instead.
-    var onNewQuestion: (() -> Void)?
-
-    var body: some View {
-        HStack(spacing: MacSpacing.standard) {
-            Image(systemName: "arrow.uturn.forward.circle.fill")
-                .font(.title2)
-                .foregroundColor(.blue)
-
-            VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
-                Text("Continuing previous search")
-                    .font(.headline)
-
-                let docCount = session.documents?.count ?? 0
-                let scoredCount = session.documents?.filter { $0.isScored }.count ?? 0
-                Text("\(docCount) documents found, \(scoredCount) scored")
-                    .font(.body)
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            // New Question button
-            if let onNewQuestion {
-                Button(action: onNewQuestion) {
-                    Text("New Question")
-                        .font(.callout)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
-            }
-
-            if session.canGetMoreEvidence {
-                HStack(spacing: MacSpacing.xSmall) {
-                    Image(systemName: "plus.circle")
-                        .foregroundColor(.green)
-                    Text("More available")
-                        .font(.caption)
-                        .foregroundColor(.green)
-                }
-            }
-        }
-        .padding(MacSpacing.large)
-        .background(Color.blue.opacity(MacOpacity.light))
         .cornerRadius(MacCornerRadius.large)
     }
 }

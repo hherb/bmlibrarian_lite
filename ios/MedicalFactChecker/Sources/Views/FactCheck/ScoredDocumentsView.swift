@@ -84,7 +84,8 @@ struct ScoredDocumentsView: View {
 
                     Spacer()
 
-                    Text("\(scoredDocuments.count)")
+                    // every row listed, the retracted ones too, as macOS counts
+                    Text("\(sortedDocuments(checks).count)")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
 
@@ -308,7 +309,14 @@ struct DocumentScoreRow: View {
                                 isPreprint: document.isPreprint
                             )
 
-                            RetractionBadge(check: retractionCheck)
+                            RetractionBadge(check: document.badgedRetractionCheck(shown: retractionCheck))
+                        }
+
+                        if let excluded = document.retractionExcludedLine(shown: retractionCheck) {
+                            Text(excluded)
+                                .font(.caption)
+                                .foregroundColor(.red)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
 

@@ -8,19 +8,35 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Retraction checking, iOS/macOS: PR 4a done** (Tasks 1–7 of
-`docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`, branch
-`feat/retraction-checking-apple`; Apple section of
-`doc/developer/retraction_checking.md`). BioMedLit `Retraction/` holds the
-Crossref lookup, the Wi-Fi-only index file (refreshed at launch and by a run
-that finds none, single-flight, never awaited), the checker with the desktop's
-reuse / `_keeps` / shown-vs-stored rules, and the sentences. The app screens in
+**Retraction checking, iOS/macOS: done** (PR #650 = PR 4a, Tasks 1–7; PR #652 = PR 4b,
+Tasks 8–9; plan
+`docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`, Apple
+section of `doc/developer/retraction_checking.md`; ledger row
+`bmlib:0.7.0-retraction-watch` now `swift: ported`). The app screens in
 `FactCheckWorkflow` before both scoring paths; **a run leaves out by the check
-it used, and every view reads the session's snapshot before the stored check**
-(a stored clear kept through an outage is never shown). The app never imports
-BmlibCore. Publication types are kept; the query no longer drops `Retracted
-Publication`. **Next:** PR 4b (Tasks 8–9: last-checked line, Check again; add
-the desktop's report-opening notice and `excluded_line`, #648), then the Android plan (PR 5: store checks per paper, and merge duplicates' publication types as Swift and Python do). Open from PR 4a: #651 (checks stored per document, so per session, not per paper), #647 (robustness: snapshot decode, a refused export re-downloaded per run), #648, #649 (test gaps).
+it used, and lists and counts read the session's snapshot before the stored
+check**; badges and banners show the stored check where *Check again* replaced
+the run's (`Document.badgedRetractionCheck`, as the desktop's card).
+**The snapshot is the run's record and is never rewritten**: *Check again*
+(`checkRetractionsAgain`) stores answers in each `Document` only, so the
+snapshot plays the desktop's `run_status`. A restored session shows
+`retractionSavedWorkLine` and the warning for cited papers, read from the
+store with no request (other sessions' documents by `RetractionPaper.paperKey`);
+rules in BioMedLit `RetractionSavedWork` (an unchecked run row is no check
+time, so an older retraction found elsewhere still warns); the line and
+warning also sit above the Report tab (`RetractionSavedWorkSection`, the
+workflow's own session only). The report opens with
+`RetractionReportSection.notice` (causes only when the writing run screened
+every snapshot paper); left-out rows show `RetractionText.excludedLine`; both
+list headers count every row listed. The dead `ResumedSessionBanner`s are gone.
+**Next:** the Android plan (PR 5: store checks per paper from the start, and
+merge duplicates' publication types as Swift and Python do). Open: #651
+(Apple checks stored per document, not per paper), #647 (snapshot decode, a
+refused export re-downloaded per run), #648 (left: a session scored before the
+check, after Find More Evidence, has its methods line dated while its earlier
+papers were never checked), #649 (test gaps), #653 (badge another session's
+newer check; label rule; restore cost), #654 (Check again: causes, stop,
+unsaved note on reopen).
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
 error follows a cancel). Open, lodged by recent rounds: #641 (JATS whitespace,
@@ -51,13 +67,11 @@ have landed):
   Offscreen smoke runs passed apart from #530's cold-start segfault.
 
 **Retraction checking, desktop: done** (PRs #594, #597, #605; spec
-`docs/superpowers/specs/2026-10-18-retraction-checking-design.md`, doc
-`doc/developer/retraction_checking.md`; contract
+`docs/superpowers/specs/2026-10-18-retraction-checking-design.md`; contract
 `doc/cross_platform/retraction_parity/`). bmlib is a git dependency
 (`8845ba8`; a git pin blocks a PyPI upload). Snapshot rows keep
-`run_status`/`run_deciding` as facts of the run, set once; a `None`
-`run_status` stays "not recorded". Open: #590–#593, #595, #599–#604, #607.
-The apps follow (above).
+`run_status`/`run_deciding` as facts of the run, set once. Open: #590–#593,
+#595, #599–#604, #607.
 
 ## Recently landed (context)
 
@@ -240,7 +254,7 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **Retraction checking** (above), then Phases 3–6 (Phase 4 as adapter work
+- **Retraction checking**: Android (above), then Phases 3–6 (Phase 4 as adapter work
   over the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**, **#585**.
 - **#545** sweep the PDF library for other articles' PDFs (CLI only, the
   maintainer's call); **#547** keep a set-aside PDF from the GUI (both from

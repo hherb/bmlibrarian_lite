@@ -115,3 +115,45 @@ struct RetractionBanner: View {
         }
     }
 }
+
+/// A restored session's retraction line with *Check again*, and the warning
+/// when a paper its report cites is now retracted or under concern (the
+/// desktop's report-tab line, button and warning).
+struct RetractionSavedWorkSection: View {
+    let workflow: FactCheckWorkflow?
+    /// The session whose report is shown: a report from another session than
+    /// the workflow's gets no section.
+    let session: FactCheckSession?
+
+    var body: some View {
+        if let workflow, let line = workflow.retractionSavedWorkLine, let session,
+           workflow.session?.id == session.id {
+            content(workflow, line: line)
+        }
+    }
+
+    /// The line with *Check again*, and the warning under it when there is one.
+    private func content(_ workflow: FactCheckWorkflow, line: String) -> some View {
+        VStack(alignment: .leading, spacing: RetractionBadgeConstants.bannerSpacing) {
+            HStack(spacing: RetractionBadgeConstants.bannerSpacing) {
+                Text(line)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button(RetractionText.checkAgainLabel) { Task { await workflow.checkRetractionsAgain() } }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(workflow.isCheckingRetractionsAgain)
+            }
+            if let warning = workflow.retractionSavedWorkWarning {
+                Text(warning)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(RetractionBadgeConstants.bannerPadding)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.red.opacity(RetractionBadgeConstants.backgroundOpacity))
+            }
+        }
+    }
+}

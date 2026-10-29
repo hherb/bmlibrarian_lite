@@ -264,7 +264,7 @@ struct MacDocumentCard: View {
                     // Search provider badge
                     MacProviderBadge(provider: documentProvider)
 
-                    RetractionBadge(check: retractionCheck)
+                    RetractionBadge(check: document.badgedRetractionCheck(shown: retractionCheck))
 
                     // PMC full text availability indicator (only if not already fetched)
                     if document.hasFullTextInPMC && !document.hasFullText && !document.fullTextUnavailable {
@@ -280,6 +280,13 @@ struct MacDocumentCard: View {
                     if document.batchNumber > 1 {
                         MacBatchBadge(batchNumber: document.batchNumber)
                     }
+                }
+
+                if let excluded = document.retractionExcludedLine(shown: retractionCheck) {
+                    Text(excluded)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
