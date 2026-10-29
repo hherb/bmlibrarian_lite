@@ -171,6 +171,8 @@ final class StoreMigrationTests: XCTestCase {
         let session = try XCTUnwrap(try ModelContext(container).fetch(FetchDescriptor<FactCheckSession>()).first)
         XCTAssertEqual(try session.retrievalShortfalls(), [])
         XCTAssertNil(session.europePMCRecordsReceived)
+        XCTAssertNil(session.retractionSnapshotJSON, "never checked")
+        XCTAssertEqual(session.retractionSnapshot(), [:])
     }
 
     /// A document stored before the open-access shortfall existed (#466) is
@@ -200,6 +202,9 @@ final class StoreMigrationTests: XCTestCase {
         XCTAssertNil(document.fullTextOpenAccessShortfallJSON)
         XCTAssertNil(document.publicationTypesJSON)
         XCTAssertNil(document.publicationTypes, "an older row has not recorded types")
+        XCTAssertNil(document.retractionCheckJSON)
+        XCTAssertNil(document.retractionCheck, "an older row was never checked")
+        XCTAssertFalse(document.isRetracted)
         XCTAssertNil(document.cachedRetrievalNotice.openAccessShortfall)
         XCTAssertNil(document.fullTextPDFNotSavedFrom)
         XCTAssertNil(document.storedPDFNotSavedNote)

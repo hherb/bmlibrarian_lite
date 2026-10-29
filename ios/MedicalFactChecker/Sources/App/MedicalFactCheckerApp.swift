@@ -124,6 +124,13 @@ struct MedicalFactCheckerApp: App {
             logger: BioMedLitOSLogLogger()
         )
         BioMedLitLib.configure(with: config)
+
+        // One refresh of the Retraction Watch data per launch (Wi-Fi only);
+        // a run never waits for it, and uses the copy it finds
+        Task.detached(priority: .background) {
+            let outcome = await RetractionIndexStore.production(email: email).refreshIfStale(now: Date())
+            AppLogger.network.info("Retraction Watch data: \(String(describing: outcome), privacy: .public)")
+        }
     }
 }
 #endif // os(iOS)

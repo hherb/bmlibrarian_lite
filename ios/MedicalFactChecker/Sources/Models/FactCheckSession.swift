@@ -118,6 +118,15 @@ final class FactCheckSession {
     /// complete search (#256).
     private var retrievalShortfallsJSON: String?
 
+    // MARK: - Retraction Snapshot
+
+    /// The retraction check each document's run used, keyed by `Document.id`,
+    /// as JSON. What the run saw; the document's own check is the latest.
+    ///
+    /// `nil` means the session was never checked. Optional so no schema
+    /// version is needed.
+    var retractionSnapshotJSON: String?
+
     // MARK: - Smart Search State
 
     /// Whether smart search mode has been activated.
@@ -283,9 +292,11 @@ final class FactCheckSession {
         (documents ?? []).filter { $0.isRelevant }
     }
 
-    /// Documents that haven't been scored yet.
+    /// Documents that haven't been scored yet and are not retracted.
+    ///
+    /// A retracted document is never scored; it stays in the session.
     var unscoredDocuments: [Document] {
-        (documents ?? []).filter { $0.relevanceScore == nil }
+        (documents ?? []).filter { $0.relevanceScore == nil && !$0.isRetracted }
     }
 
     /// Progress percentage (0-100) for the current workflow.
@@ -362,6 +373,25 @@ final class FactCheckSession {
             )
         }
         retrievalShortfallsJSON = written
+    }
+
+    // MARK: - Retraction Snapshot Methods
+
+    /// The check each document's run used, keyed by `Document.id`; empty
+    /// when never checked or unreadable.
+    func retractionSnapshot() -> [String: PaperRetractionCheck] {
+        guard let data = retractionSnapshotJSON?.data(using: .utf8) else { return [:] }
+        return (try? JSONDecoder().decode([String: PaperRetractionCheck].self, from: data)) ?? [:]
+    }
+
+    /// Adds what a run used to the snapshot; a document checked again is replaced.
+    ///
+    /// - Parameter checks: The checks used, keyed by `Document.id`; nothing is written for none.
+    func recordRetractionSnapshot(_ checks: [String: PaperRetractionCheck]) {
+        guard !checks.isEmpty,
+              let data = try? JSONEncoder().encode(retractionSnapshot().merging(checks) { _, new in new })
+        else { return }
+        retractionSnapshotJSON = String(data: data, encoding: .utf8)
     }
 
     // MARK: - Methods
