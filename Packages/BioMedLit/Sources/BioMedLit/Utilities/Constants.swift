@@ -146,6 +146,31 @@ public enum BioMedLitConstants {
     /// not a listing.
     public static let s3ListingNamespace = "http://s3.amazonaws.com/doc/2006-03-01/"
 
+    // MARK: - Retraction checking
+
+    /// Crossref's public export of the Retraction Watch database (takes
+    /// `mailto=`); the desktop's `RETRACTION_WATCH_EXPORT_URL`.
+    public static let retractionWatchExportURL = "https://api.labs.crossref.org/data/retractionwatch"
+    /// The export is refreshed daily upstream; past five weeks a copy is too
+    /// old to say "not retracted", so it is no longer consulted.
+    public static let retractionWatchMaxAgeDays = 35
+    /// The export only grows; a new copy under 95% of the notices already
+    /// held is a truncated or partial download, and its missing retractions
+    /// would read as "consulted, nothing found", so the old copy is kept.
+    public static let retractionWatchMinKeepRatio = 0.95
+    /// The export is ~68 MB, so a slow link needs far longer than a lookup;
+    /// an idle timeout between packets, not one for the whole transfer.
+    public static let retractionWatchDownloadTimeoutSeconds: TimeInterval = 120
+    /// A decided verdict is reused for a week, then asked again: a new
+    /// retraction reaches Crossref and the export within days, and a review is
+    /// often repeated within one. A verdict with a lookup unanswered is never
+    /// reused.
+    public static let retractionCheckMaxAgeDays = 7
+    /// Folder under ``appSupportFolderName`` holding the export's index.
+    public static let retractionFolderName = "retraction"
+    /// The stored index's file name in ``retractionFolderName``.
+    public static let retractionIndexFileName = "retraction_watch.index"
+
     // MARK: - OpenAlex (#480, stage B)
 
     /// OpenAlex's API, asked by DOI for the PDFs its locations name.

@@ -16,6 +16,7 @@
 
 import BmlibCore
 import XCTest
+@testable import BioMedLit
 
 /// bmlib's retraction-status contract (bmlib#504) through bmlib's Rust over
 /// UniFFI: `doc/cross_platform/retraction_parity/retraction_status.json`.
@@ -65,28 +66,10 @@ final class RetractionContractTests: XCTestCase {
 
     // MARK: - Fixture to FFI
 
-    private static let sources: [(String, RetractionSource)] = [
-        ("retraction_watch_export", .retractionWatchExport),
-        ("crossref_retraction_watch", .crossrefRetractionWatch),
-        ("crossref_publisher", .crossrefPublisher),
-        ("pubmed_label", .pubmedLabel),
-    ]
-
-    private static let kinds: [(String, RetractionKind)] = [
-        ("retraction", .retraction), ("withdrawal", .withdrawal), ("removal", .removal),
-        ("partial_retraction", .partialRetraction), ("expression_of_concern", .expressionOfConcern),
-        ("correction", .correction), ("erratum", .erratum), ("corrigendum", .corrigendum),
-        ("addendum", .addendum), ("clarification", .clarification), ("new_version", .newVersion),
-        ("new_edition", .newEdition), ("reinstatement", .reinstatement), ("other", .other),
-    ]
-
-    private static let statuses: [(String, RetractionStatus)] = [
-        ("retracted", .retracted), ("concern", .concern), ("clear", .clear), ("unchecked", .unchecked),
-    ]
-
-    private static let lookups: [(String, RetractionLookup)] = [
-        ("retraction_watch_export", .retractionWatchExport), ("crossref", .crossref),
-    ]
+    private static let sources = RetractionNames.sources
+    private static let kinds = RetractionNames.kinds
+    private static let statuses = RetractionNames.statuses
+    private static let lookups = RetractionNames.lookups
 
     private func value<T>(_ name: String?, in table: [(String, T)]) throws -> T {
         guard let match = table.first(where: { $0.0 == name }) else {
