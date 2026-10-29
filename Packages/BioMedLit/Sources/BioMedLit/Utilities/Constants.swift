@@ -325,6 +325,9 @@ public enum BioMedLitConstants {
 
     // MARK: - HTTP Status Codes
 
+    /// Product token of the User-Agent on retraction lookups; Crossref's polite pool asks for a contact (`mailto:`) beside it.
+    public static let retractionUserAgentProduct = "BMLibrarianLite/1.0"
+
     /// HTTP 200 OK.
     public static let httpStatusOK = 200
 
