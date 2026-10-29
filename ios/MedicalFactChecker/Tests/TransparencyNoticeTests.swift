@@ -102,6 +102,8 @@ final class TransparencyNoticeTests: XCTestCase {
             modelContext: context, modelContainer: container, settings: .shared
         )
         workflow.restoreForViewing(session)
+        // never the production check: it would ask live Crossref
+        workflow.useRetractionCheck { _ in [:] }
         return workflow
     }
 

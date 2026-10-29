@@ -16,6 +16,7 @@
 
 import BmlibCore
 import XCTest
+@testable import BioMedLit
 
 /// bmlib's retraction-status contract (bmlib#504) through bmlib's Rust over
 /// UniFFI: `doc/cross_platform/retraction_parity/retraction_status.json`.
@@ -65,38 +66,16 @@ final class RetractionContractTests: XCTestCase {
 
     // MARK: - Fixture to FFI
 
-    private static let sources: [(String, RetractionSource)] = [
-        ("retraction_watch_export", .retractionWatchExport),
-        ("crossref_retraction_watch", .crossrefRetractionWatch),
-        ("crossref_publisher", .crossrefPublisher),
-        ("pubmed_label", .pubmedLabel),
-    ]
-
-    private static let kinds: [(String, RetractionKind)] = [
-        ("retraction", .retraction), ("withdrawal", .withdrawal), ("removal", .removal),
-        ("partial_retraction", .partialRetraction), ("expression_of_concern", .expressionOfConcern),
-        ("correction", .correction), ("erratum", .erratum), ("corrigendum", .corrigendum),
-        ("addendum", .addendum), ("clarification", .clarification), ("new_version", .newVersion),
-        ("new_edition", .newEdition), ("reinstatement", .reinstatement), ("other", .other),
-    ]
-
-    private static let statuses: [(String, RetractionStatus)] = [
-        ("retracted", .retracted), ("concern", .concern), ("clear", .clear), ("unchecked", .unchecked),
-    ]
-
-    private static let lookups: [(String, RetractionLookup)] = [
-        ("retraction_watch_export", .retractionWatchExport), ("crossref", .crossref),
-    ]
+    private static let sources = RetractionNames.sources
+    private static let kinds = RetractionNames.kinds
+    private static let statuses = RetractionNames.statuses
+    private static let lookups = RetractionNames.lookups
 
     private func value<T>(_ name: String?, in table: [(String, T)]) throws -> T {
         guard let match = table.first(where: { $0.0 == name }) else {
             throw ContractError.unknownName(name ?? "nil")
         }
         return match.1
-    }
-
-    private func name<T: Equatable>(_ value: T, in table: [(String, T)]) -> String {
-        table.first { $0.1 == value }?.0 ?? "unmapped \(value)"
     }
 
     private func evidence(_ row: [String: Any]) throws -> RetractionEvidence {
@@ -128,8 +107,8 @@ final class RetractionContractTests: XCTestCase {
 
     private func json(_ evidence: RetractionEvidence) -> [String: Any] {
         [
-            "source": name(evidence.source, in: Self.sources),
-            "kind": name(evidence.kind, in: Self.kinds),
+            "source": RetractionNames.name(evidence.source, in: Self.sources),
+            "kind": RetractionNames.name(evidence.kind, in: Self.kinds),
             "date": json(evidence.date),
             "notice_doi": json(evidence.noticeDoi),
             "record_id": json(evidence.recordId),
@@ -157,9 +136,9 @@ final class RetractionContractTests: XCTestCase {
 
     private func json(_ verdict: RetractionVerdict) -> [String: Any] {
         [
-            "status": name(verdict.status, in: Self.statuses),
+            "status": RetractionNames.name(verdict.status, in: Self.statuses),
             "deciding": verdict.deciding.map(json) ?? NSNull(),
-            "unanswered": verdict.unanswered.map { name($0, in: Self.lookups) },
+            "unanswered": verdict.unanswered.map { RetractionNames.name($0, in: Self.lookups) },
         ]
     }
 
@@ -232,5 +211,72 @@ final class RetractionContractTests: XCTestCase {
     func testTheCopyIsThePinnedBmlibs() throws {
         let readme = try XCTUnwrap(loadContract()["_readme"] as? String)
         XCTAssertTrue(readme.contains("crossref.for"))
+    }
+
+    // MARK: - The name tables, independently
+
+    // The runners above read the fixture through `RetractionNames` both ways,
+    // so a swap inside a table round-trips unseen; these literals do not. Each
+    // switch is exhaustive, so a new bmlib case is a compile error here.
+
+    private func contractName(_ source: RetractionSource) -> String {
+        switch source {
+        case .retractionWatchExport: "retraction_watch_export"
+        case .crossrefRetractionWatch: "crossref_retraction_watch"
+        case .crossrefPublisher: "crossref_publisher"
+        case .pubmedLabel: "pubmed_label"
+        }
+    }
+
+    private func contractName(_ kind: RetractionKind) -> String {
+        switch kind {
+        case .retraction: "retraction"
+        case .withdrawal: "withdrawal"
+        case .removal: "removal"
+        case .partialRetraction: "partial_retraction"
+        case .expressionOfConcern: "expression_of_concern"
+        case .correction: "correction"
+        case .erratum: "erratum"
+        case .corrigendum: "corrigendum"
+        case .addendum: "addendum"
+        case .clarification: "clarification"
+        case .newVersion: "new_version"
+        case .newEdition: "new_edition"
+        case .reinstatement: "reinstatement"
+        case .other: "other"
+        }
+    }
+
+    private func contractName(_ status: RetractionStatus) -> String {
+        switch status {
+        case .retracted: "retracted"
+        case .concern: "concern"
+        case .clear: "clear"
+        case .unchecked: "unchecked"
+        }
+    }
+
+    private func contractName(_ lookup: RetractionLookup) -> String {
+        switch lookup {
+        case .retractionWatchExport: "retraction_watch_export"
+        case .crossref: "crossref"
+        }
+    }
+
+    private func assertTable<T: Equatable>(
+        _ table: [(String, T)], count: Int, _ name: (T) -> String, line: UInt = #line
+    ) {
+        XCTAssertEqual(table.count, count, "every case is in the table", line: line)
+        XCTAssertEqual(Set(table.map(\.0)).count, table.count, "no name twice", line: line)
+        for (stored, value) in table {
+            XCTAssertEqual(stored, name(value), line: line)
+        }
+    }
+
+    func testNameTablesAreTheContractNames() {
+        assertTable(RetractionNames.sources, count: 4, contractName)
+        assertTable(RetractionNames.kinds, count: 14, contractName)
+        assertTable(RetractionNames.statuses, count: 4, contractName)
+        assertTable(RetractionNames.lookups, count: 2, contractName)
     }
 }

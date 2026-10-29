@@ -66,12 +66,15 @@ struct ScoredDocumentsView: View {
         (session.documents ?? []).filter { $0.isScored }
     }
 
-    /// Sorted documents based on the selected sort option.
-    private var sortedDocuments: [Document] {
-        scoredDocuments.sorted(by: sortOption)
+    /// Sorted documents based on the selected sort option, then the papers left out as retracted.
+    ///
+    /// - Parameter checks: The session's ``FactCheckSession/shownRetractionChecks()``.
+    private func sortedDocuments(_ checks: [String: PaperRetractionCheck]) -> [Document] {
+        scoredDocuments.sorted(by: sortOption) + session.retractedUnscoredDocuments(by: checks)
     }
 
     var body: some View {
+        let checks = session.shownRetractionChecks()
         VStack(alignment: .leading, spacing: 12) {
             // Header with toggle
             Button(action: { withAnimation { isExpanded.toggle() } }) {
@@ -96,9 +99,10 @@ struct ScoredDocumentsView: View {
                 SortingControlsView(selectedSort: sortOptionBinding)
                     .padding(.bottom, 4)
 
-                ForEach(sortedDocuments, id: \.id) { document in
+                ForEach(sortedDocuments(checks), id: \.id) { document in
                     DocumentScoreRow(
                         document: document,
+                        retractionCheck: checks[document.id],
                         showEmbeddingScore: showEmbeddingScores
                     )
                 }
@@ -166,9 +170,11 @@ struct EnhancedScoredDocumentsView: View {
         (session.documents ?? []).filter { $0.isScored }
     }
 
-    /// Sorted documents based on the selected sort option.
-    private var sortedDocuments: [Document] {
-        scoredDocuments.sorted(by: sortOption)
+    /// Sorted documents based on the selected sort option, then the papers left out as retracted.
+    ///
+    /// - Parameter checks: The session's ``FactCheckSession/shownRetractionChecks()``.
+    private func sortedDocuments(_ checks: [String: PaperRetractionCheck]) -> [Document] {
+        scoredDocuments.sorted(by: sortOption) + session.retractedUnscoredDocuments(by: checks)
     }
 
     /// Count of successfully scored documents.
@@ -177,6 +183,7 @@ struct EnhancedScoredDocumentsView: View {
     }
 
     var body: some View {
+        let checks = session.shownRetractionChecks()
         VStack(spacing: 0) {
             // Error queue at top
             ErrorQueueView(errors: $errors, onRetry: handleRetry)
@@ -191,9 +198,10 @@ struct EnhancedScoredDocumentsView: View {
             // Document list
             ScrollView {
                 LazyVStack(spacing: 12) {
-                    ForEach(sortedDocuments, id: \.id) { document in
+                    ForEach(sortedDocuments(checks), id: \.id) { document in
                         DocumentScoreRow(
                             document: document,
+                            retractionCheck: checks[document.id],
                             showEmbeddingScore: showEmbeddingScores
                         )
                     }
@@ -258,6 +266,8 @@ struct EnhancedScoredDocumentsView: View {
 /// Expands to show abstract, LLM reasoning, score comparison, metadata, and full-text options.
 struct DocumentScoreRow: View {
     @Bindable var document: Document
+    /// The check the row is badged by: ``FactCheckSession/shownRetractionChecks()``'s.
+    let retractionCheck: PaperRetractionCheck?
     let showEmbeddingScore: Bool
 
     @Environment(\.modelContext) private var modelContext
@@ -297,6 +307,8 @@ struct DocumentScoreRow: View {
                                 provider: document.searchSourceEnum,
                                 isPreprint: document.isPreprint
                             )
+
+                            RetractionBadge(check: retractionCheck)
                         }
                     }
 
@@ -902,7 +914,7 @@ struct AbstractTextView: View {
     doc.journal = "J Med Virol"
 
     return ScrollView {
-        DocumentScoreRow(document: doc, showEmbeddingScore: true)
+        DocumentScoreRow(document: doc, retractionCheck: nil, showEmbeddingScore: true)
             .padding()
     }
 }

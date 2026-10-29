@@ -333,10 +333,12 @@ public enum PubMedQueryBuilder {
     ///
     /// An exclude-list is more robust than an include-list because new
     /// article types are included by default rather than silently dropped.
+    /// `Retracted Publication` is deliberately absent: a query filter cannot
+    /// say what it dropped, so retracted papers are kept and flagged instead.
     public static let defaultExcludeTypes = [
         "News", "Newspaper Article", "Editorial", "Letter", "Comment",
         "Published Erratum", "Biography", "Historical Article",
-        "Personal Narrative", "Directory", "Retracted Publication"
+        "Personal Narrative", "Directory"
     ]
 
     /// Build a PubMed query string.

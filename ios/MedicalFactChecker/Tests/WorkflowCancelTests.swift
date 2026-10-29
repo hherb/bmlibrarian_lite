@@ -117,6 +117,8 @@ final class WorkflowCancelTests: XCTestCase {
         workflow.useServices(
             llm: Self.offlineLLM(llm), pubMed: BMLPubMedService.create(from: .shared)
         )
+        // never the production check: it would ask live Crossref
+        workflow.useRetractionCheck { _ in [:] }
         return workflow
     }
 

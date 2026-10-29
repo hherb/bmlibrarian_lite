@@ -123,6 +123,7 @@ Shared iOS/macOS components:
   - iCloudSyncStorage, LocalFolderSyncStorage, OnDemandFetcher
   - SessionEvictionManager, WorkspaceInitializer, StorageMonitor
   - ChangeLogReader/Writer, LWWMergeStrategy, IntegrityFunctions
+- `Retraction/`: RetractionCrossrefLookup, RetractionIndexStore (Retraction Watch index, Wi-Fi only), RetractionChecker, RetractionText, RetractionNames, RetractionReportSection
 - `Utilities/`: RetryHelper, CostCalculator, BudgetChecker, QueryTranslator, ResponseParser, SearchResultMerger, ParallelProcessingConstants, ConcurrencyDetector
 
 ## Code Style

@@ -171,6 +171,10 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
     /// Used to show availability badge before user attempts to fetch full text.
     let hasFullTextInPMC: Bool
 
+    /// Publication types the source listed; `nil` when it gave no list. A
+    /// merged duplicate's are folded in (`SearchResultMerger`).
+    var publicationTypes: [String]?
+
     /// Batch number for pagination tracking.
     let batchNumber: Int
 
@@ -195,6 +199,7 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
     ///   - source: Provider that returned this article.
     ///   - isPreprint: Whether this is a preprint.
     ///   - hasFullTextInPMC: Whether full text is available in PMC.
+    ///   - publicationTypes: Publication types the source listed, or nil.
     ///   - batchNumber: Batch number for tracking.
     ///   - resultPosition: Position in search results.
     init(
@@ -212,6 +217,7 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
         isPreprint: Bool = false,
         identifierKind: ArticleIdentifierKind? = nil,
         hasFullTextInPMC: Bool = false,
+        publicationTypes: [String]? = nil,
         batchNumber: Int = 1,
         resultPosition: Int = 0
     ) {
@@ -229,6 +235,7 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
         self.isPreprint = isPreprint
         self.identifierKind = identifierKind
         self.hasFullTextInPMC = hasFullTextInPMC
+        self.publicationTypes = publicationTypes
         self.batchNumber = batchNumber
         self.resultPosition = resultPosition
     }
@@ -317,6 +324,7 @@ enum BioMedLitAdapters {
             ) == .preprint,
             identifierKind: article.identifierKind,
             hasFullTextInPMC: article.hasFullText,
+            publicationTypes: article.publicationTypes,
             batchNumber: batchNumber,
             resultPosition: resultPosition
         )
@@ -552,6 +560,32 @@ extension BMLPubMedService {
         let apiKey = settings.ncbiAPIKey.isEmpty ? nil : settings.ncbiAPIKey
         return BMLPubMedService(email: email, apiKey: apiKey)
     }
+}
+
+extension RetractionIndexStore {
+    /// The app's one Retraction Watch store, over one Wi-Fi-only session,
+    /// shared by every refresh and every run's check. Built at first use
+    /// with the settings' contact address; a changed address reaches the
+    /// next launch.
+    static let app: RetractionIndexStore = {
+        let settings = AppSettings.shared
+        return production(email: settings.ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : settings.ncbiEmail)
+    }()
+
+    /// Refreshes ``app``'s copy in the background unless it is current (Wi-Fi
+    /// only). Never awaited: a run uses the copy it finds. Called at launch
+    /// and by a run that finds no usable copy; calls meanwhile share one download.
+    static func refreshAppCopyInBackground() {
+        Task.detached(priority: .background) {
+            let outcome = await app.refreshIfStale(now: Date())
+            refreshLogger.info("Retraction Watch data: \(String(describing: outcome), privacy: .public)")
+        }
+    }
+
+    /// `AppLogger.network`'s subsystem and category; `AppLogger` is per platform and absent from the package build.
+    private static let refreshLogger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.medicalfactchecker", category: "Network"
+    )
 }
 
 extension BMLEuropePMCService {

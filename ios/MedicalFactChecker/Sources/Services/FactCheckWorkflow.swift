@@ -120,6 +120,49 @@ final class FactCheckWorkflow {
     /// because its abstract still makes a report. Each run starts it afresh.
     private(set) var fullTextNotice: String?
 
+    /// What this run's retraction screen left out and could not check, for
+    /// the screen to show (the desktop's retraction notice, as plain text).
+    ///
+    /// `nil` when nothing was left out and every paper was checked, and until
+    /// a run screens its documents (``screenForRetraction(_:)``). Not a
+    /// failure: a check that fails never stops the run.
+    private(set) var retractionNotice: String?
+
+    /// Shown while the documents about to be scored are checked for retraction.
+    static let retractionProgressMessage = "Checking retraction status…"
+
+    /// The retraction check tests inject (``useRetractionCheck(_:)``); `nil`
+    /// uses ``productionRetractionCheck()``.
+    private var retractionCheck: RetractionCheck?
+
+    /// Counts the pieces of work begun (``runAsWorkflowTask(_:)``), so the
+    /// retraction screen knows when a new run starts.
+    private var runGeneration = 0
+
+    /// What one run's retraction screen has used, in the order it met the
+    /// documents, and the papers whose check failed.
+    private struct RetractionRun {
+        let generation: Int
+        var used: [(id: String, paper: RetractionPaper, check: PaperRetractionCheck)] = []
+        var failed: Set<RetractionPaper> = []
+
+        /// "Retraction check: <the desktop's run summary clause>.", or `nil`.
+        var notice: String? {
+            let kept = used.filter { !$0.check.isRetracted }
+            let clause = RetractionText.runSummaryClause(
+                excluded: used.count - kept.count,
+                unchecked: kept.filter { $0.check.isUnchecked }.count,
+                causes: RetractionText.uncheckedCauses(
+                    kept.map { (paper: $0.paper, check: Optional($0.check)) }, failed: failed
+                )
+            )
+            return clause.map { "Retraction check: \($0)." }
+        }
+    }
+
+    /// This run's retraction screen so far.
+    private var retractionRun = RetractionRun(generation: 0)
+
     /// What a stop left undone beside a report that stands, for the screen to
     /// show.
     ///
@@ -307,8 +350,9 @@ final class FactCheckWorkflow {
 
     /// The work of ``startFactCheck(claim:searchOptions:)``, run as ``workflowTask`` so a cancel reaches it.
     private func startFactCheckWork(claim: String, searchOptions: SearchOptions?) async {
-        // A new claim answers for itself: the last run's notice is not this run's
+        // A new claim answers for itself: the last run's notices are not this run's
         smartSearchNotice = nil
+        retractionNotice = nil
 
         // Initialize services
         do {
@@ -385,6 +429,9 @@ final class FactCheckWorkflow {
     /// - Parameter session: The fact-check session to restore for viewing.
     func restoreForViewing(_ session: FactCheckSession) {
         self.session = session
+        // the last run's retraction screen is not this session's
+        retractionNotice = nil
+        runGeneration += 1
         // Initialize services lazily - only if user triggers new actions
         isRunning = false
         progressMessage = ""
@@ -811,7 +858,7 @@ final class FactCheckWorkflow {
         isRunning = false
 
         let scored = session?.documentsScored ?? 0
-        let remaining = (session?.documentsFound ?? 0) - scored
+        let remaining = (session?.documentsToScore ?? 0) - scored
         if let session {
             pendingStop = PendingStop(cause: cause, report: session.report)
             showStop(of: session, cause: cause)
@@ -833,7 +880,7 @@ final class FactCheckWorkflow {
             userDecisionPrompt = Self.stopPrompt(
                 cause,
                 scored: session.documentsScored,
-                remaining: session.documentsFound - session.documentsScored
+                remaining: session.documentsToScore - session.documentsScored
             )
             stopNotice = nil
         } else {
@@ -980,6 +1027,7 @@ final class FactCheckWorkflow {
             // Ended; its owner may not have run yet to clear it
             if workflowTask == previous { workflowTask = nil }
         }
+        runGeneration += 1
         let task = Task { @MainActor [weak self] in
             await body()
             self?.settleStop()
@@ -1005,6 +1053,15 @@ final class FactCheckWorkflow {
     func useServices(llm: LLMService, pubMed: BMLPubMedService) {
         llmService = llm
         pubmedService = pubMed
+    }
+
+    /// Gives the workflow its retraction check, in place of the production
+    /// one (``productionRetractionCheck()``), for tests.
+    ///
+    /// - Parameter check: Checks papers; throwing anything but cancellation
+    ///   leaves them unchecked for the run.
+    func useRetractionCheck(_ check: @escaping RetractionCheck) {
+        retractionCheck = check
     }
 
     // MARK: - Phase 4 Error Handling
@@ -2280,8 +2337,14 @@ final class FactCheckWorkflow {
     private func scoreDocuments() async throws {
         guard let session = session, let llmService = llmService else { return }
 
-        // Filter documents that haven't been scored and haven't failed parsing
-        let unscoredDocs = session.unscoredDocuments.filter { !$0.scoreParseFailed }
+        // Retracted papers are left out before any is scored
+        try await screenForRetraction(
+            (session.documents ?? []).filter { $0.relevanceScore == nil && !$0.scoreParseFailed }
+        )
+
+        // Filter documents that haven't been scored, haven't failed parsing, and are not retracted
+        let leftOut = retractionLeavesOut()
+        let unscoredDocs = session.unscoredDocuments.filter { !$0.scoreParseFailed && !leftOut($0) }
         guard !unscoredDocs.isEmpty else { return }
 
         // Check budget before starting parallel scoring
@@ -2928,6 +2991,13 @@ final class FactCheckWorkflow {
         // report claim a complete search (#284).
         let shortfallsRecord = try SearchFailureReporting.reportRecord(for: shortfalls)
 
+        // What the run saw: the checks it used, not whatever is stored now
+        let snapshot = session.retractionSnapshot()
+        let retraction: RetractionReportSection? = snapshot.isEmpty ? nil : RetractionReportSection(
+            papers: (session.documents ?? []).compactMap { doc in
+                snapshot[doc.id].map { (title: doc.title, check: $0) }
+            })
+
         // Handle no evidence case using ReportFormatter
         guard !allCitations.isEmpty else {
             let noEvidenceContent = ReportFormatter.generateNoEvidenceContent(
@@ -2939,7 +3009,7 @@ final class FactCheckWorkflow {
                 verdict: .insufficientEvidence,
                 summary: noEvidenceContent.summary,
                 fullReport: ReportFormatter.standInReport(
-                    noEvidenceContent.fullReport, shortfalls: shortfalls
+                    noEvidenceContent.fullReport, shortfalls: shortfalls, retraction: retraction
                 ),
                 citationCount: 0,
                 uniqueSourceCount: 0,
@@ -3001,7 +3071,8 @@ final class FactCheckWorkflow {
                 // concatenated into `EvidenceReport.fullReport` and saved, so
                 // a mislabelled identifier here is written down once and read
                 // back by every later view and export (#212).
-                identifier: doc.citationIdentifier?.labelled
+                identifier: doc.citationIdentifier?.labelled,
+                caveat: snapshot[doc.id].flatMap { $0.isConcern ? RetractionText.concernCaveat($0) : nil }
             )
         }
         let references = ReportFormatter.formatReferences(referenceData)
@@ -3009,7 +3080,8 @@ final class FactCheckWorkflow {
         let completeReport = ReportFormatter.fullReport(
             analysis: parsedReport.fullReport,
             references: references,
-            shortfalls: shortfalls
+            shortfalls: shortfalls,
+            retraction: retraction
         )
 
         let report = EvidenceReport(
@@ -3423,13 +3495,17 @@ final class FactCheckWorkflow {
     /// Score only specific documents (by PMID) using checkpointed parallel processing.
     ///
     /// Called when fetching more evidence to score just the newly retrieved documents.
-    /// Uses `CheckpointedScoringService` for resumable processing.
-    private func scoreNewDocuments(_ pmids: [String]) async throws {
+    /// Uses `CheckpointedScoringService` for resumable processing. Retracted
+    /// documents are left out (``screenForRetraction(_:)``). Internal for tests.
+    func scoreNewDocuments(_ pmids: [String]) async throws {
         guard let session = session, let llmService = llmService else { return }
 
-        let docsToScore = (session.documents ?? []).filter {
+        let candidates = (session.documents ?? []).filter {
             pmids.contains($0.pmid) && $0.relevanceScore == nil && !$0.scoreParseFailed
         }
+        try await screenForRetraction(candidates)
+        let leftOut = retractionLeavesOut()
+        let docsToScore = candidates.filter { !leftOut($0) }
         guard !docsToScore.isEmpty else { return }
 
         // Check budget before starting
@@ -3512,6 +3588,96 @@ final class FactCheckWorkflow {
         }
 
         try? modelContext.save()
+    }
+
+    // MARK: - Retraction Screen
+
+    /// Screens `documents` for retraction before they are scored, recording
+    /// each document's check and the session's snapshot, and setting
+    /// ``retractionNotice`` for the run.
+    ///
+    /// Each document is checked at most once per run. One whose stored check
+    /// ``PaperRetractionCheck/isReusable(now:publicationTypes:)`` is used
+    /// without asking; what is stored and used otherwise follows
+    /// ``Document/takeRetractionCheck(_:)``. A check that throws anything but
+    /// cancellation leaves every paper it was given unchecked for this run
+    /// (``PaperRetractionCheck/failed(at:)``), and the run goes on.
+    ///
+    /// - Parameter documents: The documents about to be scored.
+    /// - Throws: Cancellation when the run is stopped during the check, or,
+    ///   after a stop, the check's own error; nothing is then recorded.
+    private func screenForRetraction(_ documents: [Document]) async throws {
+        guard let session else { return }
+        if retractionRun.generation != runGeneration {
+            retractionRun = RetractionRun(generation: runGeneration)
+            retractionNotice = nil
+        }
+        let seen = Set(retractionRun.used.map(\.id))
+        let unseen = documents.filter { !seen.contains($0.id) }
+        guard !unseen.isEmpty else { return }
+
+        let now = Date()
+        var used: [String: PaperRetractionCheck] = [:]
+        var due: [Document] = []
+        for document in unseen {
+            if let stored = document.retractionCheck,
+               stored.isReusable(now: now, publicationTypes: document.retractionPaper.publicationTypes) {
+                used[document.id] = stored
+            } else {
+                due.append(document)
+            }
+        }
+        if !due.isEmpty {
+            updateProgress(.scoringDocuments, Self.retractionProgressMessage)
+            let papers = due.map(\.retractionPaper)
+            var checks: [RetractionPaper: PaperRetractionCheck] = [:]
+            do {
+                checks = try await (retractionCheck ?? productionRetractionCheck())(papers)
+            } catch let error where !(error is CancellationError) && !stopRequested {
+                logger.warning("Retraction check failed, its papers are left unchecked: \(error.localizedDescription)")
+            }
+            // a stop the check did not throw for still records nothing
+            if stopRequested { throw CancellationError() }
+            for (document, paper) in zip(due, papers) {
+                if checks[paper] == nil { retractionRun.failed.insert(paper) }
+                used[document.id] = document.takeRetractionCheck(checks[paper] ?? .failed(at: now))
+            }
+        }
+
+        for document in unseen {
+            guard let check = used[document.id] else { continue }
+            retractionRun.used.append((id: document.id, paper: document.retractionPaper, check: check))
+        }
+        session.recordRetractionSnapshot(used)
+        try? modelContext.save()
+        retractionNotice = retractionRun.notice
+    }
+
+    /// Whether this run leaves a document out as retracted: by the check the
+    /// run used, as the desktop excludes by the verdicts its run returns, and
+    /// by the stored check for a document the run did not screen. The stored
+    /// check can differ from the one the run used: a row this build cannot
+    /// read, or a stored clear standing against an outage, stays stored while
+    /// the run uses the fresh check.
+    private func retractionLeavesOut() -> (Document) -> Bool {
+        let used = Dictionary(retractionRun.used.map { ($0.id, $0.check.isRetracted) }) { _, new in new }
+        return { used[$0.id] ?? $0.isRetracted }
+    }
+
+    /// The production retraction check: the current Retraction Watch index
+    /// (never waited for: refreshed at launch, and in the background when a
+    /// run finds no usable copy), Crossref and the paper's label, with the
+    /// contact address `CrossRefService` sends.
+    private func productionRetractionCheck() -> RetractionCheck {
+        let email = settings.ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : settings.ncbiEmail
+        return { papers in
+            let now = Date()
+            let index = await RetractionIndexStore.app.currentIndex(now: now)
+            // a failed or aged-out refresh is tried again, for the next run
+            if index == nil { RetractionIndexStore.refreshAppCopyInBackground() }
+            return try await RetractionChecker(index: index, crossref: RetractionCrossrefLookup(email: email))
+                .check(papers, now: now)
+        }
     }
 
     private func updateProgress(_ step: WorkflowStep, _ message: String) {

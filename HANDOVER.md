@@ -8,15 +8,19 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Re-pin and contract on branch `chore/bmlib-ffi-repin-retraction-contract`
-(PR #646)**: the apps' FFI pin (`BmlibFFI.pin.json`) names bmlib `main` at
-`83cd2b3`, the ledger's `bmlib_commit` (the desktop's own dependency stays at
-`8845ba8`); the xcframework, `bmlib_ffi.swift` and `bmlib_ffi.kt` are
-`bmlib-xcframework.yml`'s build of it. Swift (`RetractionContractTests`) and
-Kotlin (`BmlibRetractionContractTest`) assert `retraction_status.json` through
-the FFI; `android-tests.yml` fails a skipped run of either FFI test. The iOS
-plan is `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`.
-**Next:** execute it (spec PR 4), then the Android plan (PR 5).
+**Retraction checking, iOS/macOS: PR 4a done** (Tasks 1–7 of
+`docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`, branch
+`feat/retraction-checking-apple`; Apple section of
+`doc/developer/retraction_checking.md`). BioMedLit `Retraction/` holds the
+Crossref lookup, the Wi-Fi-only index file (refreshed at launch and by a run
+that finds none, single-flight, never awaited), the checker with the desktop's
+reuse / `_keeps` / shown-vs-stored rules, and the sentences. The app screens in
+`FactCheckWorkflow` before both scoring paths; **a run leaves out by the check
+it used, and every view reads the session's snapshot before the stored check**
+(a stored clear kept through an outage is never shown). The app never imports
+BmlibCore. Publication types are kept; the query no longer drops `Retracted
+Publication`. **Next:** PR 4b (Tasks 8–9: last-checked line, Check again; add
+the desktop's report-opening notice and `excluded_line`, #648), then the Android plan (PR 5: store checks per paper, and merge duplicates' publication types as Swift and Python do). Open from PR 4a: #651 (checks stored per document, so per session, not per paper), #647 (robustness: snapshot decode, a refused export re-downloaded per run), #648, #649 (test gaps).
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
 error follows a cancel). Open, lodged by recent rounds: #641 (JATS whitespace,

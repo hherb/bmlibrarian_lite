@@ -359,6 +359,89 @@ final class Document {
     /// Used to display availability indicator before user attempts to fetch full text.
     var hasFullTextInPMC: Bool = false
 
+    // MARK: - Publication Types
+
+    /// The publication types the source listed, as a JSON array of strings.
+    ///
+    /// `nil` means not recorded (an older row, or a source that gave no list);
+    /// never `"[]"` for an absent list. Optional so no schema version is needed.
+    var publicationTypesJSON: String?
+
+    /// ``publicationTypesJSON`` decoded; `nil` when not recorded or unreadable.
+    var publicationTypes: [String]? {
+        get {
+            guard let data = publicationTypesJSON?.data(using: .utf8) else { return nil }
+            return try? JSONDecoder().decode([String].self, from: data)
+        }
+        set {
+            publicationTypesJSON = newValue
+                .flatMap { try? JSONEncoder().encode($0) }
+                .flatMap { String(data: $0, encoding: .utf8) }
+        }
+    }
+
+    // MARK: - Retraction
+
+    /// This document's latest retraction check, as ``PaperRetractionCheck``
+    /// JSON: the desktop's `retraction_checks` row, but per document (so per
+    /// session) rather than per paper (#651).
+    ///
+    /// `nil` means never checked. Optional so no schema version is needed.
+    var retractionCheckJSON: String?
+
+    /// ``retractionCheckJSON`` decoded; `nil` when never checked or unreadable.
+    var retractionCheck: PaperRetractionCheck? {
+        get {
+            guard let data = retractionCheckJSON?.data(using: .utf8) else { return nil }
+            return try? JSONDecoder().decode(PaperRetractionCheck.self, from: data)
+        }
+        set {
+            retractionCheckJSON = newValue
+                .flatMap { try? JSONEncoder().encode($0) }
+                .flatMap { String(data: $0, encoding: .utf8) }
+        }
+    }
+
+    /// The check this document is shown by: the one its run used (the
+    /// session's snapshot), else the stored one, which can differ (see
+    /// ``takeRetractionCheck(_:)``). A list decodes
+    /// ``FactCheckSession/shownRetractionChecks()`` once instead.
+    var shownRetractionCheck: PaperRetractionCheck? { session?.retractionSnapshot()[id] ?? retractionCheck }
+
+    /// Whether the stored check says retracted; never true for unchecked.
+    var isRetracted: Bool { retractionCheck?.isRetracted ?? false }
+
+    /// The paper a retraction check asks about. Types not recorded are asked
+    /// as none (``takeRetractionCheck(_:)`` keeps a label verdict they cannot show).
+    var retractionPaper: RetractionPaper {
+        RetractionPaper(doi: doi, pmid: pubmedID, publicationTypes: publicationTypes ?? [])
+    }
+
+    /// Stores `fresh`, the check just made, unless the stored one stands
+    /// (retraction_checks.py `check`), and returns the check the run uses.
+    ///
+    /// The stored check stands, keeping its `checkedAt`, when it rests on a
+    /// PubMed label this document has not recorded (`_label_only_unreadable`)
+    /// or when ``PaperRetractionCheck/standsAgainst(_:)`` `fresh`. A row this
+    /// build cannot read is overwritten only by a check every lookup answered.
+    ///
+    /// - Parameter fresh: The check just made.
+    /// - Returns: What the run excludes, counts and records.
+    func takeRetractionCheck(_ fresh: PaperRetractionCheck) -> PaperRetractionCheck {
+        guard let stored = retractionCheck else {
+            // an unreadable row may hold a retraction an outage must not erase
+            if retractionCheckJSON == nil || fresh.unanswered.isEmpty { retractionCheck = fresh }
+            return fresh
+        }
+        if !fresh.isRetracted, publicationTypes == nil, stored.isRetracted || stored.isConcern,
+           stored.isDecidedByLabel {
+            return stored
+        }
+        if stored.standsAgainst(fresh) { return stored.shown(against: fresh) }
+        retractionCheck = fresh
+        return fresh
+    }
+
     // MARK: - Transparency Analysis
 
     /// JSON-encoded transparency analysis result.
@@ -663,6 +746,7 @@ final class Document {
         publicationDate = metadata.publicationDate
         isPreprint = metadata.isPreprint
         identifierKind = metadata.identifierKind
+        publicationTypes = metadata.publicationTypes
         searchSource = provider.rawValue
     }
 

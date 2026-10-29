@@ -221,6 +221,22 @@ final class IdentifierKindPersistenceTests: XCTestCase {
         XCTAssertEqual(document.searchSource, MedicalFactChecker.SearchProvider.europePMC.rawValue)
     }
 
+    func testApplySearchMetadataStoresTypes() {
+        let document = makeDocument()
+        XCTAssertNil(document.publicationTypesJSON)
+
+        var metadata = preprintMetadata()
+        document.applySearchMetadata(metadata, provider: .europePMC)
+        XCTAssertNil(document.publicationTypesJSON, "no list stays unrecorded, never \"[]\"")
+
+        metadata = UnifiedArticleMetadata(
+            pmid: "1", title: "T", abstract: "", source: .pubmed,
+            publicationTypes: ["Retracted Publication", "Journal Article"]
+        )
+        document.applySearchMetadata(metadata, provider: .pubmed)
+        XCTAssertEqual(document.publicationTypes, ["Retracted Publication", "Journal Article"])
+    }
+
     private func preprintMetadata() -> UnifiedArticleMetadata {
         UnifiedArticleMetadata(
             pmid: "PPR1287966",

@@ -186,6 +186,9 @@ extension MedicalFactCheckerMacApp {
             logger: BioMedLitOSLogLogger()
         )
         BioMedLitLib.configure(with: config)
+
+        // Refresh the Retraction Watch data (Wi-Fi only); a run never waits for it
+        RetractionIndexStore.refreshAppCopyInBackground()
     }
 }
 
