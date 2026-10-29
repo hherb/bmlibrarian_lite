@@ -15,16 +15,18 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import Foundation
+import BmlibCore
 
 /// The reader-facing sentences about retraction, worded as the desktop's
 /// `retraction_text.py` words them (golden rule 13: no provider text; a
 /// failed lookup speaks only through `RequestFailure.describe()`, which
 /// ``PaperRetractionCheck/crossrefFailure`` already holds).
 ///
-/// Not ported, because the Swift types do not carry what they read: the
-/// desktop's `saved_work_line`, `saved_work_warning`, `excluded_line`, the
-/// badge texts and the export refresh lines (the app has no snapshot rows,
-/// no *Check again* and no `bmll`).
+/// Not yet ported (PR 4b, #648): the desktop's `saved_work_line`,
+/// `saved_work_warning`, `excluded_line` and the report-opening notice
+/// (`format_retraction_notice`). The badge texts live in the app's
+/// `RetractionBadge`; the export refresh lines have no counterpart, since
+/// the app has no `bmll`.
 public enum RetractionText {
     /// Heading of the report's section for the papers a run left out.
     public static let leftOutHeading = "## Left out as retracted"
@@ -67,10 +69,10 @@ public enum RetractionText {
                 found.insert(noIDsCause)
                 continue
             }
-            if check.unanswered.contains("retraction_watch_export") {
+            if check.leftUnanswered(.retractionWatchExport) {
                 found.insert(check.exportDataAsOf == nil ? exportCause : exportNoticeCause)
             }
-            if check.unanswered.contains("crossref") {
+            if check.leftUnanswered(.crossref) {
                 if let failure = check.crossrefFailure {
                     if !crossref.contains(failure) { crossref.append(failure) }
                 } else {
@@ -111,7 +113,7 @@ public enum RetractionText {
         if check.isRetracted || check.isConcern {
             line = check.isRetracted ? "Retracted" : "Expression of concern"
             // the label, not a notice: a notice without a DOI is still Retraction Watch's or Crossref's
-            if check.deciding == nil || check.deciding?.source == "pubmed_label" {
+            if check.deciding == nil || check.isDecidedByLabel {
                 line += pubmedLabel
             } else if let evidence = check.deciding {
                 if let date = evidence.date, !date.isEmpty { line += check.isRetracted ? " on \(date)" : ", \(date)" }
@@ -159,7 +161,7 @@ public enum RetractionText {
     /// or "Retracted (PubMed's label)". The title is escaped for markdown.
     public static func leftOutEntry(title: String, check: PaperRetractionCheck) -> String {
         var line = "- \(plainTitle(title)). Retracted"
-        if check.deciding == nil || check.deciding?.source == "pubmed_label" {
+        if check.deciding == nil || check.isDecidedByLabel {
             line += pubmedLabel
         } else if let evidence = check.deciding {
             if let date = evidence.date, !date.isEmpty { line += " \(date)" }

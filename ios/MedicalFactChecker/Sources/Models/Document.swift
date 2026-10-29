@@ -382,8 +382,9 @@ final class Document {
 
     // MARK: - Retraction
 
-    /// This paper's latest retraction check, as ``PaperRetractionCheck`` JSON
-    /// (the desktop's `retraction_checks` row).
+    /// This document's latest retraction check, as ``PaperRetractionCheck``
+    /// JSON: the desktop's `retraction_checks` row, but per document (so per
+    /// session) rather than per paper (#651).
     ///
     /// `nil` means never checked. Optional so no schema version is needed.
     var retractionCheckJSON: String?
@@ -433,7 +434,7 @@ final class Document {
             return fresh
         }
         if !fresh.isRetracted, publicationTypes == nil, stored.isRetracted || stored.isConcern,
-           stored.deciding?.source == "pubmed_label" {
+           stored.isDecidedByLabel {
             return stored
         }
         if stored.standsAgainst(fresh) { return stored.shown(against: fresh) }

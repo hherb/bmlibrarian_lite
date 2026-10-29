@@ -566,8 +566,30 @@ struct EuropePMCResult: Codable {
 }
 
 /// Europe PMC publication-type list wrapper.
+///
+/// Read as the desktop reads it (`europepmc.py`): a lone string is a list of
+/// one, entries that are not strings are skipped, any other shape is `nil`.
+/// Decoding strictly would drop the whole record over an advisory field.
 struct EuropePMCPubTypeList: Codable {
     let pubType: [String]?
+
+    private enum CodingKeys: String, CodingKey { case pubType }
+
+    /// A list entry kept only when it is a string.
+    private struct StringOrNil: Decodable {
+        let value: String?
+        init(from decoder: Decoder) throws { value = try? decoder.singleValueContainer().decode(String.self) }
+    }
+
+    /// Reads `pubType` as a string or a list, never failing on its shape.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let single = try? container.decode(String.self, forKey: .pubType) {
+            pubType = [single]
+        } else {
+            pubType = (try? container.decode([StringOrNil].self, forKey: .pubType))?.compactMap(\.value)
+        }
+    }
 }
 
 /// Europe PMC full-text URL list wrapper.

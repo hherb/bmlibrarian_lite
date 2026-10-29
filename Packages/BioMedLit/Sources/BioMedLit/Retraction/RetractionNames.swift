@@ -18,8 +18,9 @@ import BmlibCore
 
 /// bmlib's retraction enums by the names
 /// `doc/cross_platform/retraction_parity/retraction_status.json` gives them,
-/// the form a check is stored in. `RetractionContractTests` pins each table
-/// against the contract.
+/// the form a check is stored in. `RetractionContractTests` runs the
+/// contract's cases through these tables, and checks each table against its
+/// own literal names, every case once.
 enum RetractionNames {
     static let sources: [(String, RetractionSource)] = [
         ("retraction_watch_export", .retractionWatchExport),
@@ -44,8 +45,9 @@ enum RetractionNames {
         ("retraction_watch_export", .retractionWatchExport), ("crossref", .crossref),
     ]
 
-    /// `value`'s contract name; every case is in its table, so the fallback
-    /// (never a contract name, so never read back as one) is unreachable.
+    /// `value`'s contract name; `testNameTablesAreTheContractNames` keeps every
+    /// case in its table, so the fallback (never a contract name, so never
+    /// read back as one) is unreachable.
     static func name<T: Equatable>(_ value: T, in table: [(String, T)]) -> String {
         table.first { $0.1 == value }?.0 ?? "unmapped \(value)"
     }

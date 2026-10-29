@@ -76,6 +76,7 @@ final class RetractionCheckerTests: XCTestCase {
         XCTAssertTrue(result.isRetracted)
         XCTAssertEqual(result.retractionStatus, .retracted)
         XCTAssertEqual(result.deciding?.source, "retraction_watch_export")
+        XCTAssertFalse(result.isDecidedByLabel)
         XCTAssertEqual(result.deciding?.kind, "retraction")
         XCTAssertEqual(result.deciding?.recordID, "1")
         XCTAssertEqual(result.deciding?.noticeDOI, "10.1000/notice1")
@@ -89,6 +90,24 @@ final class RetractionCheckerTests: XCTestCase {
         let result = try await check(paper, index: nil)
         XCTAssertEqual(result.status, "retracted")
         XCTAssertEqual(result.deciding?.source, "pubmed_label")
+        XCTAssertTrue(result.isDecidedByLabel)
+    }
+
+    /// The reason Crossref is asked at all: a retraction newer than the export.
+    func testRetractedByCrossrefAlone() async throws {
+        StubURLProtocol.stubbed = (200, Self.crossrefBody(#"""
+            {"DOI": "10.1000/newer", "updated-by": [{"DOI": "10.1000/newnotice", "type": "retraction",
+             "label": "retraction", "source": "retraction-watch", "updated": {"date-parts": [[2026, 10, 1]]},
+             "record-id": 77}]}
+            """#))
+        let result = try await check(RetractionPaper(doi: "10.1000/newer", pmid: nil, publicationTypes: []),
+                                     index: try RetractionFixture.index())
+        XCTAssertEqual(result.status, "retracted")
+        XCTAssertEqual(result.deciding?.source, "crossref_retraction_watch")
+        XCTAssertEqual(result.deciding?.noticeDOI, "10.1000/newnotice")
+        XCTAssertEqual(result.deciding?.date, "2026-10-01")
+        XCTAssertFalse(result.isDecidedByLabel)
+        XCTAssertTrue(result.unanswered.isEmpty)
     }
 
     func testDocumentsSharingADOIAreAskedOnce() async throws {
@@ -188,6 +207,12 @@ final class RetractionCheckerTests: XCTestCase {
     func testACheckWithALookupUnansweredIsAskedAgain() {
         XCTAssertFalse(stored(status: "concern", unanswered: ["crossref"])
             .isReusable(now: RetractionFixture.now, publicationTypes: []))
+    }
+
+    /// A newer build's status (synced from another device) is checked again,
+    /// as the desktop drops such a row; `testAYoungAnsweredCheckIsReused` is the control.
+    func testAnUnknownStatusIsAskedAgain() {
+        XCTAssertFalse(stored(status: "not-a-status").isReusable(now: RetractionFixture.now, publicationTypes: []))
     }
 
     func testAFreshLabelIsNeverHiddenBehindAStoredClear() {

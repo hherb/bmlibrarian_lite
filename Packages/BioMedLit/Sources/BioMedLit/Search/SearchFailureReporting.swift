@@ -217,7 +217,7 @@ public enum SearchFailureReporting {
     /// The app's report has no Methodology section of its own — the model
     /// writes the analysis and the workflow appends the references — so this
     /// holds only the contract's Search Completeness line (user's decision,
-    /// 2026-09-15).
+    /// 2026-09-15). `ReportFormatter` adds the Retraction Check line under it.
     ///
     /// - Parameter shortfalls: What the search behind the report is missing.
     /// - Returns: The section, or `""` when the search was complete.

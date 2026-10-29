@@ -112,8 +112,9 @@ BioMedLit; the app never imports `BmlibCore`.
   `RetractionReportSection` (the report's methods line and "Left out as
   retracted").
 - The screen is the app's `FactCheckWorkflow.screenForRetraction`, before
-  scoring. Each paper's latest check is `Document.retractionCheckJSON` (the
-  `retraction_checks` row); what the run used is
+  scoring. Each document's latest check is `Document.retractionCheckJSON`:
+  per document, so per session, not per paper as the desktop's
+  `retraction_checks` row is (#651). What the run used is
   `FactCheckSession.retractionSnapshotJSON`. They can differ: a stored clear
   stands in storage against an outage, but the run is shown unchecked.
 - Views badge (`RetractionBadge`, `RetractionBanner`) and count from the run's
@@ -124,8 +125,10 @@ BioMedLit; the app never imports `BmlibCore`.
   copy; a run never waits for it. `RetractionIndexStore.refreshIfStale` is
   single-flight: calls meanwhile share one download.
 
-Tests: `RetractionScreenWorkflowTests` (app) and `Retraction*Tests` (BioMedLit),
-over URLProtocol stubs and injected checks, never the network.
+Tests: `RetractionScreenWorkflowTests` and `RetractionBadgeTests` (app);
+`Retraction*Tests`, `ReportFormatterRetractionTests` and
+`PublicationTypeParsingTests` (BioMedLit). They run over URLProtocol stubs and
+injected checks, never the network.
 
 ## Tests
 

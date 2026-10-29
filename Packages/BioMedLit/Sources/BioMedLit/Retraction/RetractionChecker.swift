@@ -104,6 +104,16 @@ public struct PaperRetractionCheck: Codable, Equatable, Sendable {
     public var isClear: Bool { retractionStatus == .clear }
     /// Whether the evidence could not decide (never read as clear).
     public var isUnchecked: Bool { retractionStatus == .unchecked }
+
+    /// Whether the deciding evidence is the record's own PubMed label.
+    public var isDecidedByLabel: Bool {
+        deciding.flatMap { RetractionNames.value($0.source, in: RetractionNames.sources) } == .pubmedLabel
+    }
+
+    /// Whether `lookup` did not answer.
+    func leftUnanswered(_ lookup: RetractionLookup) -> Bool {
+        unanswered.contains(RetractionNames.name(lookup, in: RetractionNames.lookups))
+    }
 }
 
 extension PaperRetractionCheck {
@@ -147,16 +157,18 @@ extension PaperRetractionCheck {
     /// Whether this stored check may stand in for a fresh one (the desktop's
     /// `RetractionChecker.check`): no older than
     /// ``BioMedLitConstants/retractionCheckMaxAgeDays``, every lookup
-    /// answered (a failure is not knowledge), and, unless it already says
-    /// retracted, the paper's own label does not retract it (a fresh label is
-    /// never hidden behind a stored clear).
+    /// answered (a failure is not knowledge), a status this build can read
+    /// (the desktop drops such a row, so the paper is checked again), and,
+    /// unless it already says retracted, the paper's own label does not
+    /// retract it (a fresh label is never hidden behind a stored clear).
     ///
     /// - Parameters:
     ///   - now: The current time.
     ///   - publicationTypes: The paper's record's publication types now.
     public func isReusable(now: Date, publicationTypes: [String]) -> Bool {
         let maxAge = TimeInterval(BioMedLitConstants.retractionCheckMaxAgeDays) * TransparencyConstants.secondsPerDay
-        guard now.timeIntervalSince(checkedAt) <= maxAge, unanswered.isEmpty else { return false }
+        guard now.timeIntervalSince(checkedAt) <= maxAge, unanswered.isEmpty,
+              RetractionNames.value(status, in: RetractionNames.statuses) != nil else { return false }
         if isRetracted { return true }
         let label = BmlibCore.retractionStatus(doi: nil, export: nil, crossref: nil, publicationTypes: publicationTypes)
         return label.status != .retracted

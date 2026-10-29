@@ -394,9 +394,6 @@ final class FactCheckSession {
         return (try? JSONDecoder().decode([String: PaperRetractionCheck].self, from: data)) ?? [:]
     }
 
-    /// Adds what a run used to the snapshot; a document checked again is replaced.
-    ///
-    /// - Parameter checks: The checks used, keyed by `Document.id`; nothing is written for none.
     /// The check each document is shown and counted by, keyed by `Document.id`:
     /// the one its run used (the snapshot), else the stored one. Decode it
     /// once per view or computation, not per row.
@@ -416,6 +413,9 @@ final class FactCheckSession {
         (documents ?? []).filter { !$0.isScored && checks[$0.id]?.isRetracted == true }
     }
 
+    /// Adds what a run used to the snapshot; a document checked again is replaced.
+    ///
+    /// - Parameter checks: The checks used, keyed by `Document.id`; nothing is written for none.
     func recordRetractionSnapshot(_ checks: [String: PaperRetractionCheck]) {
         guard !checks.isEmpty,
               let data = try? JSONEncoder().encode(retractionSnapshot().merging(checks) { _, new in new })

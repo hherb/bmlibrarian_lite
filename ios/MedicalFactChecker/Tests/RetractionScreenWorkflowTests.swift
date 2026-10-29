@@ -309,6 +309,45 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         XCTAssertNotNil(documents[1].scoredAt)
     }
 
+    /// The report names the papers its run left out, by the run's own check:
+    /// a stored check changed afterwards does not rewrite it. Through the
+    /// no-evidence report, which needs no model; the cited path passes the
+    /// same section to `ReportFormatter.fullReport`.
+    func testTheReportNamesWhatTheRunLeftOut() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b"])
+        let workflow = restore(session, check: Self.answering([
+            "10.1000/a": Self.retracted(), "10.1000/b": Self.clear(),
+        ]))
+        await workflow.retryFailedDocuments(pmids: [])
+        documents[0].retractionCheck = Self.clear()
+
+        let made = try await workflow.regenerateReportWithNewEvidence(analyzeTransparencyUsing: { _, _, _ in
+            XCTFail("nothing is relevant, so nothing is rated")
+            throw CancellationError()
+        })
+
+        XCTAssertTrue(made)
+        let report = try XCTUnwrap(session.report?.fullReport)
+        XCTAssertTrue(report.contains(RetractionText.leftOutHeading), report)
+        XCTAssertTrue(report.contains("- Study 0. Retracted 2024-01-02; notice 10.1000/notice"), report)
+        XCTAssertFalse(report.contains("- Study 1."), "control: the clear paper is not left out")
+    }
+
+    /// Control for the rule above: it covers a label verdict only. A stored
+    /// Retraction Watch retraction on a document with no label recorded is
+    /// replaced by a fresh clear every lookup answered (a reinstatement).
+    func testANoticeRetractionIsReplacedWhileTheLabelIsNotRecorded() async throws {
+        let (session, documents) = makeSession(["10.1000/a"])
+        documents[0].publicationTypes = nil
+        documents[0].retractionCheck = Self.retracted(checkedAt: Date().addingTimeInterval(-10 * Self.day))
+        let workflow = restore(session, check: Self.answering(["10.1000/a": Self.clear()]))
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        XCTAssertEqual(documents[0].retractionCheck?.isClear, true)
+        XCTAssertNotNil(documents[0].scoredAt, "reinstated, so scored")
+    }
+
     /// A stored row this build cannot read is kept against a fresh verdict
     /// that left a lookup unanswered, yet the run leaves the paper out by the
     /// verdict it used: the notice and the exclusion never disagree. A fresh

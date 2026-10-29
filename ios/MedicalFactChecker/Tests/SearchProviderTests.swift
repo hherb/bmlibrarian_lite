@@ -326,6 +326,30 @@ struct SearchResultMergerTests {
         #expect(articleA?.source == .pubmed)
     }
 
+    /// The label survives whichever record is kept (search_merger.py's union).
+    @Test func mergeFoldsADuplicatesPublicationTypesIntoTheKeptRecord() {
+        // a different paper with the same title, listed first: the identifier decides
+        let namesake = makeArticle(pmid: "99999999", title: "Study Alpha", source: .pubmed)
+        let kept = makeArticle(pmid: "12345678", title: "Study Alpha", source: .pubmed)
+        var duplicate = makeArticle(pmid: "12345678", title: "Study Alpha", source: .europePMC)
+        duplicate.publicationTypes = ["Journal Article", "Retracted Publication"]
+        let other = makeArticle(pmid: "87654321", title: "Study Beta", source: .pubmed)
+
+        let merged = SearchResultMerger.merge(
+            pubMedPage: page([namesake, kept, other], totalCount: 3),
+            europePMCPage: page([duplicate], totalCount: 1),
+            shortfalls: []
+        )
+
+        #expect(merged.articles.count == 3)
+        #expect(merged.articles.first { $0.pmid == "99999999" }?.publicationTypes == nil)
+        let alpha = merged.articles.first { $0.pmid == "12345678" }
+        #expect(alpha?.source == .pubmed)
+        #expect(alpha?.publicationTypes == ["Journal Article", "Retracted Publication"])
+        // control: a record with no duplicate keeps its own (unrecorded) types
+        #expect(merged.articles.first { $0.pmid == "87654321" }?.publicationTypes == nil)
+    }
+
     /// One provider's page, holding these articles.
     private func page(
         _ articles: [UnifiedArticleMetadata],

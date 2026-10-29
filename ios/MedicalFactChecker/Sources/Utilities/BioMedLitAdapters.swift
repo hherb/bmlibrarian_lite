@@ -171,8 +171,9 @@ struct UnifiedArticleMetadata: Sendable, Identifiable, Equatable {
     /// Used to show availability badge before user attempts to fetch full text.
     let hasFullTextInPMC: Bool
 
-    /// Publication types the source listed; `nil` when it gave no list.
-    let publicationTypes: [String]?
+    /// Publication types the source listed; `nil` when it gave no list. A
+    /// merged duplicate's are folded in (`SearchResultMerger`).
+    var publicationTypes: [String]?
 
     /// Batch number for pagination tracking.
     let batchNumber: Int

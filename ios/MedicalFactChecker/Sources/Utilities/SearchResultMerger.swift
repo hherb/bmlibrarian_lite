@@ -74,6 +74,8 @@ enum SearchResultMerger {
                 // Also add alternative keys for more robust deduplication
                 addAlternativeKeys(for: article, to: &seen)
                 merged.append(article)
+            } else {
+                absorbPublicationTypes(of: article, into: &merged)
             }
         }
 
@@ -90,6 +92,8 @@ enum SearchResultMerger {
                 seen.insert(key)
                 addAlternativeKeys(for: article, to: &seen)
                 merged.append(article)
+            } else {
+                absorbPublicationTypes(of: article, into: &merged)
             }
         }
 
@@ -105,6 +109,24 @@ enum SearchResultMerger {
             pubMedPagination: pubMedPage.pubMedPagination,
             europePMCPagination: europePMCPage.europePMCPagination
         )
+    }
+
+    /// Folds a duplicate's publication types into the kept article it
+    /// duplicates (search_merger.py: union, first-seen order; `nil` adds
+    /// nothing), so the `Retracted Publication` label survives whichever
+    /// record is kept.
+    ///
+    /// - Parameters:
+    ///   - duplicate: The record not kept.
+    ///   - merged: The kept records; the first sharing an identifier takes the
+    ///     types, else the first ``areDuplicates(_:_:)`` match (a similar title).
+    private static func absorbPublicationTypes(of duplicate: UnifiedArticleMetadata, into merged: inout [UnifiedArticleMetadata]) {
+        guard let types = duplicate.publicationTypes,
+              let index = merged.firstIndex(where: { sharesIdentifier($0, duplicate) })
+                ?? merged.firstIndex(where: { areDuplicates($0, duplicate) }) else { return }
+        var union = merged[index].publicationTypes ?? []
+        for type in types where !union.contains(type) { union.append(type) }
+        merged[index].publicationTypes = union
     }
 
     // MARK: - Deduplication Keys
@@ -218,6 +240,17 @@ enum SearchResultMerger {
     ///   - articleB: Second article.
     /// - Returns: True if the articles are likely duplicates.
     static func areDuplicates(_ articleA: UnifiedArticleMetadata, _ articleB: UnifiedArticleMetadata) -> Bool {
+        sharesIdentifier(articleA, articleB)
+            || titleSimilarity(articleA.title, articleB.title) > MergerConstants.titleSimilarityThreshold
+    }
+
+    /// Whether two articles share a PMID, DOI or PMC ID (case-insensitive for the last two).
+    ///
+    /// - Parameters:
+    ///   - articleA: First article.
+    ///   - articleB: Second article.
+    /// - Returns: True if any identifier matches.
+    private static func sharesIdentifier(_ articleA: UnifiedArticleMetadata, _ articleB: UnifiedArticleMetadata) -> Bool {
         // Same PMID
         if !articleA.pmid.isEmpty && articleA.pmid == articleB.pmid {
             return true
@@ -235,9 +268,7 @@ enum SearchResultMerger {
             return true
         }
 
-        // Similar title (Jaccard similarity > threshold)
-        let similarity = titleSimilarity(articleA.title, articleB.title)
-        return similarity > MergerConstants.titleSimilarityThreshold
+        return false
     }
 
     /// Calculate Jaccard similarity between two titles.

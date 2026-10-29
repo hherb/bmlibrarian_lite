@@ -3604,8 +3604,8 @@ final class FactCheckWorkflow {
     /// (``PaperRetractionCheck/failed(at:)``), and the run goes on.
     ///
     /// - Parameter documents: The documents about to be scored.
-    /// - Throws: Cancellation when the run is stopped during the check;
-    ///   nothing is then recorded.
+    /// - Throws: Cancellation when the run is stopped during the check, or,
+    ///   after a stop, the check's own error; nothing is then recorded.
     private func screenForRetraction(_ documents: [Document]) async throws {
         guard let session else { return }
         if retractionRun.generation != runGeneration {
@@ -3656,8 +3656,9 @@ final class FactCheckWorkflow {
     /// Whether this run leaves a document out as retracted: by the check the
     /// run used, as the desktop excludes by the verdicts its run returns, and
     /// by the stored check for a document the run did not screen. The stored
-    /// check can differ: a row this build cannot read is kept against a
-    /// verdict that left a lookup unanswered.
+    /// check can differ from the one the run used: a row this build cannot
+    /// read, or a stored clear standing against an outage, stays stored while
+    /// the run uses the fresh check.
     private func retractionLeavesOut() -> (Document) -> Bool {
         let used = Dictionary(retractionRun.used.map { ($0.id, $0.check.isRetracted) }) { _, new in new }
         return { used[$0.id] ?? $0.isRetracted }

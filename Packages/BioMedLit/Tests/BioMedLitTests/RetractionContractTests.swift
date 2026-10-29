@@ -212,4 +212,71 @@ final class RetractionContractTests: XCTestCase {
         let readme = try XCTUnwrap(loadContract()["_readme"] as? String)
         XCTAssertTrue(readme.contains("crossref.for"))
     }
+
+    // MARK: - The name tables, independently
+
+    // The runners above read the fixture through `RetractionNames` both ways,
+    // so a swap inside a table round-trips unseen; these literals do not. Each
+    // switch is exhaustive, so a new bmlib case is a compile error here.
+
+    private func contractName(_ source: RetractionSource) -> String {
+        switch source {
+        case .retractionWatchExport: "retraction_watch_export"
+        case .crossrefRetractionWatch: "crossref_retraction_watch"
+        case .crossrefPublisher: "crossref_publisher"
+        case .pubmedLabel: "pubmed_label"
+        }
+    }
+
+    private func contractName(_ kind: RetractionKind) -> String {
+        switch kind {
+        case .retraction: "retraction"
+        case .withdrawal: "withdrawal"
+        case .removal: "removal"
+        case .partialRetraction: "partial_retraction"
+        case .expressionOfConcern: "expression_of_concern"
+        case .correction: "correction"
+        case .erratum: "erratum"
+        case .corrigendum: "corrigendum"
+        case .addendum: "addendum"
+        case .clarification: "clarification"
+        case .newVersion: "new_version"
+        case .newEdition: "new_edition"
+        case .reinstatement: "reinstatement"
+        case .other: "other"
+        }
+    }
+
+    private func contractName(_ status: RetractionStatus) -> String {
+        switch status {
+        case .retracted: "retracted"
+        case .concern: "concern"
+        case .clear: "clear"
+        case .unchecked: "unchecked"
+        }
+    }
+
+    private func contractName(_ lookup: RetractionLookup) -> String {
+        switch lookup {
+        case .retractionWatchExport: "retraction_watch_export"
+        case .crossref: "crossref"
+        }
+    }
+
+    private func assertTable<T: Equatable>(
+        _ table: [(String, T)], count: Int, _ name: (T) -> String, line: UInt = #line
+    ) {
+        XCTAssertEqual(table.count, count, "every case is in the table", line: line)
+        XCTAssertEqual(Set(table.map(\.0)).count, table.count, "no name twice", line: line)
+        for (stored, value) in table {
+            XCTAssertEqual(stored, name(value), line: line)
+        }
+    }
+
+    func testNameTablesAreTheContractNames() {
+        assertTable(RetractionNames.sources, count: 4, contractName)
+        assertTable(RetractionNames.kinds, count: 14, contractName)
+        assertTable(RetractionNames.statuses, count: 4, contractName)
+        assertTable(RetractionNames.lookups, count: 2, contractName)
+    }
 }

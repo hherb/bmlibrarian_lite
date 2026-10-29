@@ -21,8 +21,9 @@ private enum RetractionBadgeConstants {
 /// A paper's retraction status as a badge: RETRACTED, CONCERN or NOT CHECKED.
 ///
 /// Follows the desktop's `retraction_badge`: clear shows nothing, and the
-/// tooltip is the paper's status line. A paper never checked shows NOT CHECKED
-/// only in the detail view, so a list of unchecked papers stays quiet.
+/// tooltip is the paper's status line. The app's own rule (the desktop always
+/// has a check): a paper never checked shows NOT CHECKED only in the detail
+/// view, so a list of unchecked papers stays quiet.
 struct RetractionBadge: View {
     /// What the badge says; separate from the view so it can be tested.
     struct Content: Equatable {

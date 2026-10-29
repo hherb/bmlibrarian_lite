@@ -20,7 +20,7 @@ it used, and every view reads the session's snapshot before the stored check**
 (a stored clear kept through an outage is never shown). The app never imports
 BmlibCore. Publication types are kept; the query no longer drops `Retracted
 Publication`. **Next:** PR 4b (Tasks 8–9: last-checked line, Check again; add
-the desktop's report-opening notice and `excluded_line`, #648), then the Android plan (PR 5). Open from PR 4a: #647 (robustness: snapshot decode, a refused export re-downloaded per run), #648, #649 (test gaps).
+the desktop's report-opening notice and `excluded_line`, #648), then the Android plan (PR 5: store checks per paper, and merge duplicates' publication types as Swift and Python do). Open from PR 4a: #651 (checks stored per document, so per session, not per paper), #647 (robustness: snapshot decode, a refused export re-downloaded per run), #648, #649 (test gaps).
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
 error follows a cancel). Open, lodged by recent rounds: #641 (JATS whitespace,

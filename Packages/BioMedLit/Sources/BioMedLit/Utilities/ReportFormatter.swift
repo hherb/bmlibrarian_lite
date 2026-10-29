@@ -345,7 +345,7 @@ public enum ReportFormatter {
     ///   - shortfalls: What the session's searches failed to retrieve.
     ///   - retraction: The retraction methods line and the papers left out, or `nil` when never checked.
     /// - Returns: The notice (if any), the analysis, the Methodology section (if
-    ///   any) and the references.
+    ///   any), the "Left out as retracted" section (if any) and the references.
     public static func fullReport(
         analysis: String,
         references: String,
@@ -373,7 +373,9 @@ public enum ReportFormatter {
     ///   - text: The message.
     ///   - shortfalls: What the session's searches failed to retrieve.
     ///   - retraction: As for ``fullReport(analysis:references:shortfalls:retraction:)``.
-    /// - Returns: The message, opening with the notice when the search was incomplete.
+    /// - Returns: The message, opening with the notice when the search was
+    ///   incomplete, then the retraction Methodology line and the "Left out as
+    ///   retracted" section when there are any.
     public static func standInReport(
         _ text: String, shortfalls: [RetrievalShortfall], retraction: RetractionReportSection? = nil
     ) -> String {

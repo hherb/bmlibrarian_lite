@@ -121,8 +121,9 @@ public struct SearchArticle: Sendable, Identifiable, Equatable {
     ///
     /// `nil` means the source gave no list (not recorded); `[]` means it
     /// listed none. The `Retracted Publication` label alone retracts a paper,
-    /// so the list is kept rather than filtered out of the query.
-    public let publicationTypes: [String]?
+    /// so the list is kept rather than filtered out of the query, and a
+    /// merged duplicate's are folded in (`SearchResultMerger`).
+    public var publicationTypes: [String]?
 
     public init(
         pmid: String,

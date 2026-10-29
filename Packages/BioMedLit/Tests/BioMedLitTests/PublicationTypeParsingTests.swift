@@ -59,6 +59,56 @@ final class PublicationTypeParsingTests: XCTestCase {
         XCTAssertNil(EuropePMCService.searchArticle(from: result).publicationTypes)
     }
 
+    /// The label stays with its own article: the next one, with no list, is unrecorded.
+    func testPubMedTypesDoNotCarryToTheNextArticle() {
+        let xml = """
+        <PubmedArticleSet>\
+        <PubmedArticle><MedlineCitation><PMID>1</PMID><Article><Journal><Title>J</Title></Journal>\
+        <ArticleTitle>A</ArticleTitle><PublicationTypeList>\
+        <PublicationType UI="D016441">Retracted Publication</PublicationType></PublicationTypeList>\
+        </Article></MedlineCitation></PubmedArticle>\
+        <PubmedArticle><MedlineCitation><PMID>2</PMID><Article><Journal><Title>J</Title></Journal>\
+        <ArticleTitle>B</ArticleTitle></Article></MedlineCitation></PubmedArticle>\
+        </PubmedArticleSet>
+        """
+        let articles = PubMedXMLParser(data: Data(xml.utf8)).parseArticleSet().articles
+        XCTAssertEqual(articles.count, 2)
+        XCTAssertEqual(articles.first?.publicationTypes, ["Retracted Publication"])
+        XCTAssertNil(articles.last?.publicationTypes)
+    }
+
+    private func europePMCTypes(_ pubTypeList: String) throws -> [String]? {
+        let result = try JSONDecoder().decode(EuropePMCResult.self, from: Data("""
+        {"id": "1", "source": "MED", "pmid": "1", "title": "T", "pubTypeList": \(pubTypeList)}
+        """.utf8))
+        return EuropePMCService.searchArticle(from: result).publicationTypes
+    }
+
+    /// Read as the desktop reads it: an odd shape costs the field, never the record.
+    func testEuropePMCOddTypeShapesKeepTheRecord() throws {
+        XCTAssertEqual(try europePMCTypes(#"{"pubType": "Retracted Publication"}"#), ["Retracted Publication"])
+        XCTAssertEqual(try europePMCTypes(#"{"pubType": ["Retracted Publication", null, 3]}"#),
+                       ["Retracted Publication"])
+        XCTAssertNil(try europePMCTypes(#"{"pubType": {"x": 1}}"#))
+        XCTAssertNil(try europePMCTypes(#"{}"#))
+    }
+
+    /// A dropped duplicate's label reaches the kept record; `nil` adds nothing.
+    func testMergerFoldsADuplicatesTypesIntoTheKeptRecord() {
+        func article(_ pmid: String, _ title: String, _ types: [String]?) -> SearchArticle {
+            SearchArticle(pmid: pmid, title: title, abstract: "", authors: "", journal: "", year: "",
+                          source: .pubmed, publicationTypes: types)
+        }
+        let merged = SearchResultMerger.mergeArticles(
+            primary: [article("1", "Study Alpha", ["Journal Article"]), article("2", "Study Beta", nil)],
+            secondary: [article("1", "Study Alpha", ["Retracted Publication", "Journal Article"]),
+                        article("2", "Study Beta", nil)]
+        )
+        XCTAssertEqual(merged.count, 2)
+        XCTAssertEqual(merged[0].publicationTypes, ["Journal Article", "Retracted Publication"])
+        XCTAssertNil(merged[1].publicationTypes)
+    }
+
     func testDefaultQueryNoLongerExcludesRetracted() {
         let query = StructuredQuery(concepts: [SearchConcept(name: "x", keywords: ["asthma"])])
         let built = PubMedQueryBuilder.build(from: query)
