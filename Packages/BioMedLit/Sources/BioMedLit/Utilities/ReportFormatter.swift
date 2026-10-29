@@ -130,6 +130,10 @@ public enum ReportFormatter {
         /// paper is not, and the reference list outlives the app.
         public let identifier: String?
 
+        /// A line printed under the reference (an expression of concern's
+        /// caveat), or `nil`.
+        public let caveat: String?
+
         /// Initialize with reference data.
         ///
         /// - Parameters:
@@ -139,7 +143,12 @@ public enum ReportFormatter {
         ///   - journal: Journal name (optional).
         ///   - identifier: The namespace-labelled identifier, or `nil` when
         ///     nothing establishes one. See ``identifier``.
-        public init(authors: String, year: Int?, title: String, journal: String?, identifier: String?) {
+        ///   - caveat: A line to print under the reference, or `nil`.
+        public init(
+            authors: String, year: Int?, title: String, journal: String?, identifier: String?,
+            caveat: String? = nil
+        ) {
+            self.caveat = caveat
             self.authors = authors
             self.year = year
             self.title = title
@@ -164,6 +173,7 @@ public enum ReportFormatter {
             ref += doc.title
             if let journal = doc.journal { ref += ". *\(journal)*" }
             if let identifier = doc.identifier { ref += ". \(identifier)" }
+            if let caveat = doc.caveat { ref += "\n" + caveat }
             return ref
         }.joined(separator: "\n\n")
     }
@@ -333,16 +343,20 @@ public enum ReportFormatter {
     ///   - analysis: The report the model wrote.
     ///   - references: The reference list, one entry per relevant document.
     ///   - shortfalls: What the session's searches failed to retrieve.
+    ///   - retraction: The retraction methods line and the papers left out, or `nil` when never checked.
     /// - Returns: The notice (if any), the analysis, the Methodology section (if
     ///   any) and the references.
     public static func fullReport(
         analysis: String,
         references: String,
-        shortfalls: [RetrievalShortfall]
+        shortfalls: [RetrievalShortfall],
+        retraction: RetractionReportSection? = nil
     ) -> String {
         let blocks = [
             analysis,
             SearchFailureReporting.searchCompletenessMethodology(shortfalls),
+            retraction?.methodsMarkdown ?? "",
+            retraction?.leftOutMarkdown ?? "",
             referencesHeading + reportBlockSeparator + references,
         ].filter { !$0.isEmpty }
         return SearchFailureReporting.withNotice(
@@ -359,9 +373,15 @@ public enum ReportFormatter {
     /// - Parameters:
     ///   - text: The message.
     ///   - shortfalls: What the session's searches failed to retrieve.
+    ///   - retraction: As for ``fullReport(analysis:references:shortfalls:retraction:)``.
     /// - Returns: The message, opening with the notice when the search was incomplete.
-    public static func standInReport(_ text: String, shortfalls: [RetrievalShortfall]) -> String {
-        SearchFailureReporting.withNotice(text, shortfalls: shortfalls)
+    public static func standInReport(
+        _ text: String, shortfalls: [RetrievalShortfall], retraction: RetractionReportSection? = nil
+    ) -> String {
+        let blocks = [text, retraction?.methodsMarkdown ?? "", retraction?.leftOutMarkdown ?? ""]
+            .filter { !$0.isEmpty }
+        return SearchFailureReporting.withNotice(
+            blocks.joined(separator: reportBlockSeparator), shortfalls: shortfalls)
     }
 
     // MARK: - No Evidence Content

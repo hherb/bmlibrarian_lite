@@ -2990,6 +2990,13 @@ final class FactCheckWorkflow {
         // report claim a complete search (#284).
         let shortfallsRecord = try SearchFailureReporting.reportRecord(for: shortfalls)
 
+        // What the run saw: the checks it used, not whatever is stored now
+        let snapshot = session.retractionSnapshot()
+        let retraction: RetractionReportSection? = snapshot.isEmpty ? nil : RetractionReportSection(
+            papers: (session.documents ?? []).compactMap { doc in
+                snapshot[doc.id].map { (title: doc.title, check: $0) }
+            })
+
         // Handle no evidence case using ReportFormatter
         guard !allCitations.isEmpty else {
             let noEvidenceContent = ReportFormatter.generateNoEvidenceContent(
@@ -3001,7 +3008,7 @@ final class FactCheckWorkflow {
                 verdict: .insufficientEvidence,
                 summary: noEvidenceContent.summary,
                 fullReport: ReportFormatter.standInReport(
-                    noEvidenceContent.fullReport, shortfalls: shortfalls
+                    noEvidenceContent.fullReport, shortfalls: shortfalls, retraction: retraction
                 ),
                 citationCount: 0,
                 uniqueSourceCount: 0,
@@ -3063,7 +3070,8 @@ final class FactCheckWorkflow {
                 // concatenated into `EvidenceReport.fullReport` and saved, so
                 // a mislabelled identifier here is written down once and read
                 // back by every later view and export (#212).
-                identifier: doc.citationIdentifier?.labelled
+                identifier: doc.citationIdentifier?.labelled,
+                caveat: snapshot[doc.id].flatMap { $0.isConcern ? RetractionText.concernCaveat($0) : nil }
             )
         }
         let references = ReportFormatter.formatReferences(referenceData)
@@ -3071,7 +3079,8 @@ final class FactCheckWorkflow {
         let completeReport = ReportFormatter.fullReport(
             analysis: parsedReport.fullReport,
             references: references,
-            shortfalls: shortfalls
+            shortfalls: shortfalls,
+            retraction: retraction
         )
 
         let report = EvidenceReport(
