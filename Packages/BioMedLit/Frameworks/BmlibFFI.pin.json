@@ -1,7 +1,7 @@
 {
   "comment": "SPIKE (WP-2). The one bmlib pin for both apps: the commit that built BmlibFFI.xcframework and Sources/BmlibCore/bmlib_ffi.swift (bmlib's rust/bmlib-ffi/scripts/build-xcframework.sh) and generated android/MedicalFactChecker/app/src/main/java/org/bmlib/ffi/bmlib_ffi.kt. All three are regenerated together, from one bmlib commit; a binding generated from another commit fails UniFFI's checksum check at first call. Android's Gradle cargo tasks read bmlibCommit from this file and refuse a bmlib checkout at any other commit (override: -Pbmlib.allowUnpinnedCommit=true). treeSha256 is defined and computed by treeSha256Script; run it with --check on this file. The xcframework and bmlib_ffi.swift are the bmlib-xcframework workflow's own build (xcode is that runner's), which every PR rebuilds and compares; its header says how to re-pin (#583).",
   "bmlibRepository": "https://github.com/hherb/bmlib",
-  "bmlibCommit": "f76721545a76eceb683d9c460fb1f47e5c925cdb",
+  "bmlibCommit": "83cd2b3b229d7a487fa9fc66054730cab9ae26ed",
   "bmlibBranch": "main",
   "bmlibCrateVersion": "0.2.0",
   "uniffiVersion": "0.32.2",
@@ -19,5 +19,5 @@
     "macOS": "14.0"
   },
   "treeSha256Script": ".github/scripts/xcframework_tree_sha256.py",
-  "treeSha256": "79f787b3b6dfbf0dfbca82b29fdb892b9678cdaec3145596e381aab559d32a2d"
+  "treeSha256": "19099be2cd042f1855d87d44b38838a8aa54a3b3c660b36d597e4c2b95b71309"
 }

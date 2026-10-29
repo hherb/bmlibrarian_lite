@@ -304,6 +304,10 @@ if (bmlibDir != null) {
         )
         doLast {
             val built = File(cargoTargetDir, "release-ffi")
+            // A dylib overwritten in place keeps its old code-signature cache entry on
+            // macOS, and the next test JVM that loads it is killed (exit 137) after a re-pin,
+            // so the host directory is emptied before every copy.
+            delete(bmlibHostLib)
             copy {
                 from(built) {
                     include("libbmlib_ffi.dylib", bmlibLibraryName, "bmlib_ffi.dll")

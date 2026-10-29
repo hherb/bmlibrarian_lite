@@ -45,7 +45,7 @@ jobs:
 
       # bmlib's Rust library through UniFFI (#583): Gradle builds it from a bmlib
       # checkout at BmlibFFI.pin.json's commit (its checkBmlibPin refuses any
-      # other), so BmlibJatsFfiTest runs against the committed Kotlin bindings.
+      # other), so the bmlib FFI tests run against the committed Kotlin bindings.
       - name: Read the bmlib pin
         id: pin
         working-directory: .
@@ -64,6 +64,14 @@ jobs:
           repository: hherb/bmlib
           ref: ${{ steps.pin.outputs.commit }}
           path: bmlib-checkout
+
+      - name: The retraction contract copy is the pinned bmlib's
+        # Swift and Kotlin assert the pin's Rust against this copy; a stale or cut copy would pass.
+        working-directory: .
+        run: |
+          cmp doc/cross_platform/retraction_parity/retraction_status.json \
+            bmlib-checkout/tests/fixtures/retraction_status.json \
+            || { echo "::error::retraction_status.json differs from bmlib at the FFI pin"; exit 1; }
 
       - uses: actions/cache@v4
         with:
@@ -86,12 +94,14 @@ jobs:
           BMLIB_DIR: ${{ github.workspace }}/bmlib-checkout
         run: ./gradlew testDebugUnitTest --console=plain --no-daemon
 
-      - name: The bmlib FFI test ran
-        # It skips itself without the host library, which would pass silently.
+      - name: The bmlib FFI tests ran
+        # They skip themselves without the host library, which would pass silently.
         run: |
-          report=app/build/test-results/testDebugUnitTest/TEST-com.bmlibrarian.factchecker.util.jats.BmlibJatsFfiTest.xml
-          grep -q 'skipped="0"' "$report" && ! grep -q 'tests="0"' "$report" \
-            || { echo "::error::BmlibJatsFfiTest did not run"; head -3 "$report"; exit 1; }
+          for test in util.jats.BmlibJatsFfiTest util.retraction.BmlibRetractionContractTest; do
+            report=app/build/test-results/testDebugUnitTest/TEST-com.bmlibrarian.factchecker.$test.xml
+            grep -q 'skipped="0"' "$report" && ! grep -q 'tests="0"' "$report" \
+              || { echo "::error::$test did not run"; head -3 "$report"; exit 1; }
+          done
 
       - name: Upload test reports
         # Gradle's HTML report is the only place the individual failure messages
