@@ -80,7 +80,7 @@ Tests: retracted never scored and stays in the session; unchecked is scored and 
 
 ### Task 7: Badges and lines; ledger
 
-`ui/factcheck/components/RetractionBadge.kt` (RETRACTED / CONCERN / NOT CHECKED; a pure `RetractionBadgeContent.of(check)` tested), in `DocumentCard` and `DocumentDetailSheet` (the status line); a retracted, unscored row says `excludedLine` (#648). The list header counts every row listed (#648's rule). Ledger rows per Global Constraints; `python scripts/check_bmlib_ledger.py --bmlib <bmlib at the pin>` exits 0.
+`ui/factcheck/components/RetractionBadge.kt` (RETRACTED / CONCERN / NOT CHECKED; a pure `RetractionBadgeContent.of(check)` tested), in `DocumentCard` (the spec's "warning row"), its expanded view the status line; papers left out are listed after the scored ones under their own header, each saying `excludedLine` (#648); each header counts the rows it lists. The report screen's `DocumentDetailSheet` is left for PR 5b, with the saved-work line. Ledger rows per Global Constraints; `python scripts/check_bmlib_ledger.py --bmlib <bmlib at the pin>` exits 0.
 
 ---
 

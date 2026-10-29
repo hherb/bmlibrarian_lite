@@ -149,6 +149,46 @@ Tests: `RetractionScreenWorkflowTests`, `RetractionSavedWorkTests` and `Retracti
 `PublicationTypeParsingTests` (BioMedLit). They run over URLProtocol stubs and
 injected checks, never the network.
 
+## Android
+
+The app calls bmlib's rule, Crossref parsing and export index through the
+UniFFI bindings (`org.bmlib.ffi`); everything else is in
+`app/.../util/retraction/`, each file a port of the BioMedLit file of the
+same name.
+
+- `RetractionCrossrefLookup` (bmlib's batches over OkHttp, paced and retried
+  as `CrossRefService`), `RetractionIndexStore` (the export as bmlib's index
+  file under `noBackupFilesDir`), `RetractionChecker`, `PaperRetractionCheck`
+  (the stored form, reuse, `standsAgainst`, `take`) and `RetractionSnapshot`
+  (read entry by entry), `RetractionNames` (exhaustive `when`s),
+  `RetractionText`, `RetractionReportSection`, and `RetractionService`
+  (`@Singleton`: the production check, one lookup per process, the stored rows).
+- **Checks are stored per paper**, as the desktop's: Room table
+  `retraction_checks` (`paper_key`, `check_json`), so what one session learnt
+  serves the next and survives a deleted session. A paper with neither DOI
+  nor PMID has no key and no row. What a run used is
+  `sessions.retraction_snapshot_json`, by document id, never rewritten by a
+  later check. Publication types are `documents.publication_types_json`
+  (Room 11); a Europe PMC duplicate's types merge into PubMed's copy.
+- The screen is `FactCheckWorkflow.screenForRetraction`, at the top of
+  `scoreDocuments`, which every scoring path calls. A run starts in
+  `runHandlingFailures`, `fetchMoreEvidence` and `retryFailedDocuments`.
+  **The native library may be missing** (a debug build without a bmlib
+  checkout): its `UnsatisfiedLinkError` is caught there, and every paper is
+  unchecked for the run.
+- The fact-check screen shows `retractionNotice`, badges each card by the
+  run's snapshot (`RetractionBadge`) and lists the papers left out after the
+  scored ones, each with `RetractionText.excludedLine`.
+- The export downloads only on an unmetered network, at launch and in the
+  background when a run finds no usable copy; one download at a time, and a
+  refused one is not downloaded again for a day. A run never waits for it.
+- Saved work (a restored session's line and warning, *Check again*) is PR 5b.
+
+Tests: `FactCheckWorkflowRetractionTest`, `RetractionBadgeContentTest`,
+`Migration10To11Test`, `PublicationTypesTest` (no native library), and
+`util/retraction/Retraction*Test` over MockWebServer, which need the host
+library (`BMLIB_DIR`); CI fails if they skip.
+
 ## Tests
 
 `tests/test_retraction_*.py`, `tests/test_mcp_retraction.py`,

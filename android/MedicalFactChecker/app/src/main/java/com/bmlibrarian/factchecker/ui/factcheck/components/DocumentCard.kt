@@ -19,6 +19,8 @@
 package com.bmlibrarian.factchecker.ui.factcheck.components
 
 import com.bmlibrarian.factchecker.ui.common.TransparencyRiskBadge
+import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
+import com.bmlibrarian.factchecker.util.retraction.RetractionText
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyRiskExplanation
 import com.bmlibrarian.factchecker.domain.transparency.transparencyCertaintyOf
 import com.bmlibrarian.factchecker.domain.transparency.transparencyResult
@@ -125,6 +127,7 @@ fun DocumentCard(
     onOpenPublisher: ((String) -> Unit)? = null,
     onOpenUrl: ((String) -> Unit)? = null,
     onUploadFullText: ((DocumentEntity) -> Unit)? = null,
+    retractionCheck: PaperRetractionCheck? = null,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -169,6 +172,11 @@ fun DocumentCard(
                         maxLines = if (expanded) Int.MAX_VALUE else 2,
                         overflow = TextOverflow.Ellipsis
                     )
+
+                    RetractionBadgeContent.of(retractionCheck)?.let { badge ->
+                        Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+                        RetractionBadge(badge)
+                    }
 
                     Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
 
@@ -216,6 +224,20 @@ fun DocumentCard(
                 Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
+
+                // Why a paper left out has no score, or the status a kept one was checked to
+                retractionCheck?.let { check ->
+                    Text(
+                        text = if (!document.isScored && check.isRetracted) {
+                            RetractionText.excludedLine(check, check)
+                        } else {
+                            RetractionText.paperStatusLine(check)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (check.isRetracted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
+                }
 
                 // LLM Reasoning - visually distinct box (shown first like iOS)
                 document.scoreRationale?.let { rationale ->

@@ -8,35 +8,32 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Retraction checking, iOS/macOS: done** (PR #650 = PR 4a, Tasks 1–7; PR #652 = PR 4b,
-Tasks 8–9; plan
-`docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`, Apple
-section of `doc/developer/retraction_checking.md`; ledger row
-`bmlib:0.7.0-retraction-watch` now `swift: ported`). The app screens in
-`FactCheckWorkflow` before both scoring paths; **a run leaves out by the check
-it used, and lists and counts read the session's snapshot before the stored
-check**; badges and banners show the stored check where *Check again* replaced
-the run's (`Document.badgedRetractionCheck`, as the desktop's card).
-**The snapshot is the run's record and is never rewritten**: *Check again*
-(`checkRetractionsAgain`) stores answers in each `Document` only, so the
-snapshot plays the desktop's `run_status`. A restored session shows
-`retractionSavedWorkLine` and the warning for cited papers, read from the
-store with no request (other sessions' documents by `RetractionPaper.paperKey`);
-rules in BioMedLit `RetractionSavedWork` (an unchecked run row is no check
-time, so an older retraction found elsewhere still warns); the line and
-warning also sit above the Report tab (`RetractionSavedWorkSection`, the
-workflow's own session only). The report opens with
-`RetractionReportSection.notice` (causes only when the writing run screened
-every snapshot paper); left-out rows show `RetractionText.excludedLine`; both
-list headers count every row listed. The dead `ResumedSessionBanner`s are gone.
-**Next:** the Android plan (PR 5: store checks per paper from the start, and
-merge duplicates' publication types as Swift and Python do). Open: #651
-(Apple checks stored per document, not per paper), #647 (snapshot decode, a
-refused export re-downloaded per run), #648 (left: a session scored before the
-check, after Find More Evidence, has its methods line dated while its earlier
-papers were never checked), #649 (test gaps), #653 (badge another session's
-newer check; label rule; restore cost), #654 (Check again: causes, stop,
-unsaved note on reopen).
+**Retraction checking, Android: PR 5a open** (branch
+`feat/retraction-checking-android`; plan
+`docs/superpowers/plans/2026-10-30-retraction-checking-android.md`, Tasks 1–7;
+Android section of `doc/developer/retraction_checking.md`). Ports BioMedLit's
+`Retraction/` files to `app/.../util/retraction/` over the FFI. **Checks are
+stored per paper from the start** (Room 11 `retraction_checks`, #651's shape);
+the run's record is `sessions.retraction_snapshot_json`. The screen is at the
+top of `FactCheckWorkflow.scoreDocuments`, which every scoring path calls; a
+run starts in `runHandlingFailures`, `fetchMoreEvidence` and
+`retryFailedDocuments`. **A missing native library** (`UnsatisfiedLinkError`,
+a debug build without bmlib) leaves papers unchecked; `paperKey`, `isReusable`
+and `uncheckedCauses` all call bmlib, so keep them inside the screen's guard.
+Europe PMC duplicates' publication types merge into PubMed's copy. **The
+FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C ~/src/bmlib
+worktree add --detach <dir> 83cd2b3`); without it they skip locally, and CI
+fails if they skip. **Next: PR 5b** (Tasks 8–9: a restored session's
+last-checked line and warning, *Check again*, the report screen's
+`DocumentDetailSheet` status line), then the ledger's feature row becomes
+`android: ported`.
+
+**Retraction checking, iOS/macOS: done** (PRs #650, #652; plan
+`docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`). The
+snapshot is the run's record, never rewritten; *Check again* stores per
+`Document`. Open: #651 (Apple stores per document, not per paper), #647,
+#648, #649, #653, #654 (the Android port took #647's per-entry snapshot and
+refused-export backoff, #649's exhaustive names and code-point escaping).
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
 error follows a cancel). Open, lodged by recent rounds: #641 (JATS whitespace,
@@ -75,12 +72,6 @@ have landed):
 
 ## Recently landed (context)
 
-- **bmlib ledger sync** (PR #643): ledger at bmlib `83cd2b3`, the desktop's
-  dependency `8845ba8` (`import_retraction_watch_export` builds the copy).
-- **Find More Evidence keeps a cut-off answer's notice** (#639, PR #640):
-  when every one of its searches fails, the notice rides on
-  `SearchFailedError.notice` and `format_search_failure_message` tells it
-  between the failure and the advice.
 - **Unknown stop reasons** (#637, PR #638): each provider names the stop
   reasons it knows (`ANTHROPIC_KNOWN_STOP_REASONS`; Ollama's `stop`/`length`)
   and logs any other, read as finished unless the whole token limit was
@@ -102,8 +93,6 @@ have landed):
   an alternative search's loss is `ShortfallQuery.ALTERNATIVE`. Find More
   Evidence (`more_evidence.py`) scores **into the reviewed run's checkpoint**,
   then writes the report from every citation of the run.
-- **Desktop: Upload Full Text** (PR #626): kept in `uploaded_full_texts`;
-  *Retry Full Text* reads one newer than the paper's last read.
 - **Desktop: citations from full text, Retry Full Text** (PR #622).
   *Settings → Full Text*: **Read citations from full text** (off) and **Fetch
   Full Text From Score** (4, never below the review's threshold). The review
@@ -254,7 +243,7 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **Retraction checking**: Android (above), then Phases 3–6 (Phase 4 as adapter work
+- **Retraction checking**: Android PR 5b (above), then Phases 3–6 (Phase 4 as adapter work
   over the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**, **#585**.
 - **#545** sweep the PDF library for other articles' PDFs (CLI only, the
   maintainer's call); **#547** keep a set-aside PDF from the GUI (both from

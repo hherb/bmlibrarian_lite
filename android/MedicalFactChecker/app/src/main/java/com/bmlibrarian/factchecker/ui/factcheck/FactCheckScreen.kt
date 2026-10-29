@@ -207,6 +207,13 @@ fun FactCheckScreen(
                 }
             }
 
+            // What the retraction screen left out and could not check
+            uiState.retractionNotice?.let { notice ->
+                item(key = "retraction_notice") {
+                    IncompleteSearchCard(text = notice)
+                }
+            }
+
             // What the full-text step could not do
             uiState.fullTextNotice?.let { notice ->
                 item(key = "full_text_notice") {
@@ -334,7 +341,27 @@ fun FactCheckScreen(
                         },
                         onOpenUrl = { url ->
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                        }
+                        },
+                        retractionCheck = uiState.retractionChecks[document.id]
+                    )
+                }
+            }
+
+            // Papers left out as retracted: listed, badged, with why they have no score
+            if (uiState.retractedDocuments.isNotEmpty()) {
+                item(key = "retracted_header") {
+                    Text(
+                        text = "Left out as retracted (${uiState.retractedDocuments.size})",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+                items(
+                    items = uiState.retractedDocuments,
+                    key = { "retracted_${it.id}" }
+                ) { document ->
+                    DocumentCard(
+                        document = document,
+                        retractionCheck = uiState.retractionChecks[document.id]
                     )
                 }
             }

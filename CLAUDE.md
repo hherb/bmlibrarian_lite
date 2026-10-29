@@ -106,7 +106,7 @@ exceptions.py         # Custom exception hierarchy
 - domain: Models, WorkflowState, workflow/ (scoring, searching, reporting)
 - ui: Compose screens + ViewModels (factcheck, report, history, settings, fulltext, onboarding)
 - ui/components: DocumentCard (with transparency), FullTextSourceBadge, SortingControls
-- util: JATSXMLParser, JATSModels, CostCalculator, ResponseParser, PdfExporter
+- util: JATSXMLParser, JATSModels, CostCalculator, ResponseParser, PdfExporter; retraction/ (Crossref lookups, Retraction Watch index, checker, sentences, RetractionService; checks per paper in Room `retraction_checks`)
 - di: Hilt modules (App, Workflow, Network, Database)
 
 ## BioMedLit Swift Package (`Packages/BioMedLit/`)

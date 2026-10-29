@@ -36,6 +36,7 @@ import okhttp3.Request
 import org.bmlib.ffi.RetractionIndex
 import org.bmlib.ffi.RetractionIndexException
 import org.bmlib.ffi.buildRetractionIndex
+import org.bmlib.ffi.crossrefRetractionRequests
 
 /** What a [RetractionIndexStore.refreshIfStale] did. */
 sealed class RetractionIndexRefresh {
@@ -138,6 +139,7 @@ class RetractionIndexStore(
             if (nowMs - at < RetractionConstants.RETRACTION_WATCH_REFUSED_BACKOFF_MS) return@withLock RetractionIndexRefresh.Refused(reason)
         }
         if (!isUnmetered()) return@withLock RetractionIndexRefresh.Metered
+        if (!bmlibLoads()) return@withLock RetractionIndexRefresh.Refused("bmlib's native library is missing")
         withContext(Dispatchers.IO) { refresh(nowMs, email) }.also {
             if (it is RetractionIndexRefresh.Refused) lastRefusal = nowMs to it.reason
         }
@@ -201,6 +203,17 @@ class RetractionIndexStore(
     companion object {
         private const val TAG = "RetractionIndexStore"
         private const val HTTP_OK = 200
+
+        /**
+         * Whether bmlib's native library loads: a debug build without it could
+         * not build the index, so the ~68 MB export is never downloaded for nothing.
+         */
+        private fun bmlibLoads(): Boolean = try {
+            crossrefRetractionRequests(emptyList(), null)
+            true
+        } catch (e: LinkageError) {
+            false
+        }
 
         /** Today's UTC day, the form bmlib's `dataAsOf` takes. */
         internal fun today(nowMs: Long): LocalDate = Instant.ofEpochMilli(nowMs).atOffset(ZoneOffset.UTC).toLocalDate()
