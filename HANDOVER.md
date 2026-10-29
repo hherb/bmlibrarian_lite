@@ -8,15 +8,11 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Re-pin and contract on branch `chore/bmlib-ffi-repin-retraction-contract`
-(PR #646)**: the apps' FFI pin (`BmlibFFI.pin.json`) names bmlib `main` at
-`83cd2b3`, the ledger's `bmlib_commit` (the desktop's own dependency stays at
-`8845ba8`); the xcframework, `bmlib_ffi.swift` and `bmlib_ffi.kt` are
-`bmlib-xcframework.yml`'s build of it. Swift (`RetractionContractTests`) and
-Kotlin (`BmlibRetractionContractTest`) assert `retraction_status.json` through
-the FFI; `android-tests.yml` fails a skipped run of either FFI test. The iOS
-plan is `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`.
-**Next:** execute it (spec PR 4), then the Android plan (PR 5).
+**Retraction checking, iOS/macOS, PR 4a on branch
+`feat/retraction-checking-apple`**: executing Tasks 1–7 of
+`docs/superpowers/plans/2026-10-29-retraction-checking-apple.md` (the re-pin
+to bmlib `83cd2b3` and the FFI contract tests landed in PR #646). **Next:**
+PR 4b (Tasks 8–9, saved work), then the Android plan (PR 5).
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
 error follows a cancel). Open, lodged by recent rounds: #641 (JATS whitespace,
