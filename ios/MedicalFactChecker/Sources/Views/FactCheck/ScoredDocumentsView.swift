@@ -68,7 +68,7 @@ struct ScoredDocumentsView: View {
 
     /// Sorted documents based on the selected sort option.
     private var sortedDocuments: [Document] {
-        scoredDocuments.sorted(by: sortOption)
+        scoredDocuments.sorted(by: sortOption) + (session.documents ?? []).filter(\.isRetractedUnscored)
     }
 
     var body: some View {
@@ -168,7 +168,7 @@ struct EnhancedScoredDocumentsView: View {
 
     /// Sorted documents based on the selected sort option.
     private var sortedDocuments: [Document] {
-        scoredDocuments.sorted(by: sortOption)
+        scoredDocuments.sorted(by: sortOption) + (session.documents ?? []).filter(\.isRetractedUnscored)
     }
 
     /// Count of successfully scored documents.
@@ -297,6 +297,8 @@ struct DocumentScoreRow: View {
                                 provider: document.searchSourceEnum,
                                 isPreprint: document.isPreprint
                             )
+
+                            RetractionBadge(check: document.retractionCheck)
                         }
                     }
 

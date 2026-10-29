@@ -55,6 +55,7 @@ struct MacScoredDocumentsView: View {
         (session.documents ?? [])
             .filter { $0.isScored && ($0.relevanceScore ?? 0) >= filterThreshold }
             .sorted(by: sortOption)
+            + (session.documents ?? []).filter(\.isRetractedUnscored)
     }
 
     var body: some View {
@@ -255,6 +256,8 @@ struct MacDocumentCard: View {
 
                     // Search provider badge
                     MacProviderBadge(provider: documentProvider)
+
+                    RetractionBadge(check: document.retractionCheck)
 
                     // PMC full text availability indicator (only if not already fetched)
                     if document.hasFullTextInPMC && !document.hasFullText && !document.fullTextUnavailable {

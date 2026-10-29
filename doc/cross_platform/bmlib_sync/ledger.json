@@ -654,10 +654,10 @@
       "id": "bmlib:0.7.0-retraction-watch",
       "title": "Retraction Watch",
       "python": "ported",
-      "swift": "owed",
+      "swift": "ported",
       "android": "owed",
       "issue": null,
-      "note": "WP 7. Spec docs/superpowers/specs/2026-10-18-retraction-checking-design.md; the rule is bmlib#504 (see its row). Desktop PR 1 (#594: the bmlib dependency, the contract copy, stored publication types) and PR 2 (#597: export copy, Crossref lookups, stored verdicts, the review, MCP, interrogation, report and bmll retractions-update) consume it, and PR 3 (#605: saved work, last checked, Check again) finishes it. The apps' plan is docs/superpowers/plans/2026-10-29-retraction-checking-apple.md (iOS/macOS); Android follows."
+      "note": "WP 7. Spec docs/superpowers/specs/2026-10-18-retraction-checking-design.md; the rule is bmlib#504 (see its row). Desktop PR 1 (#594: the bmlib dependency, the contract copy, stored publication types) and PR 2 (#597: export copy, Crossref lookups, stored verdicts, the review, MCP, interrogation, report and bmll retractions-update) consume it, and PR 3 (#605: saved work, last checked, Check again) finishes it. The apps' plan is docs/superpowers/plans/2026-10-29-retraction-checking-apple.md (iOS/macOS); Android follows. Swift: ported in PR 4a (iOS/macOS retraction checking), which calls bmlib's Rust through the FFI."
     },
     {
       "id": "bmlib:0.8.0-citation-styles",
@@ -1797,10 +1797,10 @@
       "id": "bmlib#504",
       "title": "Retraction status rule over the Retraction Watch export, Crossref updated-by and the PubMed label",
       "python": "ported",
-      "swift": "owed",
+      "swift": "ported",
       "android": "owed",
       "issue": null,
-      "note": "The rule lives in bmlib (`bmlib.publications.retraction_status`); the desktop consumes it by import and tests its copy of the contract `retraction_parity/retraction_status.json`; Swift and Kotlin assert the same copy through the FFI (PR #646), owed until the apps call it. The apps are the next plans (spec docs/superpowers/specs/2026-10-18-retraction-checking-design.md)."
+      "note": "The rule lives in bmlib (`bmlib.publications.retraction_status`); the desktop consumes it by import and tests its copy of the contract `retraction_parity/retraction_status.json`; Swift and Kotlin assert the same copy through the FFI (PR #646), owed until the apps call it. The apps are the next plans (spec docs/superpowers/specs/2026-10-18-retraction-checking-design.md). Swift: ported in PR 4a (iOS/macOS retraction checking), which calls bmlib's Rust through the FFI."
     },
     {
       "id": "bmlib#453",
@@ -1851,19 +1851,19 @@
       "id": "bmlib#509",
       "title": "`import_retraction_watch_export()`: one export replaces the stored notices",
       "python": "ported",
-      "swift": "owed",
+      "swift": "ported",
       "android": "owed",
       "issue": null,
-      "note": "The desktop builds each refresh into a fresh file with `import_retraction_watch_export` (`retraction_export._build`), so an export with no recognised `RetractionNature`, DOI or PMID is refused and the old copy kept; the 1% removal guard is moot over an empty table, and the desktop's 5% shrink guard stands. The apps' retraction plans consume bmlib's Rust through the FFI; its pin (`83cd2b3`, PR #646) carries this, owed until the apps call it."
+      "note": "The desktop builds each refresh into a fresh file with `import_retraction_watch_export` (`retraction_export._build`), so an export with no recognised `RetractionNature`, DOI or PMID is refused and the old copy kept; the 1% removal guard is moot over an empty table, and the desktop's 5% shrink guard stands. The apps' retraction plans consume bmlib's Rust through the FFI; its pin (`83cd2b3`, PR #646) carries this, owed until the apps call it. Swift: ported in PR 4a (iOS/macOS retraction checking), which calls bmlib's Rust through the FFI."
     },
     {
       "id": "bmlib#510",
       "title": "`import_retraction_watch_export()`: one export replaces the stored notices",
       "python": "ported",
-      "swift": "owed",
+      "swift": "ported",
       "android": "owed",
       "issue": null,
-      "note": "The desktop rebuilds its copy whole on every refresh, so a dropped record was already gone; it now builds with the function itself (see bmlib#509). The apps' retraction plans consume bmlib's Rust through the FFI; its pin (`83cd2b3`, PR #646) carries this, owed until the apps call it."
+      "note": "The desktop rebuilds its copy whole on every refresh, so a dropped record was already gone; it now builds with the function itself (see bmlib#509). The apps' retraction plans consume bmlib's Rust through the FFI; its pin (`83cd2b3`, PR #646) carries this, owed until the apps call it. Swift: ported in PR 4a (iOS/macOS retraction checking), which calls bmlib's Rust through the FFI."
     },
     {
       "id": "bmlib#514",
@@ -1896,19 +1896,19 @@
       "id": "bmlib#522",
       "title": "The Rust `RetractionIndex::build` refuses an export in which no notice carries a nature this version recognises",
       "python": "equivalent",
-      "swift": "owed",
+      "swift": "ported",
       "android": "owed",
       "issue": null,
-      "note": "Python's import refuses the same (see bmlib#509). The apps' retraction plans consume bmlib's Rust through the FFI; its pin (`83cd2b3`, PR #646) carries this, owed until the apps call it."
+      "note": "Python's import refuses the same (see bmlib#509). The apps' retraction plans consume bmlib's Rust through the FFI; its pin (`83cd2b3`, PR #646) carries this, owed until the apps call it. Swift: ported in PR 4a (iOS/macOS retraction checking), which calls bmlib's Rust through the FFI."
     },
     {
       "id": "bmlib#523",
       "title": "A retraction notice's own PMID is stored without leading zeros, as the paper's is",
       "python": "ported",
-      "swift": "owed",
+      "swift": "ported",
       "android": "owed",
       "issue": null,
-      "note": "The desktop takes it by import (bmlib pin `8845ba8`). The apps' retraction plans consume bmlib's Rust through the FFI; its pin (`83cd2b3`, PR #646) carries this, owed until the apps call it."
+      "note": "The desktop takes it by import (bmlib pin `8845ba8`). The apps' retraction plans consume bmlib's Rust through the FFI; its pin (`83cd2b3`, PR #646) carries this, owed until the apps call it. Swift: ported in PR 4a (iOS/macOS retraction checking), which calls bmlib's Rust through the FFI."
     },
     {
       "id": "bmlib#530",
@@ -2031,19 +2031,19 @@
       "id": "bmlib:unreleased-retraction-short-row",
       "title": "A download cut part-way through a row is refused, not stored",
       "python": "ported",
-      "swift": "owed",
+      "swift": "ported",
       "android": "owed",
       "issue": null,
-      "note": "The desktop takes it by import (bmlib pin `8845ba8`); `tests/test_retraction_export.py` refuses a cut row and keeps the old copy. The apps' retraction plans consume bmlib's Rust through the FFI; its pin (`83cd2b3`, PR #646) carries this, owed until the apps call it."
+      "note": "The desktop takes it by import (bmlib pin `8845ba8`); `tests/test_retraction_export.py` refuses a cut row and keeps the old copy. The apps' retraction plans consume bmlib's Rust through the FFI; its pin (`83cd2b3`, PR #646) carries this, owed until the apps call it. Swift: ported in PR 4a (iOS/macOS retraction checking), which calls bmlib's Rust through the FFI."
     },
     {
       "id": "bmlib:unreleased-retraction-padded-zero-pmid",
       "title": "A padded zero PubMed ID is the export's \"absent\" sentinel, as `\"0\"` is",
       "python": "ported",
-      "swift": "owed",
+      "swift": "ported",
       "android": "owed",
       "issue": null,
-      "note": "The desktop takes it by import (bmlib pin `8845ba8`); its rebuilt copy holds ~4% fewer notices (the October export's 2,913 sentinel-only rows), inside its 5% shrink guard. The apps' retraction plans consume bmlib's Rust through the FFI; its pin (`83cd2b3`, PR #646) carries this, owed until the apps call it."
+      "note": "The desktop takes it by import (bmlib pin `8845ba8`); its rebuilt copy holds ~4% fewer notices (the October export's 2,913 sentinel-only rows), inside its 5% shrink guard. The apps' retraction plans consume bmlib's Rust through the FFI; its pin (`83cd2b3`, PR #646) carries this, owed until the apps call it. Swift: ported in PR 4a (iOS/macOS retraction checking), which calls bmlib's Rust through the FFI."
     }
   ],
   "to_bmlib": [
