@@ -109,14 +109,7 @@ struct FactCheckView: View {
                         if let notice = workflow.retractionNotice {
                             IncompleteSearchNotice(text: notice)
                         }
-                        if let line = workflow.retractionSavedWorkLine {
-                            RetractionSavedWorkSection(
-                                line: line,
-                                warning: workflow.retractionSavedWorkWarning,
-                                isChecking: workflow.isCheckingRetractionsAgain,
-                                onCheckAgain: { Task { await workflow.checkRetractionsAgain() } }
-                            )
-                        }
+                        RetractionSavedWorkSection(workflow: workflow, session: workflow.session)
                         if let notice = workflow.fullTextNotice {
                             IncompleteSearchNotice(text: notice)
                         }

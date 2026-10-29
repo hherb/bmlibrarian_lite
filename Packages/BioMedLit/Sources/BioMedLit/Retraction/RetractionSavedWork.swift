@@ -44,15 +44,21 @@ public enum RetractionSavedWork {
         run: [String: PaperRetractionCheck], stored: [String: PaperRetractionCheck]
     ) -> [String: PaperRetractionCheck] {
         guard !run.isEmpty else { return stored }
-        return run.merging(stored.filter { run[$0.key] != nil }) { old, new in
-            new.checkedAt > old.checkedAt && !(new.isUnchecked && !old.isUnchecked) ? new : old
-        }
+        return run.merging(stored.filter { run[$0.key] != nil }) { old, new in rechecked(old, stored: new) }
+    }
+
+    /// One paper's check since its run: `stored` when it is newer than `run`
+    /// and is not an unchecked one over a decided one, else `run`.
+    public static func rechecked(_ run: PaperRetractionCheck, stored: PaperRetractionCheck) -> PaperRetractionCheck {
+        stored.checkedAt > run.checkedAt && !(stored.isUnchecked && !run.isUnchecked) ? stored : run
     }
 
     /// The cited papers whose status changed for the worse since the run:
     /// the latest check is no older than the run's, says retracted or concern,
-    /// and the run saw another status. A paper the run never checked warns
-    /// whenever its latest check does.
+    /// and the run saw another status. A paper the run never checked, or
+    /// checked without an answer, warns whenever its latest check does: an
+    /// unchecked check's time is no check time (as the desktop's failed row
+    /// has none), so an older retraction known elsewhere is still news.
     ///
     /// - Parameters:
     ///   - run: The checks the run used, by document id.
@@ -64,7 +70,7 @@ public enum RetractionSavedWork {
     ) -> [String] {
         cited.filter { id in
             guard let check = latest[id], check.isRetracted || check.isConcern else { return false }
-            guard let seen = run[id] else { return true }
+            guard let seen = run[id], !seen.isUnchecked else { return true }
             return check.checkedAt >= seen.checkedAt && check.status != seen.status
         }
     }

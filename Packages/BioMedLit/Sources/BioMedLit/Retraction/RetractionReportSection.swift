@@ -23,7 +23,8 @@ import Foundation
 public struct RetractionReportSection: Sendable {
     /// The papers left out as retracted, in the order given.
     public let leftOut: [(title: String, check: PaperRetractionCheck)]
-    /// ``RetractionText/methodsLine(checkedAt:notChecked:heldPapers:)`` for the run.
+    /// ``RetractionText/savedWorkLine(_:)`` for the run: the report's methods
+    /// line and a reopened session's line are the same sentence.
     public let methodsLine: String
     /// The report's opening notice (``RetractionText/reportNotice(_:)``), or
     /// `nil` when nothing was left out and every paper was checked.
@@ -42,9 +43,11 @@ public struct RetractionReportSection: Sendable {
         ).map(RetractionText.reportNotice)
     }
 
-    /// `text` with the notice in front (the desktop's `with_retraction_notice`).
+    /// `text` with the notice in front (the desktop's `with_retraction_notice`);
+    /// unchanged when it already opens with one.
     func withNotice(_ text: String) -> String {
-        notice.map { "\($0)\n\n\(text)" } ?? text
+        guard let notice, !text.hasPrefix(RetractionText.noticeOpening) else { return text }
+        return "\(notice)\n\n\(text)"
     }
 
     /// The left-out section, or `""` when nothing was left out.

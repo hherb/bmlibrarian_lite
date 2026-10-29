@@ -23,7 +23,10 @@ import BmlibCore
 /// ``PaperRetractionCheck/crossrefFailure`` already holds).
 ///
 /// The badge texts live in the app's `RetractionBadge`; the export refresh
-/// lines have no counterpart, since the app has no `bmll`.
+/// lines have no counterpart, since the app has no `bmll`. Not ported:
+/// `NO_AUDIT_RECORD_LINE`, `without_retraction_notice` and the desktop's
+/// pass dialog texts (`retraction_check_line`, `pass_retraction_note`,
+/// `with_pass_retraction_clause`, `PASS_LEFT_OUT_SENTENCE`).
 public enum RetractionText {
     /// Heading of the report's section for the papers a run left out.
     public static let leftOutHeading = "## Left out as retracted"
@@ -156,7 +159,9 @@ public enum RetractionText {
 
     /// The report's opening notice (the desktop's `format_retraction_notice`):
     /// "> **Retraction check:** <clause>.".
-    public static func reportNotice(_ clause: String) -> String { "> **Retraction check:** \(clause)." }
+    public static func reportNotice(_ clause: String) -> String { "\(noticeOpening)\(clause)." }
+    /// How the report's notice opens (the desktop's `_NOTICE_OPENING`).
+    static let noticeOpening = "> **Retraction check:** "
 
     /// A reopened session's line (the desktop's `saved_work_line`): when its
     /// decided papers were checked (the oldest), and how many were not;
@@ -175,6 +180,8 @@ public enum RetractionText {
     public static let checkAgainFailed = "; it could not be checked again, so this is still the run's record"
     /// Added to the saved-work line when the stored checks could not be read.
     public static let storedChecksUnread = "; later checks could not be read"
+    /// Added to the saved-work line when *Check again*'s answers could not be saved.
+    public static let checkAgainNotSaved = "; the new status could not be saved with this run"
 
     /// *Check again*'s note for decided papers no source answered this time,
     /// whose record stays; `""` for none.

@@ -118,20 +118,27 @@ BioMedLit; the app never imports `BmlibCore`.
   `retraction_checks` row is (#651). What the run used is
   `FactCheckSession.retractionSnapshotJSON`. They can differ: a stored clear
   stands in storage against an outage, but the run is shown unchecked.
-- Views badge (`RetractionBadge`, `RetractionBanner`) and count from the run's
-  snapshot first, then the stored check (`FactCheckSession.shownRetractionChecks`,
-  `Document.shownRetractionCheck`).
+- Views list and count from the run's snapshot first, then the stored check
+  (`FactCheckSession.shownRetractionChecks`, `Document.shownRetractionCheck`).
+  The badge and banner (`RetractionBadge`, `RetractionBanner`) show the
+  stored check where *Check again* has replaced the run's
+  (`Document.badgedRetractionCheck`), as the desktop's card badges the latest;
+  another session's newer check for the same paper is not badged (#653).
 - A restored session (`FactCheckWorkflow.restoreForViewing`) shows
   `retractionSavedWorkLine` and, for cited papers whose latest stored check
   (this session's, or another document's with the same `RetractionPaper.paperKey`)
   is now retracted or concern where the run's was not,
   `retractionSavedWorkWarning`; no request is made. **Check again**
   (`checkRetractionsAgain`) stores each answer by
-  `Document.takeRetractionCheck` and never rewrites the snapshot or the
-  report: the snapshot stays what the run saw (the desktop's `run_status`).
-  The rules are BioMedLit's `RetractionSavedWork`. A left-out row says
+  `Document.takeRetractionCheck`, which keeps a decided check over an outage,
+  and never rewrites the snapshot or the report: the snapshot stays what the
+  run saw (the desktop's `run_status`). A run row that is unchecked (a failed
+  check carries its attempt's time) is no check time, so any later warning is
+  news. The rules are BioMedLit's `RetractionSavedWork`. A left-out row says
   `RetractionText.excludedLine`; the report opens with
-  `RetractionReportSection.notice`.
+  `RetractionReportSection.notice`. The line and warning show above the
+  report too (`RetractionSavedWorkSection`, only for the workflow's own
+  session), never in its export.
 - The export downloads over Wi-Fi only (no cellular, no Low Data Mode). It is
   refreshed at launch and, in the background, by a run that finds no usable
   copy; a run never waits for it. `RetractionIndexStore.refreshIfStale` is

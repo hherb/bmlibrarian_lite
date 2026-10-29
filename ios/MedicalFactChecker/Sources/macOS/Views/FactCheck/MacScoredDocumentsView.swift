@@ -264,7 +264,7 @@ struct MacDocumentCard: View {
                     // Search provider badge
                     MacProviderBadge(provider: documentProvider)
 
-                    RetractionBadge(check: retractionCheck)
+                    RetractionBadge(check: document.badgedRetractionCheck(shown: retractionCheck))
 
                     // PMC full text availability indicator (only if not already fetched)
                     if document.hasFullTextInPMC && !document.hasFullText && !document.fullTextUnavailable {

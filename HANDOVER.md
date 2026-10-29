@@ -8,19 +8,24 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Retraction checking, iOS/macOS: done** (PR #650 = PR 4a, Tasks 1–7; PR 4b,
-Tasks 8–9, on `feat/retraction-saved-work-apple`; plan
+**Retraction checking, iOS/macOS: done** (PR #650 = PR 4a, Tasks 1–7; PR #652 = PR 4b,
+Tasks 8–9; plan
 `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`, Apple
 section of `doc/developer/retraction_checking.md`; ledger row
 `bmlib:0.7.0-retraction-watch` now `swift: ported`). The app screens in
 `FactCheckWorkflow` before both scoring paths; **a run leaves out by the check
-it used, and every view reads the session's snapshot before the stored check**.
+it used, and lists and counts read the session's snapshot before the stored
+check**; badges and banners show the stored check where *Check again* replaced
+the run's (`Document.badgedRetractionCheck`, as the desktop's card).
 **The snapshot is the run's record and is never rewritten**: *Check again*
 (`checkRetractionsAgain`) stores answers in each `Document` only, so the
 snapshot plays the desktop's `run_status`. A restored session shows
 `retractionSavedWorkLine` and the warning for cited papers, read from the
 store with no request (other sessions' documents by `RetractionPaper.paperKey`);
-rules in BioMedLit `RetractionSavedWork`. The report opens with
+rules in BioMedLit `RetractionSavedWork` (an unchecked run row is no check
+time, so an older retraction found elsewhere still warns); the line and
+warning also sit above the Report tab (`RetractionSavedWorkSection`, the
+workflow's own session only). The report opens with
 `RetractionReportSection.notice` (causes only when the writing run screened
 every snapshot paper); left-out rows show `RetractionText.excludedLine`; both
 list headers count every row listed. The dead `ResumedSessionBanner`s are gone.
@@ -29,7 +34,9 @@ merge duplicates' publication types as Swift and Python do). Open: #651
 (Apple checks stored per document, not per paper), #647 (snapshot decode, a
 refused export re-downloaded per run), #648 (left: a session scored before the
 check, after Find More Evidence, has its methods line dated while its earlier
-papers were never checked), #649 (test gaps).
+papers were never checked), #649 (test gaps), #653 (badge another session's
+newer check; label rule; restore cost), #654 (Check again: causes, stop,
+unsaved note on reopen).
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
 error follows a cancel). Open, lodged by recent rounds: #641 (JATS whitespace,
@@ -146,6 +153,9 @@ have landed):
   `tests/browser_rescue_harness.py`'s subprocess. Detection
   (`challenge_detection.json`): header names only; change a needle only
   against live pages.
+- **Settings dialog lifecycle** (PR #518): a released dialog's handlers do
+  nothing (**a queued signal still arrives after a disconnect**); GC on the
+  main thread only (#517). **PySide6 capped `<6.12`** (#516).
 - **Stage C2: Elsevier's article API** (all three; PR #507; contract
   `elsevier_article.json`). **A first-page PDF is never served**; a 403
   `AUTHENTICATION_ERROR` is "not available from this network", a 401 refuses

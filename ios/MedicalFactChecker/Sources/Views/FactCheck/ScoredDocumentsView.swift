@@ -309,7 +309,7 @@ struct DocumentScoreRow: View {
                                 isPreprint: document.isPreprint
                             )
 
-                            RetractionBadge(check: retractionCheck)
+                            RetractionBadge(check: document.badgedRetractionCheck(shown: retractionCheck))
                         }
 
                         if let excluded = document.retractionExcludedLine(shown: retractionCheck) {

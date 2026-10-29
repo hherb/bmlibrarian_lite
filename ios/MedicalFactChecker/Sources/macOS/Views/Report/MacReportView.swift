@@ -67,6 +67,7 @@ struct MacReportView: View {
                     if let notice = report.incompleteSearchNotice {
                         MacIncompleteSearchNotice(text: notice)
                     }
+                    RetractionSavedWorkSection(workflow: workflow, session: report.session)
 
                     // Verdict badge
                     HStack {

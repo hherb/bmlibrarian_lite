@@ -120,15 +120,20 @@ struct RetractionBanner: View {
 /// when a paper its report cites is now retracted or under concern (the
 /// desktop's report-tab line, button and warning).
 struct RetractionSavedWorkSection: View {
-    /// ``FactCheckWorkflow/retractionSavedWorkLine``.
-    let line: String
-    /// ``FactCheckWorkflow/retractionSavedWorkWarning``.
-    let warning: String?
-    /// Whether *Check again* is running.
-    let isChecking: Bool
-    let onCheckAgain: () -> Void
+    let workflow: FactCheckWorkflow?
+    /// The session whose report is shown: a report from another session than
+    /// the workflow's gets no section.
+    let session: FactCheckSession?
 
     var body: some View {
+        if let workflow, let line = workflow.retractionSavedWorkLine, let session,
+           workflow.session?.id == session.id {
+            content(workflow, line: line)
+        }
+    }
+
+    /// The line with *Check again*, and the warning under it when there is one.
+    private func content(_ workflow: FactCheckWorkflow, line: String) -> some View {
         VStack(alignment: .leading, spacing: RetractionBadgeConstants.bannerSpacing) {
             HStack(spacing: RetractionBadgeConstants.bannerSpacing) {
                 Text(line)
@@ -136,12 +141,12 @@ struct RetractionSavedWorkSection: View {
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                Button(RetractionText.checkAgainLabel, action: onCheckAgain)
+                Button(RetractionText.checkAgainLabel) { Task { await workflow.checkRetractionsAgain() } }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .disabled(isChecking)
+                    .disabled(workflow.isCheckingRetractionsAgain)
             }
-            if let warning {
+            if let warning = workflow.retractionSavedWorkWarning {
                 Text(warning)
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)

@@ -117,4 +117,11 @@ final class ReportFormatterRetractionTests: XCTestCase {
         XCTAssertGreaterThan(retraction, incomplete.startIndex, "the search's notice comes first")
         XCTAssertLessThan(retraction, incomplete.range(of: "The analysis.")!.lowerBound)
     }
+
+    func testNoticeIsIdempotent() {
+        let mixed = section([("A", check("retracted", deciding: notice))])
+        let once = mixed.withNotice("The analysis.")
+        XCTAssertNotEqual(once, "The analysis.", "control: the notice is added")
+        XCTAssertEqual(mixed.withNotice(once), once)
+    }
 }

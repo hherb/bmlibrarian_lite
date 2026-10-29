@@ -102,7 +102,8 @@ final class RetractionSavedWorkTests: XCTestCase {
     }
 
     /// A document in another session holding `check` for `doi`.
-    private func storeElsewhere(_ doi: String, _ check: PaperRetractionCheck) {
+    @discardableResult
+    private func storeElsewhere(_ doi: String, _ check: PaperRetractionCheck) -> Document {
         let other = FactCheckSession(claim: "Another claim")
         context.insert(other)
         let document = Document(pmid: "3000000", title: "Same paper", abstract: "An abstract.")
@@ -111,6 +112,7 @@ final class RetractionSavedWorkTests: XCTestCase {
         document.session = other
         document.retractionCheck = check
         try? context.save()
+        return document
     }
 
     /// Counts the papers asked about, answering each from `answers` by DOI.
@@ -177,6 +179,35 @@ final class RetractionSavedWorkTests: XCTestCase {
                        "another session's check is a warning, not this run's record")
     }
 
+    /// The run's own check failed, so it knew nothing: a retraction another
+    /// session found before it is still news.
+    func testARunWhoseCheckFailedWarnsOfAnEarlierRetraction() {
+        let (session, _) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("unchecked")])
+        storeElsewhere("10.1000/a", Self.check("retracted", at: Self.runDay.addingTimeInterval(-Self.day)))
+
+        let workflow = restore(session)
+
+        XCTAssertTrue(workflow.retractionSavedWorkWarning?.contains("• Study 0: Retracted") == true)
+    }
+
+    /// A stored check this build cannot read may hold a retraction: the line
+    /// says later checks could not be read, for this session's and another's.
+    func testAnUnreadableStoredCheckSaysSo() {
+        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        XCTAssertEqual(restore(session).retractionSavedWorkLine, "Retraction status checked 2026-10-18", "control")
+
+        documents[0].retractionCheckJSON = "{\"status\": 7}"
+        XCTAssertEqual(
+            restore(session).retractionSavedWorkLine,
+            "Retraction status checked 2026-10-18; later checks could not be read")
+
+        documents[0].retractionCheck = Self.check("clear")
+        storeElsewhere("10.1000/a", Self.check("clear")).retractionCheckJSON = "{\"status\": 7}"
+        XCTAssertEqual(
+            restore(session).retractionSavedWorkLine,
+            "Retraction status checked 2026-10-18; later checks could not be read")
+    }
+
     func testUncitedPaperChangeWarnsNothing() {
         let (session, _) = makeSession(["10.1000/a", "10.1000/b"], cited: [0], run: [
             0: Self.check("clear"), 1: Self.check("clear"),
@@ -208,6 +239,51 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertTrue(workflow.retractionSavedWorkWarning?.contains("• Study 0: Retracted") == true)
         XCTAssertFalse(workflow.retractionSavedWorkWarning?.contains("Study 1") == true, "control: still clear")
         XCTAssertFalse(workflow.isCheckingRetractionsAgain)
+        let shown = session.shownRetractionChecks()[documents[0].id]
+        XCTAssertEqual(shown?.isClear, true, "lists and counts keep the run's check")
+        XCTAssertEqual(documents[0].badgedRetractionCheck(shown: shown)?.isRetracted, true, "the badge shows the new one")
+        XCTAssertEqual(documents[0].badgedRetractionCheck(shown: documents[0].shownRetractionCheck)?.isRetracted, true,
+                       "and so does the full text's banner")
+    }
+
+    /// Every lookup down after an earlier *Check again* found a retraction:
+    /// the retraction stands and still warns.
+    func testAnOutageDuringASecondCheckAgainKeepsTheWarning() async {
+        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        let workflow = restore(session, answers: [
+            "10.1000/a": Self.check("retracted", at: Self.runDay.addingTimeInterval(Self.day)),
+        ])
+        await workflow.checkRetractionsAgain()
+        let outage = Self.check("unchecked", at: Self.runDay.addingTimeInterval(2 * Self.day))
+        workflow.useRetractionCheck { papers in Dictionary(papers.map { ($0, outage) }) { first, _ in first } }
+
+        await workflow.checkRetractionsAgain()
+
+        XCTAssertEqual(documents[0].retractionCheck?.isRetracted, true, "an outage is not knowledge")
+        XCTAssertTrue(workflow.retractionSavedWorkWarning?.contains("• Study 0: Retracted") == true)
+        XCTAssertEqual(
+            workflow.retractionSavedWorkLine,
+            "Retraction status checked 2026-10-19; 1 paper could not be checked again")
+    }
+
+    /// One paper answered, two decided ones not, and one the run could not
+    /// check either: only the decided ones are "not checked again", and the
+    /// date is the oldest decided check's.
+    func testAPartialOutageCountsTheDecidedPapersItMissed() async {
+        let (session, _) = makeSession(["10.1000/a", "10.1000/b", "10.1000/c", "10.1000/d"], cited: [0], run: [
+            0: Self.check("clear"), 1: Self.check("clear"), 2: Self.check("clear"), 3: Self.check("unchecked"),
+        ])
+        let later = Self.runDay.addingTimeInterval(Self.day)
+        let workflow = restore(session, answers: [
+            "10.1000/a": Self.check("clear", at: later), "10.1000/b": Self.check("unchecked", at: later),
+            "10.1000/c": Self.check("unchecked", at: later), "10.1000/d": Self.check("unchecked", at: later),
+        ])
+
+        await workflow.checkRetractionsAgain()
+
+        XCTAssertEqual(
+            workflow.retractionSavedWorkLine,
+            "Retraction status checked 2026-10-18; 1 paper could not be checked; 2 papers could not be checked again")
     }
 
     func testCheckAgainFailureKeepsTheRunsRecord() async {
@@ -279,5 +355,23 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertEqual(
             documents[0].retractionExcludedLine(shown: shown), "\(run). Checked again: No retraction found")
         XCTAssertNil(documents[0].retractionExcludedLine(shown: Self.check("clear")), "control: not left out")
+    }
+
+    /// *Check again* in an outage leaves a left-out paper's line as the run's record.
+    func testCheckAgainOutageKeepsALeftOutPapersLine() async {
+        let (session, documents) = makeSession(["10.1000/a"], cited: [], run: [0: Self.check("retracted")])
+        documents[0].relevanceScore = nil
+        documents[0].scoredAt = nil
+        let workflow = restore(session, answers: [
+            "10.1000/a": Self.check("unchecked", at: Self.runDay.addingTimeInterval(Self.day)),
+        ])
+
+        await workflow.checkRetractionsAgain()
+
+        let shown = session.shownRetractionChecks()[documents[0].id]
+        XCTAssertEqual(
+            documents[0].retractionExcludedLine(shown: shown),
+            "Excluded: retracted. Retracted on 2026-10-19 (notice 10.1000/notice)")
+        XCTAssertEqual(documents[0].badgedRetractionCheck(shown: shown)?.isRetracted, true)
     }
 }

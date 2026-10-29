@@ -63,4 +63,16 @@ final class RetractionSavedWorkTests: XCTestCase {
             RetractionSavedWork.changedSinceRun(run: runChecks, latest: latest, cited: ["d", "a", "b", "c"]),
             ["d", "a"])
     }
+
+    /// A run whose check got no answer (a failed check carries its attempt's
+    /// time) knew nothing: a retraction known before it is still news.
+    func testAnUncheckedRunRowIsNoCheckTime() {
+        let older = run.addingTimeInterval(-86_400)
+        XCTAssertEqual(
+            RetractionSavedWork.changedSinceRun(
+                run: ["a": check("unchecked", at: run), "b": check("clear", at: run)],
+                latest: ["a": check("retracted", at: older), "b": check("retracted", at: older)],
+                cited: ["a", "b"]),
+            ["a"], "control: a decided run row older than the warning still anchors it")
+    }
 }

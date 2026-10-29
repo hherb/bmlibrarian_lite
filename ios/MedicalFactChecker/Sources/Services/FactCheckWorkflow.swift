@@ -129,7 +129,7 @@ final class FactCheckWorkflow {
     private(set) var retractionNotice: String?
 
     /// A restored session's retraction line (the desktop's `saved_work_line`):
-    /// when its papers were last checked, and how many could not be. Set by
+    /// the date of its oldest decided check, and how many could not be checked. Set by
     /// ``restoreForViewing(_:)`` and ``checkRetractionsAgain()``; `nil` for a
     /// run's own session.
     private(set) var retractionSavedWorkLine: String?
@@ -506,7 +506,8 @@ final class FactCheckWorkflow {
 
     /// Checks every document of the restored session for retraction again
     /// (the desktop's *Check again*), storing each answer by
-    /// ``Document/takeRetractionCheck(_:)``. The run's snapshot, and so the
+    /// ``Document/takeRetractionCheck(_:)``, which keeps a decided check over
+    /// an outage. The run's snapshot, and so the
     /// report, is never rewritten: ``retractionSavedWorkLine`` and
     /// ``retractionSavedWorkWarning`` say what changed, and the warning
     /// suggests re-running the question. A check that fails stores nothing
@@ -524,6 +525,8 @@ final class FactCheckWorkflow {
     /// The work of ``checkRetractionsAgain()``, run as ``workflowTask`` so it never overlaps a run.
     private func checkRetractionsAgainWork() async {
         guard let session else { return }
+        // as every body does: a flag an earlier stop left must not discard this check's answers
+        isCancelling = false
         retractionSavedWorkLine = RetractionText.checkingAgainLine
 
         let documents = session.documents ?? []
@@ -532,7 +535,8 @@ final class FactCheckWorkflow {
         do {
             checks = try await (retractionCheck ?? productionRetractionCheck())(papers)
         } catch {
-            if !(error is CancellationError) && !stopRequested {
+            // a cancellation nobody asked for is a failure too (see stopRequested)
+            if !stopRequested {
                 logger.warning("Retraction check again failed: \(error.localizedDescription)")
             }
             showSavedRetraction(note: RetractionText.checkAgainFailed)
@@ -543,7 +547,15 @@ final class FactCheckWorkflow {
         for (document, paper) in zip(documents, papers) {
             if let check = checks[paper] { _ = document.takeRetractionCheck(check) }
         }
-        try? modelContext.save()
+        var unsaved = ""
+        do {
+            try modelContext.save()
+        } catch {
+            // shortcut: said on this view only, not on a later reopen as the desktop's
+            // _unsaved_rechecks does; a later save elsewhere may still keep the answers
+            logger.error("Retraction check again's answers could not be saved: \(error.localizedDescription)")
+            unsaved = RetractionText.checkAgainNotSaved
+        }
 
         // a decided check kept over an unchecked answer: no source could be reached for it
         let rows = RetractionSavedWork.recheckedChecks(
@@ -551,7 +563,7 @@ final class FactCheckWorkflow {
         let missed = zip(documents, papers).filter { document, paper in
             checks[paper]?.isUnchecked == true && rows[document.id].map { !$0.isUnchecked } == true
         }.count
-        showSavedRetraction(note: RetractionText.notCheckedAgainClause(missed))
+        showSavedRetraction(note: RetractionText.notCheckedAgainClause(missed) + unsaved)
     }
 
     /// Each document's stored retraction check, by `Document.id`.
@@ -573,14 +585,20 @@ final class FactCheckWorkflow {
         var note = note
         let cited = documents.filter { !($0.citations ?? []).isEmpty }
         var latest: [String: PaperRetractionCheck] = [:]
+        // unparsed is not absent: a row this build cannot read may hold a retraction
+        var unread = documents.contains { $0.retractionCheckJSON != nil && $0.retractionCheck == nil }
+        if unread { logger.warning("A stored retraction check of this session could not be read") }
         do {
-            latest = try latestRetractionChecks(for: cited)
+            let found = try latestRetractionChecks(for: cited)
+            latest = found.checks
+            unread = unread || found.unread
         } catch {
             // not knowing is not "no change": the session's own checks still warn, and the line says so
             logger.warning("Could not read the stored retraction checks: \(error.localizedDescription)")
             latest = Self.storedRetractionChecks(cited)
-            note += RetractionText.storedChecksUnread
+            unread = true
         }
+        if unread { note += RetractionText.storedChecksUnread }
         retractionSavedWorkLine = RetractionText.savedWorkLine(Array(rows.values)) + note
         let changed = RetractionSavedWork.changedSinceRun(run: run, latest: latest, cited: cited.map(\.id))
         let byID = Dictionary(cited.map { ($0.id, $0) }) { first, _ in first }
@@ -595,17 +613,25 @@ final class FactCheckWorkflow {
     /// in any session, and its own. No request is made.
     ///
     /// - Parameter documents: The documents to look up.
-    /// - Returns: Checks by `Document.id`; a document with none has no entry.
+    /// - Returns: Checks by `Document.id` (a document with none has no
+    ///   entry), and whether a stored check of the same papers could not be read.
     /// - Throws: When the store cannot be read.
-    private func latestRetractionChecks(for documents: [Document]) throws -> [String: PaperRetractionCheck] {
+    private func latestRetractionChecks(
+        for documents: [Document]
+    ) throws -> (checks: [String: PaperRetractionCheck], unread: Bool) {
         let keys = Set(documents.compactMap(\.retractionPaper.paperKey))
         var byKey: [String: [PaperRetractionCheck]] = [:]
+        var unread = false
         if !keys.isEmpty {
             let checked = try modelContext.fetch(FetchDescriptor<Document>(
                 predicate: #Predicate { $0.retractionCheckJSON != nil }))
             for document in checked {
-                guard let key = document.retractionPaper.paperKey, keys.contains(key),
-                      let check = document.retractionCheck else { continue }
+                guard let key = document.retractionPaper.paperKey, keys.contains(key) else { continue }
+                guard let check = document.retractionCheck else {
+                    logger.warning("A stored retraction check for a cited paper could not be read")
+                    unread = true
+                    continue
+                }
                 byKey[key, default: []].append(check)
             }
         }
@@ -614,7 +640,7 @@ final class FactCheckWorkflow {
             let shared = document.retractionPaper.paperKey.flatMap { byKey[$0] } ?? []
             out[document.id] = RetractionSavedWork.latest(shared + [document.retractionCheck].compactMap { $0 })
         }
-        return out
+        return (out, unread)
     }
 
     /// Refreshes pagination state by re-executing the search from the beginning.
@@ -3789,9 +3815,10 @@ final class FactCheckWorkflow {
     }
 
     /// Why this run's kept papers are unchecked, for the report's notice,
-    /// when this run screened every paper in `snapshot`; otherwise empty, and the notice gives the count alone (as the
-    /// desktop's restored snapshot does), since a cause this run did not see
-    /// would go unnamed.
+    /// when this run, in this generation, screened exactly the papers in
+    /// `snapshot`; otherwise empty, and the notice gives the count alone (as
+    /// the desktop's restored snapshot does), since a cause this run did not
+    /// see would go unnamed.
     private func retractionRunCauses(covering snapshot: [String: PaperRetractionCheck]) -> [String] {
         guard retractionRun.generation == runGeneration,
               Set(retractionRun.used.map(\.id)) == Set(snapshot.keys) else { return [] }
