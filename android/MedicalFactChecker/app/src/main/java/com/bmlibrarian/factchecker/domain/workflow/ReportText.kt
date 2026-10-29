@@ -20,6 +20,7 @@ package com.bmlibrarian.factchecker.domain.workflow
 
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
 import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
+import com.bmlibrarian.factchecker.util.retraction.RetractionReportSection
 
 /**
  * Assembles the stored report text around what the LLM wrote.
@@ -27,6 +28,8 @@ import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
  * What the search failed to retrieve is added here, by code, never left to the
  * LLM (#252): an incomplete search's report opens with the incomplete-search
  * notice and records the gap in a Methodology section before its references.
+ * So is what the retraction check left out and could not check: its notice,
+ * its Methodology line and the "Left out as retracted" section.
  */
 object ReportText {
 
@@ -36,6 +39,9 @@ object ReportText {
     /** Heads the references the workflow lists after the analysis. */
     private const val REFERENCES_HEADING = "## References"
 
+    /** Heads the Methodology section when the search's completeness adds nothing to it. */
+    private const val METHODOLOGY_HEADING = "## Methodology"
+
     /**
      * Build a report's full text.
      *
@@ -44,22 +50,27 @@ object ReportText {
      * @param shortfalls What the session's searches failed to retrieve
      * @param transparency The transparency sections, built by code from the
      *   stored analyses (`TransparencyReportMarkdown`); empty when none ran
-     * @return The notice (if any), the analysis, the transparency sections (if
-     *   any), the Methodology section (if any) and the references
+     * @param retraction What the run's retraction check left out and could not
+     *   check; null for a session never checked
+     * @return The search notice (if any), the retraction notice (if any), the
+     *   analysis, the transparency sections (if any), the Methodology section
+     *   (if any), the "Left out as retracted" section (if any) and the references
      */
     fun fullReport(
         analysis: String,
         references: String,
         shortfalls: List<RetrievalShortfall>,
-        transparency: String = ""
+        transparency: String = "",
+        retraction: RetractionReportSection? = null
     ): String {
         val blocks = listOf(
             analysis,
             transparency,
-            SearchFailureReporting.searchCompletenessMethodology(shortfalls),
+            methodology(SearchFailureReporting.searchCompletenessMethodology(shortfalls), retraction),
+            retraction?.leftOutMarkdown.orEmpty(),
             "$REFERENCES_HEADING$BLOCK_SEPARATOR$references"
         ).filter { it.isNotEmpty() }
-        return SearchFailureReporting.withSearchShortfallNotice(blocks.joinToString(BLOCK_SEPARATOR), shortfalls)
+        return withNotices(blocks.joinToString(BLOCK_SEPARATOR), shortfalls, retraction)
     }
 
     /**
@@ -67,8 +78,26 @@ object ReportText {
      *
      * @param text The message
      * @param shortfalls What the session's searches failed to retrieve
-     * @return The message, opening with the notice when the search was incomplete
+     * @param retraction As for [fullReport]
+     * @return The message, opening with the notice when the search was
+     *   incomplete and the retraction notice when there is one, then the
+     *   retraction Methodology line and the "Left out as retracted" section
      */
-    fun standInReport(text: String, shortfalls: List<RetrievalShortfall>): String =
-        SearchFailureReporting.withSearchShortfallNotice(text, shortfalls)
+    fun standInReport(text: String, shortfalls: List<RetrievalShortfall>, retraction: RetractionReportSection? = null): String {
+        val blocks = listOf(text, methodology("", retraction), retraction?.leftOutMarkdown.orEmpty()).filter { it.isNotEmpty() }
+        return withNotices(blocks.joinToString(BLOCK_SEPARATOR), shortfalls, retraction)
+    }
+
+    /** The search notice before the retraction notice before [body]. */
+    private fun withNotices(body: String, shortfalls: List<RetrievalShortfall>, retraction: RetractionReportSection?): String =
+        SearchFailureReporting.withSearchShortfallNotice(retraction?.withNotice(body) ?: body, shortfalls)
+
+    /**
+     * The Methodology section: [search]'s, with the retraction line added, or
+     * the heading over the retraction line alone; "" when neither has one.
+     */
+    private fun methodology(search: String, retraction: RetractionReportSection?): String {
+        val line = retraction?.methodsMarkdown ?: return search
+        return (search.ifEmpty { METHODOLOGY_HEADING }) + BLOCK_SEPARATOR + line
+    }
 }

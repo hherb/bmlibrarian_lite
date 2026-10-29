@@ -119,7 +119,8 @@ class FactCheckWorkflowSearchFailureTest {
         embeddingService = mockk(relaxed = true),
         hydeGenerator = mockk(relaxed = true),
         transparencyRunner = mockk(relaxed = true),
-        fullTextService = mockk(relaxed = true)
+        fullTextService = mockk(relaxed = true),
+        retractionService = mockk(relaxed = true)
     )
 
     @Test

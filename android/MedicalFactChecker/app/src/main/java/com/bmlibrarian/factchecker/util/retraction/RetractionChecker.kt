@@ -20,12 +20,6 @@ import org.bmlib.ffi.crossrefRetractionRequests
 import org.bmlib.ffi.retractionStatus
 
 /**
- * The workflow's injection point: a check of each paper, every paper
- * included. Throws only to say the check failed (or was cancelled).
- */
-typealias RetractionCheck = suspend (List<RetractionPaper>) -> Map<RetractionPaper, PaperRetractionCheck>
-
-/**
  * Checks papers against the Retraction Watch index, Crossref and their own
  * PubMed label; bmlib's rule decides (Swift's `RetractionChecker`).
  *
