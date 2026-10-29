@@ -114,7 +114,9 @@ public actor RetractionIndexStore {
     /// index's notices is refused as truncated.
     ///
     /// - Parameter now: The current time.
-    /// - Returns: What happened; on anything but `.refreshed` the file is untouched.
+    /// - Returns: What happened; on anything but `.refreshed` the file is
+    ///   untouched. A cancelled download returns `.failed` too (this never
+    ///   throws): a caller that cancelled must not report it as a shortfall.
     public func refreshIfStale(now: Date) async -> RetractionIndexRefresh {
         if currentIndex(now: now) != nil { return .fresh }
         var components = URLComponents(string: BioMedLitConstants.retractionWatchExportURL)

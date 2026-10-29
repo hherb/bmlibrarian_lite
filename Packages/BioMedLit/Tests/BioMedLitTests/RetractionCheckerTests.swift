@@ -222,4 +222,28 @@ final class RetractionCheckerTests: XCTestCase {
         let alreadyDown = stored(status: "concern", unanswered: ["crossref"])
         XCTAssertFalse(alreadyDown.standsAgainst(stored(status: "unchecked", unanswered: ["crossref"], daysOld: 0)))
     }
+
+    // MARK: - What the reader is shown (retraction_checks.py `old if kept else fresh`)
+
+    func testAStoredClearIsNotShownDuringAnOutage() {
+        let fresh = stored(status: "unchecked", unanswered: ["crossref"], daysOld: 0)
+        let old = stored(status: "clear")
+        XCTAssertTrue(old.standsAgainst(fresh), "the stored row is kept")
+        XCTAssertEqual(old.shown(against: fresh), fresh, "but the reader sees unchecked, never a stale clear")
+    }
+
+    func testAStoredWarningIsShownDuringAnOutage() {
+        let fresh = stored(status: "unchecked", unanswered: ["crossref"], daysOld: 0)
+        for status in ["retracted", "concern"] {
+            let old = stored(status: status)
+            XCTAssertEqual(old.shown(against: fresh), old, status)
+        }
+    }
+
+    func testAFreshCheckThatReplacesTheStoredOneIsShown() {
+        let retraction = stored(status: "retracted", unanswered: ["crossref"], daysOld: 0)
+        XCTAssertEqual(stored(status: "clear").shown(against: retraction), retraction)
+        let answered = stored(status: "clear", daysOld: 0)
+        XCTAssertEqual(stored(status: "retracted").shown(against: answered), answered)
+    }
 }

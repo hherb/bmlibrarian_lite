@@ -47,6 +47,15 @@ public struct StoredRetractionEvidence: Codable, Equatable, Sendable {
     public let recordID: String?
     /// The source's own word for the kind.
     public let rawKind: String?
+
+    public init(source: String, kind: String, date: String?, noticeDOI: String?, recordID: String?, rawKind: String?) {
+        self.source = source
+        self.kind = kind
+        self.date = date
+        self.noticeDOI = noticeDOI
+        self.recordID = recordID
+        self.rawKind = rawKind
+    }
 }
 
 /// One paper's verdict and what it rests on: the desktop's `PaperCheck`, in
@@ -65,6 +74,22 @@ public struct PaperRetractionCheck: Codable, Equatable, Sendable {
     /// Why Crossref did not answer, in the app's own words
     /// (`RequestFailure.describe()`); `nil` when it answered or was not asked.
     public let crossrefFailure: String?
+
+    public init(
+        status: String,
+        deciding: StoredRetractionEvidence?,
+        unanswered: [String],
+        checkedAt: Date,
+        exportDataAsOf: String?,
+        crossrefFailure: String?
+    ) {
+        self.status = status
+        self.deciding = deciding
+        self.unanswered = unanswered
+        self.checkedAt = checkedAt
+        self.exportDataAsOf = exportDataAsOf
+        self.crossrefFailure = crossrefFailure
+    }
 
     /// The status; a name this build cannot read is unchecked, never clear.
     public var retractionStatus: RetractionStatus {
@@ -142,11 +167,32 @@ extension PaperRetractionCheck {
     /// answered and does not warn more. A fresh retraction, or a concern over
     /// a stored clear, is news even while a lookup is down.
     ///
+    /// This decides what is **stored**: when it stands, keep this row, its
+    /// `checkedAt` included, and do not write `fresh`. Otherwise `fresh`
+    /// replaces it. With no stored row, `fresh` is written whatever it says
+    /// (the desktop writes such a check only while the row is still missing,
+    /// so a concurrent writer's answer is never overwritten by a failure).
+    /// What is **shown** is ``shown(against:)``.
+    ///
     /// - Parameter fresh: The check just made.
     public func standsAgainst(_ fresh: PaperRetractionCheck) -> Bool {
         guard !Set(fresh.unanswered).subtracting(unanswered).isEmpty else { return false }
         if fresh.isRetracted { return false }
         return !(fresh.isConcern && isClear)
+    }
+
+    /// The check the reader is shown, this being the stored one and `fresh`
+    /// the one just made (retraction_checks.py: `old if kept else fresh`).
+    ///
+    /// This stored check is shown only when it ``standsAgainst(_:)`` `fresh`
+    /// **and** warns (retracted or concern): an outage never hides a known
+    /// warning. A stored clear that stands is kept in storage but not shown,
+    /// since a clear resting on a lookup that is now down is not knowledge
+    /// today: the reader sees `fresh`, unchecked, never a stale clear.
+    ///
+    /// - Parameter fresh: The check just made.
+    public func shown(against fresh: PaperRetractionCheck) -> PaperRetractionCheck {
+        standsAgainst(fresh) && (isRetracted || isConcern) ? self : fresh
     }
 }
 

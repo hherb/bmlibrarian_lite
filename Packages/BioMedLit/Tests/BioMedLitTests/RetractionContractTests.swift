@@ -78,10 +78,6 @@ final class RetractionContractTests: XCTestCase {
         return match.1
     }
 
-    private func name<T: Equatable>(_ value: T, in table: [(String, T)]) -> String {
-        table.first { $0.1 == value }?.0 ?? "unmapped \(value)"
-    }
-
     private func evidence(_ row: [String: Any]) throws -> RetractionEvidence {
         RetractionEvidence(
             source: try value(row["source"] as? String, in: Self.sources),
@@ -111,8 +107,8 @@ final class RetractionContractTests: XCTestCase {
 
     private func json(_ evidence: RetractionEvidence) -> [String: Any] {
         [
-            "source": name(evidence.source, in: Self.sources),
-            "kind": name(evidence.kind, in: Self.kinds),
+            "source": RetractionNames.name(evidence.source, in: Self.sources),
+            "kind": RetractionNames.name(evidence.kind, in: Self.kinds),
             "date": json(evidence.date),
             "notice_doi": json(evidence.noticeDoi),
             "record_id": json(evidence.recordId),
@@ -140,9 +136,9 @@ final class RetractionContractTests: XCTestCase {
 
     private func json(_ verdict: RetractionVerdict) -> [String: Any] {
         [
-            "status": name(verdict.status, in: Self.statuses),
+            "status": RetractionNames.name(verdict.status, in: Self.statuses),
             "deciding": verdict.deciding.map(json) ?? NSNull(),
-            "unanswered": verdict.unanswered.map { name($0, in: Self.lookups) },
+            "unanswered": verdict.unanswered.map { RetractionNames.name($0, in: Self.lookups) },
         ]
     }
 
