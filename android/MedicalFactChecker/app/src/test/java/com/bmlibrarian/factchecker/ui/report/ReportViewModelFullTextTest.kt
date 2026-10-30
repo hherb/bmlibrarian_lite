@@ -98,7 +98,8 @@ class ReportViewModelFullTextTest {
             documentRepository = documentRepository,
             fullTextService = fullTextService,
             settingsRepository = settingsRepository,
-            pdfExporter = mockk(relaxed = true)
+            pdfExporter = mockk(relaxed = true),
+            retractionService = mockk(relaxed = true)
         )
         viewModel.loadReport("s")
         viewModel.onReferenceClick(ReferenceInfo(documentId = "d", displayText = "[1]"))

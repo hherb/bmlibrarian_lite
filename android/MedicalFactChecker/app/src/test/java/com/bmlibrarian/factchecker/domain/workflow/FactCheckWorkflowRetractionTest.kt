@@ -43,7 +43,11 @@ import io.mockk.every
 import io.mockk.mockk
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -417,9 +421,317 @@ class FactCheckWorkflowRetractionTest {
         coVerify(exactly = 1) { sessionRepository.updateRetractionSnapshot(SESSION_ID, any()) }
     }
 
+    // ==================== Saved work: a restored session, Check again ====================
+
+    /** A completed session whose run checked d1 (cited) and d2 a day ago and found both clear. */
+    private suspend fun restoreCheckedSession() {
+        hold("d1")
+        hold("d2")
+        documents.replaceAll { _, document -> document.copy(relevanceScore = 5) }
+        citations += CitationEntity(documentId = "d1", passage = "A passage.")
+        snapshotJson = RetractionSnapshot.merged(null, mapOf("d1" to CLEAR.copy(checkedAtMs = RUN_MS), "d2" to CLEAR.copy(checkedAtMs = RUN_MS)))
+        session = session.copy(workflowStep = WorkflowStep.COMPLETED)
+        workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
+    }
+
+    @Test
+    fun `a restored session says when its papers were checked, asking nothing`() = runTest {
+        restoreCheckedSession()
+
+        assertEquals("Retraction status checked 2026-10-18", workflow.retractionSavedWorkLine.value)
+        assertNull(workflow.retractionSavedWorkWarning.value)
+        assertTrue(asked.isEmpty())
+    }
+
+    /** #653's scenario: the warning and the badge read the one row another session wrote. */
+    @Test
+    fun `a restored session warns of a cited paper another session found retracted since, and badges it`() = runTest {
+        rows["pmid:1"] = PaperRetractionCheck.encode(RETRACTED.copy(checkedAtMs = RUN_MS + DAY_MS))
+        rows["pmid:2"] = PaperRetractionCheck.encode(RETRACTED.copy(checkedAtMs = RUN_MS + DAY_MS))
+
+        restoreCheckedSession()
+
+        val warning = workflow.retractionSavedWorkWarning.value!!
+        assertTrue(warning, warning.startsWith("Since this report was written, 1 paper this report cites has a retraction warning:\n• Study d1: Retracted"))
+        assertTrue("the badge reads the same row", workflow.retractionCurrentChecks.value.getValue("d1").isRetracted)
+        assertTrue("a paper not cited is badged, never warned of", workflow.retractionCurrentChecks.value.getValue("d2").isRetracted)
+        assertTrue(asked.isEmpty())
+    }
+
+    @Test
+    fun `stored checks that cannot be read say so on a restored session, and the run's checks stand`() = runTest {
+        coEvery { retractionService.storedChecks(any()) } throws IOException("disk")
+
+        restoreCheckedSession()
+
+        assertEquals("Retraction status checked 2026-10-18; later checks could not be read", workflow.retractionSavedWorkLine.value)
+        assertTrue(workflow.retractionCurrentChecks.value.getValue("d1").isClear)
+    }
+
+    @Test
+    fun `Check again stores each paper's answer and warns, never rewriting the run's snapshot`() = runTest {
+        restoreCheckedSession()
+        val runSnapshot = snapshotJson
+        answers["1"] = RETRACTED.copy(checkedAtMs = RUN_MS + DAY_MS)
+        answers["2"] = CLEAR.copy(checkedAtMs = RUN_MS + DAY_MS)
+
+        workflow.checkRetractionsAgain()
+
+        assertEquals(runSnapshot, snapshotJson)
+        assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
+        assertTrue(workflow.retractionSavedWorkWarning.value!!.contains("• Study d1: Retracted"))
+        assertTrue(workflow.retractionCurrentChecks.value.getValue("d1").isRetracted)
+        assertEquals("both rechecked a day later", "Retraction status checked 2026-10-19", workflow.retractionSavedWorkLine.value)
+        assertFalse(workflow.isCheckingRetractionsAgain.value)
+        coVerify(exactly = 0) { sessionRepository.updateRetractionSnapshot(any(), any()) }
+    }
+
+    @Test
+    fun `a failing Check again stores nothing and says the run's record stands`() = runTest {
+        restoreCheckedSession()
+        coEvery { retractionService.check(any()) } throws IOException("offline")
+
+        workflow.checkRetractionsAgain()
+
+        assertEquals(
+            "Retraction status checked 2026-10-18; it could not be checked again, so this is still the run's record",
+            workflow.retractionSavedWorkLine.value
+        )
+        assertTrue(rows.isEmpty())
+    }
+
+    @Test
+    fun `a Check again that cannot read the store throws and never leaves the checking line up`() = runTest {
+        restoreCheckedSession()
+        coEvery { documentRepository.getDocumentsBySessionSync(SESSION_ID) } throws IOException("disk")
+
+        assertThrows(IOException::class.java) { kotlinx.coroutines.runBlocking { workflow.checkRetractionsAgain() } }
+
+        assertEquals(
+            "Retraction status checked 2026-10-18; it could not be checked again, so this is still the run's record",
+            workflow.retractionSavedWorkLine.value
+        )
+        assertFalse(workflow.isCheckingRetractionsAgain.value)
+    }
+
+    /** #654 item 1: no Retraction Watch copy (mobile data, a fresh install) is named, not left a bare count. */
+    @Test
+    fun `Check again names why papers stay unchecked`() = runTest {
+        hold("d1")
+        snapshotJson = RetractionSnapshot.merged(null, mapOf("d1" to NO_EXPORT.copy(checkedAtMs = RUN_MS)))
+        workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
+        answers["1"] = NO_EXPORT.copy(checkedAtMs = RUN_MS + DAY_MS)
+
+        workflow.checkRetractionsAgain()
+
+        assertEquals(
+            "Retraction status could not be checked: the Retraction Watch data could not be used (it downloads over Wi-Fi)",
+            workflow.retractionSavedWorkLine.value
+        )
+    }
+
+    @Test
+    fun `a decided paper Check again cannot reach keeps its record and is counted`() = runTest {
+        restoreCheckedSession()
+        rows["pmid:1"] = PaperRetractionCheck.encode(CLEAR.copy(checkedAtMs = RUN_MS))
+        answers["1"] = OUTAGE.copy(checkedAtMs = RUN_MS + DAY_MS)
+        answers["2"] = CLEAR.copy(checkedAtMs = RUN_MS + DAY_MS)
+
+        workflow.checkRetractionsAgain()
+
+        assertEquals("Retraction status checked 2026-10-18; 1 paper could not be checked again", workflow.retractionSavedWorkLine.value)
+        assertTrue("an outage is not knowledge", PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isClear)
+    }
+
+    /** #654 item 2: Cancel reaches Check again, and leaves the completed session's step alone. */
+    @Test
+    fun `Cancel stops Check again, storing nothing`() = runTest {
+        restoreCheckedSession()
+        coEvery { retractionService.check(any()) } coAnswers { awaitCancellation() }
+
+        val job = launch { workflow.checkRetractionsAgain() }
+        runCurrent()
+        assertTrue(workflow.isCheckingRetractionsAgain.value)
+        workflow.cancelCheckAgain()
+        job.join()
+
+        assertTrue(job.isCancelled)
+        assertTrue(rows.isEmpty())
+        assertTrue(workflow.retractionSavedWorkLine.value!!.endsWith("so this is still the run's record"))
+        assertFalse(workflow.isCheckingRetractionsAgain.value)
+        coVerify(exactly = 0) { sessionRepository.updateWorkflowStep(any(), any()) }
+    }
+
+    @Test
+    fun `a run started after a restore drops the saved-work line`() = runTest {
+        restoreCheckedSession()
+        hold("d3")
+
+        run()
+
+        assertNull(workflow.retractionSavedWorkLine.value)
+        assertNull(workflow.retractionSavedWorkWarning.value)
+        assertTrue(workflow.retractionCurrentChecks.value.isEmpty())
+    }
+
+    /** A store that fails never hides what Check again found: the reader sees it, and that it was not saved. */
+    @Test
+    fun `a Check again whose answers cannot be stored still shows and warns of them`() = runTest {
+        restoreCheckedSession()
+        answers["1"] = RETRACTED.copy(checkedAtMs = RUN_MS + DAY_MS)
+        answers["2"] = CLEAR.copy(checkedAtMs = RUN_MS + DAY_MS)
+        coEvery { retractionService.store(any()) } throws IOException("disk full")
+
+        workflow.checkRetractionsAgain()
+
+        assertTrue(rows.isEmpty())
+        assertTrue(workflow.retractionCurrentChecks.value.getValue("d1").isRetracted)
+        assertTrue(workflow.retractionSavedWorkWarning.value!!.contains("• Study d1: Retracted"))
+        assertEquals(
+            "Retraction status checked 2026-10-19; the new status could not be saved with this run",
+            workflow.retractionSavedWorkLine.value
+        )
+    }
+
+    /** #651's shape: a retraction another session stored stands over Check again's outage, and is still warned of. */
+    @Test
+    fun `a stored retraction stands over Check again's outage and is still warned of`() = runTest {
+        rows["pmid:1"] = PaperRetractionCheck.encode(RETRACTED.copy(checkedAtMs = RUN_MS + DAY_MS))
+        restoreCheckedSession()
+        answers["1"] = OUTAGE.copy(checkedAtMs = RUN_MS + 2 * DAY_MS)
+
+        workflow.checkRetractionsAgain()
+
+        assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
+        assertTrue(workflow.retractionCurrentChecks.value.getValue("d1").isRetracted)
+        assertTrue(workflow.retractionSavedWorkWarning.value!!.contains("• Study d1: Retracted"))
+        assertTrue(workflow.retractionSavedWorkLine.value!!.endsWith("; 1 paper could not be checked again"))
+    }
+
+    @Test
+    fun `Check again runs one at a time`() = runTest {
+        restoreCheckedSession()
+        val gate = CompletableDeferred<Unit>()
+        coEvery { retractionService.check(any()) } coAnswers {
+            asked += firstArg<List<RetractionPaper>>()
+            gate.await()
+            firstArg<List<RetractionPaper>>().associateWith { CLEAR }
+        }
+
+        val job = launch { workflow.checkRetractionsAgain() }
+        runCurrent()
+        workflow.checkRetractionsAgain()
+        gate.complete(Unit)
+        job.join()
+
+        assertEquals(1, asked.size)
+    }
+
+    /** Check again's own Cancel never takes over the workflow's: once it ends, Cancel reaches the session again. */
+    @Test
+    fun `Cancel after a Check again reaches the session`() = runTest {
+        restoreCheckedSession()
+        workflow.checkRetractionsAgain()
+
+        workflow.cancel()
+
+        coVerify { sessionRepository.updateWorkflowStep(SESSION_ID, WorkflowStep.AWAITING_USER_DECISION) }
+    }
+
+    /** A screen begun meanwhile (here a new question) is never written by the Check again it replaced. */
+    @Test
+    fun `a Check again whose screen was replaced stores its answers but never shows them`() = runTest {
+        restoreCheckedSession()
+        answers["1"] = RETRACTED.copy(checkedAtMs = RUN_MS + DAY_MS)
+        val gate = CompletableDeferred<Unit>()
+        coEvery { retractionService.store(any()) } coAnswers {
+            gate.await()
+            firstArg<Map<String, PaperRetractionCheck>>().forEach { (key, check) -> rows[key] = PaperRetractionCheck.encode(check) }
+        }
+
+        val job = launch { workflow.checkRetractionsAgain() }
+        runCurrent()
+        workflow.reset()
+        gate.complete(Unit)
+        job.join()
+
+        assertTrue("its answers were in: they are stored whole", PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
+        assertNull(workflow.retractionSavedWorkLine.value)
+        assertNull(workflow.retractionSavedWorkWarning.value)
+        assertTrue(workflow.retractionCurrentChecks.value.isEmpty())
+        assertFalse(workflow.isCheckingRetractionsAgain.value)
+    }
+
+    @Test
+    fun `a new screen cancels a Check again still asking`() = runTest {
+        restoreCheckedSession()
+        coEvery { retractionService.check(any()) } coAnswers { awaitCancellation() }
+
+        val job = launch { workflow.checkRetractionsAgain() }
+        runCurrent()
+        workflow.reset()
+        job.join()
+
+        assertTrue(job.isCancelled)
+        assertTrue(rows.isEmpty())
+        assertNull("the cancelled check never writes the new screen", workflow.retractionSavedWorkLine.value)
+    }
+
+    @Test
+    fun `a cancelled Check again that cannot read the store never leaves the checking line up`() = runTest {
+        restoreCheckedSession()
+        coEvery { retractionService.check(any()) } coAnswers {
+            coEvery { documentRepository.getDocumentsBySessionSync(SESSION_ID) } throws IOException("disk")
+            awaitCancellation()
+        }
+
+        val job = launch { workflow.checkRetractionsAgain() }
+        runCurrent()
+        workflow.cancelCheckAgain()
+        job.join()
+
+        assertEquals(
+            "Retraction status checked 2026-10-18; it could not be checked again, so this is still the run's record",
+            workflow.retractionSavedWorkLine.value
+        )
+    }
+
+    @Test
+    fun `a restore that cannot read its session's documents says the status could not be read`() = runTest {
+        hold("d1")
+        coEvery { documentRepository.getCitationsBySessionSync(SESSION_ID) } throws IOException("disk")
+
+        workflow.restoreForViewing(session)
+
+        assertEquals("Retraction status could not be read", workflow.retractionSavedWorkLine.value)
+    }
+
+    @Test
+    fun `a stored row that does not decode is said unread on a restored session`() = runTest {
+        rows["pmid:1"] = "{not json"
+
+        restoreCheckedSession()
+
+        assertEquals("Retraction status checked 2026-10-18; later checks could not be read", workflow.retractionSavedWorkLine.value)
+        assertTrue("the run's check stands", workflow.retractionCurrentChecks.value.getValue("d1").isClear)
+    }
+
+    @Test
+    fun `a Check again without bmlib's native library says the run's record stands`() = runTest {
+        restoreCheckedSession()
+        coEvery { retractionService.check(any()) } throws UnsatisfiedLinkError("no bmlib")
+
+        workflow.checkRetractionsAgain()
+
+        assertTrue(workflow.retractionSavedWorkLine.value!!.endsWith("so this is still the run's record"))
+        assertTrue(rows.isEmpty())
+        assertFalse(workflow.isCheckingRetractionsAgain.value)
+    }
+
     private companion object {
         const val SESSION_ID = "session-retraction"
         const val DAY_MS = 86_400_000L
+        const val RUN_MS = 1_792_315_800_000L // 2026-10-18 09:30 UTC
         val CONFIG = WorkflowConfig(smartSearchEnabled = false)
         val NOTICE = StoredRetractionEvidence("retraction_watch_export", "retraction", "2026-03-09", "10.9/n")
         val RETRACTED = PaperRetractionCheck("retracted", NOTICE, checkedAtMs = 1, exportDataAsOf = "2026-10-01")
@@ -427,6 +739,7 @@ class FactCheckWorkflowRetractionTest {
             "concern", NOTICE.copy(kind = "expression_of_concern"), checkedAtMs = 1, exportDataAsOf = "2026-10-01"
         )
         val CLEAR = PaperRetractionCheck("clear", checkedAtMs = 1, exportDataAsOf = "2026-10-01")
+        val NO_EXPORT = PaperRetractionCheck("unchecked", unanswered = listOf("retraction_watch_export"), checkedAtMs = 1)
         val OUTAGE = PaperRetractionCheck(
             "unchecked", unanswered = listOf("crossref"), checkedAtMs = 1, exportDataAsOf = "2026-10-01", crossrefFailure = "HTTP 503"
         )

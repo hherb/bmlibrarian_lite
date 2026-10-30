@@ -17,6 +17,7 @@ package com.bmlibrarian.factchecker.util.retraction
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -220,6 +221,40 @@ class RetractionTextTest {
             "Retraction status checked 2026-10-17; 1 paper could not be checked",
             RetractionText.savedWorkLine(listOf(check("retracted", evidence()), older, check("unchecked", unanswered = both)))
         )
+    }
+
+    @Test
+    fun `savedWorkLine names why papers stay unchecked, after Check again`() {
+        val unchecked = check("unchecked", unanswered = both, asOf = null)
+        assertEquals(
+            "Retraction status checked 2026-10-18; 1 paper could not be checked: $rwCause",
+            RetractionText.savedWorkLine(listOf(check("clear"), unchecked), listOf(rwCause))
+        )
+        assertEquals("Retraction status could not be checked: $rwCause", RetractionText.savedWorkLine(listOf(unchecked), listOf(rwCause)))
+        assertEquals("no paper unchecked, no causes", "Retraction status checked 2026-10-18", RetractionText.savedWorkLine(listOf(check("clear")), listOf(rwCause)))
+    }
+
+    @Test
+    fun notCheckedAgainClause() {
+        assertEquals("", RetractionText.notCheckedAgainClause(0))
+        assertEquals("; 1 paper could not be checked again", RetractionText.notCheckedAgainClause(1))
+        assertEquals("; 1,200 papers could not be checked again", RetractionText.notCheckedAgainClause(1_200))
+    }
+
+    @Test
+    fun savedWorkWarning() {
+        assertNull(RetractionText.savedWorkWarning(emptyList()))
+        assertEquals(
+            "Since this report was written, 1 paper this report cites has a retraction warning:\n" +
+                "• A trial: Retracted on 2026-03-09 (notice 10.9/n); Retraction Watch data as of 2026-10-01\n" +
+                "The report has not been changed; re-run the question to bring it up to date.",
+            RetractionText.savedWorkWarning(listOf("A\n  trial" to check("retracted", evidence())))
+        )
+        val two = RetractionText.savedWorkWarning(
+            listOf("A" to check("retracted", evidence()), "B" to check("concern", evidence(kind = "expression_of_concern"), asOf = null))
+        )!!
+        assertTrue(two.startsWith("Since this report was written, 2 papers this report cites have"))
+        assertTrue(two.contains("• B: Expression of concern, 2026-03-09 (notice 10.9/n)\n"))
     }
 
     @Test

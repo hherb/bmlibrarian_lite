@@ -304,7 +304,10 @@ fun ReportScreen(
                     onOpenInPubMed = { pmid ->
                         viewModel.openInPubMed(pmid)
                     },
-                    onDismiss = viewModel::dismissDocumentSheet
+                    onDismiss = viewModel::dismissDocumentSheet,
+                    retractionCheck = uiState.selectedRetractionCheck,
+                    retractionLoading = uiState.isLoadingRetractionCheck,
+                    retractionUnread = uiState.isRetractionCheckUnread
                 )
             }
         }

@@ -157,7 +157,8 @@ UniFFI bindings (`org.bmlib.ffi`); everything else is in
 `PaperRetractionCheck` is the stored check Swift keeps in
 `RetractionChecker.swift` and `Document`; `RetractionConstants` holds what
 Swift's `BioMedLitConstants` does; `RetractionService` is Android's own (the
-Hilt entry point). `RetractionSavedWork` comes with PR 5b.
+Hilt entry point). `RetractionSavedWork` is Swift's, less `latest`: with one
+row per paper, that row is the paper's latest check.
 
 - `RetractionCrossrefLookup` (bmlib's batches over OkHttp, paced and retried
   as `CrossRefService`), `RetractionIndexStore` (the export as bmlib's index
@@ -194,12 +195,38 @@ Hilt entry point). `RetractionSavedWork` comes with PR 5b.
   across launches (a `.refused` file beside the index). A run never waits
   for it, and a device that runs out of memory building it carries on
   without it.
-- Saved work (a restored session's line and warning, *Check again*) and the
-  report screen's `DocumentDetailSheet` status line are PR 5b.
+- **Saved work.** `restoreForViewing` sets `retractionSavedWorkLine`
+  (`savedWorkLine` over `RetractionSavedWork.recheckedChecks`: the run's
+  snapshot, or a newer stored row) and `retractionSavedWorkWarning` for cited
+  papers whose row now says retracted or concern where the run saw another
+  status (or none), with no request. A restored session's cards are badged
+  from the same stored rows (`retractionCurrentChecks`); with one row per
+  paper, written through `take`, badge and warning agree. Rows that cannot be
+  read leave the run's checks and say "later checks could not be read"; a
+  restore that cannot read the session's documents at all says "Retraction
+  status could not be read", never nothing. *Check again*
+  (`checkRetractionsAgain`) stores each paper's answer through the run's
+  `take` and never the snapshot. Its answers are laid over the stored rows,
+  so they are shown even when storing them failed. It runs in its own job,
+  which its own Cancel (`cancelCheckAgain`) stops without touching the
+  session's step; a run or restore begun meanwhile cancels it, and it never
+  writes their screen. A failure, or a cancel before its answers are in,
+  stores nothing and says the run's record stands; once they are in, they
+  are stored and shown whole. Its line names why papers stay unchecked, as
+  the run's notice does (#654 item 1; Android only so far). Of #654's other
+  items, Android's Check again can be stopped (item 2), but item 3 (the
+  not-saved note said on that view only) and item 4 (a failed check recomputes
+  the warning from the stored rows) apply to it too. The report screen's
+  `DocumentDetailSheet` shows the same check's badge and status line for a
+  retracted, concern or unchecked paper (nothing for a clear one), NOT
+  CHECKED for one never checked, and "could not be read" when its check
+  could not be read; nothing while it loads.
 
-Tests: `FactCheckWorkflowRetractionTest`, `RetractionBadgeContentTest`,
-`Migration10To11Test`, `PublicationTypesTest`, `ReportTextTest` (no native
-library), and `util/retraction/Retraction*Test`, which need the host library
+Tests: `FactCheckWorkflowRetractionTest` (one label test needs the host
+library), `RetractionBadgeContentTest`, `Migration10To11Test`,
+`PublicationTypesTest`, `ReportTextTest`, `RetractionSavedWorkTest` and
+`ReportViewModelRetractionTest` (no native library), and the other
+`util/retraction/Retraction*Test` suites, which need the host library
 (`BMLIB_DIR`); the checker, lookup and index-store suites run over
 MockWebServer. CI fails if they skip.
 

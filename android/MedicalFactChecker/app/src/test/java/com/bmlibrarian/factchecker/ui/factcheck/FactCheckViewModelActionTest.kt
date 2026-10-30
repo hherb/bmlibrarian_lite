@@ -34,6 +34,8 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
+import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -77,6 +79,10 @@ class FactCheckViewModelActionTest {
             every { smartSearchNotice } returns MutableStateFlow(null)
             every { fullTextNotice } returns MutableStateFlow(null)
             every { retractionNotice } returns MutableStateFlow(null)
+            every { retractionSavedWorkLine } returns MutableStateFlow(null)
+            every { retractionSavedWorkWarning } returns MutableStateFlow(null)
+            every { retractionCurrentChecks } returns MutableStateFlow(emptyMap())
+            every { isCheckingRetractionsAgain } returns MutableStateFlow(false)
         }
         val settingsRepository = mockk<SettingsRepository>(relaxed = true) {
             every { configurationVersion } returns MutableStateFlow(0)
@@ -166,5 +172,23 @@ class FactCheckViewModelActionTest {
 
         assertEquals("No active session", viewModel.uiState.value.actionMessage)
         assertFalse(viewModel.uiState.value.isRunning)
+    }
+
+    /** Check again's Cancel stops only it: a tap landing after it ends never cancels the session. */
+    @Test
+    fun `Check again's Cancel never reaches the workflow's`() {
+        viewModel.cancelCheckAgain()
+
+        verify(exactly = 1) { workflow.cancelCheckAgain() }
+        coVerify(exactly = 0) { workflow.cancel(any()) }
+    }
+
+    @Test
+    fun `a Check again that cannot read the store is told`() {
+        coEvery { workflow.checkRetractionsAgain() } throws IOException("disk")
+
+        viewModel.checkRetractionsAgain()
+
+        assertEquals("disk", viewModel.uiState.value.errorMessage)
     }
 }

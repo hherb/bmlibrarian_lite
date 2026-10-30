@@ -53,11 +53,14 @@ import androidx.compose.ui.unit.dp
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.Pmid
 import com.bmlibrarian.factchecker.ui.common.MarkdownText
+import com.bmlibrarian.factchecker.ui.factcheck.components.RetractionBadge
+import com.bmlibrarian.factchecker.ui.factcheck.components.RetractionBadgeContent
 import com.bmlibrarian.factchecker.ui.fulltext.components.LinkOnlyFullTextSection
 import com.bmlibrarian.factchecker.ui.fulltext.components.OpenAccessShortfallNotice
 import com.bmlibrarian.factchecker.ui.theme.MedicalFactCheckerTheme
 import com.bmlibrarian.factchecker.ui.theme.scoreColor
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
 
 /**
  * Bottom sheet showing detailed document information.
@@ -74,6 +77,9 @@ import com.bmlibrarian.factchecker.util.Constants
  * @param onOpenUrl Callback to open an address: a PDF served and not saved,
  *   whose link is all the record keeps (#480)
  * @param onOpenInPubMed Callback when "Open in PubMed" is clicked
+ * @param retractionCheck The paper's retraction check; null when never checked (shown NOT CHECKED)
+ * @param retractionLoading Whether the check is still being read, so nothing is said yet
+ * @param retractionUnread Whether it could not be read, so a missing check is unread, not never checked
  * @param onDismiss Callback when the sheet should be dismissed
  * @param modifier Modifier for customizing the component
  */
@@ -87,6 +93,9 @@ fun DocumentDetailSheet(
     onOpenUrl: ((String) -> Unit)? = null,
     onOpenInPubMed: (String) -> Unit,
     onDismiss: () -> Unit,
+    retractionCheck: PaperRetractionCheck? = null,
+    retractionLoading: Boolean = false,
+    retractionUnread: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -101,6 +110,23 @@ fun DocumentDetailSheet(
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface
         )
+
+        // The paper's retraction status: a detail view says NOT CHECKED for a paper never checked
+        val retractionBadge = when {
+            retractionLoading -> null
+            retractionCheck == null && retractionUnread -> RetractionBadgeContent.UNREAD
+            else -> RetractionBadgeContent.of(retractionCheck, inDetail = true)
+        }
+        retractionBadge?.let { badge ->
+            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+            RetractionBadge(badge)
+            Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
+            Text(
+                text = badge.statusLine,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (badge.isRetracted) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
 
         Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING.dp))
 

@@ -114,6 +114,8 @@ private object ReasoningColors {
  * @param onOpenUrl Callback to open an address: a PDF served and not saved,
  *   whose link is all the record keeps (#480)
  * @param onUploadFullText Callback to upload full text for this document
+ * @param retractionCheck The retraction check the run used
+ * @param currentRetractionCheck A restored session's check since its run, which the badge and status line show
  * @param modifier Modifier for the component
  */
 @Composable
@@ -128,8 +130,11 @@ fun DocumentCard(
     onOpenUrl: ((String) -> Unit)? = null,
     onUploadFullText: ((DocumentEntity) -> Unit)? = null,
     retractionCheck: PaperRetractionCheck? = null,
+    currentRetractionCheck: PaperRetractionCheck? = null,
     modifier: Modifier = Modifier
 ) {
+    // a restored session shows what is known since its run; the run's check still says why a paper was left out
+    val shownCheck = currentRetractionCheck ?: retractionCheck
     var expanded by remember { mutableStateOf(false) }
 
     Card(
@@ -173,7 +178,7 @@ fun DocumentCard(
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    RetractionBadgeContent.of(retractionCheck)?.let { badge ->
+                    RetractionBadgeContent.of(shownCheck)?.let { badge ->
                         Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
                         RetractionBadge(badge)
                     }
@@ -226,10 +231,11 @@ fun DocumentCard(
                 Spacer(modifier = Modifier.height(Constants.UI_CARD_PADDING_SMALL.dp))
 
                 // Why a paper left out has no score, or the status a kept one was checked to
-                retractionCheck?.let { check ->
+                shownCheck?.let { check ->
+                    val runCheck = retractionCheck
                     Text(
-                        text = if (!document.isScored && check.isRetracted) {
-                            RetractionText.excludedLine(check, check)
+                        text = if (!document.isScored && runCheck?.isRetracted == true) {
+                            RetractionText.excludedLine(runCheck, check)
                         } else {
                             RetractionText.paperStatusLine(check)
                         },

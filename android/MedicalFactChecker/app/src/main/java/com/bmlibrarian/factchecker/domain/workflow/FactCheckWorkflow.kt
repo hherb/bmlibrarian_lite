@@ -56,18 +56,21 @@ import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
 import com.bmlibrarian.factchecker.util.retraction.RetractionPaper
 import com.bmlibrarian.factchecker.util.retraction.RetractionReportSection
+import com.bmlibrarian.factchecker.util.retraction.RetractionSavedWork
 import com.bmlibrarian.factchecker.util.retraction.RetractionService
 import com.bmlibrarian.factchecker.util.retraction.RetractionSnapshot
 import com.bmlibrarian.factchecker.util.retraction.RetractionText
 import com.bmlibrarian.factchecker.util.retraction.retractionPaper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -257,8 +260,55 @@ class FactCheckWorkflow @Inject constructor(
     /** Start a new run's retraction screen: each document is checked at most once per run. */
     private fun beginRetractionRun() {
         retractionRun = RetractionRun()
+        // a Check again still going is for the screen this replaces, which it must never write
+        checkAgainJob?.cancel()
+        savedWorkScreen++
         _retractionNotice.value = null
+        _retractionSavedWorkLine.value = null
+        _retractionSavedWorkWarning.value = null
+        _retractionCurrentChecks.value = emptyMap()
     }
+
+    /**
+     * A restored session's retraction line (the desktop's `saved_work_line`):
+     * the date of its oldest decided check, how many could not be checked and
+     * why, and what *Check again* could not do; "Checking…" while it runs.
+     * Set by [restoreForViewing] and [checkRetractionsAgain]; null for a run's
+     * own session.
+     */
+    private val _retractionSavedWorkLine = MutableStateFlow<String?>(null)
+    val retractionSavedWorkLine: StateFlow<String?> = _retractionSavedWorkLine.asStateFlow()
+
+    /**
+     * Warns that papers the restored session's report cites have become
+     * retracted or under concern since its run (the desktop's
+     * `saved_work_warning`); null when none has. No request is made for it: it
+     * reads each paper's stored row, and *Check again*'s answers.
+     */
+    private val _retractionSavedWorkWarning = MutableStateFlow<String?>(null)
+    val retractionSavedWorkWarning: StateFlow<String?> = _retractionSavedWorkWarning.asStateFlow()
+
+    /**
+     * The check a restored session's papers are badged by
+     * ([RetractionSavedWork.recheckedChecks]): the run's, or a newer stored
+     * row; with one row per paper, written through [PaperRetractionCheck.take],
+     * it agrees with the warning. Empty for a run's own session.
+     */
+    private val _retractionCurrentChecks = MutableStateFlow<Map<String, PaperRetractionCheck>>(emptyMap())
+    val retractionCurrentChecks: StateFlow<Map<String, PaperRetractionCheck>> = _retractionCurrentChecks.asStateFlow()
+
+    /** Whether [checkRetractionsAgain] is running, so it is offered one at a time and Cancel stops it. */
+    private val _isCheckingRetractionsAgain = MutableStateFlow(false)
+    val isCheckingRetractionsAgain: StateFlow<Boolean> = _isCheckingRetractionsAgain.asStateFlow()
+
+    /** The coroutine running [checkRetractionsAgain], which [cancelCheckAgain] stops. */
+    @Volatile private var checkAgainJob: Job? = null
+
+    /**
+     * Counts the screens the saved-work flows were cleared for ([beginRetractionRun]):
+     * work begun for an earlier screen (another session, a run) never writes them.
+     */
+    @Volatile private var savedWorkScreen = 0L
 
     // ==================== Current Session ====================
 
@@ -923,7 +973,7 @@ class FactCheckWorkflow @Inject constructor(
      *
      * @param session The fact-check session to restore for viewing.
      */
-    fun restoreForViewing(session: SessionEntity) {
+    suspend fun restoreForViewing(session: SessionEntity) {
         adoptSession(session)
         currentConfig = WorkflowConfig(
             searchProvider = session.searchProvider,
@@ -939,6 +989,171 @@ class FactCheckWorkflow @Inject constructor(
 
         _state.value = WorkflowState.Idle
         _progress.value = WorkflowProgress.idle()
+        try {
+            showSavedRetraction(session.id, savedWorkScreen)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // the session is shown all the same: its retraction status is unknown, never just absent
+            Log.w(TAG, "Could not show the saved retraction status: ${e.javaClass.simpleName}")
+            _retractionSavedWorkLine.value = RetractionText.STATUS_UNREAD
+        }
+    }
+
+    /** Stop [checkRetractionsAgain], leaving the session's step alone: it never ran the workflow. */
+    fun cancelCheckAgain() {
+        checkAgainJob?.cancel()
+    }
+
+    /**
+     * Check every document of the restored session for retraction again (the
+     * desktop's *Check again*), storing each paper's answer as the run's
+     * screen does ([PaperRetractionCheck.take], which keeps a decided row
+     * over an outage). The run's snapshot, and so the report, is never
+     * rewritten: [retractionSavedWorkLine] and [retractionSavedWorkWarning]
+     * say what changed, and the warning suggests re-running the question. A
+     * check that fails, or is cancelled ([cancelCheckAgain]) before its
+     * answers are in, stores nothing and says the run's record stands; once
+     * they are in, they are stored and shown whole. A new run or restore
+     * cancels it, and it never writes their screen.
+     *
+     * @throws Exception When the store cannot be read, even to say so
+     */
+    suspend fun checkRetractionsAgain() {
+        val session = currentSession ?: return
+        if (!_isCheckingRetractionsAgain.compareAndSet(expect = false, update = true)) return
+        checkAgainJob = currentCoroutineContext()[Job]
+        val screen = savedWorkScreen
+        val shown = _retractionSavedWorkLine.value
+        // the store could not be read even to say how it went: never leave "Checking…" up
+        val standing = {
+            if (screen == savedWorkScreen) {
+                _retractionSavedWorkLine.value =
+                    shown?.removeSuffix(RetractionText.CHECK_AGAIN_FAILED)?.plus(RetractionText.CHECK_AGAIN_FAILED)
+            }
+        }
+        try {
+            checkRetractionsAgainWork(session.id, screen)
+        } catch (e: CancellationException) {
+            withContext(NonCancellable) {
+                try {
+                    showSavedRetraction(session.id, screen, RetractionText.CHECK_AGAIN_FAILED)
+                } catch (unread: Exception) {
+                    Log.w(TAG, "Could not show a cancelled Check again: ${unread.javaClass.simpleName}")
+                    standing()
+                }
+            }
+            throw e
+        } catch (e: Exception) {
+            standing()
+            throw e
+        } finally {
+            checkAgainJob = null
+            _isCheckingRetractionsAgain.value = false
+        }
+    }
+
+    /** The work of [checkRetractionsAgain]. */
+    private suspend fun checkRetractionsAgainWork(sessionId: String, screen: Long) {
+        if (screen == savedWorkScreen) _retractionSavedWorkLine.value = RetractionText.CHECKING_AGAIN_LINE
+        val (fresh, taken) = try {
+            val documents = documentRepository.getDocumentsBySessionSync(sessionId)
+            val papers = documents.associate { it.id to it.retractionPaper }
+            val keys = papers.mapValues { it.value.paperKey }
+            val checks = retractionService.check(papers.values.distinct())
+            val fresh = documents.mapNotNull { document -> checks[papers.getValue(document.id)]?.let { document.id to it } }.toMap()
+            val stored = retractionService.storedChecks(keys.values.filterNotNull().toSet())
+            fresh to takeRetractionChecks(documents.filter { it.id in fresh }, papers, keys, stored, fresh)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Retraction check again failed: ${e.javaClass.simpleName}")
+            showSavedRetraction(sessionId, screen, RetractionText.CHECK_AGAIN_FAILED)
+            return
+        } catch (e: LinkageError) {
+            // a build without bmlib's native library
+            Log.w(TAG, "Retraction check again unavailable: ${e.javaClass.simpleName}")
+            showSavedRetraction(sessionId, screen, RetractionText.CHECK_AGAIN_FAILED)
+            return
+        }
+        currentCoroutineContext().ensureActive()
+        // the answers are in: a cancel now would call the rows they change the run's record
+        withContext(NonCancellable) {
+            val unsaved = if (storeRetractionChecks(taken.rows)) {
+                ""
+            } else {
+                // shortcut: said on this view only, not on a later reopen as the desktop's
+                // _unsaved_rechecks does; upgrade with a per-session set in this singleton if readers miss it
+                RetractionText.CHECK_AGAIN_NOT_SAVED
+            }
+            showSavedRetraction(sessionId, screen, unsaved, again = fresh, taken = taken.use)
+        }
+    }
+
+    /**
+     * Set [retractionSavedWorkLine], [retractionCurrentChecks] and
+     * [retractionSavedWorkWarning] from the run's snapshot, each paper's
+     * stored row and *Check again*'s answers, unless [screen] is no longer
+     * shown. No request is made. A row that cannot be read, or rows that
+     * cannot be looked up (stored checks unreadable, bmlib's native library
+     * missing), leave the run's checks and say so: not knowing is not "no change".
+     *
+     * @param screen The screen this is for ([savedWorkScreen] when it began)
+     * @param note A clause to add to the line (a failed *Check again*, or one not saved)
+     * @param again *Check again*'s answers by document id, which name the
+     *   decided papers it could not reach and why papers are unchecked
+     * @param taken The check each document now uses after *Check again*, by
+     *   document id, laid over the stored rows: shown even when storing them failed
+     */
+    private suspend fun showSavedRetraction(
+        sessionId: String,
+        screen: Long,
+        note: String = "",
+        again: Map<String, PaperRetractionCheck> = emptyMap(),
+        taken: Map<String, PaperRetractionCheck> = emptyMap()
+    ) {
+        val documents = documentRepository.getDocumentsBySessionSync(sessionId)
+        val run = RetractionSnapshot.read(sessionRepository.getSession(sessionId)?.retractionSnapshotJson)
+        var unread = false
+        val read = try {
+            val keys = documents.mapNotNull { document -> document.retractionPaper.paperKey?.let { document.id to it } }.toMap()
+            val rows = retractionService.storedChecks(keys.values.toSet())
+            keys.mapNotNull { (id, key) ->
+                val row = rows[key] ?: return@mapNotNull null
+                val check = PaperRetractionCheck.decode(row)
+                if (check == null) unread = true
+                check?.let { id to it }
+            }.toMap()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not read the stored retraction checks: ${e.javaClass.simpleName}")
+            unread = true
+            emptyMap()
+        } catch (e: LinkageError) {
+            // paperKey calls bmlib: without its native library no row can be found
+            Log.w(TAG, "Stored retraction checks unavailable: ${e.javaClass.simpleName}")
+            unread = true
+            emptyMap()
+        }
+        if (unread) Log.w(TAG, "A stored retraction check of this session could not be read")
+        val stored = read + taken
+        val rows = RetractionSavedWork.recheckedChecks(run, stored)
+        val cited = documentRepository.getCitationsBySessionSync(sessionId).map { it.documentId }.toSet()
+        val citedDocuments = documents.filter { it.id in cited }
+        val changed = RetractionSavedWork.changedSinceRun(run, stored, citedDocuments.map { it.id })
+        val titles = citedDocuments.associate { it.id to it.title }
+        // a decided check kept over an unchecked answer: no source could be reached for it
+        val missed = again.count { (id, check) -> check.isUnchecked && rows[id]?.isUnchecked == false }
+        val papers = documents.associate { it.id to it.retractionPaper }
+        val causes = RetractionText.uncheckedCauses(
+            again.filterKeys { rows[it]?.isUnchecked == true }.map { (id, check) -> papers.getValue(id) to check }, emptySet()
+        )
+        if (screen != savedWorkScreen) return
+        _retractionCurrentChecks.value = rows
+        _retractionSavedWorkLine.value = RetractionText.savedWorkLine(rows.values, causes) +
+            RetractionText.notCheckedAgainClause(missed) + note + if (unread) RetractionText.STORED_CHECKS_UNREAD else ""
+        _retractionSavedWorkWarning.value = RetractionText.savedWorkWarning(changed.map { titles.getValue(it) to stored.getValue(it) })
     }
 
     // ==================== Workflow Execution ====================
@@ -1859,30 +2074,67 @@ class FactCheckWorkflow @Inject constructor(
             Log.w(TAG, "Retraction lookup unavailable; only stored warnings decide: ${e.javaClass.simpleName}")
             emptyMap()
         }
-        val rows = mutableMapOf<String, PaperRetractionCheck>()
-        for (document in due) {
+        val fresh = due.associate { document ->
             val paper = papers.getValue(document.id)
-            val fresh = checks[paper] ?: PaperRetractionCheck.failedFor(paper, now).also { retractionRun.failed += paper }
+            document.id to (checks[paper] ?: PaperRetractionCheck.failedFor(paper, now).also { retractionRun.failed += paper })
+        }
+        val taken = takeRetractionChecks(due, papers, keys, stored, fresh)
+        storeRetractionChecks(taken.rows)
+        return used + taken.use
+    }
+
+    /** What [takeRetractionChecks] decided: each paper's new row by key, and the check each document uses. */
+    private class TakenRetractionChecks(val rows: Map<String, PaperRetractionCheck>, val use: Map<String, PaperRetractionCheck>)
+
+    /**
+     * Take each document's fresh check against its paper's stored row
+     * ([PaperRetractionCheck.take]). A document with no paper key stores nothing.
+     *
+     * @param documents The documents checked
+     * @param papers Their papers, by document id
+     * @param keys Their paper keys, by document id
+     * @param stored The stored rows' JSON, by paper key
+     * @param fresh Each document's fresh check, by document id
+     */
+    private fun takeRetractionChecks(
+        documents: List<DocumentEntity>,
+        papers: Map<String, RetractionPaper>,
+        keys: Map<String, String?>,
+        stored: Map<String, String>,
+        fresh: Map<String, PaperRetractionCheck>
+    ): TakenRetractionChecks {
+        val rows = mutableMapOf<String, PaperRetractionCheck>()
+        val use = mutableMapOf<String, PaperRetractionCheck>()
+        for (document in documents) {
+            val check = fresh.getValue(document.id)
             val key = keys[document.id]
             if (key == null) {
-                used[document.id] = fresh
+                use[document.id] = check
                 continue
             }
             // a paper two documents share is decided against the row this run will write, not the stale stored one
             val row = rows[key]?.let(PaperRetractionCheck::encode) ?: stored[key]
-            val taken = PaperRetractionCheck.take(row, fresh, typesRecorded = document.publicationTypes != null)
+            val taken = PaperRetractionCheck.take(row, check, typesRecorded = document.publicationTypes != null)
             taken.store?.let { rows[key] = it }
-            used[document.id] = taken.use
+            use[document.id] = taken.use
         }
-        try {
-            retractionService.store(rows)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            // the run's snapshot still records what it used; the next run asks again
-            Log.w(TAG, "Retraction checks not stored: ${e.javaClass.simpleName}")
-        }
-        return used
+        return TakenRetractionChecks(rows, use)
+    }
+
+    /**
+     * Store these rows; a failure is logged, never thrown.
+     *
+     * @return Whether they were stored
+     */
+    private suspend fun storeRetractionChecks(rows: Map<String, PaperRetractionCheck>): Boolean = try {
+        retractionService.store(rows)
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        // the run's snapshot still records what it used; the next run asks again
+        Log.w(TAG, "Retraction checks not stored: ${e.javaClass.simpleName}")
+        false
     }
 
     // ==================== Transparency Analysis ====================
