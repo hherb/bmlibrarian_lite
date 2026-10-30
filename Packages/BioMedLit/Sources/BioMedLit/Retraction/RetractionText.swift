@@ -166,10 +166,17 @@ public enum RetractionText {
     /// A reopened session's line (the desktop's `saved_work_line`): when its
     /// decided papers were checked (the oldest), and how many were not;
     /// "could not be checked" when none is decided, "never checked" for none.
-    public static func savedWorkLine(_ checks: [PaperRetractionCheck]) -> String {
-        methodsLine(
+    ///
+    /// - Parameters:
+    ///   - checks: The session's checks.
+    ///   - causes: ``uncheckedCauses(_:failed:)`` of the unchecked papers (after
+    ///     *Check again*); added only when a paper is unchecked.
+    public static func savedWorkLine(_ checks: [PaperRetractionCheck], causes: [String] = []) -> String {
+        let line = methodsLine(
             checkedAt: checks.filter { !$0.isUnchecked }.map(\.checkedAt).min(),
             notChecked: checks.filter(\.isUnchecked).count, heldPapers: !checks.isEmpty)
+        // the causes follow the not-checked count, as they follow the run notice's
+        return causes.isEmpty || !checks.contains(where: \.isUnchecked) ? line : "\(line): \(causes.joined(separator: "; "))"
     }
 
     /// The button that checks a reopened session's papers again.

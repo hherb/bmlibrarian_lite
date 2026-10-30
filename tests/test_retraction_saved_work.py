@@ -334,6 +334,20 @@ def test_the_saved_work_line_dates_decided_rows_and_counts_the_unchecked() -> No
     assert saved_work_line([]) == "Retraction status never checked"
 
 
+def test_the_saved_work_line_names_why_papers_stay_unchecked_after_check_again() -> None:
+    """Check again's causes follow the not-checked count; none without an unchecked row (#660)."""
+    from bmlibrarian_lite.retraction_text import saved_work_line
+
+    snapshot = run_snapshot()
+    one = {**snapshot, CITED.id: {**snapshot[CITED.id], "status": "unchecked"}}
+    assert saved_work_line(one.values(), ["no DOI or PMID"]) == (
+        "Retraction status checked 2026-10-15; 1 paper could not be checked: no DOI or PMID"
+    )
+    unchecked = [{**row, "status": "unchecked"} for row in snapshot.values()]
+    assert saved_work_line(unchecked, ["a", "b"]) == "Retraction status could not be checked: a; b"
+    assert saved_work_line(snapshot.values(), ["a"]) == "Retraction status checked 2026-10-01"
+
+
 # ---------------------------------------------------------------------------
 # The report tab
 # ---------------------------------------------------------------------------
@@ -601,6 +615,31 @@ def test_an_outage_over_an_all_clear_snapshot_says_how_many_could_not_be_checked
         {**{d.id: check(RetractionStatus.UNCHECKED, NOW) for d in DOCUMENTS}, CITED.id: check(RetractionStatus.CLEAR, NOW)},
     )
     assert tab.retraction_line.text().endswith("; 2 papers could not be checked again")
+
+
+def test_check_again_names_why_papers_stay_unchecked(
+    tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A paper still unchecked after Check again: the line says why, as the run notice would (#660)."""
+    seen = {**run_checks(), CITED.id: check(RetractionStatus.UNCHECKED, RUN)}
+    metadata = checkpoint_metadata_with_retraction_snapshot({}, screen_documents(DOCUMENTS, seen))
+    checkpoint_id = saved_checkpoint(storage, metadata)
+    reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
+    assert tab.retraction_line.text().endswith("; 1 paper could not be checked"), "a plain reopen names no cause"
+    run_check_again(
+        tab,
+        storage,
+        monkeypatch,
+        {
+            CITED.id: check(RetractionStatus.UNCHECKED, NOW),
+            UNCITED.id: check(RetractionStatus.CLEAR, NOW),
+            LEFT_OUT.id: check(RetractionStatus.RETRACTED, NOW),
+        },
+    )
+    assert tab.retraction_line.text().endswith(
+        "; 1 paper could not be checked: the Retraction Watch copy could not be used"
+        " (run `bmll retractions-update`); Crossref had no usable answer for the DOI"
+    )
 
 
 def test_a_late_result_for_another_question_changes_neither_view_nor_audit_trail(
