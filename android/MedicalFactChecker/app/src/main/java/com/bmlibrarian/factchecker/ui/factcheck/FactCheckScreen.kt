@@ -82,6 +82,7 @@ import com.bmlibrarian.factchecker.ui.factcheck.components.FetchMorePrompt
 import com.bmlibrarian.factchecker.ui.factcheck.components.SearchProgress
 import com.bmlibrarian.factchecker.ui.factcheck.components.SortingControls
 import com.bmlibrarian.factchecker.util.CostCalculator
+import com.bmlibrarian.factchecker.util.retraction.RetractionText
 
 /**
  * Main fact-checking screen.
@@ -351,7 +352,7 @@ fun FactCheckScreen(
             if (uiState.retractedDocuments.isNotEmpty()) {
                 item(key = "retracted_header") {
                     Text(
-                        text = "Left out as retracted (${uiState.retractedDocuments.size})",
+                        text = "${RetractionText.LEFT_OUT_TITLE} (${uiState.retractedDocuments.size})",
                         style = MaterialTheme.typography.titleMedium
                     )
                 }

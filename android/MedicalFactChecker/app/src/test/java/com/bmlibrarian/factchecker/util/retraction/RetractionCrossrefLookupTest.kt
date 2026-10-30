@@ -91,6 +91,28 @@ class RetractionCrossrefLookupTest {
         assertEquals("three attempts, then the second batch", 3 + 1, stub.requestedUrls.size)
     }
 
+    /** Swift's catch-all: a failure that is not the network's costs its batch alone, never the run. */
+    @Test
+    fun `a batch failing in an unexpected way leaves only its DOIs unreachable`() = runTest {
+        val first = (0 until 50).map { "10.1000/a$it" }
+        // the second batch holds b0 alone, so no comma follows it
+        stub.routes = mapOf("doi:10.1000/b0" to StubServer.answer(200, StubServer.crossrefBody("""{"DOI": "10.1000/b0"}""")))
+        val client = stub.client().newBuilder().apply {
+            interceptors().add(0, okhttp3.Interceptor { chain ->
+                val url = java.net.URLDecoder.decode(chain.request().url.toString(), "UTF-8")
+                if (url.contains("doi:10.1000/a0,")) throw IllegalStateException("not the network")
+                chain.proceed(chain.request())
+            })
+        }.build()
+        val out = lookup(client).results(first + "10.1000/b0")
+        val failed = RequestFailure(RequestFailureKind.REQUEST_FAILED)
+        for (doi in first) {
+            assertEquals(doi, failed, out[doi]?.failure)
+            assertEquals(doi, CrossrefResult.Unreachable(failed.describe()), out[doi]?.result)
+        }
+        assertTrue("the next batch is still asked", out["10.1000/b0"]?.result is CrossrefResult.Served)
+    }
+
     @Test
     fun `a 429 then an answer is served`() = runTest {
         stub.sequence += StubServer.answer(429)

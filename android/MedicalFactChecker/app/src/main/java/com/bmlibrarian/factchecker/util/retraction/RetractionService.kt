@@ -42,8 +42,8 @@ val DocumentEntity.retractionPaper: RetractionPaper
 
 /**
  * The app's retraction checking: the production check over the local
- * Retraction Watch index and one Crossref lookup per process, and each
- * paper's stored row.
+ * Retraction Watch index and one Crossref lookup per process (per contact
+ * address), and each paper's stored row.
  */
 @Singleton
 class RetractionService @Inject constructor(
@@ -103,6 +103,9 @@ class RetractionService @Inject constructor(
             } catch (e: LinkageError) {
                 // a build without bmlib's native library: nothing to refresh with
                 Log.w(TAG, "Retraction Watch refresh unavailable: ${e.javaClass.simpleName}")
+            } catch (e: OutOfMemoryError) {
+                // a small heap cannot build the ~68 MB export: the app runs on without it, never crashed by it
+                Log.w(TAG, "Retraction Watch refresh ran out of memory")
             }
         }
     }

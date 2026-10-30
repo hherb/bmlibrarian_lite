@@ -235,8 +235,9 @@ data class DocumentEntity(
      * ([encodePublicationTypes]); the retraction check reads PubMed's
      * "Retracted Publication" label from them.
      *
-     * Null means not recorded (a row saved before they were kept, or a source
-     * that gave no list), never `"[]"` for an absent list.
+     * Null means not recorded (a row saved before they were kept, or a Europe
+     * PMC record that gave no list). A PubMed record is always `"[]"` or more:
+     * its parser keeps no "absent", so a record with no list reads as none listed.
      */
     @ColumnInfo(name = "publication_types_json")
     val publicationTypesJson: String? = null,

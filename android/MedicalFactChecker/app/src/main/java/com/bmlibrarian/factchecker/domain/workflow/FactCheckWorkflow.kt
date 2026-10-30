@@ -790,10 +790,12 @@ class FactCheckWorkflow @Inject constructor(
                         }
                     }
                     successCount = scoringSuccessIds.size
-                    successfulIds = scoringSuccessIds
+                    // a document left out as retracted is settled, not failed: it leaves the queue too
+                    val leftOutIds = documents.filter { retractionRun.used[it.id]?.second?.isRetracted == true }.map { it.id }
+                    successfulIds = scoringSuccessIds + leftOutIds
 
                     // Remove errors for successfully retried documents
-                    errorPersistenceManager.removeErrorsForDocuments(session.id, scoringSuccessIds)
+                    errorPersistenceManager.removeErrorsForDocuments(session.id, successfulIds)
                 }
 
                 ProcessingCheckpointEntity.STEP_CITATION -> {
@@ -1771,10 +1773,13 @@ class FactCheckWorkflow @Inject constructor(
      *
      * Each document is checked at most once per run. A paper whose stored row
      * [PaperRetractionCheck.isReusable] is not asked again; otherwise what is
-     * stored and used follows [PaperRetractionCheck.take]. A check that fails
-     * (bmlib's native library missing included) leaves every paper it was
-     * given unchecked for this run, and the run goes on; a cancel records
-     * nothing.
+     * stored and used follows [PaperRetractionCheck.take]. A failing lookup
+     * leaves unchecked every paper with no stored warning that stands (a
+     * stored retraction or concern still holds); a failure before the lookup
+     * (stored rows unreadable, bmlib's native library missing) leaves every
+     * paper unchecked. Either way a paper its own label retracts is still
+     * left out ([PaperRetractionCheck.failedFor]), the run goes on, and a
+     * cancel records nothing.
      *
      * @param session The session
      * @param documents The documents about to be scored
@@ -1807,13 +1812,14 @@ class FactCheckWorkflow @Inject constructor(
     }
 
     /**
-     * Every paper unchecked for this run, the check having failed.
+     * Every paper unchecked for this run, the check having failed, but those
+     * their own label retracts.
      *
      * @return The failed check, by document id
      */
     private fun failedRetraction(papers: Map<String, RetractionPaper>, now: Long): Map<String, PaperRetractionCheck> {
         retractionRun.failed += papers.values
-        return papers.mapValues { PaperRetractionCheck.failed(now) }
+        return papers.mapValues { PaperRetractionCheck.failedFor(it.value, now) }
     }
 
     /**
@@ -1846,19 +1852,23 @@ class FactCheckWorkflow @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.w(TAG, "Retraction check failed, its papers are left unchecked: ${e.javaClass.simpleName}")
+            Log.w(TAG, "Retraction lookup failed; only stored warnings and labels decide: ${e.javaClass.simpleName}")
+            emptyMap()
+        } catch (e: LinkageError) {
+            // a build without bmlib's native library: the reusable rows above still stand
+            Log.w(TAG, "Retraction lookup unavailable; only stored warnings decide: ${e.javaClass.simpleName}")
             emptyMap()
         }
         val rows = mutableMapOf<String, PaperRetractionCheck>()
         for (document in due) {
             val paper = papers.getValue(document.id)
-            val fresh = checks[paper] ?: PaperRetractionCheck.failed(now).also { retractionRun.failed += paper }
+            val fresh = checks[paper] ?: PaperRetractionCheck.failedFor(paper, now).also { retractionRun.failed += paper }
             val key = keys[document.id]
             if (key == null) {
                 used[document.id] = fresh
                 continue
             }
-            // a paper two documents share is decided against what this run wrote first
+            // a paper two documents share is decided against the row this run will write, not the stale stored one
             val row = rows[key]?.let(PaperRetractionCheck::encode) ?: stored[key]
             val taken = PaperRetractionCheck.take(row, fresh, typesRecorded = document.publicationTypes != null)
             taken.store?.let { rows[key] = it }

@@ -20,11 +20,16 @@ import org.bmlib.ffi.RetractionLookup
 
 /**
  * What the reader is told about retraction checks, worded as the desktop's
- * `retraction_text.py` and Swift's `RetractionText` word it.
+ * `retraction_text.py` and Swift's `RetractionText` word it. The saved-work
+ * warning and *Check again*'s sentences come with PR 5b; [runNotice] and
+ * [PROGRESS_MESSAGE] are Android's own.
  */
 object RetractionText {
+    /** Title of the papers a run left out, in the report and on screen. */
+    const val LEFT_OUT_TITLE = "Left out as retracted"
+
     /** Heading of the report's section for the papers a run left out. */
-    const val LEFT_OUT_HEADING = "## Left out as retracted"
+    const val LEFT_OUT_HEADING = "## $LEFT_OUT_TITLE"
 
     /** Shown while the documents about to be scored are checked for retraction. */
     const val PROGRESS_MESSAGE = "Checking retraction status…"

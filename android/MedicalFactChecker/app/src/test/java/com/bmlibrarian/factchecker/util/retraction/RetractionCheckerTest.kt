@@ -289,6 +289,67 @@ class RetractionCheckerTest {
         assertEquals(TakenCheck(null, old), PaperRetractionCheck.take(PaperRetractionCheck.encode(old), outage, typesRecorded = true))
     }
 
+    /** A stored clear rests on a lookup now down: kept for later, but not knowledge today. */
+    @Test
+    fun `a stored clear outlives an outage, kept but shown unchecked`() {
+        val outage = stored("unchecked", listOf("crossref"), daysOld = 0.0)
+        assertEquals(TakenCheck(null, outage), PaperRetractionCheck.take(PaperRetractionCheck.encode(stored("clear")), outage, typesRecorded = true))
+    }
+
+    /** The desktop's `_decode`: a name this build does not know makes the row unreadable, so protected. */
+    @Test
+    fun `a stored row with an unknown status or lookup is unreadable, and an outage never overwrites it`() {
+        val outage = stored("unchecked", listOf("crossref"), daysOld = 0.0)
+        for (row in listOf(stored("retracted_v2"), stored("concern", listOf("a_new_source")))) {
+            val text = PaperRetractionCheck.encode(row)
+            assertNull(text, PaperRetractionCheck.decode(text))
+            assertEquals(text, TakenCheck(null, outage), PaperRetractionCheck.take(text, outage, typesRecorded = true))
+        }
+        // control: a known row decodes
+        assertEquals(stored("concern", listOf("crossref")), PaperRetractionCheck.decode(PaperRetractionCheck.encode(stored("concern", listOf("crossref")))))
+    }
+
+    /** Only a label retraction waits for recorded types; one Retraction Watch decided is cleared by a full answer. */
+    @Test
+    fun `a stored retraction not decided by the label is replaced by a full answer, types recorded or not`() {
+        val notice = PaperRetractionCheck("retracted", StoredRetractionEvidence("retraction_watch_export", "retraction"), checkedAtMs = 1)
+        val clear = stored("clear", daysOld = 0.0)
+        assertEquals(TakenCheck(clear, clear), PaperRetractionCheck.take(PaperRetractionCheck.encode(notice), clear, typesRecorded = false))
+    }
+
+    @Test
+    fun `a label retraction reached without types is never downgraded to a concern, but a fresh retraction replaces it`() {
+        val label = PaperRetractionCheck("retracted", StoredRetractionEvidence("pubmed_label", "retraction"), checkedAtMs = 1)
+        val concern = stored("concern", daysOld = 0.0)
+        assertEquals(TakenCheck(null, label), PaperRetractionCheck.take(PaperRetractionCheck.encode(label), concern, typesRecorded = false))
+        val retraction = PaperRetractionCheck("retracted", StoredRetractionEvidence("retraction_watch_export", "retraction"), checkedAtMs = 2)
+        assertEquals(TakenCheck(retraction, retraction), PaperRetractionCheck.take(PaperRetractionCheck.encode(label), retraction, typesRecorded = false))
+    }
+
+    // ---- A failed check (the desktop's _label_check)
+
+    @Test
+    fun `a failed check still retracts by the record's own label, and is otherwise unchecked`() {
+        val labelled = PaperRetractionCheck.failedFor(RetractionPaper("10.1000/x", null, listOf("Retracted Publication")), RetractionFixture.nowMs)
+        assertTrue(labelled.isRetracted)
+        assertTrue(labelled.isDecidedByLabel)
+        assertEquals(RetractionFixture.nowMs, labelled.checkedAtMs)
+        // control: without the label a failed check is unchecked, never clear
+        assertEquals(
+            PaperRetractionCheck.failed(RetractionFixture.nowMs),
+            PaperRetractionCheck.failedFor(RetractionPaper("10.1000/x", null, listOf("Journal Article")), RetractionFixture.nowMs)
+        )
+    }
+
+    /** An unsendable DOI is not sent to Crossref, but is still its key: the index is searched and the row stored by it. */
+    @Test
+    fun `an unsendable DOI is still looked up in the index and keyed by its DOI`() = runTest {
+        val index = RetractionFixture.index(RetractionFixture.rows + "4,2/6/2010 0:00,10.1000/notice4,\"10.1000/a,b\",,Retraction")
+        val paper = RetractionPaper("10.1000/a,b", null, emptyList())
+        assertTrue(check(paper, index).isRetracted)
+        assertEquals("doi:10.1000/a,b", paper.paperKey)
+    }
+
     // ---- The snapshot (#647: per entry)
 
     @Test

@@ -99,6 +99,21 @@ class RetractionIndexStoreTest {
         assertTrue(url, url.contains("mailto=t@example.org"))
         assertTrue(stub.requests.first().getHeader("User-Agent")!!.contains("mailto:t@example.org"))
         assertFalse("no temporary file is left", File(directory, "${RetractionConstants.RETRACTION_INDEX_FILE_NAME}.part").exists())
+        assertFalse("no download is left", File(directory, "${RetractionConstants.RETRACTION_INDEX_FILE_NAME}.download").exists())
+    }
+
+    /** Android kills the process often: the day's wait must outlive it, or every launch downloads again (#647). */
+    @Test
+    fun `a refusal holds across launches`() = runTest {
+        stub.stubbed = StubServer.answer(200, "<html><body>Please sign in</body></html>")
+        assertTrue(store().refreshIfStale(RetractionFixture.nowMs, "t@example.org") is RetractionIndexRefresh.Refused)
+        assertTrue("a new launch's store", store().refreshIfStale(RetractionFixture.nowMs + 60_000, "t@example.org") is RetractionIndexRefresh.Refused)
+        assertEquals(1, stub.requestedUrls.size)
+        // control: a day later a new launch tries again, and a success clears the wait
+        stub.stubbed = StubServer.answer(200, RetractionFixture.csv())
+        val later = RetractionFixture.nowMs + RetractionConstants.RETRACTION_WATCH_REFUSED_BACKOFF_MS
+        assertEquals(RetractionIndexRefresh.Refreshed(3), store().refreshIfStale(later, "t@example.org"))
+        assertFalse(File(directory, "${RetractionConstants.RETRACTION_INDEX_FILE_NAME}.refused").exists())
     }
 
     @Test
@@ -131,11 +146,12 @@ class RetractionIndexStoreTest {
         stub.stubbed = StubServer.answer(200, RetractionFixture.csv(RetractionFixture.retractions(9)))
         assertTrue(store().refreshIfStale(RetractionFixture.nowMs, "t@example.org") is RetractionIndexRefresh.Refused)
         assertArrayEquals(before, file.readBytes())
-        // control
+        // control, once the refusal's day has passed
         stub.stubbed = StubServer.answer(200, RetractionFixture.csv(RetractionFixture.retractions(10)))
+        val later = RetractionFixture.nowMs + RetractionConstants.RETRACTION_WATCH_REFUSED_BACKOFF_MS
         val store = store()
-        assertEquals(RetractionIndexRefresh.Refreshed(10), store.refreshIfStale(RetractionFixture.nowMs, "t@example.org"))
-        assertEquals(RetractionFixture.TODAY, store.currentIndex(RetractionFixture.nowMs)?.dataAsOf())
+        assertEquals(RetractionIndexRefresh.Refreshed(10), store.refreshIfStale(later, "t@example.org"))
+        assertEquals(RetractionIndexStore.today(later).toString(), store.currentIndex(later)?.dataAsOf())
     }
 
     @Test

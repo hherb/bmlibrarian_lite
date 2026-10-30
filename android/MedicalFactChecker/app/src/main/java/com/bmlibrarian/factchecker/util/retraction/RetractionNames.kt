@@ -68,4 +68,7 @@ internal object RetractionNames {
 
     /** The source [name] names, or null for a name this build does not know. */
     fun source(name: String): RetractionSource? = RetractionSource.entries.firstOrNull { name(it) == name }
+
+    /** The lookup [name] names, or null for a name this build does not know. */
+    fun lookup(name: String): RetractionLookup? = RetractionLookup.entries.firstOrNull { name(it) == name }
 }

@@ -1,6 +1,6 @@
 /*
  * BMLibrarian Lite - Biomedical Literature Research Tool
- * Copyright (C) 2024-2025 Dr Horst Herb
+ * Copyright (C) 2024-2026 Dr Horst Herb
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -30,12 +30,13 @@ import androidx.compose.ui.unit.dp
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
 import com.bmlibrarian.factchecker.util.retraction.RetractionText
+import org.bmlib.ffi.RetractionStatus
 
 /**
  * What a retraction badge says (Swift's `RetractionBadge.Content`, the
  * desktop's `retraction_badge`): clear shows nothing; a paper never checked
- * shows NOT CHECKED only in a detail view, so a list of unchecked papers
- * stays quiet.
+ * shows NOT CHECKED only in a detail view, so a list stays quiet about
+ * papers never checked (one whose check came back unchecked shows it).
  *
  * @property text The badge's text
  * @property statusLine The paper's status line, read aloud
@@ -54,11 +55,12 @@ data class RetractionBadgeContent(val text: String, val statusLine: String, val 
             if (check == null) {
                 return if (inDetail) RetractionBadgeContent(NOT_CHECKED, RetractionText.checkedOnLine(null), false, false) else null
             }
-            val text = when {
-                check.isRetracted -> "RETRACTED"
-                check.isConcern -> "CONCERN"
-                check.isUnchecked -> NOT_CHECKED
-                else -> return null
+            // exhaustive: a status bmlib adds must be given its badge, never read as clear
+            val text = when (check.retractionStatus) {
+                RetractionStatus.RETRACTED -> "RETRACTED"
+                RetractionStatus.CONCERN -> "CONCERN"
+                RetractionStatus.UNCHECKED -> NOT_CHECKED
+                RetractionStatus.CLEAR -> return null
             }
             return RetractionBadgeContent(text, RetractionText.paperStatusLine(check), check.isRetracted, check.isConcern)
         }

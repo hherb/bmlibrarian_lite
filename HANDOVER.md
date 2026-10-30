@@ -18,8 +18,11 @@ the run's record is `sessions.retraction_snapshot_json`. The screen is at the
 top of `FactCheckWorkflow.scoreDocuments`, which every scoring path calls; a
 run starts in `runHandlingFailures`, `fetchMoreEvidence` and
 `retryFailedDocuments`. **A missing native library** (`UnsatisfiedLinkError`,
-a debug build without bmlib) leaves papers unchecked; `paperKey`, `isReusable`
-and `uncheckedCauses` all call bmlib, so keep them inside the screen's guard.
+a debug build without bmlib) leaves papers unchecked, but stored warnings and
+a paper's own label still decide (`PaperRetractionCheck.failedFor`, the
+desktop's `_label_check`); `paperKey` and `isReusable` call bmlib, so keep them
+inside the screen's guard (`uncheckedCauses` runs outside it, safe because a
+failed paper never reaches `doiKey`).
 Europe PMC duplicates' publication types merge into PubMed's copy. **The
 FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C ~/src/bmlib
 worktree add --detach <dir> 83cd2b3`); without it they skip locally, and CI
@@ -33,7 +36,7 @@ last-checked line and warning, *Check again*, the report screen's
 snapshot is the run's record, never rewritten; *Check again* stores per
 `Document`. Open: #651 (Apple stores per document, not per paper), #647,
 #648, #649, #653, #654 (the Android port took #647's per-entry snapshot and
-refused-export backoff, #649's exhaustive names and code-point escaping).
+refused-export backoff, kept across launches, #649's exhaustive names and code-point escaping).
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
 error follows a cancel). Open, lodged by recent rounds: #641 (JATS whitespace,

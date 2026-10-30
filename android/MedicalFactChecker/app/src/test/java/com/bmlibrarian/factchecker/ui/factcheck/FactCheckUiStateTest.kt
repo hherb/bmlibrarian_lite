@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.ui.factcheck
 
+import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
@@ -25,6 +26,7 @@ import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowProgress
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowState
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -37,6 +39,26 @@ import org.junit.Test
  * Tests the UI state model used by FactCheckViewModel.
  */
 class FactCheckUiStateTest {
+
+    // ==================== Left Out as Retracted ====================
+
+    @Test
+    fun `only unscored retracted papers are listed as left out`() {
+        fun doc(id: String, score: Int? = null) = DocumentEntity(id = id, sessionId = "s", title = id, relevanceScore = score)
+        val retracted = PaperRetractionCheck("retracted", checkedAtMs = 1)
+        val state = FactCheckUiState(
+            documents = listOf(doc("out"), doc("concern"), doc("unchecked"), doc("scored", score = 4), doc("never")),
+            retractionChecks = mapOf(
+                "out" to retracted,
+                "concern" to PaperRetractionCheck("concern", checkedAtMs = 1),
+                "unchecked" to PaperRetractionCheck.failed(1),
+                // scored under an earlier run, then found retracted: it is a reference, not left out
+                "scored" to retracted
+            )
+        )
+
+        assertEquals(listOf("out"), state.retractedDocuments.map { it.id })
+    }
 
     // ==================== Default State Tests ====================
 

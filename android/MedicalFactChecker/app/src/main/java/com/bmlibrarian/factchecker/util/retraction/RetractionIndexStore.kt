@@ -33,6 +33,8 @@ import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okio.buffer
+import okio.sink
 import org.bmlib.ffi.RetractionIndex
 import org.bmlib.ffi.RetractionIndexException
 import org.bmlib.ffi.buildRetractionIndex
@@ -50,8 +52,10 @@ sealed class RetractionIndexRefresh {
     data class Refreshed(val noticeCount: Long) : RetractionIndexRefresh()
 
     /**
-     * The download arrived but was not stored, or a recent one was refused;
-     * the previous file is kept. The text is for the log: this app's, never
+     * The export was not stored and is not downloaded again for a day: bmlib
+     * could not build it, it shrank, the index could not be written, or
+     * bmlib's native library is missing; or one was refused within the day.
+     * The previous file is kept. The text is for the log: this app's, never
      * the provider's.
      */
     data class Refused(val reason: String) : RetractionIndexRefresh()
@@ -84,8 +88,36 @@ class RetractionIndexStore(
     /** The last index read, with the file's modification time it was read at. */
     @Volatile private var cached: Pair<Long, RetractionIndex>? = null
 
-    /** When a download was last refused, and why; the next waits a day (#647). */
-    @Volatile private var lastRefusal: Pair<Long, String>? = null
+    /** When a download was last refused, and why, kept across launches; the next waits a day (#647). */
+    private val refusalFile = File(directory, "${RetractionConstants.RETRACTION_INDEX_FILE_NAME}.refused")
+
+    /** The last refusal's time and reason; null when there is none (or its record is unreadable, so a download may be tried). */
+    private fun lastRefusal(): Pair<Long, String>? {
+        if (!refusalFile.exists()) return null
+        return try {
+            val (at, reason) = refusalFile.readText().split('\n', limit = 2)
+            at.toLong() to reason
+        } catch (e: IOException) {
+            Log.w(TAG, "Retraction Watch refusal unreadable: ${e.javaClass.simpleName}")
+            null
+        } catch (e: NumberFormatException) {
+            Log.w(TAG, "Retraction Watch refusal unreadable: ${e.javaClass.simpleName}")
+            null
+        } catch (e: IndexOutOfBoundsException) {
+            Log.w(TAG, "Retraction Watch refusal unreadable: ${e.javaClass.simpleName}")
+            null
+        }
+    }
+
+    /** Record a refusal at [atMs], so the next launch waits out the day too. */
+    private fun recordRefusal(atMs: Long, reason: String) {
+        try {
+            directory.mkdirs()
+            refusalFile.writeText("$atMs\n$reason")
+        } catch (e: IOException) {
+            Log.w(TAG, "Retraction Watch refusal not recorded: ${e.javaClass.simpleName}")
+        }
+    }
 
     /** The stored index, whatever its age; null when missing or unreadable. */
     private fun storedIndex(): RetractionIndex? {
@@ -116,6 +148,7 @@ class RetractionIndexStore(
         val asOf = try {
             LocalDate.parse(index.dataAsOf())
         } catch (e: DateTimeParseException) {
+            Log.w(TAG, "Retraction Watch index has an unreadable dataAsOf")
             return null
         }
         val age = ChronoUnit.DAYS.between(asOf, today(nowMs))
@@ -135,13 +168,13 @@ class RetractionIndexStore(
      */
     suspend fun refreshIfStale(nowMs: Long, email: String): RetractionIndexRefresh = downloading.withLock {
         if (currentIndex(nowMs) != null) return@withLock RetractionIndexRefresh.Fresh
-        lastRefusal?.let { (at, reason) ->
+        lastRefusal()?.let { (at, reason) ->
             if (nowMs - at < RetractionConstants.RETRACTION_WATCH_REFUSED_BACKOFF_MS) return@withLock RetractionIndexRefresh.Refused(reason)
         }
         if (!isUnmetered()) return@withLock RetractionIndexRefresh.Metered
         if (!bmlibLoads()) return@withLock RetractionIndexRefresh.Refused("bmlib's native library is missing")
         withContext(Dispatchers.IO) { refresh(nowMs, email) }.also {
-            if (it is RetractionIndexRefresh.Refused) lastRefusal = nowMs to it.reason
+            if (it is RetractionIndexRefresh.Refused) recordRefusal(nowMs, it.reason)
         }
     }
 
@@ -155,18 +188,25 @@ class RetractionIndexStore(
             .build()
 
         val incomplete = RetractionIndexRefresh.Failed(RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE))
+        // streamed to disk, then read once: the ~68 MB export is never held twice on the heap
+        val download = File(directory, "${RetractionConstants.RETRACTION_INDEX_FILE_NAME}.download")
         val body = try {
             httpClient.newCall(request).execute().use { response ->
                 if (response.code != HTTP_OK) return RetractionIndexRefresh.Failed(RequestFailure.forHttpStatus(response.code))
+                val source = response.body?.source() ?: return incomplete
                 // OkHttp refuses a body shorter than its Content-Length: a download cut short ends here
                 try {
-                    response.body?.bytes()
+                    directory.mkdirs()
+                    download.sink().buffer().use { it.writeAll(source) }
                 } catch (e: IOException) {
                     return incomplete
-                } ?: return incomplete
+                }
             }
+            download.readBytes()
         } catch (e: IOException) {
             return RetractionIndexRefresh.Failed(RequestFailure.fromException(e))
+        } finally {
+            download.delete()
         }
 
         val build = try {
@@ -197,6 +237,7 @@ class RetractionIndexStore(
             return RetractionIndexRefresh.Refused("the index could not be stored")
         }
         cached = file.lastModified() to build.index
+        refusalFile.delete()
         return RetractionIndexRefresh.Refreshed(count)
     }
 

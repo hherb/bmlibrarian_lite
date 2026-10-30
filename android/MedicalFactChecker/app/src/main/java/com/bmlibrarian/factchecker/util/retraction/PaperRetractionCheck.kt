@@ -205,12 +205,36 @@ data class PaperRetractionCheck(
             checkedAtMs = atMs
         )
 
+        /**
+         * The stand-in for a failed check (the desktop's `_label_check`): the
+         * record's own label still retracts, needing neither network nor
+         * database; every other paper is [failed]. Without bmlib's native
+         * library, [failed].
+         *
+         * @param paper The paper whose check failed
+         * @param atMs When the check was attempted
+         */
+        fun failedFor(paper: RetractionPaper, atMs: Long): PaperRetractionCheck {
+            val verdict = try {
+                retractionStatus(null, null, null, paper.publicationTypes)
+            } catch (e: LinkageError) {
+                return failed(atMs)
+            }
+            return if (verdict.status == RetractionStatus.RETRACTED) fromVerdict(verdict, atMs, null, null) else failed(atMs)
+        }
+
         /** [check] as stored JSON. */
         fun encode(check: PaperRetractionCheck): String = json.encodeToString(serializer(), check)
 
-        /** A stored check decoded; null when it cannot be read. */
+        /**
+         * A stored check decoded; null when it cannot be read, a status or
+         * lookup name this build does not know included (the desktop's
+         * `_decode`), so [take] protects it as it protects malformed JSON.
+         */
         fun decode(text: String): PaperRetractionCheck? = try {
-            json.decodeFromString(serializer(), text)
+            json.decodeFromString(serializer(), text).takeIf { check ->
+                RetractionNames.status(check.status) != null && check.unanswered.all { RetractionNames.lookup(it) != null }
+            }
         } catch (e: SerializationException) {
             null
         } catch (e: IllegalArgumentException) {
@@ -227,6 +251,10 @@ data class PaperRetractionCheck(
          * when it [standsAgainst] [fresh]. A row this build cannot read is
          * overwritten only by a check every lookup answered: it may hold a
          * retraction an outage must not erase.
+         *
+         * With no row, even a failed check is stored, written over any row
+         * (Room's REPLACE) where the desktop keeps an existing one: safe while
+         * the workflow is the only writer.
          *
          * @param storedJson The paper's stored row, or null for none
          * @param fresh The check just made

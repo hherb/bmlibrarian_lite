@@ -31,6 +31,7 @@ import com.bmlibrarian.factchecker.domain.model.AppSettings
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
+import com.bmlibrarian.factchecker.util.retraction.BmlibFfi
 import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
 import com.bmlibrarian.factchecker.util.retraction.RetractionPaper
 import com.bmlibrarian.factchecker.util.retraction.RetractionService
@@ -172,8 +173,11 @@ class FactCheckWorkflowRetractionTest {
         Log.clear()
     }
 
-    private fun hold(id: String, pmid: String? = id.removePrefix("d"), doi: String? = null) {
-        documents[id] = DocumentEntity(id = id, sessionId = SESSION_ID, pmid = pmid, doi = doi, title = "Study $id", abstractText = "A.")
+    private fun hold(id: String, pmid: String? = id.removePrefix("d"), doi: String? = null, types: List<String>? = null) {
+        documents[id] = DocumentEntity(
+            id = id, sessionId = SESSION_ID, pmid = pmid, doi = doi, title = "Study $id", abstractText = "A.",
+            publicationTypesJson = types?.joinToString(",", "[", "]") { "\"$it\"" }
+        )
     }
 
     private suspend fun run() = workflow.resumeSession(SESSION_ID, CONFIG)
@@ -238,6 +242,9 @@ class FactCheckWorkflowRetractionTest {
 
         assertTrue(scored.isEmpty())
         assertTrue(snapshot().getValue("d1").isRetracted)
+        // left out on purpose, so settled: it leaves the retry queue rather than failing again
+        coVerify { errors.removeErrorsForDocuments(SESSION_ID, setOf("d1")) }
+        coVerify(exactly = 0) { errors.markRetried(any()) }
     }
 
     @Test
@@ -307,13 +314,94 @@ class FactCheckWorkflowRetractionTest {
     @Test
     fun `a paper with neither DOI nor PMID is checked, scored and stores nothing`() = runTest {
         hold("d1", pmid = null)
-        answers[null.toString()] = CLEAR
+        // as bmlib answers a paper with no identifier: unchecked, both lookups unanswered
+        coEvery { retractionService.check(any()) } coAnswers {
+            firstArg<List<RetractionPaper>>().associateWith { PaperRetractionCheck.failed(1) }
+        }
 
         run()
 
         assertEquals(listOf("d1"), scored)
         assertTrue(rows.isEmpty())
-        assertTrue(snapshot().containsKey("d1"))
+        assertTrue(snapshot().getValue("d1").isUnchecked)
+        assertEquals("Retraction check: 1 paper's retraction status could not be checked: no DOI or PMID.", workflow.retractionNotice.value)
+    }
+
+    /** The desktop's `_label_check`: the label needs neither network nor database. */
+    @Test
+    fun `a failing check still leaves out a paper its own label retracts`() = runTest {
+        BmlibFfi.assumeAvailable()
+        hold("d1", types = listOf("Retracted Publication"))
+        hold("d2", types = listOf("Journal Article"))
+        coEvery { retractionService.check(any()) } throws IOException("down")
+
+        run()
+
+        assertEquals(listOf("d2"), scored)
+        assertTrue(snapshot().getValue("d1").isRetracted)
+        assertTrue(snapshot().getValue("d2").isUnchecked)
+    }
+
+    @Test
+    fun `a stored clear is kept through an outage but the paper is shown unchecked`() = runTest {
+        val clear = CLEAR.copy(checkedAtMs = System.currentTimeMillis() - 10 * DAY_MS)
+        rows["pmid:1"] = PaperRetractionCheck.encode(clear)
+        hold("d1")
+        answers["1"] = OUTAGE
+
+        run()
+
+        assertEquals(listOf("d1"), scored)
+        assertTrue(snapshot().getValue("d1").isUnchecked)
+        assertEquals("the row keeps its answer", clear, PaperRetractionCheck.decode(rows.getValue("pmid:1")))
+        assertEquals(
+            "Retraction check: 1 paper's retraction status could not be checked: Crossref could not be used (HTTP 503).",
+            workflow.retractionNotice.value
+        )
+    }
+
+    @Test
+    fun `a check that cannot be stored still leaves the retracted paper out`() = runTest {
+        hold("d1")
+        hold("d2")
+        answers["2"] = RETRACTED
+        coEvery { retractionService.store(any()) } throws IOException("disk full")
+
+        run()
+
+        assertEquals(listOf("d1"), scored)
+        assertTrue(snapshot().getValue("d2").isRetracted)
+        assertEquals("Retraction check: 1 retracted paper left out.", workflow.retractionNotice.value)
+    }
+
+    @Test
+    fun `stored checks that cannot be read leave every paper unchecked, and the run goes on`() = runTest {
+        hold("d1")
+        coEvery { retractionService.storedChecks(any()) } throws IOException("database locked")
+
+        run()
+
+        assertEquals(listOf("d1"), scored)
+        assertTrue(asked.isEmpty())
+        assertTrue(snapshot().getValue("d1").isUnchecked)
+        assertEquals("Retraction check: 1 paper's retraction status could not be checked: the check failed.", workflow.retractionNotice.value)
+    }
+
+    /** The desktop's `test_one_typed_document_reads_the_label_for_the_paper`. */
+    @Test
+    fun `a paper two documents share is decided against the row this run writes`() = runTest {
+        val label = PaperRetractionCheck(
+            "retracted", StoredRetractionEvidence("pubmed_label", "retraction"), checkedAtMs = System.currentTimeMillis() - 10 * DAY_MS
+        )
+        rows["pmid:1"] = PaperRetractionCheck.encode(label)
+        hold("d1", pmid = "1", types = listOf("Journal Article"))
+        hold("d2", pmid = "1")
+
+        run()
+
+        assertEquals(listOf("d1", "d2"), scored)
+        assertTrue(snapshot().getValue("d2").isClear)
+        assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isClear)
     }
 
     @Test

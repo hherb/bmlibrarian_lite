@@ -39,7 +39,6 @@ class MedicalFactCheckerApp : Application() {
         super.onCreate()
         // The Retraction Watch copy is refreshed off the main thread; no run waits for it
         retractionService.refreshInBackground()
-        // App-wide initialization can be added here
         // Note: Avoid heavy work on main thread - use WorkManager for background init
     }
 }

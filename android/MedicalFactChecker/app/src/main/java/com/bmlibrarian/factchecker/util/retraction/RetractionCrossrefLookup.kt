@@ -27,6 +27,7 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyConstants
 import com.bmlibrarian.factchecker.util.NetworkRetry
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -50,7 +51,8 @@ data class CrossrefAnswer(val result: CrossrefResult, val failure: RequestFailur
  * `RetractionCrossrefLookup`). bmlib builds each request and reads each
  * answer; this sends them, paced and retried as `CrossRefService` is.
  *
- * One per process, so its pacing holds across every screen (#647).
+ * One per process (per contact address), so its pacing holds across every
+ * screen (#647).
  *
  * @param email Contact address for Crossref's polite pool
  * @param httpClient HTTP client
@@ -70,14 +72,23 @@ class RetractionCrossrefLookup(
      *
      * @param dois DOIs in any form bmlib normalises
      * @return An answer per normalised DOI; a DOI bmlib cannot send is absent
-     * @throws kotlinx.coroutines.CancellationException only
+     * @throws CancellationException only: any other failure leaves its batch
+     *   unreachable, so the batches that answered, and the local index, still decide
      */
     suspend fun results(dois: List<String>): Map<String, CrossrefAnswer> {
         if (dois.isEmpty()) return emptyMap()
         val answers = mutableMapOf<String, CrossrefAnswer>()
         for (batch in crossrefRetractionRequests(dois, email).batches) {
             currentCoroutineContext().ensureActive()
-            answers.putAll(answer(batch))
+            val answered = try {
+                answer(batch)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Crossref batch failed: ${e.javaClass.simpleName}")
+                unreachable(batch, RequestFailure(RequestFailureKind.REQUEST_FAILED))
+            }
+            answers.putAll(answered)
         }
         return answers
     }
