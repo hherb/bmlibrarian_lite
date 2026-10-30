@@ -485,6 +485,8 @@ class FactCheckViewModel @Inject constructor(
                 val config = buildWorkflowConfig()
                 // Document observation starts automatically via observeWorkflowSessionId()
                 workflow.startFactCheck(claim, config)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(errorMessage = e.message ?: "Failed to start fact check")
@@ -500,6 +502,8 @@ class FactCheckViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 workflow.continueWithMoreDocuments()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(errorMessage = e.message ?: "Failed to fetch more documents")
@@ -515,6 +519,8 @@ class FactCheckViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 workflow.proceedWithCurrentDocuments()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(errorMessage = e.message ?: "Failed to continue")

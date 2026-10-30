@@ -54,6 +54,9 @@ import io.mockk.coVerify
 import io.mockk.coVerifyOrder
 import io.mockk.mockk
 import io.mockk.slot
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -142,6 +145,27 @@ class FactCheckWorkflowSearchFailureTest {
         coVerify { sessionRepository.setError(SESSION_ID, state.error) }
         coVerify(exactly = 0) { documentRepository.saveDocuments(any()) }
         coVerify(exactly = 0) { sessionRepository.updatePubMedPagination(any(), any(), any()) }
+    }
+
+    @Test
+    fun `Cancel stops a run in its search, and nothing after the search runs (#659)`() = runTest {
+        holdSession(SearchProvider.PUBMED)
+        coEvery { documentRepository.getDocumentCount(SESSION_ID) } returns 0
+        val searching = CompletableDeferred<Unit>()
+        coEvery { pubMedApi.search(any(), any(), any(), any(), any(), any(), any(), any()) } coAnswers {
+            searching.complete(Unit)
+            awaitCancellation()
+        }
+        val run = launch { workflow.resumeSession(SESSION_ID, config(SearchProvider.PUBMED)) }
+        searching.await()
+
+        workflow.cancel()
+
+        assertTrue("the run is still going", run.isCancelled && run.isCompleted)
+        assertTrue("got ${workflow.state.value}", workflow.state.value is WorkflowState.AwaitingUserDecision)
+        coVerify { sessionRepository.updateWorkflowStep(SESSION_ID, WorkflowStep.AWAITING_USER_DECISION) }
+        coVerify(exactly = 0) { documentRepository.saveDocuments(any()) }
+        coVerify(exactly = 0) { sessionRepository.setError(any(), any()) }
     }
 
     @Test
