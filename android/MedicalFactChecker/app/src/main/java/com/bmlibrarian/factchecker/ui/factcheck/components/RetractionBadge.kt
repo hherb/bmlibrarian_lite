@@ -74,6 +74,9 @@ data class RetractionBadgeContent(val text: String, val statusLine: String, val 
         }
 
         private const val NOT_CHECKED = "NOT CHECKED"
+
+        /** A detail view's paper whose check could not be read: NOT CHECKED, said as unread, not never checked. */
+        val UNREAD = RetractionBadgeContent(NOT_CHECKED, RetractionText.STATUS_UNREAD, false, false)
     }
 }
 

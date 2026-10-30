@@ -78,6 +78,8 @@ import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
  *   whose link is all the record keeps (#480)
  * @param onOpenInPubMed Callback when "Open in PubMed" is clicked
  * @param retractionCheck The paper's retraction check; null when never checked (shown NOT CHECKED)
+ * @param retractionLoading Whether the check is still being read, so nothing is said yet
+ * @param retractionUnread Whether it could not be read, so a missing check is unread, not never checked
  * @param onDismiss Callback when the sheet should be dismissed
  * @param modifier Modifier for customizing the component
  */
@@ -92,6 +94,8 @@ fun DocumentDetailSheet(
     onOpenInPubMed: (String) -> Unit,
     onDismiss: () -> Unit,
     retractionCheck: PaperRetractionCheck? = null,
+    retractionLoading: Boolean = false,
+    retractionUnread: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -108,7 +112,12 @@ fun DocumentDetailSheet(
         )
 
         // The paper's retraction status: a detail view says NOT CHECKED for a paper never checked
-        RetractionBadgeContent.of(retractionCheck, inDetail = true)?.let { badge ->
+        val retractionBadge = when {
+            retractionLoading -> null
+            retractionCheck == null && retractionUnread -> RetractionBadgeContent.UNREAD
+            else -> RetractionBadgeContent.of(retractionCheck, inDetail = true)
+        }
+        retractionBadge?.let { badge ->
             Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))
             RetractionBadge(badge)
             Spacer(modifier = Modifier.height(Constants.UI_ELEMENT_SPACING_SMALL.dp))

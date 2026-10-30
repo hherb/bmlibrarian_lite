@@ -61,7 +61,9 @@ import javax.inject.Inject
  * @property report The current report to display, or null if none available
  * @property documents List of documents referenced in the report
  * @property selectedDocument Document selected for detail view
- * @property selectedRetractionCheck Its retraction check (the run's, or a newer stored row); null when never checked
+ * @property selectedRetractionCheck Its retraction check (the run's, or a newer stored row); null until read, or when never checked
+ * @property isLoadingRetractionCheck Whether that check is still being read
+ * @property isRetractionCheckUnread Whether part of it could not be read, so null is not "never checked"
  * @property showDocumentSheet Whether to show the document detail bottom sheet
  * @property isLoadingFullText Whether full text is being fetched for selected document
  * @property isExporting Whether a PDF export is in progress
@@ -72,6 +74,8 @@ data class ReportUiState(
     val documents: List<DocumentEntity> = emptyList(),
     val selectedDocument: DocumentEntity? = null,
     val selectedRetractionCheck: PaperRetractionCheck? = null,
+    val isLoadingRetractionCheck: Boolean = false,
+    val isRetractionCheckUnread: Boolean = false,
     val showDocumentSheet: Boolean = false,
     val isLoadingFullText: Boolean = false,
     val isExporting: Boolean = false,
@@ -279,50 +283,60 @@ class ReportViewModel @Inject constructor(
                 it.copy(
                     selectedDocument = document,
                     selectedRetractionCheck = null,
+                    isLoadingRetractionCheck = true,
+                    isRetractionCheckUnread = false,
                     showDocumentSheet = true
                 )
             }
             viewModelScope.launch {
-                val check = retractionCheckFor(document)
-                _uiState.update { if (it.selectedDocument?.id == document.id) it.copy(selectedRetractionCheck = check) else it }
+                val (check, unread) = retractionCheckFor(document)
+                _uiState.update {
+                    if (it.selectedDocument?.id != document.id) {
+                        it
+                    } else {
+                        it.copy(selectedRetractionCheck = check, isLoadingRetractionCheck = false, isRetractionCheckUnread = unread)
+                    }
+                }
             }
         }
     }
 
     /**
      * The retraction check a document's sheet shows: the run's (its
-     * session's snapshot), or its paper's stored row when newer
-     * ([RetractionSavedWork.rechecked]), as the fact-check screen badges a
-     * restored session. A row that cannot be looked up leaves the run's.
+     * session's snapshot), its paper's stored row when newer
+     * ([RetractionSavedWork.rechecked]), or the stored row alone when the run
+     * recorded none. A row that cannot be looked up leaves the run's.
      *
-     * @return The check; null when the paper was never checked
+     * @return The check, null when none was found; and whether any of it could not be read
      */
-    private suspend fun retractionCheckFor(document: DocumentEntity): PaperRetractionCheck? {
+    private suspend fun retractionCheckFor(document: DocumentEntity): Pair<PaperRetractionCheck?, Boolean> {
+        var unread = false
         val run = try {
             RetractionSnapshot.read(sessionRepository.getSession(document.sessionId)?.retractionSnapshotJson)[document.id]
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "Could not read the run's retraction checks: ${e.javaClass.simpleName}")
+            unread = true
             null
         }
         val stored = try {
             document.retractionPaper.paperKey?.let { key -> retractionService.storedChecks(listOf(key))[key] }
-                ?.let(PaperRetractionCheck::decode)
+                ?.let { row -> PaperRetractionCheck.decode(row).also { if (it == null) unread = true } }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "Could not read the stored retraction check: ${e.javaClass.simpleName}")
+            unread = true
             null
         } catch (e: LinkageError) {
             // paperKey calls bmlib: a build without its native library shows the run's check
             Log.w(TAG, "Stored retraction check unavailable: ${e.javaClass.simpleName}")
+            unread = true
             null
         }
-        return RetractionSavedWork.recheckedChecks(
-            listOfNotNull(run).associateBy { document.id },
-            listOfNotNull(stored).associateBy { document.id }
-        )[document.id]
+        val check = if (run != null && stored != null) RetractionSavedWork.rechecked(run, stored) else run ?: stored
+        return check to unread
     }
 
     /**
@@ -376,6 +390,8 @@ class ReportViewModel @Inject constructor(
             it.copy(
                 selectedDocument = null,
                 selectedRetractionCheck = null,
+                isLoadingRetractionCheck = false,
+                isRetractionCheckUnread = false,
                 showDocumentSheet = false
             )
         }

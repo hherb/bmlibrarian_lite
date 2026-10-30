@@ -225,7 +225,7 @@ fun FactCheckScreen(
                         checking = uiState.isCheckingRetractionsAgain,
                         enabled = !uiState.isRunning,
                         onCheckAgain = viewModel::checkRetractionsAgain,
-                        onCancel = viewModel::cancel
+                        onCancel = viewModel::cancelCheckAgain
                     )
                 }
             }

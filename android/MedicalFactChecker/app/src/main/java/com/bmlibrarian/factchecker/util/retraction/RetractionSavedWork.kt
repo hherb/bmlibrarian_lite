@@ -19,7 +19,8 @@ package com.bmlibrarian.factchecker.util.retraction
  * What a reopened session knows about its papers since its run, worked out
  * from the checks the run used (its snapshot, never rewritten) and each
  * paper's stored row (Swift's `RetractionSavedWork`; the desktop's
- * `rechecked_snapshot` and `changed_since_snapshot`). With one row per paper,
+ * `latest_checks` and `changed_since_snapshot`, though Android never rewrites
+ * the snapshot as `rechecked_snapshot` does). With one row per paper,
  * that row is the paper's latest check, shared by every session holding it.
  */
 object RetractionSavedWork {

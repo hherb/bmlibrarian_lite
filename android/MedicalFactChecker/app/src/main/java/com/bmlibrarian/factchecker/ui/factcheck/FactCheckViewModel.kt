@@ -525,7 +525,7 @@ class FactCheckViewModel @Inject constructor(
 
     /**
      * Check the restored session's papers for retraction again; the
-     * workflow's line says how it went, and [cancel] stops it.
+     * workflow's line says how it went, and [cancelCheckAgain] stops it.
      */
     fun checkRetractionsAgain() {
         viewModelScope.launch {
@@ -538,6 +538,11 @@ class FactCheckViewModel @Inject constructor(
                 _uiState.update { it.copy(errorMessage = e.message ?: "Failed to check retraction status again") }
             }
         }
+    }
+
+    /** Stop *Check again*: its own Cancel, so a tap landing after it ends never cancels the session. */
+    fun cancelCheckAgain() {
+        workflow.cancelCheckAgain()
     }
 
     /**

@@ -176,6 +176,9 @@ object RetractionText {
      * A session's line (the desktop's `saved_work_line`): when its decided
      * papers were checked (the oldest), and how many were not; "could not be
      * checked" when none is decided, "never checked" for none.
+     *
+     * @param checks The session's checks
+     * @param causes [uncheckedCauses] of the unchecked papers; added only when a paper is unchecked
      */
     fun savedWorkLine(checks: Collection<PaperRetractionCheck>, causes: List<String> = emptyList()): String {
         val line = methodsLine(
@@ -183,7 +186,7 @@ object RetractionText {
             notChecked = checks.count { it.isUnchecked },
             heldPapers = checks.isNotEmpty()
         )
-        // the not-checked clause ends the line, so the causes follow it as they follow the run notice's
+        // the causes follow the not-checked count, as they follow the run notice's
         return if (causes.isEmpty() || checks.none { it.isUnchecked }) line else "$line: ${causes.joinToString("; ")}"
     }
 
@@ -198,6 +201,13 @@ object RetractionText {
 
     /** Added to the saved-work line when the stored checks could not be read. */
     const val STORED_CHECKS_UNREAD = "; later checks could not be read"
+
+    /**
+     * A restored session's saved-work line, or a document's detail status, when
+     * its retraction status could not be read at all (Android only so far):
+     * never "never checked", since not knowing is not absence.
+     */
+    const val STATUS_UNREAD = "Retraction status could not be read"
 
     /** Added to the saved-work line when *Check again*'s answers could not be saved. */
     const val CHECK_AGAIN_NOT_SAVED = "; the new status could not be saved with this run"

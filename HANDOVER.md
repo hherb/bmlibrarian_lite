@@ -8,12 +8,12 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Retraction checking, Android: done** (PR 5a #655; PR 5b, branch
+**Retraction checking, Android: done** (PR 5a #655; PR 5b #661, branch
 `feat/retraction-checking-android-saved-work`; plan
 `docs/superpowers/plans/2026-10-30-retraction-checking-android.md`; Android
 section of `doc/developer/retraction_checking.md`, which holds the design).
 *Check again*'s line names why papers stay unchecked (#654 item 1, the
-maintainer's choice; **#660** ports it to Swift and the desktop). **A missing
+maintainer's choice; **#660** is to port it to Swift and the desktop). **A missing
 native library** leaves papers unchecked, but
 stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
@@ -24,7 +24,9 @@ every new workflow `StateFlow` must be stubbed in the three
 `FactCheckViewModel*Test`s**, or the unstubbed `collect` leaks a
 `KotlinNothingValueException` into a later suite (it surfaced in
 `NetworkRetryTest`). Lodged: **#659**: Android's Cancel never stops a
-running fact check (`workflowJob` is never assigned).
+running fact check (`workflowJob` is never assigned); **#662**: an unchecked
+run's warning rule and the Android-only "could not be read" wording, to settle
+across platforms; **#663**: small *Check again* follow-ups.
 
 **Retraction checking, iOS/macOS: done** (PRs #650, #652; plan
 `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`). The
