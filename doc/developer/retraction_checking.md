@@ -157,7 +157,8 @@ UniFFI bindings (`org.bmlib.ffi`); everything else is in
 `PaperRetractionCheck` is the stored check Swift keeps in
 `RetractionChecker.swift` and `Document`; `RetractionConstants` holds what
 Swift's `BioMedLitConstants` does; `RetractionService` is Android's own (the
-Hilt entry point). `RetractionSavedWork` comes with PR 5b.
+Hilt entry point). `RetractionSavedWork` is Swift's, less `latest`: with one
+row per paper, that row is the paper's latest check.
 
 - `RetractionCrossrefLookup` (bmlib's batches over OkHttp, paced and retried
   as `CrossRefService`), `RetractionIndexStore` (the export as bmlib's index
@@ -194,12 +195,24 @@ Hilt entry point). `RetractionSavedWork` comes with PR 5b.
   across launches (a `.refused` file beside the index). A run never waits
   for it, and a device that runs out of memory building it carries on
   without it.
-- Saved work (a restored session's line and warning, *Check again*) and the
-  report screen's `DocumentDetailSheet` status line are PR 5b.
+- **Saved work.** `restoreForViewing` sets `retractionSavedWorkLine`
+  (`savedWorkLine` over `RetractionSavedWork.recheckedChecks`: the run's
+  snapshot, or a newer stored row) and `retractionSavedWorkWarning` for cited
+  papers whose row is now retracted or concern, with no request. A restored
+  session's cards are badged by those same checks
+  (`retractionCurrentChecks`), so badge and warning never disagree. Rows that
+  cannot be read leave the run's checks and say "later checks could not be
+  read". *Check again* (`checkRetractionsAgain`) stores each paper's answer
+  through the run's `take` and never the snapshot. It runs in its own job,
+  which `cancel()` stops without touching the session's step. A failure or a
+  cancel stores nothing and says the run's record stands. Its line names why
+  papers stay unchecked, as the run's notice does (#654 item 1; Android only
+  so far). The report screen's `DocumentDetailSheet` shows the same check,
+  badge and status line, NOT CHECKED for a paper never checked.
 
 Tests: `FactCheckWorkflowRetractionTest`, `RetractionBadgeContentTest`,
-`Migration10To11Test`, `PublicationTypesTest`, `ReportTextTest` (no native
-library), and `util/retraction/Retraction*Test`, which need the host library
+`Migration10To11Test`, `PublicationTypesTest`, `ReportTextTest`,
+`RetractionSavedWorkTest` (no native library), and `util/retraction/Retraction*Test`, which need the host library
 (`BMLIB_DIR`); the checker, lookup and index-store suites run over
 MockWebServer. CI fails if they skip.
 

@@ -79,6 +79,7 @@ import com.bmlibrarian.factchecker.ui.factcheck.components.ClaimInput
 import com.bmlibrarian.factchecker.ui.common.IncompleteSearchCard
 import com.bmlibrarian.factchecker.ui.factcheck.components.DocumentCard
 import com.bmlibrarian.factchecker.ui.factcheck.components.FetchMorePrompt
+import com.bmlibrarian.factchecker.ui.factcheck.components.RetractionSavedWorkCard
 import com.bmlibrarian.factchecker.ui.factcheck.components.SearchProgress
 import com.bmlibrarian.factchecker.ui.factcheck.components.SortingControls
 import com.bmlibrarian.factchecker.util.CostCalculator
@@ -215,6 +216,20 @@ fun FactCheckScreen(
                 }
             }
 
+            // A restored session's retraction line, Check again, and what changed since its report
+            uiState.retractionSavedWorkLine?.let { line ->
+                item(key = "retraction_saved_work") {
+                    RetractionSavedWorkCard(
+                        line = line,
+                        warning = uiState.retractionSavedWorkWarning,
+                        checking = uiState.isCheckingRetractionsAgain,
+                        enabled = !uiState.isRunning,
+                        onCheckAgain = viewModel::checkRetractionsAgain,
+                        onCancel = viewModel::cancel
+                    )
+                }
+            }
+
             // What the full-text step could not do
             uiState.fullTextNotice?.let { notice ->
                 item(key = "full_text_notice") {
@@ -343,7 +358,8 @@ fun FactCheckScreen(
                         onOpenUrl = { url ->
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                         },
-                        retractionCheck = uiState.retractionChecks[document.id]
+                        retractionCheck = uiState.retractionChecks[document.id],
+                        currentRetractionCheck = uiState.retractionCurrentChecks[document.id]
                     )
                 }
             }
@@ -362,7 +378,8 @@ fun FactCheckScreen(
                 ) { document ->
                     DocumentCard(
                         document = document,
-                        retractionCheck = uiState.retractionChecks[document.id]
+                        retractionCheck = uiState.retractionChecks[document.id],
+                        currentRetractionCheck = uiState.retractionCurrentChecks[document.id]
                     )
                 }
             }

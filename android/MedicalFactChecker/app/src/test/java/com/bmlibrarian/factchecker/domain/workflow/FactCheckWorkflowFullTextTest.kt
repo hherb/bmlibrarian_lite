@@ -40,6 +40,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -151,7 +152,7 @@ class FactCheckWorkflowFullTextTest {
             fullTextService = fullTextService,
             retractionService = mockk(relaxed = true)
         )
-        workflow.restoreForViewing(session)
+        runBlocking { workflow.restoreForViewing(session) }
         Log.clear()
     }
 

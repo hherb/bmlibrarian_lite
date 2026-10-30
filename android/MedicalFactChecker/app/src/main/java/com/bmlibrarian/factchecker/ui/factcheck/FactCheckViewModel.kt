@@ -143,6 +143,22 @@ data class FactCheckUiState(
      */
     val retractionChecks: Map<String, PaperRetractionCheck> = emptyMap(),
 
+    /**
+     * A restored session's checks since its run, by document id: what its
+     * badges and status lines show (the run's check, or a newer stored row).
+     * Empty for a run's own session, which shows [retractionChecks].
+     */
+    val retractionCurrentChecks: Map<String, PaperRetractionCheck> = emptyMap(),
+
+    /** A restored session's retraction line, offered with *Check again*; null for a run's own session. */
+    val retractionSavedWorkLine: String? = null,
+
+    /** That papers the restored session's report cites are now retracted or under concern; null when none is. */
+    val retractionSavedWorkWarning: String? = null,
+
+    /** Whether *Check again* is running, so its button stops it instead. */
+    val isCheckingRetractionsAgain: Boolean = false,
+
     /** Whether the session has completed, so it holds a report. */
     val sessionComplete: Boolean = false,
 
@@ -347,6 +363,26 @@ class FactCheckViewModel @Inject constructor(
                 _uiState.update { it.copy(fullTextNotice = notice) }
             }
         }
+        viewModelScope.launch {
+            workflow.retractionSavedWorkLine.collect { line ->
+                _uiState.update { it.copy(retractionSavedWorkLine = line) }
+            }
+        }
+        viewModelScope.launch {
+            workflow.retractionSavedWorkWarning.collect { warning ->
+                _uiState.update { it.copy(retractionSavedWorkWarning = warning) }
+            }
+        }
+        viewModelScope.launch {
+            workflow.retractionCurrentChecks.collect { checks ->
+                _uiState.update { it.copy(retractionCurrentChecks = checks) }
+            }
+        }
+        viewModelScope.launch {
+            workflow.isCheckingRetractionsAgain.collect { checking ->
+                _uiState.update { it.copy(isCheckingRetractionsAgain = checking) }
+            }
+        }
     }
 
     /**
@@ -483,6 +519,23 @@ class FactCheckViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(errorMessage = e.message ?: "Failed to continue")
                 }
+            }
+        }
+    }
+
+    /**
+     * Check the restored session's papers for retraction again; the
+     * workflow's line says how it went, and [cancel] stops it.
+     */
+    fun checkRetractionsAgain() {
+        viewModelScope.launch {
+            try {
+                workflow.checkRetractionsAgain()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // the store itself could not be read: the line cannot say how it went
+                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to check retraction status again") }
             }
         }
     }

@@ -18,11 +18,19 @@
 
 package com.bmlibrarian.factchecker.ui.factcheck.components
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -96,5 +104,60 @@ fun RetractionBadge(content: RetractionBadgeContent, modifier: Modifier = Modifi
                 vertical = Constants.UI_BADGE_PADDING_VERTICAL.dp
             )
         )
+    }
+}
+
+/**
+ * A restored session's retraction line with *Check again*, and the warning
+ * when a paper its report cites is now retracted or under concern (the
+ * desktop's report-tab line, button and warning; Swift's
+ * `RetractionSavedWorkSection`). While the check runs, the button stops it.
+ *
+ * @param line The saved-work line
+ * @param warning The warning, or null
+ * @param checking Whether *Check again* is running
+ * @param enabled Whether *Check again* may start (no run is going)
+ * @param onCheckAgain Starts *Check again*
+ * @param onCancel Stops it
+ */
+@Composable
+fun RetractionSavedWorkCard(
+    line: String,
+    warning: String?,
+    checking: Boolean,
+    enabled: Boolean,
+    onCheckAgain: () -> Unit,
+    onCancel: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING_SMALL.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Constants.UI_ELEMENT_SPACING_SMALL.dp)
+        ) {
+            Text(
+                text = line,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            if (checking) {
+                OutlinedButton(onClick = onCancel) { Text("Cancel") }
+            } else {
+                OutlinedButton(onClick = onCheckAgain, enabled = enabled) { Text(RetractionText.CHECK_AGAIN_LABEL) }
+            }
+        }
+        warning?.let {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
+                )
+            }
+        }
     }
 }

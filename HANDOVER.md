@@ -8,28 +8,23 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Retraction checking, Android: PR 5a open** (branch
-`feat/retraction-checking-android`; plan
-`docs/superpowers/plans/2026-10-30-retraction-checking-android.md`, Tasks 1–7;
-Android section of `doc/developer/retraction_checking.md`). Ports BioMedLit's
-`Retraction/` files to `app/.../util/retraction/` over the FFI. **Checks are
-stored per paper from the start** (Room 11 `retraction_checks`, #651's shape);
-the run's record is `sessions.retraction_snapshot_json`. The screen is at the
-top of `FactCheckWorkflow.scoreDocuments`, which every scoring path calls; a
-run starts in `runHandlingFailures`, `fetchMoreEvidence` and
-`retryFailedDocuments`. **A missing native library** (`UnsatisfiedLinkError`,
-a debug build without bmlib) leaves papers unchecked, but stored warnings and
-a paper's own label still decide (`PaperRetractionCheck.failedFor`, the
-desktop's `_label_check`); `paperKey` and `isReusable` call bmlib, so keep them
-inside the screen's guard (`uncheckedCauses` runs outside it, safe because a
-failed paper never reaches `doiKey`).
-Europe PMC duplicates' publication types merge into PubMed's copy. **The
-FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C ~/src/bmlib
-worktree add --detach <dir> 83cd2b3`); without it they skip locally, and CI
-fails if they skip. **Next: PR 5b** (Tasks 8–9: a restored session's
-last-checked line and warning, *Check again*, the report screen's
-`DocumentDetailSheet` status line), then the ledger's feature row becomes
-`android: ported`.
+**Retraction checking, Android: done** (PR 5a #655; PR 5b, branch
+`feat/retraction-checking-android-saved-work`; plan
+`docs/superpowers/plans/2026-10-30-retraction-checking-android.md`; Android
+section of `doc/developer/retraction_checking.md`, which holds the design).
+*Check again*'s line names why papers stay unchecked (#654 item 1, the
+maintainer's choice; **#660** ports it to Swift and the desktop). **A missing
+native library** leaves papers unchecked, but
+stored warnings and a paper's own label still decide; `paperKey` and
+`isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
+FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C
+~/src/bmlib worktree add --detach <dir> 83cd2b3`); without it they skip
+locally, and CI fails if they skip. **A ViewModel test mocks the workflow:
+every new workflow `StateFlow` must be stubbed in the three
+`FactCheckViewModel*Test`s**, or the unstubbed `collect` leaks a
+`KotlinNothingValueException` into a later suite (it surfaced in
+`NetworkRetryTest`). Lodged: **#659**: Android's Cancel never stops a
+running fact check (`workflowJob` is never assigned).
 
 **Retraction checking, iOS/macOS: done** (PRs #650, #652; plan
 `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`). The
@@ -246,8 +241,10 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **Retraction checking**: Android PR 5b (above), then Phases 3–6 (Phase 4 as adapter work
-  over the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**, **#585**.
+- **Retraction checking**: Phases 3–6 (Phase 4 as adapter work over the Rust
+  parser); **#660** (Check again's causes, Swift and desktop). bmlib audit
+  leftovers: **#571**, **#573**–**#581**, **#585**.
+- **#659** Android's Cancel stops nothing (every run entry point).
 - **#545** sweep the PDF library for other articles' PDFs (CLI only, the
   maintainer's call); **#547** keep a set-aside PDF from the GUI (both from
   #541); **#555** Android release builds fail R8; **#556**–**#558** (#546's).

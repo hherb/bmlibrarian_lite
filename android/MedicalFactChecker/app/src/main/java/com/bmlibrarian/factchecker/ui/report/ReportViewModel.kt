@@ -34,6 +34,11 @@ import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
 import com.bmlibrarian.factchecker.ui.report.components.ReferenceInfo
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.PdfExporter
+import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
+import com.bmlibrarian.factchecker.util.retraction.RetractionSavedWork
+import com.bmlibrarian.factchecker.util.retraction.RetractionService
+import com.bmlibrarian.factchecker.util.retraction.RetractionSnapshot
+import com.bmlibrarian.factchecker.util.retraction.retractionPaper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.channels.Channel
@@ -56,6 +61,7 @@ import javax.inject.Inject
  * @property report The current report to display, or null if none available
  * @property documents List of documents referenced in the report
  * @property selectedDocument Document selected for detail view
+ * @property selectedRetractionCheck Its retraction check (the run's, or a newer stored row); null when never checked
  * @property showDocumentSheet Whether to show the document detail bottom sheet
  * @property isLoadingFullText Whether full text is being fetched for selected document
  * @property isExporting Whether a PDF export is in progress
@@ -65,6 +71,7 @@ data class ReportUiState(
     val report: ReportEntity? = null,
     val documents: List<DocumentEntity> = emptyList(),
     val selectedDocument: DocumentEntity? = null,
+    val selectedRetractionCheck: PaperRetractionCheck? = null,
     val showDocumentSheet: Boolean = false,
     val isLoadingFullText: Boolean = false,
     val isExporting: Boolean = false,
@@ -149,7 +156,8 @@ class ReportViewModel @Inject constructor(
     private val documentRepository: DocumentRepository,
     private val fullTextService: FullTextService,
     private val settingsRepository: SettingsRepository,
-    private val pdfExporter: PdfExporter
+    private val pdfExporter: PdfExporter,
+    private val retractionService: RetractionService
 ) : ViewModel() {
 
     companion object {
@@ -270,10 +278,51 @@ class ReportViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     selectedDocument = document,
+                    selectedRetractionCheck = null,
                     showDocumentSheet = true
                 )
             }
+            viewModelScope.launch {
+                val check = retractionCheckFor(document)
+                _uiState.update { if (it.selectedDocument?.id == document.id) it.copy(selectedRetractionCheck = check) else it }
+            }
         }
+    }
+
+    /**
+     * The retraction check a document's sheet shows: the run's (its
+     * session's snapshot), or its paper's stored row when newer
+     * ([RetractionSavedWork.rechecked]), as the fact-check screen badges a
+     * restored session. A row that cannot be looked up leaves the run's.
+     *
+     * @return The check; null when the paper was never checked
+     */
+    private suspend fun retractionCheckFor(document: DocumentEntity): PaperRetractionCheck? {
+        val run = try {
+            RetractionSnapshot.read(sessionRepository.getSession(document.sessionId)?.retractionSnapshotJson)[document.id]
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not read the run's retraction checks: ${e.javaClass.simpleName}")
+            null
+        }
+        val stored = try {
+            document.retractionPaper.paperKey?.let { key -> retractionService.storedChecks(listOf(key))[key] }
+                ?.let(PaperRetractionCheck::decode)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not read the stored retraction check: ${e.javaClass.simpleName}")
+            null
+        } catch (e: LinkageError) {
+            // paperKey calls bmlib: a build without its native library shows the run's check
+            Log.w(TAG, "Stored retraction check unavailable: ${e.javaClass.simpleName}")
+            null
+        }
+        return RetractionSavedWork.recheckedChecks(
+            listOfNotNull(run).associateBy { document.id },
+            listOfNotNull(stored).associateBy { document.id }
+        )[document.id]
     }
 
     /**
@@ -326,6 +375,7 @@ class ReportViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 selectedDocument = null,
+                selectedRetractionCheck = null,
                 showDocumentSheet = false
             )
         }

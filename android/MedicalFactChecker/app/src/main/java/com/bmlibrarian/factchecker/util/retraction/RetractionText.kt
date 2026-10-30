@@ -177,11 +177,52 @@ object RetractionText {
      * papers were checked (the oldest), and how many were not; "could not be
      * checked" when none is decided, "never checked" for none.
      */
-    fun savedWorkLine(checks: Collection<PaperRetractionCheck>): String = methodsLine(
-        checkedAtMs = checks.filterNot { it.isUnchecked }.minOfOrNull { it.checkedAtMs },
-        notChecked = checks.count { it.isUnchecked },
-        heldPapers = checks.isNotEmpty()
-    )
+    fun savedWorkLine(checks: Collection<PaperRetractionCheck>, causes: List<String> = emptyList()): String {
+        val line = methodsLine(
+            checkedAtMs = checks.filterNot { it.isUnchecked }.minOfOrNull { it.checkedAtMs },
+            notChecked = checks.count { it.isUnchecked },
+            heldPapers = checks.isNotEmpty()
+        )
+        // the not-checked clause ends the line, so the causes follow it as they follow the run notice's
+        return if (causes.isEmpty() || checks.none { it.isUnchecked }) line else "$line: ${causes.joinToString("; ")}"
+    }
+
+    /** The button that checks a reopened session's papers again. */
+    const val CHECK_AGAIN_LABEL = "Check again"
+
+    /** The saved-work line while *Check again* runs. */
+    const val CHECKING_AGAIN_LINE = "Checking retraction status…"
+
+    /** Added to the saved-work line when *Check again* failed. */
+    const val CHECK_AGAIN_FAILED = "; it could not be checked again, so this is still the run's record"
+
+    /** Added to the saved-work line when the stored checks could not be read. */
+    const val STORED_CHECKS_UNREAD = "; later checks could not be read"
+
+    /** Added to the saved-work line when *Check again*'s answers could not be saved. */
+    const val CHECK_AGAIN_NOT_SAVED = "; the new status could not be saved with this run"
+
+    /** *Check again*'s note for decided papers no source answered this time, whose record stays; "" for none. */
+    fun notCheckedAgainClause(count: Int): String =
+        if (count == 0) "" else "; ${if (count == 1) "1 paper" else "${grouped(count)} papers"} could not be checked again"
+
+    /**
+     * Warns that papers a saved report cites are now retracted or under
+     * concern (the desktop's `saved_work_warning`), one paper per line. It
+     * suggests re-running the question; the report is not rewritten.
+     *
+     * @param changed Each paper's title and latest check
+     * @return The warning; null when nothing changed
+     */
+    fun savedWorkWarning(changed: List<Pair<String, PaperRetractionCheck>>): String? {
+        if (changed.isEmpty()) return null
+        val subject = if (changed.size == 1) "1 paper this report cites has" else "${grouped(changed.size)} papers this report cites have"
+        val papers = changed.map { (title, check) ->
+            "• ${collapsedWhitespace(title)}: ${paperStatusLine(check)}"
+        }
+        return (listOf("Since this report was written, $subject a retraction warning:") + papers +
+            "The report has not been changed; re-run the question to bring it up to date.").joinToString("\n")
+    }
 
     /**
      * A left-out paper's line (the desktop's `excluded_line`): why the run
@@ -222,16 +263,18 @@ object RetractionText {
 
     /** A title safe inside one markdown line: whitespace collapsed, specials escaped, by code point (#649). */
     internal fun plainTitle(title: String): String {
-        // Char.isWhitespace, not a regex \s: ASCII-only on the JVM, Unicode on Android
-        val collapsed = title.map { if (it.isWhitespace()) ' ' else it }.joinToString("").split(' ')
-            .filter { it.isNotEmpty() }.joinToString(" ")
         val out = StringBuilder()
-        collapsed.codePoints().forEach { point ->
+        collapsedWhitespace(title).codePoints().forEach { point ->
             if (point < 0x80 && point.toChar() in MARKDOWN_SPECIALS) out.append('\\')
             out.appendCodePoint(point)
         }
         return out.toString()
     }
+
+    /** Runs of whitespace as one space, trimmed. */
+    private fun collapsedWhitespace(text: String): String =
+        // Char.isWhitespace, not a regex \s: ASCII-only on the JVM, Unicode on Android
+        text.map { if (it.isWhitespace()) ' ' else it }.joinToString("").split(' ').filter { it.isNotEmpty() }.joinToString(" ")
 
     private const val MARKDOWN_SPECIALS = "\\`*_[]<>"
 

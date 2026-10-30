@@ -488,7 +488,7 @@ class FactCheckWorkflowSearchFailureTest {
     }
 
     @Test
-    fun `a session reopened from history shows what its search failed to retrieve`() {
+    fun `a session reopened from history shows what its search failed to retrieve`() = runTest {
         holdSession(SearchProvider.PUBMED)
         val recorded = listOf(RetrievalShortfall(SearchProvider.PUBMED, RequestFailure(RequestFailureKind.HTTP_STATUS, 429), 20))
 
