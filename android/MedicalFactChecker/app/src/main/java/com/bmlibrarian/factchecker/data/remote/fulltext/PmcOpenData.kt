@@ -6,6 +6,7 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
+import com.bmlibrarian.factchecker.util.executeCancellably
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -254,7 +255,7 @@ class PmcOpenDataService internal constructor(
         ) {
             pacer.awaitTurn() // every attempt takes its own slot
             withContext(Dispatchers.IO) {
-                httpClient.newCall(request).execute().use { response ->
+                httpClient.executeCancellably(request) { response ->
                     if (response.code in Constants.PMC_OPEN_DATA_RETRYABLE_STATUSES) {
                         throw RetryableStatusException(response.code)
                     }

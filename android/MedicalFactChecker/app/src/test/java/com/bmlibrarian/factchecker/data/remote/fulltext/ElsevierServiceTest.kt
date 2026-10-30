@@ -24,6 +24,7 @@ import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.cancelInFlight
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
@@ -562,6 +563,16 @@ class ElsevierServiceTest {
         assertThrows(CancellationException::class.java) {
             runBlocking { service(shared = cancelling).fetch() }
         }
+    }
+
+    /** A cancel ends a request in flight at once, never answered as a failure (#665). */
+    @Test
+    fun `a cancel ends a request in flight`() {
+        routes[path] = MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)
+
+        val thrown = cancelInFlight(server) { service().fetch() }
+
+        assertTrue("$thrown", thrown is CancellationException)
     }
 
     @Test

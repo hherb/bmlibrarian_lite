@@ -27,14 +27,17 @@ import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
 import com.bmlibrarian.factchecker.domain.model.OpenAccessSource
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
+import com.bmlibrarian.factchecker.util.CANCEL_WITHIN_MS
 import com.bmlibrarian.factchecker.util.Constants
 import io.mockk.coEvery
 import io.mockk.mockk
 import java.nio.charset.Charset
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -558,22 +561,18 @@ class FullTextServiceUnpaywallTest {
     }
 
     @Test
-    fun `a cancelled landing-page read is not logged as a failed lookup`() = runTest {
+    fun `a cancelled landing-page read is not logged as a failed lookup`() = runBlocking {
         unpaywallAnswers(pdfUrl = null, landingPage = server.url(handlePath).toString())
-        routes[handlePath] = MockResponse()
-            .setHeadersDelay(1, TimeUnit.SECONDS)
-            .setHeader("Content-Type", "text/html")
-            .setBody("""<meta name="citation_pdf_url" content="$pdfPath">""")
+        routes[handlePath] = MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)
 
         var completed = false
-        val job = launch(Dispatchers.Default) {
+        val job = launch(Dispatchers.IO) {
             fetch()
             completed = true
         }
         server.takeRequest() // Unpaywall
         server.takeRequest() // the landing page, now in flight
-        job.cancel()
-        job.join()
+        withTimeout(CANCEL_WITHIN_MS) { job.cancelAndJoin() } // ends at once, not when the page answers (#665)
 
         assertFalse(completed)
         assertFalse("${Log.lines}", Log.lines.any { "lookup failed" in it || "went unassessed" in it })

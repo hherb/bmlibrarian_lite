@@ -24,6 +24,7 @@ import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.text.textembedder.TextEmbedder
 import com.google.mediapipe.tasks.text.textembedder.TextEmbedderResult
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -32,6 +33,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
+import com.bmlibrarian.factchecker.util.executeCancellably
 import java.io.File
 import java.io.FileOutputStream
 import javax.inject.Inject
@@ -110,6 +112,9 @@ class EmbeddingService @Inject constructor(
             textEmbedder = TextEmbedder.createFromOptions(context, options)
             Log.d(TAG, "TextEmbedder initialized successfully")
             true
+        } catch (e: CancellationException) {
+            initializationAttempted = false // a cancelled run is no reason to give up on embeddings
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize TextEmbedder", e)
             initializationError = e
@@ -135,6 +140,8 @@ class EmbeddingService @Inject constructor(
 
                 computeSimilarityFromResults(claimResult, docResult)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error computing similarity", e)
             null
@@ -192,6 +199,8 @@ class EmbeddingService @Inject constructor(
                     }
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error scoring documents", e)
             List(documents.size) { null }
@@ -236,8 +245,11 @@ class EmbeddingService @Inject constructor(
     /**
      * Download the Universal Sentence Encoder model.
      *
+     * Written to a `.part` file and renamed into place, so a download that breaks
+     * off, even with the process, never leaves a partial file taken for the model.
+     *
      * @param targetFile The file to save the model to.
-     * @throws Exception if download fails.
+     * @throws Exception if the download fails; nothing is left at [targetFile].
      */
     private suspend fun downloadModel(targetFile: File) = withContext(Dispatchers.IO) {
         Log.d(TAG, "Downloading embedding model from ${Constants.EMBEDDING_MODEL_URL}")
@@ -246,29 +258,37 @@ class EmbeddingService @Inject constructor(
             .url(Constants.EMBEDDING_MODEL_URL)
             .build()
 
-        NetworkRetry.withExponentialBackoff(
-            maxRetries = Constants.NETWORK_MAX_RETRIES,
-            shouldRetry = { NetworkRetry.isRetryableException(it) },
-            onRetry = { attempt, delayMs, error ->
-                Log.w(TAG, "Model download attempt $attempt failed: ${error.message}, retrying in ${delayMs}ms")
-            }
-        ) {
-            val response = okHttpClient.newCall(request).execute()
-
-            if (!response.isSuccessful) {
-                if (NetworkRetry.isRetryableStatusCode(response.code)) {
-                    throw java.io.IOException("Failed to download model: ${response.code}")
+        val partial = File(targetFile.parentFile, targetFile.name + Constants.EMBEDDING_MODEL_PARTIAL_SUFFIX)
+        try {
+            NetworkRetry.withExponentialBackoff(
+                maxRetries = Constants.NETWORK_MAX_RETRIES,
+                shouldRetry = { NetworkRetry.isRetryableException(it) },
+                onRetry = { attempt, delayMs, error ->
+                    Log.w(TAG, "Model download attempt $attempt failed: ${error.message}, retrying in ${delayMs}ms")
                 }
-                throw Exception("Failed to download model: ${response.code}")
-            }
-
-            response.body?.let { body ->
-                FileOutputStream(targetFile).use { output ->
-                    body.byteStream().use { input ->
-                        input.copyTo(output)
+            ) {
+                okHttpClient.executeCancellably(request) { response ->
+                    if (!response.isSuccessful) {
+                        if (NetworkRetry.isRetryableStatusCode(response.code)) {
+                            throw java.io.IOException("Failed to download model: ${response.code}")
+                        }
+                        throw Exception("Failed to download model: ${response.code}")
                     }
+
+                    response.body?.let { body ->
+                        FileOutputStream(partial).use { output ->
+                            body.byteStream().use { input ->
+                                input.copyTo(output)
+                            }
+                        }
+                    } ?: throw Exception("Empty response body")
                 }
-            } ?: throw Exception("Empty response body")
+            }
+            if (!partial.renameTo(targetFile)) {
+                throw java.io.IOException("Could not move the downloaded model into place")
+            }
+        } finally {
+            partial.delete() // gone once renamed; otherwise never to be read as the model
         }
 
         Log.d(TAG, "Model downloaded successfully: ${targetFile.length()} bytes")

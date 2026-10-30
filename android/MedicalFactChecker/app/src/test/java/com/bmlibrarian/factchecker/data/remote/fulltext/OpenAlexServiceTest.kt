@@ -22,6 +22,7 @@ import com.bmlibrarian.factchecker.data.remote.transparency.RequestPacer
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.cancelInFlight
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -35,6 +36,7 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
 import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -196,6 +198,16 @@ class OpenAlexServiceTest {
     }
 
     /** Cancellation is not an error: it reaches the caller. */
+    /** A cancel ends a request in flight at once, never answered as a failure (#665). */
+    @Test
+    fun `a cancel ends a request in flight`() {
+        routes[path] = MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)
+
+        val thrown = cancelInFlight(server) { service().fetchPdfUrls("10.1/x") }
+
+        assertTrue("$thrown", thrown is CancellationException)
+    }
+
     @Test
     fun `cancellation still propagates`() {
         val cancelling = OkHttpClient.Builder()

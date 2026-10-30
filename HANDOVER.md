@@ -26,10 +26,17 @@ every new workflow `StateFlow` must be stubbed in the three
 `NetworkRetryTest`). **Cancel stops the run** (#659): each workflow entry
 point records its coroutine as `workflowJob`, and `cancel()` joins it before
 writing the session step; keep that line in any new entry point (a test
-in `FactCheckWorkflowSearchFailureTest` cancels each one). Lodged: **#662**: an
+in `FactCheckWorkflowSearchFailureTest` cancels each one). **Cancel does not
+wait on a fetch** (#665): an OkHttp call a run makes goes through
+`OkHttpClient.executeCancellably` (`util/CancellableCall.kt`), never a bare
+`execute()`; a cancel then ends the call and its body read, thrown as the
+cancellation it is (the one bare `execute()` left, `RetractionIndexStore`'s
+export refresh, runs in the service's own scope, not a run's). Each fetching
+service has a test that cancels a request in flight (`cancelInFlight`, test
+`util/InFlightCancel.kt`). The embedding model downloads to a `.part` file
+renamed into place. Lodged: **#662**: an
 unchecked run's warning rule and the Android-only "could not be read" wording,
-to settle across platforms; **#663**: small *Check again* follow-ups; **#665**:
-Cancel waits on a blocking OkHttp `execute()` (full text, transparency).
+to settle across platforms; **#663**: small *Check again* follow-ups.
 
 **Retraction checking, iOS/macOS: done** (PRs #650, #652; plan
 `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`). The
@@ -75,22 +82,13 @@ have landed):
 
 ## Recently landed (context)
 
-- **Unknown stop reasons** (#637, PR #638): each provider names the stop
-  reasons it knows (`ANTHROPIC_KNOWN_STOP_REASONS`; Ollama's `stop`/`length`)
-  and logs any other, read as finished unless the whole token limit was
-  generated; `None` is silent. A cut-off smart-search answer holding complete
-  queries returns `cut_off_queries_notice(n)` (`SmartSearchRound.notice`) into
-  the review's and the report's `smart_search_notice` and Find More
-  Evidence's `MoreEvidence.cut_off_notice`. **A test stubbing the reporting or
+- **Cut-off, refused and unknown-stop answers** (#629, #631, #637; PRs #630,
+  #632, #636, #638): a cut-off answer raises `TruncatedResponseError`
+  (`.content` kept; smart search searches its complete queries and says so in
+  `smart_search_notice`), `refusal` raises `RefusedResponseError` (never
+  retried); an unknown stop reason is logged and read as finished unless the
+  whole token limit was generated. **A test stubbing the reporting or
   interrogation answer patches `_chat_prose`, not `_chat`.**
-- **Cut-off and refused answers** (#629, #631; PRs #630, #632, #636): a
-  cut-off answer (`STOP_REASON_MAX_TOKENS`, Anthropic's
-  `model_context_window_exceeded`, Ollama's `length` or a whole `num_predict`)
-  raises `TruncatedResponseError` (`.content` kept; smart search searches its
-  complete queries, `cut_off_alternative_queries`, never asks again);
-  `refusal` raises `RefusedResponseError` (`MODEL_REFUSED`, never retried).
-  `ReportMetadata.smart_search_notice` is in the methodology;
-  `RetractionScreen.failed_ids`; `QualityFilter.to_report_settings()`.
 - **Desktop: Find More Evidence and repeated smart search** (PR #628).
   `smart_search.py` is told every query already run (`smart_search_run_queries`);
   an alternative search's loss is `ShortfallQuery.ALTERNATIVE`. Find More
@@ -246,7 +244,6 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **#665** Android's Cancel waits on a blocking full-text fetch.
 - **Retraction checking**: Phases 3–6 (Phase 4 as adapter work over the Rust
   parser); **#660** (Check again's causes, Swift and desktop). bmlib audit
   leftovers: **#571**, **#573**–**#581**, **#585**.
