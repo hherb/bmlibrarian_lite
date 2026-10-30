@@ -84,6 +84,7 @@ class FactCheckWorkflowSearchFailureTest {
     private lateinit var documentRepository: DocumentRepository
     private lateinit var reportRepository: ReportRepository
     private lateinit var usageRepository: UsageRepository
+    private lateinit var errorPersistenceManager: ErrorPersistenceManager
     private lateinit var workflow: FactCheckWorkflow
 
     /** The session as the repository holds it; updated by the recorded shortfalls. */
@@ -98,6 +99,7 @@ class FactCheckWorkflowSearchFailureTest {
         documentRepository = mockk(relaxed = true)
         reportRepository = mockk(relaxed = true)
         usageRepository = mockk(relaxed = true)
+        errorPersistenceManager = mockk(relaxed = true)
         workflow = workflowWith { NcbiCredentials.of(apiKey = null, email = null) }
         Log.clear()
     }
@@ -118,7 +120,7 @@ class FactCheckWorkflowSearchFailureTest {
         parallelScoringService = mockk(relaxed = true),
         parallelCitationService = mockk(relaxed = true),
         checkpointManager = mockk(relaxed = true),
-        errorPersistenceManager = mockk(relaxed = true),
+        errorPersistenceManager = errorPersistenceManager,
         embeddingService = mockk(relaxed = true),
         hydeGenerator = mockk(relaxed = true),
         transparencyRunner = mockk(relaxed = true),
@@ -148,7 +150,7 @@ class FactCheckWorkflowSearchFailureTest {
     }
 
     @Test
-    fun `Cancel stops a run in its search, and nothing after the search runs (#659)`() = runTest {
+    fun `Cancel stops a run in its search, and leaves the session awaiting the user's decision (#659)`() = runTest {
         holdSession(SearchProvider.PUBMED)
         coEvery { documentRepository.getDocumentCount(SESSION_ID) } returns 0
         val searching = CompletableDeferred<Unit>()
@@ -161,11 +163,40 @@ class FactCheckWorkflowSearchFailureTest {
 
         workflow.cancel()
 
-        assertTrue("the run is still going", run.isCancelled && run.isCompleted)
+        assertTrue("the run was not cancelled", run.isCancelled && run.isCompleted)
         assertTrue("got ${workflow.state.value}", workflow.state.value is WorkflowState.AwaitingUserDecision)
         coVerify { sessionRepository.updateWorkflowStep(SESSION_ID, WorkflowStep.AWAITING_USER_DECISION) }
-        coVerify(exactly = 0) { documentRepository.saveDocuments(any()) }
         coVerify(exactly = 0) { sessionRepository.setError(any(), any()) }
+    }
+
+    /** Each entry point records its run for Cancel to stop: one that does not is never stopped. */
+    @Test
+    fun `Cancel stops a run whichever entry point started it (#659)`() = runTest {
+        holdSession(SearchProvider.PUBMED)
+        val entryPoints: Map<String, suspend () -> Unit> = mapOf(
+            "startFactCheck" to { workflow.startFactCheck(stored.claimText, config(SearchProvider.PUBMED)) },
+            "resumeSession" to { workflow.resumeSession(SESSION_ID, config(SearchProvider.PUBMED)) },
+            "continueWithMoreDocuments" to { workflow.continueWithMoreDocuments() },
+            "proceedWithCurrentDocuments" to { workflow.proceedWithCurrentDocuments() },
+            "fetchMoreEvidence" to { workflow.fetchMoreEvidence() },
+            "retryFullTextRetrieval" to { workflow.retryFullTextRetrieval() },
+            "retryFailedDocuments" to { workflow.retryFailedDocuments() }
+        )
+        for ((name, entryPoint) in entryPoints) {
+            workflow.restoreForViewing(stored)
+            // The run's first call holds it; cancel()'s own calls pass
+            val reached = CompletableDeferred<Unit>()
+            val hold: suspend () -> Unit = { if (reached.complete(Unit)) awaitCancellation() }
+            coEvery { usageRepository.getCurrentMonthSpend() } coAnswers { hold(); 0.0 }
+            coEvery { sessionRepository.updateWorkflowStep(any(), any()) } coAnswers { hold() }
+            coEvery { errorPersistenceManager.getRetryableErrorsByStep(any(), any()) } coAnswers { hold(); emptyList() }
+            val run = launch { entryPoint() }
+            reached.await()
+
+            workflow.cancel()
+
+            assertTrue("$name's run was not cancelled", run.isCancelled && run.isCompleted)
+        }
     }
 
     @Test

@@ -499,6 +499,7 @@ class FactCheckViewModel @Inject constructor(
      * User wants to fetch more documents.
      */
     fun fetchMoreDocuments() {
+        if (!startingAction()) return
         viewModelScope.launch {
             try {
                 workflow.continueWithMoreDocuments()
@@ -508,6 +509,8 @@ class FactCheckViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(errorMessage = e.message ?: "Failed to fetch more documents")
                 }
+            } finally {
+                endingAction()
             }
         }
     }
@@ -516,6 +519,7 @@ class FactCheckViewModel @Inject constructor(
      * User declines to fetch more documents.
      */
     fun skipMoreDocuments() {
+        if (!startingAction()) return
         viewModelScope.launch {
             try {
                 workflow.proceedWithCurrentDocuments()
@@ -525,6 +529,8 @@ class FactCheckViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(errorMessage = e.message ?: "Failed to continue")
                 }
+            } finally {
+                endingAction()
             }
         }
     }
