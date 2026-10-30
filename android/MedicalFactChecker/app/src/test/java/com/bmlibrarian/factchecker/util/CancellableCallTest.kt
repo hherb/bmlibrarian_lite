@@ -19,10 +19,11 @@
 package com.bmlibrarian.factchecker.util
 
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -33,7 +34,6 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -59,21 +59,11 @@ class CancellableCallTest {
 
     private fun request() = Request.Builder().url(server.url("/slow")).build()
 
-    /** Start a call, wait until the server holds it, cancel, and answer what the caller saw. */
-    private fun cancelInFlight(read: (okhttp3.Response) -> Unit): Throwable? = runBlocking {
-        var thrown: Throwable? = null
-        val job = launch(Dispatchers.IO) {
-            try {
-                client.executeCancellably(request(), read)
-            } catch (e: Throwable) {
-                thrown = e
-                throw e
-            }
+    /** Start a call that [read]s its response, cancel it in flight, and answer what the caller saw. */
+    private fun cancelInFlight(reading: CountDownLatch? = null, read: (okhttp3.Response) -> Unit): Throwable? =
+        cancelInFlight(server, { if (reading != null) assertTrue(reading.await(SLOW_SECONDS, TimeUnit.SECONDS)) }) {
+            client.executeCancellably(request(), read)
         }
-        assertNotNull(server.takeRequest(SLOW_SECONDS, TimeUnit.SECONDS))
-        withTimeout(CANCEL_WITHIN_MS) { job.cancelAndJoin() }
-        thrown
-    }
 
     @Test
     fun `a cancel ends a call the server has not answered`() {
@@ -86,7 +76,26 @@ class CancellableCallTest {
     fun `a cancel ends a body that is still arriving`() {
         server.enqueue(MockResponse().setBody("x".repeat(SLOW_BODY_BYTES)).throttleBody(1, 1, TimeUnit.SECONDS))
 
-        assertTrue(cancelInFlight { it.body?.bytes() } is CancellationException)
+        // Counted down once the headers are in, so the cancel lands in the body read
+        val reading = CountDownLatch(1)
+
+        assertTrue(cancelInFlight(reading) { reading.countDown(); it.body?.bytes() } is CancellationException)
+    }
+
+    /** A cancel landing before execute() starts is seen too: the call is never sent. */
+    @Test
+    fun `a caller cancelled before the call sends nothing and waits for nothing`() = runBlocking {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        var thrown: Throwable? = null
+        val job = launch(Dispatchers.IO) {
+            coroutineContext.job.cancel()
+            thrown = runCatching { client.executeCancellably(request()) { } }.exceptionOrNull()
+        }
+
+        withTimeout(CANCEL_WITHIN_MS) { job.join() }
+
+        assertTrue("$thrown", thrown is CancellationException)
+        assertEquals(0, server.requestCount)
     }
 
     /** Control: with no cancel, a transport failure is still one, never a cancellation. */
@@ -108,8 +117,6 @@ class CancellableCallTest {
     }
 
     private companion object {
-        const val SLOW_SECONDS = 60L
-        const val CANCEL_WITHIN_MS = 5_000L
         const val SLOW_BODY_BYTES = 20 // a second each: well past CANCEL_WITHIN_MS
     }
 }

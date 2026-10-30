@@ -4,6 +4,8 @@ import com.bmlibrarian.factchecker.data.remote.transparency.RequestPacer
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.cancelInFlight
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
@@ -328,6 +330,16 @@ class PmcOpenDataServiceTest {
         assertTrue(job.isCancelled)
         assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) < LONG_BACKOFF_MS)
         assertEquals(1, server.requestCount)
+    }
+
+    /** A cancel ends a listing in flight at once, never answered as a failure (#665). */
+    @Test
+    fun `a cancel ends a listing in flight`() {
+        routes["/"] = MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)
+
+        val thrown = cancelInFlight(server) { service().fetchXml("PMC10358571") }
+
+        assertTrue("$thrown", thrown is CancellationException)
     }
 
     @Test

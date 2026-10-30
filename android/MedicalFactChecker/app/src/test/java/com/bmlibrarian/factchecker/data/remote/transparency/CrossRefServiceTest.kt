@@ -21,7 +21,9 @@ package com.bmlibrarian.factchecker.data.remote.transparency
 import android.util.Log
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyConstants
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyTestFixtures
+import com.bmlibrarian.factchecker.util.cancelInFlight
 import java.time.ZoneId
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -89,6 +91,16 @@ class CrossRefServiceTest {
     }
 
     /** 404 means the work is absent — the one failure that answers null. */
+    /** A cancel ends a request in flight at once, never answered as a network error (#665). */
+    @Test
+    fun `a cancel ends a request in flight`() {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+
+        val thrown = cancelInFlight(server) { service.getWork("10.1/x") }
+
+        assertTrue("$thrown", thrown is CancellationException)
+    }
+
     @Test
     fun `404 answers null`() = runBlocking {
         server.enqueue(MockResponse().setResponseCode(404))

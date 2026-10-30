@@ -30,7 +30,11 @@ in `FactCheckWorkflowSearchFailureTest` cancels each one). **Cancel does not
 wait on a fetch** (#665): an OkHttp call a run makes goes through
 `OkHttpClient.executeCancellably` (`util/CancellableCall.kt`), never a bare
 `execute()`; a cancel then ends the call and its body read, thrown as the
-cancellation it is. Lodged: **#662**: an
+cancellation it is (the one bare `execute()` left, `RetractionIndexStore`'s
+export refresh, runs in the service's own scope, not a run's). Each fetching
+service has a test that cancels a request in flight (`cancelInFlight`, test
+`util/InFlightCancel.kt`). The embedding model downloads to a `.part` file
+renamed into place. Lodged: **#662**: an
 unchecked run's warning rule and the Android-only "could not be read" wording,
 to settle across platforms; **#663**: small *Check again* follow-ups.
 

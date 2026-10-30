@@ -1,6 +1,6 @@
 /*
  * BMLibrarian Lite - Biomedical Literature Research Tool
- * Copyright (C) 2024-2025 Dr Horst Herb
+ * Copyright (C) 2024-2026 Dr Horst Herb
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -35,9 +35,10 @@ import java.io.IOException
  *
  * OkHttp's blocking `execute()` and body reads ignore coroutine cancellation, so
  * Cancel would wait for a slow fetch to end. Here a cancelled caller cancels the
- * call, which ends both at once, and the transport failure that follows is
+ * call, which ends both at once, and an IOException that then reaches here is
  * thrown as the [kotlinx.coroutines.CancellationException] it is, never as an
- * unreachable source.
+ * unreachable source. A [block] that catches IOException itself sees the
+ * cancel as one; the enclosing `withContext` still throws the cancellation.
  *
  * Call it on a pooled dispatcher (`Dispatchers.IO`): the cancel runs on another
  * of its threads while this one is blocked.
@@ -45,12 +46,14 @@ import java.io.IOException
  * @param request The request.
  * @param block Reads the response; it is closed afterwards.
  * @return What [block] returned.
- * @throws IOException if the exchange failed in transport.
- * @throws kotlinx.coroutines.CancellationException if the caller cancelled.
+ * @throws IOException if the exchange failed in transport, or [block] threw
+ *   one; whatever else [block] throws passes through.
+ * @throws kotlinx.coroutines.CancellationException if the caller cancelled and
+ *   the call or [block] then failed with an IOException.
  */
 suspend inline fun <T> OkHttpClient.executeCancellably(request: Request, block: (Response) -> T): T {
     val call = newCall(request)
-    // UNDISPATCHED: waiting before execute() starts, so no cancel can come too early to be seen
+    // UNDISPATCHED: waiting before execute() starts; dispatched, an earlier cancel would skip the body and never cancel the call
     val canceller = CoroutineScope(currentCoroutineContext()).launch(start = CoroutineStart.UNDISPATCHED) {
         try {
             awaitCancellation()

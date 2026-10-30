@@ -23,15 +23,12 @@ import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.awaitFileEndingWith
+import com.bmlibrarian.factchecker.util.cancelInFlight
 import io.mockk.every
 import io.mockk.mockk
 import java.io.File
 import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -42,7 +39,6 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -485,20 +481,17 @@ class FullTextServicePdfDownloadTest {
     }
 
     /**
-     * Cancel does not wait for a slow download to end (#665): the call is cancelled,
-     * and the partial file goes with it.
+     * Cancel does not wait for a slow download to end (#665): the call is cancelled
+     * while the body is being written, and the partial file goes with it.
      */
     @Test
-    fun `a cancelled download ends at once and saves nothing`() = runBlocking {
+    fun `a cancelled download ends at once and saves nothing`() {
         server.enqueue(
             MockResponse().setHeader("Content-Type", "application/pdf")
                 .setBody(Buffer().write(pdfBytes).write(ByteArray(pdfBytes.size * SLOW_BODY_SECONDS)))
                 .throttleBody(pdfBytes.size.toLong(), 1, TimeUnit.SECONDS)
         )
-        val job = launch(Dispatchers.IO) { download() }
-        assertNotNull(server.takeRequest(SLOW_SECONDS, TimeUnit.SECONDS))
-
-        withTimeout(CANCEL_WITHIN_MS) { job.cancelAndJoin() }
+        cancelInFlight(server, { awaitFileEndingWith(cache.root, PARTIAL_SUFFIX) }) { download() }
 
         assertEquals(emptyList<String>(), cachedFiles())
     }
@@ -512,10 +505,11 @@ class FullTextServicePdfDownloadTest {
     }
 
     private companion object {
-        /** A download, and a wait for it, far longer than any test. */
+        /** A download far longer than any test. */
         const val SLOW_BODY_SECONDS = 20
-        const val SLOW_SECONDS = 60L
-        const val CANCEL_WITHIN_MS = 5_000L
+
+        /** The download's own name for its file until it is complete. */
+        const val PARTIAL_SUFFIX = ".part"
 
         /** Enough body that the server breaks off well before its end. */
         const val TRUNCATED_BODY_PADDING = 256 * 1024

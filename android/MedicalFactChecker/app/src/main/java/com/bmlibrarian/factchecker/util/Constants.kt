@@ -408,6 +408,9 @@ object Constants {
     /** Filename for the Universal Sentence Encoder model. */
     const val EMBEDDING_MODEL_FILENAME = "universal_sentence_encoder.tflite"
 
+    /** Suffix of the model's download until it is complete and renamed into place. */
+    const val EMBEDDING_MODEL_PARTIAL_SUFFIX = ".part"
+
     /** URL to download the Universal Sentence Encoder model from Google Cloud Storage. */
     const val EMBEDDING_MODEL_URL =
         "https://storage.googleapis.com/mediapipe-models/text_embedder/" +

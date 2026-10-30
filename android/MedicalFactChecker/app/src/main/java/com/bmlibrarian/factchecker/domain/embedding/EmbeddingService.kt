@@ -113,7 +113,8 @@ class EmbeddingService @Inject constructor(
             Log.d(TAG, "TextEmbedder initialized successfully")
             true
         } catch (e: CancellationException) {
-            throw e // a cancelled run is no reason to give up on embeddings
+            initializationAttempted = false // a cancelled run is no reason to give up on embeddings
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize TextEmbedder", e)
             initializationError = e
@@ -139,6 +140,8 @@ class EmbeddingService @Inject constructor(
 
                 computeSimilarityFromResults(claimResult, docResult)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error computing similarity", e)
             null
@@ -196,6 +199,8 @@ class EmbeddingService @Inject constructor(
                     }
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error scoring documents", e)
             List(documents.size) { null }
@@ -240,8 +245,11 @@ class EmbeddingService @Inject constructor(
     /**
      * Download the Universal Sentence Encoder model.
      *
+     * Written to a `.part` file and renamed into place, so a download that breaks
+     * off, even with the process, never leaves a partial file taken for the model.
+     *
      * @param targetFile The file to save the model to.
-     * @throws Exception if download fails.
+     * @throws Exception if the download fails; nothing is left at [targetFile].
      */
     private suspend fun downloadModel(targetFile: File) = withContext(Dispatchers.IO) {
         Log.d(TAG, "Downloading embedding model from ${Constants.EMBEDDING_MODEL_URL}")
@@ -250,6 +258,7 @@ class EmbeddingService @Inject constructor(
             .url(Constants.EMBEDDING_MODEL_URL)
             .build()
 
+        val partial = File(targetFile.parentFile, targetFile.name + Constants.EMBEDDING_MODEL_PARTIAL_SUFFIX)
         try {
             NetworkRetry.withExponentialBackoff(
                 maxRetries = Constants.NETWORK_MAX_RETRIES,
@@ -267,7 +276,7 @@ class EmbeddingService @Inject constructor(
                     }
 
                     response.body?.let { body ->
-                        FileOutputStream(targetFile).use { output ->
+                        FileOutputStream(partial).use { output ->
                             body.byteStream().use { input ->
                                 input.copyTo(output)
                             }
@@ -275,9 +284,11 @@ class EmbeddingService @Inject constructor(
                     } ?: throw Exception("Empty response body")
                 }
             }
-        } catch (e: Throwable) {
-            targetFile.delete() // a partial file would be taken for the model next time
-            throw e
+            if (!partial.renameTo(targetFile)) {
+                throw java.io.IOException("Could not move the downloaded model into place")
+            }
+        } finally {
+            partial.delete() // gone once renamed; otherwise never to be read as the model
         }
 
         Log.d(TAG, "Model downloaded successfully: ${targetFile.length()} bytes")
