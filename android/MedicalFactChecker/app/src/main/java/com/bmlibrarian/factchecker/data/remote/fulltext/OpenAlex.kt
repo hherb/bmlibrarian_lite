@@ -26,6 +26,7 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
+import com.bmlibrarian.factchecker.util.executeCancellably
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -223,7 +224,7 @@ class OpenAlexService internal constructor(
         ) {
             pacer.awaitTurn() // every attempt takes its own slot
             withContext(Dispatchers.IO) {
-                httpClient.newCall(request).execute().use { response ->
+                httpClient.executeCancellably(request) { response ->
                     if (response.code in Constants.OPENALEX_RETRYABLE_STATUSES) {
                         throw RetryableStatusException(response.code)
                     }

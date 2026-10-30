@@ -25,6 +25,7 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
+import com.bmlibrarian.factchecker.util.executeCancellably
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -517,7 +518,7 @@ class ElsevierService internal constructor(
     ) {
         pacer.awaitTurn() // every attempt takes its own slot
         withContext(Dispatchers.IO) {
-            httpClient.newCall(request).execute().use { response ->
+            httpClient.executeCancellably(request) { response ->
                 if (response.code in Constants.ELSEVIER_RETRYABLE_STATUSES) {
                     throw RetryableStatusException(response.code)
                 }

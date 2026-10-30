@@ -33,6 +33,7 @@ import com.bmlibrarian.factchecker.domain.model.SourceRequestException
 import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
+import com.bmlibrarian.factchecker.util.executeCancellably
 import com.bmlibrarian.factchecker.util.jats.JATSParseError
 import com.bmlibrarian.factchecker.util.jats.JATSXMLParser
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -1005,7 +1006,7 @@ class FullTextService @Inject constructor(
                 shouldRetry = { NetworkRetry.isRetryableException(it) }
             ) {
                 withContext(Dispatchers.IO) {
-                    httpClient.newCall(request).execute().use { response ->
+                    httpClient.executeCancellably(request) { response ->
                         // Retried: a throttle or server fault is "not now"
                         if (NetworkRetry.isRetryableStatusCode(response.code)) {
                             throw RetryableStatusException(response.code)
@@ -1201,7 +1202,7 @@ class FullTextService @Inject constructor(
             }
 
             Log.d(TAG, "Downloading PDF from: $pdfUrl")
-            httpClient.newCall(request).execute().use { response ->
+            httpClient.executeCancellably(request) { response ->
                 if (!response.isSuccessful) {
                     Log.w(TAG, "PDF download failed: HTTP ${response.code}")
                     // A bot wall's challenge page is no answer about the article (#480). A

@@ -20,6 +20,7 @@ package com.bmlibrarian.factchecker.data.remote.transparency
 
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyConstants
 import com.bmlibrarian.factchecker.util.NetworkRetry
+import com.bmlibrarian.factchecker.util.executeCancellably
 import java.io.IOException
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -119,7 +120,7 @@ internal class RequestPacer(
  */
 internal suspend fun executeTransparencyRequest(client: OkHttpClient, request: Request): TransparencyHttpResponse =
     withContext(Dispatchers.IO) {
-        client.newCall(request).execute().use { response ->
+        client.executeCancellably(request) { response ->
             val body = if (response.code == TransparencyHttpConstants.HTTP_STATUS_OK) response.body?.string() else null
             TransparencyHttpResponse(response.code, body)
         }
