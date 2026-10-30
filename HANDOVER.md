@@ -23,10 +23,13 @@ locally, and CI fails if they skip. **A ViewModel test mocks the workflow:
 every new workflow `StateFlow` must be stubbed in the three
 `FactCheckViewModel*Test`s**, or the unstubbed `collect` leaks a
 `KotlinNothingValueException` into a later suite (it surfaced in
-`NetworkRetryTest`). Lodged: **#659**: Android's Cancel never stops a
-running fact check (`workflowJob` is never assigned); **#662**: an unchecked
-run's warning rule and the Android-only "could not be read" wording, to settle
-across platforms; **#663**: small *Check again* follow-ups.
+`NetworkRetryTest`). **Cancel stops the run** (#659): each workflow entry
+point records its coroutine as `workflowJob`, and `cancel()` joins it before
+writing the session step; keep that line in any new entry point (a test
+in `FactCheckWorkflowSearchFailureTest` cancels each one). Lodged: **#662**: an
+unchecked run's warning rule and the Android-only "could not be read" wording,
+to settle across platforms; **#663**: small *Check again* follow-ups; **#665**:
+Cancel waits on a blocking OkHttp `execute()` (full text, transparency).
 
 **Retraction checking, iOS/macOS: done** (PRs #650, #652; plan
 `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`). The
@@ -243,10 +246,10 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
+- **#665** Android's Cancel waits on a blocking full-text fetch.
 - **Retraction checking**: Phases 3–6 (Phase 4 as adapter work over the Rust
   parser); **#660** (Check again's causes, Swift and desktop). bmlib audit
   leftovers: **#571**, **#573**–**#581**, **#585**.
-- **#659** Android's Cancel stops nothing (every run entry point).
 - **#545** sweep the PDF library for other articles' PDFs (CLI only, the
   maintainer's call); **#547** keep a set-aside PDF from the GUI (both from
   #541); **#555** Android release builds fail R8; **#556**–**#558** (#546's).

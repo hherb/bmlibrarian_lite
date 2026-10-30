@@ -36,6 +36,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -154,6 +155,40 @@ class FactCheckViewModelActionTest {
         running.complete(Unit)
 
         coVerify(exactly = 1) { workflow.retryFullTextRetrieval(any()) }
+    }
+
+    @Test
+    fun `a second tap on the fetch-more decision while the first runs starts nothing`() {
+        workflowState.value = WorkflowState.AwaitingUserDecision(relevantCount = 1, targetCount = 5, availableCount = 0)
+        val running = CompletableDeferred<Unit>()
+        coEvery { workflow.continueWithMoreDocuments() } coAnswers { running.await() }
+
+        viewModel.fetchMoreDocuments()
+        viewModel.fetchMoreDocuments()
+        viewModel.skipMoreDocuments()
+        running.complete(Unit)
+
+        coVerify(exactly = 1) { workflow.continueWithMoreDocuments() }
+        coVerify(exactly = 0) { workflow.proceedWithCurrentDocuments() }
+    }
+
+    /** Cancel ends the run by cancelling it, which is no failure to tell (#659). */
+    @Test
+    fun `a cancelled run is not told as a failure`() {
+        coEvery { workflow.startFactCheck(any(), any()) } throws CancellationException("cancelled")
+        coEvery { workflow.continueWithMoreDocuments() } throws CancellationException("cancelled")
+        coEvery { workflow.proceedWithCurrentDocuments() } throws CancellationException("cancelled")
+        viewModel.updateClaimText("Aspirin prevents strokes")
+
+        viewModel.startFactCheck()
+        viewModel.fetchMoreDocuments()
+        viewModel.skipMoreDocuments()
+
+        coVerify(exactly = 1) { workflow.startFactCheck(any(), any()) }
+        coVerify(exactly = 1) { workflow.continueWithMoreDocuments() }
+        coVerify(exactly = 1) { workflow.proceedWithCurrentDocuments() }
+        assertNull(viewModel.uiState.value.errorMessage)
+        assertFalse(viewModel.uiState.value.isRunning)
     }
 
     @Test

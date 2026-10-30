@@ -64,6 +64,7 @@ import com.bmlibrarian.factchecker.util.retraction.retractionPaper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -321,8 +322,8 @@ class FactCheckWorkflow @Inject constructor(
     /** Monthly usage for budget checking. */
     private var monthlyUsageUsd: Double = 0.0
 
-    /** Current workflow job for cancellation support. */
-    private var workflowJob: Job? = null
+    /** The coroutine running the last entry point, which [cancel] stops; each entry point sets it. */
+    @Volatile private var workflowJob: Job? = null
 
     /** Whether this is a resumed session (for checkpoint handling). */
     private var isResumedSession: Boolean = false
@@ -352,6 +353,7 @@ class FactCheckWorkflow @Inject constructor(
         claim: String,
         config: WorkflowConfig = WorkflowConfig.default()
     ): String {
+        workflowJob = currentCoroutineContext()[Job]
         // Validate configuration
         val errors = config.validate()
         if (errors.isNotEmpty()) {
@@ -410,6 +412,7 @@ class FactCheckWorkflow @Inject constructor(
         sessionId: String,
         config: WorkflowConfig = WorkflowConfig.default()
     ) {
+        workflowJob = currentCoroutineContext()[Job]
         val session = sessionRepository.getSession(sessionId)
             ?: throw IllegalArgumentException("Session not found: $sessionId")
 
@@ -436,6 +439,7 @@ class FactCheckWorkflow @Inject constructor(
      * with the failure shown, rather than ending the session (#252).
      */
     suspend fun continueWithMoreDocuments() {
+        workflowJob = currentCoroutineContext()[Job]
         val session = currentSession
             ?: throw IllegalStateException("No active session")
         val config = currentConfig ?: WorkflowConfig.default()
@@ -464,6 +468,7 @@ class FactCheckWorkflow @Inject constructor(
      * Continue workflow after user declines to fetch more documents.
      */
     suspend fun proceedWithCurrentDocuments() {
+        workflowJob = currentCoroutineContext()[Job]
         val session = currentSession
             ?: throw IllegalStateException("No active session")
         val config = currentConfig ?: WorkflowConfig.default()
@@ -504,6 +509,7 @@ class FactCheckWorkflow @Inject constructor(
      *   configuration the session was started or restored with.
      */
     suspend fun fetchMoreEvidence(settings: WorkflowConfig? = null) {
+        workflowJob = currentCoroutineContext()[Job]
         val session = currentSession
             ?: throw IllegalStateException("No active session")
         settings?.let {
@@ -649,6 +655,7 @@ class FactCheckWorkflow @Inject constructor(
      *   the configuration the session was started or restored with
      */
     suspend fun retryFullTextRetrieval(settings: WorkflowConfig? = null) {
+        workflowJob = currentCoroutineContext()[Job]
         val session = currentSession
             ?: throw IllegalStateException("No active session")
         settings?.let {
@@ -805,6 +812,7 @@ class FactCheckWorkflow @Inject constructor(
      * @return Number of documents successfully retried
      */
     suspend fun retryFailedDocuments(step: String = ProcessingCheckpointEntity.STEP_SCORING): Int {
+        workflowJob = currentCoroutineContext()[Job]
         val session = currentSession
             ?: throw IllegalStateException("No active session")
         val config = currentConfig ?: WorkflowConfig.default()
@@ -879,6 +887,8 @@ class FactCheckWorkflow @Inject constructor(
 
         } catch (e: BudgetError) {
             handleBudgetError(e, session)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             // Don't fail completely, just return what we succeeded with
         }
@@ -906,8 +916,8 @@ class FactCheckWorkflow @Inject constructor(
      *                         state so it can be resumed. If false, marks as failed.
      */
     suspend fun cancel(preserveProgress: Boolean = true) {
-        // Cancel any running workflow job
-        workflowJob?.cancel()
+        // Stop the run first: one still going would overwrite the state set below
+        workflowJob?.cancelAndJoin()
         workflowJob = null
 
         currentSession?.let { session ->
