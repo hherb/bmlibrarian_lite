@@ -82,6 +82,7 @@ import com.bmlibrarian.factchecker.ui.factcheck.components.FetchMorePrompt
 import com.bmlibrarian.factchecker.ui.factcheck.components.SearchProgress
 import com.bmlibrarian.factchecker.ui.factcheck.components.SortingControls
 import com.bmlibrarian.factchecker.util.CostCalculator
+import com.bmlibrarian.factchecker.util.retraction.RetractionText
 
 /**
  * Main fact-checking screen.
@@ -203,6 +204,13 @@ fun FactCheckScreen(
             // Why a request for more evidence added nothing new, while the report stands
             uiState.smartSearchNotice?.let { notice ->
                 item(key = "smart_search_notice") {
+                    IncompleteSearchCard(text = notice)
+                }
+            }
+
+            // What the retraction screen left out and could not check
+            uiState.retractionNotice?.let { notice ->
+                item(key = "retraction_notice") {
                     IncompleteSearchCard(text = notice)
                 }
             }
@@ -334,7 +342,27 @@ fun FactCheckScreen(
                         },
                         onOpenUrl = { url ->
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                        }
+                        },
+                        retractionCheck = uiState.retractionChecks[document.id]
+                    )
+                }
+            }
+
+            // Papers left out as retracted: listed, badged, with why they have no score
+            if (uiState.retractedDocuments.isNotEmpty()) {
+                item(key = "retracted_header") {
+                    Text(
+                        text = "${RetractionText.LEFT_OUT_TITLE} (${uiState.retractedDocuments.size})",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+                items(
+                    items = uiState.retractedDocuments,
+                    key = { "retracted_${it.id}" }
+                ) { document ->
+                    DocumentCard(
+                        document = document,
+                        retractionCheck = uiState.retractionChecks[document.id]
                     )
                 }
             }

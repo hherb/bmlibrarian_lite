@@ -148,7 +148,8 @@ class FactCheckWorkflowFullTextTest {
             embeddingService = mockk(relaxed = true),
             hydeGenerator = mockk(relaxed = true),
             transparencyRunner = mockk(relaxed = true),
-            fullTextService = fullTextService
+            fullTextService = fullTextService,
+            retractionService = mockk(relaxed = true)
         )
         workflow.restoreForViewing(session)
         Log.clear()

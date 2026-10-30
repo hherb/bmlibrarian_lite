@@ -19,7 +19,9 @@
 package com.bmlibrarian.factchecker
 
 import android.app.Application
+import com.bmlibrarian.factchecker.util.retraction.RetractionService
 import dagger.hilt.android.HiltAndroidApp
+import javax.inject.Inject
 
 /**
  * Application class for MedicalFactChecker.
@@ -31,9 +33,12 @@ import dagger.hilt.android.HiltAndroidApp
 @HiltAndroidApp
 class MedicalFactCheckerApp : Application() {
 
+    @Inject lateinit var retractionService: RetractionService
+
     override fun onCreate() {
         super.onCreate()
-        // App-wide initialization can be added here
+        // The Retraction Watch copy is refreshed off the main thread; no run waits for it
+        retractionService.refreshInBackground()
         // Note: Avoid heavy work on main thread - use WorkManager for background init
     }
 }

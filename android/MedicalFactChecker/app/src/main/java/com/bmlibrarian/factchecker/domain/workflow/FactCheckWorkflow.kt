@@ -53,6 +53,13 @@ import com.bmlibrarian.factchecker.domain.model.Verdict
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import com.bmlibrarian.factchecker.ml.HydeGenerator
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
+import com.bmlibrarian.factchecker.util.retraction.RetractionPaper
+import com.bmlibrarian.factchecker.util.retraction.RetractionReportSection
+import com.bmlibrarian.factchecker.util.retraction.RetractionService
+import com.bmlibrarian.factchecker.util.retraction.RetractionSnapshot
+import com.bmlibrarian.factchecker.util.retraction.RetractionText
+import com.bmlibrarian.factchecker.util.retraction.retractionPaper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -114,7 +121,8 @@ class FactCheckWorkflow @Inject constructor(
     private val embeddingService: EmbeddingService,
     private val hydeGenerator: HydeGenerator,
     private val transparencyRunner: TransparencyAnalysisRunner,
-    private val fullTextService: FullTextService
+    private val fullTextService: FullTextService,
+    private val retractionService: RetractionService
 ) {
 
     companion object {
@@ -209,6 +217,48 @@ class FactCheckWorkflow @Inject constructor(
      */
     private val _fullTextNotice = MutableStateFlow<String?>(null)
     val fullTextNotice: StateFlow<String?> = _fullTextNotice.asStateFlow()
+
+    /**
+     * What this run's retraction screen left out and could not check
+     * ("Retraction check: …."), or null when it left nothing out and checked
+     * every paper. Set as documents are screened before scoring, reset when a
+     * run starts.
+     */
+    private val _retractionNotice = MutableStateFlow<String?>(null)
+    val retractionNotice: StateFlow<String?> = _retractionNotice.asStateFlow()
+
+    /**
+     * What one run's retraction screen has used, by document id in the order
+     * it met them, and the papers whose check failed.
+     */
+    private class RetractionRun {
+        val used = LinkedHashMap<String, Pair<RetractionPaper, PaperRetractionCheck>>()
+        val failed = mutableSetOf<RetractionPaper>()
+
+        /** Why the kept papers are unchecked. */
+        fun causes(): List<String> = RetractionText.uncheckedCauses(
+            used.values.filterNot { it.second.isRetracted }.map { it.first to it.second }, failed
+        )
+
+        /** "Retraction check: <the desktop's run summary clause>.", or null. */
+        fun notice(): String? {
+            val kept = used.values.filterNot { it.second.isRetracted }
+            return RetractionText.runSummaryClause(
+                excluded = used.size - kept.size,
+                unchecked = kept.count { it.second.isUnchecked },
+                causes = causes()
+            )?.let(RetractionText::runNotice)
+        }
+    }
+
+    /** This run's retraction screen so far. */
+    private var retractionRun = RetractionRun()
+
+    /** Start a new run's retraction screen: each document is checked at most once per run. */
+    private fun beginRetractionRun() {
+        retractionRun = RetractionRun()
+        _retractionNotice.value = null
+    }
 
     // ==================== Current Session ====================
 
@@ -417,6 +467,7 @@ class FactCheckWorkflow @Inject constructor(
         _smartSearchNotice.value = null
 
         _state.value = WorkflowState.FetchingMoreEvidence()
+        beginRetractionRun()
         sessionRepository.updateWorkflowStep(session.id, WorkflowStep.FETCHING_MORE_EVIDENCE)
 
         try {
@@ -604,6 +655,7 @@ class FactCheckWorkflow @Inject constructor(
      * @param work The work
      */
     private suspend fun runHandlingFailures(session: SessionEntity, config: WorkflowConfig, work: suspend () -> Unit) {
+        beginRetractionRun()
         try {
             work()
         } catch (e: BudgetError) {
@@ -718,6 +770,7 @@ class FactCheckWorkflow @Inject constructor(
 
         var successCount = 0
         var successfulIds = emptySet<String>()
+        beginRetractionRun()
 
         try {
             when (step) {
@@ -737,10 +790,12 @@ class FactCheckWorkflow @Inject constructor(
                         }
                     }
                     successCount = scoringSuccessIds.size
-                    successfulIds = scoringSuccessIds
+                    // a document left out as retracted is settled, not failed: it leaves the queue too
+                    val leftOutIds = documents.filter { retractionRun.used[it.id]?.second?.isRetracted == true }.map { it.id }
+                    successfulIds = scoringSuccessIds + leftOutIds
 
                     // Remove errors for successfully retried documents
-                    errorPersistenceManager.removeErrorsForDocuments(session.id, scoringSuccessIds)
+                    errorPersistenceManager.removeErrorsForDocuments(session.id, successfulIds)
                 }
 
                 ProcessingCheckpointEntity.STEP_CITATION -> {
@@ -844,6 +899,7 @@ class FactCheckWorkflow @Inject constructor(
         structuredQuery = null
         _currentSessionId.value = null
         clearSearchFailureState()
+        beginRetractionRun()
         _state.value = WorkflowState.Idle
         _progress.value = WorkflowProgress.idle()
     }
@@ -878,6 +934,7 @@ class FactCheckWorkflow @Inject constructor(
         // Emit session ID so UI can observe documents
         _currentSessionId.value = session.id
         clearSearchFailureState()
+        beginRetractionRun()
         _searchShortfalls.value = readableShortfalls(session).orEmpty()
 
         _state.value = WorkflowState.Idle
@@ -1275,11 +1332,15 @@ class FactCheckWorkflow @Inject constructor(
         val model = settingsRepository.getLlmModel()
         val session = currentSession ?: return
 
+        // Retracted papers are left out before any is scored
+        val toScore = screenForRetraction(session, documents)
+        if (toScore.isEmpty()) return
+
         // Check budget before starting
         checkBudget(session, config)
 
         // Convert documents to scoring inputs
-        val inputs = documents.map { ScoringInput.fromDocument(it) }
+        val inputs = toScore.map { ScoringInput.fromDocument(it) }
 
         // Get checkpointed document IDs if resuming
         val checkpointedIds = if (isResumedSession) {
@@ -1625,12 +1686,17 @@ class FactCheckWorkflow @Inject constructor(
         checkBudget(session, config)
 
         // What the searches missed goes into the report by code, never left to the LLM (#252)
-        val shortfalls = requireReadableShortfalls(sessionRepository.getSession(sessionId) ?: session)
+        val stored = sessionRepository.getSession(sessionId) ?: session
+        val shortfalls = requireReadableShortfalls(stored)
 
         // Get all citations with their documents
         val citations = documentRepository.getCitationsBySessionSync(sessionId)
         val documents = documentRepository.getDocumentsBySessionSync(sessionId)
         val documentMap = documents.associateBy { it.id }
+
+        // What the run saw: the checks it used, never whatever is stored now
+        val snapshot = RetractionSnapshot.read(stored.retractionSnapshotJson)
+        val retraction = retractionSection(documents, snapshot)
 
         // Build citation data for LLM
         val citationData = citations.mapNotNull { citation ->
@@ -1648,7 +1714,7 @@ class FactCheckWorkflow @Inject constructor(
         // Handle no citations case
         if (citationData.isEmpty()) {
             val relevantCount = documents.count { (it.relevanceScore ?: 0) >= config.relevanceThreshold }
-            return createNoEvidenceReport(sessionId, claim, relevantCount, model, shortfalls)
+            return createNoEvidenceReport(sessionId, claim, relevantCount, model, shortfalls, retraction)
         }
 
         val result = llmService.generateReport(
@@ -1674,12 +1740,13 @@ class FactCheckWorkflow @Inject constructor(
 
         // Build references section
         val relevantDocs = documents.filter { (it.relevanceScore ?: 0) >= config.relevanceThreshold }
-        val references = buildReferencesSection(relevantDocs)
+        val references = buildReferencesSection(relevantDocs, snapshot)
         val fullReport = ReportText.fullReport(
             generation.report,
             references,
             shortfalls,
-            TransparencyReportMarkdown.sections(relevantDocs)
+            TransparencyReportMarkdown.sections(relevantDocs),
+            retraction
         )
 
         // Create and save report
@@ -1696,6 +1763,126 @@ class FactCheckWorkflow @Inject constructor(
         )
 
         return report
+    }
+
+    // ==================== Retraction Screen ====================
+
+    /**
+     * Screen [documents] for retraction before they are scored, storing each
+     * paper's check and the session's snapshot, and setting [retractionNotice].
+     *
+     * Each document is checked at most once per run. A paper whose stored row
+     * [PaperRetractionCheck.isReusable] is not asked again; otherwise what is
+     * stored and used follows [PaperRetractionCheck.take]. A failing lookup
+     * leaves unchecked every paper with no stored warning that stands (a
+     * stored retraction or concern still holds); a failure before the lookup
+     * (stored rows unreadable, bmlib's native library missing) leaves every
+     * paper unchecked. Either way a paper its own label retracts is still
+     * left out ([PaperRetractionCheck.failedFor]), the run goes on, and a
+     * cancel records nothing.
+     *
+     * @param session The session
+     * @param documents The documents about to be scored
+     * @return Those the run may score: every one not left out as retracted
+     */
+    private suspend fun screenForRetraction(session: SessionEntity, documents: List<DocumentEntity>): List<DocumentEntity> {
+        val run = retractionRun
+        val unseen = documents.filter { it.id !in run.used }
+        if (unseen.isNotEmpty()) {
+            val now = System.currentTimeMillis()
+            val papers = unseen.associate { it.id to it.retractionPaper }
+            val used = try {
+                decideRetraction(unseen, papers, now)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Retraction check failed, its papers are left unchecked: ${e.javaClass.simpleName}")
+                failedRetraction(papers, now)
+            } catch (e: LinkageError) {
+                // a build without bmlib's native library
+                Log.w(TAG, "Retraction check unavailable, its papers are left unchecked: ${e.javaClass.simpleName}")
+                failedRetraction(papers, now)
+            }
+            for (document in unseen) run.used[document.id] = papers.getValue(document.id) to used.getValue(document.id)
+            val stored = sessionRepository.getSession(session.id)?.retractionSnapshotJson
+            sessionRepository.updateRetractionSnapshot(session.id, RetractionSnapshot.merged(stored, used))
+            _retractionNotice.value = run.notice()
+        }
+        return documents.filterNot { run.used[it.id]?.second?.isRetracted == true }
+    }
+
+    /**
+     * Every paper unchecked for this run, the check having failed, but those
+     * their own label retracts.
+     *
+     * @return The failed check, by document id
+     */
+    private fun failedRetraction(papers: Map<String, RetractionPaper>, now: Long): Map<String, PaperRetractionCheck> {
+        retractionRun.failed += papers.values
+        return papers.mapValues { PaperRetractionCheck.failedFor(it.value, now) }
+    }
+
+    /**
+     * Decide each document's check: a reusable stored row, else a fresh check
+     * taken against the stored row ([PaperRetractionCheck.take]), written as
+     * the paper's new row when it replaces it.
+     *
+     * @return The check the run uses, by document id
+     */
+    private suspend fun decideRetraction(
+        documents: List<DocumentEntity>,
+        papers: Map<String, RetractionPaper>,
+        now: Long
+    ): Map<String, PaperRetractionCheck> {
+        val keys = papers.mapValues { it.value.paperKey }
+        val stored = retractionService.storedChecks(keys.values.filterNotNull().toSet())
+        val used = mutableMapOf<String, PaperRetractionCheck>()
+        val due = documents.filter { document ->
+            val paper = papers.getValue(document.id)
+            val reusable = keys[document.id]?.let(stored::get)?.let(PaperRetractionCheck::decode)
+                ?.takeIf { it.isReusable(now, paper.publicationTypes) }
+            reusable?.let { used[document.id] = it }
+            reusable == null
+        }
+        if (due.isEmpty()) return used
+
+        updateProgress(RetractionText.PROGRESS_MESSAGE, WorkflowProgress.PROGRESS_SCORING_START)
+        val checks = try {
+            retractionService.check(due.map { papers.getValue(it.id) })
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Retraction lookup failed; only stored warnings and labels decide: ${e.javaClass.simpleName}")
+            emptyMap()
+        } catch (e: LinkageError) {
+            // a build without bmlib's native library: the reusable rows above still stand
+            Log.w(TAG, "Retraction lookup unavailable; only stored warnings decide: ${e.javaClass.simpleName}")
+            emptyMap()
+        }
+        val rows = mutableMapOf<String, PaperRetractionCheck>()
+        for (document in due) {
+            val paper = papers.getValue(document.id)
+            val fresh = checks[paper] ?: PaperRetractionCheck.failedFor(paper, now).also { retractionRun.failed += paper }
+            val key = keys[document.id]
+            if (key == null) {
+                used[document.id] = fresh
+                continue
+            }
+            // a paper two documents share is decided against the row this run will write, not the stale stored one
+            val row = rows[key]?.let(PaperRetractionCheck::encode) ?: stored[key]
+            val taken = PaperRetractionCheck.take(row, fresh, typesRecorded = document.publicationTypes != null)
+            taken.store?.let { rows[key] = it }
+            used[document.id] = taken.use
+        }
+        try {
+            retractionService.store(rows)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // the run's snapshot still records what it used; the next run asks again
+            Log.w(TAG, "Retraction checks not stored: ${e.javaClass.simpleName}")
+        }
+        return used
     }
 
     // ==================== Transparency Analysis ====================
@@ -2134,7 +2321,10 @@ class FactCheckWorkflow @Inject constructor(
     /**
      * Build the references section for the report.
      */
-    private fun buildReferencesSection(documents: List<DocumentEntity>): String {
+    private fun buildReferencesSection(
+        documents: List<DocumentEntity>,
+        retraction: Map<String, PaperRetractionCheck> = emptyMap()
+    ): String {
         return documents.mapIndexed { index, doc ->
             buildString {
                 append("**${index + 1}.** ")
@@ -2144,8 +2334,29 @@ class FactCheckWorkflow @Inject constructor(
                 append(doc.title)
                 doc.journal?.let { append(". *$it*") }
                 doc.pmid?.let { append(". PMID: $it") }
+                // a paper the run kept under an expression of concern carries the caveat
+                retraction[doc.id]?.takeIf { it.isConcern }?.let { append("\n").append(RetractionText.concernCaveat(it)) }
             }
         }.joinToString("\n\n")
+    }
+
+    /**
+     * What the report says about the run's retraction check, from the
+     * session's snapshot; null for a session never checked.
+     *
+     * @param documents The session's documents
+     * @param snapshot The check each document's run used
+     */
+    private fun retractionSection(
+        documents: List<DocumentEntity>,
+        snapshot: Map<String, PaperRetractionCheck>
+    ): RetractionReportSection? {
+        if (snapshot.isEmpty()) return null
+        // Causes are named only when this run screened exactly the snapshot's
+        // papers; otherwise the count stands alone, as the desktop's restored
+        // snapshot does, since a cause this run did not see would go unnamed.
+        val causes = if (retractionRun.used.keys == snapshot.keys) retractionRun.causes() else emptyList()
+        return RetractionReportSection(documents.mapNotNull { doc -> snapshot[doc.id]?.let { doc.title to it } }, causes)
     }
 
     /**
@@ -2169,6 +2380,7 @@ class FactCheckWorkflow @Inject constructor(
      * @param model The LLM model the session used
      * @param shortfalls What the session's searches failed to retrieve; the
      *   message opens with the incomplete-search notice when there are any
+     * @param retraction What the run's retraction check left out and could not check
      * @return The saved report
      */
     private suspend fun createNoEvidenceReport(
@@ -2176,7 +2388,8 @@ class FactCheckWorkflow @Inject constructor(
         claim: String,
         relevantDocCount: Int,
         model: String,
-        shortfalls: List<RetrievalShortfall>
+        shortfalls: List<RetrievalShortfall>,
+        retraction: RetractionReportSection?
     ): com.bmlibrarian.factchecker.data.local.entity.ReportEntity {
         val (summary, fullReport) = if (relevantDocCount > 0) {
             // Documents found but citation extraction failed
@@ -2236,7 +2449,7 @@ class FactCheckWorkflow @Inject constructor(
             sessionId = sessionId,
             verdict = Verdict.UNCLEAR,
             summary = summary,
-            fullReportMarkdown = ReportText.standInReport(fullReport, shortfalls),
+            fullReportMarkdown = ReportText.standInReport(fullReport, shortfalls, retraction),
             footnotes = null,
             modelUsed = model,
             totalDocumentsReviewed = 0,

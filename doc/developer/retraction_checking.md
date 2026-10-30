@@ -149,6 +149,60 @@ Tests: `RetractionScreenWorkflowTests`, `RetractionSavedWorkTests` and `Retracti
 `PublicationTypeParsingTests` (BioMedLit). They run over URLProtocol stubs and
 injected checks, never the network.
 
+## Android
+
+The app calls bmlib's rule, Crossref parsing and export index through the
+UniFFI bindings (`org.bmlib.ffi`); everything else is in
+`app/.../util/retraction/`, ports of BioMedLit's `Retraction/` files.
+`PaperRetractionCheck` is the stored check Swift keeps in
+`RetractionChecker.swift` and `Document`; `RetractionConstants` holds what
+Swift's `BioMedLitConstants` does; `RetractionService` is Android's own (the
+Hilt entry point). `RetractionSavedWork` comes with PR 5b.
+
+- `RetractionCrossrefLookup` (bmlib's batches over OkHttp, paced and retried
+  as `CrossRefService`), `RetractionIndexStore` (the export as bmlib's index
+  file under `noBackupFilesDir`), `RetractionChecker`, `PaperRetractionCheck`
+  (the stored form, reuse, `standsAgainst`, `take`) and `RetractionSnapshot`
+  (read entry by entry), `RetractionNames` (exhaustive `when`s),
+  `RetractionText`, `RetractionReportSection`, and `RetractionService`
+  (`@Singleton`: the production check, one lookup per process and contact
+  address, the stored rows). A stored row naming a status or lookup this
+  build does not know is unreadable, as the desktop's `_decode`, so only a
+  fully answered check overwrites it.
+- **Checks are stored per paper**, as the desktop's: Room table
+  `retraction_checks` (`paper_key`, `check_json`), so what one session learnt
+  serves the next and survives a deleted session. A paper with neither DOI
+  nor PMID has no key and no row. What a run used is
+  `sessions.retraction_snapshot_json`, by document id, never rewritten by a
+  later check. Publication types are `documents.publication_types_json`
+  (Room 11); a Europe PMC duplicate's types merge into PubMed's copy.
+- The screen is `FactCheckWorkflow.screenForRetraction`, at the top of
+  `scoreDocuments`, which every scoring path calls. A run starts in
+  `runHandlingFailures`, `fetchMoreEvidence` and `retryFailedDocuments`.
+  **A failing lookup** leaves unchecked every paper with no stored warning
+  that stands; **a failure before it** (stored rows unreadable, or the native
+  library missing in a debug build without a bmlib checkout) leaves every
+  paper unchecked. Either way the record's own label still retracts
+  (`PaperRetractionCheck.failedFor`, the desktop's `_label_check`). A Crossref
+  batch that fails in any way costs that batch alone.
+- The fact-check screen shows `retractionNotice`, badges each card by the
+  run's snapshot (`RetractionBadge`) and lists the papers left out after the
+  scored ones, each with `RetractionText.excludedLine`.
+- The export downloads only on an unmetered network, at launch and in the
+  background when a run finds no usable copy; one download at a time,
+  streamed to disk, and a refused one is not downloaded again for a day,
+  across launches (a `.refused` file beside the index). A run never waits
+  for it, and a device that runs out of memory building it carries on
+  without it.
+- Saved work (a restored session's line and warning, *Check again*) and the
+  report screen's `DocumentDetailSheet` status line are PR 5b.
+
+Tests: `FactCheckWorkflowRetractionTest`, `RetractionBadgeContentTest`,
+`Migration10To11Test`, `PublicationTypesTest`, `ReportTextTest` (no native
+library), and `util/retraction/Retraction*Test`, which need the host library
+(`BMLIB_DIR`); the checker, lookup and index-store suites run over
+MockWebServer. CI fails if they skip.
+
 ## Tests
 
 `tests/test_retraction_*.py`, `tests/test_mcp_retraction.py`,

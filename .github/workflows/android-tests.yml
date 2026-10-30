@@ -97,7 +97,9 @@ jobs:
       - name: The bmlib FFI tests ran
         # They skip themselves without the host library, which would pass silently.
         run: |
-          for test in util.jats.BmlibJatsFfiTest util.retraction.BmlibRetractionContractTest; do
+          for test in util.jats.BmlibJatsFfiTest util.retraction.BmlibRetractionContractTest \
+              util.retraction.RetractionCheckerTest util.retraction.RetractionCrossrefLookupTest \
+              util.retraction.RetractionIndexStoreTest util.retraction.RetractionTextTest; do
             report=app/build/test-results/testDebugUnitTest/TEST-com.bmlibrarian.factchecker.$test.xml
             grep -q 'skipped="0"' "$report" && ! grep -q 'tests="0"' "$report" \
               || { echo "::error::$test did not run"; head -3 "$report"; exit 1; }

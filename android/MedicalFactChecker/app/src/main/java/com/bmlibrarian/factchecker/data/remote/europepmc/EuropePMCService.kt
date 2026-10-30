@@ -313,6 +313,7 @@ class EuropePMCService @Inject constructor(
             meshTerms = meshHeadingList?.meshHeading
                 ?.mapNotNull { it.descriptorName }
                 ?: emptyList(),
+            publicationTypesJson = DocumentEntity.encodePublicationTypes(pubTypeList?.pubType),
             source = sourceType,
             isPreprint = isPreprint,
             batchNumber = batchNumber,

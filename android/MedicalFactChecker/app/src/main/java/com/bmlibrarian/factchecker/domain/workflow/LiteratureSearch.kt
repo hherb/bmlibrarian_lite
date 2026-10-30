@@ -161,7 +161,7 @@ class LiteratureSearch @Inject constructor(
             ProviderPage.NOT_SEARCHED
         }
 
-        val documents = pubMed.documents + europePMC.documents
+        val documents = withDuplicatesTypes(pubMed.documents, europePMC.duplicates) + europePMC.documents
         val shortfalls = SearchFailureReporting.combinedShortfalls(
             (pubMed.shortfalls + europePMC.shortfalls).map { it.copy(query = request.query) }
         )
@@ -171,12 +171,38 @@ class LiteratureSearch @Inject constructor(
         return SearchPageOutcome(documents, shortfalls, pubMed.pubMedPaging, europePMC.europePMCPaging)
     }
 
-    /** What one provider contributed to a page. */
+    /**
+     * PubMed's documents, each with the publication types of the Europe PMC
+     * records left out as its duplicates added (the union, in order, as
+     * `search_merger.py` and Swift's merger keep them), so a label only Europe
+     * PMC carries still reaches the retraction check.
+     *
+     * @param documents PubMed's documents
+     * @param duplicates Europe PMC's records left out for a PMID already held
+     * @return The documents, types merged
+     */
+    private fun withDuplicatesTypes(documents: List<DocumentEntity>, duplicates: List<DocumentEntity>): List<DocumentEntity> {
+        val extra = duplicates.filter { it.pmid != null && it.publicationTypes != null }.groupBy { it.pmid }
+        if (extra.isEmpty()) return documents
+        return documents.map { document ->
+            val more = extra[document.pmid] ?: return@map document
+            val union = (document.publicationTypes.orEmpty() + more.flatMap { it.publicationTypes.orEmpty() }).distinct()
+            document.copy(publicationTypesJson = DocumentEntity.encodePublicationTypes(union))
+        }
+    }
+
+    /**
+     * What one provider contributed to a page.
+     *
+     * @property duplicates Records left out because the session or the page
+     *   already holds their PMID
+     */
     private data class ProviderPage(
         val documents: List<DocumentEntity>,
         val shortfalls: List<RetrievalShortfall>,
         val pubMedPaging: PubMedPaging? = null,
-        val europePMCPaging: EuropePMCPaging? = null
+        val europePMCPaging: EuropePMCPaging? = null,
+        val duplicates: List<DocumentEntity> = emptyList()
     ) {
         companion object {
             /** A provider the page did not ask. */
@@ -263,16 +289,17 @@ class LiteratureSearch @Inject constructor(
             )
         }
 
-        val documents = europePMCService.toDocumentEntities(
+        val (duplicates, documents) = europePMCService.toDocumentEntities(
             articles = page.articles,
             sessionId = request.sessionId,
             batchNumber = request.batchNumber,
             startPosition = request.existingDocumentCount
-        ).filter { it.pmid !in excludedPmids }
+        ).partition { it.pmid in excludedPmids }
         return ProviderPage(
             documents,
             page.shortfalls,
-            europePMCPaging = EuropePMCPaging(page.nextCursor, page.totalResults, received?.plus(page.resultsReceived))
+            europePMCPaging = EuropePMCPaging(page.nextCursor, page.totalResults, received?.plus(page.resultsReceived)),
+            duplicates = duplicates
         )
     }
 

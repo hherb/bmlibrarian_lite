@@ -45,11 +45,15 @@ import com.bmlibrarian.factchecker.domain.workflow.WorkflowConfig
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowProgress
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowState
 import com.bmlibrarian.factchecker.util.Constants
+import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
+import com.bmlibrarian.factchecker.util.retraction.RetractionSnapshot
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -130,6 +134,15 @@ data class FactCheckUiState(
     /** What the full-text step could not do; null when nothing went wrong. */
     val fullTextNotice: String? = null,
 
+    /** What this run's retraction screen left out and could not check, or null. */
+    val retractionNotice: String? = null,
+
+    /**
+     * The retraction check each document's run used (the session's
+     * snapshot), by document id; decoded once per session update, not per row.
+     */
+    val retractionChecks: Map<String, PaperRetractionCheck> = emptyMap(),
+
     /** Whether the session has completed, so it holds a report. */
     val sessionComplete: Boolean = false,
 
@@ -187,6 +200,10 @@ data class FactCheckUiState(
      */
     val scoredDocuments: List<DocumentEntity>
         get() = documents.filter { it.relevanceScore != null }
+
+    /** Papers the run left out as retracted: never scored, listed after the scored ones. */
+    val retractedDocuments: List<DocumentEntity>
+        get() = documents.filter { !it.isScored && retractionChecks[it.id]?.isRetracted == true }
 
     /**
      * Get scored documents sorted by the current sort order.
@@ -318,6 +335,11 @@ class FactCheckViewModel @Inject constructor(
         viewModelScope.launch {
             workflow.smartSearchNotice.collect { notice ->
                 _uiState.update { it.copy(smartSearchNotice = notice) }
+            }
+        }
+        viewModelScope.launch {
+            workflow.retractionNotice.collect { notice ->
+                _uiState.update { it.copy(retractionNotice = notice) }
             }
         }
         viewModelScope.launch {
@@ -518,6 +540,16 @@ class FactCheckViewModel @Inject constructor(
             documentRepository.getDocumentsBySession(sessionId)
                 .collect { docs ->
                     _uiState.update { withRetryNotice(it.copy(documents = docs)) }
+                }
+        }
+
+        // The checks the session's runs used, for the badges and the left-out list
+        viewModelScope.launch {
+            sessionRepository.getSessionFlow(sessionId)
+                .map { it?.retractionSnapshotJson }
+                .distinctUntilChanged()
+                .collect { snapshot ->
+                    _uiState.update { it.copy(retractionChecks = RetractionSnapshot.read(snapshot)) }
                 }
         }
 

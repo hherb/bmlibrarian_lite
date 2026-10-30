@@ -247,6 +247,7 @@ class PubMedService @Inject constructor(
                 publicationDate = article.publicationDate,
                 publicationYear = article.publicationYear,
                 meshTerms = article.meshTerms,
+                publicationTypesJson = DocumentEntity.encodePublicationTypes(article.publicationTypes),
                 source = Constants.SOURCE_PUBMED,
                 isPreprint = false,
                 batchNumber = batchNumber,

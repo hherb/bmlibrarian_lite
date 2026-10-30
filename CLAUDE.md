@@ -105,8 +105,8 @@ exceptions.py         # Custom exception hierarchy
 - data/remote: PubMed, Europe PMC, LLM, Unpaywall, FullText APIs (incl. PmcOpenData, PMC's open-data bucket; OpenAlex; Core, CORE's extracted text; Elsevier, Elsevier's API PDFs with a key; KeyedServiceSession, CORE's and Elsevier's session state; BotWalls, bot-wall challenge pages; PdfTitleCheck, another article's PDF)
 - domain: Models, WorkflowState, workflow/ (scoring, searching, reporting)
 - ui: Compose screens + ViewModels (factcheck, report, history, settings, fulltext, onboarding)
-- ui/components: DocumentCard (with transparency), FullTextSourceBadge, SortingControls
-- util: JATSXMLParser, JATSModels, CostCalculator, ResponseParser, PdfExporter
+- ui/components: DocumentCard (with transparency), FullTextSourceBadge, SortingControls, RetractionBadge (RETRACTED / CONCERN / NOT CHECKED)
+- util: JATSXMLParser, JATSModels, CostCalculator, ResponseParser, PdfExporter; retraction/ (Crossref lookups, Retraction Watch index, checker, sentences, RetractionService; checks per paper in Room `retraction_checks`)
 - di: Hilt modules (App, Workflow, Network, Database)
 
 ## BioMedLit Swift Package (`Packages/BioMedLit/`)

@@ -26,11 +26,13 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.nullable
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Europe PMC search response.
@@ -203,8 +205,33 @@ data class Author(
  */
 @Serializable
 data class PubTypeList(
+    @Serializable(with = LenientPubTypeSerializer::class)
     val pubType: List<String>? = null
 )
+
+/**
+ * Reads `pubType` as the desktop does (`europepmc.py`): a lone string is a
+ * list of one, entries that are not strings are skipped, any other shape is
+ * null. A strict decode would drop the whole record over an advisory field,
+ * and with it a "Retracted Publication" label the retraction check reads.
+ */
+object LenientPubTypeSerializer : KSerializer<List<String>?> {
+
+    private val listSerializer = ListSerializer(String.serializer()).nullable
+
+    override val descriptor: SerialDescriptor = listSerializer.descriptor
+
+    override fun deserialize(decoder: Decoder): List<String>? {
+        val input = decoder as? JsonDecoder ?: throw SerializationException("Europe PMC results decode from JSON only")
+        return when (val element = input.decodeJsonElement()) {
+            is JsonPrimitive -> if (element.isString) listOf(element.content) else null
+            is JsonArray -> element.mapNotNull { (it as? JsonPrimitive)?.takeIf(JsonPrimitive::isString)?.content }
+            else -> null
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: List<String>?) = listSerializer.serialize(encoder, value)
+}
 
 /**
  * Container for MeSH headings.
