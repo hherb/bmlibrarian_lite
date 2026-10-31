@@ -61,6 +61,7 @@ from bmlibrarian_lite.retraction_screen import (  # noqa: E402
 )
 from bmlibrarian_lite.retraction_store import PaperCheck  # noqa: E402
 from bmlibrarian_lite.retraction_text import (  # noqa: E402
+    CHECK_AGAIN_FAILED,
     CHECK_AGAIN_NOT_SAVED,
     NO_AUDIT_RECORD_LINE,
     STORED_CHECKS_UNREAD,
@@ -101,6 +102,13 @@ def check(status: RetractionStatus, when: datetime) -> PaperCheck:
     deciding = {RetractionStatus.RETRACTED: NOTICE, RetractionStatus.CONCERN: CONCERN}.get(status)
     unanswered = tuple(RetractionLookup) if status is RetractionStatus.UNCHECKED else ()
     return PaperCheck(RetractionVerdict(status, deciding, unanswered), when, None, None)
+
+
+# what ``check(UNCHECKED, …)`` names: no lookup answered, no copy consulted
+OUTAGE_CAUSES = (
+    "the Retraction Watch copy could not be used (run `bmll retractions-update`);"
+    " Crossref had no usable answer for the DOI"
+)
 
 
 def run_checks() -> dict[str, PaperCheck]:
@@ -557,6 +565,30 @@ def test_a_failed_check_again_changes_nothing_and_says_so(
     assert CITED.title in tab.retraction_warning.text() and not tab.retraction_warning.isHidden()
 
 
+def test_a_failed_check_again_still_warns_by_the_label(
+    tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A label that arrived after the run: a failed Check again warns by it, and stores nothing (#673)."""
+    metadata = checkpoint_metadata_with_retraction_snapshot({}, screen_documents(DOCUMENTS, run_checks()))
+    checkpoint_id = saved_checkpoint(storage, metadata)
+    reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
+    assert tab.retraction_warning.isHidden()
+    storage.add_document(replace(CITED, publication_types=LABEL))
+    monkeypatch.setattr(report_tab_module, "build_retraction_checker", lambda *_a, **_k: DownChecker())
+    monkeypatch.setattr(RetractionRecheckWorker, "start", RetractionRecheckWorker.run)
+    tab.check_again_btn.click()
+
+    assert storage.get_checkpoint(checkpoint_id).metadata == json.loads(json.dumps(metadata))
+    assert storage.retraction_checks([paper_key(CITED)]) == {}
+    assert tab.retraction_line.text().endswith(CHECK_AGAIN_FAILED)
+    assert CITED.title in tab.retraction_warning.text() and not tab.retraction_warning.isHidden()
+    # control: without the label, nothing to warn of
+    storage.add_document(replace(CITED, publication_types=[]))
+    reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
+    tab.check_again_btn.click()
+    assert tab.retraction_warning.isHidden()
+
+
 def test_a_cancelled_check_again_saves_nothing(qapp: Any) -> None:
     """Cancelled (at quit): the worker says so instead of a result."""
     worker = RetractionRecheckWorker(NoRequests(), [], "cp")
@@ -590,7 +622,7 @@ def test_an_outage_during_check_again_leaves_the_record_and_line(
     rows = recorded_retraction_snapshot(storage.get_checkpoint(checkpoint_id).metadata)
     assert rows == recorded_retraction_snapshot(json.loads(json.dumps(metadata)))
     assert tab.retraction_line.text() == (
-        "Retraction status checked 2026-10-01; 3 papers could not be checked again"
+        "Retraction status checked 2026-10-01; 3 papers could not be checked again: " + OUTAGE_CAUSES
     )
 
 
@@ -604,7 +636,7 @@ def test_an_outage_over_an_all_clear_snapshot_says_how_many_could_not_be_checked
     reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
     run_check_again(tab, storage, monkeypatch, {d.id: check(RetractionStatus.UNCHECKED, NOW) for d in DOCUMENTS})
     assert tab.retraction_line.text() == (
-        "Retraction status checked 2026-10-01; 3 papers could not be checked again"
+        "Retraction status checked 2026-10-01; 3 papers could not be checked again: " + OUTAGE_CAUSES
     )
     # control: one paper served, two not
     reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
@@ -614,7 +646,7 @@ def test_an_outage_over_an_all_clear_snapshot_says_how_many_could_not_be_checked
         monkeypatch,
         {**{d.id: check(RetractionStatus.UNCHECKED, NOW) for d in DOCUMENTS}, CITED.id: check(RetractionStatus.CLEAR, NOW)},
     )
-    assert tab.retraction_line.text().endswith("; 2 papers could not be checked again")
+    assert tab.retraction_line.text().endswith("; 2 papers could not be checked again: " + OUTAGE_CAUSES)
 
 
 def test_check_again_names_why_papers_stay_unchecked(
@@ -645,7 +677,7 @@ def test_check_again_names_why_papers_stay_unchecked(
 def test_check_again_names_only_the_causes_of_papers_whose_row_stays_unchecked(
     tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A decided row kept over an unchecked answer is counted again, its cause never named (#660)."""
+    """A decided row kept over an unchecked answer: its cause follows the again count, not the unchecked one (#668)."""
     seen = {**run_checks(), CITED.id: check(RetractionStatus.UNCHECKED, RUN)}
     metadata = checkpoint_metadata_with_retraction_snapshot({}, screen_documents(DOCUMENTS, seen))
     checkpoint_id = saved_checkpoint(storage, metadata)
@@ -668,9 +700,10 @@ def test_check_again_names_only_the_causes_of_papers_whose_row_stays_unchecked(
     assert line.endswith(
         "; 1 paper could not be checked: the Retraction Watch copy could not be used"
         " (run `bmll retractions-update`); Crossref had no usable answer for the DOI;"
-        " 1 paper could not be checked again"
+        " 1 paper could not be checked again: a Retraction Watch notice could not be read;"
+        " Crossref had no usable answer for the DOI"
     )
-    assert "notice" not in line
+    assert line.count("notice") == 1
 
 
 def test_check_again_names_no_cause_when_an_unchecked_paper_was_not_reached(

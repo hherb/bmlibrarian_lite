@@ -511,7 +511,7 @@ final class FactCheckWorkflow {
     /// report, is never rewritten: ``retractionSavedWorkLine`` and
     /// ``retractionSavedWorkWarning`` say what changed, and the warning
     /// suggests re-running the question. A check that fails stores nothing
-    /// and says the run's record stands.
+    /// and says the run's record stands, still warning of a paper its label retracts.
     func checkRetractionsAgain() async {
         // set before the wait for earlier work, so a second tap meanwhile asks nothing
         guard !isCheckingRetractionsAgain else { return }
@@ -536,10 +536,17 @@ final class FactCheckWorkflow {
             checks = try await (retractionCheck ?? productionRetractionCheck())(papers)
         } catch {
             // a cancellation nobody asked for is a failure too (see stopRequested)
+            var labelled: [String: PaperRetractionCheck] = [:]
             if !stopRequested {
                 logger.warning("Retraction check again failed: \(error.localizedDescription)")
+                // nothing is stored, but a record's own label still retracts (#673)
+                let now = Date()
+                for (document, paper) in zip(documents, papers) {
+                    let check = PaperRetractionCheck.failed(for: paper, at: now)
+                    if check.isRetracted { labelled[document.id] = check }
+                }
             }
-            showSavedRetraction(note: RetractionText.checkAgainFailed)
+            showSavedRetraction(note: RetractionText.checkAgainFailed, labelled: labelled)
             return
         }
         // a stop the check did not throw for stores nothing either
@@ -560,9 +567,11 @@ final class FactCheckWorkflow {
         // a decided check kept over an unchecked answer: no source could be reached for it
         let rows = RetractionSavedWork.recheckedChecks(
             run: session.retractionSnapshot(), stored: Self.storedRetractionChecks(documents))
-        let missed = zip(documents, papers).filter { document, paper in
-            checks[paper]?.isUnchecked == true && rows[document.id].map { !$0.isUnchecked } == true
-        }.count
+        let missed = zip(documents, papers).compactMap { document, paper -> (paper: RetractionPaper, check: PaperRetractionCheck?)? in
+            guard let check = checks[paper], check.isUnchecked, rows[document.id].map({ !$0.isUnchecked }) == true
+            else { return nil }
+            return (paper: paper, check: check)
+        }
         // the papers whose row stays unchecked, with this check's answers for them
         let still = zip(documents, papers).compactMap { document, paper -> (paper: RetractionPaper, check: PaperRetractionCheck?)? in
             guard rows[document.id]?.isUnchecked == true, let check = checks[paper] else { return nil }
@@ -571,7 +580,9 @@ final class FactCheckWorkflow {
         // a row this check never reached has no cause: the count alone, as on a reopen, never others' causes
         let causes = still.count == rows.values.filter(\.isUnchecked).count
             ? RetractionText.uncheckedCauses(still, failed: []) : []
-        showSavedRetraction(note: RetractionText.notCheckedAgainClause(missed) + unsaved, causes: causes)
+        let again = RetractionText.notCheckedAgainClause(
+            missed.count, causes: RetractionText.uncheckedCauses(missed, failed: []))
+        showSavedRetraction(note: again + unsaved, causes: causes)
     }
 
     /// Each document's stored retraction check, by `Document.id`.
@@ -587,7 +598,11 @@ final class FactCheckWorkflow {
     /// - Parameters:
     ///   - note: A clause to add to the line (a failed or partial *Check again*).
     ///   - causes: Why papers stay unchecked, by *Check again*'s answers; none on a plain reopen.
-    private func showSavedRetraction(note: String = "", causes: [String] = []) {
+    ///   - labelled: A failed *Check again*'s label retractions by `Document.id`,
+    ///     which warn though nothing stored them.
+    private func showSavedRetraction(
+        note: String = "", causes: [String] = [], labelled: [String: PaperRetractionCheck] = [:]
+    ) {
         guard let session else { return }
         let documents = session.documents ?? []
         let run = session.retractionSnapshot()
@@ -609,6 +624,10 @@ final class FactCheckWorkflow {
             unread = true
         }
         if unread { note += RetractionText.storedChecksUnread }
+        // a stored retraction keeps its own notice
+        latest.merge(labelled) { stored, label in
+            stored.isRetracted ? stored : label
+        }
         retractionSavedWorkLine = RetractionText.savedWorkLine(Array(rows.values), causes: causes) + note
         let changed = RetractionSavedWork.changedSinceRun(run: run, latest: latest, cited: cited.map(\.id))
         let byID = Dictionary(cited.map { ($0.id, $0) }) { first, _ in first }

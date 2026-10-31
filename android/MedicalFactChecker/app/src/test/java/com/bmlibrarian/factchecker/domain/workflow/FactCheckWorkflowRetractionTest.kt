@@ -36,6 +36,7 @@ import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
 import com.bmlibrarian.factchecker.util.retraction.RetractionPaper
 import com.bmlibrarian.factchecker.util.retraction.RetractionService
 import com.bmlibrarian.factchecker.util.retraction.RetractionSnapshot
+import com.bmlibrarian.factchecker.util.retraction.RetractionText
 import com.bmlibrarian.factchecker.util.retraction.StoredRetractionEvidence
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -506,6 +507,26 @@ class FactCheckWorkflowRetractionTest {
         assertTrue(rows.isEmpty())
     }
 
+    /** #673: a label that arrived after the run still warns when Check again fails, though nothing is stored. */
+    @Test
+    fun `a failing Check again still warns by the label`() = runTest {
+        BmlibFfi.assumeAvailable()
+        restoreCheckedSession()
+        assertNull(workflow.retractionSavedWorkWarning.value)
+        documents["d1"] = documents.getValue("d1").copy(publicationTypesJson = "[\"Retracted Publication\"]")
+        coEvery { retractionService.check(any()) } throws IOException("offline")
+
+        workflow.checkRetractionsAgain()
+
+        assertTrue(workflow.retractionSavedWorkWarning.value!!.contains("• Study d1: Retracted"))
+        assertTrue(workflow.retractionSavedWorkLine.value!!.endsWith(RetractionText.CHECK_AGAIN_FAILED))
+        assertTrue("nothing is stored", rows.isEmpty())
+        // control: without the label, nothing to warn of
+        documents["d1"] = documents.getValue("d1").copy(publicationTypesJson = "[\"Journal Article\"]")
+        workflow.checkRetractionsAgain()
+        assertNull(workflow.retractionSavedWorkWarning.value)
+    }
+
     @Test
     fun `a Check again that cannot read the store throws and never leaves the checking line up`() = runTest {
         restoreCheckedSession()
@@ -536,7 +557,7 @@ class FactCheckWorkflowRetractionTest {
         )
     }
 
-    /** #660: a decided row kept over an unchecked answer is counted again, its cause never named. */
+    /** #660, #668: a decided row kept over an unchecked answer: its cause follows the again count. */
     @Test
     fun `Check again names only the causes of papers whose row stays unchecked`() = runTest {
         hold("d1")
@@ -552,7 +573,7 @@ class FactCheckWorkflowRetractionTest {
 
         assertEquals(
             "Retraction status checked 2026-10-18; 1 paper could not be checked: the Retraction Watch data could not be used" +
-                " (no up-to-date copy is on this device); 1 paper could not be checked again",
+                " (no up-to-date copy is on this device); 1 paper could not be checked again: Crossref could not be used (HTTP 503)",
             workflow.retractionSavedWorkLine.value
         )
     }
@@ -581,7 +602,10 @@ class FactCheckWorkflowRetractionTest {
 
         workflow.checkRetractionsAgain()
 
-        assertEquals("Retraction status checked 2026-10-18; 1 paper could not be checked again", workflow.retractionSavedWorkLine.value)
+        assertEquals(
+            "Retraction status checked 2026-10-18; 1 paper could not be checked again: Crossref could not be used (HTTP 503)",
+            workflow.retractionSavedWorkLine.value
+        )
         assertTrue("an outage is not knowledge", PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isClear)
     }
 
@@ -647,7 +671,9 @@ class FactCheckWorkflowRetractionTest {
         assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
         assertTrue(workflow.retractionCurrentChecks.value.getValue("d1").isRetracted)
         assertTrue(workflow.retractionSavedWorkWarning.value!!.contains("• Study d1: Retracted"))
-        assertTrue(workflow.retractionSavedWorkLine.value!!.endsWith("; 1 paper could not be checked again"))
+        assertTrue(
+            workflow.retractionSavedWorkLine.value!!.endsWith("; 1 paper could not be checked again: Crossref could not be used (HTTP 503)")
+        )
     }
 
     @Test

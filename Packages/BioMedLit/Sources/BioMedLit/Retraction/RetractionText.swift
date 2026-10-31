@@ -194,9 +194,14 @@ public enum RetractionText {
 
     /// *Check again*'s note for decided papers no source answered this time,
     /// whose record stays; `""` for none.
-    public static func notCheckedAgainClause(_ count: Int) -> String {
+    ///
+    /// - Parameters:
+    ///   - count: How many such papers.
+    ///   - causes: ``uncheckedCauses(_:failed:)`` of their answers (#668).
+    public static func notCheckedAgainClause(_ count: Int, causes: [String] = []) -> String {
         guard count > 0 else { return "" }
-        return "; \(count == 1 ? "1 paper" : "\(grouped(count)) papers") could not be checked again"
+        let clause = "; \(count == 1 ? "1 paper" : "\(grouped(count)) papers") could not be checked again"
+        return causes.isEmpty ? clause : "\(clause): \(causes.joined(separator: "; "))"
     }
 
     /// Warns that papers a saved report cites are now retracted or under

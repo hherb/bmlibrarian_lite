@@ -67,7 +67,10 @@ paper with its `retraction_status`.
   `RETRACTION_CHECK_MAX_AGE_DAYS` (7), unless the record's label now says
   retracted.
 - **The label survives everything.** A failed check (the checker could not be
-  built, the database raised) still leaves out a paper its label retracts.
+  built, the database raised) still leaves out a paper its label retracts. A
+  failed *Check again* stores nothing and the line says the run's record
+  stands, but a cited paper its label now retracts is still warned of (#673,
+  all three platforms; a shown retraction keeps its own notice).
 - **A failed store is not a failed check.** The verdicts are returned even
   when they could not be stored.
 - **A failed check is failed document by document.** `RetractionScreen.failed_ids`
@@ -94,7 +97,7 @@ paper with its `retraction_status`.
   record why; after *Check again* the saved-work line names the causes of
   the papers whose row stays unchecked (#660, all three platforms). A
   decided row kept over an unchecked answer is counted ("could not be
-  checked again"), not explained; and when an unchecked row was not reached
+  checked again"), its answers' causes after the count (#668); and when an unchecked row was not reached
   (its document is gone) the line gives the count alone, as on a reopen,
   since the others' causes would claim it too.
 - **`excluded` is a fact of the run.** Snapshot rows record whether the run

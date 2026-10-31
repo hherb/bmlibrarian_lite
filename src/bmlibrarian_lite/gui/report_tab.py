@@ -510,7 +510,7 @@ class ReportTab(QWidget):
 
         The checkpoint is read again, since its metadata is replaced whole.
         The report text is never touched. A failed check leaves the record as
-        it was and says so.
+        it was and says so, still warning of a paper its label retracts.
 
         Args:
             checkpoint_id: The run checked.
@@ -521,7 +521,16 @@ class ReportTab(QWidget):
         showing = checkpoint_id == self._saved_checkpoint_id
         if screen.failed:
             if showing:
-                self._show_saved_retraction(note=CHECK_AGAIN_FAILED)
+                # nothing is stored, but a record's own label still retracts (#673)
+                shown = self._shown_checks
+                labelled = {
+                    doc_id: c
+                    for doc_id, c in screen.checks.items()
+                    if c.verdict.status is RetractionStatus.RETRACTED
+                    # a shown retraction keeps its own notice
+                    and (doc_id not in shown or shown[doc_id].verdict.status is not RetractionStatus.RETRACTED)
+                }
+                self._show_saved_retraction({**shown, **labelled}, note=CHECK_AGAIN_FAILED)
             return
         note = ""
         try:
@@ -552,22 +561,25 @@ class ReportTab(QWidget):
             self._unsaved_rechecks.add(checkpoint_id)
         if not showing:
             return
-        # a decided row kept over an unchecked answer: no source could be reached for it
-        missed = sum(
-            1
-            for row in updated.rows
-            if (answer := screen.checks.get(row["document_id"])) is not None
-            and answer.verdict.status is RetractionStatus.UNCHECKED
-            and row["status"] != RetractionStatus.UNCHECKED.value
-        )
         still = {row["document_id"] for row in updated.rows if row["status"] == RetractionStatus.UNCHECKED.value}
+        decided = {row["document_id"] for row in updated.rows} - still
+        # a decided row kept over an unchecked answer: no source could be reached for it
+        missed = tuple(
+            doc
+            for doc in screen.kept
+            if doc.id in decided
+            and (answer := screen.checks.get(doc.id)) is not None
+            and answer.verdict.status is RetractionStatus.UNCHECKED
+        )
         kept = tuple(doc for doc in screen.kept if doc.id in still)
         # a row this check never reached has no cause: the count alone, as on a reopen, never others' causes
         causes = unchecked_causes(replace(screen, kept=kept)) if len(kept) == len(still) else []
         rows = RetractionScreen.from_snapshot(updated.to_snapshot())
         self._retraction_snapshot = rows
         self._show_saved_retraction(
-            latest_checks(rows, screen.checks), not_checked_again_clause(missed) + note, causes
+            latest_checks(rows, screen.checks),
+            not_checked_again_clause(len(missed), unchecked_causes(replace(screen, kept=missed))) + note,
+            causes,
         )
         if not checkpoint_id.startswith(FILE_ID_PREFIX):
             # the audit trail tab shows the reopened question, never a loaded file

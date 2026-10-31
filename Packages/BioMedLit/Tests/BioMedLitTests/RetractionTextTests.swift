@@ -229,6 +229,8 @@ final class RetractionTextTests: XCTestCase {
         XCTAssertEqual(RetractionText.notCheckedAgainClause(0), "")
         XCTAssertEqual(RetractionText.notCheckedAgainClause(1), "; 1 paper could not be checked again")
         XCTAssertEqual(RetractionText.notCheckedAgainClause(1_200), "; 1,200 papers could not be checked again")
+        XCTAssertEqual(
+            RetractionText.notCheckedAgainClause(2, causes: ["a", "b"]), "; 2 papers could not be checked again: a; b")
     }
 
     func testSavedWorkWarning() {
