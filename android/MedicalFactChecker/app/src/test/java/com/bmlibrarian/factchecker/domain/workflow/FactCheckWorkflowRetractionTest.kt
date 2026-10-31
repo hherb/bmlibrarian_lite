@@ -337,6 +337,10 @@ class FactCheckWorkflowRetractionTest {
         BmlibFfi.assumeAvailable()
         hold("d1", types = listOf("Retracted Publication"))
         hold("d2", types = listOf("Journal Article"))
+        // a stored clear the label has since overtaken
+        val clear = CLEAR.copy(checkedAtMs = System.currentTimeMillis() - 10 * DAY_MS)
+        rows["pmid:3"] = PaperRetractionCheck.encode(clear)
+        hold("d3", types = listOf("Retracted Publication"))
         coEvery { retractionService.check(any()) } throws IOException("down")
 
         run()
@@ -344,6 +348,8 @@ class FactCheckWorkflowRetractionTest {
         assertEquals(listOf("d2"), scored)
         assertTrue(snapshot().getValue("d1").isRetracted)
         assertTrue(snapshot().getValue("d2").isUnchecked)
+        assertTrue(snapshot().getValue("d3").isRetracted)
+        assertTrue("the label overtakes the stored clear", PaperRetractionCheck.decode(rows.getValue("pmid:3"))!!.isRetracted)
     }
 
     @Test

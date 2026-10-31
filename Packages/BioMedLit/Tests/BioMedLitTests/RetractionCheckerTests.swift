@@ -179,6 +179,8 @@ final class RetractionCheckerTests: XCTestCase {
         XCTAssertTrue(labelled.isRetracted)
         XCTAssertTrue(labelled.isDecidedByLabel)
         XCTAssertEqual(labelled.checkedAt, RetractionFixture.now)
+        // nothing was asked, so it is never reused in place of asking
+        XCTAssertEqual(labelled.unanswered, ["retraction_watch_export", "crossref"])
         // control: without the label a failed check is unchecked, never clear
         XCTAssertEqual(
             PaperRetractionCheck.failed(

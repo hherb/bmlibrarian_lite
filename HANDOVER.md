@@ -243,7 +243,7 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **Retraction checking** follow-ups: **#662** (an unchecked run's warning
   rule, "could not be read" wording, needs a cross-platform decision),
   **#663** (Android), Apple **#647**–**#649**, **#651**, **#653**, **#654**
-  (item 1 done by #660), **#657**, **#668**, **#671**.
+  (item 1 done by #660), **#657**, **#668**, **#671**, **#673** (the apps' *Check again* ignores the label on a throw).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
   the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,
