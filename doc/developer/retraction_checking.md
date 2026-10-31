@@ -87,10 +87,15 @@ paper with its `retraction_status`.
   `RETRACTION_WATCH_MIN_KEEP_RATIO` (95%) of the old copy's notices is a
   partial download; the old copy is kept.
 - **Every unchecked paper has a named cause** in the run's summary
-  (`_unchecked_causes`): the check failed, the copy, an unreadable notice,
+  (`unchecked_causes`): the check failed, the copy, an unreadable notice,
   Crossref's failure, no DOI, no usable Crossref answer, no identifiers, or a
   cancel. A restored report gives the count only, as its snapshot does not
-  record why.
+  record why; after *Check again* the saved-work line names the causes of
+  the papers whose row stays unchecked (#660, all three platforms). A
+  decided row kept over an unchecked answer is counted ("could not be
+  checked again"), not explained; and when an unchecked row was not reached
+  (its document is gone) the line gives the count alone, as on a reopen,
+  since the others' causes would claim it too.
 - **`excluded` is a fact of the run.** Snapshot rows record whether the run
   left a paper out; a later re-check (*Check again*) may change `status`,
   never that. *Check again* keeps the run's own status and notice as
@@ -132,7 +137,8 @@ BioMedLit; the app never imports `BmlibCore`.
   (`checkRetractionsAgain`) stores each answer by
   `Document.takeRetractionCheck`, which keeps a decided check over an outage,
   and never rewrites the snapshot or the report: the snapshot stays what the
-  run saw (the desktop's `run_status`). A run row that is unchecked (a failed
+  run saw (the desktop's `run_status`); its line names why papers stay
+  unchecked (`RetractionText.savedWorkLine(_:causes:)`, #660). A run row that is unchecked (a failed
   check carries its attempt's time) is no check time, so any later warning is
   news. The rules are BioMedLit's `RetractionSavedWork`. A left-out row says
   `RetractionText.excludedLine`; the report opens with
@@ -213,7 +219,7 @@ row per paper, that row is the paper's latest check.
   writes their screen. A failure, or a cancel before its answers are in,
   stores nothing and says the run's record stands; once they are in, they
   are stored and shown whole. Its line names why papers stay unchecked, as
-  the run's notice does (#654 item 1; Android only so far). Of #654's other
+  the run's notice does (#654 item 1; all three platforms since #660). Of #654's other
   items, Android's Check again can be stopped (item 2), but item 3 (the
   not-saved note said on that view only) and item 4 (a failed check recomputes
   the warning from the stored rows) apply to it too. The report screen's

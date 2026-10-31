@@ -563,7 +563,15 @@ final class FactCheckWorkflow {
         let missed = zip(documents, papers).filter { document, paper in
             checks[paper]?.isUnchecked == true && rows[document.id].map { !$0.isUnchecked } == true
         }.count
-        showSavedRetraction(note: RetractionText.notCheckedAgainClause(missed) + unsaved)
+        // the papers whose row stays unchecked, with this check's answers for them
+        let still = zip(documents, papers).compactMap { document, paper -> (paper: RetractionPaper, check: PaperRetractionCheck?)? in
+            guard rows[document.id]?.isUnchecked == true, let check = checks[paper] else { return nil }
+            return (paper: paper, check: check)
+        }
+        // a row this check never reached has no cause: the count alone, as on a reopen, never others' causes
+        let causes = still.count == rows.values.filter(\.isUnchecked).count
+            ? RetractionText.uncheckedCauses(still, failed: []) : []
+        showSavedRetraction(note: RetractionText.notCheckedAgainClause(missed) + unsaved, causes: causes)
     }
 
     /// Each document's stored retraction check, by `Document.id`.
@@ -576,8 +584,10 @@ final class FactCheckWorkflow {
     /// cited papers whose latest check, this session's or another's for the
     /// same paper, warns where the run did not.
     ///
-    /// - Parameter note: A clause to add to the line (a failed or partial *Check again*).
-    private func showSavedRetraction(note: String = "") {
+    /// - Parameters:
+    ///   - note: A clause to add to the line (a failed or partial *Check again*).
+    ///   - causes: Why papers stay unchecked, by *Check again*'s answers; none on a plain reopen.
+    private func showSavedRetraction(note: String = "", causes: [String] = []) {
         guard let session else { return }
         let documents = session.documents ?? []
         let run = session.retractionSnapshot()
@@ -599,7 +609,7 @@ final class FactCheckWorkflow {
             unread = true
         }
         if unread { note += RetractionText.storedChecksUnread }
-        retractionSavedWorkLine = RetractionText.savedWorkLine(Array(rows.values)) + note
+        retractionSavedWorkLine = RetractionText.savedWorkLine(Array(rows.values), causes: causes) + note
         let changed = RetractionSavedWork.changedSinceRun(run: run, latest: latest, cited: cited.map(\.id))
         let byID = Dictionary(cited.map { ($0.id, $0) }) { first, _ in first }
         retractionSavedWorkWarning = RetractionText.savedWorkWarning(changed.compactMap { id in

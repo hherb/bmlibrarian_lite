@@ -13,7 +13,12 @@ its slice has landed; add a new section when handing off new work.
 `docs/superpowers/plans/2026-10-30-retraction-checking-android.md`; Android
 section of `doc/developer/retraction_checking.md`, which holds the design).
 *Check again*'s line names why papers stay unchecked (#654 item 1, the
-maintainer's choice; **#660** is to port it to Swift and the desktop). **A missing
+maintainer's choice), on all three platforms since #660: the causes come from
+Check again's own answers, for the papers whose row stays unchecked; a plain
+reopen names none (the snapshot records none), nor does a Check again with an
+unchecked row it never reached (its document gone: the others' causes would
+claim it). Lodged: #668 ("could not be checked again" names no cause), #669
+(Swift: a retraction Check again finds is lost over an unreadable row). **A missing
 native library** leaves papers unchecked, but
 stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
@@ -34,16 +39,13 @@ cancellation it is (the one bare `execute()` left, `RetractionIndexStore`'s
 export refresh, runs in the service's own scope, not a run's). Each fetching
 service has a test that cancels a request in flight (`cancelInFlight`, test
 `util/InFlightCancel.kt`). The embedding model downloads to a `.part` file
-renamed into place. Lodged: **#662**: an
-unchecked run's warning rule and the Android-only "could not be read" wording,
-to settle across platforms; **#663**: small *Check again* follow-ups.
+renamed into place. Lodged: #662, #663 (see Next up).
 
 **Retraction checking, iOS/macOS: done** (PRs #650, #652; plan
 `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`). The
 snapshot is the run's record, never rewritten; *Check again* stores per
-`Document`. Open: #651 (Apple stores per document, not per paper), #647,
-#648, #649, #653, #654 (the Android port took #647's per-entry snapshot and
-refused-export backoff, kept across launches, #649's exhaustive names and code-point escaping).
+`Document`, not per paper (open: #651). The Android port took #647's per-entry snapshot and
+refused-export backoff, #649's exhaustive names and code-point escaping.
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
 error follows a cancel). Open, lodged by recent rounds: #641 (JATS whitespace,
@@ -125,8 +127,7 @@ have landed):
   `europepmc_free_pdf.json`; converter **6**, analyser **2.7**. **Phase 4
   consumes bmlib's Rust through UniFFI** (no production caller yet). Open:
   #573–#581, #585, #587.
-- **A download is checked before it is cached** (#560, #561; PR #562); **Android's
-  `downloadPdf` never answers from the cache.** Lodged: #563.
+- **A download is checked before it is cached** (PR #562); **Android's `downloadPdf` never answers from the cache.** Open: #563.
 - **Wrong-article PDFs** (#532, #541, #546; PRs #542, #548, #559; contract
   `pdf_title_check.json`): a mismatch is set aside as `.mismatch`, never read;
   the refusal is `wrong_article`, a skip **with its address**, never an
@@ -145,7 +146,7 @@ have landed):
   against live pages.
 - **Settings dialog lifecycle** (PR #518): a released dialog's handlers do
   nothing (**a queued signal still arrives after a disconnect**); GC on the
-  main thread only (#517). **PySide6 capped `<6.12`** (#516).
+  main thread only (#517). **PySide6 `<6.12`** (#516).
 - **Stage C2: Elsevier's article API** (all three; PR #507; contract
   `elsevier_article.json`). **A first-page PDF is never served**; a 403
   `AUTHENTICATION_ERROR` is "not available from this network", a 401 refuses
@@ -244,9 +245,14 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **Retraction checking**: Phases 3–6 (Phase 4 as adapter work over the Rust
-  parser); **#660** (Check again's causes, Swift and desktop). bmlib audit
-  leftovers: **#571**, **#573**–**#581**, **#585**.
+- **Retraction checking** follow-ups: **#662** (an unchecked run's warning
+  rule, "could not be read" wording, needs a cross-platform decision),
+  **#663** (Android), Apple **#647**–**#649**, **#651**, **#653**, **#654**
+  (item 1 done by #660), **#656**, **#657**.
+- **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
+  Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
+  the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,
+  **#585**.
 - **#545** sweep the PDF library for other articles' PDFs (CLI only, the
   maintainer's call); **#547** keep a set-aside PDF from the GUI (both from
   #541); **#555** Android release builds fail R8; **#556**–**#558** (#546's).
@@ -304,10 +310,8 @@ Open issues by family; each issue carries the detail. None blocks another.
   above.
 - Android: **#384** analyse full text (every rating is "limited" until then);
   **#387** data-availability parity, DAO/migration tests.
-- **#400** the data-availability heading rule (`'data' in title and ('avail'
-  … 'shar' … 'access')`) matches ~25 body sections per 5,000 articles, and
-  the first match wins; a markup-tolerant title read alone nets zero, so it
-  lands with a tighter rule (see the markup-tolerance memory).
+- **#400** the data-availability heading rule matches ~25 body sections per
+  5,000 articles (first match wins); it lands only with a tighter rule.
 
 ### The analysis-failure family: what is left
 

@@ -211,6 +211,20 @@ final class RetractionTextTests: XCTestCase {
             "the oldest decided check, never an unchecked one's time")
     }
 
+    func testSavedWorkLineNamesWhyPapersStayUncheckedAfterCheckAgain() {
+        let rwCause = "the Retraction Watch data could not be used (it downloads over Wi-Fi)"
+        let unchecked = check("unchecked", unanswered: both)
+        XCTAssertEqual(
+            RetractionText.savedWorkLine([check("clear"), unchecked], causes: [rwCause]),
+            "Retraction status checked 2026-10-18; 1 paper could not be checked: \(rwCause)")
+        XCTAssertEqual(
+            RetractionText.savedWorkLine([unchecked], causes: [rwCause]),
+            "Retraction status could not be checked: \(rwCause)")
+        XCTAssertEqual(
+            RetractionText.savedWorkLine([check("clear")], causes: [rwCause]),
+            "Retraction status checked 2026-10-18", "no paper unchecked, no causes")
+    }
+
     func testNotCheckedAgainClause() {
         XCTAssertEqual(RetractionText.notCheckedAgainClause(0), "")
         XCTAssertEqual(RetractionText.notCheckedAgainClause(1), "; 1 paper could not be checked again")

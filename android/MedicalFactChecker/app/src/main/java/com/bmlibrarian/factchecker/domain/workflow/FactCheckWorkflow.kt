@@ -1156,9 +1156,13 @@ class FactCheckWorkflow @Inject constructor(
         // a decided check kept over an unchecked answer: no source could be reached for it
         val missed = again.count { (id, check) -> check.isUnchecked && rows[id]?.isUnchecked == false }
         val papers = documents.associate { it.id to it.retractionPaper }
-        val causes = RetractionText.uncheckedCauses(
-            again.filterKeys { rows[it]?.isUnchecked == true }.map { (id, check) -> papers.getValue(id) to check }, emptySet()
-        )
+        val still = again.filterKeys { rows[it]?.isUnchecked == true }
+        // a row this check never reached has no cause: the count alone, as on a reopen, never others' causes
+        val causes = if (still.size == rows.values.count { it.isUnchecked }) {
+            RetractionText.uncheckedCauses(still.map { (id, check) -> papers.getValue(id) to check }, emptySet())
+        } else {
+            emptyList()
+        }
         if (screen != savedWorkScreen) return
         _retractionCurrentChecks.value = rows
         _retractionSavedWorkLine.value = RetractionText.savedWorkLine(rows.values, causes) +

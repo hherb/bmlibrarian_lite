@@ -30,6 +30,7 @@ import os
 import re
 import sqlite3
 import tempfile
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from collections.abc import Mapping, Sequence
@@ -103,6 +104,7 @@ from ..retraction_text import (
     not_checked_again_clause,
     plain_title,
     saved_work_line,
+    unchecked_causes,
     saved_work_warning,
     without_retraction_notice,
 )
@@ -431,14 +433,16 @@ class ReportTab(QWidget):
         return list({c.document.id: c.document for c in self._all_citations}.values())
 
     def _show_saved_retraction(
-        self, current: Mapping[str, Any] | None = None, note: str = ""
+        self, current: Mapping[str, Any] | None = None, note: str = "", causes: Sequence[str] = ()
     ) -> None:
         """Show the snapshot's checked-on line and warn of changes in *current*.
 
         Args:
             current: The latest checks by document id; ``None`` keeps the
                 ones last shown.
-            note: A clause to add to the line (a failed *Check again*).
+            note: A clause to add to the line (a failed or partial *Check again*).
+            causes: Why papers stay unchecked, by *Check again*'s answers;
+                none on a plain reopen.
         """
         if current is not None:
             self._shown_checks = current
@@ -446,7 +450,7 @@ class ReportTab(QWidget):
         line = (
             NO_AUDIT_RECORD_LINE
             if self._retraction_unrecorded and not snapshot
-            else saved_work_line(snapshot.values())
+            else saved_work_line(snapshot.values(), causes)
         )
         self.retraction_line.setText(line + note)
         self.retraction_line.setVisible(True)
@@ -556,9 +560,15 @@ class ReportTab(QWidget):
             and answer.verdict.status is RetractionStatus.UNCHECKED
             and row["status"] != RetractionStatus.UNCHECKED.value
         )
+        still = {row["document_id"] for row in updated.rows if row["status"] == RetractionStatus.UNCHECKED.value}
+        kept = tuple(doc for doc in screen.kept if doc.id in still)
+        # a row this check never reached has no cause: the count alone, as on a reopen, never others' causes
+        causes = unchecked_causes(replace(screen, kept=kept)) if len(kept) == len(still) else []
         rows = RetractionScreen.from_snapshot(updated.to_snapshot())
         self._retraction_snapshot = rows
-        self._show_saved_retraction(latest_checks(rows, screen.checks), not_checked_again_clause(missed) + note)
+        self._show_saved_retraction(
+            latest_checks(rows, screen.checks), not_checked_again_clause(missed) + note, causes
+        )
         if not checkpoint_id.startswith(FILE_ID_PREFIX):
             # the audit trail tab shows the reopened question, never a loaded file
             self.retraction_rechecked.emit(rows)

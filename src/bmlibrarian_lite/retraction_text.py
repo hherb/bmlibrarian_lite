@@ -51,7 +51,7 @@ _CROSSREF_SILENT_CAUSE = "Crossref had no usable answer for the DOI"
 _CANCELLED_CAUSE = "the check was cancelled before reaching them"
 
 
-def _unchecked_causes(screen: RetractionScreen) -> list[str]:
+def unchecked_causes(screen: RetractionScreen) -> list[str]:
     """Why the screen's kept papers are unchecked, each cause class once.
 
     In order: the check itself, the export copy or a notice in it, Crossref
@@ -122,7 +122,7 @@ def run_summary_clause(screen: RetractionRecord) -> str | None:
     if unchecked:
         owner = "1 paper's" if unchecked == 1 else f"{unchecked:,} papers'"
         clause = f"{owner} retraction status could not be checked"
-        causes = _unchecked_causes(screen) if isinstance(screen, RetractionScreen) else []
+        causes = unchecked_causes(screen) if isinstance(screen, RetractionScreen) else []
         parts.append(f"{clause}: {'; '.join(causes)}" if causes else clause)
     return "; ".join(parts) or None
 
@@ -182,7 +182,7 @@ def checked_on_line(checked_at: datetime | None) -> str:
     return f"Retraction status checked {as_utc(checked_at).date().isoformat()}"
 
 
-def saved_work_line(rows: Iterable[Mapping[str, Any]]) -> str:
+def saved_work_line(rows: Iterable[Mapping[str, Any]], causes: Sequence[str] = ()) -> str:
     """A reopened run's line: when its decided papers were checked, and how many were not.
 
     The date is the oldest check time among decided rows (retracted,
@@ -190,6 +190,9 @@ def saved_work_line(rows: Iterable[Mapping[str, Any]]) -> str:
 
     Args:
         rows: The run's snapshot rows.
+        causes: :func:`unchecked_causes` of the unchecked papers (after
+            *Check again*); added only when a row is unchecked. A plain
+            reopen has none: the snapshot records none.
 
     Returns:
         E.g. "Retraction status checked 2026-10-01; 2 papers could not be
@@ -202,8 +205,11 @@ def saved_work_line(rows: Iterable[Mapping[str, Any]]) -> str:
     unchecked = sum(1 for r in rows if r.get("status") == RetractionStatus.UNCHECKED.value)
     checked_at = decided_checked_at(rows)
     if checked_at is None:
-        return "Retraction status could not be checked"
-    return checked_on_line(checked_at) + _not_checked_clause(unchecked)
+        line = "Retraction status could not be checked"
+    else:
+        line = checked_on_line(checked_at) + _not_checked_clause(unchecked)
+    # the causes follow the not-checked count, as they follow the run notice's
+    return f"{line}: {'; '.join(causes)}" if causes and unchecked else line
 
 
 def retraction_methods_line(record: RetractionRecord) -> str:
