@@ -44,6 +44,8 @@ let package = Package(
             path: "Sources",
             exclude: [
                 "macOS",
+                // the app bundle's privacy manifest, copied by the Xcode project
+                "PrivacyInfo.xcprivacy",
             ]
         ),
         // Test target

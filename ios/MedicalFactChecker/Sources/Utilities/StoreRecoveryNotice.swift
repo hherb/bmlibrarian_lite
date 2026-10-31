@@ -96,3 +96,23 @@ extension View {
         modifier(StoreRecoveryNotice(message: message))
     }
 }
+
+/// What the app shows in place of itself when no store could be opened at
+/// launch (#297): the reason and what to do, and nothing that could start a
+/// fact check the in-memory stand-in would lose.
+struct StoreLaunchFailureView: View {
+    /// ``StoreRecovery/launchFailureMessage(for:storeDirectory:)``'s text.
+    let message: String
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading) {
+                Label(StoreRecovery.noticeTitle, systemImage: "exclamationmark.triangle")
+                    .font(.title2.bold())
+                Text(message)
+                    .textSelection(.enabled)
+            }
+            .padding()
+        }
+    }
+}

@@ -1,7 +1,7 @@
 # Privacy Policy
 
 **Medical Fact Checker**
-Last Updated: January 2026
+Last Updated: October 2026
 
 ## Overview
 
@@ -22,14 +22,15 @@ Medical Fact Checker is designed with privacy in mind. We do not collect, store,
 All of the following data is stored locally on your device and never transmitted to us:
 
 - **Medical claims and queries**: The text you enter for fact-checking
-- **Fact-check history**: Your past sessions and reports
+- **Fact-check history**: Your past sessions and reports, and the retraction status found for each paper
+- **Full texts you upload**: Files you choose to upload are read on the device and stored with the paper
 - **App settings**: Your preferences and configuration
 - **API keys**: Stored securely in the iOS Keychain
 - **Usage records**: Token counts and cost tracking for your budgets
 
 ## Third-Party Services
 
-Medical Fact Checker connects to third-party services that you configure. These connections are necessary for the app to function and are initiated only when you perform a fact-check.
+Medical Fact Checker connects to the third-party services below. These connections are necessary for the app to function. They are made when you run a fact-check or open, analyse or re-check its documents, except the Retraction Watch download, which the app refreshes on its own over Wi-Fi.
 
 ### PubMed / NCBI
 
@@ -39,7 +40,30 @@ When you run a fact-check, the app searches PubMed via the NCBI E-utilities API:
 - **Data received**: Article metadata (titles, abstracts, authors, publication info)
 - **Privacy policy**: [NCBI Privacy Policy](https://www.ncbi.nlm.nih.gov/home/about/policies/)
 
-Your email address (if configured) is sent to NCBI to identify your requests, as recommended by their API guidelines.
+Your email address (if configured) is sent to NCBI to identify your requests, as recommended by their API guidelines. The same address is sent to Crossref, Unpaywall and OpenAlex, which ask for one for the same reason. If you have not set one, a generic address of the app's is sent instead.
+
+### Article Databases and Full-Text Sources
+
+To find articles and read their full text, the app asks these services about the articles a search found. What is sent is the article's identifiers (DOI, PubMed ID, PMC ID) or, for Europe PMC, the search query; never your claim's wording beyond that query.
+
+| Service | What's Sent | Privacy Policy |
+|---------|-------------|----------------|
+| Europe PMC (EMBL-EBI) | Search queries, article identifiers | [ebi.ac.uk/data-protection](https://www.ebi.ac.uk/data-protection/) |
+| PMC Open Access (Amazon S3) | PMC IDs | [NCBI Privacy Policy](https://www.ncbi.nlm.nih.gov/home/about/policies/) |
+| Unpaywall | DOIs, your email address | [unpaywall.org/legal](https://unpaywall.org/legal) |
+| OpenAlex | DOIs, your email address | [openalex.org](https://openalex.org/) |
+| CORE (only with your CORE API key) | DOIs, your CORE API key | [core.ac.uk/privacy](https://core.ac.uk/privacy) |
+| Elsevier (only with your Elsevier API key) | DOIs of Elsevier articles, your Elsevier API key and institutional token | [elsevier.com/legal/privacy-policy](https://www.elsevier.com/legal/privacy-policy) |
+| doi.org and publishers' websites | Requests for an article's page or PDF | Each publisher's own policy |
+
+### Retraction and Transparency Checks
+
+| Service | What's Sent | Privacy Policy |
+|---------|-------------|----------------|
+| Crossref | DOIs, your email address; the app also downloads the Retraction Watch database from Crossref | [crossref.org/operations-and-sustainability/privacy](https://www.crossref.org/operations-and-sustainability/privacy/) |
+| ClinicalTrials.gov | Trial registration numbers | [NLM Privacy Policy](https://www.nlm.nih.gov/web_policies.html) |
+
+None of these services receives your API keys for AI providers, your fact-check history, or anything about you beyond the email address named above and your device's network address, which any internet request reveals.
 
 ### LLM API Providers
 
@@ -64,6 +88,10 @@ If you use Ollama, all AI processing happens locally on your Mac. No data is sen
 ### On-Device Embedding Scoring
 
 When embedding scoring is enabled, semantic similarity calculations use Apple's NLEmbedding framework and run entirely on your device. No data is sent externally for this feature.
+
+### iCloud (optional)
+
+If you turn on iCloud sync, your fact-check history is stored in your own iCloud account through Apple's CloudKit, so your other devices can read it. We have no access to it. See [Apple's Privacy Policy](https://www.apple.com/legal/privacy/).
 
 ## Data Security
 
@@ -109,5 +137,7 @@ https://github.com/hherb/bmlibrarian_lite/issues
 | API keys | Stored locally in Keychain |
 | Fact-check history | Stored locally on device |
 | PubMed queries | Sent to NCBI |
+| Article identifiers | Sent to the article databases and full-text sources above |
+| Your email address (if set) | Sent to NCBI, Crossref, Unpaywall and OpenAlex |
 | AI processing | Sent to your chosen provider |
 | Local AI option | Yes (Ollama) |

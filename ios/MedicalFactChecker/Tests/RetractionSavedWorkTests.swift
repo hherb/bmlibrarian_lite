@@ -101,9 +101,9 @@ final class RetractionSavedWorkTests: XCTestCase {
         return (session, documents)
     }
 
-    /// A document in another session holding `check` for `doi`.
-    @discardableResult
-    private func storeElsewhere(_ doi: String, _ check: PaperRetractionCheck) -> Document {
+    /// Another session's `check` of `doi`, as its run leaves it: on its
+    /// document and on the paper's record (#651). `json` replaces the stored text.
+    private func storeElsewhere(_ doi: String, _ check: PaperRetractionCheck, json: String? = nil) {
         let other = FactCheckSession(claim: "Another claim")
         context.insert(other)
         let document = Document(pmid: "3000000", title: "Same paper", abstract: "An abstract.")
@@ -111,8 +111,9 @@ final class RetractionSavedWorkTests: XCTestCase {
         context.insert(document)
         document.session = other
         document.retractionCheck = check
+        if let json { document.retractionCheckJSON = json }
+        try? RetractionCheckRecord.share(from: [document], in: context)
         try? context.save()
-        return document
     }
 
     /// Counts the papers asked about, answering each from `answers` by DOI.
@@ -202,7 +203,7 @@ final class RetractionSavedWorkTests: XCTestCase {
             "Retraction status checked 2026-10-18; later checks could not be read")
 
         documents[0].retractionCheck = Self.check("clear")
-        storeElsewhere("10.1000/a", Self.check("clear")).retractionCheckJSON = "{\"status\": 7}"
+        storeElsewhere("10.1000/a", Self.check("clear"), json: "{\"status\": 7}")
         XCTAssertEqual(
             restore(session).retractionSavedWorkLine,
             "Retraction status checked 2026-10-18; later checks could not be read")

@@ -124,9 +124,13 @@ BioMedLit; the app never imports `BmlibCore`.
   as retracted"), `RetractionSavedWork` (a restored session's line and
   warning).
 - The screen is the app's `FactCheckWorkflow.screenForRetraction`, before
-  scoring. Each document's latest check is `Document.retractionCheckJSON`:
-  per document, so per session, not per paper as the desktop's
-  `retraction_checks` row is (#651). A stored check naming a status or
+  scoring. Each paper's latest check is a `RetractionCheckRecord`, keyed by
+  `paperKey` as the desktop's `retraction_checks` row is, and kept when the
+  sessions holding the paper are deleted (#651). Not unique, since CloudKit
+  allows no unique constraint; readers merge duplicates (`standing`).
+  `Document.retractionCheckJSON` is each session's copy: a screen or *Check
+  again* brings it up to the record (`adopt`), decides, and writes it back
+  (`share`). A stored check naming a status or
   lookup this build does not know is unreadable (`isReadable`), as the
   desktop's `_decode`. What the run used is
   `FactCheckSession.retractionSnapshotJSON`. They can differ: a stored clear

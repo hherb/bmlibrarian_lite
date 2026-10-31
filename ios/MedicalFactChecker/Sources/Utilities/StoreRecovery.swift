@@ -318,6 +318,27 @@ enum StoreRecovery {
         }
     }
 
+    /// What the app shows in place of itself when no store could be opened at
+    /// launch (#297): what happened, that nothing was deleted, where the data
+    /// is, and what the user can do.
+    ///
+    /// - Parameters:
+    ///   - error: Why the store could not be opened.
+    ///   - storeDirectory: Where the store's files are, when known.
+    static func launchFailureMessage(for error: Error, storeDirectory: String?) -> String {
+        let what = (error as? StoreSetAsideFailure)?.errorDescription
+            ?? "This app could not open a database to keep fact checks in. " + nothingDeleted
+                + ". The reason given was: " + error.localizedDescription
+        let location = storeDirectory.map { " Your saved fact checks are in " + $0 + "." } ?? ""
+        return what + location + " " + launchFailureAdvice
+    }
+
+    /// What the user can do while no store opens.
+    static let launchFailureAdvice =
+        "Until a database can be opened, the app shows only this screen and keeps nothing."
+            + " Quit and reopen it to try again; if the device is low on storage, free some space first."
+            + " Deleting the app would delete your saved fact checks with it."
+
     /// Name some files the way a sentence does.
     ///
     /// - Parameter names: The file names, in the order they should be read.

@@ -81,8 +81,12 @@ enum SchemaV1: VersionedSchema {
 
 /// Schema version 2: Adds ProcessingCheckpoint for background processing support.
 ///
-/// New model added:
+/// New models added:
 /// - ProcessingCheckpoint: Stores processing state for resumable sessions
+/// - RetractionCheckRecord: Each paper's latest retraction check, across
+///   sessions (#651). Listed here rather than in a new version, as the note
+///   below explains: a store without it matches no version either way, and
+///   automatic lightweight migration adds the entity.
 ///
 /// ## CloudKit Compatibility
 ///
@@ -102,6 +106,7 @@ enum SchemaV2: VersionedSchema {
             EvidenceReport.self,
             UsageRecord.self,
             ProcessingCheckpoint.self,
+            RetractionCheckRecord.self,
         ]
     }
 }

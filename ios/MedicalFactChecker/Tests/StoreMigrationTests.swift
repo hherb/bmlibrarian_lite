@@ -139,6 +139,26 @@ final class StoreMigrationTests: XCTestCase {
         return (schema, ModelConfiguration(schema: schema, url: storeURL, cloudKitDatabase: .none))
     }
 
+    /// #297: a store that cannot be opened starts the app on an empty
+    /// in-memory stand-in that says why, instead of stopping it at every launch.
+    func testAStoreThatCannotBeOpenedStartsAStandInThatSaysWhy() throws {
+        let failure = StoreSetAsideFailure(outcome: .leftInPlace(fileNames: ["default.store-wal"], reason: "disk full"))
+
+        let launch = CloudKitConfiguration.launchContainer(open: { throw failure })
+
+        let message = try XCTUnwrap(launch.failure)
+        XCTAssertTrue(message.contains("Nothing was deleted"), message)
+        XCTAssertTrue(message.contains("disk full"), message)
+        XCTAssertTrue(message.hasSuffix(StoreRecovery.launchFailureAdvice), message)
+        XCTAssertEqual(launch.container.configurations.first?.isStoredInMemoryOnly, true, "nothing touches the disk")
+
+        let (schema, configuration) = todaysConfiguration()
+        let opened = CloudKitConfiguration.launchContainer(open: {
+            try ModelContainer(for: schema, configurations: [configuration])
+        })
+        XCTAssertNil(opened.failure, "control: a store that opens is the app's")
+    }
+
     /// The fact checks survive, and nothing is set aside.
     func testAStoreFromAnEarlierBuildKeepsItsFactChecks() throws {
         try writeEarlierBuildStore(claim: "a claim from an earlier build")
@@ -151,9 +171,14 @@ final class StoreMigrationTests: XCTestCase {
             setAsideUnreadableStore: { setAsideRan = true; return .noStoreFound }
         )
 
-        let sessions = try ModelContext(container).fetch(FetchDescriptor<FactCheckSession>())
+        let context = ModelContext(container)
+        let sessions = try context.fetch(FetchDescriptor<FactCheckSession>())
         XCTAssertEqual(sessions.map(\.claim), ["a claim from an earlier build"])
         XCTAssertFalse(setAsideRan, "A store that migrates must never reach the last resort")
+        // the per-paper retraction rows (#651) are a table the earlier store never had
+        context.insert(RetractionCheckRecord(paperKey: "doi:10.1000/a", checkJSON: "{}"))
+        try context.save()
+        XCTAssertEqual(try context.fetch(FetchDescriptor<RetractionCheckRecord>()).count, 1)
     }
 
     /// What such a store has never recorded reads as "not recorded", not as a
