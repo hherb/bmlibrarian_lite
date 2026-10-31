@@ -121,7 +121,9 @@ BioMedLit; the app never imports `BmlibCore`.
 - The screen is the app's `FactCheckWorkflow.screenForRetraction`, before
   scoring. Each document's latest check is `Document.retractionCheckJSON`:
   per document, so per session, not per paper as the desktop's
-  `retraction_checks` row is (#651). What the run used is
+  `retraction_checks` row is (#651). A stored check naming a status or
+  lookup this build does not know is unreadable (`isReadable`), as the
+  desktop's `_decode`. What the run used is
   `FactCheckSession.retractionSnapshotJSON`. They can differ: a stored clear
   stands in storage against an outage, but the run is shown unchecked.
 - Views list and count from the run's snapshot first, then the stored check

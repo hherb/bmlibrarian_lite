@@ -595,16 +595,25 @@ def test_an_outage_never_overwrites_an_unreadable_stored_row(storage, tmp_path):
 
 
 def test_a_retraction_overwrites_an_unreadable_stored_row_during_an_outage(storage, tmp_path):
-    """Crossref down, the export says retracted: nothing warns more, so it is stored (#669)."""
+    """Crossref down: a retraction is stored over an unreadable row, a concern is not (#669)."""
     _current_export(tmp_path)
-    key = "doi:10.9/retracted"
-    _store(storage, RetractionStatus.CONCERN, _CONCERN, key=key)
+    for doi in ("10.9/retracted", "10.9/concern"):
+        _store(storage, RetractionStatus.CONCERN, _CONCERN, key=f"doi:{doi}")
     with sqlite3.connect(storage.config.storage.sqlite_path) as conn:
         conn.execute("UPDATE retraction_checks SET status = 'concern_v2'")
-    assert key not in storage.retraction_checks([key]), "control: unreadable"
-    check, row = _recheck(storage, tmp_path, _doc("a", doi="10.9/retracted"))
-    assert check.verdict.status is RetractionStatus.RETRACTED and check.verdict.unanswered
-    assert row == check
+    keys = ["doi:10.9/retracted", "doi:10.9/concern"]
+    assert storage.retraction_checks(keys) == {}, "control: unreadable"
+    out = _checker(storage, tmp_path, StubSession(_unreachable)).check(
+        [_doc("r", doi="10.9/retracted"), _doc("c", doi="10.9/concern")]
+    )
+    assert out["r"].verdict.status is RetractionStatus.RETRACTED and out["r"].verdict.unanswered
+    assert out["c"].verdict.status is RetractionStatus.CONCERN and out["c"].verdict.unanswered
+    assert storage.retraction_checks(keys) == {keys[0]: out["r"]}, "nothing warns more"
+    with sqlite3.connect(storage.config.storage.sqlite_path) as conn:
+        [(status,)] = conn.execute(
+            "SELECT status FROM retraction_checks WHERE paper_key = ?", (keys[1],)
+        ).fetchall()
+    assert status == "concern_v2", "the unreadable row may hold a retraction"
 
 
 def test_an_outage_never_erases_a_stored_concern(storage, tmp_path):

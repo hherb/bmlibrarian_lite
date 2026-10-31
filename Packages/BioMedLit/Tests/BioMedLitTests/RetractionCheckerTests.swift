@@ -215,6 +215,14 @@ final class RetractionCheckerTests: XCTestCase {
         XCTAssertFalse(stored(status: "not-a-status").isReusable(now: RetractionFixture.now, publicationTypes: []))
     }
 
+    /// A newer build's status or lookup name makes a stored check unreadable,
+    /// as the desktop's `_decode` (#669).
+    func testOnlyKnownStatusAndLookupNamesAreReadable() {
+        XCTAssertTrue(stored(status: "concern", unanswered: ["retraction_watch_export", "crossref"]).isReadable)
+        XCTAssertFalse(stored(status: "not-a-status").isReadable)
+        XCTAssertFalse(stored(status: "retracted", unanswered: ["not-a-lookup"]).isReadable)
+    }
+
     func testAFreshLabelIsNeverHiddenBehindAStoredClear() {
         let types = ["Retracted Publication"]
         XCTAssertFalse(stored(status: "clear").isReusable(now: RetractionFixture.now, publicationTypes: types))

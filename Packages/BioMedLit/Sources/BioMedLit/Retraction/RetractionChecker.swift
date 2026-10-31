@@ -114,6 +114,14 @@ public struct PaperRetractionCheck: Codable, Equatable, Sendable {
     /// Whether the evidence could not decide (never read as clear).
     public var isUnchecked: Bool { retractionStatus == .unchecked }
 
+    /// Whether this build knows the status and every unanswered lookup named:
+    /// a stored check naming another is unreadable, as the desktop's
+    /// `_decode`, so an outage never overwrites it (#669).
+    public var isReadable: Bool {
+        RetractionNames.value(status, in: RetractionNames.statuses) != nil
+            && unanswered.allSatisfy { RetractionNames.value($0, in: RetractionNames.lookups) != nil }
+    }
+
     /// Whether the deciding evidence is the record's own PubMed label.
     public var isDecidedByLabel: Bool {
         deciding.flatMap { RetractionNames.value($0.source, in: RetractionNames.sources) } == .pubmedLabel

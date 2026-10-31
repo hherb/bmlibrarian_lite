@@ -389,11 +389,14 @@ final class Document {
     /// `nil` means never checked. Optional so no schema version is needed.
     var retractionCheckJSON: String?
 
-    /// ``retractionCheckJSON`` decoded; `nil` when never checked or unreadable.
+    /// ``retractionCheckJSON`` decoded; `nil` when never checked or unreadable,
+    /// a status or lookup name this build does not know included
+    /// (``PaperRetractionCheck/isReadable``).
     var retractionCheck: PaperRetractionCheck? {
         get {
-            guard let data = retractionCheckJSON?.data(using: .utf8) else { return nil }
-            return try? JSONDecoder().decode(PaperRetractionCheck.self, from: data)
+            guard let data = retractionCheckJSON?.data(using: .utf8),
+                  let check = try? JSONDecoder().decode(PaperRetractionCheck.self, from: data) else { return nil }
+            return check.isReadable ? check : nil
         }
         set {
             retractionCheckJSON = newValue
