@@ -17,7 +17,7 @@ maintainer's choice), on all three platforms since #660: the causes come from
 Check again's own answers, for the papers whose row stays unchecked; a plain
 reopen names none (the snapshot records none), nor does a Check again with an
 unchecked row it never reached (its document gone: the others' causes would
-claim it). Lodged: #668 ("could not be checked again" names no cause).
+claim it); the "could not be checked again" count names why, from those papers' own answers (#668).
 **A row this build cannot read** is overwritten only by a fully answered
 check **or a retraction**, whatever was down (#669, all three platforms;
 a concern still cannot, since the row may hold a retraction). A row naming
@@ -51,7 +51,7 @@ renamed into place. Lodged: #662, #663 (see Next up).
 `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`). The
 snapshot is the run's record, never rewritten; *Check again* stores per
 `Document`, not per paper (open: #651). A check that throws still retracts
-by the record's own label (`PaperRetractionCheck.failed(for:at:)`, #656), and
+by the record's own label (`PaperRetractionCheck.failed(for:at:)`, #656; a failed *Check again* warns by it on all three, storing nothing, #673; Android also warns of what an answered check found when its rows could not be read), and
 the export cause now reads "(no up-to-date copy is on this device)" in both
 apps, not a Wi-Fi hint a reader on Wi-Fi was given too. The Android port took #647's per-entry snapshot and
 refused-export backoff, #649's exhaustive names and code-point escaping.
@@ -243,7 +243,8 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **Retraction checking** follow-ups: **#662** (an unchecked run's warning
   rule, "could not be read" wording, needs a cross-platform decision),
   **#663** (Android), Apple **#647**–**#649**, **#651**, **#653**, **#654**
-  (item 1 done by #660), **#657**, **#668**, **#671**, **#673** (the apps' *Check again* ignores the label on a throw).
+  (item 1 done by #660), **#657**, **#671**, **#675** (a stopped Check again
+  and the label, needs a cross-platform decision).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
   the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,

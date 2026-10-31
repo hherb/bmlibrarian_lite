@@ -243,11 +243,21 @@ NO_AUDIT_RECORD_LINE = "Retraction status not recorded for this report"
 STORED_CHECKS_UNREAD = "; later checks could not be read"
 
 
-def not_checked_again_clause(count: int) -> str:
-    """*Check again*'s note for decided papers no source answered this time, whose record stays; "" for none."""
+def not_checked_again_clause(count: int, causes: Sequence[str] = ()) -> str:
+    """*Check again*'s note for decided papers no source answered this time, whose record stays; "" for none.
+
+    Args:
+        count: How many such papers.
+        causes: :func:`unchecked_causes` of their answers (#668).
+
+    Returns:
+        E.g. "; 2 papers could not be checked again: Crossref could not be
+        used (HTTP 503 Service Unavailable)"; "" when ``count`` is 0.
+    """
     if not count:
         return ""
-    return f"; {'1 paper' if count == 1 else f'{count:,} papers'} could not be checked again"
+    clause = f"; {'1 paper' if count == 1 else f'{count:,} papers'} could not be checked again"
+    return f"{clause}: {'; '.join(causes)}" if causes else clause
 
 
 def saved_work_warning(

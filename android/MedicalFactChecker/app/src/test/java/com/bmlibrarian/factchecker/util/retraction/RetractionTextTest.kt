@@ -239,6 +239,7 @@ class RetractionTextTest {
         assertEquals("", RetractionText.notCheckedAgainClause(0))
         assertEquals("; 1 paper could not be checked again", RetractionText.notCheckedAgainClause(1))
         assertEquals("; 1,200 papers could not be checked again", RetractionText.notCheckedAgainClause(1_200))
+        assertEquals("; 2 papers could not be checked again: a; b", RetractionText.notCheckedAgainClause(2, listOf("a", "b")))
     }
 
     @Test

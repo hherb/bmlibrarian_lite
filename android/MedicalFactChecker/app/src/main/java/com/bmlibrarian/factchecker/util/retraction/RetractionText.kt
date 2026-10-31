@@ -212,9 +212,17 @@ object RetractionText {
     /** Added to the saved-work line when *Check again*'s answers could not be saved. */
     const val CHECK_AGAIN_NOT_SAVED = "; the new status could not be saved with this run"
 
-    /** *Check again*'s note for decided papers no source answered this time, whose record stays; "" for none. */
-    fun notCheckedAgainClause(count: Int): String =
-        if (count == 0) "" else "; ${if (count == 1) "1 paper" else "${grouped(count)} papers"} could not be checked again"
+    /**
+     * *Check again*'s note for decided papers no source answered this time, whose record stays; "" for none.
+     *
+     * @param count How many such papers
+     * @param causes [uncheckedCauses] of their answers (#668)
+     */
+    fun notCheckedAgainClause(count: Int, causes: List<String> = emptyList()): String {
+        if (count == 0) return ""
+        val clause = "; ${if (count == 1) "1 paper" else "${grouped(count)} papers"} could not be checked again"
+        return if (causes.isEmpty()) clause else "$clause: ${causes.joinToString("; ")}"
+    }
 
     /**
      * Warns that papers a saved report cites are now retracted or under

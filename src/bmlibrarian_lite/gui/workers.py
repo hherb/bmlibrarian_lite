@@ -70,6 +70,7 @@ from ..exceptions import RefusedResponseError, TruncatedResponseError
 from ..utils import classify_analysis_exception, classify_llm_exception
 from ..retraction_screen import (
     RetractionScreen,
+    UnbuiltChecker,
     screen_documents,
     screen_with_fallback,
     unchecked_check,
@@ -268,9 +269,13 @@ class RetractionRecheckWorker(SingleOutcome, QThread):
         self._run_once(self._check, lambda _error: self._end(self.rechecked, self.checkpoint_id, self._failed()))
 
     def _failed(self) -> RetractionScreen:
-        """A failed screen: every paper unchecked, nothing decided."""
-        unchecked = unchecked_check()
-        return screen_documents(self.documents, {d.id: unchecked for d in self.documents}, failed=True)
+        """A failed screen: every paper unchecked but those the record's own label retracts (#673)."""
+        try:
+            return screen_with_fallback(UnbuiltChecker(), self.documents)
+        except Exception:
+            logger.exception("The retraction labels could not be read either; nothing decided")
+            unchecked = unchecked_check()
+            return screen_documents(self.documents, {d.id: unchecked for d in self.documents}, failed=True)
 
     def _check(self) -> None:
         """Screen with ``refresh`` (never raises) and end the run."""

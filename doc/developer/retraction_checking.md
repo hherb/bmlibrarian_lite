@@ -67,7 +67,12 @@ paper with its `retraction_status`.
   `RETRACTION_CHECK_MAX_AGE_DAYS` (7), unless the record's label now says
   retracted.
 - **The label survives everything.** A failed check (the checker could not be
-  built, the database raised) still leaves out a paper its label retracts.
+  built, the database raised) still leaves out a paper its label retracts. A
+  failed *Check again* stores nothing and the line says the run's record
+  stands, but a cited paper its label now retracts is still warned of (#673,
+  all three platforms; not on Android without bmlib's native library, which
+  the label needs). A shown retraction keeps its own notice, and a shown
+  concern stays.
 - **A failed store is not a failed check.** The verdicts are returned even
   when they could not be stored.
 - **A failed check is failed document by document.** `RetractionScreen.failed_ids`
@@ -94,9 +99,9 @@ paper with its `retraction_status`.
   record why; after *Check again* the saved-work line names the causes of
   the papers whose row stays unchecked (#660, all three platforms). A
   decided row kept over an unchecked answer is counted ("could not be
-  checked again"), not explained; and when an unchecked row was not reached
-  (its document is gone) the line gives the count alone, as on a reopen,
-  since the others' causes would claim it too.
+  checked again"), its own answers' causes after the count (#668). When an
+  unchecked row was not reached (its document is gone), the unchecked count
+  stands alone, as on a reopen, since the others' causes would claim it too.
 - **`excluded` is a fact of the run.** Snapshot rows record whether the run
   left a paper out; a later re-check (*Check again*) may change `status`,
   never that. *Check again* keeps the run's own status and notice as
@@ -222,12 +227,14 @@ row per paper, that row is the paper's latest check.
   which its own Cancel (`cancelCheckAgain`) stops without touching the
   session's step; a run or restore begun meanwhile cancels it, and it never
   writes their screen. A failure, or a cancel before its answers are in,
-  stores nothing and says the run's record stands; once they are in, they
+  stores nothing and says the run's record stands (a failure still warns by
+  the label, and of what an answered check found when its rows could not be
+  read, #673); once they are in, they
   are stored and shown whole. Its line names why papers stay unchecked, as
   the run's notice does (#654 item 1; all three platforms since #660). Of #654's other
   items, Android's Check again can be stopped (item 2), but item 3 (the
   not-saved note said on that view only) and item 4 (a failed check recomputes
-  the warning from the stored rows) apply to it too. The report screen's
+  the warning from the stored rows and the label) apply to it too. The report screen's
   `DocumentDetailSheet` shows the same check's badge and status line for a
   retracted, concern or unchecked paper (nothing for a clear one), NOT
   CHECKED for one never checked, and "could not be read" when its check

@@ -281,7 +281,7 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertTrue(workflow.retractionSavedWorkWarning?.contains("• Study 0: Retracted") == true)
         XCTAssertEqual(
             workflow.retractionSavedWorkLine,
-            "Retraction status checked 2026-10-19; 1 paper could not be checked again")
+            "Retraction status checked 2026-10-19; 1 paper could not be checked again: \(Self.uncheckedCauses)")
     }
 
     /// One paper answered, two decided ones not, and one the run could not
@@ -292,7 +292,7 @@ final class RetractionSavedWorkTests: XCTestCase {
             0: Self.check("clear"), 1: Self.check("clear"), 2: Self.check("clear"), 3: Self.check("unchecked"),
         ])
         let later = Self.runDay.addingTimeInterval(Self.day)
-        // b's copy was consulted and Crossref failed: its own causes, never named (its row stays decided)
+        // b's copy was consulted and Crossref failed: its causes follow the again count (#668)
         let unreadable = PaperRetractionCheck(
             status: "unchecked", deciding: nil, unanswered: ["retraction_watch_export", "crossref"],
             checkedAt: later, exportDataAsOf: "2026-10-19", crossrefFailure: "HTTP 503"
@@ -307,7 +307,9 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertEqual(
             workflow.retractionSavedWorkLine,
             "Retraction status checked 2026-10-18; 1 paper could not be checked: \(Self.uncheckedCauses);"
-                + " 2 papers could not be checked again")
+                + " 2 papers could not be checked again: the Retraction Watch data could not be used"
+                + " (no up-to-date copy is on this device); a Retraction Watch notice could not be read;"
+                + " Crossref could not be used (HTTP 503); Crossref had no usable answer for the DOI")
     }
 
     /// A run's paper whose document is gone is never asked: the causes of
@@ -360,6 +362,46 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertEqual(documents[0].retractionCheck, Self.check("clear"), "nothing is stored")
     }
 
+    /// #673: a label that arrived after the run still warns when *Check
+    /// again* fails, though nothing is stored.
+    func testCheckAgainFailureStillWarnsByTheLabel() async {
+        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        let workflow = restore(session)
+        XCTAssertNil(workflow.retractionSavedWorkWarning)
+        documents[0].publicationTypes = ["Journal Article", "Retracted Publication"]
+        workflow.useRetractionCheck { _ in throw CheckFailed() }
+
+        await workflow.checkRetractionsAgain()
+
+        XCTAssertTrue(workflow.retractionSavedWorkWarning?.contains("• Study 0: Retracted") == true)
+        XCTAssertEqual(documents[0].retractionCheck, Self.check("clear"), "nothing is stored")
+        XCTAssertTrue(workflow.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainFailed) == true)
+        // control: without the label, nothing to warn of
+        documents[0].publicationTypes = ["Journal Article"]
+        await workflow.checkRetractionsAgain()
+        XCTAssertNil(workflow.retractionSavedWorkWarning)
+    }
+
+    /// #673: a stored retraction keeps its own notice over the label, and
+    /// a stored concern is never hidden by a failed check.
+    func testCheckAgainFailureKeepsWhatIsStored() async {
+        let later = Self.runDay.addingTimeInterval(Self.day)
+        let (session, documents) = makeSession(
+            ["10.1000/a", "10.1000/b"], cited: [0, 1], run: [0: Self.check("clear"), 1: Self.check("clear")])
+        documents[0].retractionCheck = Self.check("retracted", at: later)
+        documents[0].publicationTypes = ["Journal Article", "Retracted Publication"]
+        documents[1].retractionCheck = Self.check("concern", at: later)
+        let workflow = restore(session)
+        workflow.useRetractionCheck { _ in throw CheckFailed() }
+
+        await workflow.checkRetractionsAgain()
+
+        let warning = workflow.retractionSavedWorkWarning ?? ""
+        XCTAssertTrue(warning.contains("• Study 0: Retracted on 2026-10-19 (notice 10.1000/notice)"), warning)
+        XCTAssertFalse(warning.contains("Study 0: Retracted (PubMed's label)"), warning)
+        XCTAssertTrue(warning.contains("• Study 1: Expression of concern"), warning)
+    }
+
     /// Every lookup down: a decided check stands, and the line says how many
     /// could not be checked again.
     func testCheckAgainOutageKeepsWhatTheRunKnew() async {
@@ -373,7 +415,7 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertEqual(documents[0].retractionCheck?.isClear, true, "an outage is not knowledge")
         XCTAssertEqual(
             workflow.retractionSavedWorkLine,
-            "Retraction status checked 2026-10-18; 1 paper could not be checked again")
+            "Retraction status checked 2026-10-18; 1 paper could not be checked again: \(Self.uncheckedCauses)")
     }
 
     func testCheckAgainNeverRewritesTheReport() async throws {

@@ -26,6 +26,7 @@ from bmlibrarian_lite.retraction_text import (
     checked_on_line,
     format_retracted_section,
     format_retraction_notice,
+    not_checked_again_clause,
     paper_status_line,
     retraction_methods_line,
     run_summary_clause,
@@ -360,3 +361,10 @@ def test_the_notice_does_not_claim_papers_were_left_out_when_none_were():
     assert notice is not None
     assert notice.startswith("> **Retraction check:** 1 paper's")
     assert "left out" not in notice
+
+
+def test_the_not_checked_again_clause_names_its_causes():
+    """The papers Check again missed say why, as the unchecked ones do (#668)."""
+    assert not_checked_again_clause(0, ["a"]) == ""
+    assert not_checked_again_clause(1) == "; 1 paper could not be checked again"
+    assert not_checked_again_clause(1_200, ["a", "b"]) == "; 1,200 papers could not be checked again: a; b"
