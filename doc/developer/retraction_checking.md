@@ -60,7 +60,8 @@ paper with its `retraction_status`.
   unanswered a lookup the stored one had answered never replaces it; a
   stored retraction or concern is still returned. A verdict resting on a
   failure only fills a missing row, so it cannot overwrite a row this build
-  could not read.
+  could not read, unless it says retracted: nothing warns more, so a
+  retraction is stored whatever was down (#669).
 - **A failure is not knowledge.** A stored verdict with a lookup unanswered
   is asked again on every check; a decided one is reused for
   `RETRACTION_CHECK_MAX_AGE_DAYS` (7), unless the record's label now says
@@ -120,7 +121,9 @@ BioMedLit; the app never imports `BmlibCore`.
 - The screen is the app's `FactCheckWorkflow.screenForRetraction`, before
   scoring. Each document's latest check is `Document.retractionCheckJSON`:
   per document, so per session, not per paper as the desktop's
-  `retraction_checks` row is (#651). What the run used is
+  `retraction_checks` row is (#651). A stored check naming a status or
+  lookup this build does not know is unreadable (`isReadable`), as the
+  desktop's `_decode`. What the run used is
   `FactCheckSession.retractionSnapshotJSON`. They can differ: a stored clear
   stands in storage against an outage, but the run is shown unchecked.
 - Views list and count from the run's snapshot first, then the stored check
@@ -175,7 +178,7 @@ row per paper, that row is the paper's latest check.
   (`@Singleton`: the production check, one lookup per process and contact
   address, the stored rows). A stored row naming a status or lookup this
   build does not know is unreadable, as the desktop's `_decode`, so only a
-  fully answered check overwrites it.
+  fully answered check, or a retraction, overwrites it.
 - **Checks are stored per paper**, as the desktop's: Room table
   `retraction_checks` (`paper_key`, `check_json`), so what one session learnt
   serves the next and survives a deleted session. A paper with neither DOI

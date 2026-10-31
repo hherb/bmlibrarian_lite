@@ -389,11 +389,14 @@ final class Document {
     /// `nil` means never checked. Optional so no schema version is needed.
     var retractionCheckJSON: String?
 
-    /// ``retractionCheckJSON`` decoded; `nil` when never checked or unreadable.
+    /// ``retractionCheckJSON`` decoded; `nil` when never checked or unreadable,
+    /// a status or lookup name this build does not know included
+    /// (``PaperRetractionCheck/isReadable``).
     var retractionCheck: PaperRetractionCheck? {
         get {
-            guard let data = retractionCheckJSON?.data(using: .utf8) else { return nil }
-            return try? JSONDecoder().decode(PaperRetractionCheck.self, from: data)
+            guard let data = retractionCheckJSON?.data(using: .utf8),
+                  let check = try? JSONDecoder().decode(PaperRetractionCheck.self, from: data) else { return nil }
+            return check.isReadable ? check : nil
         }
         set {
             retractionCheckJSON = newValue
@@ -447,14 +450,15 @@ final class Document {
     /// The stored check stands, keeping its `checkedAt`, when it rests on a
     /// PubMed label this document has not recorded (`_label_only_unreadable`)
     /// or when ``PaperRetractionCheck/standsAgainst(_:)`` `fresh`. A row this
-    /// build cannot read is overwritten only by a check every lookup answered.
+    /// build cannot read is overwritten only by a check every lookup answered,
+    /// or by a retraction, which erases nothing that warns more (#669).
     ///
     /// - Parameter fresh: The check just made.
     /// - Returns: What the run excludes, counts and records.
     func takeRetractionCheck(_ fresh: PaperRetractionCheck) -> PaperRetractionCheck {
         guard let stored = retractionCheck else {
             // an unreadable row may hold a retraction an outage must not erase
-            if retractionCheckJSON == nil || fresh.unanswered.isEmpty { retractionCheck = fresh }
+            if retractionCheckJSON == nil || fresh.unanswered.isEmpty || fresh.isRetracted { retractionCheck = fresh }
             return fresh
         }
         if !fresh.isRetracted, publicationTypes == nil, stored.isRetracted || stored.isConcern,

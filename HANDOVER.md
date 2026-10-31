@@ -17,8 +17,14 @@ maintainer's choice), on all three platforms since #660: the causes come from
 Check again's own answers, for the papers whose row stays unchecked; a plain
 reopen names none (the snapshot records none), nor does a Check again with an
 unchecked row it never reached (its document gone: the others' causes would
-claim it). Lodged: #668 ("could not be checked again" names no cause), #669
-(Swift: a retraction Check again finds is lost over an unreadable row). **A missing
+claim it). Lodged: #668 ("could not be checked again" names no cause).
+**A row this build cannot read** is overwritten only by a fully answered
+check **or a retraction**, whatever was down (#669, all three platforms;
+a concern still cannot, since the row may hold a retraction). A row naming
+a status or lookup this build does not know is unreadable on all three
+(Swift's `PaperRetractionCheck.isReadable`). Lodged: #671 (Android decides
+per document, so a same-paper document can overwrite this run's row).
+**A missing
 native library** leaves papers unchecked, but
 stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The

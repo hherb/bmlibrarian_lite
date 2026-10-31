@@ -114,6 +114,13 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         )
     }
 
+    private static func concern(unanswered: [String]) -> PaperRetractionCheck {
+        PaperRetractionCheck(
+            status: "concern", deciding: nil, unanswered: unanswered,
+            checkedAt: Date(), exportDataAsOf: "2026-10-28", crossrefFailure: nil
+        )
+    }
+
     private static func unchecked(_ unanswered: [String], exportDataAsOf: String? = nil) -> PaperRetractionCheck {
         PaperRetractionCheck(
             status: "unchecked", deciding: nil, unanswered: unanswered,
@@ -364,30 +371,65 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         XCTAssertNotNil(documents[0].scoredAt, "reinstated, so scored")
     }
 
-    /// A stored row this build cannot read is kept against a fresh verdict
-    /// that left a lookup unanswered, yet the run leaves the paper out by the
-    /// verdict it used: the notice and the exclusion never disagree. A fresh
-    /// verdict every lookup answered replaces such a row.
+    /// A stored row this build cannot read is kept against an outage, yet
+    /// replaced by a retraction, which warns at least as much, whatever was
+    /// down (#669), and the run leaves the paper out by the verdict it used:
+    /// the notice and the exclusion never disagree. A fresh verdict every
+    /// lookup answered replaces such a row.
     func testAnUnreadableRowIsKeptAndTheRunExcludesByItsOwnVerdict() async throws {
-        let (session, documents) = makeSession(["10.1000/a", "10.1000/b"])
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b", "10.1000/c"])
         for document in documents { document.retractionCheckJSON = "{\"status\": 7}" }
         let workflow = restore(session, check: Self.answering([
             "10.1000/a": Self.retracted(unanswered: ["crossref"]), "10.1000/b": Self.clear(),
+            "10.1000/c": Self.unchecked(["crossref"]),
         ]))
 
         await workflow.retryFailedDocuments(pmids: [])
 
-        XCTAssertEqual(documents[0].retractionCheckJSON, "{\"status\": 7}", "an outage never overwrites a row")
+        XCTAssertEqual(documents[2].retractionCheckJSON, "{\"status\": 7}", "an outage never overwrites a row")
+        XCTAssertEqual(documents[0].retractionCheck?.isRetracted, true, "a retraction does, a lookup down or not")
         XCTAssertNil(documents[0].scoredAt, "left out as the notice says")
         XCTAssertEqual(
             session.retractedUnscoredDocuments(by: session.shownRetractionChecks()).map(\.id), [documents[0].id],
             "listed as left out, as the notice and report name it"
         )
-        XCTAssertEqual(session.documentsToScore, 1, "not counted as still to score")
+        XCTAssertEqual(session.documentsToScore, 2, "not counted as still to score")
         XCTAssertFalse(session.unscoredDocuments.contains { $0 === documents[0] })
-        XCTAssertEqual(workflow.retractionNotice, "Retraction check: 1 retracted paper left out.")
+        XCTAssertEqual(
+            workflow.retractionNotice,
+            "Retraction check: 1 retracted paper left out; 1 paper's retraction status could not be checked: "
+                + "Crossref had no usable answer for the DOI.")
         XCTAssertEqual(documents[1].retractionCheck?.isClear, true)
         XCTAssertNotNil(documents[1].scoredAt)
+    }
+
+    /// A concern with a lookup down never overwrites a row this build cannot
+    /// read, malformed or written by a newer build: it may hold a retraction
+    /// (#669). An answer replaces a newer build's row (the control).
+    func testAConcernOrAnOutageNeverOverwritesAnUnreadableRow() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b", "10.1000/c", "10.1000/d"])
+        func newer(_ status: String, _ unanswered: [String]) throws -> String {
+            let check = PaperRetractionCheck(
+                status: status, deciding: nil, unanswered: unanswered,
+                checkedAt: Date(), exportDataAsOf: nil, crossrefFailure: nil
+            )
+            return try XCTUnwrap(String(data: JSONEncoder().encode(check), encoding: .utf8))
+        }
+        // a newer build's row with Crossref unanswered: read as this build's, nothing would stand against the outage
+        let rows = [
+            "{\"status\": 7}", try newer("withdrawn", ["crossref"]),
+            try newer("retracted", ["crossref", "pubpeer"]), try newer("withdrawn", ["crossref"]),
+        ]
+        for (document, row) in zip(documents, rows) { document.retractionCheckJSON = row }
+        let workflow = restore(session, check: Self.answering([
+            "10.1000/a": Self.concern(unanswered: ["crossref"]), "10.1000/b": Self.unchecked(["crossref"]),
+            "10.1000/c": Self.unchecked(["crossref"]), "10.1000/d": Self.clear(),
+        ]))
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        XCTAssertEqual(documents.prefix(3).map(\.retractionCheckJSON), Array(rows.prefix(3)))
+        XCTAssertEqual(documents[3].retractionCheck?.isClear, true, "an answer replaces it")
     }
 
     /// The stop prompt's "remaining" and the progress bar do not count a
