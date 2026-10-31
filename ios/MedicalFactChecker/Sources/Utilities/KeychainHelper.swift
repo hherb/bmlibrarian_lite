@@ -22,7 +22,10 @@ import Security
 /// tests, which have no Keychain entitlement to save with.
 protocol SecretStore {
     /// The value stored under `key`, or nil when none is.
-    func load(key: String) -> String?
+    ///
+    /// - Throws: When the store could not be read (the device locked, say),
+    ///   which is not "none is stored" (#511).
+    func load(key: String) throws -> String?
 
     /// Store `value` under `key`; an empty value removes it. A failure leaves
     /// what was stored before.
@@ -39,13 +42,19 @@ protocol SecretStore {
 /// The Keychain, as a ``SecretStore``.
 struct KeychainSecretStore: SecretStore {
     /// See ``KeychainHelper/load(key:)``.
-    func load(key: String) -> String? { KeychainHelper.load(key: key) }
+    func load(key: String) throws -> String? { try KeychainHelper.load(key: key) }
 
     /// See ``KeychainHelper/save(key:value:)``.
     func save(key: String, value: String) -> Bool { KeychainHelper.save(key: key, value: value) }
 
     /// See ``KeychainHelper/delete(key:)``.
     func delete(key: String) -> Bool { KeychainHelper.delete(key: key) }
+}
+
+/// A Keychain item that could not be read: not the same as one never stored.
+struct KeychainReadError: Error, Equatable {
+    /// The `OSStatus` the read returned (`errSecSuccess` for a value that is not text).
+    let status: OSStatus
 }
 
 /// Helper for secure storage of sensitive data in the iOS Keychain.
@@ -92,7 +101,10 @@ enum KeychainHelper {
     ///
     /// - Parameter key: The key to load the value for.
     /// - Returns: The stored string value, or nil if not found.
-    static func load(key: String) -> String? {
+    /// - Throws: ``KeychainReadError`` for any other status, such as
+    ///   `errSecInteractionNotAllowed` while the device is locked (#511),
+    ///   or a value that is not text; logged by status, never the value.
+    static func load(key: String) throws -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
@@ -104,10 +116,12 @@ enum KeychainHelper {
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
 
+        if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess,
               let data = result as? Data,
               let string = String(data: data, encoding: .utf8) else {
-            return nil
+            logger.error("Keychain read of \(key, privacy: .public) failed: OSStatus \(status)")
+            throw KeychainReadError(status: status)
         }
 
         return string

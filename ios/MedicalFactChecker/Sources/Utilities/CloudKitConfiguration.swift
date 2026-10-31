@@ -145,6 +145,39 @@ enum CloudKitConfiguration {
         )
     }
 
+    /// The container the app starts with: the store's, or, when no store could
+    /// be opened, an empty in-memory one and what the app shows in place of
+    /// itself, so the reason reaches a window instead of the app stopping at
+    /// every launch (#297). The root views show only that message, so no
+    /// fact check is ever started that the in-memory store would lose.
+    ///
+    /// - Parameter open: Opens the store; the default is ``makeModelContainerWithMigration()``.
+    /// - Returns: The container, and the message when it is the stand-in.
+    static func launchContainer(
+        open: () throws -> ModelContainer = makeModelContainerWithMigration
+    ) -> (container: ModelContainer, failure: String?) {
+        do {
+            return (try open(), nil)
+        } catch {
+            // A release build prints nowhere, so the log keeps the reason too (#285).
+            let nsError = error as NSError
+            logger.critical(
+                "ModelContainer creation failed (\(nsError.domain, privacy: .public) \(nsError.code, privacy: .public)): \(String(describing: error), privacy: .public)"
+            )
+            let schema = Schema(versionedSchema: SchemaV2.self)
+            do {
+                let standIn = try ModelContainer(
+                    for: schema,
+                    configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, cloudKitDatabase: .none)]
+                )
+                let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                return (standIn, StoreRecovery.launchFailureMessage(for: error, storeDirectory: directory?.path))
+            } catch {
+                fatalError("Could not create even an in-memory ModelContainer: \(error)")
+            }
+        }
+    }
+
     /// Open a store, trying every way to keep what it holds.
     ///
     /// - Parameters:

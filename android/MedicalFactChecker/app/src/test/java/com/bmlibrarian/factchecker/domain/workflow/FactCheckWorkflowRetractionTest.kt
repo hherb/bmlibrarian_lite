@@ -225,6 +225,20 @@ class FactCheckWorkflowRetractionTest {
     }
 
     @Test
+    fun `a paper scored before any screen is counted unchecked in the report (#657)`() = runTest {
+        hold("d1")
+        documents["d1"] = documents.getValue("d1").copy(relevanceScore = 5)
+        hold("d2")
+
+        run()
+
+        assertEquals("only the new paper is screened", listOf("d2"), scored)
+        assertFalse("d1" in snapshot())
+        val report = reports.single()
+        assertTrue(report, report.startsWith("> **Retraction check:** 1 paper's retraction status could not be checked.\n\n"))
+    }
+
+    @Test
     fun `a paper under concern is scored and its reference carries the caveat`() = runTest {
         hold("d1")
         answers["1"] = CONCERN

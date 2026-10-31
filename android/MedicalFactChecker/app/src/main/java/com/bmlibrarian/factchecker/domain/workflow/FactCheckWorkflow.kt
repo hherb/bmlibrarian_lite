@@ -2635,11 +2635,19 @@ class FactCheckWorkflow @Inject constructor(
         snapshot: Map<String, PaperRetractionCheck>
     ): RetractionReportSection? {
         if (snapshot.isEmpty()) return null
-        // Causes are named only when this run screened exactly the snapshot's
-        // papers; otherwise the count stands alone, as the desktop's restored
+        // a scored paper no run screened (Find More Evidence on a session older
+        // than the check) is unchecked, never silently clear (#657)
+        val unscreened = documents.filter { it.id !in snapshot && it.isScored }
+        val now = System.currentTimeMillis()
+        // Causes are named only when this run screened exactly the papers
+        // counted; otherwise the count stands alone, as the desktop's restored
         // snapshot does, since a cause this run did not see would go unnamed.
-        val causes = if (retractionRun.used.keys == snapshot.keys) retractionRun.causes() else emptyList()
-        return RetractionReportSection(documents.mapNotNull { doc -> snapshot[doc.id]?.let { doc.title to it } }, causes)
+        val causes = if (unscreened.isEmpty() && retractionRun.used.keys == snapshot.keys) retractionRun.causes() else emptyList()
+        return RetractionReportSection(
+            documents.mapNotNull { doc -> snapshot[doc.id]?.let { doc.title to it } } +
+                unscreened.map { it.title to PaperRetractionCheck.failed(now) },
+            causes
+        )
     }
 
     /**

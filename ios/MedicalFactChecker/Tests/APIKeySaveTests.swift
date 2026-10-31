@@ -3,6 +3,7 @@
 //
 // Licensed under the GNU Affero General Public License, version 3 or later.
 
+import Security
 import XCTest
 @testable import MedicalFactChecker
 import BioMedLit
@@ -16,7 +17,13 @@ private final class StubSecretStore: SecretStore {
     /// Whether every save fails, leaving what was stored.
     var failsSaves = false
 
-    func load(key: String) -> String? { stored[key] }
+    /// Whether every read fails, as the Keychain's does while the device is locked.
+    var failsReads = false
+
+    func load(key: String) throws -> String? {
+        if failsReads { throw KeychainReadError(status: errSecInteractionNotAllowed) }
+        return stored[key]
+    }
 
     func save(key: String, value: String) -> Bool {
         guard !failsSaves else { return false }
@@ -40,6 +47,20 @@ final class APIKeySaveTests: XCTestCase {
         super.setUp()
         store = StubSecretStore()
         settings = AppSettings(secretStore: store)
+    }
+
+    /// #511: a read that fails (the device locked) is not cached as "no key",
+    /// so the stored key is used once the store can be read again.
+    func testAFailedReadIsNotCachedAsNoKey() {
+        store.stored = ["core_api_key": "core-key", "elsevier_api_key": "els-key"]
+        store.failsReads = true
+
+        XCTAssertEqual(settings.coreAPIKey, "")
+        XCTAssertEqual(settings.elsevierAPIKey, "")
+
+        store.failsReads = false
+        XCTAssertEqual(settings.coreAPIKey, "core-key")
+        XCTAssertEqual(settings.elsevierAPIKey, "els-key")
     }
 
     func testASavedCOREKeyIsTheKeyInUse() {

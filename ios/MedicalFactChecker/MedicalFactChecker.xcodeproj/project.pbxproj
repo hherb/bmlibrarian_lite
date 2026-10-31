@@ -55,6 +55,7 @@
 		A1000031001 /* HelpView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000031000 /* HelpView.swift */; };
 		A1000032001 /* HELP.md in Resources */ = {isa = PBXBuildFile; fileRef = A1000032000 /* HELP.md */; };
 		A1000033001 /* PRIVACY.md in Resources */ = {isa = PBXBuildFile; fileRef = A1000033000 /* PRIVACY.md */; };
+		A10000F0001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A10000F0000 /* PrivacyInfo.xcprivacy */; };
 		A1000034001 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000034000 /* OnboardingView.swift */; };
 		A1000035001 /* SearchProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000035000 /* SearchProvider.swift */; };
 		A1000036001 /* FullTextSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000036000 /* FullTextSource.swift */; };
@@ -173,6 +174,7 @@
 		A1000031000 /* HelpView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpView.swift; sourceTree = "<group>"; };
 		A1000032000 /* HELP.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = HELP.md; sourceTree = SOURCE_ROOT; };
 		A1000033000 /* PRIVACY.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PRIVACY.md; sourceTree = SOURCE_ROOT; };
+		A10000F0000 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = Sources/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
 		A1000034000 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		A1000035000 /* SearchProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchProvider.swift; sourceTree = "<group>"; };
 		A1000036000 /* FullTextSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FullTextSource.swift; sourceTree = "<group>"; };
@@ -293,6 +295,7 @@
 				A1000000026 /* Preview Content */,
 				A1000032000 /* HELP.md */,
 				A1000033000 /* PRIVACY.md */,
+				A10000F0000 /* PrivacyInfo.xcprivacy */,
 				A1000053000 /* MedicalFactChecker.entitlements */,
 				A1000070000 /* MedicalFactCheckerMac.entitlements */,
 				E7210ACEEE6F00D966A72A7D /* macOS */,
@@ -632,6 +635,7 @@
 				A1000021001 /* Preview Assets.xcassets in Resources */,
 				A1000032001 /* HELP.md in Resources */,
 				A1000033001 /* PRIVACY.md in Resources */,
+				A10000F0001 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

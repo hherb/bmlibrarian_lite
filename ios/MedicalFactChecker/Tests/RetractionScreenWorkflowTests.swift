@@ -265,6 +265,60 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         XCTAssertEqual(workflow.retractionNotice, "Retraction check: 1 retracted paper left out.")
     }
 
+    /// #651: what one session learned about a paper decides another's, after
+    /// the first is deleted too. A finds X retracted (Crossref unanswered, so
+    /// not reusable), B's check of X reaches no source, and X is left out.
+    func testAnotherSessionsRetractionSurvivesAnOutageAndItsDeletion() async throws {
+        let (first, firstDocuments) = makeSession(["10.1000/x"])
+        let a = restore(first, check: Self.answering(["10.1000/x": Self.retracted(unanswered: ["crossref"])]))
+        await a.retryFailedDocuments(pmids: [])
+        XCTAssertTrue(firstDocuments[0].isRetracted)
+        context.delete(first)
+        try context.save()
+        XCTAssertTrue(try context.fetch(FetchDescriptor<Document>()).isEmpty, "the session's documents went with it")
+
+        let (second, secondDocuments) = makeSession(["10.1000/x"])
+        let asked = Asked()
+        let b = restore(second, check: Self.counting(asked, [
+            "10.1000/x": Self.unchecked(["retraction_watch_export", "crossref"]),
+        ]))
+        await b.retryFailedDocuments(pmids: [])
+
+        XCTAssertEqual(asked.calls, 1, "the record is not reusable, so B asks")
+        XCTAssertTrue(secondDocuments[0].isRetracted)
+        XCTAssertNil(secondDocuments[0].scoredAt, "left out by what the deleted session learned")
+        XCTAssertEqual(b.retractionNotice, "Retraction check: 1 retracted paper left out.")
+        XCTAssertEqual(try context.fetch(FetchDescriptor<RetractionCheckRecord>()).count, 1, "one row per paper")
+    }
+
+    /// #651: a record another session writes while this run's check is in
+    /// flight is read before this run decides and writes back, never written
+    /// over. The check of X reaches no source; meanwhile a retraction of X
+    /// arrives, and X is left out.
+    func testARecordWrittenDuringTheCheckIsNotWrittenOver() async throws {
+        let (session, documents) = makeSession(["10.1000/x"])
+        let key = try XCTUnwrap(documents[0].retractionPaper.paperKey)
+        let answer = Self.answering(["10.1000/x": Self.unchecked(["retraction_watch_export", "crossref"])])
+        let workflow = restore(session, check: { papers in
+            try await self.recordElsewhere(key, Self.retracted(unanswered: ["crossref"]))
+            return try await answer(papers)
+        })
+        await workflow.retryFailedDocuments(pmids: [])
+
+        XCTAssertTrue(documents[0].isRetracted)
+        XCTAssertNil(documents[0].scoredAt, "left out by the record that arrived")
+        let records = try context.fetch(FetchDescriptor<RetractionCheckRecord>())
+        XCTAssertEqual(records.count, 1, "one row per paper")
+        XCTAssertEqual(RetractionCheckRecord.check(records.first?.checkJSON)?.isRetracted, true)
+    }
+
+    /// Another session's `check`, written as the paper's record only.
+    private func recordElsewhere(_ key: String, _ check: PaperRetractionCheck) throws {
+        let json = try XCTUnwrap(String(data: JSONEncoder().encode(check), encoding: .utf8))
+        context.insert(RetractionCheckRecord(paperKey: key, checkJSON: json))
+        try context.save()
+    }
+
     /// A stored clear stands in storage, but the run is shown the fresh
     /// unchecked: a clear resting on a lookup now down is not knowledge.
     func testAStoredClearIsNotUsedAgainstAnOutage() async throws {
@@ -354,6 +408,27 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         let report = try XCTUnwrap(session.report?.fullReport)
         XCTAssertTrue(report.hasPrefix(
             "> **Retraction check:** 1 paper's retraction status could not be checked: no DOI or PMID.\n\n"), report)
+    }
+
+    /// #657: a paper scored before the session was ever screened (Find More
+    /// Evidence on a session older than the check) is counted unchecked, never
+    /// left to read as clear, and no run's cause is put on it.
+    func testAPaperScoredBeforeAnyScreenIsCountedUnchecked() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b"])
+        documents[0].relevanceScore = 1
+        documents[0].scoredAt = Date()
+        let workflow = restore(session, check: Self.answering(["10.1000/b": Self.clear()]))
+        await workflow.retryFailedDocuments(pmids: [])
+        XCTAssertNil(session.retractionSnapshot()[documents[0].id], "the earlier paper was not screened")
+
+        _ = try await workflow.regenerateReportWithNewEvidence(analyzeTransparencyUsing: { _, _, _ in
+            XCTFail("nothing is relevant, so nothing is rated")
+            throw CancellationError()
+        })
+
+        let report = try XCTUnwrap(session.report?.fullReport)
+        XCTAssertTrue(report.hasPrefix(
+            "> **Retraction check:** 1 paper's retraction status could not be checked.\n\n"), report)
     }
 
     /// Control for the rule above: it covers a label verdict only. A stored

@@ -383,8 +383,9 @@ final class Document {
     // MARK: - Retraction
 
     /// This document's latest retraction check, as ``PaperRetractionCheck``
-    /// JSON: the desktop's `retraction_checks` row, but per document (so per
-    /// session) rather than per paper (#651).
+    /// JSON: this session's copy of its paper's ``RetractionCheckRecord``,
+    /// which a screen or *Check again* brings up to date before deciding by it
+    /// and writes back after (#651). A paper with no key has this copy only.
     ///
     /// `nil` means never checked. Optional so no schema version is needed.
     var retractionCheckJSON: String?
@@ -393,11 +394,7 @@ final class Document {
     /// a status or lookup name this build does not know included
     /// (``PaperRetractionCheck/isReadable``).
     var retractionCheck: PaperRetractionCheck? {
-        get {
-            guard let data = retractionCheckJSON?.data(using: .utf8),
-                  let check = try? JSONDecoder().decode(PaperRetractionCheck.self, from: data) else { return nil }
-            return check.isReadable ? check : nil
-        }
+        get { RetractionCheckRecord.check(retractionCheckJSON) }
         set {
             retractionCheckJSON = newValue
                 .flatMap { try? JSONEncoder().encode($0) }
@@ -1903,5 +1900,93 @@ extension Document {
             return "No transparency rating for: \(titles.joined(separator: "; ")). Open a study to analyse it."
         }
         return "No transparency rating for \(titles.count) documents. Open a study to analyse it."
+    }
+}
+
+// MARK: - Retraction Check Per Paper
+
+/// A paper's latest retraction check, shared by every session holding the
+/// paper and kept when they are deleted: the desktop's `retraction_checks`
+/// row (#651). ``Document/retractionCheckJSON`` is each session's copy.
+@Model
+final class RetractionCheckRecord {
+    /// ``RetractionPaper/paperKey``. Not unique, since CloudKit allows no
+    /// unique constraint: two devices may each write one, and
+    /// ``standing(_:)`` reads them as one row.
+    var paperKey: String = ""
+    /// The check, as ``PaperRetractionCheck`` JSON.
+    var checkJSON: String = ""
+
+    init(paperKey: String, checkJSON: String) {
+        self.paperKey = paperKey
+        self.checkJSON = checkJSON
+    }
+
+    /// `json` decoded; `nil` when absent or unreadable, a status or lookup
+    /// name this build does not know included (``PaperRetractionCheck/isReadable``).
+    static func check(_ json: String?) -> PaperRetractionCheck? {
+        guard let data = json?.data(using: .utf8),
+              let check = try? JSONDecoder().decode(PaperRetractionCheck.self, from: data) else { return nil }
+        return check.isReadable ? check : nil
+    }
+
+    /// The check several stored ones of a paper stand for: one this build
+    /// cannot read when there is one (it may hold a retraction an outage must
+    /// not erase), else the latest knowledge (``RetractionSavedWork/latest(_:)``).
+    static func standing(_ jsons: [String]) -> String? {
+        if let unread = jsons.first(where: { check($0) == nil }) { return unread }
+        guard let latest = RetractionSavedWork.latest(jsons.compactMap(check)),
+              let data = try? JSONEncoder().encode(latest) else { return jsons.first }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// The records of `keys`, by key.
+    static func byKey(_ keys: Set<String>, in context: ModelContext) throws -> [String: [RetractionCheckRecord]] {
+        guard !keys.isEmpty else { return [:] }
+        let wanted = Array(keys)
+        let records = try context.fetch(FetchDescriptor<RetractionCheckRecord>(
+            predicate: #Predicate { wanted.contains($0.paperKey) }))
+        return Dictionary(grouping: records, by: \.paperKey)
+    }
+
+    /// Brings each document's copy up to its paper's record, before a check
+    /// decides by it: the latest of the two, the record's when either cannot
+    /// be read, except that a copy this build cannot read is kept.
+    static func adopt(into documents: [Document], in context: ModelContext) throws {
+        let records = try byKey(Set(documents.compactMap(\.retractionPaper.paperKey)), in: context)
+        for document in documents {
+            guard let key = document.retractionPaper.paperKey,
+                  let shared = standing((records[key] ?? []).map(\.checkJSON)) else { continue }
+            guard let own = document.retractionCheckJSON else { document.retractionCheckJSON = shared; continue }
+            guard let ownCheck = check(own) else { continue }
+            if let sharedCheck = check(shared) {
+                let latest = RetractionSavedWork.latest([ownCheck, sharedCheck])
+                if latest != ownCheck { document.retractionCheck = latest }
+            } else {
+                document.retractionCheckJSON = shared
+            }
+        }
+    }
+
+    /// Writes each document's copy as its paper's record, merging any
+    /// duplicates into one. Only after ``adopt(into:in:)`` read the records,
+    /// or an older copy would overwrite a newer record.
+    static func share(from documents: [Document], in context: ModelContext) throws {
+        var jsons: [String: [String]] = [:]
+        for document in documents {
+            guard let key = document.retractionPaper.paperKey, let json = document.retractionCheckJSON else { continue }
+            jsons[key, default: []].append(json)
+        }
+        let existing = try byKey(Set(jsons.keys), in: context)
+        for (key, values) in jsons {
+            guard let json = standing(values) else { continue }
+            var records = existing[key] ?? []
+            guard !records.isEmpty else {
+                context.insert(RetractionCheckRecord(paperKey: key, checkJSON: json))
+                continue
+            }
+            records.removeFirst().checkJSON = json
+            records.forEach(context.delete)
+        }
     }
 }

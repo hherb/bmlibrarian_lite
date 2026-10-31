@@ -34,27 +34,19 @@ struct MedicalFactCheckerApp: App {
         }
     }
 
-    var sharedModelContainer: ModelContainer = {
+    /// The store, or an empty stand-in and why the store could not be opened,
+    /// which the app then shows in place of itself (#297).
+    private let launch: (container: ModelContainer, failure: String?) = {
         // Clear any pending config change flag from previous launch
         CloudKitConfiguration.clearPendingChange()
 
         // Register custom transformer before creating the container
         StringArrayTransformer.register()
 
-        do {
-            // Use migration-aware container creation to preserve user data
-            // when upgrading from previous schema versions
-            return try CloudKitConfiguration.makeModelContainerWithMigration()
-        } catch {
-            // A release build prints nowhere, so the one record of why the app
-            // will not start goes to the log before it stops (#285).
-            let nsError = error as NSError
-            AppLogger.persistence.critical(
-                "ModelContainer creation failed (\(nsError.domain, privacy: .public) \(nsError.code, privacy: .public)): \(String(describing: error), privacy: .public)"
-            )
-            fatalError("Could not create ModelContainer: \(error)")
-        }
+        return CloudKitConfiguration.launchContainer()
     }()
+
+    var sharedModelContainer: ModelContainer { launch.container }
 
     /// Currently selected document for reference popup (shared via environment).
     @State private var selectedReferenceDocument: Document?
@@ -62,21 +54,25 @@ struct MedicalFactCheckerApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environment(AppSettings.shared)
-                .environment(\.openURL, OpenURLAction { url in
-                    // A tapped report reference: the report view on screen
-                    // reads it back through `ReportReferenceLink`.
-                    if url.scheme == ReportReferenceLink.scheme {
-                        NotificationCenter.default.post(
-                            name: .documentReferenceClicked,
-                            object: nil,
-                            userInfo: ["url": url]
-                        )
-                        return .handled
-                    }
-                    return .systemAction
-                })
+            if let failure = launch.failure {
+                StoreLaunchFailureView(message: failure)
+            } else {
+                ContentView()
+                    .environment(AppSettings.shared)
+                    .environment(\.openURL, OpenURLAction { url in
+                        // A tapped report reference: the report view on screen
+                        // reads it back through `ReportReferenceLink`.
+                        if url.scheme == ReportReferenceLink.scheme {
+                            NotificationCenter.default.post(
+                                name: .documentReferenceClicked,
+                                object: nil,
+                                userInfo: ["url": url]
+                            )
+                            return .handled
+                        }
+                        return .systemAction
+                    })
+            }
         }
         .modelContainer(sharedModelContainer)
         .onChange(of: scenePhase) { oldPhase, newPhase in

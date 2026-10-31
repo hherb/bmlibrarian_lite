@@ -83,7 +83,7 @@ final class AppSettings {
             return cached
         }
         let keychainKey = Keys.llmAPIKeyPrefix + provider.rawValue
-        let loaded = secretStore.load(key: keychainKey) ?? ""
+        guard let loaded = readSecret(keychainKey) else { return "" }
         _providerAPIKeyCache[provider] = loaded
         return loaded
     }
@@ -127,7 +127,7 @@ final class AppSettings {
         if let cached = _ncbiAPIKeyCache {
             return cached
         }
-        let loaded = secretStore.load(key: Keys.ncbiAPIKey) ?? ""
+        guard let loaded = readSecret(Keys.ncbiAPIKey) else { return "" }
         _ncbiAPIKeyCache = loaded
         return loaded
     }
@@ -157,7 +157,7 @@ final class AppSettings {
         if let cached = _coreAPIKeyCache {
             return cached
         }
-        let loaded = secretStore.load(key: Keys.coreAPIKey) ?? ""
+        guard let loaded = readSecret(Keys.coreAPIKey) else { return "" }
         _coreAPIKeyCache = loaded
         return loaded
     }
@@ -188,7 +188,7 @@ final class AppSettings {
         if let cached = _elsevierAPIKeyCache {
             return cached
         }
-        let loaded = secretStore.load(key: Keys.elsevierAPIKey) ?? ""
+        guard let loaded = readSecret(Keys.elsevierAPIKey) else { return "" }
         _elsevierAPIKeyCache = loaded
         return loaded
     }
@@ -219,7 +219,7 @@ final class AppSettings {
         if let cached = _elsevierInstTokenCache {
             return cached
         }
-        let loaded = secretStore.load(key: Keys.elsevierInstToken) ?? ""
+        guard let loaded = readSecret(Keys.elsevierInstToken) else { return "" }
         _elsevierInstTokenCache = loaded
         return loaded
     }
@@ -432,6 +432,17 @@ final class AppSettings {
         migrateLegacyAPIKeyIfNeeded(for: detectedProvider)
     }
 
+    /// The secret stored under `key`, `""` when none is, or nil when the store
+    /// could not be read: a getter then caches nothing, so the next read asks
+    /// again rather than using no key until the app restarts (#511).
+    private func readSecret(_ key: String) -> String? {
+        do {
+            return try secretStore.load(key: key) ?? ""
+        } catch {
+            return nil
+        }
+    }
+
     /// Migrate legacy single API key to the per-provider storage format.
     ///
     /// This runs once to move any existing API key from the old single-key storage
@@ -443,7 +454,9 @@ final class AppSettings {
         guard !defaults.bool(forKey: Keys.apiKeyMigrated) else { return }
 
         // Check for legacy key
-        if let legacyKey = secretStore.load(key: Keys.llmAPIKeyLegacy), !legacyKey.isEmpty {
+        // a key that could not be read is tried again on a later launch, never dropped (#511)
+        guard let legacyKey = readSecret(Keys.llmAPIKeyLegacy) else { return }
+        if !legacyKey.isEmpty {
             // Save to new per-provider key
             setAPIKey(legacyKey, for: provider)
             // Delete legacy key
