@@ -249,8 +249,9 @@ data class PaperRetractionCheck(
          * The stored check stands, keeping its time, when it rests on a PubMed
          * label this document has not recorded (`_label_only_unreadable`) or
          * when it [standsAgainst] [fresh]. A row this build cannot read is
-         * overwritten only by a check every lookup answered: it may hold a
-         * retraction an outage must not erase.
+         * overwritten only by a check every lookup answered, or by a
+         * retraction (#669): it may hold a retraction an outage must not
+         * erase, and a retraction erases nothing that warns more.
          *
          * With no row, even a failed check is stored, written over any row
          * (Room's REPLACE) where the desktop keeps an existing one: safe while
@@ -265,7 +266,7 @@ data class PaperRetractionCheck(
             val stored = storedJson?.let(::decode)
             if (stored == null) {
                 if (storedJson != null) Log.w(TAG, "A stored retraction check could not be read")
-                return TakenCheck(store = fresh.takeIf { storedJson == null || fresh.unanswered.isEmpty() }, use = fresh)
+                return TakenCheck(store = fresh.takeIf { storedJson == null || fresh.unanswered.isEmpty() || fresh.isRetracted }, use = fresh)
             }
             if (!fresh.isRetracted && !typesRecorded && (stored.isRetracted || stored.isConcern) && stored.isDecidedByLabel) {
                 return TakenCheck(store = null, use = stored)

@@ -246,6 +246,24 @@ final class RetractionSavedWorkTests: XCTestCase {
                        "and so does the full text's banner")
     }
 
+    /// A row this build cannot read, and Crossref down while Retraction Watch
+    /// says retracted: the retraction is stored and warned of (#669).
+    func testCheckAgainStoresARetractionOverAnUnreadableRow() async {
+        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("unchecked")])
+        documents[0].retractionCheckJSON = "{\"status\": 7}"
+        let found = PaperRetractionCheck(
+            status: "retracted", deciding: Self.notice, unanswered: ["crossref"],
+            checkedAt: Self.runDay.addingTimeInterval(Self.day), exportDataAsOf: nil, crossrefFailure: nil
+        )
+        let workflow = restore(session, answers: ["10.1000/a": found])
+
+        await workflow.checkRetractionsAgain()
+
+        XCTAssertEqual(documents[0].retractionCheck, found, "the retraction is stored")
+        XCTAssertEqual(workflow.retractionSavedWorkLine, "Retraction status checked 2026-10-19")
+        XCTAssertTrue(workflow.retractionSavedWorkWarning?.contains("• Study 0: Retracted") == true)
+    }
+
     /// Every lookup down after an earlier *Check again* found a retraction:
     /// the retraction stands and still warns.
     func testAnOutageDuringASecondCheckAgainKeepsTheWarning() async {

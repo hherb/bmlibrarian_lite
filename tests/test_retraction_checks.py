@@ -594,6 +594,19 @@ def test_an_outage_never_overwrites_an_unreadable_stored_row(storage, tmp_path):
     assert storage.retraction_checks([_KEY])[_KEY].verdict.status is RetractionStatus.CLEAR
 
 
+def test_a_retraction_overwrites_an_unreadable_stored_row_during_an_outage(storage, tmp_path):
+    """Crossref down, the export says retracted: nothing warns more, so it is stored (#669)."""
+    _current_export(tmp_path)
+    key = "doi:10.9/retracted"
+    _store(storage, RetractionStatus.CONCERN, _CONCERN, key=key)
+    with sqlite3.connect(storage.config.storage.sqlite_path) as conn:
+        conn.execute("UPDATE retraction_checks SET status = 'concern_v2'")
+    assert key not in storage.retraction_checks([key]), "control: unreadable"
+    check, row = _recheck(storage, tmp_path, _doc("a", doi="10.9/retracted"))
+    assert check.verdict.status is RetractionStatus.RETRACTED and check.verdict.unanswered
+    assert row == check
+
+
 def test_an_outage_never_erases_a_stored_concern(storage, tmp_path):
     """Crossref down on the re-check: the stored concern is still returned and kept."""
     _current_export(tmp_path)

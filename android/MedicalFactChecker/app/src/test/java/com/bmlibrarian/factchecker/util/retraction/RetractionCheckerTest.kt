@@ -266,11 +266,16 @@ class RetractionCheckerTest {
     }
 
     @Test
-    fun `an unreadable row is overwritten only by a fully answered check`() {
+    fun `an unreadable row is overwritten only by a fully answered check or a retraction`() {
         val outage = stored("unchecked", listOf("crossref"), daysOld = 0.0)
         assertEquals(TakenCheck(null, outage), PaperRetractionCheck.take("{", outage, typesRecorded = true))
+        val concern = stored("concern", listOf("crossref"), daysOld = 0.0)
+        assertEquals(TakenCheck(null, concern), PaperRetractionCheck.take("{", concern, typesRecorded = true))
         val answered = stored("clear", daysOld = 0.0)
         assertEquals(TakenCheck(answered, answered), PaperRetractionCheck.take("{", answered, typesRecorded = true))
+        // nothing warns more than a retraction, whatever was down (#669)
+        val retraction = stored("retracted", listOf("crossref"), daysOld = 0.0)
+        assertEquals(TakenCheck(retraction, retraction), PaperRetractionCheck.take("{", retraction, typesRecorded = true))
     }
 
     @Test

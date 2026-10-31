@@ -310,8 +310,15 @@ class RetractionChecker:
             out.update((doc.id, fresh) for doc in docs)
         # A verdict resting on a failure fills only a missing row: a row this
         # build could not read, or one another process stored meanwhile, may
-        # hold a retraction an outage must not erase
-        failing = {k: c for k, c in decided.items() if c.verdict.unanswered and k not in stored}
+        # hold a retraction an outage must not erase. A retraction erases
+        # nothing that warns more, so it is stored whatever was down (#669)
+        failing = {
+            k: c
+            for k, c in decided.items()
+            if c.verdict.unanswered
+            and c.verdict.status is not RetractionStatus.RETRACTED
+            and k not in stored
+        }
         try:
             self._storage.store_retraction_checks(
                 {k: c for k, c in decided.items() if k not in failing}

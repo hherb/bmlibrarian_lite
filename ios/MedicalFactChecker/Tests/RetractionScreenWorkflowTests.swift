@@ -364,28 +364,34 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         XCTAssertNotNil(documents[0].scoredAt, "reinstated, so scored")
     }
 
-    /// A stored row this build cannot read is kept against a fresh verdict
-    /// that left a lookup unanswered, yet the run leaves the paper out by the
-    /// verdict it used: the notice and the exclusion never disagree. A fresh
-    /// verdict every lookup answered replaces such a row.
+    /// A stored row this build cannot read is kept against an outage, yet
+    /// replaced by a retraction, which warns at least as much, whatever was
+    /// down (#669), and the run leaves the paper out by the verdict it used:
+    /// the notice and the exclusion never disagree. A fresh verdict every
+    /// lookup answered replaces such a row.
     func testAnUnreadableRowIsKeptAndTheRunExcludesByItsOwnVerdict() async throws {
-        let (session, documents) = makeSession(["10.1000/a", "10.1000/b"])
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b", "10.1000/c"])
         for document in documents { document.retractionCheckJSON = "{\"status\": 7}" }
         let workflow = restore(session, check: Self.answering([
             "10.1000/a": Self.retracted(unanswered: ["crossref"]), "10.1000/b": Self.clear(),
+            "10.1000/c": Self.unchecked(["crossref"]),
         ]))
 
         await workflow.retryFailedDocuments(pmids: [])
 
-        XCTAssertEqual(documents[0].retractionCheckJSON, "{\"status\": 7}", "an outage never overwrites a row")
+        XCTAssertEqual(documents[2].retractionCheckJSON, "{\"status\": 7}", "an outage never overwrites a row")
+        XCTAssertEqual(documents[0].retractionCheck?.isRetracted, true, "a retraction does, a lookup down or not")
         XCTAssertNil(documents[0].scoredAt, "left out as the notice says")
         XCTAssertEqual(
             session.retractedUnscoredDocuments(by: session.shownRetractionChecks()).map(\.id), [documents[0].id],
             "listed as left out, as the notice and report name it"
         )
-        XCTAssertEqual(session.documentsToScore, 1, "not counted as still to score")
+        XCTAssertEqual(session.documentsToScore, 2, "not counted as still to score")
         XCTAssertFalse(session.unscoredDocuments.contains { $0 === documents[0] })
-        XCTAssertEqual(workflow.retractionNotice, "Retraction check: 1 retracted paper left out.")
+        XCTAssertEqual(
+            workflow.retractionNotice,
+            "Retraction check: 1 retracted paper left out; 1 paper's retraction status could not be checked: "
+                + "Crossref had no usable answer for the DOI.")
         XCTAssertEqual(documents[1].retractionCheck?.isClear, true)
         XCTAssertNotNil(documents[1].scoredAt)
     }

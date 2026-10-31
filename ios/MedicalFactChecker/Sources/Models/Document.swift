@@ -447,14 +447,15 @@ final class Document {
     /// The stored check stands, keeping its `checkedAt`, when it rests on a
     /// PubMed label this document has not recorded (`_label_only_unreadable`)
     /// or when ``PaperRetractionCheck/standsAgainst(_:)`` `fresh`. A row this
-    /// build cannot read is overwritten only by a check every lookup answered.
+    /// build cannot read is overwritten only by a check every lookup answered,
+    /// or by a retraction, which erases nothing that warns more (#669).
     ///
     /// - Parameter fresh: The check just made.
     /// - Returns: What the run excludes, counts and records.
     func takeRetractionCheck(_ fresh: PaperRetractionCheck) -> PaperRetractionCheck {
         guard let stored = retractionCheck else {
             // an unreadable row may hold a retraction an outage must not erase
-            if retractionCheckJSON == nil || fresh.unanswered.isEmpty { retractionCheck = fresh }
+            if retractionCheckJSON == nil || fresh.unanswered.isEmpty || fresh.isRetracted { retractionCheck = fresh }
             return fresh
         }
         if !fresh.isRetracted, publicationTypes == nil, stored.isRetracted || stored.isConcern,
