@@ -252,7 +252,7 @@ def not_checked_again_clause(count: int, causes: Sequence[str] = ()) -> str:
 
     Returns:
         E.g. "; 2 papers could not be checked again: Crossref could not be
-        used (HTTP 503)"; "" when ``count`` is 0.
+        used (HTTP 503 Service Unavailable)"; "" when ``count`` is 0.
     """
     if not count:
         return ""

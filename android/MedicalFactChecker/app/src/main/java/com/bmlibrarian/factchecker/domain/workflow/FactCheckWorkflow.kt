@@ -1024,7 +1024,8 @@ class FactCheckWorkflow @Inject constructor(
      * say what changed, and the warning suggests re-running the question. A
      * check that fails, or is cancelled ([cancelCheckAgain]) before its
      * answers are in, stores nothing and says the run's record stands (a
-     * failed one still warns of a paper its label retracts); once
+     * failed one still warns of a paper its label retracts, and of what an
+     * answered check found before its rows could be read); once
      * they are in, they are stored and shown whole. A new run or restore
      * cancels it, and it never writes their screen.
      *
@@ -1068,22 +1069,25 @@ class FactCheckWorkflow @Inject constructor(
     private suspend fun checkRetractionsAgainWork(sessionId: String, screen: Long) {
         if (screen == savedWorkScreen) _retractionSavedWorkLine.value = RetractionText.CHECKING_AGAIN_LINE
         var papers: Map<String, RetractionPaper> = emptyMap()
-        val (fresh, taken) = try {
+        var fresh: Map<String, PaperRetractionCheck> = emptyMap()
+        val taken = try {
             val documents = documentRepository.getDocumentsBySessionSync(sessionId)
             papers = documents.associate { it.id to it.retractionPaper }
             val keys = papers.mapValues { it.value.paperKey }
             val checks = retractionService.check(papers.values.distinct())
-            val fresh = documents.mapNotNull { document -> checks[papers.getValue(document.id)]?.let { document.id to it } }.toMap()
+            fresh = documents.mapNotNull { document -> checks[papers.getValue(document.id)]?.let { document.id to it } }.toMap()
             val stored = retractionService.storedChecks(keys.values.filterNotNull().toSet())
-            fresh to takeRetractionChecks(documents.filter { it.id in fresh }, papers, keys, stored, fresh)
+            takeRetractionChecks(documents.filter { it.id in fresh }, papers, keys, stored, fresh)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "Retraction check again failed: ${e.javaClass.simpleName}")
-            // nothing is stored, but a record's own label still retracts (#673)
+            // nothing is stored, but a record's own label still retracts (#673), as does what an answered check found
             val now = System.currentTimeMillis()
             val labelled = papers.mapValues { PaperRetractionCheck.failedFor(it.value, now) }.filterValues { it.isRetracted }
-            showSavedRetraction(sessionId, screen, RetractionText.CHECK_AGAIN_FAILED, labelled = labelled)
+            // a found retraction keeps its notice over the label
+            val found = fresh.filterValues { it.isRetracted || it.isConcern } + labelled.filterKeys { fresh[it]?.isRetracted != true }
+            showSavedRetraction(sessionId, screen, RetractionText.CHECK_AGAIN_FAILED, found = found)
             return
         } catch (e: LinkageError) {
             // a build without bmlib's native library
@@ -1119,8 +1123,9 @@ class FactCheckWorkflow @Inject constructor(
      *   decided papers it could not reach and why papers are unchecked
      * @param taken The check each document now uses after *Check again*, by
      *   document id, laid over the stored rows: shown even when storing them failed
-     * @param labelled A failed *Check again*'s label retractions by document
-     *   id, which warn though nothing stored them
+     * @param found A failed *Check again*'s warnings by document id (its
+     *   label retractions, and what an answered check found), which warn
+     *   though nothing stored them
      */
     private suspend fun showSavedRetraction(
         sessionId: String,
@@ -1128,7 +1133,7 @@ class FactCheckWorkflow @Inject constructor(
         note: String = "",
         again: Map<String, PaperRetractionCheck> = emptyMap(),
         taken: Map<String, PaperRetractionCheck> = emptyMap(),
-        labelled: Map<String, PaperRetractionCheck> = emptyMap()
+        found: Map<String, PaperRetractionCheck> = emptyMap()
     ) {
         val documents = documentRepository.getDocumentsBySessionSync(sessionId)
         val run = RetractionSnapshot.read(sessionRepository.getSession(sessionId)?.retractionSnapshotJson)
@@ -1160,7 +1165,7 @@ class FactCheckWorkflow @Inject constructor(
         val cited = documentRepository.getCitationsBySessionSync(sessionId).map { it.documentId }.toSet()
         val citedDocuments = documents.filter { it.id in cited }
         // a stored retraction keeps its own notice
-        val latest = stored + labelled.filterKeys { stored[it]?.isRetracted != true }
+        val latest = stored + found.filterKeys { stored[it]?.isRetracted != true }
         val changed = RetractionSavedWork.changedSinceRun(run, latest, citedDocuments.map { it.id })
         val titles = citedDocuments.associate { it.id to it.title }
         val papers = documents.associate { it.id to it.retractionPaper }

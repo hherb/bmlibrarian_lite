@@ -382,6 +382,26 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertNil(workflow.retractionSavedWorkWarning)
     }
 
+    /// #673: a stored retraction keeps its own notice over the label, and
+    /// a stored concern is never hidden by a failed check.
+    func testCheckAgainFailureKeepsWhatIsStored() async {
+        let later = Self.runDay.addingTimeInterval(Self.day)
+        let (session, documents) = makeSession(
+            ["10.1000/a", "10.1000/b"], cited: [0, 1], run: [0: Self.check("clear"), 1: Self.check("clear")])
+        documents[0].retractionCheck = Self.check("retracted", at: later)
+        documents[0].publicationTypes = ["Journal Article", "Retracted Publication"]
+        documents[1].retractionCheck = Self.check("concern", at: later)
+        let workflow = restore(session)
+        workflow.useRetractionCheck { _ in throw CheckFailed() }
+
+        await workflow.checkRetractionsAgain()
+
+        let warning = workflow.retractionSavedWorkWarning ?? ""
+        XCTAssertTrue(warning.contains("• Study 0: Retracted on 2026-10-19 (notice 10.1000/notice)"), warning)
+        XCTAssertFalse(warning.contains("Study 0: Retracted (PubMed's label)"), warning)
+        XCTAssertTrue(warning.contains("• Study 1: Expression of concern"), warning)
+    }
+
     /// Every lookup down: a decided check stands, and the line says how many
     /// could not be checked again.
     func testCheckAgainOutageKeepsWhatTheRunKnew() async {

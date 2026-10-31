@@ -50,6 +50,7 @@ from bmlibrarian_lite.gui.report_tab import ReportTab  # noqa: E402
 from bmlibrarian_lite.gui.workers import RetractionRecheckWorker  # noqa: E402
 from bmlibrarian_lite.retraction_checks import paper_key  # noqa: E402
 from bmlibrarian_lite.retraction_screen import (  # noqa: E402
+    RetractionScreen,
     as_the_run_saw_it,
     changed_since_snapshot,
     check_from_snapshot_row,
@@ -550,6 +551,8 @@ def test_a_failed_check_again_changes_nothing_and_says_so(
     store_rows(storage, {CITED.id: check(RetractionStatus.RETRACTED, NOW)})
     reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
     assert CITED.title in tab.retraction_warning.text()
+    # the label too: the shown retraction keeps its own notice (#673)
+    storage.add_document(replace(CITED, publication_types=LABEL))
 
     class Down(RecordingChecker):
         def check(self, documents: Any, **kwargs: Any) -> dict[str, PaperCheck]:
@@ -563,6 +566,41 @@ def test_a_failed_check_again_changes_nothing_and_says_so(
     assert "could not be checked" in tab.retraction_line.text()
     assert tab.check_again_btn.isEnabled()
     assert CITED.title in tab.retraction_warning.text() and not tab.retraction_warning.isHidden()
+    assert "10.9/notice" in tab.retraction_warning.text() and "label" not in tab.retraction_warning.text()
+
+
+def test_a_failed_check_again_keeps_a_shown_concern(
+    tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a label's retraction is laid over what is shown: a failed check never hides a concern (#673)."""
+    metadata = checkpoint_metadata_with_retraction_snapshot({}, screen_documents(DOCUMENTS, run_checks()))
+    checkpoint_id = saved_checkpoint(storage, metadata)
+    store_rows(storage, {CITED.id: check(RetractionStatus.CONCERN, NOW)})
+    reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
+    assert "Expression of concern" in tab.retraction_warning.text()
+    monkeypatch.setattr(report_tab_module, "build_retraction_checker", lambda *_a, **_k: DownChecker())
+    monkeypatch.setattr(RetractionRecheckWorker, "start", RetractionRecheckWorker.run)
+    tab.check_again_btn.click()
+
+    assert tab.retraction_line.text().endswith(CHECK_AGAIN_FAILED)
+    assert "Expression of concern" in tab.retraction_warning.text() and not tab.retraction_warning.isHidden()
+
+
+def test_a_check_again_worker_that_raises_still_keeps_the_label(qapp: Any) -> None:
+    """The worker's last resort is a failed screen that keeps the label's retraction (#673)."""
+    worker = RetractionRecheckWorker(NoRequests(), [replace(CITED, publication_types=LABEL), UNCITED], "cp")
+    got: list[RetractionScreen] = []
+    worker.rechecked.connect(lambda _cp, screen: got.append(screen))
+
+    def broken() -> None:
+        raise RuntimeError("close failed")
+
+    worker._check = broken  # type: ignore[method-assign]
+    worker.run()
+    (screen,) = got
+    assert screen.failed
+    assert screen.checks[CITED.id].verdict.status is RetractionStatus.RETRACTED
+    assert screen.checks[UNCITED.id].verdict.status is RetractionStatus.UNCHECKED
 
 
 def test_a_failed_check_again_still_warns_by_the_label(
@@ -586,6 +624,7 @@ def test_a_failed_check_again_still_warns_by_the_label(
     storage.add_document(replace(CITED, publication_types=[]))
     reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
     tab.check_again_btn.click()
+    assert tab.retraction_line.text().endswith(CHECK_AGAIN_FAILED)
     assert tab.retraction_warning.isHidden()
 
 

@@ -527,6 +527,40 @@ class FactCheckWorkflowRetractionTest {
         assertNull(workflow.retractionSavedWorkWarning.value)
     }
 
+    /** #673: a stored retraction keeps its own notice over the label, and a stored concern is never hidden by a failed check. */
+    @Test
+    fun `a failing Check again keeps what is stored`() = runTest {
+        BmlibFfi.assumeAvailable()
+        rows["pmid:1"] = PaperRetractionCheck.encode(RETRACTED.copy(checkedAtMs = RUN_MS + DAY_MS))
+        rows["pmid:2"] = PaperRetractionCheck.encode(CONCERN.copy(checkedAtMs = RUN_MS + DAY_MS))
+        restoreCheckedSession()
+        citations += CitationEntity(documentId = "d2", passage = "A passage.")
+        documents["d1"] = documents.getValue("d1").copy(publicationTypesJson = "[\"Retracted Publication\"]")
+        coEvery { retractionService.check(any()) } throws IOException("offline")
+
+        workflow.checkRetractionsAgain()
+
+        val warning = workflow.retractionSavedWorkWarning.value!!
+        assertTrue(warning, warning.contains("• Study d1: Retracted on 2026-03-09 (notice 10.9/n)"))
+        assertFalse(warning, warning.contains("PubMed's label"))
+        assertTrue(warning, warning.contains("• Study d2: Expression of concern"))
+    }
+
+    /** #673: an answered check whose rows cannot be read still warns of what it found, storing nothing. */
+    @Test
+    fun `a Check again whose rows cannot be read still warns of what it found`() = runTest {
+        BmlibFfi.assumeAvailable()
+        restoreCheckedSession()
+        answers["1"] = RETRACTED.copy(checkedAtMs = RUN_MS + DAY_MS)
+        coEvery { retractionService.storedChecks(any()) } throws IOException("database locked")
+
+        workflow.checkRetractionsAgain()
+
+        assertTrue(workflow.retractionSavedWorkWarning.value!!.contains("• Study d1: Retracted"))
+        assertTrue(workflow.retractionSavedWorkLine.value!!.endsWith(RetractionText.CHECK_AGAIN_FAILED + RetractionText.STORED_CHECKS_UNREAD))
+        assertTrue("nothing is stored", rows.isEmpty())
+    }
+
     @Test
     fun `a Check again that cannot read the store throws and never leaves the checking line up`() = runTest {
         restoreCheckedSession()

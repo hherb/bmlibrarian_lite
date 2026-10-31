@@ -510,8 +510,9 @@ final class FactCheckWorkflow {
     /// an outage. The run's snapshot, and so the
     /// report, is never rewritten: ``retractionSavedWorkLine`` and
     /// ``retractionSavedWorkWarning`` say what changed, and the warning
-    /// suggests re-running the question. A check that fails stores nothing
-    /// and says the run's record stands, still warning of a paper its label retracts.
+    /// suggests re-running the question. A check that fails, or is stopped,
+    /// stores nothing and says the run's record stands; a failed one still
+    /// warns of a paper its label retracts.
     func checkRetractionsAgain() async {
         // set before the wait for earlier work, so a second tap meanwhile asks nothing
         guard !isCheckingRetractionsAgain else { return }
