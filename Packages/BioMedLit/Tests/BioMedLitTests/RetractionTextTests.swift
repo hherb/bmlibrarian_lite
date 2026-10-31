@@ -22,7 +22,7 @@ import XCTest
 final class RetractionTextTests: XCTestCase {
     private let when = Date(timeIntervalSince1970: 1_792_315_800) // 2026-10-18 09:30 UTC
     private let both = ["retraction_watch_export", "crossref"]
-    private let rwCause = "the Retraction Watch data could not be used (it downloads over Wi-Fi)"
+    private let rwCause = "the Retraction Watch data could not be used (no up-to-date copy is on this device)"
 
     private func evidence(
         source: String = "retraction_watch_export", kind: String = "retraction",
@@ -212,7 +212,7 @@ final class RetractionTextTests: XCTestCase {
     }
 
     func testSavedWorkLineNamesWhyPapersStayUncheckedAfterCheckAgain() {
-        let rwCause = "the Retraction Watch data could not be used (it downloads over Wi-Fi)"
+        let rwCause = "the Retraction Watch data could not be used (no up-to-date copy is on this device)"
         let unchecked = check("unchecked", unanswered: both)
         XCTAssertEqual(
             RetractionText.savedWorkLine([check("clear"), unchecked], causes: [rwCause]),

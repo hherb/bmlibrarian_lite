@@ -337,6 +337,10 @@ class FactCheckWorkflowRetractionTest {
         BmlibFfi.assumeAvailable()
         hold("d1", types = listOf("Retracted Publication"))
         hold("d2", types = listOf("Journal Article"))
+        // a stored clear the label has since overtaken
+        val clear = CLEAR.copy(checkedAtMs = System.currentTimeMillis() - 10 * DAY_MS)
+        rows["pmid:3"] = PaperRetractionCheck.encode(clear)
+        hold("d3", types = listOf("Retracted Publication"))
         coEvery { retractionService.check(any()) } throws IOException("down")
 
         run()
@@ -344,6 +348,8 @@ class FactCheckWorkflowRetractionTest {
         assertEquals(listOf("d2"), scored)
         assertTrue(snapshot().getValue("d1").isRetracted)
         assertTrue(snapshot().getValue("d2").isUnchecked)
+        assertTrue(snapshot().getValue("d3").isRetracted)
+        assertTrue("the label overtakes the stored clear", PaperRetractionCheck.decode(rows.getValue("pmid:3"))!!.isRetracted)
     }
 
     @Test
@@ -525,7 +531,7 @@ class FactCheckWorkflowRetractionTest {
         workflow.checkRetractionsAgain()
 
         assertEquals(
-            "Retraction status could not be checked: the Retraction Watch data could not be used (it downloads over Wi-Fi)",
+            "Retraction status could not be checked: the Retraction Watch data could not be used (no up-to-date copy is on this device)",
             workflow.retractionSavedWorkLine.value
         )
     }
@@ -546,7 +552,7 @@ class FactCheckWorkflowRetractionTest {
 
         assertEquals(
             "Retraction status checked 2026-10-18; 1 paper could not be checked: the Retraction Watch data could not be used" +
-                " (it downloads over Wi-Fi); 1 paper could not be checked again",
+                " (no up-to-date copy is on this device); 1 paper could not be checked again",
             workflow.retractionSavedWorkLine.value
         )
     }

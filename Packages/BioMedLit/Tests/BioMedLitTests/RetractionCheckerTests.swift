@@ -171,6 +171,24 @@ final class RetractionCheckerTests: XCTestCase {
         XCTAssertEqual(failed.checkedAt, RetractionFixture.now)
     }
 
+    /// The desktop's `_label_check`: a failed check still retracts by the record's own label.
+    func testAFailedCheckStillRetractsByTheRecordsOwnLabel() {
+        let labelled = PaperRetractionCheck.failed(
+            for: RetractionPaper(doi: "10.1000/x", pmid: nil, publicationTypes: ["Retracted Publication"]),
+            at: RetractionFixture.now)
+        XCTAssertTrue(labelled.isRetracted)
+        XCTAssertTrue(labelled.isDecidedByLabel)
+        XCTAssertEqual(labelled.checkedAt, RetractionFixture.now)
+        // nothing was asked, so it is never reused in place of asking
+        XCTAssertEqual(labelled.unanswered, ["retraction_watch_export", "crossref"])
+        // control: without the label a failed check is unchecked, never clear
+        XCTAssertEqual(
+            PaperRetractionCheck.failed(
+                for: RetractionPaper(doi: "10.1000/x", pmid: nil, publicationTypes: ["Journal Article"]),
+                at: RetractionFixture.now),
+            PaperRetractionCheck.failed(at: RetractionFixture.now))
+    }
+
     func testAnUnknownStatusNameIsUnchecked() {
         let odd = stored(status: "not-a-status")
         XCTAssertEqual(odd.retractionStatus, .unchecked)

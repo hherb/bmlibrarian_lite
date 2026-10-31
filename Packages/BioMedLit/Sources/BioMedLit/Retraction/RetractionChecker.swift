@@ -171,6 +171,20 @@ extension PaperRetractionCheck {
         )
     }
 
+    /// The stand-in for a failed check on `paper` (the desktop's
+    /// `_label_check`): the record's own label needs neither network nor
+    /// database, so a retraction it states survives any failure; any other
+    /// paper is ``failed(at:)``.
+    ///
+    /// - Parameters:
+    ///   - paper: The paper the check failed for.
+    ///   - date: When the check was attempted.
+    public static func failed(for paper: RetractionPaper, at date: Date) -> PaperRetractionCheck {
+        let label = BmlibCore.retractionStatus(doi: nil, export: nil, crossref: nil, publicationTypes: paper.publicationTypes)
+        guard label.status == .retracted else { return failed(at: date) }
+        return PaperRetractionCheck(verdict: label, checkedAt: date, exportDataAsOf: nil, crossrefFailure: nil)
+    }
+
     /// Whether this stored check may stand in for a fresh one (the desktop's
     /// `RetractionChecker.check`): no older than
     /// ``BioMedLitConstants/retractionCheckMaxAgeDays``, every lookup

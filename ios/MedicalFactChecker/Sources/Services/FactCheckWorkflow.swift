@@ -1225,8 +1225,8 @@ final class FactCheckWorkflow {
     /// Gives the workflow its retraction check, in place of the production
     /// one (``productionRetractionCheck()``), for tests.
     ///
-    /// - Parameter check: Checks papers; throwing anything but cancellation
-    ///   leaves them unchecked for the run.
+    /// - Parameter check: Checks papers; throwing without a stop leaves them
+    ///   unchecked for the run, but those their own label retracts.
     func useRetractionCheck(_ check: @escaping RetractionCheck) {
         retractionCheck = check
     }
@@ -3767,9 +3767,10 @@ final class FactCheckWorkflow {
     /// Each document is checked at most once per run. One whose stored check
     /// ``PaperRetractionCheck/isReusable(now:publicationTypes:)`` is used
     /// without asking; what is stored and used otherwise follows
-    /// ``Document/takeRetractionCheck(_:)``. A check that throws anything but
-    /// cancellation leaves every paper it was given unchecked for this run
-    /// (``PaperRetractionCheck/failed(at:)``), and the run goes on.
+    /// ``Document/takeRetractionCheck(_:)``. A check that throws without a stop
+    /// (a cancellation nobody asked for included) leaves every paper it
+    /// was given unchecked for this run, unless its record's own label retracts it
+    /// (``PaperRetractionCheck/failed(for:at:)``), and the run goes on.
     ///
     /// - Parameter documents: The documents about to be scored.
     /// - Throws: Cancellation when the run is stopped during the check, or,
@@ -3804,14 +3805,15 @@ final class FactCheckWorkflow {
             var checks: [RetractionPaper: PaperRetractionCheck] = [:]
             do {
                 checks = try await (retractionCheck ?? productionRetractionCheck())(papers)
-            } catch let error where !(error is CancellationError) && !stopRequested {
-                logger.warning("Retraction check failed, its papers are left unchecked: \(error.localizedDescription)")
+            } catch let error where !stopRequested {
+                // a cancellation nobody asked for is a failure too, as in *Check again*
+                logger.warning("Retraction check failed, its papers unchecked but those their label retracts: \(error.localizedDescription)")
             }
             // a stop the check did not throw for still records nothing
             if stopRequested { throw CancellationError() }
             for (document, paper) in zip(due, papers) {
                 if checks[paper] == nil { retractionRun.failed.insert(paper) }
-                used[document.id] = document.takeRetractionCheck(checks[paper] ?? .failed(at: now))
+                used[document.id] = document.takeRetractionCheck(checks[paper] ?? .failed(for: paper, at: now))
             }
         }
 

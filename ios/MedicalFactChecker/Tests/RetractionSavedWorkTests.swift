@@ -328,7 +328,7 @@ final class RetractionSavedWorkTests: XCTestCase {
     }
 
     /// Why ``check(_:at:)``'s unchecked answer leaves a paper with a DOI unchecked.
-    private static let uncheckedCauses = "the Retraction Watch data could not be used (it downloads over Wi-Fi);"
+    private static let uncheckedCauses = "the Retraction Watch data could not be used (no up-to-date copy is on this device);"
         + " Crossref had no usable answer for the DOI"
 
     /// #660: a paper still unchecked after *Check again* is named with why,
