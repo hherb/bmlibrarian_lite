@@ -563,12 +563,14 @@ final class FactCheckWorkflow {
         let missed = zip(documents, papers).filter { document, paper in
             checks[paper]?.isUnchecked == true && rows[document.id].map { !$0.isUnchecked } == true
         }.count
-        // why the papers still unchecked are, by this check's own answers
-        let causes = RetractionText.uncheckedCauses(
-            zip(documents, papers).compactMap { document, paper in
-                guard rows[document.id]?.isUnchecked == true, let check = checks[paper] else { return nil }
-                return (paper: paper, check: Optional(check))
-            }, failed: [])
+        // the papers whose row stays unchecked, with this check's answers for them
+        let still = zip(documents, papers).compactMap { document, paper -> (paper: RetractionPaper, check: PaperRetractionCheck?)? in
+            guard rows[document.id]?.isUnchecked == true, let check = checks[paper] else { return nil }
+            return (paper: paper, check: check)
+        }
+        // a row this check never reached has no cause: the count alone, as on a reopen, never others' causes
+        let causes = still.count == rows.values.filter(\.isUnchecked).count
+            ? RetractionText.uncheckedCauses(still, failed: []) : []
         showSavedRetraction(note: RetractionText.notCheckedAgainClause(missed) + unsaved, causes: causes)
     }
 

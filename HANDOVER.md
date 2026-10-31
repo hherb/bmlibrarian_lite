@@ -15,7 +15,10 @@ section of `doc/developer/retraction_checking.md`, which holds the design).
 *Check again*'s line names why papers stay unchecked (#654 item 1, the
 maintainer's choice), on all three platforms since #660: the causes come from
 Check again's own answers, for the papers whose row stays unchecked; a plain
-reopen names none (the snapshot records none). **A missing
+reopen names none (the snapshot records none), nor does a Check again with an
+unchecked row it never reached (its document gone: the others' causes would
+claim it). Lodged: #668 ("could not be checked again" names no cause), #669
+(Swift: a retraction Check again finds is lost over an unreadable row). **A missing
 native library** leaves papers unchecked, but
 stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
@@ -41,7 +44,7 @@ renamed into place. Lodged: #662, #663 (see Next up).
 **Retraction checking, iOS/macOS: done** (PRs #650, #652; plan
 `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`). The
 snapshot is the run's record, never rewritten; *Check again* stores per
-`Document` (#651). The Android port took #647's per-entry snapshot and
+`Document`, not per paper (open: #651). The Android port took #647's per-entry snapshot and
 refused-export backoff, #649's exhaustive names and code-point escaping.
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
@@ -142,7 +145,8 @@ have landed):
   (`challenge_detection.json`): header names only; change a needle only
   against live pages.
 - **Settings dialog lifecycle** (PR #518): a released dialog's handlers do
-  nothing (**a queued signal still arrives after a disconnect**); **PySide6 `<6.12`** (#516).
+  nothing (**a queued signal still arrives after a disconnect**); GC on the
+  main thread only (#517). **PySide6 `<6.12`** (#516).
 - **Stage C2: Elsevier's article API** (all three; PR #507; contract
   `elsevier_article.json`). **A first-page PDF is never served**; a 403
   `AUTHENTICATION_ERROR` is "not available from this network", a 401 refuses

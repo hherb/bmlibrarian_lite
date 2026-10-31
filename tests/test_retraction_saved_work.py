@@ -642,6 +642,61 @@ def test_check_again_names_why_papers_stay_unchecked(
     )
 
 
+def test_check_again_names_only_the_causes_of_papers_whose_row_stays_unchecked(
+    tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A decided row kept over an unchecked answer is counted again, its cause never named (#660)."""
+    seen = {**run_checks(), CITED.id: check(RetractionStatus.UNCHECKED, RUN)}
+    metadata = checkpoint_metadata_with_retraction_snapshot({}, screen_documents(DOCUMENTS, seen))
+    checkpoint_id = saved_checkpoint(storage, metadata)
+    reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
+    # UNCITED's copy was consulted: its own cause would be an unreadable notice
+    unreadable = PaperCheck(
+        RetractionVerdict(RetractionStatus.UNCHECKED, None, tuple(RetractionLookup)), NOW, NOW.date(), None
+    )
+    run_check_again(
+        tab,
+        storage,
+        monkeypatch,
+        {
+            CITED.id: check(RetractionStatus.UNCHECKED, NOW),
+            UNCITED.id: unreadable,
+            LEFT_OUT.id: check(RetractionStatus.RETRACTED, NOW),
+        },
+    )
+    line = tab.retraction_line.text()
+    assert line.endswith(
+        "; 1 paper could not be checked: the Retraction Watch copy could not be used"
+        " (run `bmll retractions-update`); Crossref had no usable answer for the DOI;"
+        " 1 paper could not be checked again"
+    )
+    assert "notice" not in line
+
+
+def test_check_again_names_no_cause_when_an_unchecked_paper_was_not_reached(
+    tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run's paper no longer held is never asked: the causes of the others would claim it too."""
+    seen = {
+        **run_checks(),
+        CITED.id: check(RetractionStatus.UNCHECKED, RUN),
+        UNCITED.id: check(RetractionStatus.UNCHECKED, RUN),
+    }
+    metadata = checkpoint_metadata_with_retraction_snapshot({}, screen_documents(DOCUMENTS, seen))
+    checkpoint_id = saved_checkpoint(storage, metadata)
+    reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
+    held = storage.get_documents
+    # storage gives "fewer than requested" for a document gone since the run
+    monkeypatch.setattr(storage, "get_documents", lambda ids: [d for d in held(ids) if d.id != UNCITED.id])
+    run_check_again(
+        tab,
+        storage,
+        monkeypatch,
+        {CITED.id: check(RetractionStatus.UNCHECKED, NOW), LEFT_OUT.id: check(RetractionStatus.RETRACTED, NOW)},
+    )
+    assert tab.retraction_line.text().endswith("; 2 papers could not be checked")
+
+
 def test_a_late_result_for_another_question_changes_neither_view_nor_audit_trail(
     tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
 ) -> None:

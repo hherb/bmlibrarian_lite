@@ -530,6 +530,42 @@ class FactCheckWorkflowRetractionTest {
         )
     }
 
+    /** #660: a decided row kept over an unchecked answer is counted again, its cause never named. */
+    @Test
+    fun `Check again names only the causes of papers whose row stays unchecked`() = runTest {
+        hold("d1")
+        hold("d2")
+        snapshotJson = RetractionSnapshot.merged(
+            null, mapOf("d1" to NO_EXPORT.copy(checkedAtMs = RUN_MS), "d2" to CLEAR.copy(checkedAtMs = RUN_MS))
+        )
+        workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
+        answers["1"] = NO_EXPORT.copy(checkedAtMs = RUN_MS + DAY_MS)
+        answers["2"] = OUTAGE.copy(checkedAtMs = RUN_MS + DAY_MS)
+
+        workflow.checkRetractionsAgain()
+
+        assertEquals(
+            "Retraction status checked 2026-10-18; 1 paper could not be checked: the Retraction Watch data could not be used" +
+                " (it downloads over Wi-Fi); 1 paper could not be checked again",
+            workflow.retractionSavedWorkLine.value
+        )
+    }
+
+    /** #660: a run's paper no longer held is never asked; the others' causes would claim it too. */
+    @Test
+    fun `Check again names no cause when an unchecked paper was not reached`() = runTest {
+        hold("d1")
+        snapshotJson = RetractionSnapshot.merged(
+            null, mapOf("d1" to NO_EXPORT.copy(checkedAtMs = RUN_MS), "d2" to NO_EXPORT.copy(checkedAtMs = RUN_MS))
+        )
+        workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
+        answers["1"] = NO_EXPORT.copy(checkedAtMs = RUN_MS + DAY_MS)
+
+        workflow.checkRetractionsAgain()
+
+        assertEquals("Retraction status could not be checked", workflow.retractionSavedWorkLine.value)
+    }
+
     @Test
     fun `a decided paper Check again cannot reach keeps its record and is counted`() = runTest {
         restoreCheckedSession()

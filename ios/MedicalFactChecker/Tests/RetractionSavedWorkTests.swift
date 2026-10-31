@@ -274,8 +274,13 @@ final class RetractionSavedWorkTests: XCTestCase {
             0: Self.check("clear"), 1: Self.check("clear"), 2: Self.check("clear"), 3: Self.check("unchecked"),
         ])
         let later = Self.runDay.addingTimeInterval(Self.day)
+        // b's copy was consulted and Crossref failed: its own causes, never named (its row stays decided)
+        let unreadable = PaperRetractionCheck(
+            status: "unchecked", deciding: nil, unanswered: ["retraction_watch_export", "crossref"],
+            checkedAt: later, exportDataAsOf: "2026-10-19", crossrefFailure: "HTTP 503"
+        )
         let workflow = restore(session, answers: [
-            "10.1000/a": Self.check("clear", at: later), "10.1000/b": Self.check("unchecked", at: later),
+            "10.1000/a": Self.check("clear", at: later), "10.1000/b": unreadable,
             "10.1000/c": Self.check("unchecked", at: later), "10.1000/d": Self.check("unchecked", at: later),
         ])
 
@@ -285,6 +290,23 @@ final class RetractionSavedWorkTests: XCTestCase {
             workflow.retractionSavedWorkLine,
             "Retraction status checked 2026-10-18; 1 paper could not be checked: \(Self.uncheckedCauses);"
                 + " 2 papers could not be checked again")
+    }
+
+    /// A run's paper whose document is gone is never asked: the causes of
+    /// the others would claim it too, so the line gives the count alone.
+    func testCheckAgainNamesNoCauseWhenAnUncheckedPaperWasNotReached() async {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b"], cited: [0], run: [
+            0: Self.check("unchecked"), 1: Self.check("unchecked"),
+        ])
+        context.delete(documents[1])
+        try? context.save()
+        let workflow = restore(session, answers: [
+            "10.1000/a": Self.check("unchecked", at: Self.runDay.addingTimeInterval(Self.day)),
+        ])
+
+        await workflow.checkRetractionsAgain()
+
+        XCTAssertEqual(workflow.retractionSavedWorkLine, "Retraction status could not be checked")
     }
 
     /// Why ``check(_:at:)``'s unchecked answer leaves a paper with a DOI unchecked.

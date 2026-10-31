@@ -440,8 +440,9 @@ class ReportTab(QWidget):
         Args:
             current: The latest checks by document id; ``None`` keeps the
                 ones last shown.
-            note: A clause to add to the line (a failed *Check again*).
-            causes: Why papers stay unchecked, by *Check again*'s answers.
+            note: A clause to add to the line (a failed or partial *Check again*).
+            causes: Why papers stay unchecked, by *Check again*'s answers;
+                none on a plain reopen.
         """
         if current is not None:
             self._shown_checks = current
@@ -560,7 +561,9 @@ class ReportTab(QWidget):
             and row["status"] != RetractionStatus.UNCHECKED.value
         )
         still = {row["document_id"] for row in updated.rows if row["status"] == RetractionStatus.UNCHECKED.value}
-        causes = unchecked_causes(replace(screen, kept=tuple(doc for doc in screen.kept if doc.id in still)))
+        kept = tuple(doc for doc in screen.kept if doc.id in still)
+        # a row this check never reached has no cause: the count alone, as on a reopen, never others' causes
+        causes = unchecked_causes(replace(screen, kept=kept)) if len(kept) == len(still) else []
         rows = RetractionScreen.from_snapshot(updated.to_snapshot())
         self._retraction_snapshot = rows
         self._show_saved_retraction(
