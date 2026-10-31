@@ -188,7 +188,7 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         XCTAssertEqual(
             workflow.retractionNotice,
             "Retraction check: 2 papers' retraction status could not be checked: "
-                + "the Retraction Watch data could not be used (it downloads over Wi-Fi); no DOI or PMID."
+                + "the Retraction Watch data could not be used (no up-to-date copy is on this device); no DOI or PMID."
         )
     }
 
@@ -468,6 +468,27 @@ final class RetractionScreenWorkflowTests: XCTestCase {
             workflow.retractionNotice,
             "Retraction check: 1 retracted paper left out; "
                 + "2 papers' retraction status could not be checked: the check failed."
+        )
+    }
+
+    /// The desktop's `_label_check` (#656): a check that throws still leaves
+    /// out a paper whose record's own label says retracted, with no stored check.
+    func testAFailedCheckStillLeavesOutAPaperItsLabelRetracts() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b"])
+        documents[0].publicationTypes = ["Journal Article", "Retracted Publication"]
+        let workflow = restore(session, check: { _ in throw CheckFailed() })
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        XCTAssertEqual(documents[0].retractionCheck?.isDecidedByLabel, true)
+        XCTAssertTrue(documents[0].isRetracted)
+        XCTAssertNil(documents[0].scoredAt, "left out, never scored")
+        XCTAssertEqual(documents[1].retractionCheck?.isUnchecked, true, "control: no label, unchecked")
+        XCTAssertNotNil(documents[1].scoredAt)
+        XCTAssertEqual(
+            workflow.retractionNotice,
+            "Retraction check: 1 retracted paper left out; "
+                + "1 paper's retraction status could not be checked: the check failed."
         )
     }
 

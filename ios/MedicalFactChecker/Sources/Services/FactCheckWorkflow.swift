@@ -3768,8 +3768,9 @@ final class FactCheckWorkflow {
     /// ``PaperRetractionCheck/isReusable(now:publicationTypes:)`` is used
     /// without asking; what is stored and used otherwise follows
     /// ``Document/takeRetractionCheck(_:)``. A check that throws anything but
-    /// cancellation leaves every paper it was given unchecked for this run
-    /// (``PaperRetractionCheck/failed(at:)``), and the run goes on.
+    /// cancellation leaves every paper it was given unchecked for this run,
+    /// unless its record's own label retracts it
+    /// (``PaperRetractionCheck/failed(for:at:)``), and the run goes on.
     ///
     /// - Parameter documents: The documents about to be scored.
     /// - Throws: Cancellation when the run is stopped during the check, or,
@@ -3811,7 +3812,7 @@ final class FactCheckWorkflow {
             if stopRequested { throw CancellationError() }
             for (document, paper) in zip(due, papers) {
                 if checks[paper] == nil { retractionRun.failed.insert(paper) }
-                used[document.id] = document.takeRetractionCheck(checks[paper] ?? .failed(at: now))
+                used[document.id] = document.takeRetractionCheck(checks[paper] ?? .failed(for: paper, at: now))
             }
         }
 

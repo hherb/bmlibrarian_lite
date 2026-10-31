@@ -525,7 +525,7 @@ class FactCheckWorkflowRetractionTest {
         workflow.checkRetractionsAgain()
 
         assertEquals(
-            "Retraction status could not be checked: the Retraction Watch data could not be used (it downloads over Wi-Fi)",
+            "Retraction status could not be checked: the Retraction Watch data could not be used (no up-to-date copy is on this device)",
             workflow.retractionSavedWorkLine.value
         )
     }
@@ -546,7 +546,7 @@ class FactCheckWorkflowRetractionTest {
 
         assertEquals(
             "Retraction status checked 2026-10-18; 1 paper could not be checked: the Retraction Watch data could not be used" +
-                " (it downloads over Wi-Fi); 1 paper could not be checked again",
+                " (no up-to-date copy is on this device); 1 paper could not be checked again",
             workflow.retractionSavedWorkLine.value
         )
     }

@@ -25,7 +25,7 @@ import org.junit.Test
 class RetractionTextTest {
     private val whenMs = 1_792_315_800_000L // 2026-10-18 09:30 UTC
     private val both = listOf("retraction_watch_export", "crossref")
-    private val rwCause = "the Retraction Watch data could not be used (it downloads over Wi-Fi)"
+    private val rwCause = "the Retraction Watch data could not be used (no up-to-date copy is on this device)"
 
     @Before
     fun setUp() = BmlibFfi.assumeAvailable()

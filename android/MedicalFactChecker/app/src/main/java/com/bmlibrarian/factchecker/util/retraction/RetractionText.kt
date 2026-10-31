@@ -36,7 +36,7 @@ object RetractionText {
 
     private const val FAILED_CAUSE = "the check failed"
     /** Replaces the desktop's `bmll retractions-update` hint: the app downloads the data itself. */
-    private const val EXPORT_CAUSE = "the Retraction Watch data could not be used (it downloads over Wi-Fi)"
+    private const val EXPORT_CAUSE = "the Retraction Watch data could not be used (no up-to-date copy is on this device)"
     private const val EXPORT_NOTICE_CAUSE = "a Retraction Watch notice could not be read"
     private const val NO_IDS_CAUSE = "no DOI or PMID"
     private const val NO_DOI_CAUSE = "no DOI, which Crossref needs"

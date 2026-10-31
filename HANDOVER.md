@@ -50,7 +50,10 @@ renamed into place. Lodged: #662, #663 (see Next up).
 **Retraction checking, iOS/macOS: done** (PRs #650, #652; plan
 `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`). The
 snapshot is the run's record, never rewritten; *Check again* stores per
-`Document`, not per paper (open: #651). The Android port took #647's per-entry snapshot and
+`Document`, not per paper (open: #651). A check that throws still retracts
+by the record's own label (`PaperRetractionCheck.failed(for:at:)`, #656), and
+the export cause now reads "(no up-to-date copy is on this device)" in both
+apps, not a Wi-Fi hint a reader on Wi-Fi was given too. The Android port took #647's per-entry snapshot and
 refused-export backoff, #649's exhaustive names and code-point escaping.
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
@@ -97,11 +100,9 @@ have landed):
   retried); an unknown stop reason is logged and read as finished unless the
   whole token limit was generated. **A test stubbing the reporting or
   interrogation answer patches `_chat_prose`, not `_chat`.**
-- **Desktop: Find More Evidence and repeated smart search** (PR #628).
-  `smart_search.py` is told every query already run (`smart_search_run_queries`);
-  an alternative search's loss is `ShortfallQuery.ALTERNATIVE`. Find More
-  Evidence (`more_evidence.py`) scores **into the reviewed run's checkpoint**,
-  then writes the report from every citation of the run.
+- **Desktop: Find More Evidence and repeated smart search** (PR #628):
+  smart search is told every query already run; Find More Evidence scores
+  **into the reviewed run's checkpoint**, then rewrites the report.
 - **Desktop: citations from full text, Retry Full Text** (PR #622).
   *Settings → Full Text*: **Read citations from full text** (off) and **Fetch
   Full Text From Score** (4, never below the review's threshold). The review
@@ -117,13 +118,11 @@ have landed):
   replaces citations in one transaction when the text yields passages, redoes transparency, writes the
   report again only when a text was read (`full_text_report_pending` survives
   a cancel). Runs from before PR #622 cannot be retried.
-- **Android: taking a fact check further** (PR #616, Room **10**): abstract
-  holdback, PDF text via iText (1 MB cap); citations read
-  `DocumentEntity.analysisFullText` and are replaced in one transaction.
+- **Android: taking a fact check further** (PR #616, Room **10**): PDF text
+  via iText; citations read `DocumentEntity.analysisFullText`.
 - **bmlib: the FFI pin and the port set** (#583; PRs #564–#570, #572). The
   pin names bmlib `main` (`83cd2b3`, PR #646); `android-tests.yml` builds
-  bmlib there, fails if either bmlib FFI test skips, and fails if the
-  retraction contract copy is not the pin's; **the committed xcframework is
+  bmlib there and fails if an FFI test skips or the contract copy drifts; **the committed xcframework is
   `bmlib-xcframework.yml`'s own build** (re-pin from its artifact as its
   header says). **`doc/cross_platform/bmlib_sync/ledger.json` records every
   bmlib change per platform**: a sync bumps `bmlib_commit` and triages every
@@ -133,7 +132,6 @@ have landed):
   `europepmc_free_pdf.json`; converter **6**, analyser **2.7**. **Phase 4
   consumes bmlib's Rust through UniFFI** (no production caller yet). Open:
   #573–#581, #585, #587.
-- **A download is checked before it is cached** (PR #562); **Android's `downloadPdf` never answers from the cache.** Open: #563.
 - **Wrong-article PDFs** (#532, #541, #546; PRs #542, #548, #559; contract
   `pdf_title_check.json`): a mismatch is set aside as `.mismatch`, never read;
   the refusal is `wrong_article`, a skip **with its address**, never an
@@ -151,8 +149,7 @@ have landed):
   (`challenge_detection.json`): header names only; change a needle only
   against live pages.
 - **Settings dialog lifecycle** (PR #518): a released dialog's handlers do
-  nothing (**a queued signal still arrives after a disconnect**); GC on the
-  main thread only (#517). **PySide6 `<6.12`** (#516).
+  nothing; GC on the main thread only (#517). **PySide6 `<6.12`** (#516).
 - **Stage C2: Elsevier's article API** (all three; PR #507; contract
   `elsevier_article.json`). **A first-page PDF is never served**; a 403
   `AUTHENTICATION_ERROR` is "not available from this network", a 401 refuses
@@ -176,23 +173,15 @@ have landed):
   `JATS_MARKDOWN_CONVERTER_VERSION` when output changes); `END_MATTER_MARKER`
   (converter **5**) — **no marker, no charge**; recognising more end matter
   creates charges (#359); no full text, no data-availability request (#421).
-- **Transparency, compressed** (PRs #358–#419):
-  - Every no-full-text rating says "Limited certainty because of lack of full
-    text access". "Without full text" means nothing in it was recognised.
-  - **Score = clamped sum of `score_components`; High iff `high_risk_triggers`
-    is non-empty**, under the user's settings, one shared object. A broken
-    stored breakdown reads as `None` (`risk_explanation_strings.json`).
-  - No Unassessed rule on the desktop; the apps show an unread-text High as
-    **Unassessed** (PR #388).
-  - **Unreachable is provisional**: the apps' `sourcesUnreachable`, and
-    Python needs every cited trial answered.
-  - A row **strictly newer** than this build is never overwritten. **Bump
-    `TRANSPARENCY_ANALYZER_VERSION`** whenever a score could move.
-  - **A skip is a third state** (`SourceLookupSkipped`): only text we read can
-    say `NOT_STATED`. Assert the built sentence, not a shared substring.
-  - Never `findtext` a mixed-content element.
-  - Funders by brand: `sponsor_patterns.json` schema 4, which differs from
-    bmlib's copy.
+- **Transparency, compressed** (PRs #358–#419): every no-full-text rating
+  says "Limited certainty because of lack of full text access". **Score =
+  clamped sum of `score_components`; High iff `high_risk_triggers` is
+  non-empty** (a broken stored breakdown reads as `None`). The apps show an
+  unread-text High as **Unassessed** (PR #388), the desktop does not.
+  **Unreachable is provisional.** A row **strictly newer** than this build is
+  never overwritten; **bump `TRANSPARENCY_ANALYZER_VERSION`** whenever a score
+  could move. **A skip is a third state** (`SourceLookupSkipped`). Never
+  `findtext` a mixed-content element. Funders: `sponsor_patterns.json` schema 4.
 - **Older rounds, compressed to the rules that still bind.** Each cost a
   defect; the archaeology is in git history and the `doc/cross_platform/`
   READMEs, which these point at.
@@ -254,14 +243,14 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **Retraction checking** follow-ups: **#662** (an unchecked run's warning
   rule, "could not be read" wording, needs a cross-platform decision),
   **#663** (Android), Apple **#647**–**#649**, **#651**, **#653**, **#654**
-  (item 1 done by #660), **#656**, **#657**.
+  (item 1 done by #660), **#657**, **#668**, **#671**.
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
   the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,
   **#585**.
 - **#545** sweep the PDF library for other articles' PDFs (CLI only, the
   maintainer's call); **#547** keep a set-aside PDF from the GUI (both from
-  #541); **#555** Android release builds fail R8; **#556**–**#558** (#546's).
+  #541); **#563** (PR #562's, checked downloads); **#555** Android release builds fail R8; **#556**–**#558** (#546's).
 - **C2's probe and acceptance, and C1's replay** (maintainer); the **embedded
   browser rescue's follow-ups**: **#524**, **#525**, **#527**, **#528**, **#530**, **#531**, **#533** (stage 2 follow-ups), **#534**, **#535**, **#537**–**#540**, **#544** (stage 3); **#481** follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
   **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2); **#516** (PySide6 cap, leaked widgets), **#517** (GC on worker threads); **#467**, **#468** / **#470**, **#476**.

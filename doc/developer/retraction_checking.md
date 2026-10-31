@@ -125,7 +125,9 @@ BioMedLit; the app never imports `BmlibCore`.
   lookup this build does not know is unreadable (`isReadable`), as the
   desktop's `_decode`. What the run used is
   `FactCheckSession.retractionSnapshotJSON`. They can differ: a stored clear
-  stands in storage against an outage, but the run is shown unchecked.
+  stands in storage against an outage, but the run is shown unchecked. A
+  check that throws still retracts by the record's own label
+  (`PaperRetractionCheck.failed(for:at:)`, the desktop's `_label_check`, #656).
 - Views list and count from the run's snapshot first, then the stored check
   (`FactCheckSession.shownRetractionChecks`, `Document.shownRetractionCheck`).
   The badge and banner (`RetractionBadge`, `RetractionBanner`) show the
