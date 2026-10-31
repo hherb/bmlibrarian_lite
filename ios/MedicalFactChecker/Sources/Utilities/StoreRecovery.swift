@@ -335,7 +335,7 @@ enum StoreRecovery {
 
     /// What the user can do while no store opens.
     static let launchFailureAdvice =
-        "Until a database can be opened, the app shows only this screen and keeps nothing."
+        "Until a database can be opened, the app shows only this screen and keeps no fact checks."
             + " Quit and reopen it to try again; if the device is low on storage, free some space first."
             + " Deleting the app would delete your saved fact checks with it."
 

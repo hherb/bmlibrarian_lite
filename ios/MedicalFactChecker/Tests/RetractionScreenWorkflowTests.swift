@@ -291,6 +291,34 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         XCTAssertEqual(try context.fetch(FetchDescriptor<RetractionCheckRecord>()).count, 1, "one row per paper")
     }
 
+    /// #651: a record another session writes while this run's check is in
+    /// flight is read before this run decides and writes back, never written
+    /// over. The check of X reaches no source; meanwhile a retraction of X
+    /// arrives, and X is left out.
+    func testARecordWrittenDuringTheCheckIsNotWrittenOver() async throws {
+        let (session, documents) = makeSession(["10.1000/x"])
+        let key = try XCTUnwrap(documents[0].retractionPaper.paperKey)
+        let answer = Self.answering(["10.1000/x": Self.unchecked(["retraction_watch_export", "crossref"])])
+        let workflow = restore(session, check: { papers in
+            try await self.recordElsewhere(key, Self.retracted(unanswered: ["crossref"]))
+            return try await answer(papers)
+        })
+        await workflow.retryFailedDocuments(pmids: [])
+
+        XCTAssertTrue(documents[0].isRetracted)
+        XCTAssertNil(documents[0].scoredAt, "left out by the record that arrived")
+        let records = try context.fetch(FetchDescriptor<RetractionCheckRecord>())
+        XCTAssertEqual(records.count, 1, "one row per paper")
+        XCTAssertEqual(RetractionCheckRecord.check(records.first?.checkJSON)?.isRetracted, true)
+    }
+
+    /// Another session's `check`, written as the paper's record only.
+    private func recordElsewhere(_ key: String, _ check: PaperRetractionCheck) throws {
+        let json = try XCTUnwrap(String(data: JSONEncoder().encode(check), encoding: .utf8))
+        context.insert(RetractionCheckRecord(paperKey: key, checkJSON: json))
+        try context.save()
+    }
+
     /// A stored clear stands in storage, but the run is shown the fresh
     /// unchecked: a clear resting on a lookup now down is not knowledge.
     func testAStoredClearIsNotUsedAgainstAnOutage() async throws {

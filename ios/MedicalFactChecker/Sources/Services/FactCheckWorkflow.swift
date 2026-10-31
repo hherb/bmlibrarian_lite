@@ -3808,7 +3808,7 @@ final class FactCheckWorkflow {
         let seen = Set(retractionRun.used.map(\.id))
         let unseen = documents.filter { !seen.contains($0.id) }
         guard !unseen.isEmpty else { return }
-        let adopted = adoptSharedRetractionChecks(unseen)
+        var adopted = adoptSharedRetractionChecks(unseen)
 
         let now = Date()
         var used: [String: PaperRetractionCheck] = [:]
@@ -3833,6 +3833,9 @@ final class FactCheckWorkflow {
             }
             // a stop the check did not throw for still records nothing
             if stopRequested { throw CancellationError() }
+            // another session may have written a record during the check: read
+            // them again, or the write back below would overwrite it (#651)
+            adopted = adoptSharedRetractionChecks(unseen)
             for (document, paper) in zip(due, papers) {
                 if checks[paper] == nil { retractionRun.failed.insert(paper) }
                 used[document.id] = document.takeRetractionCheck(checks[paper] ?? .failed(for: paper, at: now))
