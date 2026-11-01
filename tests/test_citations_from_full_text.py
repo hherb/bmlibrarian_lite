@@ -1084,7 +1084,10 @@ class TestRetryFullText:
         _, _, reporter = retry(storage, {"doc-1": "T1."}, {"doc-1": ["New 1."]})
 
         screen = reporter.generate_report.call_args.args[2].retraction_screen
-        assert [r["status"] for r in screen.to_snapshot()] == [RetractionStatus.CONCERN.value]
+        statuses = {r["document_id"]: r["status"] for r in screen.to_snapshot()}
+        assert statuses.pop("doc-1") == RetractionStatus.CONCERN.value
+        # the run's other papers have no row, so none reads as clear (#657)
+        assert set(statuses.values()) == {RetractionStatus.UNCHECKED.value}
         kept = storage.get_checkpoint(checkpoint_id).metadata
         assert kept[CHECKPOINT_RETRACTION_SNAPSHOT_KEY][0]["document_id"] == "doc-1"
 
