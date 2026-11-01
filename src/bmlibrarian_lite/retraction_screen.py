@@ -516,7 +516,9 @@ def latest_checks(
 
 
 def rechecked_snapshot(
-    snapshot: Mapping[str, Mapping[str, Any]], screen: RetractionScreen
+    snapshot: Mapping[str, Mapping[str, Any]],
+    screen: RetractionScreen,
+    run_ids: Collection[str] = (),
 ) -> RetractionSnapshot:
     """The run's snapshot with *Check again*'s answers written in.
 
@@ -529,13 +531,16 @@ def rechecked_snapshot(
     unchecked answer never replaces a decided row (an outage is not
     knowledge; the checker's own rule), and a
     document the check did not reach keeps its row. Only the run's own
-    documents are written: a document another run linked gets a row only
-    when the run has no snapshot (it predates the check). A document whose
-    check failed keeps its row.
+    documents are written: its rows, and its scored papers without one (a
+    run reviewed before the check that Find More Evidence gave rows, #684);
+    a document another run linked gets a row only when the run has no
+    snapshot (it predates the check). A document whose check failed keeps
+    its row.
 
     Args:
         snapshot: The run's snapshot rows by document id.
         screen: *Check again*'s screen.
+        run_ids: The run's scored papers' document ids.
 
     Returns:
         The new snapshot.
@@ -544,7 +549,9 @@ def rechecked_snapshot(
     for row in screen.to_snapshot():
         doc_id = row["document_id"]
         check = screen.checks.get(doc_id)
-        if check is None or doc_id in screen.failed_ids or (snapshot and doc_id not in snapshot):
+        if check is None or doc_id in screen.failed_ids or (
+            snapshot and doc_id not in snapshot and doc_id not in run_ids
+        ):
             continue
         old = rows.get(doc_id, {})
         if (

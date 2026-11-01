@@ -28,18 +28,22 @@ object RetractionSavedWork {
      * The checks a reopened session's line and badges are read from: each the
      * run's, unless the paper's stored row is newer and is not an unchecked one
      * over a decided one. A session whose run recorded none (it predates the
-     * check) reads the stored rows alone.
+     * check) reads the stored rows alone, as does a scored paper the run has
+     * no check of (Find More Evidence on such a session, #684).
      *
      * @param run The checks the run used, by document id
      * @param stored Each document's paper's stored row, by document id
+     * @param scored The session's scored documents' ids
      * @return The checks, by document id
      */
     fun recheckedChecks(
         run: Map<String, PaperRetractionCheck>,
-        stored: Map<String, PaperRetractionCheck>
+        stored: Map<String, PaperRetractionCheck>,
+        scored: Set<String> = emptySet()
     ): Map<String, PaperRetractionCheck> {
         if (run.isEmpty()) return stored
-        return run.mapValues { (id, check) -> stored[id]?.let { rechecked(check, it) } ?: check }
+        return stored.filterKeys { it !in run && it in scored } +
+            run.mapValues { (id, check) -> stored[id]?.let { rechecked(check, it) } ?: check }
     }
 
     /** One paper's check since its run: [stored] when newer than [run] and not an unchecked one over a decided one. */

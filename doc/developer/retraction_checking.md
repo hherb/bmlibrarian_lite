@@ -107,6 +107,12 @@ paper with its `retraction_status`.
   finds, so the report written again counts every scored paper with no
   snapshot row as unchecked, its count alone (#657, all three platforms; the
   desktop's `write_report_again`). The stored snapshot does not gain them.
+  *Check again* does check them (#684): the desktop writes a row for each of
+  the run's scored papers with none (`rechecked_snapshot`'s `run_ids`,
+  `run_status` None, as for a run that predates the check), and the apps'
+  line reads a scored paper's stored check when the run has none
+  (`RetractionSavedWork.recheckedChecks`'s `scored`). A paper only another
+  run scored still gets no row.
 - **`excluded` is a fact of the run.** Snapshot rows record whether the run
   left a paper out; a later re-check (*Check again*) may change `status`,
   never that. *Check again* keeps the run's own status and notice as

@@ -569,7 +569,8 @@ final class FactCheckWorkflow {
 
         // a decided check kept over an unchecked answer: no source could be reached for it
         let rows = RetractionSavedWork.recheckedChecks(
-            run: session.retractionSnapshot(), stored: Self.storedRetractionChecks(documents))
+            run: session.retractionSnapshot(), stored: Self.storedRetractionChecks(documents),
+            scored: Self.scoredIDs(documents))
         let missed = zip(documents, papers).compactMap { document, paper -> (paper: RetractionPaper, check: PaperRetractionCheck?)? in
             guard let check = checks[paper], check.isUnchecked, rows[document.id].map({ !$0.isUnchecked }) == true
             else { return nil }
@@ -586,6 +587,11 @@ final class FactCheckWorkflow {
         let again = RetractionText.notCheckedAgainClause(
             missed.count, causes: RetractionText.uncheckedCauses(missed, failed: []))
         showSavedRetraction(note: again + unsaved, causes: causes)
+    }
+
+    /// The scored documents' ids (the report's rule, #657): a run's papers, with a snapshot row or not (#684).
+    private static func scoredIDs(_ documents: [Document]) -> Set<String> {
+        Set(documents.filter { $0.relevanceScore != nil }.map(\.id))
     }
 
     /// Each document's stored retraction check, by `Document.id`.
@@ -609,7 +615,8 @@ final class FactCheckWorkflow {
         guard let session else { return }
         let documents = session.documents ?? []
         let run = session.retractionSnapshot()
-        let rows = RetractionSavedWork.recheckedChecks(run: run, stored: Self.storedRetractionChecks(documents))
+        let rows = RetractionSavedWork.recheckedChecks(
+            run: run, stored: Self.storedRetractionChecks(documents), scored: Self.scoredIDs(documents))
         var note = note
         let cited = documents.filter { !($0.citations ?? []).isEmpty }
         var latest: [String: PaperRetractionCheck] = [:]

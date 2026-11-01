@@ -34,6 +34,7 @@ from bmlib.publications.retraction_status import (  # noqa: E402
 )
 
 from bmlibrarian_lite.audit_records import (  # noqa: E402
+    CHECKPOINT_RETRACTION_SNAPSHOT_KEY,
     checkpoint_metadata_with_retraction_snapshot,
     recorded_retraction_snapshot,
 )
@@ -50,6 +51,7 @@ from bmlibrarian_lite.gui.report_tab import ReportTab  # noqa: E402
 from bmlibrarian_lite.gui.workers import RetractionRecheckWorker  # noqa: E402
 from bmlibrarian_lite.retraction_checks import paper_key  # noqa: E402
 from bmlibrarian_lite.retraction_screen import (  # noqa: E402
+    RUN_STATUS_KEY,
     RetractionScreen,
     as_the_run_saw_it,
     changed_since_snapshot,
@@ -320,6 +322,10 @@ def test_check_again_writes_only_this_runs_documents() -> None:
     # a run from before the feature has no snapshot: every linked document gets a row
     rows = {r["document_id"] for r in rechecked_snapshot({}, screen).to_snapshot()}
     assert rows == {d.id for d in [*DOCUMENTS, other]}
+    # a scored paper of the run without a row gains one; another run's still does not (#684)
+    partial = {LEFT_OUT.id: run_snapshot()[LEFT_OUT.id]}
+    rows = {r["document_id"] for r in rechecked_snapshot(partial, screen, {CITED.id}).to_snapshot()}
+    assert rows == {LEFT_OUT.id, CITED.id}
 
 
 def test_the_saved_work_line_dates_decided_rows_and_counts_the_unchecked() -> None:
@@ -1571,6 +1577,36 @@ def test_a_pre_feature_run_warns_of_a_cited_paper_check_again_found_retracted(
     run_check_again(tab, storage, monkeypatch, {CITED.id: check(RetractionStatus.RETRACTED, NOW)})
     assert CITED.title in tab.retraction_warning.text()
     reopen(tab, recorded_retraction_snapshot(storage.get_checkpoint(checkpoint_id).metadata), checkpoint_id)
+    assert CITED.title in tab.retraction_warning.text()
+
+
+def test_check_again_gives_a_row_to_each_scored_paper_no_screen_saw(
+    tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#684: a run reviewed before the check, then given rows by Find More Evidence.
+
+    Its earlier scored papers gain rows the run never saw (``run_status``
+    None, so a warning is news); a paper only another run scored does not.
+    """
+    partial = {LEFT_OUT.id: run_snapshot()[LEFT_OUT.id]}
+    checkpoint_id = saved_checkpoint(storage, {CHECKPOINT_RETRACTION_SNAPSHOT_KEY: list(partial.values())})
+    for document in (CITED, LEFT_OUT):
+        storage.save_scored_document(ScoredDocument(document=document, score=4, explanation="On topic."), checkpoint_id)
+    reopen(tab, partial, checkpoint_id)
+
+    run_check_again(
+        tab,
+        storage,
+        monkeypatch,
+        {d.id: check(RetractionStatus.RETRACTED if d is CITED else RetractionStatus.CLEAR, NOW) for d in DOCUMENTS},
+    )
+
+    rows = recorded_retraction_snapshot(storage.get_checkpoint(checkpoint_id).metadata)
+    assert set(rows) == {CITED.id, LEFT_OUT.id}
+    assert rows[CITED.id]["status"] == "retracted" and rows[CITED.id][RUN_STATUS_KEY] is None
+    assert rows[CITED.id]["excluded"] is False
+    assert CITED.title in tab.retraction_warning.text()
+    reopen(tab, rows, checkpoint_id)
     assert CITED.title in tab.retraction_warning.text()
 
 

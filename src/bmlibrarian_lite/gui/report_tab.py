@@ -533,6 +533,7 @@ class ReportTab(QWidget):
                 self._show_saved_retraction({**shown, **labelled}, note=CHECK_AGAIN_FAILED)
             return
         note = ""
+        run_ids: set[str] = set()
         try:
             if checkpoint_id.startswith(FILE_ID_PREFIX):
                 updated, audit = self._rewrite_audit_snapshot(
@@ -544,7 +545,14 @@ class ReportTab(QWidget):
                 checkpoint = self.storage.get_checkpoint(checkpoint_id)
                 if checkpoint is None:
                     raise LookupError("checkpoint gone")
-                updated = rechecked_snapshot(recorded_retraction_snapshot(checkpoint.metadata), screen)
+                # a scored paper no screen saw gains its row (#684)
+                run_ids = {
+                    d.document.id
+                    for d in self.storage.get_scored_documents_for_question(
+                        checkpoint.research_question, checkpoint_id=checkpoint_id
+                    )
+                }
+                updated = rechecked_snapshot(recorded_retraction_snapshot(checkpoint.metadata), screen, run_ids)
                 self.storage.update_checkpoint(
                     checkpoint_id,
                     metadata=checkpoint_metadata_with_retraction_snapshot(checkpoint.metadata, updated),
@@ -555,7 +563,7 @@ class ReportTab(QWidget):
             # The shared rows hold the answers unless storing them failed too;
             # this run's record missed them
             logger.warning("Could not save the new retraction status with %s (%s)", checkpoint_id, type(e).__name__)
-            updated = rechecked_snapshot(self._retraction_snapshot or {}, screen)
+            updated = rechecked_snapshot(self._retraction_snapshot or {}, screen, run_ids)
             note = CHECK_AGAIN_NOT_SAVED
             # said again whenever this run is shown, until a Check again is saved
             self._unsaved_rechecks.add(checkpoint_id)

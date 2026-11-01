@@ -50,6 +50,17 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertEqual(predating["x"]?.status, "clear", "a run that recorded none reads the stored checks")
     }
 
+    func testRecheckedChecksReadAScoredPaperTheRunHasNoCheckOf() {
+        // #684: a session older than the check that Find More Evidence gave a snapshot
+        let rows = RetractionSavedWork.recheckedChecks(
+            run: ["a": check("clear", at: run)],
+            stored: ["a": check("unchecked", at: later), "x": check("retracted", at: later), "y": check("clear", at: later)],
+            scored: ["a", "x"])
+        XCTAssertEqual(rows["a"]?.status, "clear", "the run's row still stands against an outage")
+        XCTAssertEqual(rows["x"]?.status, "retracted", "a scored paper without a run row reads its stored check")
+        XCTAssertNil(rows["y"], "a document the run did not score still gets no row")
+    }
+
     func testOnlyACitedPapersChangeForTheWorseWarns() {
         let runChecks = ["a": check("clear", at: run), "b": check("retracted", at: run), "c": check("clear", at: run)]
         let latest = [
