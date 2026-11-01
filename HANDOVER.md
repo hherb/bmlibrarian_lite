@@ -8,28 +8,19 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
-**Retraction checking, Android: done** (PR 5a #655; PR 5b #661, branch
-`feat/retraction-checking-android-saved-work`; plan
-`docs/superpowers/plans/2026-10-30-retraction-checking-android.md`; Android
-section of `doc/developer/retraction_checking.md`, which holds the design).
-*Check again*'s line names why papers stay unchecked (#654 item 1, the
-maintainer's choice), on all three platforms since #660: the causes come from
-Check again's own answers, for the papers whose row stays unchecked; a plain
-reopen names none (the snapshot records none), nor does a Check again with an
-unchecked row it never reached (its document gone: the others' causes would
-claim it); the "could not be checked again" count names why, from those papers' own answers (#668).
+**Retraction checking, Android: done** (PRs #655, #661; design in
+`doc/developer/retraction_checking.md`). *Check again* names why papers stay
+unchecked from its own answers only (#660, #668, all three platforms).
 **A row this build cannot read** is overwritten only by a fully answered
 check **or a retraction**, whatever was down (#669, all three platforms;
 a concern still cannot, since the row may hold a retraction). A row naming
 a status or lookup this build does not know is unreadable on all three
 (Swift's `PaperRetractionCheck.isReadable`). Lodged: #671 (Android decides
 per document, so a same-paper document can overwrite this run's row).
-**A missing
-native library** leaves papers unchecked, but
-stored warnings and a paper's own label still decide; `paperKey` and
+**A missing native library** leaves papers unchecked, but stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
 FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C
-~/src/bmlib worktree add --detach <dir> 83cd2b3`); without it they skip
+~/src/bmlib worktree add --detach <dir> aa47a57`); without it they skip
 locally, and CI fails if they skip. **A ViewModel test mocks the workflow:
 every new workflow `StateFlow` must be stubbed in the three
 `FactCheckViewModel*Test`s**, or the unstubbed `collect` leaks a
@@ -44,17 +35,16 @@ wait on a fetch** (#665): an OkHttp call a run makes goes through
 cancellation it is (the one bare `execute()` left, `RetractionIndexStore`'s
 export refresh, runs in the service's own scope, not a run's). Each fetching
 service has a test that cancels a request in flight (`cancelInFlight`, test
-`util/InFlightCancel.kt`). The embedding model downloads to a `.part` file
-renamed into place. Lodged: #662, #663 (see Next up).
+`util/InFlightCancel.kt`).
 
 **Retraction checking, iOS/macOS: done** (PRs #650, #652; plan
 `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`). The
-snapshot is the run's record, never rewritten; *Check again* stores per
-`Document`, not per paper (open: #651). A check that throws still retracts
+snapshot is the run's record, never rewritten; checks are stored per paper
+in `RetractionCheckRecord` (#651, PR #676; no unique constraint under
+CloudKit, so readers merge duplicates). A check that throws still retracts
 by the record's own label (`PaperRetractionCheck.failed(for:at:)`, #656; a failed *Check again* warns by it on all three, storing nothing, #673; Android also warns of what an answered check found when its rows could not be read), and
 the export cause now reads "(no up-to-date copy is on this device)" in both
-apps, not a Wi-Fi hint a reader on Wi-Fi was given too. The Android port took #647's per-entry snapshot and
-refused-export backoff, #649's exhaustive names and code-point escaping.
+apps, not a Wi-Fi hint a reader on Wi-Fi was given too.
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
 error follows a cancel). Open, lodged by recent rounds: #641 (JATS whitespace,
@@ -93,6 +83,20 @@ have landed):
 
 ## Recently landed (context)
 
+- **Apple 1.7 release blockers** (PRs #676, #678–#681): unscreened cited
+  papers counted unchecked (#657, Android too), per-paper retraction rows
+  (#651), a stand-in store window (#297), a failed Keychain read is never
+  cached as no key and leaves CORE/Elsevier unreachable, not unasked (#511);
+  privacy manifest and `PRIVACY.md`; the Mac app is sandboxed
+  (`network.client`, `print`) with the push entitlement on both. **A run never
+  waits for the Retraction Watch refresh**: `currentIndex` is `nonisolated`
+  (pinned by a test that holds the injected build, #681), and bmlib's CSV
+  parse is linear (849 s → 0.6 s). **Owed by the maintainer before 1.7**:
+  accept Apple's latest Program License Agreement (signing fails until then),
+  deploy the CloudKit schema to Production (`RetractionCheckRecord`, new
+  `Document` fields), update App Privacy answers to `PRIVACY.md`, archive and
+  Validate App on both platforms (first release bundling `BmlibFFI`).
+
 - **Cut-off, refused and unknown-stop answers** (#629, #631, #637; PRs #630,
   #632, #636, #638): a cut-off answer raises `TruncatedResponseError`
   (`.content` kept; smart search searches its complete queries and says so in
@@ -100,10 +104,9 @@ have landed):
   retried); an unknown stop reason is logged and read as finished unless the
   whole token limit was generated. **A test stubbing the reporting or
   interrogation answer patches `_chat_prose`, not `_chat`.**
-- **Desktop: Find More Evidence and repeated smart search** (PR #628):
-  smart search is told every query already run; Find More Evidence scores
-  **into the reviewed run's checkpoint**, then rewrites the report.
-- **Desktop: citations from full text, Retry Full Text** (PR #622).
+- **Desktop: Find More Evidence** (PR #628) scores **into the reviewed run's
+  checkpoint**; smart search is told every query already run. **Citations
+  from full text, Retry Full Text** (PR #622).
   *Settings → Full Text*: **Read citations from full text** (off) and **Fetch
   Full Text From Score** (4, never below the review's threshold). The review
   fetches full texts through the discovery chain (`citation_full_texts`)
@@ -118,10 +121,8 @@ have landed):
   replaces citations in one transaction when the text yields passages, redoes transparency, writes the
   report again only when a text was read (`full_text_report_pending` survives
   a cancel). Runs from before PR #622 cannot be retried.
-- **Android: taking a fact check further** (PR #616, Room **10**): PDF text
-  via iText; citations read `DocumentEntity.analysisFullText`.
 - **bmlib: the FFI pin and the port set** (#583; PRs #564–#570, #572). The
-  pin names bmlib `main` (`83cd2b3`, PR #646); `android-tests.yml` builds
+  pin names bmlib `main` (`aa47a57`, PR #680: bmlib#621's linear CSV parse); `android-tests.yml` builds
   bmlib there and fails if an FFI test skips or the contract copy drifts; **the committed xcframework is
   `bmlib-xcframework.yml`'s own build** (re-pin from its artifact as its
   header says). **`doc/cross_platform/bmlib_sync/ledger.json` records every
@@ -148,8 +149,6 @@ have landed):
   `tests/browser_rescue_harness.py`'s subprocess. Detection
   (`challenge_detection.json`): header names only; change a needle only
   against live pages.
-- **Settings dialog lifecycle** (PR #518): a released dialog's handlers do
-  nothing; GC on the main thread only (#517). **PySide6 `<6.12`** (#516).
 - **Stage C2: Elsevier's article API** (all three; PR #507; contract
   `elsevier_article.json`). **A first-page PDF is never served**; a 403
   `AUTHENTICATION_ERROR` is "not available from this network", a 401 refuses
@@ -242,8 +241,8 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 - **Retraction checking** follow-ups: **#662** (an unchecked run's warning
   rule, "could not be read" wording, needs a cross-platform decision),
-  **#663** (Android), Apple **#647**–**#649**, **#651**, **#653**, **#654**
-  (item 1 done by #660), **#657**, **#671**, **#675** (a stopped Check again
+  **#663** (Android), Apple **#647**–**#649**, **#653**, **#654**
+  (item 1 done by #660), **#658** (Android), **#671**, **#675** (a stopped Check again
   and the label, needs a cross-platform decision).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
@@ -366,8 +365,8 @@ Open issues by family; each issue carries the detail. None blocks another.
 ### iOS/macOS storage, errors and tests (#282 and #285 rounds)
 
 **#289 blocks any model change lightweight migration cannot absorb** until
-each `VersionedSchema` snapshots its own model types. Around it: #297
-(`fatalError` on an unopenable store), #292, #293, #294, #295, #296, #298,
+each `VersionedSchema` snapshots its own model types. Around it (#297's
+unopenable store now opens a stand-in that says why, PR #676): #292, #293, #294, #295, #296, #298,
 #287, #286 (Swift 6 error), #290. **#281 / #288 — the workflow's own
 decisions are untested** (six of ten are pure functions `private` by
 accident; `failedEuropePMCPage`'s `max(1, …)` matters most).

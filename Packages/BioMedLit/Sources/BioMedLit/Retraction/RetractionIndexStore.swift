@@ -37,6 +37,8 @@ public actor RetractionIndexStore {
     private let directory: URL
     private let session: URLSession
     private let email: String
+    /// bmlib's `buildRetractionIndex`; a test injects one it can hold.
+    private let build: @Sendable (Data, String) throws -> RetractionIndexBuild
     /// The download under way, which every caller meanwhile awaits.
     private var inFlight: Task<RetractionIndexRefresh, Never>?
 
@@ -47,9 +49,21 @@ public actor RetractionIndexStore {
     ///   - email: Contact address, sent as `mailto=` and in the User-Agent,
     ///     as the desktop's download does.
     public init(directory: URL, session: URLSession, email: String) {
+        self.init(directory: directory, session: session, email: email) {
+            try buildRetractionIndex(csv: $0, dataAsOf: $1)
+        }
+    }
+
+    init(
+        directory: URL,
+        session: URLSession,
+        email: String,
+        build: @escaping @Sendable (Data, String) throws -> RetractionIndexBuild
+    ) {
         self.directory = directory
         self.session = session
         self.email = email
+        self.build = build
     }
 
     /// The store the app uses: ``productionDirectory`` over a Wi-Fi-only session.
@@ -170,7 +184,7 @@ public actor RetractionIndexStore {
 
         let build: RetractionIndexBuild
         do {
-            build = try buildRetractionIndex(csv: body, dataAsOf: Self.dayFormatter.string(from: now))
+            build = try self.build(body, Self.dayFormatter.string(from: now))
         } catch {
             BioMedLitLib.logger?.warning("Retraction Watch export refused: \(error)", category: .network)
             return .refused("the export could not be built")
