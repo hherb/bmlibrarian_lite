@@ -1073,11 +1073,13 @@ class FactCheckWorkflow @Inject constructor(
         val taken = try {
             val documents = documentRepository.getDocumentsBySessionSync(sessionId)
             papers = documents.associate { it.id to it.retractionPaper }
+            // apart, so a merge that throws an Exception still leaves each document's own label for its catch
+            papers = RetractionPaper.merged(papers)
             val keys = papers.mapValues { it.value.paperKey }
             val checks = retractionService.check(papers.values.distinct())
             fresh = documents.mapNotNull { document -> checks[papers.getValue(document.id)]?.let { document.id to it } }.toMap()
             val stored = retractionService.storedChecks(keys.values.filterNotNull().toSet())
-            takeRetractionChecks(documents.filter { it.id in fresh }, papers, keys, stored, fresh)
+            takeRetractionChecks(documents.filter { it.id in fresh }, keys, stored, fresh)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -2036,8 +2038,9 @@ class FactCheckWorkflow @Inject constructor(
         val unseen = documents.filter { it.id !in run.used }
         if (unseen.isNotEmpty()) {
             val now = System.currentTimeMillis()
-            val papers = unseen.associate { it.id to it.retractionPaper }
+            var papers = unseen.associate { it.id to it.retractionPaper }
             val used = try {
+                papers = RetractionPaper.merged(papers)
                 decideRetraction(unseen, papers, now)
             } catch (e: CancellationException) {
                 throw e
@@ -2073,6 +2076,8 @@ class FactCheckWorkflow @Inject constructor(
      * taken against the stored row ([PaperRetractionCheck.take]), written as
      * the paper's new row when it replaces it.
      *
+     * @param papers Each document's paper, [RetractionPaper.merged], so a
+     *   paper two documents share is decided once
      * @return The check the run uses, by document id
      */
     private suspend fun decideRetraction(
@@ -2094,7 +2099,7 @@ class FactCheckWorkflow @Inject constructor(
 
         updateProgress(RetractionText.PROGRESS_MESSAGE, WorkflowProgress.PROGRESS_SCORING_START)
         val checks = try {
-            retractionService.check(due.map { papers.getValue(it.id) })
+            retractionService.check(due.map { papers.getValue(it.id) }.distinct())
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -2109,7 +2114,7 @@ class FactCheckWorkflow @Inject constructor(
             val paper = papers.getValue(document.id)
             document.id to (checks[paper] ?: PaperRetractionCheck.failedFor(paper, now).also { retractionRun.failed += paper })
         }
-        val taken = takeRetractionChecks(due, papers, keys, stored, fresh)
+        val taken = takeRetractionChecks(due, keys, stored, fresh)
         storeRetractionChecks(taken.rows)
         return used + taken.use
     }
@@ -2118,36 +2123,38 @@ class FactCheckWorkflow @Inject constructor(
     private class TakenRetractionChecks(val rows: Map<String, PaperRetractionCheck>, val use: Map<String, PaperRetractionCheck>)
 
     /**
-     * Take each document's fresh check against its paper's stored row
-     * ([PaperRetractionCheck.take]). A document with no paper key stores nothing.
+     * Take each paper's fresh check against its stored row, once per paper key
+     * ([PaperRetractionCheck.take]; the desktop's `check`, #671), so no
+     * document can replace the row another document of the same paper decided.
+     * Its label counts as recorded when any of its documents recorded one. A
+     * document with no paper key stores nothing.
      *
      * @param documents The documents checked
-     * @param papers Their papers, by document id
      * @param keys Their paper keys, by document id
      * @param stored The stored rows' JSON, by paper key
-     * @param fresh Each document's fresh check, by document id
+     * @param fresh Each document's fresh check, by document id: one for every
+     *   document of a paper, its papers being [RetractionPaper.merged]
      */
     private fun takeRetractionChecks(
         documents: List<DocumentEntity>,
-        papers: Map<String, RetractionPaper>,
         keys: Map<String, String?>,
         stored: Map<String, String>,
         fresh: Map<String, PaperRetractionCheck>
     ): TakenRetractionChecks {
         val rows = mutableMapOf<String, PaperRetractionCheck>()
         val use = mutableMapOf<String, PaperRetractionCheck>()
-        for (document in documents) {
-            val check = fresh.getValue(document.id)
-            val key = keys[document.id]
+        for ((key, group) in documents.groupBy { keys[it.id] }) {
             if (key == null) {
-                use[document.id] = check
+                group.forEach { use[it.id] = fresh.getValue(it.id) }
                 continue
             }
-            // a paper two documents share is decided against the row this run will write, not the stale stored one
-            val row = rows[key]?.let(PaperRetractionCheck::encode) ?: stored[key]
-            val taken = PaperRetractionCheck.take(row, check, typesRecorded = document.publicationTypes != null)
+            val taken = PaperRetractionCheck.take(
+                stored[key],
+                fresh.getValue(group.first().id),
+                typesRecorded = group.any { it.publicationTypes != null }
+            )
             taken.store?.let { rows[key] = it }
-            use[document.id] = taken.use
+            group.forEach { use[it.id] = taken.use }
         }
         return TakenRetractionChecks(rows, use)
     }
