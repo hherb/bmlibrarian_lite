@@ -1651,6 +1651,16 @@ def test_a_check_again_not_saved_still_counts_a_scored_paper_no_screen_saw(
     assert tab.retraction_line.text().endswith(CHECK_AGAIN_NOT_SAVED)
 
 
+def test_a_reopen_counts_a_scored_paper_no_screen_saw(tab: ReportTab, storage: LiteStorage) -> None:
+    """#685: before any Check again, the line counts it unchecked, as the report written again does."""
+    partial = {LEFT_OUT.id: run_snapshot()[LEFT_OUT.id]}
+    scored = [ScoredDocument(document=d, score=4, explanation="On topic.") for d in (CITED, LEFT_OUT)]
+    reopen(tab, partial, "cp", scored)
+    assert tab.retraction_line.text().endswith("; 1 paper could not be checked")
+    reopen(tab, partial, "cp", scored[1:])
+    assert "could not be checked" not in tab.retraction_line.text()  # control: a row is counted once
+
+
 def test_a_second_check_again_waits_for_the_first(
     tab: ReportTab, monkeypatch: pytest.MonkeyPatch
 ) -> None:

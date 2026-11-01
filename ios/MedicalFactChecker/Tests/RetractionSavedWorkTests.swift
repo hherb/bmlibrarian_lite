@@ -456,7 +456,8 @@ final class RetractionSavedWorkTests: XCTestCase {
             "10.1000/a": Self.check("unchecked", at: later), "10.1000/b": Self.check("clear", at: later),
             "10.1000/c": Self.check("unchecked", at: later),
         ])
-        XCTAssertEqual(workflow.retractionSavedWorkLine, "Retraction status checked 2026-10-18")
+        // #685: before Check again, the scored paper with no check is already counted
+        XCTAssertEqual(workflow.retractionSavedWorkLine, "Retraction status checked 2026-10-18; 1 paper could not be checked")
 
         await workflow.checkRetractionsAgain()
 

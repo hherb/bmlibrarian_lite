@@ -93,6 +93,7 @@ from ..retraction_screen import (
     label_types_of,
     latest_checks,
     rechecked_snapshot,
+    screen_documents,
 )
 from ..retraction_text import (
     CHECK_AGAIN_FAILED,
@@ -447,10 +448,15 @@ class ReportTab(QWidget):
         if current is not None:
             self._shown_checks = current
         snapshot = self._retraction_snapshot or {}
+        rows = list(snapshot.values())
+        if snapshot and not (self._saved_checkpoint_id or "").startswith(FILE_ID_PREFIX):
+            # a scored paper no screen saw is unchecked, as in the report written again (#685)
+            unscreened = [d.document for d in self._all_scored_documents if d.document.id not in snapshot]
+            rows += screen_documents(unscreened, {}).to_snapshot()
         line = (
             NO_AUDIT_RECORD_LINE
             if self._retraction_unrecorded and not snapshot
-            else saved_work_line(snapshot.values(), causes)
+            else saved_work_line(rows, causes)
         )
         self.retraction_line.setText(line + note)
         self.retraction_line.setVisible(True)

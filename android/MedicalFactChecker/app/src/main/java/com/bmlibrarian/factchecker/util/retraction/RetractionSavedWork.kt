@@ -29,7 +29,8 @@ object RetractionSavedWork {
      * run's, unless the paper's stored row is newer and is not an unchecked one
      * over a decided one. A session whose run recorded none (it predates the
      * check) reads the stored rows alone, as does a scored paper the run has
-     * no check of (Find More Evidence on such a session, #684).
+     * no check of (Find More Evidence on such a session, #684); one with no
+     * stored row either is unchecked, as in the report written again (#685).
      *
      * @param run The checks the run used, by document id
      * @param stored Each document's paper's stored row, by document id
@@ -42,7 +43,9 @@ object RetractionSavedWork {
         scored: Set<String> = emptySet()
     ): Map<String, PaperRetractionCheck> {
         if (run.isEmpty()) return stored
-        return stored.filterKeys { it !in run && it in scored } +
+        // an unchecked check's time is no check time, so the stand-in's never shows
+        return scored.associateWith { PaperRetractionCheck.failed(0L) } +
+            stored.filterKeys { it !in run && it in scored } +
             run.mapValues { (id, check) -> stored[id]?.let { rechecked(check, it) } ?: check }
     }
 

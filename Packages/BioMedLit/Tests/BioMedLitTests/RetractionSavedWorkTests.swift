@@ -61,6 +61,19 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertNil(rows["y"], "a document the run did not score still gets no row")
     }
 
+    func testRecheckedChecksCountAScoredPaperWithNoCheckUnchecked() {
+        // #685: a reopen before any Check again, as the report written again counts it
+        let rows = RetractionSavedWork.recheckedChecks(
+            run: ["a": check("clear", at: run)], stored: [:], scored: ["a", "z"])
+        XCTAssertEqual(rows["a"]?.status, "clear")
+        XCTAssertEqual(rows["z"]?.isUnchecked, true)
+        XCTAssertEqual(
+            RetractionText.savedWorkLine(Array(rows.values)),
+            "Retraction status checked 2026-10-18; 1 paper could not be checked")
+        XCTAssertTrue(RetractionSavedWork.recheckedChecks(run: [:], stored: [:], scored: ["z"]).isEmpty,
+                      "a run that recorded none stays never checked")
+    }
+
     func testOnlyACitedPapersChangeForTheWorseWarns() {
         let runChecks = ["a": check("clear", at: run), "b": check("retracted", at: run), "c": check("clear", at: run)]
         let latest = [
