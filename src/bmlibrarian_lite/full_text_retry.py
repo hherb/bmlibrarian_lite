@@ -47,7 +47,7 @@ from .data_models import (
     ReportMetadata,
     ScoredDocument,
 )
-from .retraction_screen import RetractionSnapshot
+from .retraction_screen import RetractionSnapshot, screen_documents
 from .transparency.assessment import record_transparency_counts
 from .utils import classify_analysis_exception
 
@@ -413,8 +413,10 @@ def write_report_again(
 
     The checkpoint is read again first: a *Check again* may have saved new
     retraction answers while the texts were read, and the report states
-    those, not the ones it was first written with. Transparency is counted
-    again when the run counted it, from the rows as they are now.
+    those, not the ones it was first written with. A scored paper with no
+    snapshot row is stated unchecked, the stored snapshot left as it is.
+    Transparency is counted again when the run counted it, from the rows as
+    they are now.
 
     Args:
         question: The research question.
@@ -461,7 +463,11 @@ def write_report_again(
 
     snapshot = recorded_retraction_snapshot(checkpoint.metadata)
     if snapshot:
-        metadata.retraction_screen = RetractionSnapshot(tuple(snapshot.values()))
+        # a scored paper no screen saw (left by Find More Evidence on a run
+        # older than the check) is unchecked, never silently clear (#657)
+        unscreened = [d.document for d in scored if d.document.id not in snapshot]
+        unchecked = screen_documents(unscreened, {}).to_snapshot()
+        metadata.retraction_screen = RetractionSnapshot((*snapshot.values(), *unchecked))
 
     citations = storage.get_citations_for_question(question, checkpoint_id=checkpoint_id)
     cited = list(dict.fromkeys(c.document.id for c in citations))

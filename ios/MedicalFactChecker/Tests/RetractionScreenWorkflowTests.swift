@@ -519,6 +519,18 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         XCTAssertEqual(session.progressPercent, 60, accuracy: 0.001)
     }
 
+    /// #648 item 4: what is still to score follows the check the run used,
+    /// not a later stored one, wherever the two disagree.
+    func testWhatIsToScoreFollowsTheRunsCheckNotTheStoredOne() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b"])
+        session.recordRetractionSnapshot([documents[0].id: Self.retracted(), documents[1].id: Self.clear()])
+        documents[0].retractionCheck = Self.clear()  // a later check: the run still left it out
+        documents[1].retractionCheck = Self.retracted()  // a later check: the run kept it
+
+        XCTAssertEqual(session.documentsToScore, 1)
+        XCTAssertEqual(session.unscoredDocuments.map(\.id), [documents[1].id])
+    }
+
     // MARK: - Failure and cancel
 
     /// Ruling 3: a check that throws leaves every paper it was given

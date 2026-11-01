@@ -55,6 +55,7 @@ from bmlibrarian_lite.more_evidence import (
 )
 from bmlibrarian_lite.quality.data_models import QualityFilter, QualityTier
 from bmlibrarian_lite.retraction_screen import RetractionScreen, unchecked_check
+from bmlibrarian_lite.retraction_text import format_retraction_notice, retraction_methods_line
 from bmlibrarian_lite.smart_search import (
     NO_NEW_EVIDENCE_TEXT,
     NO_USABLE_QUERY_TEXT,
@@ -463,6 +464,52 @@ class TestWhatIsFoundIsScreened:
         rows = storage.get_checkpoint(checkpoint_id).metadata[CHECKPOINT_RETRACTION_SNAPSHOT_KEY]
         assert [(r["document_id"], r["excluded"]) for r in rows] == [("doc-5", True)]
         assert outcome.left_out == 1
+
+    def test_a_paper_scored_before_any_screen_is_counted_unchecked(
+        self, storage: LiteStorage
+    ) -> None:
+        """#657: a run reviewed before the check counts its earlier papers unchecked.
+
+        The new paper is screened; the earlier ones, never screened, never read as clear.
+        """
+        reviewed(storage)
+
+        def screen(documents: list[LiteDocument]) -> RetractionScreen:
+            return RetractionScreen(kept=tuple(documents), excluded=(),
+                                    checks=RetractingChecker().check(documents))
+
+        run = Run(storage, screen=screen)
+        run(found(storage, "5"))
+
+        record = run.metadata.retraction_screen
+        assert record is not None
+        assert record.unchecked_count == 3  # papers 1-3, scored by the review
+        assert retraction_methods_line(record).endswith("; 3 papers could not be checked")
+        assert format_retraction_notice(record) == (
+            "> **Retraction check:** 3 papers' retraction status could not be checked.")
+
+    def test_a_screened_run_counts_no_paper_unchecked(self, storage: LiteStorage) -> None:
+        """The control: every paper the run holds has a row, so none is added."""
+        checkpoint_id = reviewed(storage)
+        rows = RetractionScreen(
+            kept=tuple(make_document(p) for p in ("1", "2", "3")), excluded=(),
+            checks=RetractingChecker().check([make_document(p) for p in ("1", "2", "3")]),
+        ).to_snapshot()
+        stored = storage.get_checkpoint(checkpoint_id).metadata
+        storage.update_checkpoint(checkpoint_id=checkpoint_id, metadata={
+            **stored, CHECKPOINT_RETRACTION_SNAPSHOT_KEY: rows})
+
+        def screen(documents: list[LiteDocument]) -> RetractionScreen:
+            return RetractionScreen(kept=tuple(documents), excluded=(),
+                                    checks=RetractingChecker().check(documents))
+
+        run = Run(storage, screen=screen)
+        run(found(storage, "5"))
+
+        record = run.metadata.retraction_screen
+        assert record is not None
+        assert (record.unchecked_count, len(record.to_snapshot())) == (0, 4)
+        assert format_retraction_notice(record) is None
 
 
 class TestTheRunsQualityFilter:
