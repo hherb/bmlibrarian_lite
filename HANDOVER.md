@@ -18,7 +18,8 @@ a status or lookup this build does not know is unreadable on all three
 (Swift's `PaperRetractionCheck.isReadable`). **Android decides once per
 paper key** (#671): `RetractionPaper.merged` gives every document of a paper
 the first DOI, first canonical PMID and all publication types, and
-`takeRetractionChecks` takes one check per key, as the desktop's `check`; Apple still decides per document (#688).
+`takeRetractionChecks` takes one check per key, as the desktop's `check`,
+within each screen call; Apple still decides per document (#688).
 **A missing native library** leaves papers unchecked, but stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
 FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C

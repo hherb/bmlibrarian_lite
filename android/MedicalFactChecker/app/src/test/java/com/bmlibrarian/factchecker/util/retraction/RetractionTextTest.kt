@@ -278,4 +278,27 @@ class RetractionTextTest {
         assertNull("a PMID that is not canonical is no PMID", paper(null, pmid = "x").paperKey)
         assertNull(paper(null).paperKey)
     }
+
+    /** #671, the desktop's `check`: one paper per key, the first DOI, the first canonical PMID, every document's types. */
+    @Test
+    fun mergedPapers() {
+        val papers = mapOf(
+            "a" to RetractionPaper("10.1/Shared", null, listOf("Journal Article")),
+            "b" to RetractionPaper("https://doi.org/10.1/shared", "0005", listOf("Retracted Publication")),
+            "c" to RetractionPaper(null, "0007", emptyList()),
+            "d" to RetractionPaper(null, "8", emptyList()),
+            "e" to RetractionPaper(null, "x", listOf("Journal Article")),
+            "f" to RetractionPaper(null, null, emptyList())
+        )
+
+        val merged = RetractionPaper.merged(papers)
+
+        val shared = RetractionPaper("10.1/Shared", "5", listOf("Journal Article", "Retracted Publication"))
+        assertEquals(shared, merged["a"])
+        assertEquals(shared, merged["b"])
+        assertEquals("a paper of its own stands as given", papers["c"], merged["c"])
+        assertEquals("another key is not merged", papers["d"], merged["d"])
+        assertEquals("a paper with no key stands as given", papers["e"], merged["e"])
+        assertEquals(papers["f"], merged["f"])
+    }
 }

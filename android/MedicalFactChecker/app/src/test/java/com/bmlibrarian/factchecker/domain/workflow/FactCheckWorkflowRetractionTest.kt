@@ -33,6 +33,7 @@ import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import com.bmlibrarian.factchecker.util.retraction.BmlibFfi
 import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
+import com.bmlibrarian.factchecker.util.retraction.RetractionChecker
 import com.bmlibrarian.factchecker.util.retraction.RetractionPaper
 import com.bmlibrarian.factchecker.util.retraction.RetractionService
 import com.bmlibrarian.factchecker.util.retraction.RetractionSnapshot
@@ -42,6 +43,8 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkObject
+import io.mockk.unmockkObject
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -55,6 +58,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 
@@ -177,6 +181,9 @@ class FactCheckWorkflowRetractionTest {
         )
         Log.clear()
     }
+
+    @After
+    fun tearDown() = unmockkObject(RetractionChecker.Companion)
 
     private fun hold(id: String, pmid: String? = id.removePrefix("d"), doi: String? = null, types: List<String>? = null) {
         documents[id] = DocumentEntity(
@@ -432,9 +439,10 @@ class FactCheckWorkflowRetractionTest {
     /** #671: decided once per paper, as the desktop does, so the document that knows less never writes over it. */
     @Test
     fun `a paper two documents share is checked once, from both documents' evidence`() = runTest {
-        hold("d1", pmid = "1", types = listOf("Journal Article"))
-        hold("d2", pmid = "1")
-        // Crossref is down; only a check that sees d1's record finds the retraction
+        // the document that knows less comes first, so its own paper alone would not do
+        hold("d1", pmid = "1")
+        hold("d2", pmid = "1", types = listOf("Journal Article"))
+        // Crossref is down; only a check that sees d2's record finds the retraction
         coEvery { retractionService.check(any()) } coAnswers {
             val papers = firstArg<List<RetractionPaper>>()
             asked += papers
@@ -445,8 +453,59 @@ class FactCheckWorkflowRetractionTest {
 
         assertEquals(listOf(listOf(RetractionPaper(null, "1", listOf("Journal Article")))), asked)
         assertTrue(scored.isEmpty())
-        assertTrue(snapshot().getValue("d2").isRetracted)
+        assertTrue(snapshot().getValue("d1").isRetracted)
         assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
+    }
+
+    /** The desktop's `_label_only_unreadable`: a label is recorded when any document of the paper recorded one. */
+    @Test
+    fun `a paper's label counts as recorded when a later document recorded it`() = runTest {
+        val label = PaperRetractionCheck(
+            "retracted", StoredRetractionEvidence("pubmed_label", "retraction"), checkedAtMs = System.currentTimeMillis() - 10 * DAY_MS
+        )
+        rows["pmid:1"] = PaperRetractionCheck.encode(label)
+        hold("d1", pmid = "1")
+        hold("d2", pmid = "1", types = listOf("Journal Article"))
+
+        run()
+
+        assertEquals(listOf("d1", "d2"), scored)
+        assertTrue(snapshot().getValue("d1").isClear)
+        assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isClear)
+    }
+
+    /** The desktop's `_label_retracts` over every document of a key: one document's label overtakes a stored clear for all. */
+    @Test
+    fun `a label on one document of a paper overtakes a stored clear for every document`() = runTest {
+        BmlibFfi.assumeAvailable()
+        rows["pmid:1"] = PaperRetractionCheck.encode(CLEAR.copy(checkedAtMs = System.currentTimeMillis()))
+        hold("d1", pmid = "1")
+        hold("d2", pmid = "1", types = listOf("Retracted Publication"))
+        coEvery { retractionService.check(any()) } throws IOException("down")
+
+        run()
+
+        assertTrue(scored.isEmpty())
+        assertTrue(snapshot().getValue("d1").isRetracted)
+        assertTrue(snapshot().getValue("d2").isRetracted)
+    }
+
+    /** A merge that throws leaves the run's papers unchecked, each by its own label, and the run goes on. */
+    @Test
+    fun `a merge that throws leaves every paper unchecked but its own label, and the run goes on`() = runTest {
+        BmlibFfi.assumeAvailable()
+        hold("d1", doi = "10.1/x", types = listOf("Retracted Publication"))
+        hold("d2")
+        mockkObject(RetractionChecker.Companion)
+        every { RetractionChecker.doiKey(any()) } throws IllegalStateException("bmlib")
+
+        run()
+
+        assertTrue(asked.isEmpty())
+        assertEquals(listOf("d2"), scored)
+        assertTrue(snapshot().getValue("d1").isRetracted)
+        assertTrue(snapshot().getValue("d2").isUnchecked)
+        assertTrue(workflow.retractionNotice.value!!.endsWith("could not be checked: the check failed."))
     }
 
     @Test
@@ -531,21 +590,44 @@ class FactCheckWorkflowRetractionTest {
     @Test
     fun `Check again checks a paper two documents share once, from both documents' evidence`() = runTest {
         restoreCheckedSession()
-        documents["d1"] = documents.getValue("d1").copy(publicationTypesJson = "[\"Journal Article\"]")
-        hold("d3", pmid = "1")
+        // d1, first, knows less, so its own paper alone would not do
+        hold("d3", pmid = "1", types = listOf("Journal Article"))
         documents["d3"] = documents.getValue("d3").copy(relevanceScore = 5)
-        // Crossref is down; only a check that sees d1's record finds the retraction
+        // Crossref is down; only a check that sees d3's record finds the retraction
         coEvery { retractionService.check(any()) } coAnswers {
             val papers = firstArg<List<RetractionPaper>>()
             asked += papers
-            papers.associateWith { if (it.publicationTypes.isEmpty()) OUTAGE else RETRACTED.copy(unanswered = listOf("crossref")) }
+            val retracted = RETRACTED.copy(unanswered = listOf("crossref"), checkedAtMs = RUN_MS + DAY_MS)
+            papers.associateWith { if (it.publicationTypes.isEmpty()) OUTAGE else retracted }
         }
 
         workflow.checkRetractionsAgain()
 
-        assertEquals(1, asked.single().count { it.pmid == "1" })
+        assertEquals(RetractionPaper(null, "1", listOf("Journal Article")), asked.single().single { it.pmid == "1" })
         assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
+        assertTrue(workflow.retractionCurrentChecks.value.getValue("d1").isRetracted)
         assertTrue(workflow.retractionCurrentChecks.value.getValue("d3").isRetracted)
+    }
+
+    /** A merge that throws an Exception still warns by each document's own label (the catch's `papers`). */
+    @Test
+    fun `a Check again whose merge throws still warns by the label`() = runTest {
+        BmlibFfi.assumeAvailable()
+        restoreCheckedSession()
+        documents["d1"] = documents.getValue("d1").copy(publicationTypesJson = "[\"Retracted Publication\"]")
+        documents["d2"] = documents.getValue("d2").copy(doi = "10.1/x")
+        mockkObject(RetractionChecker.Companion)
+        every { RetractionChecker.doiKey(any()) } throws IllegalStateException("bmlib")
+
+        workflow.checkRetractionsAgain()
+
+        assertTrue(asked.isEmpty())
+        val warning = workflow.retractionSavedWorkWarning.value
+        assertTrue("$warning", warning!!.contains("• Study d1: Retracted"))
+        // the saved rows' keys call bmlib as well, so they are said to be unread
+        val line = workflow.retractionSavedWorkLine.value
+        assertTrue("$line", line!!.contains(RetractionText.CHECK_AGAIN_FAILED))
+        assertTrue("nothing is stored: $rows", rows.isEmpty())
     }
 
     @Test

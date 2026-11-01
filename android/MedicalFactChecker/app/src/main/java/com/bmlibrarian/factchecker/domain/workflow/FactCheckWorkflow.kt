@@ -1073,7 +1073,7 @@ class FactCheckWorkflow @Inject constructor(
         val taken = try {
             val documents = documentRepository.getDocumentsBySessionSync(sessionId)
             papers = documents.associate { it.id to it.retractionPaper }
-            // apart, so a merge that throws still leaves each document's own label for the catch
+            // apart, so a merge that throws an Exception still leaves each document's own label for its catch
             papers = RetractionPaper.merged(papers)
             val keys = papers.mapValues { it.value.paperKey }
             val checks = retractionService.check(papers.values.distinct())
