@@ -44,7 +44,7 @@ in `RetractionCheckRecord` (#651, PR #676; no unique constraint under
 CloudKit, so readers merge duplicates). A check that throws still retracts
 by the record's own label (`PaperRetractionCheck.failed(for:at:)`, #656; a failed *Check again* warns by it on all three, storing nothing, #673; Android also warns of what an answered check found when its rows could not be read), and
 the export cause now reads "(no up-to-date copy is on this device)" in both
-apps, not a Wi-Fi hint a reader on Wi-Fi was given too.
+apps, not a Wi-Fi hint a reader on Wi-Fi was given too. **A scored paper with no snapshot row is unchecked in a report written again, never clear** (#657, all three; the snapshot does not gain it).
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
 error follows a cancel). Open, lodged by recent rounds: #641 (JATS whitespace,
@@ -241,7 +241,7 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 - **Retraction checking** follow-ups: **#662** (an unchecked run's warning
   rule, "could not be read" wording, needs a cross-platform decision),
-  **#663** (Android), Apple **#647**–**#649**, **#653**, **#654**
+  **#663** (Android), Apple **#647**, **#649**, **#653**, **#654**
   (item 1 done by #660), **#658** (Android), **#671**, **#675** (a stopped Check again
   and the label, needs a cross-platform decision).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
