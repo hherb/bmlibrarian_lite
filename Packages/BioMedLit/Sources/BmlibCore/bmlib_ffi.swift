@@ -3657,7 +3657,7 @@ fileprivate struct FfiConverterDictionaryStringTypeCrossrefResult: FfiConverterR
     }
 }
 /**
- * The Rust workspace version these bindings were built from (`0.2.0` …),
+ * The Rust workspace version these bindings were built from (`0.3.0` …),
  * which bmlib-ffi and the bmlib crate share. Not Python bmlib's version, and
  * the same for every commit of one version, so it cannot tell two builds
  * apart — the build's commit is issue #493.
@@ -3794,7 +3794,7 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_bmlib_ffi_checksum_func_bmlib_version() != 42428) {
+    if (uniffi_bmlib_ffi_checksum_func_bmlib_version() != 37273) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bmlib_ffi_checksum_func_parse_jats() != 30685) {

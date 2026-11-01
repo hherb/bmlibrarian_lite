@@ -868,7 +868,7 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
-    if ((lib.uniffi_bmlib_ffi_checksum_func_bmlib_version() and 0xFFFF) != 42428) {
+    if ((lib.uniffi_bmlib_ffi_checksum_func_bmlib_version() and 0xFFFF) != 37273) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_bmlib_ffi_checksum_func_parse_jats() and 0xFFFF) != 30685) {
@@ -3856,7 +3856,7 @@ public object FfiConverterMapStringTypeCrossrefResult: FfiConverterRustBuffer<Ma
     }
 }
         /**
-         * The Rust workspace version these bindings were built from (`0.2.0` …),
+         * The Rust workspace version these bindings were built from (`0.3.0` …),
          * which bmlib-ffi and the bmlib crate share. Not Python bmlib's version, and
          * the same for every commit of one version, so it cannot tell two builds
          * apart — the build's commit is issue #493.

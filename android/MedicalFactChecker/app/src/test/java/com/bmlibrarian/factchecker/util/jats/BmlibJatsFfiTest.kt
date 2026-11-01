@@ -63,7 +63,7 @@ class BmlibJatsFfiTest {
 
     @Test
     fun parseJatsIsCallableThroughUniFFI() {
-        assertEquals("0.2.0", bmlibVersion())
+        assertEquals("0.3.0", bmlibVersion())
         val article = parseJats(
             "<article><front><article-meta><title-group><article-title>T</article-title>" +
                 "</title-group></article-meta></front><body><sec><title>S</title><p>P</p></sec></body></article>"

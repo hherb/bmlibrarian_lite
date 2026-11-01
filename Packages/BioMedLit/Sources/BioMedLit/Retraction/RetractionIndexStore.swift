@@ -80,10 +80,10 @@ public actor RetractionIndexStore {
         return config
     }
 
-    private var file: URL { directory.appendingPathComponent(BioMedLitConstants.retractionIndexFileName) }
+    private nonisolated var file: URL { directory.appendingPathComponent(BioMedLitConstants.retractionIndexFileName) }
 
     /// The stored index, whatever its age; `nil` when missing or unreadable.
-    private func storedIndex() -> RetractionIndex? {
+    private nonisolated func storedIndex() -> RetractionIndex? {
         guard let bytes = try? Data(contentsOf: file) else { return nil }
         do {
             return try RetractionIndex.fromBytes(bytes: bytes)
@@ -99,7 +99,10 @@ public actor RetractionIndexStore {
     /// - Returns: `nil` when the file is missing, unreadable, or its
     ///   `dataAsOf` is more than ``BioMedLitConstants/retractionWatchMaxAgeDays``
     ///   days before `now`'s day (UTC): the export is then not consulted.
-    public func currentIndex(now: Date) -> RetractionIndex? {
+    ///
+    /// Nonisolated, so a run never waits for a refresh building the index;
+    /// the file is replaced atomically, so it reads the old copy or the new.
+    public nonisolated func currentIndex(now: Date) async -> RetractionIndex? {
         guard let index = storedIndex(),
               let asOf = Self.dayFormatter.date(from: index.dataAsOf()),
               let today = Self.dayFormatter.date(from: Self.dayFormatter.string(from: now)),
@@ -134,7 +137,7 @@ public actor RetractionIndexStore {
 
     /// ``refreshIfStale(now:)``'s work, run once per download.
     private func refresh(now: Date) async -> RetractionIndexRefresh {
-        if currentIndex(now: now) != nil { return .fresh }
+        if await currentIndex(now: now) != nil { return .fresh }
         var components = URLComponents(string: BioMedLitConstants.retractionWatchExportURL)
         components?.queryItems = [URLQueryItem(name: "mailto", value: email)]
         guard let url = components?.url else { return .failed(.requestFailed) }

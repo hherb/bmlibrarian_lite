@@ -144,7 +144,7 @@ final class BmlibJATSParityTests: XCTestCase {
 
     /// Acceptance criterion 1: `parse_jats` is callable from BioMedLit.
     func testParseJatsIsCallableThroughUniFFI() throws {
-        XCTAssertEqual(BmlibJATS.bmlibVersion, "0.2.0")
+        XCTAssertEqual(BmlibJATS.bmlibVersion, "0.3.0")
         let xml = """
             <article><front><article-meta><title-group><article-title>T</article-title>\
             </title-group></article-meta></front><body><sec><title>S</title><p>P</p></sec></body></article>
