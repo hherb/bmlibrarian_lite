@@ -3,7 +3,7 @@
   "bmlibRepository": "https://github.com/hherb/bmlib",
   "bmlibCommit": "aa47a57a1e5efb1241be864a01a6eb9d6ea9bda3",
   "bmlibBranch": "main",
-  "bmlibCrateVersion": "0.2.0",
+  "bmlibCrateVersion": "0.3.0",
   "uniffiVersion": "0.32.2",
   "rustc": "1.98.0",
   "xcode": "16.4",
@@ -19,5 +19,5 @@
     "macOS": "14.0"
   },
   "treeSha256Script": ".github/scripts/xcframework_tree_sha256.py",
-  "treeSha256": "19099be2cd042f1855d87d44b38838a8aa54a3b3c660b36d597e4c2b95b71309"
+  "treeSha256": "3c4cdd6535a6b55c6d00e4c93586ab105b4bbd2623ed30271d89299318c9e117"
 }
