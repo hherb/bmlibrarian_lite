@@ -94,6 +94,7 @@ final class FullTextServiceElsevierTests: RecordingLoggerTestCase {
         coreAPIKey: String? = nil,
         elsevierAPIKey: String? = "test-elsevier-key",
         elsevierInstToken: String? = nil,
+        elsevierCredentialsUnreadable: Bool = false,
         elsevierRetry: RetryConfiguration = .noRetry,
         elsevierSession: ElsevierSession = ElsevierSession(),
         writeCachedPDF: @escaping @Sendable (Data, URL) throws -> Void = FullTextService.writeAtomically
@@ -115,6 +116,7 @@ final class FullTextServiceElsevierTests: RecordingLoggerTestCase {
             coreThrottle: CoreThrottle(),
             elsevierAPIKey: elsevierAPIKey,
             elsevierInstToken: elsevierInstToken,
+            elsevierCredentialsUnreadable: elsevierCredentialsUnreadable,
             elsevierRetry: elsevierRetry,
             elsevierSession: elsevierSession,
             writeCachedPDF: writeCachedPDF
@@ -487,6 +489,22 @@ final class FullTextServiceElsevierTests: RecordingLoggerTestCase {
         XCTAssertTrue(makeService(elsevierAPIKey: " \(key) ").asksElsevier)
         // And the absence is settled: no shortfall, a DOI link
         XCTAssertEqual(result.content, .doi(webURL: URL(string: "\(BioMedLitConstants.doiBaseURL)/\(doi)")!))
+    }
+
+    /// #511: a key or token set but not readable leaves Elsevier unreachable,
+    /// as Android's does, never "not asked"; with extraction off it would not
+    /// have been asked, so nothing is lost and nothing recorded.
+    func testCredentialsThatCouldNotBeReadLeaveElsevierUnreachable() async throws {
+        StubURLProtocol.routes[elsevierHost] = (200, pdfBody)
+        let result = try await makeService(elsevierAPIKey: nil, elsevierCredentialsUnreadable: true)
+            .fetchFullText(pmcId: nil, doi: doi, pmid: "")
+        XCTAssertEqual(elsevierRequests, 0)
+        XCTAssertEqual(result.openAccessShortfall?.entries.last?.source, .elsevier)
+        XCTAssertEqual(result.openAccessShortfall?.entries.last?.reason, .failed(.requestFailed))
+
+        let off = try await makeService(extractPDFText: false, elsevierAPIKey: nil, elsevierCredentialsUnreadable: true)
+            .fetchFullText(pmcId: nil, doi: doi, pmid: "")
+        XCTAssertFalse(off.openAccessShortfall?.entries.contains { $0.source == .elsevier } ?? false)
     }
 
     /// The control for both: with a key and an Elsevier DOI, it is asked, by

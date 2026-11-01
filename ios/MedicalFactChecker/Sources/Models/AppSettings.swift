@@ -153,11 +153,15 @@ final class AppSettings {
     /// Cached in memory after first access to avoid Keychain latency. Changed
     /// only through ``saveCOREAPIKey(_:)``, so it never reads as saved when
     /// the save failed.
-    var coreAPIKey: String {
+    var coreAPIKey: String { coreAPIKeyIfReadable ?? "" }
+
+    /// ``coreAPIKey``, or nil when the Keychain could not be read (#511), which the
+    /// full-text chain records as the service unreachable rather than not asked.
+    var coreAPIKeyIfReadable: String? {
         if let cached = _coreAPIKeyCache {
             return cached
         }
-        guard let loaded = readSecret(Keys.coreAPIKey) else { return "" }
+        guard let loaded = readSecret(Keys.coreAPIKey) else { return nil }
         _coreAPIKeyCache = loaded
         return loaded
     }
@@ -184,11 +188,15 @@ final class AppSettings {
     /// only through ``saveElsevierAPIKey(_:)``, so it never reads as saved when
     /// the save failed. Sent only in Elsevier's request header, never in a URL,
     /// a log line or a stored record.
-    var elsevierAPIKey: String {
+    var elsevierAPIKey: String { elsevierAPIKeyIfReadable ?? "" }
+
+    /// ``elsevierAPIKey``, or nil when the Keychain could not be read (#511), which the
+    /// full-text chain records as the service unreachable rather than not asked.
+    var elsevierAPIKeyIfReadable: String? {
         if let cached = _elsevierAPIKeyCache {
             return cached
         }
-        guard let loaded = readSecret(Keys.elsevierAPIKey) else { return "" }
+        guard let loaded = readSecret(Keys.elsevierAPIKey) else { return nil }
         _elsevierAPIKeyCache = loaded
         return loaded
     }
@@ -215,11 +223,15 @@ final class AppSettings {
     /// Cached in memory after first access to avoid Keychain latency. Changed
     /// only through ``saveElsevierInstToken(_:)``, so it never reads as saved
     /// when the save failed. Never sent without a key.
-    var elsevierInstToken: String {
+    var elsevierInstToken: String { elsevierInstTokenIfReadable ?? "" }
+
+    /// ``elsevierInstToken``, or nil when the Keychain could not be read (#511), which the
+    /// full-text chain records as the service unreachable rather than not asked.
+    var elsevierInstTokenIfReadable: String? {
         if let cached = _elsevierInstTokenCache {
             return cached
         }
-        guard let loaded = readSecret(Keys.elsevierInstToken) else { return "" }
+        guard let loaded = readSecret(Keys.elsevierInstToken) else { return nil }
         _elsevierInstTokenCache = loaded
         return loaded
     }

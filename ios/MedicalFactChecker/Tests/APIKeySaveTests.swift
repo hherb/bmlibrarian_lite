@@ -58,9 +58,22 @@ final class APIKeySaveTests: XCTestCase {
         XCTAssertEqual(settings.coreAPIKey, "")
         XCTAssertEqual(settings.elsevierAPIKey, "")
 
+        XCTAssertNil(settings.coreAPIKeyIfReadable, "unreadable, which the chain records as unreachable")
+        XCTAssertNil(settings.elsevierInstTokenIfReadable)
+
         store.failsReads = false
         XCTAssertEqual(settings.coreAPIKey, "core-key")
         XCTAssertEqual(settings.elsevierAPIKey, "els-key")
+        XCTAssertEqual(settings.elsevierInstTokenIfReadable, "", "control: none stored is not unreadable")
+    }
+
+    /// #511: the Elsevier step is unreachable when its key, or the token beside
+    /// a key, could not be read; a token alone, never sent, does not count.
+    func testElsevierCredentialsUnreadableRule() {
+        XCTAssertTrue(BMLFullTextService.elsevierCredentialsUnreadable(key: nil, token: ""))
+        XCTAssertTrue(BMLFullTextService.elsevierCredentialsUnreadable(key: "k", token: nil))
+        XCTAssertFalse(BMLFullTextService.elsevierCredentialsUnreadable(key: "", token: nil), "no key: never sent")
+        XCTAssertFalse(BMLFullTextService.elsevierCredentialsUnreadable(key: "k", token: ""))
     }
 
     func testASavedCOREKeyIsTheKeyInUse() {
