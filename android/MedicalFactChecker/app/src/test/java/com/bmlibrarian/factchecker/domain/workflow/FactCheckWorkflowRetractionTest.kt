@@ -429,6 +429,26 @@ class FactCheckWorkflowRetractionTest {
         assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isClear)
     }
 
+    /** #671: decided once per paper, as the desktop does, so the document that knows less never writes over it. */
+    @Test
+    fun `a paper two documents share is checked once, from both documents' evidence`() = runTest {
+        hold("d1", pmid = "1", types = listOf("Journal Article"))
+        hold("d2", pmid = "1")
+        // Crossref is down; only a check that sees d1's record finds the retraction
+        coEvery { retractionService.check(any()) } coAnswers {
+            val papers = firstArg<List<RetractionPaper>>()
+            asked += papers
+            papers.associateWith { if (it.publicationTypes.isEmpty()) OUTAGE else RETRACTED.copy(unanswered = listOf("crossref")) }
+        }
+
+        run()
+
+        assertEquals(listOf(listOf(RetractionPaper(null, "1", listOf("Journal Article")))), asked)
+        assertTrue(scored.isEmpty())
+        assertTrue(snapshot().getValue("d2").isRetracted)
+        assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
+    }
+
     @Test
     fun `a session whose papers were all left out writes the section into its stand-in report`() = runTest {
         hold("d1")
@@ -505,6 +525,27 @@ class FactCheckWorkflowRetractionTest {
         assertEquals("both rechecked a day later", "Retraction status checked 2026-10-19", workflow.retractionSavedWorkLine.value)
         assertFalse(workflow.isCheckingRetractionsAgain.value)
         coVerify(exactly = 0) { sessionRepository.updateRetractionSnapshot(any(), any()) }
+    }
+
+    /** #671 on Check again: one check per paper, from every document's evidence. */
+    @Test
+    fun `Check again checks a paper two documents share once, from both documents' evidence`() = runTest {
+        restoreCheckedSession()
+        documents["d1"] = documents.getValue("d1").copy(publicationTypesJson = "[\"Journal Article\"]")
+        hold("d3", pmid = "1")
+        documents["d3"] = documents.getValue("d3").copy(relevanceScore = 5)
+        // Crossref is down; only a check that sees d1's record finds the retraction
+        coEvery { retractionService.check(any()) } coAnswers {
+            val papers = firstArg<List<RetractionPaper>>()
+            asked += papers
+            papers.associateWith { if (it.publicationTypes.isEmpty()) OUTAGE else RETRACTED.copy(unanswered = listOf("crossref")) }
+        }
+
+        workflow.checkRetractionsAgain()
+
+        assertEquals(1, asked.single().count { it.pmid == "1" })
+        assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
+        assertTrue(workflow.retractionCurrentChecks.value.getValue("d3").isRetracted)
     }
 
     @Test

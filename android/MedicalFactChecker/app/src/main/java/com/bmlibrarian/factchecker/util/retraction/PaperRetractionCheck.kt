@@ -49,6 +49,32 @@ data class RetractionPaper(val doi: String?, val pmid: String?, val publicationT
      */
     val paperKey: String?
         get() = doi?.let(RetractionChecker::doiKey)?.let { "doi:$it" } ?: canonicalPmid?.let { "pmid:$it" }
+
+    companion object {
+        /**
+         * Each document's paper as its check is decided: one paper per paper
+         * key, as the desktop's `check` decides (#671), with the first
+         * document's DOI, the first canonical PMID and every document's
+         * publication types. A paper no other document shares, or with no
+         * key, stands as it is. Calls bmlib ([paperKey]).
+         *
+         * @param papers Each document's own paper, by document id
+         * @return The paper its check is decided for, by document id
+         */
+        fun merged(papers: Map<String, RetractionPaper>): Map<String, RetractionPaper> {
+            val keys = papers.mapValues { it.value.paperKey }
+            val byKey = papers.entries.filter { keys[it.key] != null }
+                .groupBy({ keys.getValue(it.key) }, { it.value })
+                .mapValues { (_, group) ->
+                    group.singleOrNull() ?: RetractionPaper(
+                        doi = group.first().doi,
+                        pmid = group.firstNotNullOfOrNull { it.canonicalPmid },
+                        publicationTypes = group.flatMap { it.publicationTypes }
+                    )
+                }
+            return papers.mapValues { (id, paper) -> keys[id]?.let(byKey::getValue) ?: paper }
+        }
+    }
 }
 
 /**

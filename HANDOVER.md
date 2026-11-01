@@ -15,8 +15,10 @@ unchecked from its own answers only (#660, #668, all three platforms).
 check **or a retraction**, whatever was down (#669, all three platforms;
 a concern still cannot, since the row may hold a retraction). A row naming
 a status or lookup this build does not know is unreadable on all three
-(Swift's `PaperRetractionCheck.isReadable`). Lodged: #671 (Android decides
-per document, so a same-paper document can overwrite this run's row).
+(Swift's `PaperRetractionCheck.isReadable`). **Android decides once per
+paper key** (#671): `RetractionPaper.merged` gives every document of a paper
+the first DOI, first canonical PMID and all publication types, and
+`takeRetractionChecks` takes one check per key, as the desktop's `check`; Apple still decides per document (#688).
 **A missing native library** leaves papers unchecked, but stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
 FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C
@@ -242,7 +244,7 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **Retraction checking** follow-ups: **#662** (an unchecked run's warning
   rule, "could not be read" wording, needs a cross-platform decision),
   **#663** (Android), Apple **#647**, **#649**, **#653**, **#654**
-  (item 1 done by #660), **#658** (Android), **#671**, **#675** (a stopped Check again
+  (item 1 done by #660), **#688** (Apple, #671's per-paper decision), **#658** (Android), **#675** (a stopped Check again
   and the label, needs a cross-platform decision).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
