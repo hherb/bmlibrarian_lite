@@ -62,6 +62,20 @@ class RetractionSavedWorkTest {
     }
 
     @Test
+    fun `rechecked checks count a scored paper with no row unchecked`() {
+        // #685: a reopen before any Check again, as the report written again counts it
+        val rows = RetractionSavedWork.recheckedChecks(mapOf("a" to check("clear", run)), emptyMap(), setOf("a", "z"))
+        assertEquals("clear", rows["a"]?.status)
+        assertEquals(true, rows["z"]?.isUnchecked)
+        assertEquals(
+            "Retraction status checked 2026-10-18; 1 paper could not be checked",
+            RetractionText.savedWorkLine(rows.values)
+        )
+        assertEquals("a run that recorded none stays never checked", emptyMap<String, PaperRetractionCheck>(),
+            RetractionSavedWork.recheckedChecks(emptyMap(), emptyMap(), setOf("z")))
+    }
+
+    @Test
     fun `only a cited paper's change for the worse warns`() {
         val runChecks = mapOf("a" to check("clear", run), "b" to check("retracted", run), "c" to check("clear", run))
         val latest = mapOf(
