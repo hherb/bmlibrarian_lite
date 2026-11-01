@@ -533,7 +533,13 @@ class ReportTab(QWidget):
                 self._show_saved_retraction({**shown, **labelled}, note=CHECK_AGAIN_FAILED)
             return
         note = ""
-        run_ids: set[str] = set()
+        # a scored paper no screen saw gains its row (#684); the shown run's were loaded with
+        # it, so a failed save still counts them
+        run_ids: set[str] = (
+            {d.document.id for d in self._all_scored_documents}
+            if showing and not checkpoint_id.startswith(FILE_ID_PREFIX)
+            else set()
+        )
         try:
             if checkpoint_id.startswith(FILE_ID_PREFIX):
                 updated, audit = self._rewrite_audit_snapshot(
@@ -545,13 +551,13 @@ class ReportTab(QWidget):
                 checkpoint = self.storage.get_checkpoint(checkpoint_id)
                 if checkpoint is None:
                     raise LookupError("checkpoint gone")
-                # a scored paper no screen saw gains its row (#684)
-                run_ids = {
-                    d.document.id
-                    for d in self.storage.get_scored_documents_for_question(
-                        checkpoint.research_question, checkpoint_id=checkpoint_id
-                    )
-                }
+                if not showing:
+                    run_ids = {
+                        d.document.id
+                        for d in self.storage.get_scored_documents_for_question(
+                            checkpoint.research_question, checkpoint_id=checkpoint_id
+                        )
+                    }
                 updated = rechecked_snapshot(recorded_retraction_snapshot(checkpoint.metadata), screen, run_ids)
                 self.storage.update_checkpoint(
                     checkpoint_id,

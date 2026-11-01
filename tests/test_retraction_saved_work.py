@@ -176,14 +176,21 @@ def tab(qapp: Any, tmp_path: Any, storage: LiteStorage, monkeypatch: pytest.Monk
     return ReportTab(config=LiteConfig(), storage=storage)
 
 
-def reopen(tab: ReportTab, snapshot: dict[str, dict[str, Any]] | None, checkpoint_id: str = "cp") -> None:
+def reopen(
+    tab: ReportTab,
+    snapshot: dict[str, dict[str, Any]] | None,
+    checkpoint_id: str = "cp",
+    scored: list[ScoredDocument] | None = None,
+) -> None:
     """Show the saved report as the app does on reopening, citing CITED only."""
     tab.display_report(
         report=REPORT,
         question=QUESTION,
         citations=[Citation(document=CITED, passage="Aspirin reduced stroke.", relevance_score=4)],
         documents_found=list(DOCUMENTS),
-        all_scored_documents=[
+        all_scored_documents=scored
+        if scored is not None
+        else [
             ScoredDocument(document=CITED, score=4, explanation="On topic."),
             ScoredDocument(document=UNCITED, score=2, explanation="Off topic."),
         ],
@@ -326,6 +333,9 @@ def test_check_again_writes_only_this_runs_documents() -> None:
     partial = {LEFT_OUT.id: run_snapshot()[LEFT_OUT.id]}
     rows = {r["document_id"] for r in rechecked_snapshot(partial, screen, {CITED.id}).to_snapshot()}
     assert rows == {LEFT_OUT.id, CITED.id}
+    # a failed check writes no new row either: its stand-in is no answer
+    failed = replace(screen, failed_ids=frozenset({CITED.id}))
+    assert {r["document_id"] for r in rechecked_snapshot(partial, failed, {CITED.id}).to_snapshot()} == {LEFT_OUT.id}
 
 
 def test_the_saved_work_line_dates_decided_rows_and_counts_the_unchecked() -> None:
@@ -1586,19 +1596,32 @@ def test_check_again_gives_a_row_to_each_scored_paper_no_screen_saw(
     """#684: a run reviewed before the check, then given rows by Find More Evidence.
 
     Its earlier scored papers gain rows the run never saw (``run_status``
-    None, so a warning is news); a paper only another run scored does not.
+    None, so a warning is news); a paper only another run scored does not,
+    whether the run is shown or not.
     """
     partial = {LEFT_OUT.id: run_snapshot()[LEFT_OUT.id]}
     checkpoint_id = saved_checkpoint(storage, {CHECKPOINT_RETRACTION_SNAPSHOT_KEY: list(partial.values())})
-    for document in (CITED, LEFT_OUT):
-        storage.save_scored_document(ScoredDocument(document=document, score=4, explanation="On topic."), checkpoint_id)
-    reopen(tab, partial, checkpoint_id)
+    scored = [ScoredDocument(document=d, score=4, explanation="On topic.") for d in (CITED, LEFT_OUT)]
+    for scored_document in scored:
+        storage.save_scored_document(scored_document, checkpoint_id)
+    other_run = storage.create_checkpoint(QUESTION, metadata={}).id
+    storage.save_scored_document(ScoredDocument(document=UNCITED, score=4, explanation="On topic."), other_run)
+    answers = {d.id: check(RetractionStatus.RETRACTED if d is CITED else RetractionStatus.CLEAR, NOW) for d in DOCUMENTS}
 
+    # answered while another run is shown: the run's scored papers are read from the store
+    reopen(tab, run_snapshot(), "other")
+    tab._on_rechecked(checkpoint_id, screen_documents(DOCUMENTS, answers))
+    assert set(recorded_retraction_snapshot(storage.get_checkpoint(checkpoint_id).metadata)) == {CITED.id, LEFT_OUT.id}
+
+    storage.update_checkpoint(
+        checkpoint_id, metadata={CHECKPOINT_RETRACTION_SNAPSHOT_KEY: list(partial.values())}
+    )
+    reopen(tab, partial, checkpoint_id, scored)
     run_check_again(
         tab,
         storage,
         monkeypatch,
-        {d.id: check(RetractionStatus.RETRACTED if d is CITED else RetractionStatus.CLEAR, NOW) for d in DOCUMENTS},
+        answers,
     )
 
     rows = recorded_retraction_snapshot(storage.get_checkpoint(checkpoint_id).metadata)
@@ -1608,6 +1631,24 @@ def test_check_again_gives_a_row_to_each_scored_paper_no_screen_saw(
     assert CITED.title in tab.retraction_warning.text()
     reopen(tab, rows, checkpoint_id)
     assert CITED.title in tab.retraction_warning.text()
+
+
+def test_a_check_again_not_saved_still_counts_a_scored_paper_no_screen_saw(
+    tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#684: the run's record could not be written, but its line still counts the paper's outage."""
+    partial = {LEFT_OUT.id: run_snapshot()[LEFT_OUT.id]}
+    checkpoint_id = saved_checkpoint(storage, {CHECKPOINT_RETRACTION_SNAPSHOT_KEY: list(partial.values())})
+    reopen(tab, partial, checkpoint_id, [ScoredDocument(document=CITED, score=4, explanation="On topic.")])
+
+    def refuse(*_a: Any, **_k: Any) -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(storage, "update_checkpoint", refuse)
+    run_check_again(tab, storage, monkeypatch, {CITED.id: check(RetractionStatus.UNCHECKED, NOW)})
+
+    assert "1 paper could not be checked" in tab.retraction_line.text()
+    assert tab.retraction_line.text().endswith(CHECK_AGAIN_NOT_SAVED)
 
 
 def test_a_second_check_again_waits_for_the_first(

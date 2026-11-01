@@ -611,11 +611,13 @@ class FactCheckWorkflowRetractionTest {
         hold("d1")
         hold("d2")
         documents.replaceAll { _, document -> document.copy(relevanceScore = 5) }
+        hold("d3") // never scored: its outage is not the run's
         snapshotJson = RetractionSnapshot.merged(null, mapOf("d2" to CLEAR.copy(checkedAtMs = RUN_MS)))
         workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
         assertEquals("Retraction status checked 2026-10-18", workflow.retractionSavedWorkLine.value)
         answers["1"] = NO_EXPORT.copy(checkedAtMs = RUN_MS + DAY_MS)
         answers["2"] = CLEAR.copy(checkedAtMs = RUN_MS + DAY_MS)
+        answers["3"] = NO_EXPORT.copy(checkedAtMs = RUN_MS + DAY_MS)
 
         workflow.checkRetractionsAgain()
 

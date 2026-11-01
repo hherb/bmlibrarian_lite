@@ -44,7 +44,7 @@ in `RetractionCheckRecord` (#651, PR #676; no unique constraint under
 CloudKit, so readers merge duplicates). A check that throws still retracts
 by the record's own label (`PaperRetractionCheck.failed(for:at:)`, #656; a failed *Check again* warns by it on all three, storing nothing, #673; Android also warns of what an answered check found when its rows could not be read), and
 the export cause now reads "(no up-to-date copy is on this device)" in both
-apps, not a Wi-Fi hint a reader on Wi-Fi was given too. **A scored paper with no snapshot row is unchecked in a report written again, never clear** (#657, all three; the snapshot does not gain it); *Check again* checks and counts it (#684: the desktop gives it a row, the apps' line reads its stored check). A plain reopen's line still leaves it out until then (#685).
+apps, not a Wi-Fi hint a reader on Wi-Fi was given too. **A scored paper with no snapshot row is unchecked in a report written again, never clear** (#657, all three; the snapshot does not gain it); *Check again* checks and counts it (#684: the desktop gives it a row, the apps' line reads its stored check, on Android any session's). A reopen's line leaves it out while no check of it is stored: on the desktop and Apple until this run's *Check again* (#685).
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
 error follows a cancel). Open, lodged by recent rounds: #641 (JATS whitespace,
