@@ -370,6 +370,74 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         XCTAssertNotNil(documents[1].scoredAt)
     }
 
+    /// #688, as the desktop's `check` and Android (#671): a paper two
+    /// documents share is asked about once, from both documents' evidence,
+    /// so the one that knows less is never scored unchecked.
+    func testAPaperTwoDocumentsShareIsCheckedOnceFromBothDocumentsEvidence() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/a"])
+        documents[1].publicationTypes = nil
+        let asked = Asked()
+        let (outage, found) = (Self.unchecked(["crossref"]), Self.retracted(unanswered: ["crossref"]))
+        // Crossref is down; only a check that sees document 0's record finds the retraction
+        let workflow = restore(session) { papers in
+            asked.papers += papers
+            var out: [RetractionPaper: PaperRetractionCheck] = [:]
+            for paper in papers { out[paper] = paper.publicationTypes.isEmpty ? outage : found }
+            return out
+        }
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        XCTAssertEqual(asked.papers.count, 1, "asked once")
+        XCTAssertEqual(asked.papers.first?.publicationTypes, ["Journal Article"])
+        for document in documents {
+            XCTAssertTrue(document.isRetracted)
+            XCTAssertNil(document.scoredAt, "neither document of a retracted paper is scored")
+            XCTAssertEqual(session.retractionSnapshot()[document.id]?.isRetracted, true)
+        }
+        let key = try XCTUnwrap(documents[0].retractionPaper.paperKey)
+        let records = try XCTUnwrap(RetractionCheckRecord.byKey([key], in: context)[key])
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(RetractionCheckRecord.check(records[0].checkJSON)?.isRetracted, true)
+    }
+
+    /// #688: a retraction one document of a paper stored survives an outage
+    /// for the other document too, which had no check of its own.
+    func testAStoredRetractionOfAPaperTwoDocumentsShareSurvivesAnOutageForBoth() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/a"])
+        documents[0].retractionCheck = Self.retracted(checkedAt: Date().addingTimeInterval(-10 * Self.day))
+        let workflow = restore(session, check: Self.answering([nil: Self.unchecked(["retraction_watch_export", "crossref"])]))
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        for document in documents {
+            XCTAssertTrue(document.isRetracted)
+            XCTAssertNil(document.scoredAt)
+        }
+    }
+
+    /// #688: a paper's label is recorded when any of its documents recorded
+    /// it, so a stored label retraction is replaced for both of them, as the
+    /// control in ``testALabelRetractionStandsWhileTheLabelIsNotRecorded()``
+    /// replaces it for a document that recorded the label.
+    func testAPaperTwoDocumentsShareHasItsLabelRecordedByEither() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/a"])
+        let label = StoredRetractionEvidence(
+            source: "pubmed_label", kind: "retraction", date: nil, noticeDOI: nil, recordID: nil, rawKind: nil
+        )
+        let stored = Self.retracted(checkedAt: Date().addingTimeInterval(-10 * Self.day), deciding: label)
+        documents[0].publicationTypes = nil
+        for document in documents { document.retractionCheck = stored }
+        let workflow = restore(session, check: Self.answering(["10.1000/a": Self.clear()]))
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        for document in documents {
+            XCTAssertEqual(document.retractionCheck?.isClear, true)
+            XCTAssertNotNil(document.scoredAt)
+        }
+    }
+
     /// The report names the papers its run left out, by the run's own check:
     /// a stored check changed afterwards does not rewrite it. Through the
     /// no-evidence report, which needs no model; the cited path passes the
