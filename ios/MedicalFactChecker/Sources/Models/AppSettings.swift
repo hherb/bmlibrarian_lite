@@ -31,6 +31,10 @@ final class AppSettings {
     /// Where the API keys are kept: the Keychain, or a test's stand-in.
     private let secretStore: any SecretStore
 
+    /// Whether each optional credential is saved, which is not secret, so a
+    /// read the Keychain refuses is told apart from no key (#511).
+    private let credentialFlags: UserDefaults
+
     // MARK: - LLM Configuration
 
     /// Selected LLM provider.
@@ -157,14 +161,7 @@ final class AppSettings {
 
     /// ``coreAPIKey``, or nil when the Keychain could not be read (#511), which the
     /// full-text chain records as the service unreachable rather than not asked.
-    var coreAPIKeyIfReadable: String? {
-        if let cached = _coreAPIKeyCache {
-            return cached
-        }
-        guard let loaded = readSecret(Keys.coreAPIKey) else { return nil }
-        _coreAPIKeyCache = loaded
-        return loaded
-    }
+    var coreAPIKeyIfReadable: String? { credential(Keys.coreAPIKey, cache: &_coreAPIKeyCache) }
 
     /// Store the CORE API key, then cache it; an empty key removes it.
     ///
@@ -174,6 +171,7 @@ final class AppSettings {
     @discardableResult
     func saveCOREAPIKey(_ key: String) -> Bool {
         guard secretStore.save(key: Keys.coreAPIKey, value: key) else { return false }
+        credentialFlags.set(!key.isEmpty, forKey: Keys.coreAPIKey + Keys.savedSuffix)
         _coreAPIKeyCache = key
         return true
     }
@@ -192,14 +190,7 @@ final class AppSettings {
 
     /// ``elsevierAPIKey``, or nil when the Keychain could not be read (#511), which the
     /// full-text chain records as the service unreachable rather than not asked.
-    var elsevierAPIKeyIfReadable: String? {
-        if let cached = _elsevierAPIKeyCache {
-            return cached
-        }
-        guard let loaded = readSecret(Keys.elsevierAPIKey) else { return nil }
-        _elsevierAPIKeyCache = loaded
-        return loaded
-    }
+    var elsevierAPIKeyIfReadable: String? { credential(Keys.elsevierAPIKey, cache: &_elsevierAPIKeyCache) }
 
     /// Store the Elsevier API key, then cache it; an empty key removes it.
     ///
@@ -209,6 +200,7 @@ final class AppSettings {
     @discardableResult
     func saveElsevierAPIKey(_ key: String) -> Bool {
         guard secretStore.save(key: Keys.elsevierAPIKey, value: key) else { return false }
+        credentialFlags.set(!key.isEmpty, forKey: Keys.elsevierAPIKey + Keys.savedSuffix)
         _elsevierAPIKeyCache = key
         return true
     }
@@ -227,14 +219,7 @@ final class AppSettings {
 
     /// ``elsevierInstToken``, or nil when the Keychain could not be read (#511), which the
     /// full-text chain records as the service unreachable rather than not asked.
-    var elsevierInstTokenIfReadable: String? {
-        if let cached = _elsevierInstTokenCache {
-            return cached
-        }
-        guard let loaded = readSecret(Keys.elsevierInstToken) else { return nil }
-        _elsevierInstTokenCache = loaded
-        return loaded
-    }
+    var elsevierInstTokenIfReadable: String? { credential(Keys.elsevierInstToken, cache: &_elsevierInstTokenCache) }
 
     /// Store the Elsevier institutional token, then cache it; an empty token
     /// removes it.
@@ -245,6 +230,7 @@ final class AppSettings {
     @discardableResult
     func saveElsevierInstToken(_ token: String) -> Bool {
         guard secretStore.save(key: Keys.elsevierInstToken, value: token) else { return false }
+        credentialFlags.set(!token.isEmpty, forKey: Keys.elsevierInstToken + Keys.savedSuffix)
         _elsevierInstTokenCache = token
         return true
     }
@@ -383,10 +369,14 @@ final class AppSettings {
 
     /// Load the settings. The app uses ``shared``.
     ///
-    /// - Parameter secretStore: Where the API keys are kept. Defaults to the
-    ///   Keychain; a test passes a stand-in, having no Keychain entitlement.
-    init(secretStore: any SecretStore = KeychainSecretStore()) {
+    /// - Parameters:
+    ///   - secretStore: Where the API keys are kept. Defaults to the
+    ///     Keychain; a test passes a stand-in, having no Keychain entitlement.
+    ///   - credentialFlags: Where whether each optional credential is saved is
+    ///     kept. Defaults to the standard defaults; a test passes its own suite.
+    init(secretStore: any SecretStore = KeychainSecretStore(), credentialFlags: UserDefaults = .standard) {
         self.secretStore = secretStore
+        self.credentialFlags = credentialFlags
         let defaults = UserDefaults.standard
 
         // Determine provider first (need local variable before any self access)
@@ -455,6 +445,27 @@ final class AppSettings {
         }
     }
 
+    /// An optional credential (CORE's key, Elsevier's key and token): the cached
+    /// value, else the stored one, cached once read.
+    ///
+    /// - Parameters:
+    ///   - key: The credential's account.
+    ///   - cache: Its in-memory cache.
+    /// - Returns: The credential, `""` when none is saved, or nil when one was
+    ///   saved and the store could not be read (#511). Locked, the Keychain may
+    ///   refuse a read for a key never saved: that is no key, and not cached.
+    private func credential(_ key: String, cache: inout String?) -> String? {
+        if let cache { return cache }
+        let flag = key + Keys.savedSuffix
+        guard let loaded = readSecret(key) else {
+            return credentialFlags.bool(forKey: flag) ? nil : ""
+        }
+        // also records a key saved before the flag existed
+        credentialFlags.set(!loaded.isEmpty, forKey: flag)
+        cache = loaded
+        return loaded
+    }
+
     /// Migrate legacy single API key to the per-provider storage format.
     ///
     /// This runs once to move any existing API key from the old single-key storage
@@ -493,6 +504,8 @@ final class AppSettings {
         static let coreAPIKey = "core_api_key"
         static let elsevierAPIKey = "elsevier_api_key"
         static let elsevierInstToken = "elsevier_insttoken"
+        /// Appended to a credential's account: the defaults key saying one is saved.
+        static let savedSuffix = "_saved"
         static let batchSize = "batch_size"
         static let minRelevantDocuments = "min_relevant_documents"
         static let minScoreThreshold = "min_score_threshold"

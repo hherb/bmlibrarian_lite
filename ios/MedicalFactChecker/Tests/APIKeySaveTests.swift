@@ -41,18 +41,30 @@ private final class StubSecretStore: SecretStore {
 /// key in use, and the settings say it was not saved.
 final class APIKeySaveTests: XCTestCase {
     private var store = StubSecretStore()
+    private var flags: UserDefaults!
     private var settings: AppSettings!
+    private let flagsSuite = "APIKeySaveTests"
 
     override func setUp() {
         super.setUp()
         store = StubSecretStore()
-        settings = AppSettings(secretStore: store)
+        flags = UserDefaults(suiteName: flagsSuite)
+        flags.removePersistentDomain(forName: flagsSuite)
+        settings = AppSettings(secretStore: store, credentialFlags: flags)
+    }
+
+    override func tearDown() {
+        flags.removePersistentDomain(forName: flagsSuite)
+        super.tearDown()
     }
 
     /// #511: a read that fails (the device locked) is not cached as "no key",
     /// so the stored key is used once the store can be read again.
     func testAFailedReadIsNotCachedAsNoKey() {
-        store.stored = ["core_api_key": "core-key", "elsevier_api_key": "els-key"]
+        settings.saveCOREAPIKey("core-key")
+        settings.saveElsevierAPIKey("els-key")
+        settings.saveElsevierInstToken("els-token")
+        settings = AppSettings(secretStore: store, credentialFlags: flags)
         store.failsReads = true
 
         XCTAssertEqual(settings.coreAPIKey, "")
@@ -64,7 +76,30 @@ final class APIKeySaveTests: XCTestCase {
         store.failsReads = false
         XCTAssertEqual(settings.coreAPIKey, "core-key")
         XCTAssertEqual(settings.elsevierAPIKey, "els-key")
-        XCTAssertEqual(settings.elsevierInstTokenIfReadable, "", "control: none stored is not unreadable")
+        XCTAssertEqual(settings.elsevierInstTokenIfReadable, "els-token")
+    }
+
+    /// #511: locked, the Keychain may refuse a read for a key never saved;
+    /// that is no key, not one the chain records as unreachable.
+    func testAFailedReadOfAKeyNeverSavedIsNoKey() {
+        store.failsReads = true
+        XCTAssertEqual(settings.coreAPIKeyIfReadable, "")
+        XCTAssertEqual(settings.elsevierAPIKeyIfReadable, "")
+        XCTAssertEqual(settings.elsevierInstTokenIfReadable, "")
+    }
+
+    /// A key saved before its flag existed is recorded at its first read, and
+    /// one removed clears it, so a later failed read says unreadable, or no key.
+    func testAReadRecordsWhetherAKeyIsSaved() {
+        store.stored = ["core_api_key": "core-key"]
+        XCTAssertEqual(settings.coreAPIKeyIfReadable, "core-key")
+        store.failsReads = true
+        XCTAssertNil(AppSettings(secretStore: store, credentialFlags: flags).coreAPIKeyIfReadable)
+
+        store.failsReads = false
+        settings.saveCOREAPIKey("")
+        store.failsReads = true
+        XCTAssertEqual(AppSettings(secretStore: store, credentialFlags: flags).coreAPIKeyIfReadable, "")
     }
 
     /// #511: the Elsevier step is unreachable when its key, or the token beside
