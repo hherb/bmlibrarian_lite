@@ -605,6 +605,26 @@ class FactCheckWorkflowRetractionTest {
         )
     }
 
+    /** #684: a session older than the check, given a snapshot by Find More Evidence. */
+    @Test
+    fun `Check again counts a scored paper the run has no row for`() = runTest {
+        hold("d1")
+        hold("d2")
+        documents.replaceAll { _, document -> document.copy(relevanceScore = 5) }
+        hold("d3") // never scored: its outage is not the run's
+        snapshotJson = RetractionSnapshot.merged(null, mapOf("d2" to CLEAR.copy(checkedAtMs = RUN_MS)))
+        workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
+        assertEquals("Retraction status checked 2026-10-18", workflow.retractionSavedWorkLine.value)
+        answers["1"] = NO_EXPORT.copy(checkedAtMs = RUN_MS + DAY_MS)
+        answers["2"] = CLEAR.copy(checkedAtMs = RUN_MS + DAY_MS)
+        answers["3"] = NO_EXPORT.copy(checkedAtMs = RUN_MS + DAY_MS)
+
+        workflow.checkRetractionsAgain()
+
+        val line = workflow.retractionSavedWorkLine.value!!
+        assertTrue(line, line.startsWith("Retraction status checked 2026-10-19; 1 paper could not be checked"))
+    }
+
     /** #660, #668: a decided row kept over an unchecked answer: its cause follows the again count. */
     @Test
     fun `Check again names only the causes of papers whose row stays unchecked`() = runTest {

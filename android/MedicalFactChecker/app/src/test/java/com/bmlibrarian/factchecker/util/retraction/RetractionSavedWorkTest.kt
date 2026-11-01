@@ -49,6 +49,19 @@ class RetractionSavedWorkTest {
     }
 
     @Test
+    fun `rechecked checks read a scored paper the run has no check of`() {
+        // #684: a session older than the check that Find More Evidence gave a snapshot
+        val rows = RetractionSavedWork.recheckedChecks(
+            run = mapOf("a" to check("clear", run)),
+            stored = mapOf("a" to check("unchecked", later), "x" to check("retracted", later), "y" to check("clear", later)),
+            scored = setOf("a", "x")
+        )
+        assertEquals("the run's row still stands against an outage", "clear", rows["a"]?.status)
+        assertEquals("a scored paper without a run row reads its stored row", "retracted", rows["x"]?.status)
+        assertNull("a document the run did not score still gets no row", rows["y"])
+    }
+
+    @Test
     fun `only a cited paper's change for the worse warns`() {
         val runChecks = mapOf("a" to check("clear", run), "b" to check("retracted", run), "c" to check("clear", run))
         val latest = mapOf(

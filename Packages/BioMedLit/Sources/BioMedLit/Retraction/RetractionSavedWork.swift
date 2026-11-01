@@ -34,17 +34,21 @@ public enum RetractionSavedWork {
     /// The checks a reopened session's line is read from: each the run's,
     /// unless the document's stored check is newer and is not an unchecked one
     /// over a decided one. A session whose run recorded none (it predates the
-    /// check) reads the stored checks alone.
+    /// check) reads the stored checks alone, as does a scored paper the run
+    /// has no check of (Find More Evidence on such a session, #684).
     ///
     /// - Parameters:
     ///   - run: The checks the run used, by document id.
     ///   - stored: Each of the session's documents' stored check, by document id.
+    ///   - scored: The session's scored documents' ids.
     /// - Returns: The checks, by document id.
     public static func recheckedChecks(
-        run: [String: PaperRetractionCheck], stored: [String: PaperRetractionCheck]
+        run: [String: PaperRetractionCheck], stored: [String: PaperRetractionCheck], scored: Set<String> = []
     ) -> [String: PaperRetractionCheck] {
         guard !run.isEmpty else { return stored }
-        return run.merging(stored.filter { run[$0.key] != nil }) { old, new in rechecked(old, stored: new) }
+        return run.merging(stored.filter { run[$0.key] != nil || scored.contains($0.key) }) { old, new in
+            rechecked(old, stored: new)
+        }
     }
 
     /// One paper's check since its run: `stored` when it is newer than `run`

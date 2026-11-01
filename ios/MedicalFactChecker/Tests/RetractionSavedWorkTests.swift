@@ -445,6 +445,26 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertEqual(workflow.retractionSavedWorkLine, "Retraction status checked 2026-10-19")
     }
 
+    /// #684: a session older than the check, given a snapshot by Find More
+    /// Evidence: Check again's answer for a scored paper without a run row counts.
+    func testCheckAgainCountsAScoredPaperTheRunHasNoRowFor() async {
+        let (session, documents) = makeSession(
+            ["10.1000/a", "10.1000/b", "10.1000/c"], cited: [0], run: [1: Self.check("clear")])
+        documents[2].relevanceScore = nil  // never scored: its outage is not the run's
+        let later = Self.runDay.addingTimeInterval(Self.day)
+        let workflow = restore(session, answers: [
+            "10.1000/a": Self.check("unchecked", at: later), "10.1000/b": Self.check("clear", at: later),
+            "10.1000/c": Self.check("unchecked", at: later),
+        ])
+        XCTAssertEqual(workflow.retractionSavedWorkLine, "Retraction status checked 2026-10-18")
+
+        await workflow.checkRetractionsAgain()
+
+        let line = workflow.retractionSavedWorkLine ?? "no line"
+        XCTAssertTrue(line.hasPrefix("Retraction status checked 2026-10-19; 1 paper could not be checked"), line)
+        XCTAssertFalse(line.contains("again"), line)
+    }
+
     // MARK: - Left out
 
     func testALeftOutRowSaysWhyAndWhatCheckAgainFound() {

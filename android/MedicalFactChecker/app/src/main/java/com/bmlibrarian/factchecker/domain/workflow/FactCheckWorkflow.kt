@@ -1161,7 +1161,7 @@ class FactCheckWorkflow @Inject constructor(
         }
         if (unread) Log.w(TAG, "A stored retraction check of this session could not be read")
         val stored = read + taken
-        val rows = RetractionSavedWork.recheckedChecks(run, stored)
+        val rows = RetractionSavedWork.recheckedChecks(run, stored, documents.filter { it.isScored }.map { it.id }.toSet())
         val cited = documentRepository.getCitationsBySessionSync(sessionId).map { it.documentId }.toSet()
         val citedDocuments = documents.filter { it.id in cited }
         // a stored retraction keeps its own notice
