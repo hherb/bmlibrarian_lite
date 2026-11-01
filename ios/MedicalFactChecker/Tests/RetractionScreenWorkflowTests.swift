@@ -525,7 +525,7 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         let (session, documents) = makeSession(["10.1000/a", "10.1000/b"])
         session.recordRetractionSnapshot([documents[0].id: Self.retracted(), documents[1].id: Self.clear()])
         documents[0].retractionCheck = Self.clear()  // a later check: the run still left it out
-        documents[1].retractionCheck = Self.clear()
+        documents[1].retractionCheck = Self.retracted()  // a later check: the run kept it
 
         XCTAssertEqual(session.documentsToScore, 1)
         XCTAssertEqual(session.unscoredDocuments.map(\.id), [documents[1].id])

@@ -470,7 +470,7 @@ class TestWhatIsFoundIsScreened:
     ) -> None:
         """#657: a run reviewed before the check counts its earlier papers unchecked.
 
-        Only the new papers gain snapshot rows; the earlier ones never read as clear.
+        The new paper is screened; the earlier ones, never screened, never read as clear.
         """
         reviewed(storage)
 

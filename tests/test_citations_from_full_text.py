@@ -1089,7 +1089,16 @@ class TestRetryFullText:
         # the run's other papers have no row, so none reads as clear (#657)
         assert set(statuses.values()) == {RetractionStatus.UNCHECKED.value}
         kept = storage.get_checkpoint(checkpoint_id).metadata
-        assert kept[CHECKPOINT_RETRACTION_SNAPSHOT_KEY][0]["document_id"] == "doc-1"
+        # the stored snapshot does not gain them
+        assert [r["document_id"] for r in kept[CHECKPOINT_RETRACTION_SNAPSHOT_KEY]] == ["doc-1"]
+
+    def test_a_run_never_screened_states_no_retraction_check(self, storage: LiteStorage) -> None:
+        """Without a snapshot no paper reads as could-not-be-checked: none was tried."""
+        reviewed(storage)
+
+        _, _, reporter = retry(storage, {"doc-1": "T1."}, {"doc-1": ["New 1."]})
+
+        assert reporter.generate_report.call_args.args[2].retraction_screen is None
 
     def test_a_question_without_a_report_cannot_be_retried(self, storage: LiteStorage) -> None:
         """Said to the reader, not a crash."""

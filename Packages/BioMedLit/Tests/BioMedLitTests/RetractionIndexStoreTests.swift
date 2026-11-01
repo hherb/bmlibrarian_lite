@@ -174,7 +174,7 @@ final class RetractionIndexStoreTests: XCTestCase {
         }
         // Stale for the refresh, so it downloads and builds; current for the read.
         let later = RetractionFixture.now.addingTimeInterval(
-            Double(BioMedLitConstants.retractionWatchMaxAgeDays + 1) * 86_400
+            Double(BioMedLitConstants.retractionWatchMaxAgeDays + 1) * TransparencyConstants.secondsPerDay
         )
         let refresh = Task { await store.refreshIfStale(now: later) }
         await fulfillment(of: [started], timeout: 10)

@@ -83,7 +83,7 @@ have landed):
 
 ## Recently landed (context)
 
-- **Apple 1.7 release blockers** (PRs #676, #678–#681): unscreened cited
+- **Apple 1.7 release blockers** (PRs #676, #678–#680, #682): unscreened scored
   papers counted unchecked (#657, Android too), per-paper retraction rows
   (#651), a stand-in store window (#297), a failed Keychain read is never
   cached as no key and leaves CORE/Elsevier unreachable, not unasked (#511);

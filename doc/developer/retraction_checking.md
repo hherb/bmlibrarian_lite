@@ -104,7 +104,7 @@ paper with its `retraction_status`.
   stands alone, as on a reopen, since the others' causes would claim it too.
 - **A paper no screen saw is unchecked, never clear.** *Find More Evidence*
   on a run reviewed before retraction checking screens only the papers it
-  scores, so the report written again counts every scored paper with no
+  finds, so the report written again counts every scored paper with no
   snapshot row as unchecked, its count alone (#657, all three platforms; the
   desktop's `write_report_again`). The stored snapshot does not gain them.
 - **`excluded` is a fact of the run.** Snapshot rows record whether the run
