@@ -156,6 +156,43 @@ final class RetractionIndexStoreTests: XCTestCase {
         XCTAssertEqual(index?.dataAsOf(), RetractionFixture.today)
     }
 
+    /// A run reads the stored copy while a refresh builds the next one (#681):
+    /// the build holds the actor, so an isolated read would wait it out.
+    func testAReadNeverWaitsForAnIndexBuild() async throws {
+        try storeIndex(dataAsOf: RetractionFixture.today)
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv())
+        let started = expectation(description: "the build started")
+        let release = DispatchSemaphore(value: 0)
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubURLProtocol.self]
+        let store = RetractionIndexStore(
+            directory: directory, session: URLSession(configuration: config), email: "t@example.org"
+        ) { csv, dataAsOf in
+            started.fulfill()
+            release.wait()
+            return try buildRetractionIndex(csv: csv, dataAsOf: dataAsOf)
+        }
+        // Stale for the refresh, so it downloads and builds; current for the read.
+        let later = RetractionFixture.now.addingTimeInterval(
+            Double(BioMedLitConstants.retractionWatchMaxAgeDays + 1) * 86_400
+        )
+        let refresh = Task { await store.refreshIfStale(now: later) }
+        await fulfillment(of: [started], timeout: 10)
+
+        let read = expectation(description: "the read returned")
+        let reader = Task {
+            let index = await store.currentIndex(now: RetractionFixture.now)
+            read.fulfill()
+            return index
+        }
+        await fulfillment(of: [read], timeout: 5)
+        release.signal()
+        let index = await reader.value
+        XCTAssertEqual(index?.dataAsOf(), RetractionFixture.today)
+        let outcome = await refresh.value
+        XCTAssertEqual(outcome, .refreshed(noticeCount: 3))
+    }
+
     /// Control: the guard lasts one download; a failed one is tried again by the next call.
     func testAFailedRefreshIsTriedAgain() async throws {
         StubURLProtocol.stubbed = (404, Data())
