@@ -90,6 +90,7 @@ final class FullTextServiceCORETests: RecordingLoggerTestCase {
         retry: RetryConfiguration = .noRetry,
         email: String = "test@example.org",
         coreAPIKey: String? = "test-core-key",
+        coreKeyUnreadable: Bool = false,
         coreRetry: RetryConfiguration = .noRetry,
         coreThrottle: CoreThrottle = CoreThrottle(),
         writeCachedPDF: @escaping @Sendable (Data, URL) throws -> Void = FullTextService.writeAtomically
@@ -106,6 +107,7 @@ final class FullTextServiceCORETests: RecordingLoggerTestCase {
             pmcOpenDataRetry: .noRetry,
             openAlexRetry: retry,
             coreAPIKey: coreAPIKey,
+            coreKeyUnreadable: coreKeyUnreadable,
             coreRetry: coreRetry,
             coreThrottle: coreThrottle,
             writeCachedPDF: writeCachedPDF
@@ -184,6 +186,16 @@ final class FullTextServiceCORETests: RecordingLoggerTestCase {
         XCTAssertFalse(makeService(coreAPIKey: "   ").asksCore)
         // The control: a key, trimmed, is one
         XCTAssertTrue(makeService(coreAPIKey: " test-core-key ").asksCore)
+    }
+
+    /// #511: a key set but not readable (the device locked) leaves CORE
+    /// unreachable, never "not asked": the article's text is not settled.
+    func testAKeyThatCouldNotBeReadLeavesCOREUnreachable() async throws {
+        let result = try await makeService(coreAPIKey: nil, coreKeyUnreadable: true)
+            .fetchFullText(pmcId: nil, doi: doi, pmid: "1")
+        XCTAssertEqual(coreRequests, 0, "nothing is sent without the key")
+        XCTAssertEqual(result.openAccessShortfall?.entries.last?.source, .core)
+        XCTAssertEqual(result.openAccessShortfall?.entries.last?.reason, .failed(.requestFailed))
     }
 
     func testCOREKnowingNothingAddsNothing() async throws {

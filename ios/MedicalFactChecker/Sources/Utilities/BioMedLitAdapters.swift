@@ -604,12 +604,26 @@ extension BMLFullTextService {
     ///   the optional CORE key and the optional Elsevier key and institutional token.
     /// - Returns: Configured full text service.
     static func create(from settings: AppSettings) -> BMLFullTextService {
-        create(
+        // read once each: a key the Keychain could not give is unreachable, not absent (#511)
+        let core = settings.coreAPIKeyIfReadable
+        let elsevierKey = settings.elsevierAPIKeyIfReadable
+        let elsevierToken = settings.elsevierInstTokenIfReadable
+        return create(
             ncbiEmail: settings.ncbiEmail,
-            coreAPIKey: settings.coreAPIKey,
-            elsevierAPIKey: settings.elsevierAPIKey,
-            elsevierInstToken: settings.elsevierInstToken
+            coreAPIKey: core ?? "",
+            elsevierAPIKey: elsevierKey ?? "",
+            elsevierInstToken: elsevierToken ?? "",
+            coreKeyUnreadable: core == nil,
+            elsevierCredentialsUnreadable: elsevierCredentialsUnreadable(key: elsevierKey, token: elsevierToken)
         )
+    }
+
+    /// Whether Elsevier's credentials could not be read (`nil` is unreadable):
+    /// the key, or the token beside a key that was read, since the token is
+    /// never sent without one (#511).
+    static func elsevierCredentialsUnreadable(key: String?, token: String?) -> Bool {
+        guard let key else { return true }
+        return token == nil && !key.isEmpty
     }
 
     /// The service for these settings: the NCBI email (or the app's own address) and,
@@ -625,19 +639,26 @@ extension BMLFullTextService {
     ///   - elsevierAPIKey: The user's Elsevier API key, or empty — the default — for none.
     ///   - elsevierInstToken: The user's Elsevier institutional token, or empty — the
     ///     default — for none.
+    ///   - coreKeyUnreadable: The CORE key could not be read from the Keychain (#511).
+    ///   - elsevierCredentialsUnreadable: The Elsevier key, or the token beside a
+    ///     key, could not be read (#511).
     /// - Returns: Configured full text service.
     static func create(
         ncbiEmail: String,
         coreAPIKey: String,
         elsevierAPIKey: String = "",
-        elsevierInstToken: String = ""
+        elsevierInstToken: String = "",
+        coreKeyUnreadable: Bool = false,
+        elsevierCredentialsUnreadable: Bool = false
     ) -> BMLFullTextService {
         let email = ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : ncbiEmail
         return BMLFullTextService(
             email: email,
             coreAPIKey: credential(coreAPIKey),
+            coreKeyUnreadable: coreKeyUnreadable,
             elsevierAPIKey: credential(elsevierAPIKey),
-            elsevierInstToken: credential(elsevierInstToken)
+            elsevierInstToken: credential(elsevierInstToken),
+            elsevierCredentialsUnreadable: elsevierCredentialsUnreadable
         )
     }
 

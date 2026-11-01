@@ -145,6 +145,10 @@ public actor FullTextService {
     /// Whether this service asks CORE: a non-blank key was given.
     public nonisolated var asksCore: Bool { coreAPIKey != nil }
 
+    /// Whether the user's CORE key was set but could not be read (the device
+    /// locked, #511): CORE is then recorded as unreachable, never as not asked.
+    private let coreKeyUnreadable: Bool
+
     /// The user's Elsevier API key, trimmed; `nil` when none or blank, and then
     /// Elsevier's API is never asked and nothing is recorded (#480, stage C2).
     /// It travels in the `X-ELS-APIKey` header alone, never in a URL or a log line.
@@ -167,6 +171,11 @@ public actor FullTextService {
 
     /// Whether this service asks Elsevier's API: a non-blank key was given.
     public nonisolated var asksElsevier: Bool { elsevierAPIKey != nil }
+
+    /// Whether the user's Elsevier key or institutional token could not be
+    /// read (#511): Elsevier is then recorded as unreachable, as Android's
+    /// `ElsevierService` does, never as not asked.
+    private let elsevierCredentialsUnreadable: Bool
 
     /// Whether this service sends an institutional token with Elsevier's key: a
     /// non-blank token was given with a key.
@@ -240,6 +249,8 @@ public actor FullTextService {
     ///     failure. Defaults to ``RetryConfiguration/openAlex``.
     ///   - coreAPIKey: The user's CORE API key. `nil` — the default — or
     ///     blank means CORE is never asked (#480, stage C).
+    ///   - coreKeyUnreadable: The CORE key could not be read, so CORE is
+    ///     recorded as unreachable. Defaults to `false`.
     ///   - coreRetry: How each request to CORE retries a transient failure.
     ///     Defaults to ``RetryConfiguration/core``.
     ///   - coreThrottle: CORE's session state: the 429 pause and the refused
@@ -249,6 +260,8 @@ public actor FullTextService {
     ///     or blank means Elsevier's API is never asked (#480, stage C2).
     ///   - elsevierInstToken: The user's Elsevier institutional token, sent
     ///     beside the key. `nil` — the default — or blank sends none.
+    ///   - elsevierCredentialsUnreadable: The Elsevier key or token could not
+    ///     be read, so Elsevier is recorded as unreachable. Defaults to `false`.
     ///   - elsevierRetry: How each request to Elsevier's API retries a
     ///     transient failure. Defaults to ``RetryConfiguration/elsevier``.
     ///   - elsevierSession: Elsevier's session state: the 429 pause, the
@@ -271,10 +284,12 @@ public actor FullTextService {
         pmcOpenDataRetry: RetryConfiguration = .pmcOpenData,
         openAlexRetry: RetryConfiguration = .openAlex,
         coreAPIKey: String? = nil,
+        coreKeyUnreadable: Bool = false,
         coreRetry: RetryConfiguration = .core,
         coreThrottle: CoreThrottle = .shared,
         elsevierAPIKey: String? = nil,
         elsevierInstToken: String? = nil,
+        elsevierCredentialsUnreadable: Bool = false,
         elsevierRetry: RetryConfiguration = .elsevier,
         elsevierSession: ElsevierSession = .shared,
         writeCachedPDF: @escaping @Sendable (Data, URL) throws -> Void = FullTextService.writeAtomically,
@@ -291,11 +306,13 @@ public actor FullTextService {
         self.pmcOpenDataRetry = pmcOpenDataRetry
         self.openAlexRetry = openAlexRetry
         self.coreAPIKey = Self.setting(coreAPIKey)
+        self.coreKeyUnreadable = coreKeyUnreadable
         self.coreRetry = coreRetry
         self.coreThrottle = coreThrottle
         self.elsevierAPIKey = Self.setting(elsevierAPIKey)
         // Never sent without a key, so not held without one either
         self.elsevierInstToken = self.elsevierAPIKey == nil ? nil : Self.setting(elsevierInstToken)
+        self.elsevierCredentialsUnreadable = elsevierCredentialsUnreadable
         self.elsevierRetry = elsevierRetry
         self.elsevierSession = elsevierSession
         self.writeCachedPDF = writeCachedPDF
@@ -324,7 +341,7 @@ public actor FullTextService {
 
     /// The transport production uses.
     ///
-    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:openAlexRetry:coreAPIKey:coreRetry:coreThrottle:elsevierAPIKey:elsevierInstToken:elsevierRetry:elsevierSession:writeCachedPDF:titleChecker:)``
+    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:openAlexRetry:coreAPIKey:coreKeyUnreadable:coreRetry:coreThrottle:elsevierAPIKey:elsevierInstToken:elsevierCredentialsUnreadable:elsevierRetry:elsevierSession:writeCachedPDF:titleChecker:)``
     /// so a test can
     /// substitute a stubbed `URLSession` without reproducing these timeouts.
     ///
@@ -1753,6 +1770,16 @@ public actor FullTextService {
         copyServed: inout Bool
     ) async throws -> FullTextResult? {
         guard !doi.isEmpty, Elsevier.isEligible(doi: doi) else { return nil }
+        // its PDF is only read with extraction on, so only then is a lost key a loss
+        guard !(elsevierCredentialsUnreadable && extractPDFText) else {
+            shortfall = .adding(OpenAccessShortfall(source: .elsevier, failure: .requestFailed), to: shortfall)
+            BioMedLitLib.logger?.warning(
+                "\(BioMedLitConstants.elsevierServiceName)'s key or token could not be read, so it was "
+                    + "not asked about DOI \(doi) and any PDF it holds is not assessed",
+                category: .fullText
+            )
+            return nil
+        }
         guard elsevierAPIKey != nil else {
             BioMedLitLib.logger?.debug(
                 "No Elsevier API key configured; Elsevier's API not asked about DOI \(doi)",
@@ -3545,6 +3572,15 @@ public actor FullTextService {
         doi: String, degradation: FullTextDegradation?, shortfall: inout OpenAccessShortfall?
     ) async throws -> FullTextResult? {
         guard !doi.isEmpty else { return nil }
+        guard !coreKeyUnreadable else {
+            shortfall = .adding(OpenAccessShortfall(source: .core, failure: .requestFailed), to: shortfall)
+            BioMedLitLib.logger?.warning(
+                "CORE's key could not be read, so CORE was not asked about DOI \(doi) and any text "
+                    + "it holds is not assessed",
+                category: .fullText
+            )
+            return nil
+        }
         guard let coreAPIKey else {
             BioMedLitLib.logger?.debug(
                 "No CORE API key configured; CORE not asked about DOI \(doi)", category: .fullText
