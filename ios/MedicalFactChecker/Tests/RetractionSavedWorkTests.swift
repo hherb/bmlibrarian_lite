@@ -257,7 +257,7 @@ final class RetractionSavedWorkTests: XCTestCase {
         let (session, documents) = makeSession(["10.1000/a", "10.1000/a"], cited: [0, 1], run: [
             0: Self.check("clear"), 1: Self.check("clear"),
         ])
-        documents[1].publicationTypes = nil
+        documents[0].publicationTypes = nil
         let found = PaperRetractionCheck(
             status: "retracted", deciding: Self.notice, unanswered: ["crossref"],
             checkedAt: Self.runDay.addingTimeInterval(Self.day), exportDataAsOf: nil, crossrefFailure: nil

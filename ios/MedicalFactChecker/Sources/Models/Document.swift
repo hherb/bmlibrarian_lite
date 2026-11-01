@@ -435,8 +435,9 @@ final class Document {
     /// Whether the stored check says retracted; never true for unchecked.
     var isRetracted: Bool { retractionCheck?.isRetracted ?? false }
 
-    /// The paper a retraction check asks about. Types not recorded are asked
-    /// as none (``takeRetractionCheck(_:typesRecorded:)`` keeps a label verdict they cannot show).
+    /// This document's own paper; a check asks about ``RetractionPaper/merged(_:)``
+    /// of a run's. Types no document of the paper recorded are asked as none
+    /// (``takeRetractionCheck(_:typesRecorded:)`` keeps a label verdict they cannot show).
     var retractionPaper: RetractionPaper {
         RetractionPaper(doi: doi, pmid: pubmedID, publicationTypes: publicationTypes ?? [])
     }
@@ -473,10 +474,10 @@ final class Document {
 
     /// Takes each document's fresh check (``takeRetractionCheck(_:typesRecorded:)``),
     /// a paper's label counting as recorded when any of `documents` with its
-    /// paper key recorded it. With their copies
-    /// ``RetractionCheckRecord/unify(_:)``'d and their papers
-    /// ``RetractionPaper/merged(_:)``, every document of a paper decides
-    /// alike, as the desktop's `check` decides once per paper (#688).
+    /// paper key recorded it. Callers first ``RetractionCheckRecord/unify(_:)``
+    /// the copies and pass checks of the ``RetractionPaper/merged(_:)``
+    /// papers; every document of a paper then decides alike, as the
+    /// desktop's `check` decides once per paper (#688).
     ///
     /// - Parameters:
     ///   - documents: The documents checked.

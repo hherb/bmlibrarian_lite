@@ -127,10 +127,11 @@ final class RetractionCheckerTests: XCTestCase {
     func testMergedGivesPapersSharingAKeyOnePaper() {
         let first = RetractionPaper(doi: "10.1000/Shared", pmid: nil, publicationTypes: ["Journal Article"])
         let second = RetractionPaper(doi: "https://doi.org/10.1000/shared", pmid: "0005", publicationTypes: ["Retracted Publication"])
-        let alone = RetractionPaper(doi: "10.1000/alone", pmid: "7", publicationTypes: [])
+        let third = RetractionPaper(doi: "10.1000/SHARED", pmid: "9", publicationTypes: [])
+        let alone = RetractionPaper(doi: "10.1000/alone", pmid: "0007", publicationTypes: [])
         let keyless = RetractionPaper(doi: nil, pmid: nil, publicationTypes: ["Journal Article"])
         let one = RetractionPaper(doi: "10.1000/Shared", pmid: "5", publicationTypes: ["Journal Article", "Retracted Publication"])
-        XCTAssertEqual(RetractionPaper.merged([first, alone, second, keyless]), [one, alone, one, keyless])
+        XCTAssertEqual(RetractionPaper.merged([first, alone, second, keyless, third]), [one, alone, one, keyless, one])
     }
 
     /// Control: a served Crossref answer and a consulted, empty index clear a paper.

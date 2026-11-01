@@ -541,7 +541,7 @@ final class FactCheckWorkflow {
             var labelled: [String: PaperRetractionCheck] = [:]
             if !stopRequested {
                 logger.warning("Retraction check again failed: \(error.localizedDescription)")
-                // nothing is stored, but a record's own label still retracts (#673)
+                // nothing is stored, but the paper's label (any of its records') still retracts (#673)
                 let now = Date()
                 for (document, paper) in zip(documents, papers) {
                     let check = PaperRetractionCheck.failed(for: paper, at: now)
@@ -3802,7 +3802,7 @@ final class FactCheckWorkflow {
     /// without asking; what is stored and used otherwise follows
     /// ``Document/takeRetractionChecks(_:fresh:)``. A check that throws without a stop
     /// (a cancellation nobody asked for included) leaves every paper it
-    /// was given unchecked for this run, unless its record's own label retracts it
+    /// was given unchecked for this run, unless its paper's label (any of its records') retracts it
     /// (``PaperRetractionCheck/failed(for:at:)``), and the run goes on.
     ///
     /// - Parameter documents: The documents about to be scored.

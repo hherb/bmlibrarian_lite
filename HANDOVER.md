@@ -18,7 +18,8 @@ a status or lookup this build does not know is unreadable on all three
 (Swift's `PaperRetractionCheck.isReadable`). **Both apps decide once per
 paper key**, as the desktop's `check` (#671 Android, #688 Apple):
 `RetractionPaper.merged` gives every document of a paper the first DOI,
-first canonical PMID and all publication types, asked once, and a paper's
+first canonical PMID and all publication types, asked once within each screen
+call, and a paper's
 label counts as recorded when any of its documents recorded it. Apple keeps a
 copy per document, so `RetractionCheckRecord.unify` gives a paper's documents
 one copy (`standing`) before deciding; keep it in `adoptSharedRetractionChecks`.
@@ -247,7 +248,8 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **Retraction checking** follow-ups: **#662** (an unchecked run's warning
   rule, "could not be read" wording, needs a cross-platform decision),
   **#663** (Android), Apple **#647**, **#649**, **#653**, **#654**
-  (item 1 done by #660), **#658** (Android), **#675** (a stopped Check again
+  (item 1 done by #660), **#691** (Apple, an unreadable copy beats a
+  readable retraction), **#658** (Android), **#675** (a stopped Check again
   and the label, needs a cross-platform decision).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over

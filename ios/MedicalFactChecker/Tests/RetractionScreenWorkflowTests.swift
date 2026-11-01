@@ -375,7 +375,7 @@ final class RetractionScreenWorkflowTests: XCTestCase {
     /// so the one that knows less is never scored unchecked.
     func testAPaperTwoDocumentsShareIsCheckedOnceFromBothDocumentsEvidence() async throws {
         let (session, documents) = makeSession(["10.1000/a", "10.1000/a"])
-        documents[1].publicationTypes = nil
+        documents[0].publicationTypes = nil
         let asked = Asked()
         let (outage, found) = (Self.unchecked(["crossref"]), Self.retracted(unanswered: ["crossref"]))
         // Crossref is down; only a check that sees document 0's record finds the retraction
@@ -435,6 +435,55 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         for document in documents {
             XCTAssertEqual(document.retractionCheck?.isClear, true)
             XCTAssertNotNil(document.scoredAt)
+        }
+    }
+
+    /// #688, as Android's (#689): a label one document of a paper records
+    /// overtakes a fresh stored clear for both, the two naming the DOI
+    /// differently, though the check throws.
+    func testALabelOnOneDocumentOfAPaperOvertakesAStoredClearForBoth() async throws {
+        let (session, documents) = makeSession(["10.1000/A", "https://doi.org/10.1000/a"])
+        documents[0].publicationTypes = nil
+        documents[1].publicationTypes = ["Retracted Publication"]
+        for document in documents { document.retractionCheck = Self.clear(checkedAt: Date().addingTimeInterval(-Self.day)) }
+        let workflow = restore(session, check: { _ in throw CheckFailed() })
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        for document in documents {
+            XCTAssertTrue(document.isRetracted)
+            XCTAssertNil(document.scoredAt, "neither document of a retracted paper is scored")
+        }
+        XCTAssertEqual(workflow.retractionNotice, "Retraction check: 2 retracted papers left out.")
+    }
+
+    /// #688: a check that throws on a paper two documents name differently
+    /// is told as the failure it was, for both.
+    func testAThrownCheckOnAPaperTwoDocumentsShareIsToldAsAFailure() async throws {
+        let (session, _) = makeSession(["10.1000/A", "https://doi.org/10.1000/a"])
+        let workflow = restore(session, check: { _ in throw CheckFailed() })
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        XCTAssertEqual(
+            workflow.retractionNotice,
+            "Retraction check: 2 papers' retraction status could not be checked: the check failed."
+        )
+    }
+
+    /// #688: two documents of a paper holding different copies decide by
+    /// one, the latest knowledge: an older clear never keeps one scored.
+    func testTwoDocumentsOfAPaperHoldingDifferentCopiesDecideByTheLatest() async throws {
+        let (session, documents) = makeSession(["10.1000/A", "https://doi.org/10.1000/a"])
+        documents[0].retractionCheck = Self.clear(checkedAt: Date().addingTimeInterval(-40 * Self.day))
+        documents[1].retractionCheck = Self.retracted(checkedAt: Date().addingTimeInterval(-10 * Self.day))
+        let workflow = restore(session, check: Self.answering([nil: Self.unchecked(["retraction_watch_export", "crossref"])]))
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        for document in documents {
+            XCTAssertTrue(document.isRetracted)
+            XCTAssertNil(document.scoredAt)
         }
     }
 

@@ -153,6 +153,12 @@ BioMedLit; the app never imports `BmlibCore`.
   stands in storage against an outage, but the run is shown unchecked. A
   check that throws still retracts by the record's own label
   (`PaperRetractionCheck.failed(for:at:)`, the desktop's `_label_check`, #656).
+- **A paper is decided once**, as the desktop's `check` (#688): the documents
+  of one `paperKey` are given one copy (`RetractionCheckRecord.unify`, in
+  `adoptSharedRetractionChecks`) and one paper (`RetractionPaper.merged`: the
+  first document's DOI, the first canonical PMID, every publication type),
+  asked about once; a paper's label counts as recorded when any of its
+  documents recorded it (`Document.takeRetractionChecks`).
 - Views list and count from the run's snapshot first, then the stored check
   (`FactCheckSession.shownRetractionChecks`, `Document.shownRetractionCheck`).
   The badge and banner (`RetractionBadge`, `RetractionBanner`) show the
@@ -165,7 +171,7 @@ BioMedLit; the app never imports `BmlibCore`.
   is now retracted or concern where the run's was not,
   `retractionSavedWorkWarning`; no request is made. **Check again**
   (`checkRetractionsAgain`) stores each answer by
-  `Document.takeRetractionCheck`, which keeps a decided check over an outage,
+  `Document.takeRetractionChecks`, which keeps a decided check over an outage,
   and never rewrites the snapshot or the report: the snapshot stays what the
   run saw (the desktop's `run_status`); its line names why papers stay
   unchecked (`RetractionText.savedWorkLine(_:causes:)`, #660). A run row that is unchecked (a failed
@@ -213,6 +219,8 @@ row per paper, that row is the paper's latest check.
   `sessions.retraction_snapshot_json`, by document id, never rewritten by a
   later check. Publication types are `documents.publication_types_json`
   (Room 11); a Europe PMC duplicate's types merge into PubMed's copy.
+  Each screen call decides a paper once (#671): `RetractionPaper.merged`
+  gives its documents one paper, as the desktop's `check` and Apple's.
 - The screen is `FactCheckWorkflow.screenForRetraction`, at the top of
   `scoreDocuments`, which every scoring path calls. A run starts in
   `runHandlingFailures`, `fetchMoreEvidence` and `retryFailedDocuments`.

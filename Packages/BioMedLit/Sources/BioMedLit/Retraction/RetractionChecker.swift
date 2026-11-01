@@ -42,7 +42,7 @@ public struct RetractionPaper: Hashable, Sendable {
 
     /// Each document's paper as its check is decided: one paper per
     /// ``paperKey``, as the desktop's `check` decides (#688; Android's
-    /// `RetractionPaper.merged`), with the first one's DOI, the first
+    /// `RetractionPaper.merged`), with the first document's DOI, the first
     /// canonical PMID and every one's publication types. A paper no other
     /// shares, or with no key, stands as it is.
     ///
