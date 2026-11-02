@@ -27,7 +27,9 @@ one copy (`standing`) before deciding; keep it in `adoptSharedRetractionChecks`.
 desktop's `_keeps`); a retraction they merge to beats an unreadable copy,
 nothing else does, a fully answered check included, as the unreadable copy's
 time is unknown (#691). The merge depends on order, so `adopt` merges a copy
-with all its records in one call, never in two steps.
+with all its records in one call, never in two steps. The saved-work line's
+warning reads the same merge (`RetractionCheckRecord.merged`, #693), never the
+newest check.
 **A missing native library** leaves papers unchecked, but stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
 FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C
@@ -35,18 +37,14 @@ FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C
 locally, and CI fails if they skip. **A ViewModel test mocks the workflow:
 every new workflow `StateFlow` must be stubbed in the three
 `FactCheckViewModel*Test`s**, or the unstubbed `collect` leaks a
-`KotlinNothingValueException` into a later suite (it surfaced in
-`NetworkRetryTest`). **Cancel stops the run** (#659): each workflow entry
-point records its coroutine as `workflowJob`, and `cancel()` joins it before
-writing the session step; keep that line in any new entry point (a test
-in `FactCheckWorkflowSearchFailureTest` cancels each one). **Cancel does not
-wait on a fetch** (#665): an OkHttp call a run makes goes through
-`OkHttpClient.executeCancellably` (`util/CancellableCall.kt`), never a bare
-`execute()`; a cancel then ends the call and its body read, thrown as the
-cancellation it is (the one bare `execute()` left, `RetractionIndexStore`'s
-export refresh, runs in the service's own scope, not a run's). Each fetching
-service has a test that cancels a request in flight (`cancelInFlight`, test
-`util/InFlightCancel.kt`).
+`KotlinNothingValueException` into a later suite. **Cancel stops the run**
+(#659): each workflow entry point records its coroutine as `workflowJob`,
+and `cancel()` joins it before writing the session step; keep that line in
+any new entry point (`FactCheckWorkflowSearchFailureTest` cancels each one).
+**Cancel does not wait on a fetch** (#665): a run's OkHttp calls use
+`executeCancellably` (`util/CancellableCall.kt`), never a bare `execute()`
+(only `RetractionIndexStore`'s export refresh, in the service's own scope);
+each fetching service has a `cancelInFlight` test (`util/InFlightCancel.kt`).
 
 **Retraction checking, iOS/macOS: done** (PRs #650, #652; plan
 `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`). The
@@ -253,7 +251,8 @@ Open issues by family; each issue carries the detail. None blocks another.
   rule, "could not be read" wording, needs a cross-platform decision),
   **#663** (Android), Apple **#647**, **#649**, **#653**, **#654**
   (item 1 done by #660), **#658** (Android), **#675** (a stopped Check again
-  and the label, needs a cross-platform decision).
+  and the label, needs a cross-platform decision), Apple **#694** (date an
+  unknown-status copy in `standing`, needs a decision).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
   the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,

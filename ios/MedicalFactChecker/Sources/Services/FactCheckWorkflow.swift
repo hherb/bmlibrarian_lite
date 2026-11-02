@@ -652,9 +652,10 @@ final class FactCheckWorkflow {
         })
     }
 
-    /// The latest check of each document's paper (``RetractionSavedWork/latest(_:)``):
-    /// its ``RetractionCheckRecord``, which any session may have written, and
-    /// its own copy. No request is made.
+    /// The latest check of each document's paper: its own copy and its
+    /// ``RetractionCheckRecord``s, which any session may have written,
+    /// ``RetractionCheckRecord/merged(_:check:)`` as the screen merges them
+    /// (#693). No request is made.
     ///
     /// - Parameter documents: The documents to look up.
     /// - Returns: Checks by `Document.id` (a document with none has no
@@ -677,7 +678,7 @@ final class FactCheckWorkflow {
                 }
                 checks.append(check)
             }
-            out[document.id] = RetractionSavedWork.latest(checks)
+            out[document.id] = RetractionCheckRecord.merged(checks) { $0 }
         }
         return (out, unread)
     }
