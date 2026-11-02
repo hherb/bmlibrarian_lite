@@ -1960,14 +1960,26 @@ final class RetractionCheckRecord {
         return check.isReadable ? check : nil
     }
 
-    /// The check several stored ones of a paper stand for: one this build
-    /// cannot read when there is one (it may hold a retraction an outage must
-    /// not erase), else the latest knowledge (``RetractionSavedWork/latest(_:)``).
+    /// The one of several stored checks of a paper that stands for them all.
+    /// The readable ones merge oldest first as the desktop's one row is
+    /// written: a newer one replaces the kept one unless the kept one
+    /// ``PaperRetractionCheck/standsAgainst(_:)`` it, and an unchecked one
+    /// never replaces a decided one. A retraction they merge to stands; else
+    /// a copy this build cannot read does when there is one (it may hold a
+    /// retraction an outage must not erase), as only a retraction or a fully
+    /// answered check overwrites such a row (#669, #691).
     static func standing(_ jsons: [String]) -> String? {
-        if let unread = jsons.first(where: { check($0) == nil }) { return unread }
-        guard let latest = RetractionSavedWork.latest(jsons.compactMap(check)),
-              let data = try? JSONEncoder().encode(latest) else { return jsons.first }
-        return String(data: data, encoding: .utf8)
+        let readable = jsons.compactMap { json in check(json).map { (json: json, check: $0) } }
+        var kept: (json: String, check: PaperRetractionCheck)?
+        for next in readable.sorted(by: { $0.check.checkedAt < $1.check.checkedAt }) {
+            if let old = kept?.check,
+               old == next.check || old.standsAgainst(next.check) || (next.check.isUnchecked && !old.isUnchecked) {
+                continue
+            }
+            kept = next
+        }
+        if kept?.check.isRetracted == true { return kept?.json }
+        return jsons.first { check($0) == nil } ?? kept?.json
     }
 
     /// The records of `keys`, by key.
@@ -1980,21 +1992,15 @@ final class RetractionCheckRecord {
     }
 
     /// Brings each document's copy up to its paper's record, before a check
-    /// decides by it: the latest of the two, the record's when either cannot
-    /// be read, except that a copy this build cannot read is kept.
+    /// decides by it: the ``standing(_:)`` one of the two, the copy when
+    /// neither can be read.
     static func adopt(into documents: [Document], in context: ModelContext) throws {
         let records = try byKey(Set(documents.compactMap(\.retractionPaper.paperKey)), in: context)
         for document in documents {
             guard let key = document.retractionPaper.paperKey,
                   let shared = standing((records[key] ?? []).map(\.checkJSON)) else { continue }
             guard let own = document.retractionCheckJSON else { document.retractionCheckJSON = shared; continue }
-            guard let ownCheck = check(own) else { continue }
-            if let sharedCheck = check(shared) {
-                let latest = RetractionSavedWork.latest([ownCheck, sharedCheck])
-                if latest != ownCheck { document.retractionCheck = latest }
-            } else {
-                document.retractionCheckJSON = shared
-            }
+            if let json = standing([own, shared]), json != own { document.retractionCheckJSON = json }
         }
     }
 
