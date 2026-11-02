@@ -404,7 +404,7 @@ final class Document {
 
     /// The check this document is shown by: the one its run used (the
     /// session's snapshot), else the stored one, which can differ (see
-    /// ``takeRetractionCheck(_:)``). A list decodes
+    /// ``takeRetractionCheck(_:typesRecorded:)``). A list decodes
     /// ``FactCheckSession/shownRetractionChecks()`` once instead.
     var shownRetractionCheck: PaperRetractionCheck? { session?.retractionSnapshot()[id] ?? retractionCheck }
 
@@ -435,8 +435,9 @@ final class Document {
     /// Whether the stored check says retracted; never true for unchecked.
     var isRetracted: Bool { retractionCheck?.isRetracted ?? false }
 
-    /// The paper a retraction check asks about. Types not recorded are asked
-    /// as none (``takeRetractionCheck(_:)`` keeps a label verdict they cannot show).
+    /// This document's own paper; a check asks about ``RetractionPaper/merged(_:)``
+    /// of a run's. Types no document of the paper recorded are asked as none
+    /// (``takeRetractionCheck(_:typesRecorded:)`` keeps a label verdict they cannot show).
     var retractionPaper: RetractionPaper {
         RetractionPaper(doi: doi, pmid: pubmedID, publicationTypes: publicationTypes ?? [])
     }
@@ -445,26 +446,55 @@ final class Document {
     /// (retraction_checks.py `check`), and returns the check the run uses.
     ///
     /// The stored check stands, keeping its `checkedAt`, when it rests on a
-    /// PubMed label this document has not recorded (`_label_only_unreadable`)
+    /// PubMed label not recorded (`_label_only_unreadable`)
     /// or when ``PaperRetractionCheck/standsAgainst(_:)`` `fresh`. A row this
     /// build cannot read is overwritten only by a check every lookup answered,
     /// or by a retraction, which erases nothing that warns more (#669).
     ///
-    /// - Parameter fresh: The check just made.
+    /// - Parameters:
+    ///   - fresh: The check just made.
+    ///   - typesRecorded: Whether the paper's PubMed label is recorded, by
+    ///     this document or another of the same paper
+    ///     (``takeRetractionChecks(_:fresh:)``).
     /// - Returns: What the run excludes, counts and records.
-    func takeRetractionCheck(_ fresh: PaperRetractionCheck) -> PaperRetractionCheck {
+    func takeRetractionCheck(_ fresh: PaperRetractionCheck, typesRecorded: Bool) -> PaperRetractionCheck {
         guard let stored = retractionCheck else {
             // an unreadable row may hold a retraction an outage must not erase
             if retractionCheckJSON == nil || fresh.unanswered.isEmpty || fresh.isRetracted { retractionCheck = fresh }
             return fresh
         }
-        if !fresh.isRetracted, publicationTypes == nil, stored.isRetracted || stored.isConcern,
+        if !fresh.isRetracted, !typesRecorded, stored.isRetracted || stored.isConcern,
            stored.isDecidedByLabel {
             return stored
         }
         if stored.standsAgainst(fresh) { return stored.shown(against: fresh) }
         retractionCheck = fresh
         return fresh
+    }
+
+    /// Takes each document's fresh check (``takeRetractionCheck(_:typesRecorded:)``),
+    /// a paper's label counting as recorded when any of `documents` with its
+    /// paper key recorded it. Callers first ``RetractionCheckRecord/unify(_:)``
+    /// the copies and pass checks of the ``RetractionPaper/merged(_:)``
+    /// papers; every document of a paper then decides alike, as the
+    /// desktop's `check` decides once per paper (#688).
+    ///
+    /// - Parameters:
+    ///   - documents: The documents checked.
+    ///   - fresh: Each one's fresh check, in order; `nil` takes none.
+    /// - Returns: The check each one's run uses, by `Document.id`, for those taken.
+    static func takeRetractionChecks(
+        _ documents: [Document], fresh: [PaperRetractionCheck?]
+    ) -> [String: PaperRetractionCheck] {
+        let recorded = Set(documents.filter { $0.publicationTypes != nil }.compactMap(\.retractionPaper.paperKey))
+        var used: [String: PaperRetractionCheck] = [:]
+        for (document, check) in zip(documents, fresh) {
+            guard let check else { continue }
+            let typesRecorded = document.publicationTypes != nil
+                || document.retractionPaper.paperKey.map(recorded.contains) == true
+            used[document.id] = document.takeRetractionCheck(check, typesRecorded: typesRecorded)
+        }
+        return used
     }
 
     // MARK: - Transparency Analysis
@@ -1965,6 +1995,19 @@ final class RetractionCheckRecord {
             } else {
                 document.retractionCheckJSON = shared
             }
+        }
+    }
+
+    /// Gives every one of `documents` sharing a paper key the same copy, the
+    /// ``standing(_:)`` one of theirs, as ``share(from:in:)`` merges them,
+    /// so a check decides the paper once (#688).
+    static func unify(_ documents: [Document]) {
+        let byKey = Dictionary(grouping: documents.compactMap { document in
+            document.retractionPaper.paperKey.map { (key: $0, document: document) }
+        }, by: \.key)
+        for group in byKey.values.map({ $0.map(\.document) }) where group.count > 1 {
+            let json = standing(group.compactMap(\.retractionCheckJSON))
+            for document in group where document.retractionCheckJSON != json { document.retractionCheckJSON = json }
         }
     }
 

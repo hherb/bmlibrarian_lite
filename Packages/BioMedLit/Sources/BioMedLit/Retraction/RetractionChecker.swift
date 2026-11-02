@@ -39,6 +39,30 @@ public struct RetractionPaper: Hashable, Sendable {
         if let key = doi.flatMap(RetractionChecker.doiKey) { return "doi:\(key)" }
         return pmid.flatMap { PMID.canonical($0).pmid }.map { "pmid:\($0)" }
     }
+
+    /// Each document's paper as its check is decided: one paper per
+    /// ``paperKey``, as the desktop's `check` decides (#688; Android's
+    /// `RetractionPaper.merged`), with the first document's DOI, the first
+    /// canonical PMID and every one's publication types. A paper no other
+    /// shares, or with no key, stands as it is.
+    ///
+    /// - Parameter papers: Each document's own paper, in order.
+    /// - Returns: The paper each one's check is decided for, in the same order.
+    public static func merged(_ papers: [RetractionPaper]) -> [RetractionPaper] {
+        let keys = papers.map(\.paperKey)
+        var groups: [String: [RetractionPaper]] = [:]
+        for (key, paper) in zip(keys, papers) {
+            if let key { groups[key, default: []].append(paper) }
+        }
+        let byKey = groups.mapValues { group in
+            group.count == 1 ? group[0] : RetractionPaper(
+                doi: group[0].doi,
+                pmid: group.lazy.compactMap { $0.pmid.flatMap { PMID.canonical($0).pmid } }.first,
+                publicationTypes: group.flatMap(\.publicationTypes)
+            )
+        }
+        return zip(keys, papers).map { key, paper in key.flatMap { byKey[$0] } ?? paper }
+    }
 }
 
 /// The notice a verdict rests on, by contract names.

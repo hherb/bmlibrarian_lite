@@ -123,6 +123,17 @@ final class RetractionCheckerTests: XCTestCase {
         XCTAssertEqual(out[second]?.status, "clear")
     }
 
+    /// #688: papers sharing a key become one, from all their evidence; the rest stand.
+    func testMergedGivesPapersSharingAKeyOnePaper() {
+        let first = RetractionPaper(doi: "10.1000/Shared", pmid: nil, publicationTypes: ["Journal Article"])
+        let second = RetractionPaper(doi: "https://doi.org/10.1000/shared", pmid: "0005", publicationTypes: ["Retracted Publication"])
+        let third = RetractionPaper(doi: "10.1000/SHARED", pmid: "9", publicationTypes: [])
+        let alone = RetractionPaper(doi: "10.1000/alone", pmid: "0007", publicationTypes: [])
+        let keyless = RetractionPaper(doi: nil, pmid: nil, publicationTypes: ["Journal Article"])
+        let one = RetractionPaper(doi: "10.1000/Shared", pmid: "5", publicationTypes: ["Journal Article", "Retracted Publication"])
+        XCTAssertEqual(RetractionPaper.merged([first, alone, second, keyless, third]), [one, alone, one, keyless, one])
+    }
+
     /// Control: a served Crossref answer and a consulted, empty index clear a paper.
     func testServedCrossrefAndConsultedEmptyIndexIsClear() async throws {
         StubURLProtocol.stubbed = (200, Self.crossrefBody(#"{"DOI": "10.1000/unknown"}"#))

@@ -121,6 +121,11 @@ final class RetractionSavedWorkTests: XCTestCase {
         var calls = 0
     }
 
+    /// The papers asked about.
+    private final class AskedPapers: @unchecked Sendable {
+        var papers: [RetractionPaper] = []
+    }
+
     private func restore(
         _ session: FactCheckSession, asked: Asked = Asked(), answers: [String: PaperRetractionCheck] = [:]
     ) -> FactCheckWorkflow {
@@ -245,6 +250,39 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertEqual(documents[0].badgedRetractionCheck(shown: shown)?.isRetracted, true, "the badge shows the new one")
         XCTAssertEqual(documents[0].badgedRetractionCheck(shown: documents[0].shownRetractionCheck)?.isRetracted, true,
                        "and so does the full text's banner")
+    }
+
+    /// #688 on *Check again*: one check per paper, from every document's evidence.
+    func testCheckAgainChecksAPaperTwoDocumentsShareOnce() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/a"], cited: [0, 1], run: [
+            0: Self.check("clear"), 1: Self.check("clear"),
+        ])
+        documents[0].publicationTypes = nil
+        let found = PaperRetractionCheck(
+            status: "retracted", deciding: Self.notice, unanswered: ["crossref"],
+            checkedAt: Self.runDay.addingTimeInterval(Self.day), exportDataAsOf: nil, crossrefFailure: nil
+        )
+        let outage = PaperRetractionCheck(
+            status: "unchecked", deciding: nil, unanswered: ["crossref"],
+            checkedAt: Self.runDay.addingTimeInterval(Self.day), exportDataAsOf: nil, crossrefFailure: nil
+        )
+        let workflow = restore(session)
+        let asked = AskedPapers()
+        // Crossref is down; only a check that sees document 0's record finds the retraction
+        workflow.useRetractionCheck { papers in
+            asked.papers += papers
+            var out: [RetractionPaper: PaperRetractionCheck] = [:]
+            for paper in papers { out[paper] = paper.publicationTypes.isEmpty ? outage : found }
+            return out
+        }
+
+        await workflow.checkRetractionsAgain()
+
+        XCTAssertEqual(asked.papers.count, 1, "asked once")
+        for document in documents { XCTAssertEqual(document.retractionCheck, found) }
+        let key = try XCTUnwrap(documents[0].retractionPaper.paperKey)
+        let records = try XCTUnwrap(RetractionCheckRecord.byKey([key], in: context)[key])
+        XCTAssertEqual(records.map { RetractionCheckRecord.check($0.checkJSON) }, [found])
     }
 
     /// A row this build cannot read, and Crossref down while Retraction Watch

@@ -15,11 +15,14 @@ unchecked from its own answers only (#660, #668, all three platforms).
 check **or a retraction**, whatever was down (#669, all three platforms;
 a concern still cannot, since the row may hold a retraction). A row naming
 a status or lookup this build does not know is unreadable on all three
-(Swift's `PaperRetractionCheck.isReadable`). **Android decides once per
-paper key** (#671): `RetractionPaper.merged` gives every document of a paper
-the first DOI, first canonical PMID and all publication types, and
-`takeRetractionChecks` takes one check per key, as the desktop's `check`,
-within each screen call; Apple still decides per document (#688).
+(Swift's `PaperRetractionCheck.isReadable`). **Both apps decide once per
+paper key**, as the desktop's `check` (#671 Android, #688 Apple):
+`RetractionPaper.merged` gives every document of a paper the first DOI,
+first canonical PMID and all publication types, asked once within each screen
+call, and a paper's
+label counts as recorded when any of its documents recorded it. Apple keeps a
+copy per document, so `RetractionCheckRecord.unify` gives a paper's documents
+one copy (`standing`) before deciding; keep it in `adoptSharedRetractionChecks`.
 **A missing native library** leaves papers unchecked, but stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
 FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C
@@ -245,7 +248,8 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **Retraction checking** follow-ups: **#662** (an unchecked run's warning
   rule, "could not be read" wording, needs a cross-platform decision),
   **#663** (Android), Apple **#647**, **#649**, **#653**, **#654**
-  (item 1 done by #660), **#688** (Apple, #671's per-paper decision), **#658** (Android), **#675** (a stopped Check again
+  (item 1 done by #660), **#691** (Apple, an unreadable copy beats a
+  readable retraction), **#658** (Android), **#675** (a stopped Check again
   and the label, needs a cross-platform decision).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
@@ -461,11 +465,8 @@ page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
   doc/cross_platform/jats_corpus/` line by line — regenerating unread is how a
   regression becomes a committed expectation. Then **run** bmlib's Python parser
   over the same files; Android's needs a source read until #121.
-- Mutation-testing a source file? **Back it up with `cp`, not `git checkout`**,
-  whose restore wipes uncommitted work so later runs measure a tree with the
-  feature missing. **Key the harness on `swift test`'s exit code**, not its last
-  summary line. **A survivor is a claim about the test, and sometimes about the
-  code** (#186): check what the asserted value's provenance is on that path.
+- Mutation-testing? **Back up with `cp`, never `git checkout`**, key on `swift
+  test`'s exit code, and read a survivor as a claim about the test (#186).
 - **Touching a SwiftData model, or `SchemaVersions.swift`?** A probe that opens
   a store whose checksum *matches* a listed version proves nothing — two of them
   passed while the change would have crashed every upgrading app at launch. Write
@@ -493,11 +494,8 @@ page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
 
 ### Xcode Cloud contract (macOS ships from the multiplatform project)
 
-Xcode Cloud archives `ios/MedicalFactChecker/MedicalFactChecker.xcodeproj`,
-scheme `MedicalFactChecker`, from a **fresh clone**. Two invariants break it
-silently while local builds stay green, both enforced on every PR by
-`.github/workflows/xcode-project-guards.yml`: **no Swift package reference may
-point outside this repository**, and **`MedicalFactChecker.xcscheme` must stay
-shared** (`…xcodeproj/xcshareddata/xcschemes/`). Reproduce a cloud build:
-`git clone <repo> /tmp/x && cd /tmp/x/ios/MedicalFactChecker && xcodebuild
--scheme MedicalFactChecker -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO archive`.
+Xcode Cloud archives scheme `MedicalFactChecker` from a **fresh clone**;
+`xcode-project-guards.yml` enforces that **no Swift package reference points
+outside this repository** and **the scheme stays shared**. Reproduce: clone to
+`/tmp/x`, then `xcodebuild -scheme MedicalFactChecker -destination
+'platform=macOS' CODE_SIGNING_ALLOWED=NO archive` in `ios/MedicalFactChecker`.

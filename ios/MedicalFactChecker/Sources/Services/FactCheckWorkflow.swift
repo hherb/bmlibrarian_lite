@@ -506,7 +506,7 @@ final class FactCheckWorkflow {
 
     /// Checks every document of the restored session for retraction again
     /// (the desktop's *Check again*), storing each answer by
-    /// ``Document/takeRetractionCheck(_:)``, which keeps a decided check over
+    /// ``Document/takeRetractionChecks(_:fresh:)``, which keeps a decided check over
     /// an outage. The run's snapshot, and so the
     /// report, is never rewritten: ``retractionSavedWorkLine`` and
     /// ``retractionSavedWorkWarning`` say what changed, and the warning
@@ -531,16 +531,17 @@ final class FactCheckWorkflow {
         retractionSavedWorkLine = RetractionText.checkingAgainLine
 
         let documents = session.documents ?? []
-        let papers = documents.map(\.retractionPaper)
+        // one paper per paper key, from every document's evidence (#688)
+        let papers = RetractionPaper.merged(documents.map(\.retractionPaper))
         let checks: [RetractionPaper: PaperRetractionCheck]
         do {
-            checks = try await (retractionCheck ?? productionRetractionCheck())(papers)
+            checks = try await (retractionCheck ?? productionRetractionCheck())(Self.distinct(papers))
         } catch {
             // a cancellation nobody asked for is a failure too (see stopRequested)
             var labelled: [String: PaperRetractionCheck] = [:]
             if !stopRequested {
                 logger.warning("Retraction check again failed: \(error.localizedDescription)")
-                // nothing is stored, but a record's own label still retracts (#673)
+                // nothing is stored, but the paper's label (any of its records') still retracts (#673)
                 let now = Date()
                 for (document, paper) in zip(documents, papers) {
                     let check = PaperRetractionCheck.failed(for: paper, at: now)
@@ -553,9 +554,7 @@ final class FactCheckWorkflow {
         // a stop the check did not throw for stores nothing either
         if stopRequested { showSavedRetraction(note: RetractionText.checkAgainFailed); return }
         let adopted = adoptSharedRetractionChecks(documents)
-        for (document, paper) in zip(documents, papers) {
-            if let check = checks[paper] { _ = document.takeRetractionCheck(check) }
-        }
+        _ = Document.takeRetractionChecks(documents, fresh: papers.map { checks[$0] })
         if adopted { shareRetractionChecks(documents) }
         var unsaved = ""
         do {
@@ -587,6 +586,12 @@ final class FactCheckWorkflow {
         let again = RetractionText.notCheckedAgainClause(
             missed.count, causes: RetractionText.uncheckedCauses(missed, failed: []))
         showSavedRetraction(note: again + unsaved, causes: causes)
+    }
+
+    /// `papers` without repeats, in order: a paper two documents share is asked about once (#688).
+    private static func distinct(_ papers: [RetractionPaper]) -> [RetractionPaper] {
+        var seen: Set<RetractionPaper> = []
+        return papers.filter { seen.insert($0).inserted }
     }
 
     /// The scored documents' ids (the report's rule, #657): a run's papers, with a snapshot row or not (#684).
@@ -3795,9 +3800,9 @@ final class FactCheckWorkflow {
     /// Each document is checked at most once per run. One whose stored check
     /// ``PaperRetractionCheck/isReusable(now:publicationTypes:)`` is used
     /// without asking; what is stored and used otherwise follows
-    /// ``Document/takeRetractionCheck(_:)``. A check that throws without a stop
+    /// ``Document/takeRetractionChecks(_:fresh:)``. A check that throws without a stop
     /// (a cancellation nobody asked for included) leaves every paper it
-    /// was given unchecked for this run, unless its record's own label retracts it
+    /// was given unchecked for this run, unless its paper's label (any of its records') retracts it
     /// (``PaperRetractionCheck/failed(for:at:)``), and the run goes on.
     ///
     /// - Parameter documents: The documents about to be scored.
@@ -3816,24 +3821,25 @@ final class FactCheckWorkflow {
         let unseen = documents.filter { !seen.contains($0.id) }
         guard !unseen.isEmpty else { return }
         var adopted = adoptSharedRetractionChecks(unseen)
+        // one paper per paper key, from every document's evidence, as the desktop's `check` (#688)
+        let papers = RetractionPaper.merged(unseen.map(\.retractionPaper))
 
         let now = Date()
         var used: [String: PaperRetractionCheck] = [:]
-        var due: [Document] = []
-        for document in unseen {
+        var due: [(document: Document, paper: RetractionPaper)] = []
+        for (document, paper) in zip(unseen, papers) {
             if let stored = document.retractionCheck,
-               stored.isReusable(now: now, publicationTypes: document.retractionPaper.publicationTypes) {
+               stored.isReusable(now: now, publicationTypes: paper.publicationTypes) {
                 used[document.id] = stored
             } else {
-                due.append(document)
+                due.append((document: document, paper: paper))
             }
         }
         if !due.isEmpty {
             updateProgress(.scoringDocuments, Self.retractionProgressMessage)
-            let papers = due.map(\.retractionPaper)
             var checks: [RetractionPaper: PaperRetractionCheck] = [:]
             do {
-                checks = try await (retractionCheck ?? productionRetractionCheck())(papers)
+                checks = try await (retractionCheck ?? productionRetractionCheck())(Self.distinct(due.map(\.paper)))
             } catch let error where !stopRequested {
                 // a cancellation nobody asked for is a failure too, as in *Check again*
                 logger.warning("Retraction check failed, its papers unchecked but those their label retracts: \(error.localizedDescription)")
@@ -3843,15 +3849,15 @@ final class FactCheckWorkflow {
             // another session may have written a record during the check: read
             // them again, or the write back below would overwrite it (#651)
             adopted = adoptSharedRetractionChecks(unseen)
-            for (document, paper) in zip(due, papers) {
-                if checks[paper] == nil { retractionRun.failed.insert(paper) }
-                used[document.id] = document.takeRetractionCheck(checks[paper] ?? .failed(for: paper, at: now))
-            }
+            for (_, paper) in due where checks[paper] == nil { retractionRun.failed.insert(paper) }
+            used.merge(Document.takeRetractionChecks(
+                due.map(\.document), fresh: due.map { checks[$0.paper] ?? .failed(for: $0.paper, at: now) }
+            )) { _, taken in taken }
         }
 
-        for document in unseen {
+        for (document, paper) in zip(unseen, papers) {
             guard let check = used[document.id] else { continue }
-            retractionRun.used.append((id: document.id, paper: document.retractionPaper, check: check))
+            retractionRun.used.append((id: document.id, paper: paper, check: check))
         }
         if adopted { shareRetractionChecks(unseen) }
         session.recordRetractionSnapshot(used)
@@ -3865,6 +3871,8 @@ final class FactCheckWorkflow {
     ///
     /// - Returns: Whether the records were read, so may be written back.
     private func adoptSharedRetractionChecks(_ documents: [Document]) -> Bool {
+        // every document of a paper then decides by one copy (#688)
+        defer { RetractionCheckRecord.unify(documents) }
         do {
             try RetractionCheckRecord.adopt(into: documents, in: modelContext)
             return true
