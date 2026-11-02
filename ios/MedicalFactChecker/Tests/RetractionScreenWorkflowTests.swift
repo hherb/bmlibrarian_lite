@@ -121,11 +121,18 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         )
     }
 
-    private static func unchecked(_ unanswered: [String], exportDataAsOf: String? = nil) -> PaperRetractionCheck {
+    private static func unchecked(
+        _ unanswered: [String], exportDataAsOf: String? = nil, checkedAt: Date = Date()
+    ) -> PaperRetractionCheck {
         PaperRetractionCheck(
             status: "unchecked", deciding: nil, unanswered: unanswered,
-            checkedAt: Date(), exportDataAsOf: exportDataAsOf, crossrefFailure: nil
+            checkedAt: checkedAt, exportDataAsOf: exportDataAsOf, crossrefFailure: nil
         )
+    }
+
+    /// `check` as a stored copy's JSON.
+    private static func json(_ check: PaperRetractionCheck) throws -> String {
+        try XCTUnwrap(String(data: JSONEncoder().encode(check), encoding: .utf8))
     }
 
     /// Asks and counts, answering each paper from `answers`.
@@ -458,9 +465,9 @@ final class RetractionScreenWorkflowTests: XCTestCase {
     }
 
     /// #691: a readable retraction one document of a paper stored beats a copy
-    /// the other holds that this build cannot read, as a retraction overwrites
-    /// such a row (#669); a concern does not (the control), since the row may
-    /// hold a retraction.
+    /// the other holds that this build cannot read, as it erases nothing that
+    /// warns more; a fully answered concern does not (the control), since the
+    /// unreadable copy may be newer and may hold a retraction.
     func testAStoredRetractionBeatsAnUnreadableCopyOfThePaper() async throws {
         let (session, documents) = makeSession(["10.1000/a", "10.1000/a", "10.1000/b", "10.1000/b"])
         let unreadable = "{\"status\": 7}"
@@ -510,6 +517,73 @@ final class RetractionScreenWorkflowTests: XCTestCase {
 
         XCTAssertTrue(documents[0].isRetracted)
         XCTAssertNil(documents[0].scoredAt)
+    }
+
+    /// #691: the copy standing for a paper's stored ones, case by case.
+    func testTheStandingCopyOfAPaper() throws {
+        let unreadable = "{\"status\": 7}", otherUnreadable = "{\"status\": 8}"
+        let now = Date()
+        let ago = { (days: Double) in now.addingTimeInterval(-days * Self.day) }
+        let retraction = try Self.json(Self.retracted(checkedAt: ago(3)))
+        let oldRetraction = try Self.json(Self.retracted(checkedAt: ago(20)))
+        let retractionOnAnOutage = try Self.json(Self.retracted(checkedAt: ago(3), unanswered: ["crossref"]))
+        let newerUnchecked = try Self.json(Self.unchecked(["crossref"], checkedAt: ago(1)))
+        let oldClear = try Self.json(Self.clear(checkedAt: ago(40)))
+        let newerClear = try Self.json(Self.clear(checkedAt: ago(2)))
+        let answeredConcern = try Self.json(Self.concern(unanswered: [], checkedAt: ago(3)))
+        let cases: [(String, [String], String?)] = [
+            ("nothing stored", [], nil),
+            ("only an unreadable copy", [unreadable], unreadable),
+            ("two unreadable copies: the first", [unreadable, otherUnreadable], unreadable),
+            ("merged by time, not by order", [retraction, oldClear], retraction),
+            ("a newer unchecked never replaces a decided one", [retractionOnAnOutage, newerUnchecked], retractionOnAnOutage),
+            ("a newer answered clear replaces a retraction", [oldRetraction, newerClear], newerClear),
+            ("a superseded retraction never beats an unreadable copy", [oldRetraction, newerClear, unreadable], unreadable),
+            ("a retraction beats an unreadable copy", [unreadable, retraction], retraction),
+            ("an answered concern does not", [answeredConcern, unreadable], unreadable),
+        ]
+        for (name, jsons, expected) in cases {
+            XCTAssertEqual(RetractionCheckRecord.standing(jsons), expected, name)
+        }
+    }
+
+    /// #691: a document's copy this build cannot read takes a retraction its
+    /// paper's record holds, and keeps its place against an answered concern
+    /// there (the control).
+    func testAnUnreadableCopyTakesTheRecordsRetraction() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b"])
+        let unreadable = "{\"status\": 7}"
+        for document in documents { document.retractionCheckJSON = unreadable }
+        let keys = try documents.map { try XCTUnwrap($0.retractionPaper.paperKey) }
+        try recordElsewhere(keys[0], Self.retracted(checkedAt: Date().addingTimeInterval(-10 * Self.day), unanswered: ["crossref"]))
+        try recordElsewhere(keys[1], Self.concern(unanswered: [], checkedAt: Date().addingTimeInterval(-10 * Self.day)))
+        let workflow = restore(session, check: Self.answering([nil: Self.unchecked(["retraction_watch_export", "crossref"])]))
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        XCTAssertTrue(documents[0].isRetracted)
+        XCTAssertNil(documents[0].scoredAt)
+        XCTAssertEqual(documents[1].retractionCheckJSON, unreadable)
+    }
+
+    /// #691: a document's copy merges with all its paper's records at once,
+    /// as the merge depends on their order: an older retraction this session
+    /// holds is superseded by a newer answered clear in one record, so the
+    /// unreadable other record stands and the paper is not left out. Merging
+    /// the records first would set the clear aside and keep the retraction.
+    func testACopyMergesWithAllItsPapersRecordsAtOnce() async throws {
+        let (session, documents) = makeSession(["10.1000/a"])
+        documents[0].retractionCheck = Self.retracted(checkedAt: Date().addingTimeInterval(-20 * Self.day))
+        let key = try XCTUnwrap(documents[0].retractionPaper.paperKey)
+        try recordElsewhere(key, Self.clear(checkedAt: Date().addingTimeInterval(-5 * Self.day)))
+        context.insert(RetractionCheckRecord(paperKey: key, checkJSON: "{\"status\": 7}"))
+        try context.save()
+        let workflow = restore(session, check: Self.answering([nil: Self.unchecked(["crossref"])]))
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        XCTAssertFalse(documents[0].isRetracted)
+        XCTAssertEqual(documents[0].retractionCheckJSON, "{\"status\": 7}")
     }
 
     /// #688: a check that throws on a paper two documents name differently

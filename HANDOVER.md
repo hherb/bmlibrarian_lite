@@ -23,9 +23,11 @@ call, and a paper's
 label counts as recorded when any of its documents recorded it. Apple keeps a
 copy per document, so `RetractionCheckRecord.unify` gives a paper's documents
 one copy (`standing`) before deciding; keep it in `adoptSharedRetractionChecks`.
-`standing` merges readable copies oldest first by `standsAgainst`, as the
-desktop's one row is written, and a retraction they merge to beats an
-unreadable copy; a concern does not (#691).
+`standing` merges readable copies oldest first by `standsAgainst` (the
+desktop's `_keeps`); a retraction they merge to beats an unreadable copy,
+nothing else does, a fully answered check included, as the unreadable copy's
+time is unknown (#691). The merge depends on order, so `adopt` merges a copy
+with all its records in one call, never in two steps.
 **A missing native library** leaves papers unchecked, but stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
 FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C

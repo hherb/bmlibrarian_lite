@@ -1961,13 +1961,13 @@ final class RetractionCheckRecord {
     }
 
     /// The one of several stored checks of a paper that stands for them all.
-    /// The readable ones merge oldest first as the desktop's one row is
-    /// written: a newer one replaces the kept one unless the kept one
-    /// ``PaperRetractionCheck/standsAgainst(_:)`` it, and an unchecked one
-    /// never replaces a decided one. A retraction they merge to stands; else
-    /// a copy this build cannot read does when there is one (it may hold a
-    /// retraction an outage must not erase), as only a retraction or a fully
-    /// answered check overwrites such a row (#669, #691).
+    /// The readable ones merge oldest first: a newer one replaces the kept
+    /// one unless the kept one ``PaperRetractionCheck/standsAgainst(_:)`` it
+    /// (the desktop's `_keeps`) or, as ``RetractionSavedWork/latest(_:)``, it
+    /// is unchecked and the kept one decided. A retraction they merge to
+    /// stands, as it erases nothing that warns more; else a copy this build
+    /// cannot read does when there is one, since its time is unknown and it
+    /// may hold a retraction an outage must not erase (#669, #691).
     static func standing(_ jsons: [String]) -> String? {
         let readable = jsons.compactMap { json in check(json).map { (json: json, check: $0) } }
         var kept: (json: String, check: PaperRetractionCheck)?
@@ -1991,16 +1991,18 @@ final class RetractionCheckRecord {
         return Dictionary(grouping: records, by: \.paperKey)
     }
 
-    /// Brings each document's copy up to its paper's record, before a check
-    /// decides by it: the ``standing(_:)`` one of the two, the copy when
-    /// neither can be read.
+    /// Brings each document's copy up to its paper's records, before a check
+    /// decides by it: the ``standing(_:)`` one of the copy and every record,
+    /// merged at once since the merge depends on their order, the copy when
+    /// none can be read.
     static func adopt(into documents: [Document], in context: ModelContext) throws {
         let records = try byKey(Set(documents.compactMap(\.retractionPaper.paperKey)), in: context)
         for document in documents {
-            guard let key = document.retractionPaper.paperKey,
-                  let shared = standing((records[key] ?? []).map(\.checkJSON)) else { continue }
-            guard let own = document.retractionCheckJSON else { document.retractionCheckJSON = shared; continue }
-            if let json = standing([own, shared]), json != own { document.retractionCheckJSON = json }
+            guard let key = document.retractionPaper.paperKey, let shared = records[key] else { continue }
+            let own = document.retractionCheckJSON
+            if let json = standing([own].compactMap { $0 } + shared.map(\.checkJSON)), json != own {
+                document.retractionCheckJSON = json
+            }
         }
     }
 
