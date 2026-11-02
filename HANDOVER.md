@@ -37,14 +37,18 @@ FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C
 locally, and CI fails if they skip. **A ViewModel test mocks the workflow:
 every new workflow `StateFlow` must be stubbed in the three
 `FactCheckViewModel*Test`s**, or the unstubbed `collect` leaks a
-`KotlinNothingValueException` into a later suite. **Cancel stops the run**
-(#659): each workflow entry point records its coroutine as `workflowJob`,
-and `cancel()` joins it before writing the session step; keep that line in
-any new entry point (`FactCheckWorkflowSearchFailureTest` cancels each one).
-**Cancel does not wait on a fetch** (#665): a run's OkHttp calls use
-`executeCancellably` (`util/CancellableCall.kt`), never a bare `execute()`
-(only `RetractionIndexStore`'s export refresh, in the service's own scope);
-each fetching service has a `cancelInFlight` test (`util/InFlightCancel.kt`).
+`KotlinNothingValueException` into a later suite (it surfaced in
+`NetworkRetryTest`). **Cancel stops the run** (#659): each workflow entry
+point records its coroutine as `workflowJob`, and `cancel()` joins it before
+writing the session step; keep that line in any new entry point (a test
+in `FactCheckWorkflowSearchFailureTest` cancels each one). **Cancel does not
+wait on a fetch** (#665): an OkHttp call a run makes goes through
+`OkHttpClient.executeCancellably` (`util/CancellableCall.kt`), never a bare
+`execute()`; a cancel then ends the call and its body read, thrown as the
+cancellation it is (the one bare `execute()` left, `RetractionIndexStore`'s
+export refresh, runs in the service's own scope, not a run's). Each fetching
+service has a test that cancels a request in flight (`cancelInFlight`, test
+`util/InFlightCancel.kt`).
 
 **Retraction checking, iOS/macOS: done** (PRs #650, #652; plan
 `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`). The

@@ -211,6 +211,16 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertTrue(warning.contains("• Study 0: Retracted"), warning)
     }
 
+    /// The control: a newer clear every lookup answered replaces the older
+    /// retraction, as on the screen, so nothing warns.
+    func testANewerAnsweredClearReplacesAnOlderRetraction() {
+        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        storeElsewhere("10.1000/a", Self.check("retracted", at: Self.runDay.addingTimeInterval(Self.day)))
+        documents[0].retractionCheck = Self.check("clear", at: Self.runDay.addingTimeInterval(9 * Self.day))
+
+        XCTAssertNil(restore(session).retractionSavedWorkWarning)
+    }
+
     /// A stored check this build cannot read may hold a retraction: the line
     /// says later checks could not be read, for this session's and another's.
     func testAnUnreadableStoredCheckSaysSo() {

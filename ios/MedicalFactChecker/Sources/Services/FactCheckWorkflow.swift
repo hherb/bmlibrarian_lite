@@ -606,7 +606,7 @@ final class FactCheckWorkflow {
 
     /// Sets ``retractionSavedWorkLine`` from the run's snapshot and the
     /// session's stored checks, and ``retractionSavedWorkWarning`` for the
-    /// cited papers whose latest check, this session's or another's for the
+    /// cited papers whose standing check, this session's or another's for the
     /// same paper, warns where the run did not.
     ///
     /// - Parameters:
@@ -629,7 +629,7 @@ final class FactCheckWorkflow {
         var unread = documents.contains { $0.retractionCheckJSON != nil && $0.retractionCheck == nil }
         if unread { logger.warning("A stored retraction check of this session could not be read") }
         do {
-            let found = try latestRetractionChecks(for: cited)
+            let found = try standingRetractionChecks(for: cited)
             latest = found.checks
             unread = unread || found.unread
         } catch {
@@ -652,7 +652,7 @@ final class FactCheckWorkflow {
         })
     }
 
-    /// The latest check of each document's paper: its own copy and its
+    /// The standing check of each document's paper: its own copy and its
     /// ``RetractionCheckRecord``s, which any session may have written,
     /// ``RetractionCheckRecord/merged(_:check:)`` as the screen merges them
     /// (#693). No request is made.
@@ -661,7 +661,7 @@ final class FactCheckWorkflow {
     /// - Returns: Checks by `Document.id` (a document with none has no
     ///   entry), and whether a stored check of the same papers could not be read.
     /// - Throws: When the store cannot be read.
-    private func latestRetractionChecks(
+    private func standingRetractionChecks(
         for documents: [Document]
     ) throws -> (checks: [String: PaperRetractionCheck], unread: Bool) {
         let records = try RetractionCheckRecord.byKey(
