@@ -114,10 +114,10 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         )
     }
 
-    private static func concern(unanswered: [String]) -> PaperRetractionCheck {
+    private static func concern(unanswered: [String], checkedAt: Date = Date()) -> PaperRetractionCheck {
         PaperRetractionCheck(
             status: "concern", deciding: nil, unanswered: unanswered,
-            checkedAt: Date(), exportDataAsOf: "2026-10-28", crossrefFailure: nil
+            checkedAt: checkedAt, exportDataAsOf: "2026-10-28", crossrefFailure: nil
         )
     }
 
@@ -455,6 +455,61 @@ final class RetractionScreenWorkflowTests: XCTestCase {
             XCTAssertNil(document.scoredAt, "neither document of a retracted paper is scored")
         }
         XCTAssertEqual(workflow.retractionNotice, "Retraction check: 2 retracted papers left out.")
+    }
+
+    /// #691: a readable retraction one document of a paper stored beats a copy
+    /// the other holds that this build cannot read, as a retraction overwrites
+    /// such a row (#669); a concern does not (the control), since the row may
+    /// hold a retraction.
+    func testAStoredRetractionBeatsAnUnreadableCopyOfThePaper() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/a", "10.1000/b", "10.1000/b"])
+        let unreadable = "{\"status\": 7}"
+        documents[0].retractionCheckJSON = unreadable
+        documents[1].retractionCheck = Self.retracted(checkedAt: Date().addingTimeInterval(-3 * Self.day))
+        documents[2].retractionCheckJSON = unreadable
+        documents[3].retractionCheck = Self.concern(unanswered: [], checkedAt: Date().addingTimeInterval(-3 * Self.day))
+        let workflow = restore(session, check: Self.answering([nil: Self.unchecked(["crossref"])]))
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        for document in documents.prefix(2) {
+            XCTAssertTrue(document.isRetracted)
+            XCTAssertNil(document.scoredAt, "neither document of a retracted paper is scored")
+        }
+        XCTAssertEqual(documents.suffix(2).map(\.retractionCheckJSON), [unreadable, unreadable])
+    }
+
+    /// #691: a paper's copies merge as the desktop's one row would have been
+    /// written: a newer concern resting on an outage never replaces an older
+    /// retraction every lookup answered (``PaperRetractionCheck/standsAgainst(_:)``).
+    func testANewerConcernOnAnOutageNeverBeatsAnAnsweredRetractionOfThePaper() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/a"])
+        documents[0].retractionCheck = Self.retracted(checkedAt: Date().addingTimeInterval(-10 * Self.day))
+        documents[1].retractionCheck = Self.concern(unanswered: ["crossref"], checkedAt: Date().addingTimeInterval(-Self.day))
+        let workflow = restore(session, check: Self.answering([nil: Self.unchecked(["crossref"])]))
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        for document in documents {
+            XCTAssertTrue(document.isRetracted)
+            XCTAssertNil(document.scoredAt)
+        }
+    }
+
+    /// #691: a paper's record this build cannot read never replaces a
+    /// readable retraction this session holds.
+    func testAnUnreadableRecordNeverReplacesAStoredRetraction() async throws {
+        let (session, documents) = makeSession(["10.1000/a"])
+        documents[0].retractionCheck = Self.retracted(checkedAt: Date().addingTimeInterval(-3 * Self.day))
+        let key = try XCTUnwrap(documents[0].retractionPaper.paperKey)
+        context.insert(RetractionCheckRecord(paperKey: key, checkJSON: "{\"status\": 7}"))
+        try context.save()
+        let workflow = restore(session, check: Self.answering([nil: Self.unchecked(["crossref"])]))
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        XCTAssertTrue(documents[0].isRetracted)
+        XCTAssertNil(documents[0].scoredAt)
     }
 
     /// #688: a check that throws on a paper two documents name differently

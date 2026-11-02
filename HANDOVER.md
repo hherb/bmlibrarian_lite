@@ -23,6 +23,9 @@ call, and a paper's
 label counts as recorded when any of its documents recorded it. Apple keeps a
 copy per document, so `RetractionCheckRecord.unify` gives a paper's documents
 one copy (`standing`) before deciding; keep it in `adoptSharedRetractionChecks`.
+`standing` merges readable copies oldest first by `standsAgainst`, as the
+desktop's one row is written, and a retraction they merge to beats an
+unreadable copy; a concern does not (#691).
 **A missing native library** leaves papers unchecked, but stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
 FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C
@@ -187,9 +190,8 @@ have landed):
   never overwritten; **bump `TRANSPARENCY_ANALYZER_VERSION`** whenever a score
   could move. **A skip is a third state** (`SourceLookupSkipped`). Never
   `findtext` a mixed-content element. Funders: `sponsor_patterns.json` schema 4.
-- **Older rounds, compressed to the rules that still bind.** Each cost a
-  defect; the archaeology is in git history and the `doc/cross_platform/`
-  READMEs, which these point at.
+- **Older rounds, compressed to the rules that still bind** (archaeology in
+  git history and the `doc/cross_platform/` READMEs).
   - **A source we could not reach is not a finding** (#346, #347, #344,
     PR #349). A typed fetch carries the answer *or* a `RequestFailure`
     (`served()` / `absent()` / `unreachable()`: `RecordFetch`,
@@ -248,8 +250,7 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **Retraction checking** follow-ups: **#662** (an unchecked run's warning
   rule, "could not be read" wording, needs a cross-platform decision),
   **#663** (Android), Apple **#647**, **#649**, **#653**, **#654**
-  (item 1 done by #660), **#691** (Apple, an unreadable copy beats a
-  readable retraction), **#658** (Android), **#675** (a stopped Check again
+  (item 1 done by #660), **#658** (Android), **#675** (a stopped Check again
   and the label, needs a cross-platform decision).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
@@ -437,10 +438,8 @@ page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
   `<OtherAbstract>`; **#404** Android's `ArticleId` has no `<Reference>`
   guard; **#190** CI never builds the iOS app target.
 
-### Transparency parity and pricing
-
-#148, #159, #160, #150, #145; Android #116, #109; pricing #136/#137, #138,
-#139; small #140, #126, #111, #225.
+- **Transparency parity and pricing**: #148, #159, #160, #150, #145; Android
+  #116, #109; pricing #136/#137, #138, #139; small #140, #126, #111, #225.
 
 ### Verify
 
