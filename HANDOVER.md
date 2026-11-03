@@ -268,8 +268,11 @@ Open issues by family; each issue carries the detail. None blocks another.
   cross-platform decision; items 2 and 3 done: Android's `failedFor` survives
   a bmlib panic, the desktop's `screen_with_fallback` logs a failing
   `close()` instead of losing the screen), Apple **#694** (date an
-  unknown-status copy in `standing`, needs a decision), **#700** (Swift and
-  Android: a local storage failure is waited out a day as a refused export).
+  unknown-status copy in `standing`, needs a decision). **#700 done**: only
+  a refusal of the export itself (unbuildable, shrunk) records the day's
+  wait; an index that cannot be written is `notStored` / `NotStored`, and
+  Android's missing native library `NoNativeLibrary`, neither recorded
+  (this settles #658's storage item on it).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
   the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,
