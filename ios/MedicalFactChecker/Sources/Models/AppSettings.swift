@@ -161,7 +161,7 @@ final class AppSettings {
 
     /// ``coreAPIKey``, or nil when the Keychain could not be read (#511), which the
     /// full-text chain records as the service unreachable rather than not asked.
-    var coreAPIKeyIfReadable: String? { credential(Keys.coreAPIKey, cache: &_coreAPIKeyCache) }
+    var coreAPIKeyIfReadable: String? { credential(Keys.coreAPIKey, cache: \._coreAPIKeyCache) }
 
     /// Store the CORE API key, then cache it; an empty key removes it.
     ///
@@ -190,7 +190,7 @@ final class AppSettings {
 
     /// ``elsevierAPIKey``, or nil when the Keychain could not be read (#511), which the
     /// full-text chain records as the service unreachable rather than not asked.
-    var elsevierAPIKeyIfReadable: String? { credential(Keys.elsevierAPIKey, cache: &_elsevierAPIKeyCache) }
+    var elsevierAPIKeyIfReadable: String? { credential(Keys.elsevierAPIKey, cache: \._elsevierAPIKeyCache) }
 
     /// Store the Elsevier API key, then cache it; an empty key removes it.
     ///
@@ -219,7 +219,7 @@ final class AppSettings {
 
     /// ``elsevierInstToken``, or nil when the Keychain could not be read (#511), which the
     /// full-text chain records as the service unreachable rather than not asked.
-    var elsevierInstTokenIfReadable: String? { credential(Keys.elsevierInstToken, cache: &_elsevierInstTokenCache) }
+    var elsevierInstTokenIfReadable: String? { credential(Keys.elsevierInstToken, cache: \._elsevierInstTokenCache) }
 
     /// Store the Elsevier institutional token, then cache it; an empty token
     /// removes it.
@@ -450,19 +450,21 @@ final class AppSettings {
     ///
     /// - Parameters:
     ///   - key: The credential's account.
-    ///   - cache: Its in-memory cache.
+    ///   - cache: Its in-memory cache. A key path, not `inout`: an `inout` pass of an
+    ///     observed property reports a change on every read, so a view reading the
+    ///     credential re-rendered itself forever (Settings froze).
     /// - Returns: The credential, `""` when none is saved, or nil when one was
     ///   saved and the store could not be read (#511). Locked, the Keychain may
     ///   refuse a read for a key never saved: that is no key, and not cached.
-    private func credential(_ key: String, cache: inout String?) -> String? {
-        if let cache { return cache }
+    private func credential(_ key: String, cache: ReferenceWritableKeyPath<AppSettings, String?>) -> String? {
+        if let cached = self[keyPath: cache] { return cached }
         let flag = key + Keys.savedSuffix
         guard let loaded = readSecret(key) else {
             return credentialFlags.bool(forKey: flag) ? nil : ""
         }
         // also records a key saved before the flag existed
         credentialFlags.set(!loaded.isEmpty, forKey: flag)
-        cache = loaded
+        self[keyPath: cache] = loaded
         return loaded
     }
 

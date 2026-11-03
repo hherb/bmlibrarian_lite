@@ -3,6 +3,7 @@
 //
 // Licensed under the GNU Affero General Public License, version 3 or later.
 
+import Observation
 import Security
 import XCTest
 @testable import MedicalFactChecker
@@ -77,6 +78,43 @@ final class APIKeySaveTests: XCTestCase {
         XCTAssertEqual(settings.coreAPIKey, "core-key")
         XCTAssertEqual(settings.elsevierAPIKey, "els-key")
         XCTAssertEqual(settings.elsevierInstTokenIfReadable, "els-token")
+    }
+
+    /// Reading a cached credential is not a change: Settings reads all three while
+    /// it renders, and a read reported as one re-rendered it forever (the app froze).
+    func testReadingACachedCredentialIsNotAChange() {
+        settings.saveCOREAPIKey("core-key")
+        settings.saveElsevierAPIKey("els-key")
+        settings.saveElsevierInstToken("els-token")
+        var changed = false
+        withObservationTracking {
+            _ = settings.coreAPIKey
+            _ = settings.elsevierAPIKey
+            _ = settings.elsevierInstTokenIfReadable
+        } onChange: { changed = true }
+
+        _ = settings.coreAPIKey
+        _ = settings.elsevierAPIKey
+        _ = settings.elsevierInstTokenIfReadable
+        XCTAssertFalse(changed)
+
+        settings.saveCOREAPIKey("new-key")
+        XCTAssertTrue(changed, "control: a save is a change")
+    }
+
+    /// Nor is a read the locked Keychain refuses, which caches nothing, so every
+    /// render asks again: reported as a change, Settings re-rendered forever there too.
+    func testAnUnreadableCredentialReadIsNotAChange() {
+        settings.saveCOREAPIKey("core-key")
+        settings = AppSettings(secretStore: store, credentialFlags: flags)
+        store.failsReads = true
+        var changed = false
+        withObservationTracking {
+            _ = settings.coreAPIKeyIfReadable
+        } onChange: { changed = true }
+
+        XCTAssertNil(settings.coreAPIKeyIfReadable, "control: the read was refused")
+        XCTAssertFalse(changed)
     }
 
     /// #511: locked, the Keychain may refuse a read for a key never saved;
