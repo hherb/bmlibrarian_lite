@@ -578,7 +578,12 @@ extension RetractionIndexStore {
     static func refreshAppCopyInBackground() {
         Task.detached(priority: .background) {
             let outcome = await app.refreshIfStale(now: Date())
-            refreshLogger.info("Retraction Watch data: \(String(describing: outcome), privacy: .public)")
+            switch outcome {
+            case .fresh, .refreshed:
+                refreshLogger.info("Retraction Watch data: \(String(describing: outcome), privacy: .public)")
+            case .refused, .failed:
+                refreshLogger.warning("Retraction Watch data: \(String(describing: outcome), privacy: .public)")
+            }
         }
     }
 

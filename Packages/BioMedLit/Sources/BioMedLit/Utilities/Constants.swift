@@ -158,6 +158,9 @@ public enum BioMedLitConstants {
     /// held is a truncated or partial download, and its missing retractions
     /// would read as "consulted, nothing found", so the old copy is kept.
     public static let retractionWatchMinKeepRatio = 0.95
+    /// A refused export would be refused again, so the next download waits a
+    /// day, not one per run (#647; Android's `RETRACTION_WATCH_REFUSED_BACKOFF_MS`).
+    public static let retractionWatchRefusedBackoffSeconds: TimeInterval = 24 * 60 * 60
     /// The export is ~68 MB, so a slow link needs far longer than a lookup;
     /// an idle timeout between packets, not one for the whole transfer.
     public static let retractionWatchDownloadTimeoutSeconds: TimeInterval = 120

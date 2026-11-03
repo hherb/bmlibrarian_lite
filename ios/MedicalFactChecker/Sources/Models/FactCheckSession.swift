@@ -16,7 +16,15 @@
 
 import BioMedLit
 import Foundation
+import OSLog
 import SwiftData
+
+/// Logger for stored-JSON decode failures on ``FactCheckSession`` (see `documentLog`
+/// in Document.swift for why it is not the per-platform `AppLogger`).
+private let sessionLog = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "com.bmlibrarian.MedicalFactChecker",
+    category: "Persistence"
+)
 
 /// A fact-checking session for a single medical claim.
 ///
@@ -387,11 +395,30 @@ final class FactCheckSession {
 
     // MARK: - Retraction Snapshot Methods
 
-    /// The check each document's run used, keyed by `Document.id`; empty
-    /// when never checked or unreadable.
-    func retractionSnapshot() -> [String: PaperRetractionCheck] {
+    /// The snapshot's entries as written, keyed by `Document.id`; empty when
+    /// never checked or when the whole snapshot is unreadable (logged).
+    private func retractionSnapshotEntries() -> [String: Any] {
         guard let data = retractionSnapshotJSON?.data(using: .utf8) else { return [:] }
-        return (try? JSONDecoder().decode([String: PaperRetractionCheck].self, from: data)) ?? [:]
+        guard let entries = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            sessionLog.error("Retraction snapshot unreadable; no run's check can be shown")
+            return [:]
+        }
+        return entries
+    }
+
+    /// The check each document's run used, keyed by `Document.id`; empty
+    /// when never checked. An entry this build cannot read is left out
+    /// (logged), never the whole snapshot (#647).
+    func retractionSnapshot() -> [String: PaperRetractionCheck] {
+        retractionSnapshotEntries().reduce(into: [:]) { checks, entry in
+            guard let data = try? JSONSerialization.data(withJSONObject: entry.value, options: .fragmentsAllowed),
+                  let check = try? JSONDecoder().decode(PaperRetractionCheck.self, from: data)
+            else {
+                sessionLog.error("Retraction snapshot entry unreadable; left out")
+                return
+            }
+            checks[entry.key] = check
+        }
     }
 
     /// The check each document is shown and counted by, keyed by `Document.id`:
@@ -413,13 +440,28 @@ final class FactCheckSession {
         (documents ?? []).filter { !$0.isScored && checks[$0.id]?.isRetracted == true }
     }
 
-    /// Adds what a run used to the snapshot; a document checked again is replaced.
+    /// Adds what a run used to the snapshot; a document checked again is
+    /// replaced. Every other entry is kept as written, one this build cannot
+    /// read included (#647); a snapshot unreadable as a whole is replaced
+    /// (logged by ``retractionSnapshotEntries()``).
     ///
     /// - Parameter checks: The checks used, keyed by `Document.id`; nothing is written for none.
     func recordRetractionSnapshot(_ checks: [String: PaperRetractionCheck]) {
-        guard !checks.isEmpty,
-              let data = try? JSONEncoder().encode(retractionSnapshot().merging(checks) { _, new in new })
-        else { return }
+        guard !checks.isEmpty else { return }
+        var entries = retractionSnapshotEntries()
+        for (id, check) in checks {
+            guard let data = try? JSONEncoder().encode(check),
+                  let entry = try? JSONSerialization.jsonObject(with: data)
+            else {
+                sessionLog.error("Retraction check not encodable; the snapshot is not written")
+                return
+            }
+            entries[id] = entry
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: entries, options: .sortedKeys) else {
+            sessionLog.error("Retraction snapshot not serialisable; the snapshot is not written")
+            return
+        }
         retractionSnapshotJSON = String(data: data, encoding: .utf8)
     }
 
