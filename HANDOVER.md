@@ -253,7 +253,8 @@ Open issues by family; each issue carries the detail. None blocks another.
   rule, "could not be read" wording, needs a cross-platform decision),
   **#663** item 2 (Android: a cancel is worded as a failure; waits on #654
   item 2; items 1, 3, 4 done: answers stored but not shown say "later checks
-  could not be read", never "the run's record", and the saved work is one
+  could not be read", never "the run's record", yet badge what they found
+  from memory as the desktop does, and the saved work is one
   `retractionSavedWork: StateFlow<RetractionSavedWorkState?>`), Apple
   **#647**, **#649**, **#653**, **#654** (item 1 done by #660), **#658**
   (Android), **#675** item 1 (a stopped Check again and the label, needs a

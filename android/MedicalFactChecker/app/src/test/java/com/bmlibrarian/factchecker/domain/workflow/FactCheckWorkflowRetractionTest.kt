@@ -827,9 +827,7 @@ class FactCheckWorkflowRetractionTest {
 
         run()
 
-        assertNull(workflow.retractionSavedWork.value?.line)
-        assertNull(workflow.retractionSavedWork.value?.warning)
-        assertTrue(workflow.retractionSavedWork.value?.checks.orEmpty().isEmpty())
+        assertNull(workflow.retractionSavedWork.value)
     }
 
     /** A store that fails never hides what Check again found: the reader sees it, and that it was not saved. */
@@ -862,9 +860,31 @@ class FactCheckWorkflowRetractionTest {
         workflow.checkRetractionsAgain()
 
         assertTrue("stored", PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
-        // the earlier badges and warning stay up whole: never a blank that could hide a retraction
-        assertEquals(shown.copy(line = "Retraction status checked 2026-10-18" + RetractionText.STORED_CHECKS_UNREAD), workflow.retractionSavedWork.value)
+        val savedWork = workflow.retractionSavedWork.value!!
+        assertEquals("Retraction status checked 2026-10-18" + RetractionText.STORED_CHECKS_UNREAD, savedWork.line)
+        // the earlier warning stays up: never a blank that could hide a retraction
+        assertEquals(shown.warning, savedWork.warning)
+        assertTrue("what it found is badged though it could not be read back", savedWork.checks.getValue("d1").isRetracted)
         assertFalse(workflow.isCheckingRetractionsAgain.value)
+    }
+
+    /** An earlier Check again's "not saved" is no longer so once this one stores its answers. */
+    @Test
+    fun `a Check again that stores its answers drops an earlier one's not saved, though it cannot show them`() = runTest {
+        restoreCheckedSession()
+        coEvery { retractionService.store(any()) } throws IOException("disk full")
+        workflow.checkRetractionsAgain()
+        assertTrue(workflow.retractionSavedWork.value!!.line.endsWith(RetractionText.CHECK_AGAIN_NOT_SAVED))
+        coEvery { retractionService.store(any()) } answers {
+            firstArg<Map<String, PaperRetractionCheck>>().forEach { (key, check) -> rows[key] = PaperRetractionCheck.encode(check) }
+        }
+        coEvery { documentRepository.getCitationsBySessionSync(SESSION_ID) } throws IOException("disk")
+
+        workflow.checkRetractionsAgain()
+
+        val line = workflow.retractionSavedWork.value!!.line
+        assertFalse(line, line.contains(RetractionText.CHECK_AGAIN_NOT_SAVED))
+        assertTrue(line, line.endsWith(RetractionText.STORED_CHECKS_UNREAD))
     }
 
     /** Control for the above: answers not stored leave the run's record, so the failure still says so and throws. */
@@ -949,9 +969,7 @@ class FactCheckWorkflowRetractionTest {
         job.join()
 
         assertTrue("its answers were in: they are stored whole", PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
-        assertNull(workflow.retractionSavedWork.value?.line)
-        assertNull(workflow.retractionSavedWork.value?.warning)
-        assertTrue(workflow.retractionSavedWork.value?.checks.orEmpty().isEmpty())
+        assertNull(workflow.retractionSavedWork.value)
         assertFalse(workflow.isCheckingRetractionsAgain.value)
     }
 

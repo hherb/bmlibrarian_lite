@@ -1007,11 +1007,12 @@ class FactCheckWorkflow @Inject constructor(
      * screen does ([PaperRetractionCheck.take], which keeps a decided row
      * over an outage). The run's snapshot, and so the report, is never
      * rewritten: [retractionSavedWork]'s line and warning say what changed,
-     * and the warning suggests re-running the question. A check that fails, or is cancelled ([cancelCheckAgain]) before its
-     * answers are in, stores nothing and says the run's record stands (a
-     * failed one still warns of a paper its label retracts, and of what an
-     * answered check found before its rows could be read); once
-     * they are in, they are stored and shown whole. A new run or restore
+     * and the warning suggests re-running the question. A check that fails,
+     * or is cancelled ([cancelCheckAgain]) before its answers are in, stores
+     * nothing and says the run's record stands (a failed one still warns of a
+     * paper its label retracts, and of what an answered check found before
+     * its rows could be read); once they are in, they are stored and shown
+     * whole, and badged though the rows cannot be read back. A new run or restore
      * cancels it, and it never writes their screen.
      *
      * @throws Exception When the store cannot be read, even to say so
@@ -1110,9 +1111,15 @@ class FactCheckWorkflow @Inject constructor(
                 // stored, so never "still the run's record" (#663): what was shown, saying the new checks went unread
                 Log.w(TAG, "Could not show Check again's stored answers: ${e.javaClass.simpleName}")
                 if (screen == savedWorkScreen) {
-                    _retractionSavedWork.value = shown?.let {
-                        val line = it.line.removeSuffix(RetractionText.STORED_CHECKS_UNREAD).removeSuffix(RetractionText.CHECK_AGAIN_FAILED)
-                        it.copy(line = line + RetractionText.STORED_CHECKS_UNREAD)
+                    _retractionSavedWork.value = shown?.let { before ->
+                        val line = before.line.removeSuffix(RetractionText.STORED_CHECKS_UNREAD)
+                            .removeSuffix(RetractionText.CHECK_AGAIN_FAILED).removeSuffix(RetractionText.CHECK_AGAIN_NOT_SAVED)
+                        // the answers are in hand, as the desktop shows them: a found retraction is badged,
+                        // though its warning cannot be read
+                        val checks = before.checks + taken.use.mapValues { (id, check) ->
+                            before.checks[id]?.let { RetractionSavedWork.rechecked(it, check) } ?: check
+                        }
+                        RetractionSavedWorkState(line + RetractionText.STORED_CHECKS_UNREAD, before.warning, checks)
                     }
                 }
             }
