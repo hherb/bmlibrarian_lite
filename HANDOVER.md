@@ -253,9 +253,13 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 - **Retraction checking** follow-ups: **#662** (an unchecked run's warning
   rule, "could not be read" wording, needs a cross-platform decision),
-  **#663** (Android), Apple **#647**, **#649**, **#653**, **#654**
-  (item 1 done by #660), **#658** (Android), **#675** (a stopped Check again
-  and the label, needs a cross-platform decision), Apple **#694** (date an
+  **#663** (Android; item 3 done: a failed *Check again* shows
+  `RetractionText.CHECK_AGAIN_ERROR`, never the exception's text), Apple
+  **#647**, **#649**, **#653**, **#654** (item 1 done by #660), **#658**
+  (Android), **#675** item 1 (a stopped Check again and the label, needs a
+  cross-platform decision; items 2 and 3 done: Android's `failedFor` survives
+  a bmlib panic, the desktop's `screen_with_fallback` logs a failing
+  `close()` instead of losing the screen), Apple **#694** (date an
   unknown-status copy in `standing`, needs a decision).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over

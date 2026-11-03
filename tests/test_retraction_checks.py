@@ -578,6 +578,28 @@ def test_a_failed_check_still_leaves_out_a_paper_its_label_retracts(storage, tmp
     assert screen.checks["k"].verdict.status is RetractionStatus.UNCHECKED
 
 
+def test_a_close_that_raises_keeps_the_screen(storage, tmp_path, caplog):
+    """A checker whose close fails loses nothing the check found (#675)."""
+    from bmlibrarian_lite.retraction_screen import screen_with_fallback
+
+    _current_export(tmp_path)
+    checker = _checker(storage, tmp_path, StubSession())
+    real_close = checker.close
+
+    def failing_close():
+        real_close()
+        raise sqlite3.OperationalError("database is locked")
+
+    checker.close = failing_close
+    docs = [_doc("r", doi="10.9/retracted"), _doc("c", doi="10.1/clear")]
+    screen = screen_with_fallback(checker, docs)
+    assert not screen.failed
+    assert [d.id for d in screen.excluded] == ["r"]
+    assert screen.checks["c"].verdict.status is RetractionStatus.CLEAR
+    assert "OperationalError" in caplog.text
+    assert "database is locked" not in caplog.text
+
+
 def test_an_outage_never_overwrites_an_unreadable_stored_row(storage, tmp_path):
     """A row a newer build wrote may hold a retraction: an outage leaves it."""
     _current_export(tmp_path)
