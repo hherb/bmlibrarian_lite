@@ -19,6 +19,7 @@
 package com.bmlibrarian.factchecker.ui.factcheck
 
 import android.net.Uri
+import android.util.Log
 import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextUpload
 import com.bmlibrarian.factchecker.data.remote.fulltext.FullTextUploadContent
@@ -30,6 +31,7 @@ import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
 import com.bmlibrarian.factchecker.domain.workflow.FactCheckWorkflow
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowProgress
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowState
+import com.bmlibrarian.factchecker.util.retraction.RetractionText
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -219,11 +221,13 @@ class FactCheckViewModelActionTest {
     }
 
     @Test
-    fun `a Check again that cannot read the store is told`() {
-        coEvery { workflow.checkRetractionsAgain() } throws IOException("disk")
+    fun `a Check again that cannot read the store is told in plain words, never the error's text`() {
+        coEvery { workflow.checkRetractionsAgain() } throws IOException("disk I/O error (code 522 SQLITE_IOERR_SHORT_READ)")
+        Log.clear()
 
         viewModel.checkRetractionsAgain()
 
-        assertEquals("disk", viewModel.uiState.value.errorMessage)
+        assertEquals(RetractionText.CHECK_AGAIN_ERROR, viewModel.uiState.value.errorMessage)
+        assertEquals(listOf("FactCheckViewModel: Check again failed: IOException"), Log.lines)
     }
 }

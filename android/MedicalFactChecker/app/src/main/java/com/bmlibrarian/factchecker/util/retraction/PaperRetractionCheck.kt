@@ -235,7 +235,7 @@ data class PaperRetractionCheck(
          * The stand-in for a failed check (the desktop's `_label_check`): the
          * record's own label still retracts, needing neither network nor
          * database; every other paper is [failed]. Without bmlib's native
-         * library, [failed].
+         * library, or when it panics (UniFFI's `InternalException`), [failed].
          *
          * @param paper The paper whose check failed
          * @param atMs When the check was attempted
@@ -244,6 +244,9 @@ data class PaperRetractionCheck(
             val verdict = try {
                 retractionStatus(null, null, null, paper.publicationTypes)
             } catch (e: LinkageError) {
+                return failed(atMs)
+            } catch (e: Exception) {
+                Log.w(TAG, "PubMed label could not be read: ${e.javaClass.simpleName}")
                 return failed(atMs)
             }
             return if (verdict.status == RetractionStatus.RETRACTED) fromVerdict(verdict, atMs, null, null) else failed(atMs)

@@ -441,7 +441,11 @@ def screen_with_fallback(
             documents, {doc.id: _label_check(doc) for doc in documents}, failed=True
         )
     finally:
-        checker.close()
+        try:
+            checker.close()
+        except Exception as e:
+            # a close that fails must not replace the screen already made
+            logger.warning("Retraction checker could not be closed (%s)", type(e).__name__)
 
 
 def changed_since_snapshot(

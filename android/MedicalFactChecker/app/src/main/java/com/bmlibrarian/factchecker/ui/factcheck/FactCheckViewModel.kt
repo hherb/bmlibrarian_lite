@@ -47,6 +47,7 @@ import com.bmlibrarian.factchecker.domain.workflow.WorkflowState
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
 import com.bmlibrarian.factchecker.util.retraction.RetractionSnapshot
+import com.bmlibrarian.factchecker.util.retraction.RetractionText
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -546,8 +547,9 @@ class FactCheckViewModel @Inject constructor(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // the store itself could not be read: the line cannot say how it went
-                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to check retraction status again") }
+                // the store itself could not be read: the line cannot say how it went; its text (SQLite's) is never shown
+                Log.w(TAG, "Check again failed: ${e.javaClass.simpleName}")
+                _uiState.update { it.copy(errorMessage = RetractionText.CHECK_AGAIN_ERROR) }
             }
         }
     }
