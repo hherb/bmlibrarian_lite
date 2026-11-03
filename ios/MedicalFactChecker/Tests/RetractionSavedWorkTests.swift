@@ -562,4 +562,39 @@ final class RetractionSavedWorkTests: XCTestCase {
             "Excluded: retracted. Retracted on 2026-10-19 (notice 10.1000/notice)")
         XCTAssertEqual(documents[0].badgedRetractionCheck(shown: shown)?.isRetracted, true)
     }
+
+    // MARK: - An unreadable snapshot entry (#647)
+
+    /// One entry this build cannot read costs only itself, and a later run's
+    /// record keeps it as written: a later build may read it.
+    func testAnUnreadableSnapshotEntryIsLeftOutAndKept() throws {
+        let session = FactCheckSession(claim: "Aspirin prevents stroke")
+        context.insert(session)
+        session.recordRetractionSnapshot(["a": Self.check("retracted")])
+        var written = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(try XCTUnwrap(session.retractionSnapshotJSON).utf8)) as? [String: Any]
+        )
+        written["b"] = ["status": 7]
+        session.retractionSnapshotJSON = String(
+            data: try JSONSerialization.data(withJSONObject: written), encoding: .utf8
+        )
+
+        XCTAssertEqual(session.retractionSnapshot(), ["a": Self.check("retracted")])
+
+        session.recordRetractionSnapshot(["c": Self.check("clear")])
+        XCTAssertEqual(session.retractionSnapshot(), ["a": Self.check("retracted"), "c": Self.check("clear")])
+        let kept = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(try XCTUnwrap(session.retractionSnapshotJSON).utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(kept["b"] as? [String: Int], ["status": 7], "the unreadable entry is kept as written")
+    }
+
+    /// Control: a document checked again is replaced.
+    func testASnapshotEntryCheckedAgainIsReplaced() {
+        let session = FactCheckSession(claim: "Aspirin prevents stroke")
+        context.insert(session)
+        session.recordRetractionSnapshot(["a": Self.check("unchecked")])
+        session.recordRetractionSnapshot(["a": Self.check("retracted")])
+        XCTAssertEqual(session.retractionSnapshot(), ["a": Self.check("retracted")])
+    }
 }

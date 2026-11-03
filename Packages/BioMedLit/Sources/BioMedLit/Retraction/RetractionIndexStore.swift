@@ -96,6 +96,33 @@ public actor RetractionIndexStore {
 
     private nonisolated var file: URL { directory.appendingPathComponent(BioMedLitConstants.retractionIndexFileName) }
 
+    /// When a download was last refused, and why, kept across launches; the next waits a day (#647).
+    private nonisolated var refusalFile: URL {
+        directory.appendingPathComponent("\(BioMedLitConstants.retractionIndexFileName).refused")
+    }
+
+    /// The last refusal's time and reason; `nil` when there is none (or its
+    /// record is unreadable, so a download may be tried).
+    private func lastRefusal() -> (at: Date, reason: String)? {
+        guard let text = try? String(contentsOf: refusalFile, encoding: .utf8) else { return nil }
+        let parts = text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2, let seconds = TimeInterval(parts[0]) else {
+            BioMedLitLib.logger?.warning("Retraction Watch refusal unreadable", category: .network)
+            return nil
+        }
+        return (Date(timeIntervalSince1970: seconds), String(parts[1]))
+    }
+
+    /// Record a refusal at `at`, so the next launch waits out the day too.
+    private func recordRefusal(at: Date, reason: String) {
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try "\(at.timeIntervalSince1970)\n\(reason)".write(to: refusalFile, atomically: true, encoding: .utf8)
+        } catch {
+            BioMedLitLib.logger?.warning("Retraction Watch refusal not recorded: \(error)", category: .network)
+        }
+    }
+
     /// The stored index, whatever its age; `nil` when missing or unreadable.
     private nonisolated func storedIndex() -> RetractionIndex? {
         guard let bytes = try? Data(contentsOf: file) else { return nil }
@@ -117,13 +144,17 @@ public actor RetractionIndexStore {
     /// Nonisolated, so a run never waits for a refresh building the index;
     /// the file is replaced atomically, so it reads the old copy or the new.
     public nonisolated func currentIndex(now: Date) async -> RetractionIndex? {
-        guard let index = storedIndex(),
-              let asOf = Self.dayFormatter.date(from: index.dataAsOf()),
-              let today = Self.dayFormatter.date(from: Self.dayFormatter.string(from: now)),
-              let age = Self.utcCalendar.dateComponents([.day], from: asOf, to: today).day,
-              age <= BioMedLitConstants.retractionWatchMaxAgeDays
-        else { return nil }
-        return index
+        storedIndex().flatMap { Self.isCurrent($0, now: now) ? $0 : nil }
+    }
+
+    /// Whether `index` may be consulted at `now`: its `dataAsOf` is at most
+    /// ``BioMedLitConstants/retractionWatchMaxAgeDays`` days before `now`'s day (UTC).
+    private static func isCurrent(_ index: RetractionIndex, now: Date) -> Bool {
+        guard let asOf = dayFormatter.date(from: index.dataAsOf()),
+              let today = dayFormatter.date(from: dayFormatter.string(from: now)),
+              let age = utcCalendar.dateComponents([.day], from: asOf, to: today).day
+        else { return false }
+        return age <= BioMedLitConstants.retractionWatchMaxAgeDays
     }
 
     /// Download and store a new index unless the stored one is current.
@@ -131,6 +162,10 @@ public actor RetractionIndexStore {
     /// bmlib builds the index, dated `now`'s day; one under
     /// ``BioMedLitConstants/retractionWatchMinKeepRatio`` of the stored
     /// index's notices is refused as truncated.
+    ///
+    /// A refused download is not tried again for
+    /// ``BioMedLitConstants/retractionWatchRefusedBackoffSeconds``, across
+    /// launches; meanwhile the refusal is returned again.
     ///
     /// One download at a time: a call made while one is under way awaits
     /// it (the launch's and a run's refresh never download twice). The
@@ -151,7 +186,25 @@ public actor RetractionIndexStore {
 
     /// ``refreshIfStale(now:)``'s work, run once per download.
     private func refresh(now: Date) async -> RetractionIndexRefresh {
-        if await currentIndex(now: now) != nil { return .fresh }
+        // Parsed once, and only its count kept through the download (#647).
+        let stored = storedIndex().map { (current: Self.isCurrent($0, now: now), notices: $0.noticeCount()) }
+        if stored?.current == true { return .fresh }
+        if let refusal = lastRefusal(),
+           now.timeIntervalSince(refusal.at) < BioMedLitConstants.retractionWatchRefusedBackoffSeconds {
+            return .refused(refusal.reason)
+        }
+        let outcome = await download(now: now, storedNotices: stored?.notices)
+        if case .refused(let reason) = outcome {
+            recordRefusal(at: now, reason: reason)
+        } else if case .refreshed = outcome {
+            try? FileManager.default.removeItem(at: refusalFile)
+        }
+        return outcome
+    }
+
+    /// Download and build the export, storing it unless it shrank below
+    /// `storedNotices` (the stored index's count, if any).
+    private func download(now: Date, storedNotices: UInt64?) async -> RetractionIndexRefresh {
         var components = URLComponents(string: BioMedLitConstants.retractionWatchExportURL)
         components?.queryItems = [URLQueryItem(name: "mailto", value: email)]
         guard let url = components?.url else { return .failed(.requestFailed) }
@@ -200,7 +253,7 @@ public actor RetractionIndexStore {
             )
         }
         let count = build.index.noticeCount()
-        if let old = storedIndex()?.noticeCount(),
+        if let old = storedNotices,
            Double(count) < Double(old) * BioMedLitConstants.retractionWatchMinKeepRatio {
             BioMedLitLib.logger?.warning("Retraction Watch export shrank from \(old) to \(count) notices", category: .network)
             return .refused("the export shrank from \(old) to \(count) notices")

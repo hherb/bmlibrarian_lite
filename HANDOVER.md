@@ -256,7 +256,12 @@ Open issues by family; each issue carries the detail. None blocks another.
   could not be read", never "the run's record", yet badge what they found
   from memory as the desktop does, and the saved work is one
   `retractionSavedWork: StateFlow<RetractionSavedWorkState?>`), Apple
-  **#647**, **#649**, **#653**, **#654** (item 1 done by #660), **#658**
+  **#647** (done: the snapshot decodes per entry and a later run keeps an
+  entry it cannot read as written; a refused export waits a day across
+  launches, `<index>.refused` as Android; the stored index is parsed once
+  per refresh; refresh failures log at warning. Left: a shared Crossref
+  lookup, per-access check decoding, a fail-under-XCTest default, an
+  unreadable index file logged), **#649**, **#653**, **#654** (item 1 done by #660), **#658**
   (Android), **#675** item 1 (a stopped Check again and the label, needs a
   cross-platform decision; items 2 and 3 done: Android's `failedFor` survives
   a bmlib panic, the desktop's `screen_with_fallback` logs a failing

@@ -115,6 +115,33 @@ final class RetractionIndexStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), before)
     }
 
+    /// A refused export would be refused again: not downloaded again within the
+    /// day, by a later launch either (#647).
+    func testARefusedExportIsNotDownloadedAgainWithinTheDay() async throws {
+        try storeIndex(RetractionFixture.retractions(10), dataAsOf: "2026-01-01")
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv(RetractionFixture.retractions(9)))
+        let first = await store().refreshIfStale(now: RetractionFixture.now)
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv(RetractionFixture.retractions(10)))
+        let again = await store().refreshIfStale(now: RetractionFixture.now.addingTimeInterval(60 * 60))
+        XCTAssertEqual(again, first)
+        XCTAssertEqual(StubURLProtocol.requestedURLs.count, 1)
+    }
+
+    /// Control: a day after a refusal the export is downloaded again, and a
+    /// stored copy clears the refusal.
+    func testARefusedExportIsDownloadedAgainAfterADay() async throws {
+        try storeIndex(RetractionFixture.retractions(10), dataAsOf: "2026-01-01")
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv(RetractionFixture.retractions(9)))
+        _ = await store().refreshIfStale(now: RetractionFixture.now)
+        let dayLater = RetractionFixture.now.addingTimeInterval(BioMedLitConstants.retractionWatchRefusedBackoffSeconds)
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv(RetractionFixture.retractions(10)))
+        let outcome = await store().refreshIfStale(now: dayLater)
+        XCTAssertEqual(outcome, .refreshed(noticeCount: 10))
+        XCTAssertEqual(StubURLProtocol.requestedURLs.count, 2)
+        let refusal = directory.appendingPathComponent("\(BioMedLitConstants.retractionIndexFileName).refused")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: refusal.path))
+    }
+
     /// Control: an export as large as the old one replaces it.
     func testUnshrunkExportReplacesAStaleOne() async throws {
         try storeIndex(RetractionFixture.retractions(10), dataAsOf: "2026-01-01")

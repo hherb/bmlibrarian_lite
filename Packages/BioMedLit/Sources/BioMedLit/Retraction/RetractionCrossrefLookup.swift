@@ -115,6 +115,7 @@ public actor RetractionCrossrefLookup {
     /// Keep Crossref's polite-pool pacing between batches.
     private func enforceRateLimit() async {
         let wait = TransparencyConstants.minimumRequestInterval - Date().timeIntervalSince(lastRequestTime)
+        // A cancel ends the sleep early; harmless, as the next request then throws it.
         if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
         lastRequestTime = Date()
     }
