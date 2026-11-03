@@ -538,8 +538,8 @@ class FactCheckWorkflowRetractionTest {
     fun `a restored session says when its papers were checked, asking nothing`() = runTest {
         restoreCheckedSession()
 
-        assertEquals("Retraction status checked 2026-10-18", workflow.retractionSavedWorkLine.value)
-        assertNull(workflow.retractionSavedWorkWarning.value)
+        assertEquals("Retraction status checked 2026-10-18", workflow.retractionSavedWork.value?.line)
+        assertNull(workflow.retractionSavedWork.value?.warning)
         assertTrue(asked.isEmpty())
     }
 
@@ -551,10 +551,10 @@ class FactCheckWorkflowRetractionTest {
 
         restoreCheckedSession()
 
-        val warning = workflow.retractionSavedWorkWarning.value!!
+        val warning = workflow.retractionSavedWork.value?.warning!!
         assertTrue(warning, warning.startsWith("Since this report was written, 1 paper this report cites has a retraction warning:\n• Study d1: Retracted"))
-        assertTrue("the badge reads the same row", workflow.retractionCurrentChecks.value.getValue("d1").isRetracted)
-        assertTrue("a paper not cited is badged, never warned of", workflow.retractionCurrentChecks.value.getValue("d2").isRetracted)
+        assertTrue("the badge reads the same row", workflow.retractionSavedWork.value?.checks.orEmpty().getValue("d1").isRetracted)
+        assertTrue("a paper not cited is badged, never warned of", workflow.retractionSavedWork.value?.checks.orEmpty().getValue("d2").isRetracted)
         assertTrue(asked.isEmpty())
     }
 
@@ -564,8 +564,8 @@ class FactCheckWorkflowRetractionTest {
 
         restoreCheckedSession()
 
-        assertEquals("Retraction status checked 2026-10-18; later checks could not be read", workflow.retractionSavedWorkLine.value)
-        assertTrue(workflow.retractionCurrentChecks.value.getValue("d1").isClear)
+        assertEquals("Retraction status checked 2026-10-18; later checks could not be read", workflow.retractionSavedWork.value?.line)
+        assertTrue(workflow.retractionSavedWork.value?.checks.orEmpty().getValue("d1").isClear)
     }
 
     @Test
@@ -579,9 +579,9 @@ class FactCheckWorkflowRetractionTest {
 
         assertEquals(runSnapshot, snapshotJson)
         assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
-        assertTrue(workflow.retractionSavedWorkWarning.value!!.contains("• Study d1: Retracted"))
-        assertTrue(workflow.retractionCurrentChecks.value.getValue("d1").isRetracted)
-        assertEquals("both rechecked a day later", "Retraction status checked 2026-10-19", workflow.retractionSavedWorkLine.value)
+        assertTrue(workflow.retractionSavedWork.value?.warning!!.contains("• Study d1: Retracted"))
+        assertTrue(workflow.retractionSavedWork.value?.checks.orEmpty().getValue("d1").isRetracted)
+        assertEquals("both rechecked a day later", "Retraction status checked 2026-10-19", workflow.retractionSavedWork.value?.line)
         assertFalse(workflow.isCheckingRetractionsAgain.value)
         coVerify(exactly = 0) { sessionRepository.updateRetractionSnapshot(any(), any()) }
     }
@@ -605,8 +605,8 @@ class FactCheckWorkflowRetractionTest {
 
         assertEquals(RetractionPaper(null, "1", listOf("Journal Article")), asked.single().single { it.pmid == "1" })
         assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
-        assertTrue(workflow.retractionCurrentChecks.value.getValue("d1").isRetracted)
-        assertTrue(workflow.retractionCurrentChecks.value.getValue("d3").isRetracted)
+        assertTrue(workflow.retractionSavedWork.value?.checks.orEmpty().getValue("d1").isRetracted)
+        assertTrue(workflow.retractionSavedWork.value?.checks.orEmpty().getValue("d3").isRetracted)
     }
 
     /** A merge that throws an Exception still warns by each document's own label (the catch's `papers`). */
@@ -622,10 +622,10 @@ class FactCheckWorkflowRetractionTest {
         workflow.checkRetractionsAgain()
 
         assertTrue(asked.isEmpty())
-        val warning = workflow.retractionSavedWorkWarning.value
+        val warning = workflow.retractionSavedWork.value?.warning
         assertTrue("$warning", warning!!.contains("• Study d1: Retracted"))
         // the saved rows' keys call bmlib as well, so they are said to be unread
-        val line = workflow.retractionSavedWorkLine.value
+        val line = workflow.retractionSavedWork.value?.line
         assertTrue("$line", line!!.contains(RetractionText.CHECK_AGAIN_FAILED))
         assertTrue("nothing is stored: $rows", rows.isEmpty())
     }
@@ -639,7 +639,7 @@ class FactCheckWorkflowRetractionTest {
 
         assertEquals(
             "Retraction status checked 2026-10-18; it could not be checked again, so this is still the run's record",
-            workflow.retractionSavedWorkLine.value
+            workflow.retractionSavedWork.value?.line
         )
         assertTrue(rows.isEmpty())
     }
@@ -649,19 +649,19 @@ class FactCheckWorkflowRetractionTest {
     fun `a failing Check again still warns by the label`() = runTest {
         BmlibFfi.assumeAvailable()
         restoreCheckedSession()
-        assertNull(workflow.retractionSavedWorkWarning.value)
+        assertNull(workflow.retractionSavedWork.value?.warning)
         documents["d1"] = documents.getValue("d1").copy(publicationTypesJson = "[\"Retracted Publication\"]")
         coEvery { retractionService.check(any()) } throws IOException("offline")
 
         workflow.checkRetractionsAgain()
 
-        assertTrue(workflow.retractionSavedWorkWarning.value!!.contains("• Study d1: Retracted"))
-        assertTrue(workflow.retractionSavedWorkLine.value!!.endsWith(RetractionText.CHECK_AGAIN_FAILED))
+        assertTrue(workflow.retractionSavedWork.value?.warning!!.contains("• Study d1: Retracted"))
+        assertTrue(workflow.retractionSavedWork.value?.line!!.endsWith(RetractionText.CHECK_AGAIN_FAILED))
         assertTrue("nothing is stored", rows.isEmpty())
         // control: without the label, nothing to warn of
         documents["d1"] = documents.getValue("d1").copy(publicationTypesJson = "[\"Journal Article\"]")
         workflow.checkRetractionsAgain()
-        assertNull(workflow.retractionSavedWorkWarning.value)
+        assertNull(workflow.retractionSavedWork.value?.warning)
     }
 
     /** #673: a stored retraction keeps its own notice over the label, and a stored concern is never hidden by a failed check. */
@@ -677,7 +677,7 @@ class FactCheckWorkflowRetractionTest {
 
         workflow.checkRetractionsAgain()
 
-        val warning = workflow.retractionSavedWorkWarning.value!!
+        val warning = workflow.retractionSavedWork.value?.warning!!
         assertTrue(warning, warning.contains("• Study d1: Retracted on 2026-03-09 (notice 10.9/n)"))
         assertFalse(warning, warning.contains("PubMed's label"))
         assertTrue(warning, warning.contains("• Study d2: Expression of concern"))
@@ -693,8 +693,8 @@ class FactCheckWorkflowRetractionTest {
 
         workflow.checkRetractionsAgain()
 
-        assertTrue(workflow.retractionSavedWorkWarning.value!!.contains("• Study d1: Retracted"))
-        assertTrue(workflow.retractionSavedWorkLine.value!!.endsWith(RetractionText.CHECK_AGAIN_FAILED + RetractionText.STORED_CHECKS_UNREAD))
+        assertTrue(workflow.retractionSavedWork.value?.warning!!.contains("• Study d1: Retracted"))
+        assertTrue(workflow.retractionSavedWork.value?.line!!.endsWith(RetractionText.CHECK_AGAIN_FAILED + RetractionText.STORED_CHECKS_UNREAD))
         assertTrue("nothing is stored", rows.isEmpty())
     }
 
@@ -707,7 +707,7 @@ class FactCheckWorkflowRetractionTest {
 
         assertEquals(
             "Retraction status checked 2026-10-18; it could not be checked again, so this is still the run's record",
-            workflow.retractionSavedWorkLine.value
+            workflow.retractionSavedWork.value?.line
         )
         assertFalse(workflow.isCheckingRetractionsAgain.value)
     }
@@ -724,7 +724,7 @@ class FactCheckWorkflowRetractionTest {
 
         assertEquals(
             "Retraction status could not be checked: the Retraction Watch data could not be used (no up-to-date copy is on this device)",
-            workflow.retractionSavedWorkLine.value
+            workflow.retractionSavedWork.value?.line
         )
     }
 
@@ -738,14 +738,14 @@ class FactCheckWorkflowRetractionTest {
         snapshotJson = RetractionSnapshot.merged(null, mapOf("d2" to CLEAR.copy(checkedAtMs = RUN_MS)))
         workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
         // #685: before Check again, the scored paper with no row is already counted
-        assertEquals("Retraction status checked 2026-10-18; 1 paper could not be checked", workflow.retractionSavedWorkLine.value)
+        assertEquals("Retraction status checked 2026-10-18; 1 paper could not be checked", workflow.retractionSavedWork.value?.line)
         answers["1"] = NO_EXPORT.copy(checkedAtMs = RUN_MS + DAY_MS)
         answers["2"] = CLEAR.copy(checkedAtMs = RUN_MS + DAY_MS)
         answers["3"] = NO_EXPORT.copy(checkedAtMs = RUN_MS + DAY_MS)
 
         workflow.checkRetractionsAgain()
 
-        val line = workflow.retractionSavedWorkLine.value!!
+        val line = workflow.retractionSavedWork.value?.line!!
         assertTrue(line, line.startsWith("Retraction status checked 2026-10-19; 1 paper could not be checked"))
     }
 
@@ -766,7 +766,7 @@ class FactCheckWorkflowRetractionTest {
         assertEquals(
             "Retraction status checked 2026-10-18; 1 paper could not be checked: the Retraction Watch data could not be used" +
                 " (no up-to-date copy is on this device); 1 paper could not be checked again: Crossref could not be used (HTTP 503)",
-            workflow.retractionSavedWorkLine.value
+            workflow.retractionSavedWork.value?.line
         )
     }
 
@@ -782,7 +782,7 @@ class FactCheckWorkflowRetractionTest {
 
         workflow.checkRetractionsAgain()
 
-        assertEquals("Retraction status could not be checked", workflow.retractionSavedWorkLine.value)
+        assertEquals("Retraction status could not be checked", workflow.retractionSavedWork.value?.line)
     }
 
     @Test
@@ -796,7 +796,7 @@ class FactCheckWorkflowRetractionTest {
 
         assertEquals(
             "Retraction status checked 2026-10-18; 1 paper could not be checked again: Crossref could not be used (HTTP 503)",
-            workflow.retractionSavedWorkLine.value
+            workflow.retractionSavedWork.value?.line
         )
         assertTrue("an outage is not knowledge", PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isClear)
     }
@@ -815,7 +815,7 @@ class FactCheckWorkflowRetractionTest {
 
         assertTrue(job.isCancelled)
         assertTrue(rows.isEmpty())
-        assertTrue(workflow.retractionSavedWorkLine.value!!.endsWith("so this is still the run's record"))
+        assertTrue(workflow.retractionSavedWork.value?.line!!.endsWith("so this is still the run's record"))
         assertFalse(workflow.isCheckingRetractionsAgain.value)
         coVerify(exactly = 0) { sessionRepository.updateWorkflowStep(any(), any()) }
     }
@@ -827,9 +827,7 @@ class FactCheckWorkflowRetractionTest {
 
         run()
 
-        assertNull(workflow.retractionSavedWorkLine.value)
-        assertNull(workflow.retractionSavedWorkWarning.value)
-        assertTrue(workflow.retractionCurrentChecks.value.isEmpty())
+        assertNull(workflow.retractionSavedWork.value)
     }
 
     /** A store that fails never hides what Check again found: the reader sees it, and that it was not saved. */
@@ -843,11 +841,66 @@ class FactCheckWorkflowRetractionTest {
         workflow.checkRetractionsAgain()
 
         assertTrue(rows.isEmpty())
-        assertTrue(workflow.retractionCurrentChecks.value.getValue("d1").isRetracted)
-        assertTrue(workflow.retractionSavedWorkWarning.value!!.contains("• Study d1: Retracted"))
+        assertTrue(workflow.retractionSavedWork.value?.checks.orEmpty().getValue("d1").isRetracted)
+        assertTrue(workflow.retractionSavedWork.value?.warning!!.contains("• Study d1: Retracted"))
         assertEquals(
             "Retraction status checked 2026-10-19; the new status could not be saved with this run",
-            workflow.retractionSavedWorkLine.value
+            workflow.retractionSavedWork.value?.line
+        )
+    }
+
+    /** #663 item 1: stored answers are no longer the run's record, though they could not be shown. */
+    @Test
+    fun `a Check again that stores its answers but cannot show them says the new checks went unread`() = runTest {
+        restoreCheckedSession()
+        val shown = workflow.retractionSavedWork.value!!
+        answers["1"] = RETRACTED.copy(checkedAtMs = RUN_MS + DAY_MS)
+        coEvery { documentRepository.getCitationsBySessionSync(SESSION_ID) } throws IOException("disk")
+
+        workflow.checkRetractionsAgain()
+
+        assertTrue("stored", PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
+        val savedWork = workflow.retractionSavedWork.value!!
+        assertEquals("Retraction status checked 2026-10-18" + RetractionText.STORED_CHECKS_UNREAD, savedWork.line)
+        // the earlier warning stays up: never a blank that could hide a retraction
+        assertEquals(shown.warning, savedWork.warning)
+        assertTrue("what it found is badged though it could not be read back", savedWork.checks.getValue("d1").isRetracted)
+        assertFalse(workflow.isCheckingRetractionsAgain.value)
+    }
+
+    /** An earlier Check again's "not saved" is no longer so once this one stores its answers. */
+    @Test
+    fun `a Check again that stores its answers drops an earlier one's not saved, though it cannot show them`() = runTest {
+        restoreCheckedSession()
+        coEvery { retractionService.store(any()) } throws IOException("disk full")
+        workflow.checkRetractionsAgain()
+        assertTrue(workflow.retractionSavedWork.value!!.line.endsWith(RetractionText.CHECK_AGAIN_NOT_SAVED))
+        coEvery { retractionService.store(any()) } answers {
+            firstArg<Map<String, PaperRetractionCheck>>().forEach { (key, check) -> rows[key] = PaperRetractionCheck.encode(check) }
+        }
+        coEvery { documentRepository.getCitationsBySessionSync(SESSION_ID) } throws IOException("disk")
+
+        workflow.checkRetractionsAgain()
+
+        val line = workflow.retractionSavedWork.value!!.line
+        assertFalse(line, line.contains(RetractionText.CHECK_AGAIN_NOT_SAVED))
+        assertTrue(line, line.endsWith(RetractionText.STORED_CHECKS_UNREAD))
+    }
+
+    /** Control for the above: answers not stored leave the run's record, so the failure still says so and throws. */
+    @Test
+    fun `a Check again that neither stores nor shows its answers says the run's record stands`() = runTest {
+        restoreCheckedSession()
+        answers["1"] = RETRACTED.copy(checkedAtMs = RUN_MS + DAY_MS)
+        coEvery { retractionService.store(any()) } throws IOException("disk full")
+        coEvery { documentRepository.getCitationsBySessionSync(SESSION_ID) } throws IOException("disk")
+
+        assertThrows(IOException::class.java) { kotlinx.coroutines.runBlocking { workflow.checkRetractionsAgain() } }
+
+        assertTrue(rows.isEmpty())
+        assertEquals(
+            "Retraction status checked 2026-10-18" + RetractionText.CHECK_AGAIN_FAILED,
+            workflow.retractionSavedWork.value?.line
         )
     }
 
@@ -861,10 +914,10 @@ class FactCheckWorkflowRetractionTest {
         workflow.checkRetractionsAgain()
 
         assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
-        assertTrue(workflow.retractionCurrentChecks.value.getValue("d1").isRetracted)
-        assertTrue(workflow.retractionSavedWorkWarning.value!!.contains("• Study d1: Retracted"))
+        assertTrue(workflow.retractionSavedWork.value?.checks.orEmpty().getValue("d1").isRetracted)
+        assertTrue(workflow.retractionSavedWork.value?.warning!!.contains("• Study d1: Retracted"))
         assertTrue(
-            workflow.retractionSavedWorkLine.value!!.endsWith("; 1 paper could not be checked again: Crossref could not be used (HTTP 503)")
+            workflow.retractionSavedWork.value?.line!!.endsWith("; 1 paper could not be checked again: Crossref could not be used (HTTP 503)")
         )
     }
 
@@ -916,9 +969,7 @@ class FactCheckWorkflowRetractionTest {
         job.join()
 
         assertTrue("its answers were in: they are stored whole", PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
-        assertNull(workflow.retractionSavedWorkLine.value)
-        assertNull(workflow.retractionSavedWorkWarning.value)
-        assertTrue(workflow.retractionCurrentChecks.value.isEmpty())
+        assertNull(workflow.retractionSavedWork.value)
         assertFalse(workflow.isCheckingRetractionsAgain.value)
     }
 
@@ -934,7 +985,7 @@ class FactCheckWorkflowRetractionTest {
 
         assertTrue(job.isCancelled)
         assertTrue(rows.isEmpty())
-        assertNull("the cancelled check never writes the new screen", workflow.retractionSavedWorkLine.value)
+        assertNull("the cancelled check never writes the new screen", workflow.retractionSavedWork.value?.line)
     }
 
     @Test
@@ -952,7 +1003,7 @@ class FactCheckWorkflowRetractionTest {
 
         assertEquals(
             "Retraction status checked 2026-10-18; it could not be checked again, so this is still the run's record",
-            workflow.retractionSavedWorkLine.value
+            workflow.retractionSavedWork.value?.line
         )
     }
 
@@ -963,7 +1014,7 @@ class FactCheckWorkflowRetractionTest {
 
         workflow.restoreForViewing(session)
 
-        assertEquals("Retraction status could not be read", workflow.retractionSavedWorkLine.value)
+        assertEquals("Retraction status could not be read", workflow.retractionSavedWork.value?.line)
     }
 
     @Test
@@ -972,8 +1023,8 @@ class FactCheckWorkflowRetractionTest {
 
         restoreCheckedSession()
 
-        assertEquals("Retraction status checked 2026-10-18; later checks could not be read", workflow.retractionSavedWorkLine.value)
-        assertTrue("the run's check stands", workflow.retractionCurrentChecks.value.getValue("d1").isClear)
+        assertEquals("Retraction status checked 2026-10-18; later checks could not be read", workflow.retractionSavedWork.value?.line)
+        assertTrue("the run's check stands", workflow.retractionSavedWork.value?.checks.orEmpty().getValue("d1").isClear)
     }
 
     @Test
@@ -983,7 +1034,7 @@ class FactCheckWorkflowRetractionTest {
 
         workflow.checkRetractionsAgain()
 
-        assertTrue(workflow.retractionSavedWorkLine.value!!.endsWith("so this is still the run's record"))
+        assertTrue(workflow.retractionSavedWork.value?.line!!.endsWith("so this is still the run's record"))
         assertTrue(rows.isEmpty())
         assertFalse(workflow.isCheckingRetractionsAgain.value)
     }
