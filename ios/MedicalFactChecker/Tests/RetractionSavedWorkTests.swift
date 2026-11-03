@@ -589,6 +589,19 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertEqual(kept["b"] as? [String: Int], ["status": 7], "the unreadable entry is kept as written")
     }
 
+    /// A snapshot the earlier build wrote (one `JSONEncoder` pass over the whole
+    /// map) reads back unchanged, and a fractional `checkedAt` survives a later
+    /// run's rewrite through `JSONSerialization`.
+    func testAnEarlierBuildsSnapshotReadsAndRewritesUnchanged() throws {
+        let session = FactCheckSession(claim: "Aspirin prevents stroke")
+        context.insert(session)
+        let old = ["a": Self.check("retracted", at: Date(timeIntervalSinceReferenceDate: 814_008_600.123_456_7))]
+        session.retractionSnapshotJSON = String(data: try JSONEncoder().encode(old), encoding: .utf8)
+        XCTAssertEqual(session.retractionSnapshot(), old)
+        session.recordRetractionSnapshot(["c": Self.check("clear")])
+        XCTAssertEqual(session.retractionSnapshot()["a"], old["a"])
+    }
+
     /// Control: a document checked again is replaced.
     func testASnapshotEntryCheckedAgainIsReplaced() {
         let session = FactCheckSession(claim: "Aspirin prevents stroke")

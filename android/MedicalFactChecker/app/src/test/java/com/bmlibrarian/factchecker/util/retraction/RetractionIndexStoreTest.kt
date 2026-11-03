@@ -116,6 +116,20 @@ class RetractionIndexStoreTest {
         assertFalse(File(directory, "${RetractionConstants.RETRACTION_INDEX_FILE_NAME}.refused").exists())
     }
 
+    /** A refusal dated after now (a clock since set back) is not waited out until then; garbage is no wait either. */
+    @Test
+    fun `a refusal dated ahead or unreadable does not stop a download`() = runTest {
+        val refusal = File(directory, "${RetractionConstants.RETRACTION_INDEX_FILE_NAME}.refused")
+        stub.stubbed = StubServer.answer(200, RetractionFixture.csv())
+        val ahead = RetractionFixture.nowMs + 30 * RetractionConstants.RETRACTION_WATCH_REFUSED_BACKOFF_MS
+        refusal.writeText("$ahead\nthe export shrank from 10 to 9 notices")
+        assertEquals(RetractionIndexRefresh.Refreshed(3), store().refreshIfStale(RetractionFixture.nowMs, "t@example.org"))
+        file.delete()
+        refusal.writeText("garbage")
+        assertEquals(RetractionIndexRefresh.Refreshed(3), store().refreshIfStale(RetractionFixture.nowMs, "t@example.org"))
+        assertEquals(2, stub.requestedUrls.size)
+    }
+
     @Test
     fun `a metered network downloads nothing`() = runTest {
         unmetered = false

@@ -169,7 +169,8 @@ class RetractionIndexStore(
     suspend fun refreshIfStale(nowMs: Long, email: String): RetractionIndexRefresh = downloading.withLock {
         if (currentIndex(nowMs) != null) return@withLock RetractionIndexRefresh.Fresh
         lastRefusal()?.let { (at, reason) ->
-            if (nowMs - at < RetractionConstants.RETRACTION_WATCH_REFUSED_BACKOFF_MS) return@withLock RetractionIndexRefresh.Refused(reason)
+            // a refusal dated ahead of `nowMs` (a clock set back since) is not waited out
+            if (nowMs - at in 0L until RetractionConstants.RETRACTION_WATCH_REFUSED_BACKOFF_MS) return@withLock RetractionIndexRefresh.Refused(reason)
         }
         if (!isUnmetered()) return@withLock RetractionIndexRefresh.Metered
         if (!bmlibLoads()) return@withLock RetractionIndexRefresh.Refused("bmlib's native library is missing")

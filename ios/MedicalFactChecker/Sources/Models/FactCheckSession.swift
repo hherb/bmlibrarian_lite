@@ -442,7 +442,8 @@ final class FactCheckSession {
 
     /// Adds what a run used to the snapshot; a document checked again is
     /// replaced. Every other entry is kept as written, one this build cannot
-    /// read included, so an earlier run's record is never lost (#647).
+    /// read included (#647); a snapshot unreadable as a whole is replaced
+    /// (logged by ``retractionSnapshotEntries()``).
     ///
     /// - Parameter checks: The checks used, keyed by `Document.id`; nothing is written for none.
     func recordRetractionSnapshot(_ checks: [String: PaperRetractionCheck]) {
@@ -457,7 +458,10 @@ final class FactCheckSession {
             }
             entries[id] = entry
         }
-        guard let data = try? JSONSerialization.data(withJSONObject: entries, options: .sortedKeys) else { return }
+        guard let data = try? JSONSerialization.data(withJSONObject: entries, options: .sortedKeys) else {
+            sessionLog.error("Retraction snapshot not serialisable; the snapshot is not written")
+            return
+        }
         retractionSnapshotJSON = String(data: data, encoding: .utf8)
     }
 

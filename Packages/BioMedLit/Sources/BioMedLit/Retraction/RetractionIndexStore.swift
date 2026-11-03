@@ -189,8 +189,9 @@ public actor RetractionIndexStore {
         // Parsed once, and only its count kept through the download (#647).
         let stored = storedIndex().map { (current: Self.isCurrent($0, now: now), notices: $0.noticeCount()) }
         if stored?.current == true { return .fresh }
+        // a refusal dated ahead of `now` (a clock set back since) is not waited out
         if let refusal = lastRefusal(),
-           now.timeIntervalSince(refusal.at) < BioMedLitConstants.retractionWatchRefusedBackoffSeconds {
+           (0..<BioMedLitConstants.retractionWatchRefusedBackoffSeconds).contains(now.timeIntervalSince(refusal.at)) {
             return .refused(refusal.reason)
         }
         let outcome = await download(now: now, storedNotices: stored?.notices)

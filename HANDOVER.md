@@ -250,7 +250,8 @@ Open issues by family; each issue carries the detail. None blocks another.
 ### Next up
 
 - **Retraction checking** follow-ups: **#662** (an unchecked run's warning
-  rule, "could not be read" wording, needs a cross-platform decision),
+  rule, "could not be read" wording, an Apple snapshot entry left out unread,
+  needs a cross-platform decision),
   **#663** item 2 (Android: a cancel is worded as a failure; waits on #654
   item 2; items 1, 3, 4 done: answers stored but not shown say "later checks
   could not be read", never "the run's record", yet badge what they found
@@ -258,7 +259,8 @@ Open issues by family; each issue carries the detail. None blocks another.
   `retractionSavedWork: StateFlow<RetractionSavedWorkState?>`), Apple
   **#647** (done: the snapshot decodes per entry and a later run keeps an
   entry it cannot read as written; a refused export waits a day across
-  launches, `<index>.refused` as Android; the stored index is parsed once
+  launches, `<index>.refused` as Android, and a refusal dated ahead of now
+  is no wait on either app; the stored index is parsed once
   per refresh; refresh failures log at warning. Left: a shared Crossref
   lookup, per-access check decoding, a fail-under-XCTest default, an
   unreadable index file logged), **#649**, **#653**, **#654** (item 1 done by #660), **#658**
@@ -266,7 +268,8 @@ Open issues by family; each issue carries the detail. None blocks another.
   cross-platform decision; items 2 and 3 done: Android's `failedFor` survives
   a bmlib panic, the desktop's `screen_with_fallback` logs a failing
   `close()` instead of losing the screen), Apple **#694** (date an
-  unknown-status copy in `standing`, needs a decision).
+  unknown-status copy in `standing`, needs a decision), **#700** (Swift and
+  Android: a local storage failure is waited out a day as a refused export).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
   the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,

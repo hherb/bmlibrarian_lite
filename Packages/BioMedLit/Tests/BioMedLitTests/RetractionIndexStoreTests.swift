@@ -121,10 +121,49 @@ final class RetractionIndexStoreTests: XCTestCase {
         try storeIndex(RetractionFixture.retractions(10), dataAsOf: "2026-01-01")
         StubURLProtocol.stubbed = (200, RetractionFixture.csv(RetractionFixture.retractions(9)))
         let first = await store().refreshIfStale(now: RetractionFixture.now)
+        guard case .refused = first else { return XCTFail("a shrunk export is refused: \(first)") }
         StubURLProtocol.stubbed = (200, RetractionFixture.csv(RetractionFixture.retractions(10)))
         let again = await store().refreshIfStale(now: RetractionFixture.now.addingTimeInterval(60 * 60))
         XCTAssertEqual(again, first)
         XCTAssertEqual(StubURLProtocol.requestedURLs.count, 1)
+    }
+
+    /// With no stored copy a refusal is waited out too, by a later launch either (Android's
+    /// `a refusal holds across launches`).
+    func testARefusalWithNoStoredIndexHoldsAcrossLaunches() async {
+        StubURLProtocol.stubbed = (200, Data("<html><body>Please sign in</body></html>".utf8))
+        let first = await store().refreshIfStale(now: RetractionFixture.now)
+        guard case .refused = first else { return XCTFail("an HTML body is refused: \(first)") }
+        let again = await store().refreshIfStale(now: RetractionFixture.now.addingTimeInterval(60 * 60))
+        XCTAssertEqual(again, first)
+        XCTAssertEqual(StubURLProtocol.requestedURLs.count, 1)
+    }
+
+    /// A refusal record that cannot be read does not stop a download.
+    func testAnUnreadableRefusalRecordIsNoWait() async throws {
+        try writeRefusal("garbage")
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv())
+        let outcome = await store().refreshIfStale(now: RetractionFixture.now)
+        XCTAssertEqual(outcome, .refreshed(noticeCount: 3))
+    }
+
+    /// A refusal dated after `now` (recorded under a clock since set back) is
+    /// not waited out until that date: the index would go unconsulted meanwhile.
+    func testARefusalDatedAheadIsNoWait() async throws {
+        let ahead = RetractionFixture.now.addingTimeInterval(30 * BioMedLitConstants.retractionWatchRefusedBackoffSeconds)
+        try writeRefusal("\(ahead.timeIntervalSince1970)\nthe export shrank from 10 to 9 notices")
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv())
+        let outcome = await store().refreshIfStale(now: RetractionFixture.now)
+        XCTAssertEqual(outcome, .refreshed(noticeCount: 3))
+        XCTAssertEqual(StubURLProtocol.requestedURLs.count, 1)
+    }
+
+    /// Write the refusal record as `text`.
+    private func writeRefusal(_ text: String) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try text.write(
+            to: directory.appendingPathComponent("\(BioMedLitConstants.retractionIndexFileName).refused"),
+            atomically: true, encoding: .utf8)
     }
 
     /// Control: a day after a refusal the export is downloaded again, and a
