@@ -102,6 +102,21 @@ final class APIKeySaveTests: XCTestCase {
         XCTAssertTrue(changed, "control: a save is a change")
     }
 
+    /// Nor is a read the locked Keychain refuses, which caches nothing, so every
+    /// render asks again: reported as a change, Settings re-rendered forever there too.
+    func testAnUnreadableCredentialReadIsNotAChange() {
+        settings.saveCOREAPIKey("core-key")
+        settings = AppSettings(secretStore: store, credentialFlags: flags)
+        store.failsReads = true
+        var changed = false
+        withObservationTracking {
+            _ = settings.coreAPIKeyIfReadable
+        } onChange: { changed = true }
+
+        XCTAssertNil(settings.coreAPIKeyIfReadable, "control: the read was refused")
+        XCTAssertFalse(changed)
+    }
+
     /// #511: locked, the Keychain may refuse a read for a key never saved;
     /// that is no key, not one the chain records as unreachable.
     func testAFailedReadOfAKeyNeverSavedIsNoKey() {
