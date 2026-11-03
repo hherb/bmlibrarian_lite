@@ -46,6 +46,7 @@ import com.bmlibrarian.factchecker.domain.workflow.WorkflowProgress
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowState
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
+import com.bmlibrarian.factchecker.util.retraction.RetractionSavedWorkState
 import com.bmlibrarian.factchecker.util.retraction.RetractionSnapshot
 import com.bmlibrarian.factchecker.util.retraction.RetractionText
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -145,17 +146,11 @@ data class FactCheckUiState(
     val retractionChecks: Map<String, PaperRetractionCheck> = emptyMap(),
 
     /**
-     * A restored session's checks since its run, by document id: what its
-     * badges and status lines show (the run's check, or a newer stored row).
-     * Empty for a run's own session, which shows [retractionChecks].
+     * A restored session's retraction line, warning and checks since its run
+     * (what its badges and status lines show); null for a run's own session,
+     * which shows [retractionChecks].
      */
-    val retractionCurrentChecks: Map<String, PaperRetractionCheck> = emptyMap(),
-
-    /** A restored session's retraction line, offered with *Check again*; null for a run's own session. */
-    val retractionSavedWorkLine: String? = null,
-
-    /** That papers the restored session's report cites are now retracted or under concern; null when none is. */
-    val retractionSavedWorkWarning: String? = null,
+    val retractionSavedWork: RetractionSavedWorkState? = null,
 
     /** Whether *Check again* is running, so its button stops it instead. */
     val isCheckingRetractionsAgain: Boolean = false,
@@ -365,18 +360,8 @@ class FactCheckViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            workflow.retractionSavedWorkLine.collect { line ->
-                _uiState.update { it.copy(retractionSavedWorkLine = line) }
-            }
-        }
-        viewModelScope.launch {
-            workflow.retractionSavedWorkWarning.collect { warning ->
-                _uiState.update { it.copy(retractionSavedWorkWarning = warning) }
-            }
-        }
-        viewModelScope.launch {
-            workflow.retractionCurrentChecks.collect { checks ->
-                _uiState.update { it.copy(retractionCurrentChecks = checks) }
+            workflow.retractionSavedWork.collect { savedWork ->
+                _uiState.update { it.copy(retractionSavedWork = savedWork) }
             }
         }
         viewModelScope.launch {

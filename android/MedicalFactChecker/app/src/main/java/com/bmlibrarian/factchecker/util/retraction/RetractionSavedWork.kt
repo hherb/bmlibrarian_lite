@@ -77,3 +77,18 @@ object RetractionSavedWork {
         seen == null || seen.isUnchecked || (check.checkedAtMs >= seen.checkedAtMs && check.status != seen.status)
     }
 }
+
+/**
+ * What a restored session shows of its papers' retraction status, set as one
+ * value so a collector never sees one check's line with another's warning or
+ * badges (#663); null for a run's own session.
+ *
+ * @property line The retraction line, offered with *Check again*
+ * @property warning That papers the report cites are now retracted or under concern; null when none is
+ * @property checks The check each document is badged by ([RetractionSavedWork.recheckedChecks]), by document id
+ */
+data class RetractionSavedWorkState(
+    val line: String,
+    val warning: String? = null,
+    val checks: Map<String, PaperRetractionCheck> = emptyMap()
+)

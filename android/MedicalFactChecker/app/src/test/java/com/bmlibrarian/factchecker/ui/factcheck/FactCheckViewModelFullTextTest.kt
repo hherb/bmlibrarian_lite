@@ -85,9 +85,7 @@ class FactCheckViewModelFullTextTest {
             every { smartSearchNotice } returns MutableStateFlow(null)
             every { fullTextNotice } returns MutableStateFlow(null)
             every { retractionNotice } returns MutableStateFlow(null)
-            every { retractionSavedWorkLine } returns MutableStateFlow(null)
-            every { retractionSavedWorkWarning } returns MutableStateFlow(null)
-            every { retractionCurrentChecks } returns MutableStateFlow(emptyMap())
+            every { retractionSavedWork } returns MutableStateFlow(null)
             every { isCheckingRetractionsAgain } returns MutableStateFlow(false)
         }
         val settingsRepository = mockk<SettingsRepository>(relaxed = true) {

@@ -108,7 +108,11 @@ have landed):
   accept Apple's latest Program License Agreement (signing fails until then),
   deploy the CloudKit schema to Production (`RetractionCheckRecord`, new
   `Document` fields), update App Privacy answers to `PRIVACY.md`, archive and
-  Validate App on both platforms (first release bundling `BmlibFFI`).
+  Validate App on both platforms (first release bundling `BmlibFFI`). **Never
+  pass an `@Observable` property `inout`** (#697): its `_modify` reports a
+  change on every read, and Settings re-rendered itself until the watchdog
+  killed it; pass a `ReferenceWritableKeyPath`. Xcode Cloud's workflow
+  manifest (`xcshareddata/xcodecloud/`) is committed.
 
 - **Cut-off, refused and unknown-stop answers** (#629, #631, #637; PRs #630,
   #632, #636, #638): a cut-off answer raises `TruncatedResponseError`
@@ -119,21 +123,15 @@ have landed):
   interrogation answer patches `_chat_prose`, not `_chat`.**
 - **Desktop: Find More Evidence** (PR #628) scores **into the reviewed run's
   checkpoint**; smart search is told every query already run. **Citations
-  from full text, Retry Full Text** (PR #622).
-  *Settings → Full Text*: **Read citations from full text** (off) and **Fetch
-  Full Text From Score** (4, never below the review's threshold). The review
-  fetches full texts through the discovery chain (`citation_full_texts`)
-  before citations. **Every LLM text path map-reduces over
-  `chunking.analysis_windows`**: the text without its reference list in
-  16,000-character windows overlapping by 250, one call each, **one window
-  failing fails the paper**, never `text[:N]` (contract `text_windows.json`;
-  the apps read the same windows). **`citation_reads`** records what each
-  paper's last extraction read (no row = unread); the checkpoint keeps the
-  run's `ReportMetadata`. *Research Questions → Retry Full Text*
-  (`full_text_retry.py`, `FullTextRetryWorker`) re-extracts unread papers,
-  replaces citations in one transaction when the text yields passages, redoes transparency, writes the
-  report again only when a text was read (`full_text_report_pending` survives
-  a cancel). Runs from before PR #622 cannot be retried.
+  from full text, Retry Full Text** (PR #622; *Settings → Full Text*, off by
+  default, from score 4). **Every LLM text path map-reduces over
+  `chunking.analysis_windows`** (16,000-character windows overlapping by 250,
+  no reference list, **one window failing fails the paper**, never
+  `text[:N]`; contract `text_windows.json`). **`citation_reads`** records what
+  each paper's last extraction read (no row = unread). Retry Full Text
+  replaces citations in one transaction only when the text yields passages,
+  and writes the report again only when a text was read; runs from before
+  PR #622 cannot be retried.
 - **bmlib: the FFI pin and the port set** (#583; PRs #564–#570, #572). The
   pin names bmlib `main` (`aa47a57`, PR #680: bmlib#621's linear CSV parse); `android-tests.yml` builds
   bmlib there and fails if an FFI test skips or the contract copy drifts; **the committed xcframework is
@@ -253,8 +251,10 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 - **Retraction checking** follow-ups: **#662** (an unchecked run's warning
   rule, "could not be read" wording, needs a cross-platform decision),
-  **#663** (Android; item 3 done: a failed *Check again* shows
-  `RetractionText.CHECK_AGAIN_ERROR`, never the exception's text), Apple
+  **#663** item 2 (Android: a cancel is worded as a failure; waits on #654
+  item 2; items 1, 3, 4 done: answers stored but not shown say "later checks
+  could not be read", never "the run's record", and the saved work is one
+  `retractionSavedWork: StateFlow<RetractionSavedWorkState?>`), Apple
   **#647**, **#649**, **#653**, **#654** (item 1 done by #660), **#658**
   (Android), **#675** item 1 (a stopped Check again and the label, needs a
   cross-platform decision; items 2 and 3 done: Android's `failedFor` survives
@@ -274,33 +274,20 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 
-- **#430** segment PDF-extracted text into body and end matter (LLM-based;
-  plugs into `segment_unmarked_end_matter`), so PDF-only articles can be
-  charged for a missing statement again.
-- **#436** Swift + Android: a JATS parse failure at the end of the chain is
-  still recorded as "no full text available" for good.
-- **#437** Android stores no Europe PMC record ID for a preprint, so one with
-  no DOI never reaches its full text (Room migration).
-- From PR #438's review: **#439** Swift, a lost search followed by an
-  answered slot fetch silently skips the Europe PMC PDF render tier; **#440**
-  both apps read a matched but unreadable record as "no match"; **#441** "Try
-  again later" where a retry cannot help; **#442** Android fact-check fetches
-  twice after `NotEstablished`; **#443** a preprint record with no usable
-  accession ends as a permanent absence without a lookup.
-- **#450** Swift + Android ask `fullTextXML` for every accession: port #432's
-  `isOpenAccess` rule (needs the record's flag at the fetch; the apps often
-  start from a stored PMC ID). **#453** Europe PMC's
-  `?pdf=render` answers 403 to every non-browser client, so the render tier
-  serves nothing (all three). **#454** a fresh preprint can be served while
-  its record says `inEPMC=N`, and every rule skips it.
-- **#427** MCP `get_document_fulltext` and reader-facing discovery callers
-  discard a stale cached text when the refresh fails
-  (`pdf_utils.read_stale_cached_fulltext` exists); the analyser must never
-  get it.
-- **#425** headings still missed (non-English, plain-text and stacked
-  run-ins; none charged). **#424** "data within the manuscript" classifies
-  `UNKNOWN` (maintainer decision, all three). **#423** the apps drop
-  front-matter statements.
+- **#430** segment PDF text into body and end matter (LLM-based, into
+  `segment_unmarked_end_matter`) so PDF-only articles can be charged again.
+- Swift + Android: **#436** a JATS parse failure at the chain's end is
+  recorded as "no full text" for good; **#437** Android stores no Europe PMC
+  ID for a preprint (Room migration); **#450** port #432's `isOpenAccess`
+  rule. From PR #438: **#439** (Swift skips the render tier), **#440**,
+  **#441**, **#442** (Android), **#443**.
+- All three: **#453** `?pdf=render` answers 403 to non-browsers; **#454** a
+  fresh preprint served while its record says `inEPMC=N`.
+- **#427** the MCP and reader-facing discovery callers drop a stale cached
+  text when the refresh fails (`pdf_utils.read_stale_cached_fulltext`; never
+  to the analyser). **#425** missed headings (none charged); **#424**
+  "data within the manuscript" is `UNKNOWN` (maintainer, all three);
+  **#423** the apps drop front-matter statements.
 
 ### Transparency after PR #388: desktop parity and the ports
 

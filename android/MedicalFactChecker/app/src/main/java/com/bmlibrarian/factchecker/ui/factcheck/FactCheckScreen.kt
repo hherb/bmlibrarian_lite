@@ -217,11 +217,11 @@ fun FactCheckScreen(
             }
 
             // A restored session's retraction line, Check again, and what changed since its report
-            uiState.retractionSavedWorkLine?.let { line ->
+            uiState.retractionSavedWork?.let { savedWork ->
                 item(key = "retraction_saved_work") {
                     RetractionSavedWorkCard(
-                        line = line,
-                        warning = uiState.retractionSavedWorkWarning,
+                        line = savedWork.line,
+                        warning = savedWork.warning,
                         checking = uiState.isCheckingRetractionsAgain,
                         enabled = !uiState.isRunning,
                         onCheckAgain = viewModel::checkRetractionsAgain,
@@ -359,7 +359,7 @@ fun FactCheckScreen(
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                         },
                         retractionCheck = uiState.retractionChecks[document.id],
-                        currentRetractionCheck = uiState.retractionCurrentChecks[document.id]
+                        currentRetractionCheck = uiState.retractionSavedWork?.checks?.get(document.id)
                     )
                 }
             }
@@ -379,7 +379,7 @@ fun FactCheckScreen(
                     DocumentCard(
                         document = document,
                         retractionCheck = uiState.retractionChecks[document.id],
-                        currentRetractionCheck = uiState.retractionCurrentChecks[document.id]
+                        currentRetractionCheck = uiState.retractionSavedWork?.checks?.get(document.id)
                     )
                 }
             }

@@ -57,6 +57,7 @@ import com.bmlibrarian.factchecker.util.retraction.PaperRetractionCheck
 import com.bmlibrarian.factchecker.util.retraction.RetractionPaper
 import com.bmlibrarian.factchecker.util.retraction.RetractionReportSection
 import com.bmlibrarian.factchecker.util.retraction.RetractionSavedWork
+import com.bmlibrarian.factchecker.util.retraction.RetractionSavedWorkState
 import com.bmlibrarian.factchecker.util.retraction.RetractionService
 import com.bmlibrarian.factchecker.util.retraction.RetractionSnapshot
 import com.bmlibrarian.factchecker.util.retraction.RetractionText
@@ -265,38 +266,23 @@ class FactCheckWorkflow @Inject constructor(
         checkAgainJob?.cancel()
         savedWorkScreen++
         _retractionNotice.value = null
-        _retractionSavedWorkLine.value = null
-        _retractionSavedWorkWarning.value = null
-        _retractionCurrentChecks.value = emptyMap()
+        _retractionSavedWork.value = null
     }
 
     /**
-     * A restored session's retraction line (the desktop's `saved_work_line`):
-     * the date of its oldest decided check, how many could not be checked and
-     * why, and what *Check again* could not do; "Checking…" while it runs.
-     * Set by [restoreForViewing] and [checkRetractionsAgain]; null for a run's
-     * own session.
+     * A restored session's retraction status; null for a run's own session.
+     * Its line is the desktop's `saved_work_line`: the date of its oldest
+     * decided check, how many could not be checked and why, and what *Check
+     * again* could not do; "Checking…" while it runs. Its warning (the
+     * desktop's `saved_work_warning`) names the cited papers that have become
+     * retracted or under concern since the run, read from each paper's stored
+     * row and *Check again*'s answers, never a request. Its checks badge the
+     * papers: the run's, or a newer stored row; with one row per paper,
+     * written through [PaperRetractionCheck.take], they agree with the
+     * warning. Set by [restoreForViewing] and [checkRetractionsAgain].
      */
-    private val _retractionSavedWorkLine = MutableStateFlow<String?>(null)
-    val retractionSavedWorkLine: StateFlow<String?> = _retractionSavedWorkLine.asStateFlow()
-
-    /**
-     * Warns that papers the restored session's report cites have become
-     * retracted or under concern since its run (the desktop's
-     * `saved_work_warning`); null when none has. No request is made for it: it
-     * reads each paper's stored row, and *Check again*'s answers.
-     */
-    private val _retractionSavedWorkWarning = MutableStateFlow<String?>(null)
-    val retractionSavedWorkWarning: StateFlow<String?> = _retractionSavedWorkWarning.asStateFlow()
-
-    /**
-     * The check a restored session's papers are badged by
-     * ([RetractionSavedWork.recheckedChecks]): the run's, or a newer stored
-     * row; with one row per paper, written through [PaperRetractionCheck.take],
-     * it agrees with the warning. Empty for a run's own session.
-     */
-    private val _retractionCurrentChecks = MutableStateFlow<Map<String, PaperRetractionCheck>>(emptyMap())
-    val retractionCurrentChecks: StateFlow<Map<String, PaperRetractionCheck>> = _retractionCurrentChecks.asStateFlow()
+    private val _retractionSavedWork = MutableStateFlow<RetractionSavedWorkState?>(null)
+    val retractionSavedWork: StateFlow<RetractionSavedWorkState?> = _retractionSavedWork.asStateFlow()
 
     /** Whether [checkRetractionsAgain] is running, so it is offered one at a time and Cancel stops it. */
     private val _isCheckingRetractionsAgain = MutableStateFlow(false)
@@ -1006,7 +992,7 @@ class FactCheckWorkflow @Inject constructor(
         } catch (e: Exception) {
             // the session is shown all the same: its retraction status is unknown, never just absent
             Log.w(TAG, "Could not show the saved retraction status: ${e.javaClass.simpleName}")
-            _retractionSavedWorkLine.value = RetractionText.STATUS_UNREAD
+            _retractionSavedWork.value = RetractionSavedWorkState(RetractionText.STATUS_UNREAD)
         }
     }
 
@@ -1020,9 +1006,8 @@ class FactCheckWorkflow @Inject constructor(
      * desktop's *Check again*), storing each paper's answer as the run's
      * screen does ([PaperRetractionCheck.take], which keeps a decided row
      * over an outage). The run's snapshot, and so the report, is never
-     * rewritten: [retractionSavedWorkLine] and [retractionSavedWorkWarning]
-     * say what changed, and the warning suggests re-running the question. A
-     * check that fails, or is cancelled ([cancelCheckAgain]) before its
+     * rewritten: [retractionSavedWork]'s line and warning say what changed,
+     * and the warning suggests re-running the question. A check that fails, or is cancelled ([cancelCheckAgain]) before its
      * answers are in, stores nothing and says the run's record stands (a
      * failed one still warns of a paper its label retracts, and of what an
      * answered check found before its rows could be read); once
@@ -1036,16 +1021,17 @@ class FactCheckWorkflow @Inject constructor(
         if (!_isCheckingRetractionsAgain.compareAndSet(expect = false, update = true)) return
         checkAgainJob = currentCoroutineContext()[Job]
         val screen = savedWorkScreen
-        val shown = _retractionSavedWorkLine.value
+        val shown = _retractionSavedWork.value
         // the store could not be read even to say how it went: never leave "Checking…" up
         val standing = {
             if (screen == savedWorkScreen) {
-                _retractionSavedWorkLine.value =
-                    shown?.removeSuffix(RetractionText.CHECK_AGAIN_FAILED)?.plus(RetractionText.CHECK_AGAIN_FAILED)
+                _retractionSavedWork.value = shown?.let {
+                    it.copy(line = it.line.removeSuffix(RetractionText.CHECK_AGAIN_FAILED) + RetractionText.CHECK_AGAIN_FAILED)
+                }
             }
         }
         try {
-            checkRetractionsAgainWork(session.id, screen)
+            checkRetractionsAgainWork(session.id, screen, shown)
         } catch (e: CancellationException) {
             withContext(NonCancellable) {
                 try {
@@ -1065,9 +1051,16 @@ class FactCheckWorkflow @Inject constructor(
         }
     }
 
-    /** The work of [checkRetractionsAgain]. */
-    private suspend fun checkRetractionsAgainWork(sessionId: String, screen: Long) {
-        if (screen == savedWorkScreen) _retractionSavedWorkLine.value = RetractionText.CHECKING_AGAIN_LINE
+    /**
+     * The work of [checkRetractionsAgain].
+     *
+     * @param shown The saved work [screen] showed before it
+     */
+    private suspend fun checkRetractionsAgainWork(sessionId: String, screen: Long, shown: RetractionSavedWorkState?) {
+        if (screen == savedWorkScreen) {
+            _retractionSavedWork.value = shown?.copy(line = RetractionText.CHECKING_AGAIN_LINE)
+                ?: RetractionSavedWorkState(RetractionText.CHECKING_AGAIN_LINE)
+        }
         var papers: Map<String, RetractionPaper> = emptyMap()
         var fresh: Map<String, PaperRetractionCheck> = emptyMap()
         val taken = try {
@@ -1100,20 +1093,34 @@ class FactCheckWorkflow @Inject constructor(
         currentCoroutineContext().ensureActive()
         // the answers are in: a cancel now would call the rows they change the run's record
         withContext(NonCancellable) {
-            val unsaved = if (storeRetractionChecks(taken.rows)) {
+            val saved = storeRetractionChecks(taken.rows)
+            val unsaved = if (saved) {
                 ""
             } else {
                 // shortcut: said on this view only, not on a later reopen as the desktop's
                 // _unsaved_rechecks does; upgrade with a per-session set in this singleton if readers miss it
                 RetractionText.CHECK_AGAIN_NOT_SAVED
             }
-            showSavedRetraction(sessionId, screen, unsaved, again = fresh, taken = taken.use)
+            try {
+                showSavedRetraction(sessionId, screen, unsaved, again = fresh, taken = taken.use)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (!saved) throw e
+                // stored, so never "still the run's record" (#663): what was shown, saying the new checks went unread
+                Log.w(TAG, "Could not show Check again's stored answers: ${e.javaClass.simpleName}")
+                if (screen == savedWorkScreen) {
+                    _retractionSavedWork.value = shown?.let {
+                        val line = it.line.removeSuffix(RetractionText.STORED_CHECKS_UNREAD).removeSuffix(RetractionText.CHECK_AGAIN_FAILED)
+                        it.copy(line = line + RetractionText.STORED_CHECKS_UNREAD)
+                    }
+                }
+            }
         }
     }
 
     /**
-     * Set [retractionSavedWorkLine], [retractionCurrentChecks] and
-     * [retractionSavedWorkWarning] from the run's snapshot, each paper's
+     * Set [retractionSavedWork] from the run's snapshot, each paper's
      * stored row and *Check again*'s answers, unless [screen] is no longer
      * shown. No request is made. A row that cannot be read, or rows that
      * cannot be looked up (stored checks unreadable, bmlib's native library
@@ -1182,11 +1189,13 @@ class FactCheckWorkflow @Inject constructor(
             emptyList()
         }
         if (screen != savedWorkScreen) return
-        _retractionCurrentChecks.value = rows
-        _retractionSavedWorkLine.value = RetractionText.savedWorkLine(rows.values, causes) +
-            RetractionText.notCheckedAgainClause(missed.size, missedCauses) + note +
-            if (unread) RetractionText.STORED_CHECKS_UNREAD else ""
-        _retractionSavedWorkWarning.value = RetractionText.savedWorkWarning(changed.map { titles.getValue(it) to latest.getValue(it) })
+        _retractionSavedWork.value = RetractionSavedWorkState(
+            line = RetractionText.savedWorkLine(rows.values, causes) +
+                RetractionText.notCheckedAgainClause(missed.size, missedCauses) + note +
+                if (unread) RetractionText.STORED_CHECKS_UNREAD else "",
+            warning = RetractionText.savedWorkWarning(changed.map { titles.getValue(it) to latest.getValue(it) }),
+            checks = rows
+        )
     }
 
     // ==================== Workflow Execution ====================
