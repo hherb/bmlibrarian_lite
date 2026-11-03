@@ -1960,26 +1960,31 @@ final class RetractionCheckRecord {
         return check.isReadable ? check : nil
     }
 
-    /// The one of several stored checks of a paper that stands for them all.
-    /// The readable ones merge oldest first: a newer one replaces the kept
-    /// one unless the kept one ``PaperRetractionCheck/standsAgainst(_:)`` it
-    /// (the desktop's `_keeps`) or, as ``RetractionSavedWork/latest(_:)``, it
-    /// is unchecked and the kept one decided. A retraction they merge to
+    /// The one of several stored checks of a paper that stands for them all:
+    /// the readable ones ``merged(_:check:)``. A retraction they merge to
     /// stands, as it erases nothing that warns more; else a copy this build
     /// cannot read does when there is one, since its time is unknown and it
     /// may hold a retraction an outage must not erase (#669, #691).
     static func standing(_ jsons: [String]) -> String? {
         let readable = jsons.compactMap { json in check(json).map { (json: json, check: $0) } }
-        var kept: (json: String, check: PaperRetractionCheck)?
-        for next in readable.sorted(by: { $0.check.checkedAt < $1.check.checkedAt }) {
-            if let old = kept?.check,
-               old == next.check || old.standsAgainst(next.check) || (next.check.isUnchecked && !old.isUnchecked) {
+        let kept = merged(readable) { $0.check }
+        if kept?.check.isRetracted == true { return kept?.json }
+        return jsons.first { check($0) == nil } ?? kept?.json
+    }
+
+    /// Readable checks of one paper merged oldest first: a newer one replaces
+    /// the kept one unless the kept one ``PaperRetractionCheck/standsAgainst(_:)``
+    /// it (the desktop's `_keeps`) or it is unchecked and the kept one decided.
+    static func merged<T>(_ items: [T], check: (T) -> PaperRetractionCheck) -> T? {
+        var kept: T?
+        for next in items.sorted(by: { check($0).checkedAt < check($1).checkedAt }) {
+            if let old = kept.map(check), old == check(next) || old.standsAgainst(check(next))
+                || (check(next).isUnchecked && !old.isUnchecked) {
                 continue
             }
             kept = next
         }
-        if kept?.check.isRetracted == true { return kept?.json }
-        return jsons.first { check($0) == nil } ?? kept?.json
+        return kept
     }
 
     /// The records of `keys`, by key.

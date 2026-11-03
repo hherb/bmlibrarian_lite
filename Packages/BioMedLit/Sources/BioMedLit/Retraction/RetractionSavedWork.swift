@@ -17,20 +17,12 @@ import Foundation
 
 /// What a reopened session knows about its papers since its run, worked out
 /// from the checks the run used (its snapshot, never rewritten) and the checks
-/// stored since (the desktop's `latest_checks`, `rechecked_snapshot` and
+/// stored since (the desktop's `rechecked_snapshot` and
 /// `changed_since_snapshot` in `retraction_screen.py`).
 ///
 /// The snapshot keeps what the run saw, as the desktop's `run_status` does;
 /// *Check again* writes only the stored checks.
 public enum RetractionSavedWork {
-    /// A paper's latest knowledge among its stored checks: the newest decided
-    /// one (retracted, concern, clear), else the newest. An unchecked check
-    /// never replaces a decided one: an outage is not knowledge.
-    public static func latest(_ checks: [PaperRetractionCheck]) -> PaperRetractionCheck? {
-        let decided = checks.filter { !$0.isUnchecked }
-        return (decided.isEmpty ? checks : decided).max { $0.checkedAt < $1.checkedAt }
-    }
-
     /// The checks a reopened session's line is read from: each the run's,
     /// unless the document's stored check is newer and is not an unchecked one
     /// over a decided one. A session whose run recorded none (it predates the

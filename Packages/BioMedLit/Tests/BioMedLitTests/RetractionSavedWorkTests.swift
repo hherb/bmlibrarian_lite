@@ -29,14 +29,6 @@ final class RetractionSavedWorkTests: XCTestCase {
             checkedAt: date, exportDataAsOf: nil, crossrefFailure: nil)
     }
 
-    func testLatestPrefersTheNewestDecidedCheck() {
-        XCTAssertNil(RetractionSavedWork.latest([]))
-        let decided = check("clear", at: run)
-        XCTAssertEqual(RetractionSavedWork.latest([decided, check("unchecked", at: later)]), decided)
-        XCTAssertEqual(RetractionSavedWork.latest([decided, check("retracted", at: later)])?.status, "retracted")
-        XCTAssertEqual(RetractionSavedWork.latest([check("unchecked", at: later)])?.status, "unchecked")
-    }
-
     func testRecheckedChecksKeepTheRunAgainstAnOutage() {
         let rows = RetractionSavedWork.recheckedChecks(
             run: ["a": check("clear", at: run), "b": check("unchecked", at: run), "c": check("clear", at: run)],

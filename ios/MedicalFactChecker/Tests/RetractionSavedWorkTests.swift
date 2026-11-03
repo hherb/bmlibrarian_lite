@@ -196,6 +196,31 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertTrue(workflow.retractionSavedWorkWarning?.contains("• Study 0: Retracted") == true)
     }
 
+    /// A retraction every lookup answered, and a newer concern resting on a
+    /// Crossref outage: the warning reads the retraction, as the screen
+    /// (``RetractionCheckRecord/standing(_:)``) does, not the newer check (#693).
+    func testAnAnsweredRetractionWarnsOverANewerOutageConcern() {
+        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        storeElsewhere("10.1000/a", Self.check("retracted", at: Self.runDay.addingTimeInterval(Self.day)))
+        documents[0].retractionCheck = PaperRetractionCheck(
+            status: "concern", deciding: nil, unanswered: ["crossref"],
+            checkedAt: Self.runDay.addingTimeInterval(9 * Self.day), exportDataAsOf: nil, crossrefFailure: nil)
+
+        let warning = restore(session).retractionSavedWorkWarning ?? ""
+
+        XCTAssertTrue(warning.contains("• Study 0: Retracted"), warning)
+    }
+
+    /// The control: a newer clear every lookup answered replaces the older
+    /// retraction, as on the screen, so nothing warns.
+    func testANewerAnsweredClearReplacesAnOlderRetraction() {
+        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        storeElsewhere("10.1000/a", Self.check("retracted", at: Self.runDay.addingTimeInterval(Self.day)))
+        documents[0].retractionCheck = Self.check("clear", at: Self.runDay.addingTimeInterval(9 * Self.day))
+
+        XCTAssertNil(restore(session).retractionSavedWorkWarning)
+    }
+
     /// A stored check this build cannot read may hold a retraction: the line
     /// says later checks could not be read, for this session's and another's.
     func testAnUnreadableStoredCheckSaysSo() {
