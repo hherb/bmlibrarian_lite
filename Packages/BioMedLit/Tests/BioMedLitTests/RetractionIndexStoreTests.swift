@@ -37,6 +37,7 @@ final class RetractionIndexStoreTests: XCTestCase {
     }
 
     private var file: URL { directory.appendingPathComponent(BioMedLitConstants.retractionIndexFileName) }
+    private var refusalFile: URL { directory.appendingPathComponent("\(BioMedLitConstants.retractionIndexFileName).refused") }
 
     private func store() -> RetractionIndexStore {
         let config = URLSessionConfiguration.ephemeral
@@ -257,6 +258,35 @@ final class RetractionIndexStoreTests: XCTestCase {
         XCTAssertEqual(index?.dataAsOf(), RetractionFixture.today)
         let outcome = await refresh.value
         XCTAssertEqual(outcome, .refreshed(noticeCount: 3))
+    }
+
+    /// A local write failure says nothing about the export: no day's wait, the next refresh downloads again (#700).
+    func testAnIndexThatCannotBeStoredIsNoWait() async throws {
+        // a non-empty folder where the index goes: the atomic rename over it fails
+        try FileManager.default.createDirectory(at: file, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: file.appendingPathComponent("blocker"))
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv())
+        let first = await store().refreshIfStale(now: RetractionFixture.now)
+        XCTAssertEqual(first, .notStored)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: refusalFile.path))
+        // control: once it can be written, a new launch an hour later stores it
+        try FileManager.default.removeItem(at: file)
+        let again = await store().refreshIfStale(now: RetractionFixture.now.addingTimeInterval(60 * 60))
+        XCTAssertEqual(again, .refreshed(noticeCount: 3))
+        XCTAssertEqual(StubURLProtocol.requestedURLs.count, 2)
+    }
+
+    /// A write that fails keeps the previous index as it was (#700).
+    func testAnIndexThatCannotBeStoredKeepsThePreviousOne() async throws {
+        try storeIndex(dataAsOf: "2026-01-01")
+        let before = try Data(contentsOf: file)
+        // a read-only folder: nothing can be written or renamed into it
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path) }
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv())
+        let outcome = await store().refreshIfStale(now: RetractionFixture.now)
+        XCTAssertEqual(outcome, .notStored)
+        XCTAssertEqual(try Data(contentsOf: file), before)
     }
 
     /// Control: the guard lasts one download; a failed one is tried again by the next call.

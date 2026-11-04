@@ -23,9 +23,15 @@ public enum RetractionIndexRefresh: Equatable, Sendable {
     case fresh
     /// A new index was built and stored.
     case refreshed(noticeCount: UInt64)
-    /// The download arrived but was not stored; the previous file is kept.
+    /// The export itself was refused (bmlib could not build it, or it shrank)
+    /// and is not downloaded again for a day; the previous file is kept.
     /// The text is for the log: it is this library's, never the provider's.
     case refused(String)
+    /// The export was built but could not be written here (a full disk, or
+    /// file protection while the device is locked). Nothing was learned
+    /// about the export, so no wait is recorded: the next refresh tries
+    /// again (#700). The previous file is kept.
+    case notStored
     /// The download failed; the previous file is kept.
     case failed(RequestFailure)
 }
@@ -270,7 +276,7 @@ public actor RetractionIndexStore {
             try build.index.toBytes().write(to: file, options: .atomic)
         } catch {
             BioMedLitLib.logger?.warning("Retraction Watch index not stored: \(error)", category: .network)
-            return .refused("the index could not be stored")
+            return .notStored
         }
         return .refreshed(noticeCount: count)
     }

@@ -52,13 +52,22 @@ sealed class RetractionIndexRefresh {
     data class Refreshed(val noticeCount: Long) : RetractionIndexRefresh()
 
     /**
-     * The export was not stored and is not downloaded again for a day: bmlib
-     * could not build it, it shrank, the index could not be written, or
-     * bmlib's native library is missing; or one was refused within the day.
-     * The previous file is kept. The text is for the log: this app's, never
-     * the provider's.
+     * The export itself was refused and is not downloaded again for a day:
+     * bmlib could not build it, or it shrank; or one was refused within the
+     * day. The previous file is kept. The text is for the log: this app's,
+     * never the provider's.
      */
     data class Refused(val reason: String) : RetractionIndexRefresh()
+
+    /**
+     * The export was built but could not be written here (a full disk, say).
+     * Nothing was learned about the export, so no wait is recorded: the next
+     * refresh tries again (#700). The previous file is kept.
+     */
+    data object NotStored : RetractionIndexRefresh()
+
+    /** bmlib's native library is missing, so nothing was downloaded; no wait is recorded (#700). */
+    data object NoNativeLibrary : RetractionIndexRefresh()
 
     /** The download failed; the previous file is kept. */
     data class Failed(val failure: RequestFailure) : RetractionIndexRefresh()
@@ -73,12 +82,14 @@ sealed class RetractionIndexRefresh {
  * @param isUnmetered Whether the active network is unmetered; the export is
  *   downloaded only then
  * @param exportUrl The export's address
+ * @param bmlibLoads Whether bmlib's native library loads; a test stands in for a missing one
  */
 class RetractionIndexStore(
     private val directory: File,
     private val httpClient: OkHttpClient = defaultExportClient(),
     private val isUnmetered: () -> Boolean,
     private val exportUrl: String = RetractionConstants.RETRACTION_WATCH_EXPORT_URL,
+    private val bmlibLoads: () -> Boolean = ::nativeLibraryLoads,
 ) {
     private val file = File(directory, RetractionConstants.RETRACTION_INDEX_FILE_NAME)
 
@@ -173,7 +184,7 @@ class RetractionIndexStore(
             if (nowMs - at in 0L until RetractionConstants.RETRACTION_WATCH_REFUSED_BACKOFF_MS) return@withLock RetractionIndexRefresh.Refused(reason)
         }
         if (!isUnmetered()) return@withLock RetractionIndexRefresh.Metered
-        if (!bmlibLoads()) return@withLock RetractionIndexRefresh.Refused("bmlib's native library is missing")
+        if (!bmlibLoads()) return@withLock RetractionIndexRefresh.NoNativeLibrary
         withContext(Dispatchers.IO) { refresh(nowMs, email) }.also {
             if (it is RetractionIndexRefresh.Refused) recordRefusal(nowMs, it.reason)
         }
@@ -235,7 +246,7 @@ class RetractionIndexStore(
         } catch (e: IOException) {
             temporary.delete()
             Log.w(TAG, "Retraction Watch index not stored: ${e.javaClass.simpleName}")
-            return RetractionIndexRefresh.Refused("the index could not be stored")
+            return RetractionIndexRefresh.NotStored
         }
         cached = file.lastModified() to build.index
         refusalFile.delete()
@@ -250,7 +261,7 @@ class RetractionIndexStore(
          * Whether bmlib's native library loads: a debug build without it could
          * not build the index, so the ~68 MB export is never downloaded for nothing.
          */
-        private fun bmlibLoads(): Boolean = try {
+        private fun nativeLibraryLoads(): Boolean = try {
             crossrefRetractionRequests(emptyList(), null)
             true
         } catch (e: LinkageError) {

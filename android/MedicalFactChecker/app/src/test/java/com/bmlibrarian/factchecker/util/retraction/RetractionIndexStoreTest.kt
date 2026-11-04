@@ -38,6 +38,7 @@ class RetractionIndexStoreTest {
     private var unmetered = true
 
     private val file get() = File(directory, RetractionConstants.RETRACTION_INDEX_FILE_NAME)
+    private val refusalFile get() = File(directory, "${RetractionConstants.RETRACTION_INDEX_FILE_NAME}.refused")
 
     @Before
     fun setUp() {
@@ -128,6 +129,45 @@ class RetractionIndexStoreTest {
         refusal.writeText("garbage")
         assertEquals(RetractionIndexRefresh.Refreshed(3), store().refreshIfStale(RetractionFixture.nowMs, "t@example.org"))
         assertEquals(2, stub.requestedUrls.size)
+    }
+
+    /** A local write failure says nothing about the export: no day's wait, the next refresh downloads again (#700). */
+    @Test
+    fun `an index that cannot be stored is no wait`() = runTest {
+        // a non-empty folder where the index goes: the rename over it fails
+        File(file, "blocker").apply { parentFile!!.mkdirs() }.writeText("x")
+        stub.stubbed = StubServer.answer(200, RetractionFixture.csv())
+        assertEquals(RetractionIndexRefresh.NotStored, store().refreshIfStale(RetractionFixture.nowMs, "t@example.org"))
+        assertFalse(refusalFile.exists())
+        assertFalse("no temporary file is left", File(directory, "${RetractionConstants.RETRACTION_INDEX_FILE_NAME}.part").exists())
+        // control: once it can be written, a new launch a minute later stores it
+        file.deleteRecursively()
+        assertEquals(RetractionIndexRefresh.Refreshed(3), store().refreshIfStale(RetractionFixture.nowMs + 60_000, "t@example.org"))
+        assertEquals(2, stub.requestedUrls.size)
+    }
+
+    /** A write that fails keeps the previous index as it was (#700). */
+    @Test
+    fun `an index that cannot be stored keeps the previous one`() = runTest {
+        storeIndex(dataAsOf = "2026-01-01")
+        val before = file.readBytes()
+        // a non-empty folder where the temporary file goes: its write fails
+        File(directory, "${RetractionConstants.RETRACTION_INDEX_FILE_NAME}.part/blocker").apply { parentFile!!.mkdirs() }.writeText("x")
+        stub.stubbed = StubServer.answer(200, RetractionFixture.csv())
+        assertEquals(RetractionIndexRefresh.NotStored, store().refreshIfStale(RetractionFixture.nowMs, "t@example.org"))
+        assertTrue(before.contentEquals(file.readBytes()))
+    }
+
+    /** A missing native library downloads nothing and records no wait (#700). */
+    @Test
+    fun `a missing native library downloads nothing and is no wait`() = runTest {
+        stub.stubbed = StubServer.answer(200, RetractionFixture.csv())
+        val missing = RetractionIndexStore(directory, stub.client(), isUnmetered = { true }, bmlibLoads = { false })
+        assertEquals(RetractionIndexRefresh.NoNativeLibrary, missing.refreshIfStale(RetractionFixture.nowMs, "t@example.org"))
+        assertTrue(stub.requestedUrls.isEmpty())
+        assertFalse(refusalFile.exists())
+        // control: with the library, the same minute downloads
+        assertEquals(RetractionIndexRefresh.Refreshed(3), store().refreshIfStale(RetractionFixture.nowMs, "t@example.org"))
     }
 
     @Test

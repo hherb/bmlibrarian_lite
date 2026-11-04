@@ -581,7 +581,7 @@ extension RetractionIndexStore {
             switch outcome {
             case .fresh, .refreshed:
                 refreshLogger.info("Retraction Watch data: \(String(describing: outcome), privacy: .public)")
-            case .refused, .failed:
+            case .refused, .notStored, .failed:
                 refreshLogger.warning("Retraction Watch data: \(String(describing: outcome), privacy: .public)")
             }
         }
