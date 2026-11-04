@@ -249,9 +249,9 @@ struct MacContentView: View {
         // refresh pagination state before fetching new documents
         restoredWorkflow.restoreForViewing(session)
 
-        // Set the workflow binding so MacFactCheckView receives it
-        // once replaced, its running Check again is out of reach: stop it, as Android's beginRetractionRun does (#708)
+        // #708: no Cancel reaches the outgoing workflow's Check again (see cancelCheckAgain)
         activeWorkflow?.cancelCheckAgain()
+        // Set the workflow binding so MacFactCheckView receives it
         activeWorkflow = restoredWorkflow
 
         // Set the current report so Report view shows it

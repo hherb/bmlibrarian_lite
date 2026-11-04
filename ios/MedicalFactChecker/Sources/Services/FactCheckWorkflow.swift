@@ -539,6 +539,12 @@ final class FactCheckWorkflow {
     /// Stops a running *Check again* (its Cancel, and background expiry,
     /// #654): it stores nothing, and the line says it was stopped. A run it
     /// waits behind is not touched; that one has its own stop (``cancelFactCheck()``).
+    ///
+    /// Every view that replaces or clears its workflow calls this on the
+    /// outgoing one first (#708), as Android's `beginRetractionRun()` cancels
+    /// `checkAgainJob`: no Cancel reaches a replaced workflow, and restoring the
+    /// same session again could check it twice at once. Keep the call at any
+    /// new site that swaps the workflow.
     func cancelCheckAgain() {
         guard isCheckingRetractionsAgain, !checkAgainStopRequested else { return }
         checkAgainStopRequested = true

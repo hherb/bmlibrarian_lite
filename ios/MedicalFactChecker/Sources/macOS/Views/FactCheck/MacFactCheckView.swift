@@ -315,7 +315,7 @@ struct MacFactCheckView: View {
     /// Clears the claim and the current session so a new question starts fresh.
     private func startNewQuestion() {
         claimText = ""
-        // once replaced, its running Check again is out of reach: stop it, as Android's beginRetractionRun does (#708)
+        // #708: no Cancel reaches the outgoing workflow's Check again (see cancelCheckAgain)
         workflow?.cancelCheckAgain()
         workflow = nil
     }
@@ -348,7 +348,7 @@ struct MacFactCheckView: View {
             showingError = true
         }
 
-        // once replaced, its running Check again is out of reach: stop it, as Android's beginRetractionRun does (#708)
+        // #708: no Cancel reaches the outgoing workflow's Check again (see cancelCheckAgain)
         self.workflow?.cancelCheckAgain()
         self.workflow = newWorkflow
 

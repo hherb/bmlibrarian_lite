@@ -98,7 +98,7 @@ have landed):
 
 ## Recently landed (context)
 
-- **Apple 1.7 release blockers** (PRs #676, #678–#680, #682): unscreened scored
+- **Apple release blockers** (fixed for 1.7, which never shipped; PRs #676, #678–#680, #682): unscreened scored
   papers counted unchecked (#657, Android too), per-paper retraction rows
   (#651), a stand-in store window (#297), a failed Keychain read is never
   cached as no key and leaves CORE/Elsevier unreachable, not unasked (#511);
@@ -106,9 +106,13 @@ have landed):
   (`network.client`, `print`) with the push entitlement on both. **A run never
   waits for the Retraction Watch refresh**: `currentIndex` is `nonisolated`
   (pinned by a test that holds the injected build, #681), and bmlib's CSV
-  parse is linear (849 s → 0.6 s). **Apps 1.8.0 (macOS beta) is cut** (PR
-  #709, `APP_STORE.md`); the CloudKit Production schema must carry
-  `RetractionCheckRecord` and the new `Document` fields. **Never
+  parse is linear (849 s → 0.6 s). **Apps 1.8.0 is cut** (PR #709,
+  `ios/MedicalFactChecker/APP_STORE.md`) only as a notarized macOS DMG for a
+  beta tester. **Still owed by the maintainer before the App Store release**:
+  Apple's latest Program License Agreement (if not yet accepted), deploy the
+  CloudKit schema to Production (`RetractionCheckRecord`, new `Document`
+  fields), update App Privacy answers to `PRIVACY.md`, archive and Validate
+  App on both platforms (first release bundling `BmlibFFI`). **Never
   pass an `@Observable` property `inout`** (#697): its `_modify` reports a
   change on every read, and Settings re-rendered itself until the watchdog
   killed it; pass a `ReferenceWritableKeyPath`. Xcode Cloud's workflow
@@ -251,12 +255,15 @@ Open issues by family; each issue carries the detail. None blocks another.
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**,
   **#653**, **#654** items 3 and 4 (the not-saved note said once, a failed
-  check recomputing the warning; items 1 and 2 done), **#658** (Android).
+  check recomputing the warning; items 1 and 2 done), **#658** (Android),
+  Apple **#711** (*Check again* on one session from two windows, or from a
+  closed one).
   **#708 done**: each Apple view that replaces its workflow (restore, *New
   Question*, a new run; six sites, iOS and macOS) first calls the outgoing
   one's `cancelCheckAgain()`, as Android's `beginRetractionRun()` cancels
-  `checkAgainJob`; the stopped check stores nothing. Keep that line at any
-  new site that swaps the workflow.
+  `checkAgainJob`; the stopped check stores nothing. Keep the
+  `cancelCheckAgain()` call at any new site that swaps the workflow (its doc
+  comment says so too).
   **Landed (PR #707: #654 item 2, #663, #675)**: Apple's
   *Check again* has its own Cancel (`cancelCheckAgain`, as Android's), which
   background expiry calls too; it never cancels a run it waits behind, and
