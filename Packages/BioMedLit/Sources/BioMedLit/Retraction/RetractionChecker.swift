@@ -137,12 +137,17 @@ public struct PaperRetractionCheck: Codable, Equatable, Sendable {
     /// Whether the evidence could not decide (never read as clear).
     public var isUnchecked: Bool { retractionStatus == .unchecked }
 
-    /// Whether this build knows the status and every unanswered lookup named:
-    /// a stored check naming another is unreadable, as the desktop's
-    /// `_decode`, so an outage never overwrites it (#669).
+    /// Whether this build knows the status, every unanswered lookup and the
+    /// deciding evidence's source and kind: a stored check naming another is
+    /// unreadable, as the desktop's `_decode`, so an outage never overwrites
+    /// it (#669, #705).
     public var isReadable: Bool {
         RetractionNames.value(status, in: RetractionNames.statuses) != nil
             && unanswered.allSatisfy { RetractionNames.value($0, in: RetractionNames.lookups) != nil }
+            && deciding.map {
+                RetractionNames.value($0.source, in: RetractionNames.sources) != nil
+                    && RetractionNames.value($0.kind, in: RetractionNames.kinds) != nil
+            } ?? true
     }
 
     /// Whether the deciding evidence is the record's own PubMed label.
@@ -221,8 +226,7 @@ extension PaperRetractionCheck {
     ///   - publicationTypes: The paper's record's publication types now.
     public func isReusable(now: Date, publicationTypes: [String]) -> Bool {
         let maxAge = TimeInterval(BioMedLitConstants.retractionCheckMaxAgeDays) * TransparencyConstants.secondsPerDay
-        guard now.timeIntervalSince(checkedAt) <= maxAge, unanswered.isEmpty,
-              RetractionNames.value(status, in: RetractionNames.statuses) != nil else { return false }
+        guard now.timeIntervalSince(checkedAt) <= maxAge, unanswered.isEmpty, isReadable else { return false }
         if isRetracted { return true }
         let label = BmlibCore.retractionStatus(doi: nil, export: nil, crossref: nil, publicationTypes: publicationTypes)
         return label.status != .retracted

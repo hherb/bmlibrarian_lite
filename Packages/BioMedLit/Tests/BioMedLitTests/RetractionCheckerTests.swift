@@ -252,6 +252,30 @@ final class RetractionCheckerTests: XCTestCase {
         XCTAssertFalse(stored(status: "retracted", unanswered: ["not-a-lookup"]).isReadable)
     }
 
+    /// So does a newer build's source or kind for the deciding evidence (#705);
+    /// such a check is never reused either.
+    func testOnlyKnownEvidenceSourceAndKindAreReadable() {
+        func decidedBy(_ source: String, _ kind: String) -> PaperRetractionCheck {
+            PaperRetractionCheck(
+                status: "retracted",
+                deciding: StoredRetractionEvidence(
+                    source: source, kind: kind, date: "2026-01", noticeDOI: nil, recordID: nil, rawKind: nil
+                ),
+                unanswered: [],
+                checkedAt: RetractionFixture.now.addingTimeInterval(-TransparencyConstants.secondsPerDay),
+                exportDataAsOf: nil,
+                crossrefFailure: nil
+            )
+        }
+        let known = decidedBy("crossref_publisher", "retraction")
+        XCTAssertTrue(known.isReadable, "control")
+        XCTAssertTrue(known.isReusable(now: RetractionFixture.now, publicationTypes: []), "control")
+        for odd in [decidedBy("a_new_source", "retraction"), decidedBy("crossref_publisher", "a_new_kind")] {
+            XCTAssertFalse(odd.isReadable)
+            XCTAssertFalse(odd.isReusable(now: RetractionFixture.now, publicationTypes: []))
+        }
+    }
+
     func testAFreshLabelIsNeverHiddenBehindAStoredClear() {
         let types = ["Retracted Publication"]
         XCTAssertFalse(stored(status: "clear").isReusable(now: RetractionFixture.now, publicationTypes: types))

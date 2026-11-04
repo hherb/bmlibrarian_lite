@@ -134,6 +134,17 @@ data class PaperRetractionCheck(
     /** Whether the evidence could not decide (never read as clear). */
     val isUnchecked: Boolean get() = retractionStatus == RetractionStatus.UNCHECKED
 
+    /**
+     * Whether this build knows the status, every unanswered lookup and the
+     * deciding evidence's source and kind: a stored check naming another is
+     * unreadable, as the desktop's `_decode`, so an outage never overwrites
+     * it (#669, #705).
+     */
+    val isReadable: Boolean
+        get() = RetractionNames.status(status) != null &&
+            unanswered.all { RetractionNames.lookup(it) != null } &&
+            (deciding == null || (RetractionNames.source(deciding.source) != null && RetractionNames.kind(deciding.kind) != null))
+
     /** Whether the deciding evidence is the record's own PubMed label. */
     val isDecidedByLabel: Boolean
         get() = deciding?.let { RetractionNames.source(it.source) } == RetractionSource.PUBMED_LABEL
@@ -154,7 +165,7 @@ data class PaperRetractionCheck(
      */
     fun isReusable(nowMs: Long, publicationTypes: List<String>): Boolean {
         val maxAgeMs = RetractionConstants.RETRACTION_CHECK_MAX_AGE_DAYS * RetractionConstants.MS_PER_DAY
-        if (nowMs - checkedAtMs > maxAgeMs || unanswered.isNotEmpty() || RetractionNames.status(status) == null) return false
+        if (nowMs - checkedAtMs > maxAgeMs || unanswered.isNotEmpty() || !isReadable) return false
         if (isRetracted) return true
         return retractionStatus(null, null, null, publicationTypes).status != RetractionStatus.RETRACTED
     }
@@ -256,14 +267,12 @@ data class PaperRetractionCheck(
         fun encode(check: PaperRetractionCheck): String = json.encodeToString(serializer(), check)
 
         /**
-         * A stored check decoded; null when it cannot be read, a status or
-         * lookup name this build does not know included (the desktop's
+         * A stored check decoded; null when it cannot be read, a name this
+         * build does not know included ([isReadable], the desktop's
          * `_decode`), so [take] protects it as it protects malformed JSON.
          */
         fun decode(text: String): PaperRetractionCheck? = try {
-            json.decodeFromString(serializer(), text).takeIf { check ->
-                RetractionNames.status(check.status) != null && check.unanswered.all { RetractionNames.lookup(it) != null }
-            }
+            json.decodeFromString(serializer(), text).takeIf { it.isReadable }
         } catch (e: SerializationException) {
             null
         } catch (e: IllegalArgumentException) {
