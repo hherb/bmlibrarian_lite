@@ -143,8 +143,9 @@ final class FactCheckWorkflow {
     private(set) var isCheckingRetractionsAgain = false
 
     /// Set by ``cancelCheckAgain()`` until the next *Check again* begins; a stop
-    /// asked while it waits behind earlier work is kept for its body.
-    private var checkAgainStopRequested = false
+    /// asked while it waits behind earlier work is kept for its body. The
+    /// badge disables its Cancel by it, since the line changes only once the body runs.
+    private(set) var checkAgainStopRequested = false
 
     /// Whether *Check again*'s own body is the running ``workflowTask``, so
     /// ``cancelCheckAgain()`` cancels it and never a run it waits behind.
@@ -322,9 +323,10 @@ final class FactCheckWorkflow {
 
     /// Handle background task expiration.
     ///
-    /// Called when iOS is about to suspend the app. Stops the work under way
-    /// and saves the session at once, as ``cancelFactCheck()`` does
-    /// (``stopWork(_:)``). The workflow shows itself as paused, offering to
+    /// Called when iOS is about to suspend the app. Stops a running *Check
+    /// again* (``cancelCheckAgain()``, recording no stop on the session), then
+    /// the work under way, saving the session at once, as ``cancelFactCheck()``
+    /// does (``stopWork(_:)``). The workflow shows itself as paused, offering to
     /// resume, only when the session waits on the user: beside a report that
     /// stands there is nothing to resume, and ``stopNotice`` says what the
     /// stop left undone.
@@ -555,8 +557,9 @@ final class FactCheckWorkflow {
         let papers = RetractionPaper.merged(documents.map(\.retractionPaper))
         // nothing is stored, but the paper's label (any of its records') still retracts (#673, #675)
         let standing = { [self] in
-            // a cancellation nobody asked for is a failure (see stopRequested)
+            // only cancelCheckAgain()'s stop reads as one; a cancellation nobody asked for is a failure
             let note = checkAgainStopRequested ? RetractionText.checkAgainStopped : RetractionText.checkAgainFailed
+            if checkAgainStopRequested { logger.info("Retraction check again stopped; nothing stored") }
             showSavedRetraction(note: note, labelled: Self.labelRetractions(documents, papers))
         }
         // stopped while it waited behind earlier work
@@ -1239,7 +1242,7 @@ final class FactCheckWorkflow {
     }
 
     /// Runs one piece of the workflow's work as ``workflowTask``, so that
-    /// ``cancelFactCheck()`` and background expiry reach it.
+    /// ``cancelFactCheck()``, ``cancelCheckAgain()`` and background expiry reach it.
     ///
     /// Every entry point that does work runs its whole body through here.
     ///
@@ -1248,8 +1251,8 @@ final class FactCheckWorkflow {
     /// the new work's session or state.
     ///
     /// The body runs in an unstructured task, so cancelling the caller's own
-    /// task does not stop it; only ``cancelFactCheck()`` and background
-    /// expiry do. A stop is recorded again from what the body left, inside
+    /// task does not stop it; only ``cancelFactCheck()``, ``cancelCheckAgain()``
+    /// (*Check again*'s own body) and background expiry do. A stop is recorded again from what the body left, inside
     /// the task (``settleStop()``).
     ///
     /// - Parameter body: The work. Runs on the main actor.

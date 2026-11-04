@@ -685,6 +685,34 @@ def test_a_cancelled_check_again_still_warns_by_the_label(
     assert tab.check_again_btn.isEnabled()
 
 
+def test_a_cancelled_check_again_keeps_a_stored_retractions_notice(
+    tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stop lays the label only over what is shown: a stored retraction keeps its notice (#675)."""
+    metadata = checkpoint_metadata_with_retraction_snapshot({}, screen_documents(DOCUMENTS, run_checks()))
+    checkpoint_id = saved_checkpoint(storage, metadata)
+    store_rows(storage, {CITED.id: check(RetractionStatus.RETRACTED, NOW)})
+    reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
+    storage.add_document(replace(CITED, publication_types=LABEL))
+    monkeypatch.setattr(report_tab_module, "build_retraction_checker", lambda *_a, **_k: DownChecker())
+
+    def cancelled_run(worker: RetractionRecheckWorker) -> None:
+        worker.cancel()
+        worker.run()
+
+    monkeypatch.setattr(RetractionRecheckWorker, "start", cancelled_run)
+    tab.check_again_btn.click()
+
+    assert tab.retraction_line.text().endswith(CHECK_AGAIN_STOPPED)
+    assert "10.9/notice" in tab.retraction_warning.text() and "label" not in tab.retraction_warning.text()
+
+
+def test_check_again_sentences_are_the_apps() -> None:
+    """Python is canonical: the apps' tests pin these same words (#663)."""
+    assert CHECK_AGAIN_STOPPED == "; checking again was stopped, so this is still the run's record"
+    assert CHECK_AGAIN_FAILED == "; it could not be checked again, so this is still the run's record"
+
+
 def test_quit_cancels_check_again_and_leaves_the_one_bounded_wait_to_the_keeper() -> None:
     """The keeper holds the worker and waits for it at quit: the tab cancels and never waits a second time."""
     worker = MagicMock()

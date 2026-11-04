@@ -1010,8 +1010,9 @@ class FactCheckWorkflow @Inject constructor(
      * and the warning suggests re-running the question. A check that fails,
      * or is cancelled ([cancelCheckAgain]) before its answers are in, stores
      * nothing and says the run's record stands, still warning of a paper its
-     * label retracts (#673, #675; a failed one also of what an answered check
-     * found before its rows could be read); once they are in, they are stored and shown
+     * label retracts unless the documents cannot be read again (#673, #675; a
+     * failed one also of what an answered check found before its rows could be
+     * read); once they are in, they are stored and shown
      * whole, and badged though the rows cannot be read back. A new run or restore
      * cancels it, and it never writes their screen.
      *
@@ -1036,6 +1037,8 @@ class FactCheckWorkflow @Inject constructor(
         try {
             checkRetractionsAgainWork(session.id, screen, shown)
         } catch (e: CancellationException) {
+            // a new run or restore cancelled it: their screen is never written, so read nothing for it
+            if (screen != savedWorkScreen) throw e
             withContext(NonCancellable) {
                 try {
                     // stopped, not failed (#663), yet a record's own label still warns, as on a failure (#675)

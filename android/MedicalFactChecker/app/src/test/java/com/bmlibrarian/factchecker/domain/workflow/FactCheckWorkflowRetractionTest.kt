@@ -840,6 +840,54 @@ class FactCheckWorkflowRetractionTest {
         assertTrue("nothing is stored", rows.isEmpty())
     }
 
+    /** #675: a merge that throws on the stop still leaves each document's own label to warn. */
+    @Test
+    fun `a cancelled Check again whose merge throws still warns by the label`() = runTest {
+        BmlibFfi.assumeAvailable()
+        restoreCheckedSession()
+        documents["d1"] = documents.getValue("d1").copy(publicationTypesJson = "[\"Retracted Publication\"]")
+        documents["d2"] = documents.getValue("d2").copy(doi = "10.1/x")
+        var stopping = false
+        mockkObject(RetractionChecker.Companion)
+        every { RetractionChecker.doiKey(any()) } answers {
+            if (stopping) throw IllegalStateException("bmlib") else callOriginal()
+        }
+        coEvery { retractionService.check(any()) } coAnswers { awaitCancellation() }
+
+        val job = launch { workflow.checkRetractionsAgain() }
+        runCurrent()
+        stopping = true
+        workflow.cancelCheckAgain()
+        job.join()
+
+        assertTrue(workflow.retractionSavedWork.value?.warning!!.contains("• Study d1: Retracted"))
+        assertTrue(workflow.retractionSavedWork.value?.line!!.contains(RetractionText.CHECK_AGAIN_STOPPED))
+        assertTrue("nothing is stored", rows.isEmpty())
+    }
+
+    /** #663: a Cancel once the answers are being stored is too late to stop them: never "still the run's record". */
+    @Test
+    fun `a Cancel while Check again stores its answers never calls them the run's record`() = runTest {
+        restoreCheckedSession()
+        answers["1"] = RETRACTED.copy(checkedAtMs = RUN_MS + DAY_MS)
+        val storing = CompletableDeferred<Unit>()
+        coEvery { retractionService.store(any()) } coAnswers {
+            storing.await()
+            firstArg<Map<String, PaperRetractionCheck>>().forEach { (key, check) -> rows[key] = PaperRetractionCheck.encode(check) }
+        }
+
+        val job = launch { workflow.checkRetractionsAgain() }
+        runCurrent()
+        workflow.cancelCheckAgain()
+        storing.complete(Unit)
+        job.join()
+
+        assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
+        val line = workflow.retractionSavedWork.value?.line!!
+        assertFalse(line, line.contains(RetractionText.CHECK_AGAIN_STOPPED))
+        assertTrue(workflow.retractionSavedWork.value?.warning!!.contains("• Study d1: Retracted"))
+    }
+
     @Test
     fun `a run started after a restore drops the saved-work line`() = runTest {
         restoreCheckedSession()

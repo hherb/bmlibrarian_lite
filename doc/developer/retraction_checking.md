@@ -68,9 +68,10 @@ paper with its `retraction_status`.
   retracted.
 - **The label survives everything.** A failed check (the checker could not be
   built, the database raised) still leaves out a paper its label retracts. A
-  failed or stopped *Check again* stores nothing and the line says the
-  run's record stands (a stop says it was stopped, `CHECK_AGAIN_STOPPED`,
-  #663), but a cited paper its label now retracts is still warned of (#673,
+  failed or stopped *Check again* stores nothing with the run and the line
+  says the run's record stands (a stop says it was stopped,
+  `CHECK_AGAIN_STOPPED`, #663; on the desktop, the shared `retraction_checks`
+  table still keeps what the lookups answered before the stop), but a cited paper its label now retracts is still warned of (#673,
   #675, all three platforms; not on Android without bmlib's native library,
   which the label needs). A shown retraction keeps its own notice, and a shown
   concern stays.

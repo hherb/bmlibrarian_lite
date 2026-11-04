@@ -253,8 +253,10 @@ Open issues by family; each issue carries the detail. None blocks another.
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**,
   **#653**, **#654** items 3 and 4 (the not-saved note said once, a failed
-  check recomputing the warning; items 1 and 2 done), **#658** (Android).
-  **Done this round (PR for #654 item 2, #663 item 2, #675 item 1)**: Apple's
+  check recomputing the warning; items 1 and 2 done), **#658** (Android),
+  Apple **#708** (a restore orphans a running *Check again*; the same session
+  can be checked twice at once).
+  **Done this round (PR #707: #654 item 2, #663 item 2, #675 item 1)**: Apple's
   *Check again* has its own Cancel (`cancelCheckAgain`, as Android's), which
   background expiry calls too; it never cancels a run it waits behind, and
   records no stop on the session. A stopped *Check again* says

@@ -187,7 +187,7 @@ public enum RetractionText {
     public static let checkingAgainLine = "Checking retraction status…"
     /// Added to the saved-work line when *Check again* failed.
     public static let checkAgainFailed = "; it could not be checked again, so this is still the run's record"
-    /// Added to the saved-work line when *Check again* was stopped (its Cancel, background expiry, quit).
+    /// Added to the saved-work line when *Check again* was stopped (its Cancel, background expiry; the desktop's, a quit).
     public static let checkAgainStopped = "; checking again was stopped, so this is still the run's record"
     /// Added to the saved-work line when the stored checks could not be read.
     public static let storedChecksUnread = "; later checks could not be read"

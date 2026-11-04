@@ -199,7 +199,7 @@ object RetractionText {
     /** Added to the saved-work line when *Check again* failed. */
     const val CHECK_AGAIN_FAILED = "; it could not be checked again, so this is still the run's record"
 
-    /** Added to the saved-work line when *Check again* was stopped (its Cancel, a new run or restore, quit). */
+    /** Added to the saved-work line when *Check again* was stopped (its Cancel, or its scope cancelled, e.g. the ViewModel cleared). */
     const val CHECK_AGAIN_STOPPED = "; checking again was stopped, so this is still the run's record"
 
     /** The error shown when *Check again* failed outright (the line says how the record stands). */

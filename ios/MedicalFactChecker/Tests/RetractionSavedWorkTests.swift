@@ -512,9 +512,10 @@ final class RetractionSavedWorkTests: XCTestCase {
     /// #654: a stop asked while *Check again* waits behind earlier work stops
     /// it before it asks anything, and leaves that work running.
     func testAStopWhileWaitingStopsCheckAgainNotTheWorkAhead() async {
-        let (session, _) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
         let asked = Asked()
         let workflow = restore(session, asked: asked)
+        documents[0].publicationTypes = ["Journal Article", "Retracted Publication"]
         let (gate, open) = AsyncStream<Void>.makeStream()
         var aheadCancelled: Bool?
         let ahead = Task { @MainActor in
@@ -528,6 +529,7 @@ final class RetractionSavedWorkTests: XCTestCase {
         while !workflow.isCheckingRetractionsAgain { await Task.yield() }
 
         workflow.cancelCheckAgain()
+        XCTAssertTrue(workflow.checkAgainStopRequested, "the badge's Cancel is disabled while it waits")
         open.finish()
         await ahead.value
         await check.value
@@ -535,6 +537,41 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertEqual(aheadCancelled, false, "the work ahead is not stopped")
         XCTAssertEqual(asked.calls, 0, "a stopped Check again asks nothing")
         XCTAssertTrue(workflow.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainStopped) == true)
+        XCTAssertTrue(workflow.retractionSavedWorkWarning?.contains("• Study 0: Retracted") == true, "#675")
+    }
+
+    /// #675: a stop the check did not throw for still warns by the label, never by the answers it threw away.
+    func testAStopTheCheckDidNotThrowForStillWarnsByTheLabel() async {
+        let (session, documents) = makeSession(
+            ["10.1000/a", "10.1000/b"], cited: [0, 1], run: [0: Self.check("clear"), 1: Self.check("clear")])
+        let workflow = restore(session)
+        documents[0].publicationTypes = ["Journal Article", "Retracted Publication"]
+        let retracted = Self.check("retracted", at: Self.runDay.addingTimeInterval(Self.day))
+        workflow.useRetractionCheck { papers in
+            await MainActor.run { workflow.cancelCheckAgain() }
+            return Dictionary(papers.map { ($0, retracted) }) { first, _ in first }
+        }
+
+        await workflow.checkRetractionsAgain()
+
+        let warning = workflow.retractionSavedWorkWarning ?? ""
+        XCTAssertTrue(warning.contains("• Study 0: Retracted"), warning)
+        XCTAssertFalse(warning.contains("Study 1"), "an answer not stored warns of nothing")
+        XCTAssertEqual(documents[1].retractionCheck, Self.check("clear"), "nothing is stored")
+    }
+
+    /// #663, #675: a cancellation nobody asked for reads as a failure, still warning by the label.
+    func testAnUnaskedCancellationIsAFailure() async {
+        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        let workflow = restore(session)
+        documents[0].publicationTypes = ["Journal Article", "Retracted Publication"]
+        workflow.useRetractionCheck { _ in throw CancellationError() }
+
+        await workflow.checkRetractionsAgain()
+
+        XCTAssertTrue(workflow.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainFailed) == true)
+        XCTAssertTrue(workflow.retractionSavedWorkWarning?.contains("• Study 0: Retracted") == true)
+        XCTAssertEqual(documents[0].retractionCheck, Self.check("clear"), "nothing is stored")
     }
 
     /// #654: background expiry reaches *Check again* too, and records no stop on the session.
