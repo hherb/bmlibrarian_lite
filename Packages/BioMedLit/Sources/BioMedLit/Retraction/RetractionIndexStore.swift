@@ -28,9 +28,10 @@ public enum RetractionIndexRefresh: Equatable, Sendable {
     /// The text is for the log: it is this library's, never the provider's.
     case refused(String)
     /// The export was built but could not be written here (a full disk, or
-    /// file protection while the device is locked). Nothing was learned
-    /// about the export, so no wait is recorded: the next refresh tries
-    /// again (#700). The previous file is kept.
+    /// file protection while the device is locked), or too little space was
+    /// free to download it (#702). Nothing was learned about the export, so
+    /// no wait is recorded: the next refresh tries again (#700). The
+    /// previous file is kept.
     case notStored
     /// The download failed; the previous file is kept.
     case failed(RequestFailure)
@@ -45,6 +46,8 @@ public actor RetractionIndexStore {
     private let email: String
     /// bmlib's `buildRetractionIndex`; a test injects one it can hold.
     private let build: @Sendable (Data, String) throws -> RetractionIndexBuild
+    /// The free space at the index's folder (`nil`: unknown); a test stands in for a full disk.
+    private let freeBytes: @Sendable (URL) -> Int64?
     /// The download under way, which every caller meanwhile awaits.
     private var inFlight: Task<RetractionIndexRefresh, Never>?
 
@@ -64,12 +67,29 @@ public actor RetractionIndexStore {
         directory: URL,
         session: URLSession,
         email: String,
+        freeBytes: @escaping @Sendable (URL) -> Int64? = RetractionIndexStore.availableBytes(at:),
         build: @escaping @Sendable (Data, String) throws -> RetractionIndexBuild
     ) {
         self.directory = directory
         self.session = session
         self.email = email
+        self.freeBytes = freeBytes
         self.build = build
+    }
+
+    /// The space free for important use on `directory`'s volume, made first
+    /// (a missing folder has no resource values); `nil` when unknown. A
+    /// folder that cannot be made has none, as Android's `usableSpace`: the
+    /// index could not be written there, so nothing is downloaded.
+    static func availableBytes(at directory: URL) -> Int64? {
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            BioMedLitLib.logger?.warning("Retraction Watch folder not made: \(error)", category: .network)
+            return 0
+        }
+        return (try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
+            .volumeAvailableCapacityForImportantUsage
     }
 
     /// The store the app uses: ``productionDirectory`` over a Wi-Fi-only session.
@@ -199,6 +219,13 @@ public actor RetractionIndexStore {
         if let refusal = lastRefusal(),
            (0..<BioMedLitConstants.retractionWatchRefusedBackoffSeconds).contains(now.timeIntervalSince(refusal.at)) {
             return .refused(refusal.reason)
+        }
+        // unknown free space is no reason to skip: the write still reports a failure
+        if let free = freeBytes(directory), free < BioMedLitConstants.retractionWatchMinFreeBytes {
+            BioMedLitLib.logger?.warning(
+                "Retraction Watch export not downloaded: \(free) bytes free, \(BioMedLitConstants.retractionWatchMinFreeBytes) needed",
+                category: .network)
+            return .notStored
         }
         let outcome = await download(now: now, storedNotices: stored?.notices)
         if case .refused(let reason) = outcome {

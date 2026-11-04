@@ -95,7 +95,13 @@ class RetractionService @Inject constructor(
     fun refreshInBackground() {
         scope.launch {
             try {
-                Log.i(TAG, "Retraction Watch refresh: ${store.refreshIfStale(System.currentTimeMillis(), email())}")
+                val outcome = store.refreshIfStale(System.currentTimeMillis(), email())
+                // as Apple's: anything but a current copy is a warning, so release logs keep it
+                if (outcome is RetractionIndexRefresh.Fresh || outcome is RetractionIndexRefresh.Refreshed) {
+                    Log.i(TAG, "Retraction Watch refresh: $outcome")
+                } else {
+                    Log.w(TAG, "Retraction Watch refresh: $outcome")
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

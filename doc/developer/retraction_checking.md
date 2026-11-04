@@ -143,7 +143,11 @@ BioMedLit; the app never imports `BmlibCore`.
   scoring. Each paper's latest check is a `RetractionCheckRecord`, keyed by
   `paperKey` as the desktop's `retraction_checks` row is, and kept when the
   sessions holding the paper are deleted (#651). Not unique, since CloudKit
-  allows no unique constraint; readers merge duplicates (`standing`).
+  allows no unique constraint; readers merge duplicates (`standing`): by
+  `checkedAt`, a copy this build cannot read included, which replaces any
+  but a retraction and is replaced by a readable check only when every
+  lookup answered it or it is a retraction (#694); a copy that does not
+  decode has no time and beats all but a readable retraction the merge keeps.
   `Document.retractionCheckJSON` is each session's copy: a screen or *Check
   again* brings it up to the record (`adopt`), decides, and writes it back
   (`share`). A stored check naming a status or
@@ -187,7 +191,10 @@ BioMedLit; the app never imports `BmlibCore`.
   single-flight: calls meanwhile share one download. A refused export
   (unbuildable, or shrunk) is not downloaded again for a day, across
   launches (a `.refused` file beside the index); an index that cannot be
-  written here (`.notStored`) records no wait (#700).
+  written here (`.notStored`) records no wait (#700). A full disk would
+  then fetch it every run, so too little free space
+  (`retractionWatchMinFreeBytes`), or a folder that cannot be made, skips
+  the download as `.notStored` (#702); an unknown free space does not.
 
 Tests: `RetractionScreenWorkflowTests`, `RetractionSavedWorkTests` and `RetractionBadgeTests` (app);
 `Retraction*Tests`, `ReportFormatterRetractionTests` and
@@ -241,7 +248,9 @@ row per paper, that row is the paper's latest check.
   streamed to disk, and a refused one (unbuildable, or shrunk) is not
   downloaded again for a day, across launches (a `.refused` file beside the
   index); an index that cannot be written (`NotStored`) or a missing native
-  library (`NoNativeLibrary`) records no wait (#700). A run never waits
+  library (`NoNativeLibrary`) records no wait (#700); too little free space
+  (`RETRACTION_WATCH_MIN_FREE_BYTES`), or a folder that cannot be made,
+  skips the download as `NotStored` (#702). A run never waits
   for it, and a device that runs out of memory building it carries on
   without it.
 - **Saved work.** `restoreForViewing` sets `retractionSavedWorkLine`

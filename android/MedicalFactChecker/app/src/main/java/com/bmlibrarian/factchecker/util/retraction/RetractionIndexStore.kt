@@ -60,9 +60,10 @@ sealed class RetractionIndexRefresh {
     data class Refused(val reason: String) : RetractionIndexRefresh()
 
     /**
-     * The export was built but could not be written here (a full disk, say).
-     * Nothing was learned about the export, so no wait is recorded: the next
-     * refresh tries again (#700). The previous file is kept.
+     * The export was built but could not be written here (a full disk, say),
+     * or too little space was free to download it (#702). Nothing was learned
+     * about the export, so no wait is recorded: the next refresh tries again
+     * (#700). The previous file is kept.
      */
     data object NotStored : RetractionIndexRefresh()
 
@@ -83,6 +84,8 @@ sealed class RetractionIndexRefresh {
  *   downloaded only then
  * @param exportUrl The export's address
  * @param bmlibLoads Whether bmlib's native library loads; a test stands in for a missing one
+ * @param freeBytes The free space in [directory], where the export is streamed and the index
+ *   written (0 when it cannot be made); a test stands in for a full disk
  */
 class RetractionIndexStore(
     private val directory: File,
@@ -90,6 +93,11 @@ class RetractionIndexStore(
     private val isUnmetered: () -> Boolean,
     private val exportUrl: String = RetractionConstants.RETRACTION_WATCH_EXPORT_URL,
     private val bmlibLoads: () -> Boolean = ::nativeLibraryLoads,
+    // a directory that does not exist has no usable space, so make it first;
+    // one that cannot be made has none (the index could not be written there)
+    private val freeBytes: () -> Long = {
+        if (directory.mkdirs() || directory.isDirectory) directory.usableSpace else 0L
+    },
 ) {
     private val file = File(directory, RetractionConstants.RETRACTION_INDEX_FILE_NAME)
 
@@ -185,6 +193,15 @@ class RetractionIndexStore(
         }
         if (!isUnmetered()) return@withLock RetractionIndexRefresh.Metered
         if (!bmlibLoads()) return@withLock RetractionIndexRefresh.NoNativeLibrary
+        val free = freeBytes()
+        if (free < RetractionConstants.RETRACTION_WATCH_MIN_FREE_BYTES) {
+            Log.w(
+                TAG,
+                "Retraction Watch export not downloaded: $free bytes free, " +
+                    "${RetractionConstants.RETRACTION_WATCH_MIN_FREE_BYTES} needed",
+            )
+            return@withLock RetractionIndexRefresh.NotStored
+        }
         withContext(Dispatchers.IO) { refresh(nowMs, email) }.also {
             if (it is RetractionIndexRefresh.Refused) recordRefusal(nowMs, it.reason)
         }
