@@ -404,6 +404,21 @@ def _label_check(doc: LiteDocument) -> PaperCheck:
     return unchecked_check()
 
 
+def label_screen(documents: Sequence[LiteDocument]) -> RetractionScreen:
+    """A failed screen: every document unchecked but those its record's own label retracts.
+
+    Needs neither network nor database: what a failed or stopped check
+    still warns of (#673, #675).
+
+    Args:
+        documents: The documents.
+
+    Returns:
+        The failed screen.
+    """
+    return screen_documents(documents, {doc.id: _label_check(doc) for doc in documents}, failed=True)
+
+
 def screen_with_fallback(
     checker: Any,
     documents: Sequence[LiteDocument],
@@ -437,9 +452,7 @@ def screen_with_fallback(
             "Retraction check failed (%s); every document unchecked but those their label retracts",
             type(e).__name__,
         )
-        return screen_documents(
-            documents, {doc.id: _label_check(doc) for doc in documents}, failed=True
-        )
+        return label_screen(documents)
     finally:
         try:
             checker.close()

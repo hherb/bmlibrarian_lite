@@ -70,7 +70,7 @@ from ..exceptions import RefusedResponseError, TruncatedResponseError
 from ..utils import classify_analysis_exception, classify_llm_exception
 from ..retraction_screen import (
     RetractionScreen,
-    UnbuiltChecker,
+    label_screen,
     screen_documents,
     screen_with_fallback,
     unchecked_check,
@@ -232,14 +232,15 @@ class RetractionRecheckWorker(SingleOutcome, QThread):
             A check that fails is a failed screen (every paper unchecked but
             those the record's own label retracts), never an error: the
             run's record is then left as it was.
-        cancelled: Emitted with the checkpoint id when a cancel (at quit)
-            stopped the run; nothing is to be saved.
+        cancelled: Emitted with the checkpoint id and a failed screen when a
+            cancel (at quit) stopped the run; nothing is to be saved, but the
+            screen keeps what the record's own label retracts (#675).
 
     Exactly one of ``rechecked`` and ``cancelled`` ends a run.
     """
 
     rechecked = Signal(str, object)  # checkpoint_id, RetractionScreen
-    cancelled = Signal(str)  # checkpoint_id
+    cancelled = Signal(str, object)  # checkpoint_id, the label's failed RetractionScreen
 
     def __init__(
         self,
@@ -269,9 +270,12 @@ class RetractionRecheckWorker(SingleOutcome, QThread):
         self._run_once(self._check, lambda _error: self._end(self.rechecked, self.checkpoint_id, self._failed()))
 
     def _failed(self) -> RetractionScreen:
-        """A failed screen: every paper unchecked but those the record's own label retracts (#673)."""
+        """A failed or stopped check's screen (#673, #675).
+
+        Every paper unchecked but those the record's own label retracts.
+        """
         try:
-            return screen_with_fallback(UnbuiltChecker(), self.documents)
+            return label_screen(self.documents)
         except Exception:
             logger.exception("The retraction labels could not be read either; nothing decided")
             unchecked = unchecked_check()
@@ -283,7 +287,8 @@ class RetractionRecheckWorker(SingleOutcome, QThread):
             self.checker, self.documents, lambda: self._cancelled, refresh=True
         )
         if self._cancelled:
-            self._end(self.cancelled, self.checkpoint_id)
+            logger.info("Retraction check again cancelled; nothing stored with the run")
+            self._end(self.cancelled, self.checkpoint_id, self._failed())
         else:
             self._end(self.rechecked, self.checkpoint_id, screen)
 

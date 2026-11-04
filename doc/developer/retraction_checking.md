@@ -68,10 +68,12 @@ paper with its `retraction_status`.
   retracted.
 - **The label survives everything.** A failed check (the checker could not be
   built, the database raised) still leaves out a paper its label retracts. A
-  failed *Check again* stores nothing and the line says the run's record
-  stands, but a cited paper its label now retracts is still warned of (#673,
-  all three platforms; not on Android without bmlib's native library, which
-  the label needs). A shown retraction keeps its own notice, and a shown
+  failed or stopped *Check again* stores nothing with the run and the line
+  says the run's record stands (a stop says it was stopped,
+  `CHECK_AGAIN_STOPPED`, #663; on the desktop, the shared `retraction_checks`
+  table still keeps what the lookups answered before the stop), but a cited paper its label now retracts is still warned of (#673,
+  #675, all three platforms; not on Android without bmlib's native library,
+  which the label needs). A shown retraction keeps its own notice, and a shown
   concern stays.
 - **A failed store is not a failed check.** The verdicts are returned even
   when they could not be stored.
@@ -178,7 +180,9 @@ BioMedLit; the app never imports `BmlibCore`.
   `Document.takeRetractionChecks`, which keeps a decided check over an outage,
   and never rewrites the snapshot or the report: the snapshot stays what the
   run saw (the desktop's `run_status`); its line names why papers stay
-  unchecked (`RetractionText.savedWorkLine(_:causes:)`, #660). A run row that is unchecked (a failed
+  unchecked (`RetractionText.savedWorkLine(_:causes:)`, #660). Its own
+  Cancel and background expiry stop it (`cancelCheckAgain`, #654), never a
+  run it waits behind, and record no stop on the session. A run row that is unchecked (a failed
   check carries its attempt's time) is no check time, so any later warning is
   news. The rules are BioMedLit's `RetractionSavedWork`. A left-out row says
   `RetractionText.excludedLine`; the report opens with
@@ -269,12 +273,12 @@ row per paper, that row is the paper's latest check.
   which its own Cancel (`cancelCheckAgain`) stops without touching the
   session's step; a run or restore begun meanwhile cancels it, and it never
   writes their screen. A failure, or a cancel before its answers are in,
-  stores nothing and says the run's record stands (a failure still warns by
-  the label, and of what an answered check found when its rows could not be
-  read, #673); once they are in, they
+  stores nothing and says the run's record stands, still warning by the
+  label (#673, #675; a failure also of what an answered check found when its
+  rows could not be read); once they are in, they
   are stored and shown whole. Its line names why papers stay unchecked, as
   the run's notice does (#654 item 1; all three platforms since #660). Of #654's other
-  items, Android's Check again can be stopped (item 2), but item 3 (the
+  items, both apps' Check again can be stopped (item 2), but item 3 (the
   not-saved note said on that view only) and item 4 (a failed check recomputes
   the warning from the stored rows and the label) apply to it too. The report screen's
   `DocumentDetailSheet` shows the same check's badge and status line for a

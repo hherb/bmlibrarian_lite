@@ -250,15 +250,20 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **Retraction checking** follow-ups: **#662** (an unchecked run's warning
   rule, "could not be read" wording, an Apple snapshot entry left out unread,
   needs a cross-platform decision),
-  **#663** item 2 (Android: a cancel is worded as a failure; waits on #654
-  item 2; items 1, 3, 4 done: answers stored but not shown say "later checks
-  could not be read", never "the run's record", yet badge what they found
-  from memory as the desktop does, and the saved work is one
-  `retractionSavedWork: StateFlow<RetractionSavedWorkState?>`), Apple
-  **#647** (left: a shared Crossref lookup, per-access check decoding, a
-  fail-under-XCTest default, an unreadable index file logged), **#649**, **#653**, **#654** (item 1 done by #660), **#658**
-  (Android), **#675** item 1 (a stopped Check again and the label, needs a
-  cross-platform decision; items 2 and 3 done). **#700, #702, #694 done**:
+  Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
+  fail-under-XCTest default, an unreadable index file logged), **#649**,
+  **#653**, **#654** items 3 and 4 (the not-saved note said once, a failed
+  check recomputing the warning; items 1 and 2 done), **#658** (Android),
+  Apple **#708** (a restore orphans a running *Check again*; the same session
+  can be checked twice at once).
+  **Done this round (PR #707: #654 item 2, #663 item 2, #675 item 1)**: Apple's
+  *Check again* has its own Cancel (`cancelCheckAgain`, as Android's), which
+  background expiry calls too; it never cancels a run it waits behind, and
+  records no stop on the session. A stopped *Check again* says
+  `checkAgainStopped` ("checking again was stopped, so this is still the
+  run's record"), never the failure clause, and still warns by the label, on
+  all three (maintainer's decision, 2026-11-04). **#663** and **#675** have
+  nothing left once it lands. **#700, #702, #694 done**:
   only a refusal of the export itself records the day's wait; an index that
   cannot be written, or too little free space to download it
   (`retractionWatchMinFreeBytes` / `RETRACTION_WATCH_MIN_FREE_BYTES`, 100 MB,

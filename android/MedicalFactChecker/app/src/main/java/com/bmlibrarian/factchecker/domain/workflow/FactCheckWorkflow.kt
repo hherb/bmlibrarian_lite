@@ -1009,9 +1009,10 @@ class FactCheckWorkflow @Inject constructor(
      * rewritten: [retractionSavedWork]'s line and warning say what changed,
      * and the warning suggests re-running the question. A check that fails,
      * or is cancelled ([cancelCheckAgain]) before its answers are in, stores
-     * nothing and says the run's record stands (a failed one still warns of a
-     * paper its label retracts, and of what an answered check found before
-     * its rows could be read); once they are in, they are stored and shown
+     * nothing and says the run's record stands, still warning of a paper its
+     * label retracts unless the documents cannot be read again (#673, #675; a
+     * failed one also of what an answered check found before its rows could be
+     * read); once they are in, they are stored and shown
      * whole, and badged though the rows cannot be read back. A new run or restore
      * cancels it, and it never writes their screen.
      *
@@ -1024,33 +1025,57 @@ class FactCheckWorkflow @Inject constructor(
         val screen = savedWorkScreen
         val shown = _retractionSavedWork.value
         // the store could not be read even to say how it went: never leave "Checking…" up
-        val standing = {
+        val standing = { note: String ->
             if (screen == savedWorkScreen) {
                 _retractionSavedWork.value = shown?.let {
-                    it.copy(line = it.line.removeSuffix(RetractionText.CHECK_AGAIN_FAILED) + RetractionText.CHECK_AGAIN_FAILED)
+                    val line = it.line.removeSuffix(RetractionText.CHECK_AGAIN_FAILED)
+                        .removeSuffix(RetractionText.CHECK_AGAIN_STOPPED)
+                    it.copy(line = line + note)
                 }
             }
         }
         try {
             checkRetractionsAgainWork(session.id, screen, shown)
         } catch (e: CancellationException) {
+            // a new run or restore cancelled it: their screen is never written, so read nothing for it
+            if (screen != savedWorkScreen) throw e
             withContext(NonCancellable) {
                 try {
-                    showSavedRetraction(session.id, screen, RetractionText.CHECK_AGAIN_FAILED)
+                    // stopped, not failed (#663), yet a record's own label still warns, as on a failure (#675)
+                    val own = documentRepository.getDocumentsBySessionSync(session.id).associate { it.id to it.retractionPaper }
+                    val papers = try {
+                        RetractionPaper.merged(own)
+                    } catch (merge: Exception) {
+                        own
+                    } catch (merge: LinkageError) {
+                        own
+                    }
+                    showSavedRetraction(
+                        session.id, screen, RetractionText.CHECK_AGAIN_STOPPED,
+                        found = labelRetractions(papers, System.currentTimeMillis())
+                    )
                 } catch (unread: Exception) {
                     Log.w(TAG, "Could not show a cancelled Check again: ${unread.javaClass.simpleName}")
-                    standing()
+                    standing(RetractionText.CHECK_AGAIN_STOPPED)
                 }
             }
             throw e
         } catch (e: Exception) {
-            standing()
+            standing(RetractionText.CHECK_AGAIN_FAILED)
             throw e
         } finally {
             checkAgainJob = null
             _isCheckingRetractionsAgain.value = false
         }
     }
+
+    /**
+     * The retractions each document's paper label decides, by document id:
+     * what a failed or stopped *Check again* still warns of (#673, #675).
+     * Needs neither network nor database.
+     */
+    private fun labelRetractions(papers: Map<String, RetractionPaper>, atMs: Long): Map<String, PaperRetractionCheck> =
+        papers.mapValues { PaperRetractionCheck.failedFor(it.value, atMs) }.filterValues { it.isRetracted }
 
     /**
      * The work of [checkRetractionsAgain].
@@ -1079,8 +1104,7 @@ class FactCheckWorkflow @Inject constructor(
         } catch (e: Exception) {
             Log.w(TAG, "Retraction check again failed: ${e.javaClass.simpleName}")
             // nothing is stored, but a record's own label still retracts (#673), as does what an answered check found
-            val now = System.currentTimeMillis()
-            val labelled = papers.mapValues { PaperRetractionCheck.failedFor(it.value, now) }.filterValues { it.isRetracted }
+            val labelled = labelRetractions(papers, System.currentTimeMillis())
             // a found retraction keeps its notice over the label
             val found = fresh.filterValues { it.isRetracted || it.isConcern } + labelled.filterKeys { fresh[it]?.isRetracted != true }
             showSavedRetraction(sessionId, screen, RetractionText.CHECK_AGAIN_FAILED, found = found)

@@ -116,7 +116,7 @@ struct RetractionBanner: View {
     }
 }
 
-/// A restored session's retraction line with *Check again*, and the warning
+/// A restored session's retraction line with *Check again* (Cancel while it runs), and the warning
 /// when a paper its report cites is now retracted or under concern (the
 /// desktop's report-tab line, button and warning).
 struct RetractionSavedWorkSection: View {
@@ -132,7 +132,7 @@ struct RetractionSavedWorkSection: View {
         }
     }
 
-    /// The line with *Check again*, and the warning under it when there is one.
+    /// The line with *Check again* (Cancel while it runs), and the warning under it when there is one.
     private func content(_ workflow: FactCheckWorkflow, line: String) -> some View {
         VStack(alignment: .leading, spacing: RetractionBadgeConstants.bannerSpacing) {
             HStack(spacing: RetractionBadgeConstants.bannerSpacing) {
@@ -141,10 +141,17 @@ struct RetractionSavedWorkSection: View {
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                Button(RetractionText.checkAgainLabel) { Task { await workflow.checkRetractionsAgain() } }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(workflow.isCheckingRetractionsAgain)
+                if workflow.isCheckingRetractionsAgain {
+                    // a stop asked while it waits behind earlier work shows only once its body runs
+                    Button("Cancel", role: .cancel) { workflow.cancelCheckAgain() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(workflow.checkAgainStopRequested)
+                } else {
+                    Button(RetractionText.checkAgainLabel) { Task { await workflow.checkRetractionsAgain() } }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
             }
             if let warning = workflow.retractionSavedWorkWarning {
                 Text(warning)

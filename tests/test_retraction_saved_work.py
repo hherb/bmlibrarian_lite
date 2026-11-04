@@ -66,6 +66,7 @@ from bmlibrarian_lite.retraction_store import PaperCheck  # noqa: E402
 from bmlibrarian_lite.retraction_text import (  # noqa: E402
     CHECK_AGAIN_FAILED,
     CHECK_AGAIN_NOT_SAVED,
+    CHECK_AGAIN_STOPPED,
     NO_AUDIT_RECORD_LINE,
     STORED_CHECKS_UNREAD,
 )
@@ -645,15 +646,71 @@ def test_a_failed_check_again_still_warns_by_the_label(
 
 
 def test_a_cancelled_check_again_saves_nothing(qapp: Any) -> None:
-    """Cancelled (at quit): the worker says so instead of a result."""
-    worker = RetractionRecheckWorker(NoRequests(), [], "cp")
+    """Cancelled (at quit): the worker says so instead of a result, with the label's failed screen (#675)."""
+    worker = RetractionRecheckWorker(NoRequests(), [replace(CITED, publication_types=LABEL), UNCITED], "cp")
     got: list[Any] = []
     worker.rechecked.connect(lambda *a: got.append(("rechecked", a)))
     worker.cancelled.connect(lambda *a: got.append(("cancelled", a)))
     worker.cancel()
     worker.checker = RecordingChecker(MagicMock(), {})
     worker.run()
-    assert got == [("cancelled", ("cp",))]
+    ((outcome, (checkpoint_id, screen)),) = got
+    assert (outcome, checkpoint_id) == ("cancelled", "cp")
+    assert screen.failed
+    assert screen.checks[CITED.id].verdict.status is RetractionStatus.RETRACTED
+    assert screen.checks[UNCITED.id].verdict.status is RetractionStatus.UNCHECKED
+
+
+def test_a_cancelled_check_again_still_warns_by_the_label(
+    tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Check again cancelled (at quit) stores nothing, says it was stopped, and warns by the label (#675)."""
+    metadata = checkpoint_metadata_with_retraction_snapshot({}, screen_documents(DOCUMENTS, run_checks()))
+    checkpoint_id = saved_checkpoint(storage, metadata)
+    reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
+    storage.add_document(replace(CITED, publication_types=LABEL))
+    monkeypatch.setattr(report_tab_module, "build_retraction_checker", lambda *_a, **_k: DownChecker())
+
+    def cancelled_run(worker: RetractionRecheckWorker) -> None:
+        worker.cancel()
+        worker.run()
+
+    monkeypatch.setattr(RetractionRecheckWorker, "start", cancelled_run)
+    tab.check_again_btn.click()
+
+    assert storage.get_checkpoint(checkpoint_id).metadata == json.loads(json.dumps(metadata))
+    assert storage.retraction_checks([paper_key(CITED)]) == {}
+    assert tab.retraction_line.text().endswith(CHECK_AGAIN_STOPPED)
+    assert CITED.title in tab.retraction_warning.text() and not tab.retraction_warning.isHidden()
+    assert tab.check_again_btn.isEnabled()
+
+
+def test_a_cancelled_check_again_keeps_a_stored_retractions_notice(
+    tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stop lays the label only over what is shown: a stored retraction keeps its notice (#675)."""
+    metadata = checkpoint_metadata_with_retraction_snapshot({}, screen_documents(DOCUMENTS, run_checks()))
+    checkpoint_id = saved_checkpoint(storage, metadata)
+    store_rows(storage, {CITED.id: check(RetractionStatus.RETRACTED, NOW)})
+    reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
+    storage.add_document(replace(CITED, publication_types=LABEL))
+    monkeypatch.setattr(report_tab_module, "build_retraction_checker", lambda *_a, **_k: DownChecker())
+
+    def cancelled_run(worker: RetractionRecheckWorker) -> None:
+        worker.cancel()
+        worker.run()
+
+    monkeypatch.setattr(RetractionRecheckWorker, "start", cancelled_run)
+    tab.check_again_btn.click()
+
+    assert tab.retraction_line.text().endswith(CHECK_AGAIN_STOPPED)
+    assert "10.9/notice" in tab.retraction_warning.text() and "label" not in tab.retraction_warning.text()
+
+
+def test_check_again_sentences_are_the_apps() -> None:
+    """Python is canonical: the apps' tests pin these same words (#663)."""
+    assert CHECK_AGAIN_STOPPED == "; checking again was stopped, so this is still the run's record"
+    assert CHECK_AGAIN_FAILED == "; it could not be checked again, so this is still the run's record"
 
 
 def test_quit_cancels_check_again_and_leaves_the_one_bounded_wait_to_the_keeper() -> None:
