@@ -272,6 +272,8 @@ struct FactCheckView: View {
     /// Clears the claim and the current session so a new question starts fresh.
     private func startNewQuestion() {
         claimText = ""
+        // once replaced, its running Check again is out of reach: stop it, as Android's beginRetractionRun does (#708)
+        workflow?.cancelCheckAgain()
         workflow = nil
     }
 
@@ -293,6 +295,8 @@ struct FactCheckView: View {
             showingError = true
         }
 
+        // once replaced, its running Check again is out of reach: stop it, as Android's beginRetractionRun does (#708)
+        self.workflow?.cancelCheckAgain()
         self.workflow = newWorkflow
 
         Task {

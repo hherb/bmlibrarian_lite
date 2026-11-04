@@ -106,11 +106,9 @@ have landed):
   (`network.client`, `print`) with the push entitlement on both. **A run never
   waits for the Retraction Watch refresh**: `currentIndex` is `nonisolated`
   (pinned by a test that holds the injected build, #681), and bmlib's CSV
-  parse is linear (849 s → 0.6 s). **Owed by the maintainer before 1.7**:
-  accept Apple's latest Program License Agreement (signing fails until then),
-  deploy the CloudKit schema to Production (`RetractionCheckRecord`, new
-  `Document` fields), update App Privacy answers to `PRIVACY.md`, archive and
-  Validate App on both platforms (first release bundling `BmlibFFI`). **Never
+  parse is linear (849 s → 0.6 s). **Apps 1.8.0 (macOS beta) is cut** (PR
+  #709, `APP_STORE.md`); the CloudKit Production schema must carry
+  `RetractionCheckRecord` and the new `Document` fields. **Never
   pass an `@Observable` property `inout`** (#697): its `_modify` reports a
   change on every read, and Settings re-rendered itself until the watchdog
   killed it; pass a `ReferenceWritableKeyPath`. Xcode Cloud's workflow
@@ -253,17 +251,19 @@ Open issues by family; each issue carries the detail. None blocks another.
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**,
   **#653**, **#654** items 3 and 4 (the not-saved note said once, a failed
-  check recomputing the warning; items 1 and 2 done), **#658** (Android),
-  Apple **#708** (a restore orphans a running *Check again*; the same session
-  can be checked twice at once).
-  **Done this round (PR #707: #654 item 2, #663 item 2, #675 item 1)**: Apple's
+  check recomputing the warning; items 1 and 2 done), **#658** (Android).
+  **#708 done**: each Apple view that replaces its workflow (restore, *New
+  Question*, a new run; six sites, iOS and macOS) first calls the outgoing
+  one's `cancelCheckAgain()`, as Android's `beginRetractionRun()` cancels
+  `checkAgainJob`; the stopped check stores nothing. Keep that line at any
+  new site that swaps the workflow.
+  **Landed (PR #707: #654 item 2, #663, #675)**: Apple's
   *Check again* has its own Cancel (`cancelCheckAgain`, as Android's), which
   background expiry calls too; it never cancels a run it waits behind, and
   records no stop on the session. A stopped *Check again* says
   `checkAgainStopped` ("checking again was stopped, so this is still the
   run's record"), never the failure clause, and still warns by the label, on
-  all three (maintainer's decision, 2026-11-04). **#663** and **#675** have
-  nothing left once it lands. **#700, #702, #694 done**:
+  all three (maintainer's decision, 2026-11-04). **#700, #702, #694 done**:
   only a refusal of the export itself records the day's wait; an index that
   cannot be written, or too little free space to download it
   (`retractionWatchMinFreeBytes` / `RETRACTION_WATCH_MIN_FREE_BYTES`, 100 MB,

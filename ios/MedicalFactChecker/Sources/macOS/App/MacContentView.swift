@@ -250,6 +250,8 @@ struct MacContentView: View {
         restoredWorkflow.restoreForViewing(session)
 
         // Set the workflow binding so MacFactCheckView receives it
+        // once replaced, its running Check again is out of reach: stop it, as Android's beginRetractionRun does (#708)
+        activeWorkflow?.cancelCheckAgain()
         activeWorkflow = restoredWorkflow
 
         // Set the current report so Report view shows it

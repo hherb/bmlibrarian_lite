@@ -228,6 +228,8 @@ struct ContentView: View {
         restoredWorkflow.restoreForViewing(session)
 
         // Set the workflow binding so FactCheckView receives it
+        // once replaced, its running Check again is out of reach: stop it, as Android's beginRetractionRun does (#708)
+        factCheckWorkflow?.cancelCheckAgain()
         factCheckWorkflow = restoredWorkflow
 
         // Set the current report so Report tab shows it
