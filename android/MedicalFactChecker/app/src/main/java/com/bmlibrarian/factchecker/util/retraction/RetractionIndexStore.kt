@@ -84,7 +84,8 @@ sealed class RetractionIndexRefresh {
  *   downloaded only then
  * @param exportUrl The export's address
  * @param bmlibLoads Whether bmlib's native library loads; a test stands in for a missing one
- * @param freeBytes The free space where the index is written; a test stands in for a full disk
+ * @param freeBytes The free space in [directory], where the export is streamed and the index
+ *   written (0 when it cannot be made); a test stands in for a full disk
  */
 class RetractionIndexStore(
     private val directory: File,
@@ -92,8 +93,11 @@ class RetractionIndexStore(
     private val isUnmetered: () -> Boolean,
     private val exportUrl: String = RetractionConstants.RETRACTION_WATCH_EXPORT_URL,
     private val bmlibLoads: () -> Boolean = ::nativeLibraryLoads,
-    // a directory that does not exist has no usable space, so make it first
-    private val freeBytes: () -> Long = { directory.mkdirs(); directory.usableSpace },
+    // a directory that does not exist has no usable space, so make it first;
+    // one that cannot be made has none (the index could not be written there)
+    private val freeBytes: () -> Long = {
+        if (directory.mkdirs() || directory.isDirectory) directory.usableSpace else 0L
+    },
 ) {
     private val file = File(directory, RetractionConstants.RETRACTION_INDEX_FILE_NAME)
 
@@ -189,8 +193,13 @@ class RetractionIndexStore(
         }
         if (!isUnmetered()) return@withLock RetractionIndexRefresh.Metered
         if (!bmlibLoads()) return@withLock RetractionIndexRefresh.NoNativeLibrary
-        if (freeBytes() < RetractionConstants.RETRACTION_WATCH_MIN_FREE_BYTES) {
-            Log.w(TAG, "Retraction Watch export not downloaded: too little free space")
+        val free = freeBytes()
+        if (free < RetractionConstants.RETRACTION_WATCH_MIN_FREE_BYTES) {
+            Log.w(
+                TAG,
+                "Retraction Watch export not downloaded: $free bytes free, " +
+                    "${RetractionConstants.RETRACTION_WATCH_MIN_FREE_BYTES} needed",
+            )
             return@withLock RetractionIndexRefresh.NotStored
         }
         withContext(Dispatchers.IO) { refresh(nowMs, email) }.also {

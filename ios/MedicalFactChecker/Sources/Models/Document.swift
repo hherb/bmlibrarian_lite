@@ -1978,11 +1978,12 @@ final class RetractionCheckRecord {
     }
 
     /// Checks of one paper merged oldest first, a newer one replacing the
-    /// kept one as a fresh check replaces a stored row: between readable
-    /// checks unless the kept one ``PaperRetractionCheck/standsAgainst(_:)``
-    /// it (the desktop's `_keeps`) or it is unchecked and the kept one
-    /// decided; one this build cannot read replaces any but a retraction, and
-    /// is replaced only by a check every lookup answered or a retraction (#669).
+    /// kept one: between readable checks unless the kept one
+    /// ``PaperRetractionCheck/standsAgainst(_:)`` it (the desktop's `_keeps`)
+    /// or it is unchecked and the kept one decided; one this build cannot
+    /// read replaces any but a retraction, and is replaced by a readable
+    /// check only when every lookup answered it or it is a retraction, as a
+    /// fresh check replaces an unreadable stored row (#669, #694).
     static func merged<T>(_ items: [T], check: (T) -> PaperRetractionCheck) -> T? {
         var kept: T?
         for next in items.sorted(by: { check($0).checkedAt < check($1).checkedAt }) {
@@ -1997,9 +1998,9 @@ final class RetractionCheckRecord {
         switch (old.isReadable, next.isReadable) {
         case (true, true):
             return !(old == next || old.standsAgainst(next) || (next.isUnchecked && !old.isUnchecked))
-        case (true, false): return !old.isRetracted
+        // a retraction, read or not, is never erased by a copy this build cannot read
+        case (_, false): return !old.isRetracted
         case (false, true): return next.unanswered.isEmpty || next.isRetracted
-        case (false, false): return true
         }
     }
 
@@ -2014,8 +2015,8 @@ final class RetractionCheckRecord {
 
     /// Brings each document's copy up to its paper's records, before a check
     /// decides by it: the ``standing(_:)`` one of the copy and every record,
-    /// merged at once since the merge depends on their order, the copy when
-    /// none can be read.
+    /// merged at once since the merge depends on their order. The copy is
+    /// listed first, so it stands when no copy or record decodes.
     static func adopt(into documents: [Document], in context: ModelContext) throws {
         let records = try byKey(Set(documents.compactMap(\.retractionPaper.paperKey)), in: context)
         for document in documents {

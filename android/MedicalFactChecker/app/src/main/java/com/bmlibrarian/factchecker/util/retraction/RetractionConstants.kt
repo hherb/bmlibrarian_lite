@@ -48,9 +48,10 @@ object RetractionConstants {
 
     /**
      * Below this much free space the export is not downloaded, as it could not
-     * be kept: the ~68 MB export, the most either app writes at once, with
-     * room to grow. A full disk otherwise downloaded it on every refresh,
-     * since a write that fails records no wait (#700, #702).
+     * be kept: the ~68 MB export, streamed to disk before the index is built
+     * (Apple holds it in memory), with room to grow. A full disk otherwise
+     * downloaded it on every refresh, since a write that fails records no
+     * wait (#700, #702; BioMedLit's `retractionWatchMinFreeBytes`).
      */
     const val RETRACTION_WATCH_MIN_FREE_BYTES = 100L * 1024 * 1024
 

@@ -25,12 +25,13 @@ copy per document, so `RetractionCheckRecord.unify` gives a paper's documents
 one copy (`standing`) before deciding; keep it in `adoptSharedRetractionChecks`.
 `standing` merges copies oldest first by `standsAgainst` (the desktop's
 `_keeps`); a copy that decodes but this build cannot read keeps its
-`checkedAt` and is replaced only by a check every lookup answered or a
-retraction (#694, the #669 row rule); one that does not decode has no time
-and beats all but a readable retraction (#691). The merge depends on order, so `adopt` merges a copy
+`checkedAt`, replaces any but a retraction (read or not), and is replaced by
+a readable check only when every lookup answered it or it is a retraction
+(#694, the #669 row rule); one that does not decode has no time and beats
+all but a readable retraction the merge keeps (#691). The merge depends on order, so `adopt` merges a copy
 with all its records in one call, never in two steps. The saved-work line's
-warning reads the same merge (`RetractionCheckRecord.merged`, #693), never the
-newest check.
+warning merges the readable checks the same way (`RetractionCheckRecord.merged`,
+#693), never the newest check; an unreadable one only adds its note.
 **A missing native library** leaves papers unchecked, but stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
 FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C
@@ -264,8 +265,9 @@ Open issues by family; each issue carries the detail. None blocks another.
   cross-platform decision; items 2 and 3 done). **#700, #702, #694 done**:
   only a refusal of the export itself records the day's wait; an index that
   cannot be written, or too little free space to download it
-  (`retractionWatchMinFreeBytes`, 100 MB, both apps, checked first), is
-  `notStored` / `NotStored`, never recorded (settles #658's storage item).
+  (`retractionWatchMinFreeBytes` / `RETRACTION_WATCH_MIN_FREE_BYTES`, 100 MB,
+  checked just before the download; a folder that cannot be made has none), is
+  `notStored` / `NotStored`, never recorded (settles #658's storage item). Follow-ups: **#704** (a full disk is only logged; reader text needs a decision), **#705** (the desktop treats an unknown evidence source/kind as unreadable, the apps do not).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
   the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,

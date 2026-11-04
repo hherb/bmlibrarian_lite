@@ -652,10 +652,11 @@ final class FactCheckWorkflow {
         })
     }
 
-    /// The standing check of each document's paper: its own copy and its
-    /// ``RetractionCheckRecord``s, which any session may have written,
-    /// ``RetractionCheckRecord/merged(_:check:)`` as the screen merges them
-    /// (#693). No request is made.
+    /// The standing check of each document's paper: the readable ones of its
+    /// own copy and its ``RetractionCheckRecord``s, which any session may
+    /// have written, ``RetractionCheckRecord/merged(_:check:)`` as the screen
+    /// merges readable checks (#693). A record this build cannot read only
+    /// sets `unread`, for the saved-work note. No request is made.
     ///
     /// - Parameter documents: The documents to look up.
     /// - Returns: Checks by `Document.id` (a document with none has no

@@ -307,6 +307,13 @@ final class RetractionIndexStoreTests: XCTestCase {
         XCTAssertNotNil(RetractionIndexStore.availableBytes(at: directory))
     }
 
+    /// A folder that cannot be made (a file in its place) has no free space,
+    /// so the export is not downloaded only to fail its write every run.
+    func testAFolderThatCannotBeMadeHasNoFreeSpace() {
+        XCTAssertTrue(FileManager.default.createFile(atPath: directory.path, contents: nil))
+        XCTAssertEqual(RetractionIndexStore.availableBytes(at: directory), 0)
+    }
+
     /// A write that fails keeps the previous index as it was (#700).
     func testAnIndexThatCannotBeStoredKeepsThePreviousOne() async throws {
         try storeIndex(dataAsOf: "2026-01-01")

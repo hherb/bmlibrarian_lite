@@ -535,6 +535,8 @@ final class RetractionScreenWorkflowTests: XCTestCase {
             status: "withdrawn", deciding: nil, unanswered: [],
             checkedAt: ago(5), exportDataAsOf: "2026-10-28", crossrefFailure: nil))
         let unreadableRetraction = try Self.json(Self.retracted(checkedAt: ago(30), unanswered: ["pubpeer"]))
+        let concernOnAnOutage = try Self.json(Self.concern(unanswered: ["crossref"], checkedAt: ago(1)))
+        let oldConcern = try Self.json(Self.concern(unanswered: [], checkedAt: ago(40)))
         let cases: [(String, [String], String?)] = [
             ("nothing stored", [], nil),
             ("only an unreadable copy", [unreadable], unreadable),
@@ -549,6 +551,10 @@ final class RetractionScreenWorkflowTests: XCTestCase {
             ("a newer answered clear replaces a dated unreadable copy", [newerClear, datedUnreadable], newerClear),
             ("a newer answered concern does too", [answeredConcern, datedUnreadable], answeredConcern),
             ("a newer check on an outage does not", [newerUnchecked, datedUnreadable], datedUnreadable),
+            ("nor does a newer concern on an outage", [concernOnAnOutage, datedUnreadable], datedUnreadable),
+            ("an older answered concern does not", [oldConcern, datedUnreadable], datedUnreadable),
+            ("an older unreadable retraction stands against a newer dated unreadable copy",
+             [datedUnreadable, unreadableRetraction], unreadableRetraction),
             ("a newer retraction on an outage does", [datedUnreadable, retractionOnAnOutage], retractionOnAnOutage),
             ("an older answered clear does not", [oldClear, datedUnreadable], datedUnreadable),
             ("an older retraction beats a newer dated unreadable copy", [oldRetraction, datedUnreadable], oldRetraction),

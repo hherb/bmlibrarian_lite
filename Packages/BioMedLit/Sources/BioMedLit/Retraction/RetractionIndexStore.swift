@@ -78,9 +78,16 @@ public actor RetractionIndexStore {
     }
 
     /// The space free for important use on `directory`'s volume, made first
-    /// (a missing folder has no resource values); `nil` when unknown.
+    /// (a missing folder has no resource values); `nil` when unknown. A
+    /// folder that cannot be made has none, as Android's `usableSpace`: the
+    /// index could not be written there, so nothing is downloaded.
     static func availableBytes(at directory: URL) -> Int64? {
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            BioMedLitLib.logger?.warning("Retraction Watch folder not made: \(error)", category: .network)
+            return 0
+        }
         return (try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
             .volumeAvailableCapacityForImportantUsage
     }
@@ -215,7 +222,9 @@ public actor RetractionIndexStore {
         }
         // unknown free space is no reason to skip: the write still reports a failure
         if let free = freeBytes(directory), free < BioMedLitConstants.retractionWatchMinFreeBytes {
-            BioMedLitLib.logger?.warning("Retraction Watch export not downloaded: too little free space", category: .network)
+            BioMedLitLib.logger?.warning(
+                "Retraction Watch export not downloaded: \(free) bytes free, \(BioMedLitConstants.retractionWatchMinFreeBytes) needed",
+                category: .network)
             return .notStored
         }
         let outcome = await download(now: now, storedNotices: stored?.notices)
