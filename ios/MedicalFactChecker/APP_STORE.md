@@ -58,38 +58,37 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
 
 ---
 
-## What's New (Version 1.6.0)
+## What's New (Version 1.8.0)
 
-**Transparency Ratings Explained**
-- Reports now explain why each study was rated high transparency risk:
-  the rules that applied, how the score was reached, and any caveats
-- Every rating made without the article's full text says so
-- Studies whose only warning signs come from full text that could not be
-  read are shown as "Unassessed" rather than as high risk
-- A trial registry or funder database that could not be reached is noted,
-  never reported as a missing registration or missing funding
-- Conflict-of-interest and data-availability statements are found far
-  more reliably, so studies are no longer rated high risk for statements
-  they actually contain
-- Funders are now checked for studies found through PubMed
-- Industry funders named without a legal suffix ("Pfizer") are now
-  recognised, while company-named charitable foundations are not
+**Retraction Checking**
+- Every paper is checked against Retraction Watch and Crossref before it
+  is scored; retracted papers are left out, counted and named in the report
+- Papers under an expression of concern are flagged, never silently dropped
+- Badges and banners show each paper's retraction status
+- A saved report shows when its papers were last checked, with a
+  *Check again* button you can stop at any time
+- A check that fails or is stopped never reads as "not retracted", and
+  still warns of a paper PubMed itself marks as retracted
 
-**Full Text from PDFs**
-- Downloaded PDFs now contribute their text to the analysis
-- Abstract-only records are no longer treated as full articles
-- Improved full-text parsing for PubMed Central articles
+**More Full Text**
+- Full text is now also fetched from PubMed Central's open-access
+  collection, OpenAlex, CORE (with your free CORE key) and Elsevier
+  (with your Elsevier key, on an institutional network)
+- Every PDF an open-access source names is tried, and each source that
+  failed is named
+- A downloaded PDF that turns out to be a different article is refused
+- Upload a paper's full text yourself from its card
+- Long articles are read in full, in overlapping sections, never cut short
 
-**More Reliable Searches**
-- A literature source that fails is reported as a failure, not as
-  "no results"
-- PubMed searches report every match and page through all of them
-- Reports record what a search could not retrieve
+**Research Tools**
+- Find More Evidence, a repeated smart search, and a retry for full texts
+  that could not be read, on a saved report
+- Transparency is analysed again once a paper's full text arrives
 
 **Bug Fixes & Improvements**
-- Current Claude model pricing
-- Uploaded PDFs reopen correctly
-- Fixed the model list request for OpenAI-compatible providers
+- The Mac app now runs in Apple's app sandbox
+- Settings no longer freezes while reading a saved key
+- "Get More Evidence" on the Mac Report tab starts the fetch
 
 **Supported AI Models**
 - Anthropic Claude (all models)
@@ -103,6 +102,12 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
 ---
 
 ## Version History
+
+### Version 1.8.0 (November 2026)
+- Retraction checking before scoring, with badges, report sections and Check again
+- Full text from PMC's open-access collection, OpenAlex, CORE and Elsevier
+- Another article's PDF refused; full-text upload; long texts read in full
+- Sandboxed Mac app
 
 ### Version 1.6.0 (September 2026)
 - High-risk transparency ratings explained in every report
