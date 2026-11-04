@@ -276,6 +276,19 @@ final class RetractionIndexStoreTests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.requestedURLs.count, 2)
     }
 
+    /// A write that fails keeps the previous index as it was (#700).
+    func testAnIndexThatCannotBeStoredKeepsThePreviousOne() async throws {
+        try storeIndex(dataAsOf: "2026-01-01")
+        let before = try Data(contentsOf: file)
+        // a read-only folder: nothing can be written or renamed into it
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path) }
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv())
+        let outcome = await store().refreshIfStale(now: RetractionFixture.now)
+        XCTAssertEqual(outcome, .notStored)
+        XCTAssertEqual(try Data(contentsOf: file), before)
+    }
+
     /// Control: the guard lasts one download; a failed one is tried again by the next call.
     func testAFailedRefreshIsTriedAgain() async throws {
         StubURLProtocol.stubbed = (404, Data())

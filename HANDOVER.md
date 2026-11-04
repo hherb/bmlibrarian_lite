@@ -272,7 +272,9 @@ Open issues by family; each issue carries the detail. None blocks another.
   a refusal of the export itself (unbuildable, shrunk) records the day's
   wait; an index that cannot be written is `notStored` / `NotStored`, and
   Android's missing native library `NoNativeLibrary`, neither recorded
-  (this settles #658's storage item on it).
+  (this settles #658's storage item on it). Follow-up **#702** (Apple: a
+  disk that stays full re-downloads the export every run with no current
+  copy; needs a decision).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
   the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,

@@ -184,7 +184,10 @@ BioMedLit; the app never imports `BmlibCore`.
 - The export downloads over Wi-Fi only (no cellular, no Low Data Mode). It is
   refreshed at launch and, in the background, by a run that finds no usable
   copy; a run never waits for it. `RetractionIndexStore.refreshIfStale` is
-  single-flight: calls meanwhile share one download.
+  single-flight: calls meanwhile share one download. A refused export
+  (unbuildable, or shrunk) is not downloaded again for a day, across
+  launches (a `.refused` file beside the index); an index that cannot be
+  written here (`.notStored`) records no wait (#700).
 
 Tests: `RetractionScreenWorkflowTests`, `RetractionSavedWorkTests` and `RetractionBadgeTests` (app);
 `Retraction*Tests`, `ReportFormatterRetractionTests` and
@@ -235,8 +238,10 @@ row per paper, that row is the paper's latest check.
   scored ones, each with `RetractionText.excludedLine`.
 - The export downloads only on an unmetered network, at launch and in the
   background when a run finds no usable copy; one download at a time,
-  streamed to disk, and a refused one is not downloaded again for a day,
-  across launches (a `.refused` file beside the index). A run never waits
+  streamed to disk, and a refused one (unbuildable, or shrunk) is not
+  downloaded again for a day, across launches (a `.refused` file beside the
+  index); an index that cannot be written (`NotStored`) or a missing native
+  library (`NoNativeLibrary`) records no wait (#700). A run never waits
   for it, and a device that runs out of memory building it carries on
   without it.
 - **Saved work.** `restoreForViewing` sets `retractionSavedWorkLine`
