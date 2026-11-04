@@ -537,6 +537,12 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         let unreadableRetraction = try Self.json(Self.retracted(checkedAt: ago(30), unanswered: ["pubpeer"]))
         let concernOnAnOutage = try Self.json(Self.concern(unanswered: ["crossref"], checkedAt: ago(1)))
         let oldConcern = try Self.json(Self.concern(unanswered: [], checkedAt: ago(40)))
+        let decidedBy = { (source: String, kind: String) in
+            try Self.json(Self.retracted(checkedAt: ago(3), deciding: StoredRetractionEvidence(
+                source: source, kind: kind, date: "2024-01-02", noticeDOI: nil, recordID: nil, rawKind: nil)))
+        }
+        let oddKindRetraction = try decidedBy("retraction_watch_export", "a_new_kind")
+        let oddSourceRetraction = try decidedBy("a_new_source", "retraction")
         let cases: [(String, [String], String?)] = [
             ("nothing stored", [], nil),
             ("only an unreadable copy", [unreadable], unreadable),
@@ -560,6 +566,9 @@ final class RetractionScreenWorkflowTests: XCTestCase {
             ("an older retraction beats a newer dated unreadable copy", [oldRetraction, datedUnreadable], oldRetraction),
             ("a retraction naming an unknown lookup is no readable retraction", [unreadableRetraction, unreadable], unreadable),
             ("an undecodable copy still beats an answered clear", [datedUnreadable, newerClear, unreadable], unreadable),
+            // #705: deciding evidence naming an unknown source or kind makes a retraction unreadable
+            ("a retraction decided by an unknown kind is no readable retraction", [oddKindRetraction, unreadable], unreadable),
+            ("nor is one decided by an unknown source", [oddSourceRetraction, unreadable], unreadable),
         ]
         for (name, jsons, expected) in cases {
             XCTAssertEqual(RetractionCheckRecord.standing(jsons), expected, name)

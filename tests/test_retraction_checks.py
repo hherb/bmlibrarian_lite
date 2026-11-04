@@ -652,6 +652,9 @@ def test_an_unknown_evidence_source_or_kind_makes_a_stored_row_unreadable(storag
     with sqlite3.connect(storage.config.storage.sqlite_path) as conn:
         [(deciding,)] = conn.execute("SELECT deciding_json FROM retraction_checks").fetchall()
     assert json.loads(deciding)[field] == "new", "an outage never overwrites it"
+    # control: an answer replaces it
+    _checker(storage, tmp_path, StubSession()).check([_doc("a", doi="10.1/a")])
+    assert storage.retraction_checks([_KEY])[_KEY].verdict.status is RetractionStatus.CLEAR
 
 
 def test_a_retraction_overwrites_an_unreadable_stored_row_during_an_outage(storage, tmp_path):
