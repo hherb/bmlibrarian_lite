@@ -276,6 +276,37 @@ final class RetractionIndexStoreTests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.requestedURLs.count, 2)
     }
 
+    /// Too little free space downloads nothing and records no wait: a full
+    /// disk no longer downloads the export on every run (#702). Unknown space
+    /// is no reason to skip.
+    func testTooLittleFreeSpaceDownloadsNothingAndIsNoWait() async throws {
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv())
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubURLProtocol.self]
+        let store = { (free: Int64?) in
+            RetractionIndexStore(
+                directory: self.directory, session: URLSession(configuration: config), email: "t@example.org",
+                freeBytes: { _ in free }
+            ) { try buildRetractionIndex(csv: $0, dataAsOf: $1) }
+        }
+        let full = await store(BioMedLitConstants.retractionWatchMinFreeBytes - 1).refreshIfStale(now: RetractionFixture.now)
+        XCTAssertEqual(full, .notStored)
+        XCTAssertTrue(StubURLProtocol.requestedURLs.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: refusalFile.path))
+        // controls: exactly enough room downloads, and so does unknown room
+        let room = await store(BioMedLitConstants.retractionWatchMinFreeBytes).refreshIfStale(now: RetractionFixture.now)
+        XCTAssertEqual(room, .refreshed(noticeCount: 3))
+        try FileManager.default.removeItem(at: file)
+        let unknown = await store(nil).refreshIfStale(now: RetractionFixture.now)
+        XCTAssertEqual(unknown, .refreshed(noticeCount: 3))
+    }
+
+    /// The production free-space query answers for a folder not yet made.
+    func testTheFreeSpaceOfAMissingFolderIsKnown() {
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+        XCTAssertNotNil(RetractionIndexStore.availableBytes(at: directory))
+    }
+
     /// A write that fails keeps the previous index as it was (#700).
     func testAnIndexThatCannotBeStoredKeepsThePreviousOne() async throws {
         try storeIndex(dataAsOf: "2026-01-01")

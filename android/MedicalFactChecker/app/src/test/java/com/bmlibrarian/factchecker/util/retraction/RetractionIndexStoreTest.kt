@@ -170,6 +170,25 @@ class RetractionIndexStoreTest {
         assertEquals(RetractionIndexRefresh.Refreshed(3), store().refreshIfStale(RetractionFixture.nowMs, "t@example.org"))
     }
 
+    /** Too little free space downloads nothing and records no wait: a full disk no longer downloads every run (#702). */
+    @Test
+    fun `too little free space downloads nothing and is no wait`() = runTest {
+        stub.stubbed = StubServer.answer(200, RetractionFixture.csv())
+        val full = RetractionIndexStore(
+            directory, stub.client(), isUnmetered = { true },
+            freeBytes = { RetractionConstants.RETRACTION_WATCH_MIN_FREE_BYTES - 1 },
+        )
+        assertEquals(RetractionIndexRefresh.NotStored, full.refreshIfStale(RetractionFixture.nowMs, "t@example.org"))
+        assertTrue(stub.requestedUrls.isEmpty())
+        assertFalse(refusalFile.exists())
+        // control: with exactly enough room, the same minute downloads
+        val room = RetractionIndexStore(
+            directory, stub.client(), isUnmetered = { true },
+            freeBytes = { RetractionConstants.RETRACTION_WATCH_MIN_FREE_BYTES },
+        )
+        assertEquals(RetractionIndexRefresh.Refreshed(3), room.refreshIfStale(RetractionFixture.nowMs, "t@example.org"))
+    }
+
     @Test
     fun `a metered network downloads nothing`() = runTest {
         unmetered = false

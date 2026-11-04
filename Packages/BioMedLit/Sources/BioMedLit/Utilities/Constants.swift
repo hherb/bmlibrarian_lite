@@ -161,6 +161,12 @@ public enum BioMedLitConstants {
     /// A refused export would be refused again, so the next download waits a
     /// day, not one per run (#647; Android's `RETRACTION_WATCH_REFUSED_BACKOFF_MS`).
     public static let retractionWatchRefusedBackoffSeconds: TimeInterval = 24 * 60 * 60
+    /// Below this much free space the export is not downloaded, as it could
+    /// not be kept: the ~68 MB export, the most either app writes at once,
+    /// with room to grow. A full disk otherwise downloaded it on every run,
+    /// since a write that fails records no wait (#700, #702; Android's
+    /// `RETRACTION_WATCH_MIN_FREE_BYTES`).
+    public static let retractionWatchMinFreeBytes: Int64 = 100 * 1024 * 1024
     /// The export is ~68 MB, so a slow link needs far longer than a lookup;
     /// an idle timeout between packets, not one for the whole transfer.
     public static let retractionWatchDownloadTimeoutSeconds: TimeInterval = 120

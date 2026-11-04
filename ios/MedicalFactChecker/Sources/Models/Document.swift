@@ -1955,36 +1955,52 @@ final class RetractionCheckRecord {
     /// `json` decoded; `nil` when absent or unreadable, a status or lookup
     /// name this build does not know included (``PaperRetractionCheck/isReadable``).
     static func check(_ json: String?) -> PaperRetractionCheck? {
-        guard let data = json?.data(using: .utf8),
-              let check = try? JSONDecoder().decode(PaperRetractionCheck.self, from: data) else { return nil }
-        return check.isReadable ? check : nil
+        decoded(json).flatMap { $0.isReadable ? $0 : nil }
+    }
+
+    /// `json` decoded, readable or not; `nil` when absent or undecodable.
+    private static func decoded(_ json: String?) -> PaperRetractionCheck? {
+        guard let data = json?.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(PaperRetractionCheck.self, from: data)
     }
 
     /// The one of several stored checks of a paper that stands for them all:
-    /// the readable ones ``merged(_:check:)``. A retraction they merge to
-    /// stands, as it erases nothing that warns more; else a copy this build
-    /// cannot read does when there is one, since its time is unknown and it
-    /// may hold a retraction an outage must not erase (#669, #691).
+    /// every copy that decodes ``merged(_:check:)`` by its `checkedAt`, read
+    /// or not (#694). A readable retraction it merges to stands, as it erases
+    /// nothing that warns more; else a copy that does not decode does when
+    /// there is one, since its time is unknown and it may hold a retraction an
+    /// outage must not erase (#669, #691).
     static func standing(_ jsons: [String]) -> String? {
-        let readable = jsons.compactMap { json in check(json).map { (json: json, check: $0) } }
-        let kept = merged(readable) { $0.check }
-        if kept?.check.isRetracted == true { return kept?.json }
-        return jsons.first { check($0) == nil } ?? kept?.json
+        let dated = jsons.compactMap { json in decoded(json).map { (json: json, check: $0) } }
+        let kept = merged(dated) { $0.check }
+        if let kept, kept.check.isReadable, kept.check.isRetracted { return kept.json }
+        return jsons.first { decoded($0) == nil } ?? kept?.json
     }
 
-    /// Readable checks of one paper merged oldest first: a newer one replaces
-    /// the kept one unless the kept one ``PaperRetractionCheck/standsAgainst(_:)``
-    /// it (the desktop's `_keeps`) or it is unchecked and the kept one decided.
+    /// Checks of one paper merged oldest first, a newer one replacing the
+    /// kept one as a fresh check replaces a stored row: between readable
+    /// checks unless the kept one ``PaperRetractionCheck/standsAgainst(_:)``
+    /// it (the desktop's `_keeps`) or it is unchecked and the kept one
+    /// decided; one this build cannot read replaces any but a retraction, and
+    /// is replaced only by a check every lookup answered or a retraction (#669).
     static func merged<T>(_ items: [T], check: (T) -> PaperRetractionCheck) -> T? {
         var kept: T?
         for next in items.sorted(by: { check($0).checkedAt < check($1).checkedAt }) {
-            if let old = kept.map(check), old == check(next) || old.standsAgainst(check(next))
-                || (check(next).isUnchecked && !old.isUnchecked) {
-                continue
-            }
+            if let old = kept.map(check), !replaces(old, check(next)) { continue }
             kept = next
         }
         return kept
+    }
+
+    /// Whether `next`, the newer, replaces `old` in ``merged(_:check:)``.
+    private static func replaces(_ old: PaperRetractionCheck, _ next: PaperRetractionCheck) -> Bool {
+        switch (old.isReadable, next.isReadable) {
+        case (true, true):
+            return !(old == next || old.standsAgainst(next) || (next.isUnchecked && !old.isUnchecked))
+        case (true, false): return !old.isRetracted
+        case (false, true): return next.unanswered.isEmpty || next.isRetracted
+        case (false, false): return true
+        }
     }
 
     /// The records of `keys`, by key.

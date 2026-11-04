@@ -23,10 +23,11 @@ call, and a paper's
 label counts as recorded when any of its documents recorded it. Apple keeps a
 copy per document, so `RetractionCheckRecord.unify` gives a paper's documents
 one copy (`standing`) before deciding; keep it in `adoptSharedRetractionChecks`.
-`standing` merges readable copies oldest first by `standsAgainst` (the
-desktop's `_keeps`); a retraction they merge to beats an unreadable copy,
-nothing else does, a fully answered check included, as the unreadable copy's
-time is unknown (#691). The merge depends on order, so `adopt` merges a copy
+`standing` merges copies oldest first by `standsAgainst` (the desktop's
+`_keeps`); a copy that decodes but this build cannot read keeps its
+`checkedAt` and is replaced only by a check every lookup answered or a
+retraction (#694, the #669 row rule); one that does not decode has no time
+and beats all but a readable retraction (#691). The merge depends on order, so `adopt` merges a copy
 with all its records in one call, never in two steps. The saved-work line's
 warning reads the same merge (`RetractionCheckRecord.merged`, #693), never the
 newest check.
@@ -82,10 +83,9 @@ have landed):
   --out tmp/core_acceptance.jsonl`; the bar is ≥ 14 of the spike's 149
   not-open-access rows; record the counts in the spikes README and the
   contract.
-- **Desktop browser rescue, live check** (maintainer): launch the real app,
-  open *Tools → Walled PDFs…* on a ScienceDirect entry, tick the check, then
-  quit; also download a supplement there and see *Keep this PDF* offered.
-  Offscreen smoke runs passed apart from #530's cold-start segfault.
+- **Desktop browser rescue, live check**: *Tools → Walled PDFs…* on a
+  ScienceDirect entry, tick the check, quit; download a supplement there and
+  see *Keep this PDF* offered (offscreen smoke passed bar #530's segfault).
 
 **Retraction checking, desktop: done** (PRs #594, #597, #605; spec
 `docs/superpowers/specs/2026-10-18-retraction-checking-design.md`; contract
@@ -224,14 +224,10 @@ have landed):
     `schemaVersion` (#163). **Route markup on the owning element** (#156–#175).
     **Measure JATS prevalence from the XML, never through the parser** (#164);
     **bmlib is ahead of Swift — port from it** (#165).
-  - **Real PMC JATS corpus** (#146) under `doc/cross_platform/jats_corpus/`:
-    read its `README.md` first. **The fixture walk stops at the checkout
-    root** (worktrees live inside the checkout); **a test only hears what the
-    logger records** (the recorder once ignored `debug`).
-  - **Funder classification** (#143/#147/#152): `sponsor_patterns.json` is
-    the contract, `confidence_probes` checked behaviourally; never merge
-    funder lists into `INDUSTRY_KEYWORDS`; `NONPROFIT` means "not
-    recognised".
+  - **Real PMC JATS corpus** (#146): read `doc/cross_platform/jats_corpus/README.md`
+    first; the fixture walk stops at the checkout root.
+  - **Funders** (#143/#147/#152): `sponsor_patterns.json` is the contract;
+    never merge into `INDUSTRY_KEYWORDS`; `NONPROFIT` means "not recognised".
   - **CI on all three platforms** (#129). **No job may gain a `paths:`
     filter.** **The Qt preflight (`.github/scripts/qt_preflight.py`, QtWebEngine
     included) runs before pytest.** No test starts a settings-dialog thread.
@@ -265,31 +261,24 @@ Open issues by family; each issue carries the detail. None blocks another.
   lookup, per-access check decoding, a fail-under-XCTest default, an
   unreadable index file logged), **#649**, **#653**, **#654** (item 1 done by #660), **#658**
   (Android), **#675** item 1 (a stopped Check again and the label, needs a
-  cross-platform decision; items 2 and 3 done: Android's `failedFor` survives
-  a bmlib panic, the desktop's `screen_with_fallback` logs a failing
-  `close()` instead of losing the screen), Apple **#694** (date an
-  unknown-status copy in `standing`, needs a decision). **#700 done**: only
-  a refusal of the export itself (unbuildable, shrunk) records the day's
-  wait; an index that cannot be written is `notStored` / `NotStored`, and
-  Android's missing native library `NoNativeLibrary`, neither recorded
-  (this settles #658's storage item on it). Follow-up **#702** (Apple: a
-  disk that stays full re-downloads the export every run with no current
-  copy; needs a decision).
+  cross-platform decision; items 2 and 3 done). **#700, #702, #694 done**:
+  only a refusal of the export itself records the day's wait; an index that
+  cannot be written, or too little free space to download it
+  (`retractionWatchMinFreeBytes`, 100 MB, both apps, checked first), is
+  `notStored` / `NotStored`, never recorded (settles #658's storage item).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
   the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,
   **#585**.
-- **#545** sweep the PDF library for other articles' PDFs (CLI only, the
-  maintainer's call); **#547** keep a set-aside PDF from the GUI (both from
-  #541); **#563** (PR #562's, checked downloads); **#555** Android release builds fail R8; **#556**–**#558** (#546's).
+- **#545** sweep the PDF library for other articles' PDFs (CLI, maintainer's
+  call); **#547** keep a set-aside PDF from the GUI; **#563** (PR #562's, checked downloads); **#555** Android release builds fail R8; **#556**–**#558** (#546's).
 - **C2's probe and acceptance, and C1's replay** (maintainer); the **embedded
   browser rescue's follow-ups**: **#524**, **#525**, **#527**, **#528**, **#530**, **#531**, **#533** (stage 2 follow-ups), **#534**, **#535**, **#537**–**#540**, **#544** (stage 3); **#481** follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
   **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2); **#516** (PySide6 cap, leaked widgets), **#517** (GC on worker threads); **#467**, **#468** / **#470**, **#476**.
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 
-- **#430** segment PDF text into body and end matter (LLM-based, into
-  `segment_unmarked_end_matter`) so PDF-only articles can be charged again.
+- **#430** segment PDF text into body and end matter (LLM, `segment_unmarked_end_matter`).
 - Swift + Android: **#436** a JATS parse failure at the chain's end is
   recorded as "no full text" for good; **#437** Android stores no Europe PMC
   ID for a preprint (Room migration); **#450** port #432's `isOpenAccess`

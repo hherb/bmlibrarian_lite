@@ -47,6 +47,14 @@ object RetractionConstants {
     const val RETRACTION_WATCH_REFUSED_BACKOFF_MS = 24L * 60 * 60 * 1000
 
     /**
+     * Below this much free space the export is not downloaded, as it could not
+     * be kept: the ~68 MB export, the most either app writes at once, with
+     * room to grow. A full disk otherwise downloaded it on every refresh,
+     * since a write that fails records no wait (#700, #702).
+     */
+    const val RETRACTION_WATCH_MIN_FREE_BYTES = 100L * 1024 * 1024
+
+    /**
      * A decided verdict is reused for a week, then asked again: a new
      * retraction reaches Crossref and the export within days, and a review is
      * often repeated within one. A verdict with a lookup unanswered is never

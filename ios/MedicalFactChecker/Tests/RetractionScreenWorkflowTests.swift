@@ -531,6 +531,10 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         let oldClear = try Self.json(Self.clear(checkedAt: ago(40)))
         let newerClear = try Self.json(Self.clear(checkedAt: ago(2)))
         let answeredConcern = try Self.json(Self.concern(unanswered: [], checkedAt: ago(3)))
+        let datedUnreadable = try Self.json(PaperRetractionCheck(
+            status: "withdrawn", deciding: nil, unanswered: [],
+            checkedAt: ago(5), exportDataAsOf: "2026-10-28", crossrefFailure: nil))
+        let unreadableRetraction = try Self.json(Self.retracted(checkedAt: ago(30), unanswered: ["pubpeer"]))
         let cases: [(String, [String], String?)] = [
             ("nothing stored", [], nil),
             ("only an unreadable copy", [unreadable], unreadable),
@@ -541,6 +545,15 @@ final class RetractionScreenWorkflowTests: XCTestCase {
             ("a superseded retraction never beats an unreadable copy", [oldRetraction, newerClear, unreadable], unreadable),
             ("a retraction beats an unreadable copy", [unreadable, retraction], retraction),
             ("an answered concern does not", [answeredConcern, unreadable], unreadable),
+            // #694: a copy that decodes but names a status this build does not know keeps its time
+            ("a newer answered clear replaces a dated unreadable copy", [newerClear, datedUnreadable], newerClear),
+            ("a newer answered concern does too", [answeredConcern, datedUnreadable], answeredConcern),
+            ("a newer check on an outage does not", [newerUnchecked, datedUnreadable], datedUnreadable),
+            ("a newer retraction on an outage does", [datedUnreadable, retractionOnAnOutage], retractionOnAnOutage),
+            ("an older answered clear does not", [oldClear, datedUnreadable], datedUnreadable),
+            ("an older retraction beats a newer dated unreadable copy", [oldRetraction, datedUnreadable], oldRetraction),
+            ("a retraction naming an unknown lookup is no readable retraction", [unreadableRetraction, unreadable], unreadable),
+            ("an undecodable copy still beats an answered clear", [datedUnreadable, newerClear, unreadable], unreadable),
         ]
         for (name, jsons, expected) in cases {
             XCTAssertEqual(RetractionCheckRecord.standing(jsons), expected, name)
