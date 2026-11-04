@@ -141,10 +141,15 @@ struct RetractionSavedWorkSection: View {
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                Button(RetractionText.checkAgainLabel) { Task { await workflow.checkRetractionsAgain() } }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(workflow.isCheckingRetractionsAgain)
+                if workflow.isCheckingRetractionsAgain {
+                    Button("Cancel", role: .cancel) { workflow.cancelCheckAgain() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                } else {
+                    Button(RetractionText.checkAgainLabel) { Task { await workflow.checkRetractionsAgain() } }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
             }
             if let warning = workflow.retractionSavedWorkWarning {
                 Text(warning)

@@ -232,14 +232,15 @@ class RetractionRecheckWorker(SingleOutcome, QThread):
             A check that fails is a failed screen (every paper unchecked but
             those the record's own label retracts), never an error: the
             run's record is then left as it was.
-        cancelled: Emitted with the checkpoint id when a cancel (at quit)
-            stopped the run; nothing is to be saved.
+        cancelled: Emitted with the checkpoint id and a failed screen when a
+            cancel (at quit) stopped the run; nothing is to be saved, but the
+            screen keeps what the record's own label retracts (#675).
 
     Exactly one of ``rechecked`` and ``cancelled`` ends a run.
     """
 
     rechecked = Signal(str, object)  # checkpoint_id, RetractionScreen
-    cancelled = Signal(str)  # checkpoint_id
+    cancelled = Signal(str, object)  # checkpoint_id, the label's failed RetractionScreen
 
     def __init__(
         self,
@@ -283,7 +284,7 @@ class RetractionRecheckWorker(SingleOutcome, QThread):
             self.checker, self.documents, lambda: self._cancelled, refresh=True
         )
         if self._cancelled:
-            self._end(self.cancelled, self.checkpoint_id)
+            self._end(self.cancelled, self.checkpoint_id, self._failed())
         else:
             self._end(self.rechecked, self.checkpoint_id, screen)
 

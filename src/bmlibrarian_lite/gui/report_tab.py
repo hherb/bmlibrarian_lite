@@ -99,6 +99,7 @@ from ..retraction_text import (
     CHECK_AGAIN_FAILED,
     CHECK_AGAIN_LABEL,
     CHECK_AGAIN_NOT_SAVED,
+    CHECK_AGAIN_STOPPED,
     NO_AUDIT_RECORD_LINE,
     CHECKING_AGAIN_LINE,
     STORED_CHECKS_UNREAD,
@@ -527,16 +528,7 @@ class ReportTab(QWidget):
         showing = checkpoint_id == self._saved_checkpoint_id
         if screen.failed:
             if showing:
-                # nothing is stored, but a record's own label still retracts (#673)
-                shown = self._shown_checks
-                labelled = {
-                    doc_id: c
-                    for doc_id, c in screen.checks.items()
-                    if c.verdict.status is RetractionStatus.RETRACTED
-                    # a shown retraction keeps its own notice
-                    and (doc_id not in shown or shown[doc_id].verdict.status is not RetractionStatus.RETRACTED)
-                }
-                self._show_saved_retraction({**shown, **labelled}, note=CHECK_AGAIN_FAILED)
+                self._show_label_retractions(screen, CHECK_AGAIN_FAILED)
             return
         note = ""
         # a scored paper no screen saw gains its row (#684); the shown run's were loaded with
@@ -651,12 +643,36 @@ class ReportTab(QWidget):
             Path(temp).unlink(missing_ok=True)
         return updated, audit
 
-    def _on_recheck_cancelled(self, checkpoint_id: str) -> None:
-        """A cancel (at quit) stopped *Check again*: nothing is saved."""
+    def _on_recheck_cancelled(self, checkpoint_id: str, screen: RetractionScreen) -> None:
+        """A cancel (at quit) stopped *Check again*: nothing is saved, but the label still warns (#675).
+
+        Args:
+            checkpoint_id: The run checked.
+            screen: The failed screen of the record's own labels.
+        """
         self._recheck_worker = None
         self.check_again_btn.setEnabled(True)
         if checkpoint_id == self._saved_checkpoint_id:
-            self._show_saved_retraction()
+            self._show_label_retractions(screen, CHECK_AGAIN_STOPPED)
+
+    def _show_label_retractions(self, screen: RetractionScreen, note: str) -> None:
+        """Show the saved work as it stood, warning too of the papers a failed screen's labels retract.
+
+        Nothing is stored: a failed or stopped *Check again* (#673, #675).
+
+        Args:
+            screen: The failed screen.
+            note: Why the run's record stands.
+        """
+        shown = self._shown_checks
+        labelled = {
+            doc_id: c
+            for doc_id, c in screen.checks.items()
+            if c.verdict.status is RetractionStatus.RETRACTED
+            # a shown retraction keeps its own notice
+            and (doc_id not in shown or shown[doc_id].verdict.status is not RetractionStatus.RETRACTED)
+        }
+        self._show_saved_retraction({**shown, **labelled}, note=note)
 
     def _cancel_at_quit(self) -> None:
         """Cancel a running *Check again*; the thread keeper does the one bounded wait.

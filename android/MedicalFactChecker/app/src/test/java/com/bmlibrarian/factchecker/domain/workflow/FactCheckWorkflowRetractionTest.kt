@@ -815,9 +815,29 @@ class FactCheckWorkflowRetractionTest {
 
         assertTrue(job.isCancelled)
         assertTrue(rows.isEmpty())
-        assertTrue(workflow.retractionSavedWork.value?.line!!.endsWith("so this is still the run's record"))
+        // the reader stopped it: worded as a stop, never a failure (#663 item 2)
+        assertTrue(workflow.retractionSavedWork.value?.line!!.endsWith(RetractionText.CHECK_AGAIN_STOPPED))
         assertFalse(workflow.isCheckingRetractionsAgain.value)
         coVerify(exactly = 0) { sessionRepository.updateWorkflowStep(any(), any()) }
+    }
+
+    /** #675 item 1: a cancelled Check again still warns by the label, as a failed one does, and stores nothing. */
+    @Test
+    fun `a cancelled Check again still warns by the label`() = runTest {
+        BmlibFfi.assumeAvailable()
+        restoreCheckedSession()
+        assertNull(workflow.retractionSavedWork.value?.warning)
+        documents["d1"] = documents.getValue("d1").copy(publicationTypesJson = "[\"Retracted Publication\"]")
+        coEvery { retractionService.check(any()) } coAnswers { awaitCancellation() }
+
+        val job = launch { workflow.checkRetractionsAgain() }
+        runCurrent()
+        workflow.cancelCheckAgain()
+        job.join()
+
+        assertTrue(workflow.retractionSavedWork.value?.warning!!.contains("• Study d1: Retracted"))
+        assertTrue(workflow.retractionSavedWork.value?.line!!.endsWith(RetractionText.CHECK_AGAIN_STOPPED))
+        assertTrue("nothing is stored", rows.isEmpty())
     }
 
     @Test
@@ -1002,7 +1022,7 @@ class FactCheckWorkflowRetractionTest {
         job.join()
 
         assertEquals(
-            "Retraction status checked 2026-10-18; it could not be checked again, so this is still the run's record",
+            "Retraction status checked 2026-10-18; checking again was stopped, so this is still the run's record",
             workflow.retractionSavedWork.value?.line
         )
     }

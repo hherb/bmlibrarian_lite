@@ -142,6 +142,14 @@ final class FactCheckWorkflow {
     /// Whether ``checkRetractionsAgain()`` is running, so it is offered once at a time.
     private(set) var isCheckingRetractionsAgain = false
 
+    /// Set by ``cancelCheckAgain()`` until the next *Check again* begins; a stop
+    /// asked while it waits behind earlier work is kept for its body.
+    private var checkAgainStopRequested = false
+
+    /// Whether *Check again*'s own body is the running ``workflowTask``, so
+    /// ``cancelCheckAgain()`` cancels it and never a run it waits behind.
+    private var checkAgainBodyRunning = false
+
     /// Shown while the documents about to be scored are checked for retraction.
     static let retractionProgressMessage = "Checking retraction status…"
 
@@ -321,6 +329,8 @@ final class FactCheckWorkflow {
     /// stands there is nothing to resume, and ``stopNotice`` says what the
     /// stop left undone.
     private func handleBackgroundExpiration() async {
+        // Check again is no run: it stops, storing nothing, and records no stop on the session
+        cancelCheckAgain()
         guard let session = session, let counts = stopWork(.background) else { return }
 
         logger.info("Background expiring - saved state for session \(session.id)")
@@ -511,16 +521,26 @@ final class FactCheckWorkflow {
     /// report, is never rewritten: ``retractionSavedWorkLine`` and
     /// ``retractionSavedWorkWarning`` say what changed, and the warning
     /// suggests re-running the question. A check that fails, or is stopped,
-    /// stores nothing and says the run's record stands; a failed one still
-    /// warns of a paper its label retracts.
+    /// stores nothing and says the run's record stands, still warning of a
+    /// paper its label retracts (#673, #675). ``cancelCheckAgain()`` stops it.
     func checkRetractionsAgain() async {
         // set before the wait for earlier work, so a second tap meanwhile asks nothing
         guard !isCheckingRetractionsAgain else { return }
         isCheckingRetractionsAgain = true
+        checkAgainStopRequested = false
         defer { isCheckingRetractionsAgain = false }
         await runAsWorkflowTask { [weak self] in
             await self?.checkRetractionsAgainWork()
         }
+    }
+
+    /// Stops a running *Check again* (its Cancel, and background expiry,
+    /// #654): it stores nothing, and the line says it was stopped. A run it
+    /// waits behind is not touched; that one has its own stop (``cancelFactCheck()``).
+    func cancelCheckAgain() {
+        guard isCheckingRetractionsAgain, !checkAgainStopRequested else { return }
+        checkAgainStopRequested = true
+        if checkAgainBodyRunning { workflowTask?.cancel() }
     }
 
     /// The work of ``checkRetractionsAgain()``, run as ``workflowTask`` so it never overlaps a run.
@@ -528,31 +548,31 @@ final class FactCheckWorkflow {
         guard let session else { return }
         // as every body does: a flag an earlier stop left must not discard this check's answers
         isCancelling = false
-        retractionSavedWorkLine = RetractionText.checkingAgainLine
-
+        checkAgainBodyRunning = true
+        defer { checkAgainBodyRunning = false }
         let documents = session.documents ?? []
         // one paper per paper key, from every document's evidence (#688)
         let papers = RetractionPaper.merged(documents.map(\.retractionPaper))
+        // nothing is stored, but the paper's label (any of its records') still retracts (#673, #675)
+        let standing = { [self] in
+            // a cancellation nobody asked for is a failure (see stopRequested)
+            let note = checkAgainStopRequested ? RetractionText.checkAgainStopped : RetractionText.checkAgainFailed
+            showSavedRetraction(note: note, labelled: Self.labelRetractions(documents, papers))
+        }
+        // stopped while it waited behind earlier work
+        if checkAgainStopRequested { standing(); return }
+        retractionSavedWorkLine = RetractionText.checkingAgainLine
+
         let checks: [RetractionPaper: PaperRetractionCheck]
         do {
             checks = try await (retractionCheck ?? productionRetractionCheck())(Self.distinct(papers))
         } catch {
-            // a cancellation nobody asked for is a failure too (see stopRequested)
-            var labelled: [String: PaperRetractionCheck] = [:]
-            if !stopRequested {
-                logger.warning("Retraction check again failed: \(error.localizedDescription)")
-                // nothing is stored, but the paper's label (any of its records') still retracts (#673)
-                let now = Date()
-                for (document, paper) in zip(documents, papers) {
-                    let check = PaperRetractionCheck.failed(for: paper, at: now)
-                    if check.isRetracted { labelled[document.id] = check }
-                }
-            }
-            showSavedRetraction(note: RetractionText.checkAgainFailed, labelled: labelled)
+            if !stopRequested { logger.warning("Retraction check again failed: \(error.localizedDescription)") }
+            standing()
             return
         }
         // a stop the check did not throw for stores nothing either
-        if stopRequested { showSavedRetraction(note: RetractionText.checkAgainFailed); return }
+        if stopRequested || checkAgainStopRequested { standing(); return }
         let adopted = adoptSharedRetractionChecks(documents)
         _ = Document.takeRetractionChecks(documents, fresh: papers.map { checks[$0] })
         if adopted { shareRetractionChecks(documents) }
@@ -586,6 +606,20 @@ final class FactCheckWorkflow {
         let again = RetractionText.notCheckedAgainClause(
             missed.count, causes: RetractionText.uncheckedCauses(missed, failed: []))
         showSavedRetraction(note: again + unsaved, causes: causes)
+    }
+
+    /// The retractions each document's paper label decides, by `Document.id`:
+    /// what a failed or stopped *Check again* still warns of (#673, #675).
+    private static func labelRetractions(
+        _ documents: [Document], _ papers: [RetractionPaper]
+    ) -> [String: PaperRetractionCheck] {
+        let now = Date()
+        var labelled: [String: PaperRetractionCheck] = [:]
+        for (document, paper) in zip(documents, papers) {
+            let check = PaperRetractionCheck.failed(for: paper, at: now)
+            if check.isRetracted { labelled[document.id] = check }
+        }
+        return labelled
     }
 
     /// `papers` without repeats, in order: a paper two documents share is asked about once (#688).
