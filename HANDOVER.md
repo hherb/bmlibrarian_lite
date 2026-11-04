@@ -14,8 +14,9 @@ unchecked from its own answers only (#660, #668, all three platforms).
 **A row this build cannot read** is overwritten only by a fully answered
 check **or a retraction**, whatever was down (#669, all three platforms;
 a concern still cannot, since the row may hold a retraction). A row naming
-a status or lookup this build does not know is unreadable on all three
-(Swift's `PaperRetractionCheck.isReadable`). **Both apps decide once per
+a status, lookup or deciding evidence source/kind this build does not know
+is unreadable on all three, and never reused (`PaperRetractionCheck.isReadable`
+on both apps, bmlib's `from_dict` on the desktop; #705). **Both apps decide once per
 paper key**, as the desktop's `check` (#671 Android, #688 Apple):
 `RetractionPaper.merged` gives every document of a paper the first DOI,
 first canonical PMID and all publication types, asked once within each screen
@@ -254,20 +255,15 @@ Open issues by family; each issue carries the detail. None blocks another.
   could not be read", never "the run's record", yet badge what they found
   from memory as the desktop does, and the saved work is one
   `retractionSavedWork: StateFlow<RetractionSavedWorkState?>`), Apple
-  **#647** (done: the snapshot decodes per entry and a later run keeps an
-  entry it cannot read as written; a refused export waits a day across
-  launches, `<index>.refused` as Android, and a refusal dated ahead of now
-  is no wait on either app; the stored index is parsed once
-  per refresh; refresh failures log at warning. Left: a shared Crossref
-  lookup, per-access check decoding, a fail-under-XCTest default, an
-  unreadable index file logged), **#649**, **#653**, **#654** (item 1 done by #660), **#658**
+  **#647** (left: a shared Crossref lookup, per-access check decoding, a
+  fail-under-XCTest default, an unreadable index file logged), **#649**, **#653**, **#654** (item 1 done by #660), **#658**
   (Android), **#675** item 1 (a stopped Check again and the label, needs a
   cross-platform decision; items 2 and 3 done). **#700, #702, #694 done**:
   only a refusal of the export itself records the day's wait; an index that
   cannot be written, or too little free space to download it
   (`retractionWatchMinFreeBytes` / `RETRACTION_WATCH_MIN_FREE_BYTES`, 100 MB,
   checked just before the download; a folder that cannot be made has none), is
-  `notStored` / `NotStored`, never recorded (settles #658's storage item). Follow-ups: **#704** (a full disk is only logged; reader text needs a decision), **#705** (the desktop treats an unknown evidence source/kind as unreadable, the apps do not).
+  `notStored` / `NotStored`, never recorded (settles #658's storage item). Follow-up: **#704** (a full disk is only logged; reader text needs a decision).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
   the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,

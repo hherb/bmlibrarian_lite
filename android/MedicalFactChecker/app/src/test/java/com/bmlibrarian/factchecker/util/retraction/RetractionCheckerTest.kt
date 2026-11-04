@@ -314,6 +314,22 @@ class RetractionCheckerTest {
         assertEquals(stored("concern", listOf("crossref")), PaperRetractionCheck.decode(PaperRetractionCheck.encode(stored("concern", listOf("crossref")))))
     }
 
+    /** So does a newer build's source or kind for the deciding evidence (#705); such a row is never reused either. */
+    @Test
+    fun `a stored row with an unknown evidence source or kind is unreadable, and an outage never overwrites it`() {
+        val outage = stored("unchecked", listOf("crossref"), daysOld = 0.0)
+        fun decidedBy(source: String, kind: String) = stored("retracted").copy(deciding = StoredRetractionEvidence(source, kind, "2026-01"))
+        val known = decidedBy("crossref_publisher", "retraction")
+        assertEquals("control", known, PaperRetractionCheck.decode(PaperRetractionCheck.encode(known)))
+        assertTrue("control", known.isReusable(RetractionFixture.nowMs, emptyList()))
+        for (row in listOf(decidedBy("a_new_source", "retraction"), decidedBy("crossref_publisher", "a_new_kind"))) {
+            val text = PaperRetractionCheck.encode(row)
+            assertNull(text, PaperRetractionCheck.decode(text))
+            assertFalse(text, row.isReusable(RetractionFixture.nowMs, emptyList()))
+            assertEquals(text, TakenCheck(null, outage), PaperRetractionCheck.take(text, outage, typesRecorded = true))
+        }
+    }
+
     /** Only a label retraction waits for recorded types; one Retraction Watch decided is cleared by a full answer. */
     @Test
     fun `a stored retraction not decided by the label is replaced by a full answer, types recorded or not`() {

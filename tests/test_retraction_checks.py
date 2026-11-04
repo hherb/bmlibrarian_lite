@@ -636,6 +636,27 @@ def test_an_outage_never_overwrites_an_unreadable_stored_row(storage, tmp_path):
     assert storage.retraction_checks([_KEY])[_KEY].verdict.status is RetractionStatus.CLEAR
 
 
+@pytest.mark.parametrize("field", ["source", "kind"])
+def test_an_unknown_evidence_source_or_kind_makes_a_stored_row_unreadable(storage, tmp_path, field):
+    """A newer build's source or kind is unreadable too: the reference for the apps (#705)."""
+    _current_export(tmp_path)
+    _store(storage, RetractionStatus.RETRACTED, _NOTICE)
+    assert storage.retraction_checks([_KEY]), "control: readable"
+    with sqlite3.connect(storage.config.storage.sqlite_path) as conn:
+        conn.execute(
+            "UPDATE retraction_checks SET deciding_json = json_set(deciding_json, ?, 'new')",
+            (f"$.{field}",),
+        )
+    assert storage.retraction_checks([_KEY]) == {}
+    _checker(storage, tmp_path, StubSession(_unreachable)).check([_doc("a", doi="10.1/a")])
+    with sqlite3.connect(storage.config.storage.sqlite_path) as conn:
+        [(deciding,)] = conn.execute("SELECT deciding_json FROM retraction_checks").fetchall()
+    assert json.loads(deciding)[field] == "new", "an outage never overwrites it"
+    # control: an answer replaces it
+    _checker(storage, tmp_path, StubSession()).check([_doc("a", doi="10.1/a")])
+    assert storage.retraction_checks([_KEY])[_KEY].verdict.status is RetractionStatus.CLEAR
+
+
 def test_a_retraction_overwrites_an_unreadable_stored_row_during_an_outage(storage, tmp_path):
     """Crossref down: a retraction is stored over an unreadable row, a concern is not (#669)."""
     _current_export(tmp_path)
