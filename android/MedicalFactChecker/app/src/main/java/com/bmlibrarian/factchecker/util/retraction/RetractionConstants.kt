@@ -72,6 +72,14 @@ object RetractionConstants {
     /** The User-Agent product the export download and Crossref lookups send, before the mailto. */
     const val USER_AGENT_PRODUCT = "BMLibrarianLite/1.0"
 
+    /**
+     * The most paper keys one stored-check read binds: SQLite before 3.32
+     * (Android before API 31) refuses a statement with more than 999
+     * variables: a run would then leave every paper unchecked ("the check
+     * failed"), and Check again and the saved-work line would fail.
+     */
+    const val RETRACTION_CHECK_KEYS_PER_QUERY = 999
+
     /** Milliseconds in a day. */
     const val MS_PER_DAY = 24L * 60 * 60 * 1000
 }

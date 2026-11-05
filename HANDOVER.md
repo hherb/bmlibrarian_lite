@@ -98,25 +98,17 @@ have landed):
 
 ## Recently landed (context)
 
-- **Apple release blockers** (fixed for 1.7, which never shipped; PRs #676, #678–#680, #682): unscreened scored
-  papers counted unchecked (#657, Android too), per-paper retraction rows
-  (#651), a stand-in store window (#297), a failed Keychain read is never
-  cached as no key and leaves CORE/Elsevier unreachable, not unasked (#511);
-  privacy manifest and `PRIVACY.md`; the Mac app is sandboxed
-  (`network.client`, `print`) with the push entitlement on both. **A run never
-  waits for the Retraction Watch refresh**: `currentIndex` is `nonisolated`
-  (pinned by a test that holds the injected build, #681), and bmlib's CSV
-  parse is linear (849 s → 0.6 s). **Apps 1.8.0 is cut** (PR #709,
-  `ios/MedicalFactChecker/APP_STORE.md`) only as a notarized macOS DMG for a
-  beta tester. **Still owed by the maintainer before the App Store release**:
-  Apple's latest Program License Agreement (if not yet accepted), deploy the
-  CloudKit schema to Production (`RetractionCheckRecord`, new `Document`
-  fields), update App Privacy answers to `PRIVACY.md`, archive and Validate
-  App on both platforms (first release bundling `BmlibFFI`). **Never
-  pass an `@Observable` property `inout`** (#697): its `_modify` reports a
-  change on every read, and Settings re-rendered itself until the watchdog
-  killed it; pass a `ReferenceWritableKeyPath`. Xcode Cloud's workflow
-  manifest (`xcshareddata/xcodecloud/`) is committed.
+- **Apple release blockers** (fixed for 1.7, never shipped; PRs #676,
+  #678–#680, #682); the Mac app is sandboxed (`network.client`, `print`).
+  **A run never waits for the Retraction Watch refresh** (`currentIndex` is
+  `nonisolated`, #681). A failed Keychain read is never cached as no key
+  (CORE/Elsevier unreachable, not unasked, #511). **Apps 1.8.0** (PR #709, `ios/MedicalFactChecker/APP_STORE.md`)
+  went out only as a notarized macOS DMG. **Owed by the maintainer before the
+  App Store**: the latest Program License Agreement (if not yet accepted), deploy the CloudKit
+  schema to Production (`RetractionCheckRecord`, new `Document` fields), App
+  Privacy answers per `PRIVACY.md`, archive and Validate on both platforms
+  (first release bundling `BmlibFFI`). **Never pass an `@Observable`
+  property `inout`** (#697; pass a `ReferenceWritableKeyPath`).
 
 - **Cut-off, refused and unknown-stop answers** (#629, #631, #637; PRs #630,
   #632, #636, #638): a cut-off answer raises `TruncatedResponseError`
@@ -196,8 +188,8 @@ have landed):
   never overwritten; **bump `TRANSPARENCY_ANALYZER_VERSION`** whenever a score
   could move. **A skip is a third state** (`SourceLookupSkipped`). Never
   `findtext` a mixed-content element. Funders: `sponsor_patterns.json` schema 4.
-- **Older rounds, compressed to the rules that still bind** (archaeology in
-  git history and the `doc/cross_platform/` READMEs).
+- **Older rounds: the rules that still bind** (detail in git history and
+  the `doc/cross_platform/` READMEs).
   - **A source we could not reach is not a finding** (#346, #347, #344,
     PR #349). A typed fetch carries the answer *or* a `RequestFailure`
     (`served()` / `absent()` / `unreachable()`: `RecordFetch`,
@@ -255,7 +247,15 @@ Open issues by family; each issue carries the detail. None blocks another.
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**,
   **#653**, **#654** items 3 and 4 (the not-saved note said once, a failed
-  check recomputing the warning; items 1 and 2 done), **#658** (Android).
+  check recomputing the warning; items 1 and 2 done), **#658** (Android;
+  left: the at-most-once-per-run test; the type items (the
+  `PaperRetractionCheck` and `CrossrefAnswer` invariants, a cross-platform
+  decision; `publicationTypes` nullable; `paperKey` a function); the IGNORE
+  insert, owed before a second writer lands; whether a full disk's `Refused`
+  should wait a day), **#720** (a failed stored read skips the fresh check;
+  needs the IGNORE insert or a no-write path first). **The stored-check read
+  binds at most 999 keys** (SQLite before API 31): read through
+  `RetractionService.storedChecks`, never `RetractionCheckDao.get` direct.
   **#708, #711, #714, #716 done**: a view that replaces its workflow or whose
   window closes calls the outgoing one's `cancelCheckAgain()` (keep it at any
   new such site); `sessionsCheckingAgain` refuses a second window's *Check

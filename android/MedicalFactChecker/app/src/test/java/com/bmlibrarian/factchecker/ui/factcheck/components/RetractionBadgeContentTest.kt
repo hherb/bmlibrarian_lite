@@ -41,6 +41,22 @@ class RetractionBadgeContentTest {
     }
 
     @Test
+    fun `each badge's colour flags follow its status`() {
+        // (isRetracted, isConcern): the badge's colours are chosen by these alone
+        val flags = mapOf(
+            "retracted" to (true to false),
+            "concern" to (false to true),
+            "unchecked" to (false to false),
+        )
+        for ((status, expected) in flags) {
+            val content = RetractionBadgeContent.of(check(status, listOf("crossref")))!!
+            assertEquals(status, expected, content.isRetracted to content.isConcern)
+        }
+        val never = RetractionBadgeContent.of(null, inDetail = true)!!
+        assertEquals(false to false, never.isRetracted to never.isConcern)
+    }
+
+    @Test
     fun `a paper never checked is NOT CHECKED only in a detail view`() {
         assertNull(RetractionBadgeContent.of(null))
         val detail = RetractionBadgeContent.of(null, inDetail = true)!!

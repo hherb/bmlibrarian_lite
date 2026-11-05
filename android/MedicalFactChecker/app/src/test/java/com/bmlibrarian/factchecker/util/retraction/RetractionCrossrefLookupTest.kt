@@ -18,11 +18,18 @@ package com.bmlibrarian.factchecker.util.retraction
 import com.bmlibrarian.factchecker.data.remote.transparency.TransparencyRetryPolicy
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
+import java.net.SocketTimeoutException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockWebServer
 import org.bmlib.ffi.CrossrefResult
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -150,6 +157,86 @@ class RetractionCrossrefLookupTest {
         val connection = RequestFailure(RequestFailureKind.CONNECTION)
         assertEquals(connection, out["10.1000/a0"]?.failure)
         assertEquals(CrossrefResult.Unreachable(connection.describe()), out["10.1000/a0"]?.result)
+    }
+
+    /** The desktop's `test_one_unreadable_item_in_a_200_is_malformed_for_it_alone`. */
+    @Test
+    fun `one unreadable item in a 200 is malformed for it alone`() = runTest {
+        stub.stubbed = StubServer.answer(
+            200,
+            StubServer.crossrefBody("""{"DOI": "10.1000/bad", "updated-by": "not a list"}, {"DOI": "10.1000/good"}""")
+        )
+        val out = lookup().results(listOf("10.1000/bad", "10.1000/good"))
+        val malformed = RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+        assertEquals(malformed, out["10.1000/bad"]?.failure)
+        assertEquals(CrossrefResult.Unreachable(malformed.describe()), out["10.1000/bad"]?.result)
+        assertTrue("${out["10.1000/good"]}", out["10.1000/good"]?.result is CrossrefResult.Served)
+        assertNull(out["10.1000/good"]?.failure)
+    }
+
+    @Test
+    fun `a persistent 503 is unreachable after every attempt`() = runTest {
+        stub.stubbed = StubServer.answer(503)
+        val out = lookup().results(listOf("10.1000/a0"))
+        val failure = RequestFailure(RequestFailureKind.HTTP_STATUS, 503)
+        assertEquals(failure, out["10.1000/a0"]?.failure)
+        assertEquals(CrossrefResult.Unreachable(failure.describe()), out["10.1000/a0"]?.result)
+        assertEquals("three attempts", 3, stub.requestedUrls.size)
+    }
+
+    @Test
+    fun `a socket timeout is unreachable as a timeout`() = runTest {
+        val client = stub.client().newBuilder().apply {
+            interceptors().add(0, okhttp3.Interceptor { throw SocketTimeoutException("read timed out") })
+        }.build()
+        val out = lookup(client).results(listOf("10.1000/a0"))
+        val timeout = RequestFailure(RequestFailureKind.TIMEOUT)
+        assertEquals(timeout, out["10.1000/a0"]?.failure)
+        assertEquals(CrossrefResult.Unreachable(timeout.describe()), out["10.1000/a0"]?.result)
+    }
+
+    /**
+     * Cancel [dois]' lookup during its first request.
+     *
+     * @return Whether the lookup returned (it must throw), and the requests sent
+     */
+    private fun cancelDuringFirstBatch(dois: List<String>): Pair<Boolean, Int> = runBlocking {
+        stub.stubbed = StubServer.answer(200, StubServer.crossrefBody(""))
+        lateinit var job: Job
+        val client = stub.client().newBuilder()
+            .addInterceptor { chain -> chain.proceed(chain.request()).also { job.cancel() } }
+            .build()
+        var returned = false
+        // started only once assigned, so the interceptor always sees the job
+        job = launch(Dispatchers.Default, start = CoroutineStart.LAZY) {
+            lookup(client).results(dois)
+            returned = true
+        }
+        job.start()
+        job.join()
+        assertTrue(job.isCancelled)
+        returned to stub.requestedUrls.size
+    }
+
+    /**
+     * Counterpart of the desktop's `test_cancel_between_batches_stops_sending`:
+     * no further batch is sent. Unlike the desktop, which returns the answered
+     * batch, a cancel here throws.
+     */
+    @Test
+    fun `a cancel during the first batch asks no further batch`() {
+        val (returned, requests) = cancelDuringFirstBatch((0 until 60).map { "10.1000/a$it" })
+        assertFalse(returned)
+        assertEquals("only the first of two batches", 1, requests)
+    }
+
+    /**
+     * With no later batch, no `ensureActive()` follows: a catch that swallowed
+     * the cancel would return an unreachable batch, and only this test sees it.
+     */
+    @Test
+    fun `a cancel during the only batch is thrown, never read as an unreachable batch`() {
+        assertFalse(cancelDuringFirstBatch(listOf("10.1000/a0")).first)
     }
 
     @Test
