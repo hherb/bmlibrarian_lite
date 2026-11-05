@@ -180,6 +180,8 @@ final class FactCheckWorkflow {
     private static let retractionChecksStored = Notification.Name("FactCheckWorkflow.retractionChecksStored")
     // nonisolated(unsafe): written once in init, read again only by deinit (#716)
     @ObservationIgnored nonisolated(unsafe) private var retractionChecksStoredObserver: NSObjectProtocol?
+    /// Where both observers are added and removed, and ``retractionChecksStored`` posted.
+    private let notificationCenter: NotificationCenter
 
     /// Shown while the documents about to be scored are checked for retraction.
     static let retractionProgressMessage = "Checking retraction status…"
@@ -326,7 +328,13 @@ final class FactCheckWorkflow {
     ///   - modelContext: SwiftData model context for persistence.
     ///   - modelContainer: SwiftData model container (required for checkpointing).
     ///   - settings: App settings for configuration.
-    init(modelContext: ModelContext, modelContainer: ModelContainer, settings: AppSettings = .shared) {
+    ///   - notificationCenter: Where the workflow observes and posts; `.default`
+    ///     but in tests.
+    init(
+        modelContext: ModelContext, modelContainer: ModelContainer, settings: AppSettings = .shared,
+        notificationCenter: NotificationCenter = .default
+    ) {
+        self.notificationCenter = notificationCenter
         self.modelContext = modelContext
         self.modelContainer = modelContainer
         self.settings = settings
@@ -337,11 +345,11 @@ final class FactCheckWorkflow {
 
     /// Removes the two notification observers ``setupBackgroundObservers()``
     /// added. Views make a new workflow on every restore, so without this each
-    /// one left its blocks in `NotificationCenter.default` for the life of the
+    /// one left its blocks in the notification center for the life of the
     /// process (#716).
     deinit {
         for token in [backgroundExpirationObserver, retractionChecksStoredObserver].compactMap({ $0 }) {
-            NotificationCenter.default.removeObserver(token)
+            notificationCenter.removeObserver(token)
         }
     }
 
@@ -350,7 +358,7 @@ final class FactCheckWorkflow {
     /// Listens for `.backgroundTaskExpiring` to save state immediately
     /// before the app is suspended.
     private func setupBackgroundObservers() {
-        backgroundExpirationObserver = NotificationCenter.default.addObserver(
+        backgroundExpirationObserver = notificationCenter.addObserver(
             forName: .backgroundTaskExpiring,
             object: nil,
             queue: .main
@@ -359,7 +367,7 @@ final class FactCheckWorkflow {
                 await self?.handleBackgroundExpiration()
             }
         }
-        retractionChecksStoredObserver = NotificationCenter.default.addObserver(
+        retractionChecksStoredObserver = notificationCenter.addObserver(
             forName: Self.retractionChecksStored,
             object: nil,
             queue: .main
@@ -676,7 +684,7 @@ final class FactCheckWorkflow {
         var unsaved = ""
         do {
             try modelContext.save()
-            NotificationCenter.default.post(
+            notificationCenter.post(
                 name: Self.retractionChecksStored, object: self, userInfo: ["session": session.id])
         } catch {
             // shortcut: said on this view only, not on a later reopen as the desktop's

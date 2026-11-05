@@ -262,7 +262,8 @@ Open issues by family; each issue carries the detail. None blocks another.
   again* on one session; a stored *Check again* posts
   `retractionChecksStored` and other windows redraw; the workflow's
   `deinit` removes its two observers (tokens `nonisolated(unsafe)`; a test
-  asserts a released workflow is freed). **Open: #713** (does a closed iPad
+  injects a counting `notificationCenter` and asserts both removals).
+  **Open: #713** (does a closed iPad
   scene's root `onDisappear` fire? needs a simulator or device by hand).
   **PR #707 (#654 item 2, #663, #675)**: Apple's *Check again* has its own
   Cancel (as Android's; background expiry calls it), never cancels a run it
