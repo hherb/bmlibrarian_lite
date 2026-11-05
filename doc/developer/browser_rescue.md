@@ -24,17 +24,27 @@ tick the robot check (stage 3).
 
 - `browser_rescue.py`: the rules, with no Qt and no database access (it imports `sqlite3` only to
   catch its errors). States, outcomes,
-  verdicts (`page_verdict`, `download_verdict`), `next_state`, which failures
-  are queued (`rescue_requests`, `queue_challenged_copies`), the pacing delay
+  verdicts (`page_verdict`, `download_verdict`, and `title_checked_verdict`
+  for a PDF that arrived), `next_state`, which failures are queued
+  (`rescue_requests`, `queue_challenged_copies`: a `CHALLENGED` failure of a
+  `RESCUABLE_SERVICES` copy, Unpaywall's or OpenAlex's, for a document with a
+  DOI), where a rescued PDF goes (`rescue_pdf_path`), the pacing delay
   (`rescue_delay_ms`), `penalise_host_for_answer` and `reanalyse_rescued`.
   Stage 3 adds `dismissed_state` and `dismiss_entry` (a `DismissResult`:
   dismissed, not open, or failed), `awaiting_reader_states`, the reader's
   wait (`wait_watch`, and `wait_outcome`, whose `WaitResult` carries the entry
-  that decided it), `WalkEnd`, `fetchable_host`, and `stamp` (the stored
-  time format, aware moments only).
-- `rescue_queue_store.py`: the queue's table. SQL only; `LiteStorage` opens the
-  connection. `record_verdict` and `dismiss` each run their own transaction,
-  because the MCP server writes the same table from another process. They
+  that decided it), `WalkEnd`, `HeldPdfKeep`, `fetchable_host`, and `stamp`
+  (the stored time format, aware moments only).
+- `bot_walls.py`: `challenge_markers`, the defences an answer names (the
+  `WALL_MARKERS` needles in its first `CHALLENGE_BODY_PREFIX_BYTES`, a
+  defence's own headers, and Cloudflare's own 403 or 503, `Server:
+  cloudflare`). Shared with the HTTP client, whose `challenge_failure`
+  records a `CHALLENGED` failure; the contract is `doc/cross_platform/fulltext_parity/challenge_detection.json`.
+- `rescue_queue_store.py`: the queue's table, `browser_rescue_queue`, one row
+  per document and address. SQL only; `LiteStorage` opens the connection.
+  `enqueue` is idempotent: an existing entry is left as it is, open or
+  settled, except that a higher priority raises an open one's.
+  `record_verdict` and `dismiss` each run their own transaction, because the MCP server writes the same table from another process. They
   return a `RecordedVerdict`: the entry as it now stands and whether this
   change was applied, so a rescue another process recorded first is not
   announced twice.
@@ -83,8 +93,9 @@ was rescued) are reached outside a visit. `pending` and
 
 A **transport** outcome learnt nothing about the article, so the entry stays
 `pending` (unreachable is not absent). Transport covers: a network error, a
-renderer crash, a stalled or interrupted download, an empty download, a PDF
-that arrived and could not be kept or read (a `%PDF` body PyMuPDF cannot
+renderer crash, a stalled download (nothing received for
+`RESCUE_DOWNLOAD_STALL_MS`, 20 s) or an interrupted one, an empty download,
+a PDF that arrived and could not be kept or read (a `%PDF` body PyMuPDF cannot
 open), a visit that could not start (no profile
 or PDF folder), a visit with no main-frame answer before
 `RESCUE_HIDDEN_TIMEOUT_MS` (`page_verdict` with no status), a page read while a
@@ -110,9 +121,12 @@ back off together. The hidden page is muted.
 - **A PDF must carry the article's title (#532).** Before a PDF is renamed
   into place, `pdf_title_check.check_pdf_title` reads its first page with
   text (pages with none before it, an image-only cover, are passed over) and
-  asks for at least `PDF_TITLE_MIN_PAIR_SHARE` of the title's adjacent word
-  pairs (single words are not enough: an article on the same subject shares
-  them; the survey is in the constant's comment). Markup inside a word
+  asks for at least `PDF_TITLE_MIN_PAIR_SHARE` (0.5) of the title's adjacent
+  word pairs (single words are not enough: an article on the same subject
+  shares them; the survey is in the constant's comment). A title of at least
+  `PDF_TITLE_MIN_JOINED_CHARACTERS` (20) letters and numbers that the page
+  carries whole, word breaks ignored on both sides, matches too: a text layer
+  can space a word apart or run words together (#546). Markup inside a word
   (`H<sub>2</sub>O<sub>2</sub>`) is read both as a break and as none.
   `title_checked_verdict` maps the check:
   - a mismatch is `wrong_pdf`, which waits for a person (the right PDF may
@@ -128,9 +142,14 @@ back off together. The hidden page is muted.
 
   Each check is logged with its outcome and share. Each visit is checked
   against its entry's `request.title`. The HTTP download paths share the same
-  check: `verification_warning` warns of a mismatch, no text and an unreadable
-  file, and the progress status says `unchecked`, never `mismatch`, for what
-  could not be judged.
+  check (#541): a whole download is checked before it replaces the cached
+  file, and one that lacks the title is set aside as `<pdf>.mismatch`
+  (`pdf_library_check.set_aside`) unless a keep marker names its bytes; the
+  cached-PDF tier sets aside a library PDF the same way
+  (`check_cached_pdf`), and `bmll keep-pdf` keeps either.
+  `verification_warning` warns of a mismatch, no text and an unreadable file,
+  and the progress status says `unchecked`, never `mismatch`, for what could
+  not be judged.
 - **Spec D3.** A transport failure is retried no sooner than
   `RESCUE_RETRY_DELAY_SECONDS` (15 minutes) later. After `MAX_RESCUE_ATTEMPTS`
   (3) the entry becomes `needs_person` and waits for the review queue window.
@@ -259,8 +278,8 @@ queued.
 **Spec D7.** The service wakes on the systematic review and Research Questions tabs'
 analysis outcomes (an analysis is where walled PDFs are queued); a 60 s poll
 (`RESCUE_POLL_INTERVAL_MS`) catches entries other processes wrote. The hidden
-pass runs only while `discovery.browser_rescue_hidden` is on. It is read when an
-entry is taken and again when its visit starts, after the host's pacing slot,
+pass runs only while `discovery.browser_rescue_hidden` is on (the default).
+It is read when an entry is taken and again when its visit starts, after the host's pacing slot,
 which a throttling host can push minutes away.
 
 A rescue re-analyses its document when storage holds it
@@ -277,8 +296,8 @@ for then (`rescue_delay_ms`).
 
 - `prepare_web_engine()` must run **before any `QApplication`** exists: it sets
   `AA_ShareOpenGLContexts` and imports `QtWebEngineCore`. Otherwise the first
-  page fails and Qt only warns. The application, the harness and CI's
-  preflight all call it; it raises if a `QApplication` exists.
+  page fails and Qt only warns. The application, `tests/conftest.py`, the
+  harness and CI's preflight all call it; it raises if a `QApplication` exists.
 - The profile is persistent and owner-only (cookies are the reader's
   clearances), with its PDF viewer **off**, so a PDF arrives through
   `downloadRequested` instead of rendering.
@@ -317,6 +336,12 @@ Run the harness alone:
 ```bash
 QT_QPA_PLATFORM=offscreen python tests/browser_rescue_harness.py
 ```
+
+`scripts/browser_rescue_acceptance.py` is the live acceptance run: it queues
+the spike's walled addresses in a throwaway data directory, with a fresh
+profile, and runs the real `BrowserRescueService` with production timeouts
+and pacing until nothing is due, writing one row per address (PDFs go to a
+temporary folder, never the reader's library).
 
 The window, the indicator and the tab are tested in the suite with a fake
 service, calling slots directly and never pumping. The window's fake service
