@@ -108,10 +108,12 @@ final class WorkflowCancelTests: XCTestCase {
 
     /// A workflow showing `session`, with services that need no API key.
     private func restore(
-        _ session: FactCheckSession, llm: URL = closedPort
+        _ session: FactCheckSession, llm: URL = closedPort,
+        notificationCenter: NotificationCenter = .default
     ) -> FactCheckWorkflow {
         let workflow = FactCheckWorkflow(
-            modelContext: context, modelContainer: container, settings: .shared
+            modelContext: context, modelContainer: container, settings: .shared,
+            notificationCenter: notificationCenter
         )
         workflow.restoreForViewing(session)
         workflow.useServices(
@@ -558,6 +560,35 @@ final class WorkflowCancelTests: XCTestCase {
             "Processing paused when the app was backgrounded. "
                 + "Proceed with Current continues from where it stopped."
         )
+    }
+
+    /// A workflow nothing holds any more is freed and its `deinit` removes
+    /// its two notification observers (#716): views make a new workflow on
+    /// every restore, and a cycle through those blocks or a stored task, or a
+    /// `deinit` that removed nothing, would leave each one's observers behind
+    /// for good.
+    func testAReleasedWorkflowRemovesItsObservers() {
+        let session = makeSession(citations: 1, reportedCitations: 1)
+        let center = RemovalCountingCenter()
+        weak var released: FactCheckWorkflow?
+        autoreleasepool {
+            let workflow = restore(session, notificationCenter: center)
+            released = workflow
+            XCTAssertNotNil(released)
+            XCTAssertEqual(center.removed, 0)
+        }
+        XCTAssertNil(released)
+        XCTAssertEqual(center.removed, 2)
+    }
+}
+
+/// Counts the observer tokens removed from it.
+private final class RemovalCountingCenter: NotificationCenter, @unchecked Sendable {
+    private(set) var removed = 0
+
+    override func removeObserver(_ observer: Any) {
+        removed += 1
+        super.removeObserver(observer)
     }
 }
 
