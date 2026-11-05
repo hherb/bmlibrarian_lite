@@ -151,6 +151,11 @@ final class FactCheckWorkflow {
     /// ``cancelCheckAgain()`` cancels it and never a run it waits behind.
     private var checkAgainBodyRunning = false
 
+    /// The sessions some workflow is checking again, process-wide: each window
+    /// has its own workflow, so two windows on one session would otherwise ask
+    /// every lookup twice and write the same documents' checks (#711).
+    private static var sessionsCheckingAgain: Set<UUID> = []
+
     /// Shown while the documents about to be scored are checked for retraction.
     static let retractionProgressMessage = "Checking retraction status…"
 
@@ -525,9 +530,19 @@ final class FactCheckWorkflow {
     /// suggests re-running the question. A check that fails, or is stopped,
     /// stores nothing and says the run's record stands, still warning of a
     /// paper its label retracts (#673, #675). ``cancelCheckAgain()`` stops it.
+    /// It is refused, and the line says so, while another workflow checks the
+    /// same session again (#711).
     func checkRetractionsAgain() async {
         // set before the wait for earlier work, so a second tap meanwhile asks nothing
         guard !isCheckingRetractionsAgain else { return }
+        let id = session?.id
+        if let id {
+            guard Self.sessionsCheckingAgain.insert(id).inserted else {
+                showSavedRetraction(note: RetractionText.checkAgainElsewhere)
+                return
+            }
+        }
+        defer { if let id { Self.sessionsCheckingAgain.remove(id) } }
         isCheckingRetractionsAgain = true
         checkAgainStopRequested = false
         defer { isCheckingRetractionsAgain = false }
@@ -544,7 +559,7 @@ final class FactCheckWorkflow {
     /// outgoing one first (#708), as Android's `beginRetractionRun()` cancels
     /// `checkAgainJob`: no Cancel reaches a replaced workflow, and restoring the
     /// same session again could check it twice at once. Keep the call at any
-    /// new site that swaps the workflow.
+    /// new site that swaps the workflow. A window that closes calls it too (#711).
     func cancelCheckAgain() {
         guard isCheckingRetractionsAgain, !checkAgainStopRequested else { return }
         checkAgainStopRequested = true

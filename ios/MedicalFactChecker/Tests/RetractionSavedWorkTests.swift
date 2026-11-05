@@ -575,6 +575,37 @@ final class RetractionSavedWorkTests: XCTestCase {
     }
 
     /// #654: background expiry reaches *Check again* too, and records no stop on the session.
+    /// #711: two windows on one session check it again once at a time; the second is told why.
+    func testASecondWindowCannotCheckTheSameSessionAgainMeanwhile() async {
+        let (session, _) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        let firstAsked = Asked()
+        let first = restore(session, asked: firstAsked)
+        let (gate, open) = AsyncStream<Void>.makeStream()
+        first.useRetractionCheck { _ in
+            firstAsked.calls += 1
+            for await _ in gate {}
+            return [:]
+        }
+        let secondAsked = Asked()
+        let second = restore(session, asked: secondAsked)
+        let other = restore(makeSession(["10.1000/b"], cited: [0], run: [0: Self.check("clear")]).0)
+        let running = Task { @MainActor in await first.checkRetractionsAgain() }
+        while firstAsked.calls == 0 { await Task.yield() }
+
+        await second.checkRetractionsAgain()
+        XCTAssertEqual(secondAsked.calls, 0, "the second window asks nothing")
+        XCTAssertTrue(second.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainElsewhere) == true)
+        XCTAssertFalse(second.isCheckingRetractionsAgain)
+        await other.checkRetractionsAgain()
+        XCTAssertFalse(other.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainElsewhere) == true,
+                       "control: another session is checked")
+
+        open.finish()
+        await running.value
+        await second.checkRetractionsAgain()
+        XCTAssertEqual(secondAsked.calls, 1, "once the first is done, the second checks")
+    }
+
     func testBackgroundExpiryStopsCheckAgain() async {
         let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
         let workflow = restore(session)
