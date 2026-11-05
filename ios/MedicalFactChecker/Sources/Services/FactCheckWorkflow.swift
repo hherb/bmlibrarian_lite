@@ -178,7 +178,8 @@ final class FactCheckWorkflow {
     /// `userInfo["session"]`, once its *Check again* has saved its answers, so every other window
     /// showing that session's saved work redraws its line (#714).
     private static let retractionChecksStored = Notification.Name("FactCheckWorkflow.retractionChecksStored")
-    private var retractionChecksStoredObserver: NSObjectProtocol?
+    // nonisolated(unsafe): written once in init, read again only by deinit (#716)
+    @ObservationIgnored nonisolated(unsafe) private var retractionChecksStoredObserver: NSObjectProtocol?
 
     /// Shown while the documents about to be scored are checked for retraction.
     static let retractionProgressMessage = "Checking retraction status…"
@@ -275,7 +276,7 @@ final class FactCheckWorkflow {
     private(set) var wasPausedByBackground = false
 
     /// Observer token for background expiration notification.
-    private var backgroundExpirationObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var backgroundExpirationObserver: NSObjectProtocol?
 
     /// The structured query parsed from LLM response.
     ///
@@ -332,6 +333,16 @@ final class FactCheckWorkflow {
         self.checkpointManager = CheckpointManager(modelContainer: modelContainer)
         self.errorPersistenceManager = ErrorPersistenceManager(modelContainer: modelContainer)
         setupBackgroundObservers()
+    }
+
+    /// Removes the two notification observers ``setupBackgroundObservers()``
+    /// added. Views make a new workflow on every restore, so without this each
+    /// one left its blocks in `NotificationCenter.default` for the life of the
+    /// process (#716).
+    deinit {
+        for token in [backgroundExpirationObserver, retractionChecksStoredObserver].compactMap({ $0 }) {
+            NotificationCenter.default.removeObserver(token)
+        }
     }
 
     /// Set up observers for background lifecycle notifications.

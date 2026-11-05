@@ -559,6 +559,21 @@ final class WorkflowCancelTests: XCTestCase {
                 + "Proceed with Current continues from where it stopped."
         )
     }
+
+    /// A workflow nothing holds any more is freed, so its `deinit` removes
+    /// its two notification observers (#716): views make a new workflow on
+    /// every restore, and a cycle through those blocks or a stored task would
+    /// leave each one's observers behind for good.
+    func testAReleasedWorkflowIsFreed() {
+        let session = makeSession(citations: 1, reportedCitations: 1)
+        weak var released: FactCheckWorkflow?
+        autoreleasepool {
+            let workflow = restore(session)
+            released = workflow
+            XCTAssertNotNil(released)
+        }
+        XCTAssertNil(released)
+    }
 }
 
 /// A cancel stops scoring without recording the documents it stopped as

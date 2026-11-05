@@ -256,34 +256,24 @@ Open issues by family; each issue carries the detail. None blocks another.
   fail-under-XCTest default, an unreadable index file logged), **#649**,
   **#653**, **#654** items 3 and 4 (the not-saved note said once, a failed
   check recomputing the warning; items 1 and 2 done), **#658** (Android).
-  **#708, #711 done**: each Apple view that replaces its workflow (six
-  sites) or whose window closes (`onDisappear` on `ContentView` /
-  `MacContentView`) calls the outgoing one's `cancelCheckAgain()`; keep it at
-  any new such site. `FactCheckWorkflow.sessionsCheckingAgain` (process-wide)
-  refuses a second window's *Check again* on a session being checked, and
-  the line ends `RetractionText.checkAgainElsewhere`; a stop frees the
-  session at once (`releaseCheckAgainSession`, only the workflow's own hold).
-  **#714 done**: a workflow keeps its own last *Check again* caveat
-  (`checkAgainCaveat`, for one `runGeneration`), and a refusal redraws with
-  it; a *Check again* that saved its answers posts
-  `retractionChecksStored`, and every other workflow showing that session's
-  saved line redraws, its caveat superseded; one stopped while it waits, and
-  overtaken so, ends without "still the run's record"
-  (`checkAgainStoredElsewhereSinceStop`). **Open: #713** (does a closed
-  iPad scene's root `onDisappear` fire? needs a simulator or device by hand),
-  #716 (the workflow's block observers are never removed; a small leak).
-  **Landed (PR #707: #654 item 2, #663, #675)**: Apple's
-  *Check again* has its own Cancel (`cancelCheckAgain`, as Android's), which
-  background expiry calls too; it never cancels a run it waits behind, and
-  records no stop on the session. A stopped *Check again* says
-  `checkAgainStopped` ("checking again was stopped, so this is still the
-  run's record"), never the failure clause, and still warns by the label, on
-  all three (maintainer's decision, 2026-11-04). **#700, #702, #694 done**:
-  only a refusal of the export itself records the day's wait; an index that
-  cannot be written, or too little free space to download it
-  (`retractionWatchMinFreeBytes` / `RETRACTION_WATCH_MIN_FREE_BYTES`, 100 MB,
-  checked just before the download; a folder that cannot be made has none), is
-  `notStored` / `NotStored`, never recorded (settles #658's storage item). Follow-up: **#704** (a full disk is only logged; reader text needs a decision).
+  **#708, #711, #714, #716 done**: a view that replaces its workflow or whose
+  window closes calls the outgoing one's `cancelCheckAgain()` (keep it at any
+  new such site); `sessionsCheckingAgain` refuses a second window's *Check
+  again* on one session; a stored *Check again* posts
+  `retractionChecksStored` and other windows redraw; the workflow's
+  `deinit` removes its two observers (tokens `nonisolated(unsafe)`; a test
+  asserts a released workflow is freed). **Open: #713** (does a closed iPad
+  scene's root `onDisappear` fire? needs a simulator or device by hand).
+  **PR #707 (#654 item 2, #663, #675)**: Apple's *Check again* has its own
+  Cancel (as Android's; background expiry calls it), never cancels a run it
+  waits behind, records no stop, and a stopped one says `checkAgainStopped`
+  and still warns by the label, on all three (maintainer, 2026-11-04).
+  **#700, #702, #694**: only a refused export records the day's wait; an
+  unwritable index or < 100 MB free (`retractionWatchMinFreeBytes` /
+  `RETRACTION_WATCH_MIN_FREE_BYTES`, checked just before downloading; a
+  folder that cannot be made has none) is
+  `notStored` / `NotStored`, never recorded. Follow-up: **#704** (a full disk
+  is only logged; reader text needs a decision).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
   the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,
