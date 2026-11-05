@@ -104,7 +104,7 @@ have landed):
   `nonisolated`, #681). A failed Keychain read is never cached as no key
   (CORE/Elsevier unreachable, not unasked, #511). **Apps 1.8.0** (PR #709, `ios/MedicalFactChecker/APP_STORE.md`)
   went out only as a notarized macOS DMG. **Owed by the maintainer before the
-  App Store**: the latest Program License Agreement, deploy the CloudKit
+  App Store**: the latest Program License Agreement (if not yet accepted), deploy the CloudKit
   schema to Production (`RetractionCheckRecord`, new `Document` fields), App
   Privacy answers per `PRIVACY.md`, archive and Validate on both platforms
   (first release bundling `BmlibFFI`). **Never pass an `@Observable`
@@ -188,7 +188,8 @@ have landed):
   never overwritten; **bump `TRANSPARENCY_ANALYZER_VERSION`** whenever a score
   could move. **A skip is a third state** (`SourceLookupSkipped`). Never
   `findtext` a mixed-content element. Funders: `sponsor_patterns.json` schema 4.
-- **Older rounds: the rules that still bind** (detail in git history).
+- **Older rounds: the rules that still bind** (detail in git history and
+  the `doc/cross_platform/` READMEs).
   - **A source we could not reach is not a finding** (#346, #347, #344,
     PR #349). A typed fetch carries the answer *or* a `RequestFailure`
     (`served()` / `absent()` / `unreachable()`: `RecordFetch`,
@@ -247,8 +248,12 @@ Open issues by family; each issue carries the detail. None blocks another.
   fail-under-XCTest default, an unreadable index file logged), **#649**,
   **#653**, **#654** items 3 and 4 (the not-saved note said once, a failed
   check recomputing the warning; items 1 and 2 done), **#658** (Android;
-  left: the type invariants, a cross-platform decision, and the IGNORE
-  insert, owed before a second writer lands). **The stored-check read
+  left: the at-most-once-per-run test; the type items (the
+  `PaperRetractionCheck` and `CrossrefAnswer` invariants, a cross-platform
+  decision; `publicationTypes` nullable; `paperKey` a function); the IGNORE
+  insert, owed before a second writer lands; whether a full disk's `Refused`
+  should wait a day), **#720** (a failed stored read skips the fresh check;
+  needs the IGNORE insert or a no-write path first). **The stored-check read
   binds at most 999 keys** (SQLite before API 31): read through
   `RetractionService.storedChecks`, never `RetractionCheckDao.get` direct.
   **#708, #711, #714, #716 done**: a view that replaces its workflow or whose

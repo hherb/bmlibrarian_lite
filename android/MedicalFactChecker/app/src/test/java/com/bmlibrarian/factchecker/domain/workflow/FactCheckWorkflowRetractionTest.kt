@@ -245,6 +245,21 @@ class FactCheckWorkflowRetractionTest {
         assertTrue(report, report.startsWith("> **Retraction check:** 1 paper's retraction status could not be checked.\n\n"))
     }
 
+    /** The unscreened paper has no cause, so the screened one's is not named over both. */
+    @Test
+    fun `a report counting a paper no run screened gives the count alone`() = runTest {
+        hold("d1")
+        documents["d1"] = documents.getValue("d1").copy(relevanceScore = 5)
+        hold("d2")
+        answers["2"] = OUTAGE
+
+        run()
+
+        assertEquals("only the new paper is screened", listOf("d2"), scored)
+        val report = reports.single()
+        assertTrue(report, report.startsWith("> **Retraction check:** 2 papers' retraction status could not be checked.\n\n"))
+    }
+
     @Test
     fun `a run's report names the causes of the papers it screened`() = runTest {
         hold("d1")

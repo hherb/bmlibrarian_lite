@@ -75,7 +75,8 @@ object RetractionConstants {
     /**
      * The most paper keys one stored-check read binds: SQLite before 3.32
      * (Android before API 31) refuses a statement with more than 999
-     * variables, and every paper would then read "the check failed".
+     * variables: a run would then leave every paper unchecked ("the check
+     * failed"), and Check again and the saved-work line would fail.
      */
     const val RETRACTION_CHECK_KEYS_PER_QUERY = 999
 

@@ -27,11 +27,13 @@ import org.junit.Test
 /** The stored-check read binds at most 999 keys a statement (SQLite before API 31, #658). */
 class RetractionServiceStoredChecksTest {
     /** Refuses a read of more keys than old SQLite binds, as the platform would. */
-    private class BoundedDao(val rows: Map<String, String>) : RetractionCheckDao {
+    private class BoundedDao(val rows: Map<String, String>, val failingRead: Int? = null) : RetractionCheckDao {
         val reads = mutableListOf<Int>()
 
         override suspend fun get(paperKeys: List<String>): List<RetractionCheckEntity> {
-            require(paperKeys.size <= RetractionConstants.RETRACTION_CHECK_KEYS_PER_QUERY) { "too many SQL variables" }
+            // SQLite's own limit, not the production constant, so the fake cannot follow it
+            require(paperKeys.size <= 999) { "too many SQL variables" }
+            if (reads.size == failingRead) throw IllegalStateException("disk I/O error")
             reads += paperKeys.size
             return paperKeys.mapNotNull { key -> rows[key]?.let { RetractionCheckEntity(key, it) } }
         }
@@ -50,5 +52,17 @@ class RetractionServiceStoredChecksTest {
         assertEquals(listOf(999, 999, 502), dao.reads)
         assertEquals(1_250, stored.size)
         assertTrue(stored.keys.all { it.removePrefix("pmid:").toInt() % 2 == 0 })
+    }
+
+    /** A partial map would read the failed batch's papers as having no row, dropping "could not be read". */
+    @Test
+    fun `one batch failing fails the whole read`() = runTest {
+        val keys = (0 until 2_500).map { "pmid:$it" }
+        val dao = BoundedDao(keys.associateWith { "{}" }, failingRead = 1)
+        val service = RetractionService(mockk(relaxed = true), mockk(relaxed = true), dao)
+
+        val read = runCatching { service.storedChecks(keys.toSet()) }
+
+        assertTrue("$read", read.exceptionOrNull() is IllegalStateException)
     }
 }

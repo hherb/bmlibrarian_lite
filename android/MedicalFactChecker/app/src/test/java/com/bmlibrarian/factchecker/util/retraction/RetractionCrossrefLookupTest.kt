@@ -218,7 +218,11 @@ class RetractionCrossrefLookupTest {
         returned to stub.requestedUrls.size
     }
 
-    /** The desktop's `test_cancel_between_batches_stops_sending`. */
+    /**
+     * Counterpart of the desktop's `test_cancel_between_batches_stops_sending`:
+     * no further batch is sent. Unlike the desktop, which returns the answered
+     * batch, a cancel here throws.
+     */
     @Test
     fun `a cancel during the first batch asks no further batch`() {
         val (returned, requests) = cancelDuringFirstBatch((0 until 60).map { "10.1000/a$it" })
@@ -226,7 +230,10 @@ class RetractionCrossrefLookupTest {
         assertEquals("only the first of two batches", 1, requests)
     }
 
-    /** With no batch after it, nothing but the batch's own catch can turn the cancel into an answer. */
+    /**
+     * With no later batch, no `ensureActive()` follows: a catch that swallowed
+     * the cancel would return an unreachable batch, and only this test sees it.
+     */
     @Test
     fun `a cancel during the only batch is thrown, never read as an unreachable batch`() {
         assertFalse(cancelDuringFirstBatch(listOf("10.1000/a0")).first)
