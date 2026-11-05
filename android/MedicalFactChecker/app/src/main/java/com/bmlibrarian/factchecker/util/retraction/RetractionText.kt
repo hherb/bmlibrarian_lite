@@ -17,6 +17,7 @@ package com.bmlibrarian.factchecker.util.retraction
 
 import java.util.Locale
 import org.bmlib.ffi.RetractionLookup
+import org.bmlib.ffi.RetractionStatus
 
 /**
  * What the reader is told about retraction checks, worded as the desktop's
@@ -122,25 +123,28 @@ object RetractionText {
     fun paperStatusLine(check: PaperRetractionCheck): String {
         val line = StringBuilder()
         val deciding = check.deciding
-        if (check.isRetracted || check.isConcern) {
-            line.append(if (check.isRetracted) "Retracted" else "Expression of concern")
-            // the label, not a notice: a notice without a DOI is still Retraction Watch's or Crossref's
-            if (deciding == null || check.isDecidedByLabel) {
-                line.append(PUBMED_LABEL)
-            } else {
-                deciding.date?.takeIf { it.isNotEmpty() }?.let { line.append(if (check.isRetracted) " on $it" else ", $it") }
-                deciding.noticeDoi?.takeIf { it.isNotEmpty() }?.let { line.append(" (notice $it)") }
+        // exhaustive: a status bmlib adds must be given its line, never read as "No retraction found"
+        when (check.retractionStatus) {
+            RetractionStatus.RETRACTED, RetractionStatus.CONCERN -> {
+                line.append(if (check.isRetracted) "Retracted" else "Expression of concern")
+                // the label, not a notice: a notice without a DOI is still Retraction Watch's or Crossref's
+                if (deciding == null || check.isDecidedByLabel) {
+                    line.append(PUBMED_LABEL)
+                } else {
+                    deciding.date?.takeIf { it.isNotEmpty() }?.let { line.append(if (check.isRetracted) " on $it" else ", $it") }
+                    deciding.noticeDoi?.takeIf { it.isNotEmpty() }?.let { line.append(" (notice $it)") }
+                }
             }
-        } else if (check.isUnchecked) {
-            val names = check.unanswered.map { lookup ->
-                val name = SOURCE_NAMES[lookup] ?: lookup
-                val failure = check.crossrefFailure
-                if (lookup == CROSSREF && failure != null) "$name ($failure)" else name
+            RetractionStatus.UNCHECKED -> {
+                val names = check.unanswered.map { lookup ->
+                    val name = SOURCE_NAMES[lookup] ?: lookup
+                    val failure = check.crossrefFailure
+                    if (lookup == CROSSREF && failure != null) "$name ($failure)" else name
+                }
+                line.append("Retraction status not checked")
+                if (names.isNotEmpty()) line.append(": ").append(names.joinToString(", "))
             }
-            line.append("Retraction status not checked")
-            if (names.isNotEmpty()) line.append(": ").append(names.joinToString(", "))
-        } else {
-            line.append("No retraction found")
+            RetractionStatus.CLEAR -> line.append("No retraction found")
         }
         check.exportDataAsOf?.let { line.append("; Retraction Watch data as of $it") }
         return line.toString()

@@ -31,7 +31,8 @@ interface RetractionCheckDao {
     /**
      * The stored checks of these papers.
      *
-     * @param paperKeys The papers' keys
+     * @param paperKeys The papers' keys: at most 999 before API 31, so callers
+     *   go through `RetractionService.storedChecks`, which batches them
      * @return A row per key that has one
      */
     @Query("SELECT * FROM retraction_checks WHERE paper_key IN (:paperKeys)")

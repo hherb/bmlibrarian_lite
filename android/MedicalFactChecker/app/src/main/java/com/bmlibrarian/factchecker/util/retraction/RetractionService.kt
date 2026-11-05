@@ -117,14 +117,17 @@ class RetractionService @Inject constructor(
     }
 
     /**
-     * The stored rows of these papers.
+     * The stored rows of these papers, read in batches of
+     * [RetractionConstants.RETRACTION_CHECK_KEYS_PER_QUERY] keys.
      *
      * @param paperKeys The papers' keys
      * @return Each stored row's JSON, by key
      */
     suspend fun storedChecks(paperKeys: Collection<String>): Map<String, String> =
         if (paperKeys.isEmpty()) emptyMap()
-        else retractionCheckDao.get(paperKeys.toList()).associate { it.paperKey to it.checkJson }
+        else paperKeys.chunked(RetractionConstants.RETRACTION_CHECK_KEYS_PER_QUERY)
+            .flatMap { retractionCheckDao.get(it) }
+            .associate { it.paperKey to it.checkJson }
 
     /**
      * Store these checks as their papers' rows.
