@@ -198,11 +198,16 @@ have landed):
   `findtext` a mixed-content element. Funders: `sponsor_patterns.json` schema 4.
 - **Older rounds, compressed to the rules that still bind** (archaeology in
   git history and the `doc/cross_platform/` READMEs).
-  - **A source we could not reach is not a finding** (#346–#349, #429,
-    #432, #434): a typed fetch carries the answer *or* a `RequestFailure`
-    (`served()` / `absent()` / `unreachable()`, no field defaults); **404 is
-    the one status about the article** unless the caller knows better;
-    caveats carry no provider text. **Always keep a control test.**
+  - **A source we could not reach is not a finding** (#346, #347, #344,
+    PR #349). A typed fetch carries the answer *or* a `RequestFailure`
+    (`served()` / `absent()` / `unreachable()`: `RecordFetch`,
+    `ArticleInfoFetch`, `FullTextXmlFetch` (#429; the apps' port #434); no field defaults, so
+    `absent()` is never a slip); **404 is the one status about the
+    article** -- except where the caller knows better (`fullTextXML` 404s
+    for non-OA articles the search holds, #432); a preprint is fetched by its
+    `PPR` ID; unreadable is not absent either; caveats carry no
+    provider text (`RequestFailure.describe()` only). **Always keep a
+    control test** — mutating the fetch to `absent()` once passed the suite.
   - **Every outbound request is paced, per host** (#341, PR #345) —
     contract `doc/cross_platform/polite_request_pacing.md`. One limiter per
     host, process-wide, mounted by `mount_politely`; a `Retry-After` is a
@@ -256,7 +261,8 @@ Open issues by family; each issue carries the detail. None blocks another.
   `MacContentView`) calls the outgoing one's `cancelCheckAgain()`; keep it at
   any new such site. `FactCheckWorkflow.sessionsCheckingAgain` (process-wide)
   refuses a second window's *Check again* on a session being checked, and
-  the line ends `RetractionText.checkAgainElsewhere`.
+  the line ends `RetractionText.checkAgainElsewhere`; a stop frees the
+  session at once (`releaseCheckAgainSession`, only the workflow's own hold).
   **Landed (PR #707: #654 item 2, #663, #675)**: Apple's
   *Check again* has its own Cancel (`cancelCheckAgain`, as Android's), which
   background expiry calls too; it never cancels a run it waits behind, and
@@ -440,7 +446,8 @@ page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
   `<OtherAbstract>`; **#404** Android's `ArticleId` has no `<Reference>`
   guard; **#190** CI never builds the iOS app target.
 
-- **Transparency parity and pricing**: #148, #159, #160, #150, #145, Android #116, #109; pricing #136–#139; small #140, #126, #111, #225.
+- **Transparency parity and pricing**: #148, #159, #160, #150, #145; Android
+  #116, #109; pricing #136/#137, #138, #139; small #140, #126, #111, #225.
 
 ### Verify
 
@@ -494,6 +501,8 @@ page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
 
 ### Xcode Cloud contract (macOS ships from the multiplatform project)
 
-Xcode Cloud archives from a **fresh clone**; `xcode-project-guards.yml`: **no
-package reference outside this repo**, **the scheme stays shared**. Reproduce:
-clone to `/tmp/x`, `xcodebuild ... CODE_SIGNING_ALLOWED=NO archive` there.
+Xcode Cloud archives scheme `MedicalFactChecker` from a **fresh clone**;
+`xcode-project-guards.yml` enforces that **no Swift package reference points
+outside this repository** and **the scheme stays shared**. Reproduce: clone to
+`/tmp/x`, then `xcodebuild -scheme MedicalFactChecker -destination
+'platform=macOS' CODE_SIGNING_ALLOWED=NO archive` in `ios/MedicalFactChecker`.

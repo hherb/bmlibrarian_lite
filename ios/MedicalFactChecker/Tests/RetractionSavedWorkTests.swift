@@ -31,6 +31,8 @@ final class RetractionSavedWorkTests: XCTestCase {
     private static let unservedScheme = URL(string: "nosuch-scheme://x")!
     private nonisolated static let runDay = Date(timeIntervalSince1970: 1_792_315_800) // 2026-10-18 09:30 UTC
     private static let day: TimeInterval = 24 * 60 * 60
+    /// How long ``waitUntil(_:)`` waits for a check to start before failing.
+    private static let startDeadline: Duration = .seconds(5)
 
     override func setUp() async throws {
         StringArrayTransformer.register()
@@ -574,7 +576,6 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertEqual(documents[0].retractionCheck, Self.check("clear"), "nothing is stored")
     }
 
-    /// #654: background expiry reaches *Check again* too, and records no stop on the session.
     /// #711: two windows on one session check it again once at a time; the second is told why.
     func testASecondWindowCannotCheckTheSameSessionAgainMeanwhile() async {
         let (session, _) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
@@ -588,17 +589,22 @@ final class RetractionSavedWorkTests: XCTestCase {
         }
         let secondAsked = Asked()
         let second = restore(session, asked: secondAsked)
-        let other = restore(makeSession(["10.1000/b"], cited: [0], run: [0: Self.check("clear")]).0)
+        let otherAsked = Asked()
+        let other = restore(makeSession(["10.1000/b"], cited: [0], run: [0: Self.check("clear")]).0, asked: otherAsked)
         let running = Task { @MainActor in await first.checkRetractionsAgain() }
-        while firstAsked.calls == 0 { await Task.yield() }
+        guard await Self.waitUntil({ firstAsked.calls > 0 }) else {
+            open.finish()
+            return XCTFail("the first window never asked")
+        }
 
         await second.checkRetractionsAgain()
         XCTAssertEqual(secondAsked.calls, 0, "the second window asks nothing")
         XCTAssertTrue(second.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainElsewhere) == true)
         XCTAssertFalse(second.isCheckingRetractionsAgain)
+        await second.checkRetractionsAgain()
+        XCTAssertEqual(secondAsked.calls, 0, "a refusal leaves the first window's hold in place")
         await other.checkRetractionsAgain()
-        XCTAssertFalse(other.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainElsewhere) == true,
-                       "control: another session is checked")
+        XCTAssertEqual(otherAsked.calls, 1, "control: another session is checked meanwhile")
 
         open.finish()
         await running.value
@@ -606,6 +612,68 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertEqual(secondAsked.calls, 1, "once the first is done, the second checks")
     }
 
+    /// #711: a check stopped while it waits behind earlier work frees its session
+    /// at once (a restore in the same window, or a closed window), not when that work ends.
+    func testAStoppedCheckAgainFreesItsSessionWhileTheWorkAheadRuns() async {
+        let (session, _) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        let firstAsked = Asked()
+        let first = restore(session, asked: firstAsked)
+        let (gate, open) = AsyncStream<Void>.makeStream()
+        let ahead = Task { @MainActor in
+            await first.runAsWorkflowTask { for await _ in gate {} }
+        }
+        await Task.yield()
+        let check = Task { @MainActor in await first.checkRetractionsAgain() }
+        while !first.isCheckingRetractionsAgain { await Task.yield() }
+        let secondAsked = Asked()
+        let second = restore(session, asked: secondAsked)
+
+        await second.checkRetractionsAgain()
+        XCTAssertEqual(secondAsked.calls, 0, "control: the waiting check holds the session")
+        XCTAssertTrue(second.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainElsewhere) == true)
+
+        first.cancelCheckAgain()
+        await second.checkRetractionsAgain()
+        XCTAssertEqual(secondAsked.calls, 1, "a stopped check frees the session while the work ahead runs")
+        XCTAssertFalse(second.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainElsewhere) == true)
+
+        // the stopped check, ending later, must not free a hold it no longer owns
+        let (secondGate, openSecond) = AsyncStream<Void>.makeStream()
+        second.useRetractionCheck { _ in
+            secondAsked.calls += 1
+            for await _ in secondGate {}
+            return [:]
+        }
+        let secondRunning = Task { @MainActor in await second.checkRetractionsAgain() }
+        guard await Self.waitUntil({ secondAsked.calls > 1 }) else {
+            open.finish(); openSecond.finish()
+            return XCTFail("the second window never asked again")
+        }
+        open.finish()
+        await ahead.value
+        await check.value
+        XCTAssertEqual(firstAsked.calls, 0, "a stopped check asks nothing")
+        XCTAssertTrue(first.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainStopped) == true)
+        let thirdAsked = Asked()
+        let third = restore(session, asked: thirdAsked)
+        await third.checkRetractionsAgain()
+        XCTAssertEqual(thirdAsked.calls, 0, "the second window's hold survives the stopped check's end")
+        openSecond.finish()
+        await secondRunning.value
+    }
+
+    /// Yields until `condition` holds, or ``startDeadline`` passes, so a check
+    /// that never starts fails its test instead of hanging the suite.
+    private static func waitUntil(_ condition: () -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + startDeadline
+        while !condition() {
+            guard ContinuousClock.now < deadline else { return false }
+            await Task.yield()
+        }
+        return true
+    }
+
+    /// #654: background expiry reaches *Check again* too, and records no stop on the session.
     func testBackgroundExpiryStopsCheckAgain() async {
         let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
         let workflow = restore(session)

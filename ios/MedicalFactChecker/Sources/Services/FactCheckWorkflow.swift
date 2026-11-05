@@ -156,6 +156,11 @@ final class FactCheckWorkflow {
     /// every lookup twice and write the same documents' checks (#711).
     private static var sessionsCheckingAgain: Set<UUID> = []
 
+    /// The session this workflow holds in ``sessionsCheckingAgain``, until its
+    /// *Check again* ends or is stopped: a stopped check stores nothing, so it
+    /// frees the session at once rather than when the work it waits behind ends.
+    private var heldCheckAgainSession: UUID?
+
     /// Shown while the documents about to be scored are checked for retraction.
     static let retractionProgressMessage = "Checking retraction status…"
 
@@ -531,18 +536,19 @@ final class FactCheckWorkflow {
     /// stores nothing and says the run's record stands, still warning of a
     /// paper its label retracts (#673, #675). ``cancelCheckAgain()`` stops it.
     /// It is refused, and the line says so, while another workflow checks the
-    /// same session again (#711).
+    /// same session again (#711); a stopped one no longer counts.
     func checkRetractionsAgain() async {
         // set before the wait for earlier work, so a second tap meanwhile asks nothing
         guard !isCheckingRetractionsAgain else { return }
-        let id = session?.id
-        if let id {
+        if let id = session?.id {
             guard Self.sessionsCheckingAgain.insert(id).inserted else {
+                logger.info("Retraction check again refused: another window is checking this session again")
                 showSavedRetraction(note: RetractionText.checkAgainElsewhere)
                 return
             }
+            heldCheckAgainSession = id
         }
-        defer { if let id { Self.sessionsCheckingAgain.remove(id) } }
+        defer { releaseCheckAgainSession() }
         isCheckingRetractionsAgain = true
         checkAgainStopRequested = false
         defer { isCheckingRetractionsAgain = false }
@@ -563,7 +569,16 @@ final class FactCheckWorkflow {
     func cancelCheckAgain() {
         guard isCheckingRetractionsAgain, !checkAgainStopRequested else { return }
         checkAgainStopRequested = true
+        releaseCheckAgainSession()
         if checkAgainBodyRunning { workflowTask?.cancel() }
+    }
+
+    /// Frees the session this workflow holds for *Check again*, once: only its
+    /// own hold, never one another workflow took after a stop freed it.
+    private func releaseCheckAgainSession() {
+        guard let id = heldCheckAgainSession else { return }
+        Self.sessionsCheckingAgain.remove(id)
+        heldCheckAgainSession = nil
     }
 
     /// The work of ``checkRetractionsAgain()``, run as ``workflowTask`` so it never overlaps a run.

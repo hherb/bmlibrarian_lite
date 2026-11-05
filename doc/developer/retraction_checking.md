@@ -75,6 +75,11 @@ paper with its `retraction_status`.
   #675, all three platforms; not on Android without bmlib's native library,
   which the label needs). A shown retraction keeps its own notice, and a shown
   concern stays.
+- ***Check again* runs once per session at a time** (Apple, #711: each
+  window has its own workflow). A second window's tap is refused, asks
+  nothing, and its line ends `RetractionText.checkAgainElsewhere`; a stopped
+  check (its Cancel, a workflow swap, a closed window) frees the session at
+  once, since it stores nothing.
 - **A failed store is not a failed check.** The verdicts are returned even
   when they could not be stored.
 - **A failed check is failed document by document.** `RetractionScreen.failed_ids`
