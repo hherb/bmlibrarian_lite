@@ -67,7 +67,7 @@ paper with its `retraction_status`.
   `RETRACTION_CHECK_MAX_AGE_DAYS` (7), unless the record's label now says
   retracted.
 - **The label survives everything.** A failed check (the checker could not be
-  built, the database raised) still leaves out a paper its label retracts. A
+  built, or raised) still leaves out a paper its label retracts. A
   failed or stopped *Check again* stores nothing with the run and the line
   says the run's record stands (a stop says it was stopped,
   `CHECK_AGAIN_STOPPED`, #663; on the desktop, the shared `retraction_checks`
@@ -82,6 +82,12 @@ paper with its `retraction_status`.
   once, since it stores nothing.
 - **A failed store is not a failed check.** The verdicts are returned even
   when they could not be stored.
+- **Neither is a failed stored read** (#720, all three platforms). Every
+  paper is then asked afresh, as if it had no row, so a retraction found
+  earlier is still found and left out; nothing is stored, since a row not
+  read may hold a retraction a fresh verdict must not overwrite (the
+  desktop's `check`, Android's `decideRetraction`, Apple's
+  `adoptSharedRetractionChecks` returning false).
 - **A failed check is failed document by document.** `RetractionScreen.failed_ids`
   holds the papers whose checks are a failed check's stand-ins: no check time,
   and "the check failed" as the cause of each kept, unchecked one (a paper
@@ -244,9 +250,10 @@ row per paper, that row is the paper's latest check.
   `scoreDocuments`, which every scoring path calls. A run starts in
   `runHandlingFailures`, `fetchMoreEvidence` and `retryFailedDocuments`.
   **A failing lookup** leaves unchecked every paper with no stored warning
-  that stands; **a failure before it** (stored rows unreadable, or the native
-  library missing in a debug build without a bmlib checkout) leaves every
-  paper unchecked. Either way the record's own label still retracts
+  that stands; **a failure before it** (the native library missing in a
+  debug build without a bmlib checkout) leaves every paper unchecked. Stored
+  rows that cannot be read are no such failure: every paper is asked afresh
+  and nothing is stored (#720). Either way the record's own label still retracts
   (`PaperRetractionCheck.failedFor`, the desktop's `_label_check`). A Crossref
   batch that fails in any way costs that batch alone.
 - The fact-check screen shows `retractionNotice`, badges each card by the

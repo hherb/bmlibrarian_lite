@@ -2114,7 +2114,8 @@ class FactCheckWorkflow @Inject constructor(
     /**
      * Decide each document's check: a reusable stored row, else a fresh check
      * taken against the stored row ([PaperRetractionCheck.take]), written as
-     * the paper's new row when it replaces it.
+     * the paper's new row when it replaces it. Stored rows that cannot be read
+     * leave every paper to the fresh check, and nothing is written.
      *
      * @param papers Each document's paper, [RetractionPaper.merged], so a
      *   paper two documents share is decided once
@@ -2126,11 +2127,19 @@ class FactCheckWorkflow @Inject constructor(
         now: Long
     ): Map<String, PaperRetractionCheck> {
         val keys = papers.mapValues { it.value.paperKey }
-        val stored = retractionService.storedChecks(keys.values.filterNotNull().toSet())
+        val stored = try {
+            retractionService.storedChecks(keys.values.filterNotNull().toSet())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // the fresh lookups still find a known retraction; a row not read is never overwritten (#720, the desktop's `check`)
+            Log.w(TAG, "Stored retraction checks could not be read; all asked afresh, none stored: ${e.javaClass.simpleName}")
+            null
+        }
         val used = mutableMapOf<String, PaperRetractionCheck>()
         val due = documents.filter { document ->
             val paper = papers.getValue(document.id)
-            val reusable = keys[document.id]?.let(stored::get)?.let(PaperRetractionCheck::decode)
+            val reusable = keys[document.id]?.let { stored?.get(it) }?.let(PaperRetractionCheck::decode)
                 ?.takeIf { it.isReusable(now, paper.publicationTypes) }
             reusable?.let { used[document.id] = it }
             reusable == null
@@ -2154,8 +2163,8 @@ class FactCheckWorkflow @Inject constructor(
             val paper = papers.getValue(document.id)
             document.id to (checks[paper] ?: PaperRetractionCheck.failedFor(paper, now).also { retractionRun.failed += paper })
         }
-        val taken = takeRetractionChecks(due, keys, stored, fresh)
-        storeRetractionChecks(taken.rows)
+        val taken = takeRetractionChecks(due, keys, stored.orEmpty(), fresh)
+        if (stored != null) storeRetractionChecks(taken.rows)
         return used + taken.use
     }
 

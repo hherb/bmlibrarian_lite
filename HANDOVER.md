@@ -252,8 +252,9 @@ Open issues by family; each issue carries the detail. None blocks another.
   `PaperRetractionCheck` and `CrossrefAnswer` invariants, a cross-platform
   decision; `publicationTypes` nullable; `paperKey` a function); the IGNORE
   insert, owed before a second writer lands; whether a full disk's `Refused`
-  should wait a day), **#720** (a failed stored read skips the fresh check;
-  needs the IGNORE insert or a no-write path first). **The stored-check read
+  should wait a day). **#720 done**: a stored read that fails asks every
+  paper afresh and stores nothing, on all three (Apple already did; desktop
+  `check`, Android `decideRetraction`). **The stored-check read
   binds at most 999 keys** (SQLite before API 31): read through
   `RetractionService.storedChecks`, never `RetractionCheckDao.get` direct.
   **#708, #711, #714, #716 done**: a view that replaces its workflow or whose

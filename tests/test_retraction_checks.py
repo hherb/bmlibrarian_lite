@@ -783,3 +783,28 @@ def test_one_typed_document_reads_the_label_for_the_paper(storage, tmp_path):
     docs = [_doc("doi-10.1_a", doi="10.1/a"), _doc("pmid-1", doi="10.1/a", types=["Journal Article"])]
     out = _checker(storage, tmp_path, StubSession()).check(docs)
     assert {c.verdict.status for c in out.values()} == {RetractionStatus.CLEAR}
+
+
+def test_a_failed_stored_read_still_asks_afresh_and_stores_nothing(
+    storage, tmp_path, monkeypatch, caplog
+):
+    """An unreadable store hides no retraction the lookups find, and overwrites none (#720)."""
+    from bmlibrarian_lite.retraction_screen import screen_with_fallback
+
+    _current_export(tmp_path)
+
+    def broken(*_args, **_kwargs):
+        raise sqlite3.DatabaseError("database disk image is malformed")
+
+    writes: list[object] = []
+    monkeypatch.setattr(storage, "retraction_checks", broken)
+    monkeypatch.setattr(storage, "store_retraction_checks", lambda *a, **k: writes.append(a))
+    session = StubSession()
+    docs = [_doc("r", doi="10.9/retracted"), _doc("c", doi="10.1/clear")]
+    screen = screen_with_fallback(_checker(storage, tmp_path, session), docs)
+    assert [d.id for d in screen.excluded] == ["r"]
+    assert screen.checks["c"].verdict.status is RetractionStatus.CLEAR
+    assert not screen.failed
+    assert session.crossref_urls
+    assert writes == []
+    assert "DatabaseError" in caplog.text

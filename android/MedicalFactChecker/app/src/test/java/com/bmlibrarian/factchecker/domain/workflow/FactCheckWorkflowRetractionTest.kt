@@ -455,17 +455,22 @@ class FactCheckWorkflowRetractionTest {
         assertEquals("Retraction check: 1 retracted paper left out.", workflow.retractionNotice.value)
     }
 
+    /** #720, the desktop's `test_a_failed_stored_read_still_asks_afresh_and_stores_nothing`. */
     @Test
-    fun `stored checks that cannot be read leave every paper unchecked, and the run goes on`() = runTest {
+    fun `stored checks that cannot be read leave every paper to the fresh check, and nothing is stored`() = runTest {
         hold("d1")
+        hold("d2")
+        answers["2"] = RETRACTED
         coEvery { retractionService.storedChecks(any()) } throws IOException("database locked")
 
         run()
 
         assertEquals(listOf("d1"), scored)
-        assertTrue(asked.isEmpty())
-        assertTrue(snapshot().getValue("d1").isUnchecked)
-        assertEquals("Retraction check: 1 paper's retraction status could not be checked: the check failed.", workflow.retractionNotice.value)
+        assertEquals(listOf("1", "2"), asked.single().map { it.pmid })
+        assertTrue(snapshot().getValue("d1").isClear)
+        assertTrue(snapshot().getValue("d2").isRetracted)
+        assertEquals("Retraction check: 1 retracted paper left out.", workflow.retractionNotice.value)
+        coVerify(exactly = 0) { retractionService.store(any()) }
     }
 
     /** The desktop's `test_one_typed_document_reads_the_label_for_the_paper`. */
