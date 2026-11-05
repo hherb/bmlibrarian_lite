@@ -263,6 +263,15 @@ Open issues by family; each issue carries the detail. None blocks another.
   refuses a second window's *Check again* on a session being checked, and
   the line ends `RetractionText.checkAgainElsewhere`; a stop frees the
   session at once (`releaseCheckAgainSession`, only the workflow's own hold).
+  **#714 done**: a workflow keeps its own last *Check again* caveat
+  (`checkAgainCaveat`, for one `runGeneration`), and a refusal redraws with
+  it; a *Check again* that saved its answers posts
+  `retractionChecksStored`, and every other workflow showing that session's
+  saved line redraws, its caveat superseded; one stopped while it waits, and
+  overtaken so, ends without "still the run's record"
+  (`checkAgainStoredElsewhereSinceStop`). **Open: #713** (does a closed
+  iPad scene's root `onDisappear` fire? needs a simulator or device by hand),
+  #716 (the workflow's block observers are never removed; a small leak).
   **Landed (PR #707: #654 item 2, #663, #675)**: Apple's
   *Check again* has its own Cancel (`cancelCheckAgain`, as Android's), which
   background expiry calls too; it never cancels a run it waits behind, and

@@ -191,7 +191,8 @@ public enum RetractionText {
     public static let checkAgainStopped = "; checking again was stopped, so this is still the run's record"
     /// Added to the saved-work line when *Check again* is refused because another
     /// window is already checking the same session again (Apple only, #711). Past
-    /// tense: the line is not redrawn when that window's check ends.
+    /// tense: the line is redrawn when that window's check stores its answers
+    /// (#714), not when it fails, is stopped or cannot save.
     public static let checkAgainElsewhere = "; another window was checking it again, so check again here once that is done"
     /// Added to the saved-work line when the stored checks could not be read.
     public static let storedChecksUnread = "; later checks could not be read"
