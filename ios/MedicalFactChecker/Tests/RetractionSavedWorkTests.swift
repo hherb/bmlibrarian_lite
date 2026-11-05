@@ -662,6 +662,112 @@ final class RetractionSavedWorkTests: XCTestCase {
         await secondRunning.value
     }
 
+    /// #714: a refused *Check again* keeps what this window's own last one
+    /// said, a stopped check's clause and its label's warning among it, until a restore.
+    func testARefusalKeepsThisWindowsEarlierCaveat() async {
+        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        documents[0].publicationTypes = ["Journal Article", "Retracted Publication"]
+        let second = restore(session)
+        second.useRetractionCheck { _ in
+            await MainActor.run { second.cancelCheckAgain() }
+            try Task.checkCancellation()
+            return [:]
+        }
+        await second.checkRetractionsAgain()
+        XCTAssertTrue(second.retractionSavedWorkWarning?.contains("• Study 0: Retracted") == true)
+        guard let release = await holdCheckAgain(session) else { return XCTFail("the first window never asked") }
+
+        await second.checkRetractionsAgain()
+
+        XCTAssertTrue(
+            second.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainStopped + RetractionText.checkAgainElsewhere)
+                == true, second.retractionSavedWorkLine ?? "")
+        XCTAssertTrue(second.retractionSavedWorkWarning?.contains("• Study 0: Retracted") == true, "the label still warns")
+        await release()
+        XCTAssertTrue(
+            second.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainElsewhere) == true,
+            "a check that stored nothing redraws nothing")
+
+        // control: a restore is a fresh view, so a later refusal has no earlier caveat to keep
+        second.restoreForViewing(session)
+        guard let releaseAgain = await holdCheckAgain(session) else { return XCTFail("the third window never asked") }
+        await second.checkRetractionsAgain()
+        XCTAssertFalse(second.retractionSavedWorkLine?.contains(RetractionText.checkAgainStopped) == true)
+        XCTAssertNil(second.retractionSavedWorkWarning)
+        await releaseAgain()
+    }
+
+    /// #714: when another window's *Check again* saves its answers, a window
+    /// showing the same session redraws its line, which they supersede, its
+    /// refusal note and earlier caveat with it; another session's is untouched.
+    func testAnotherWindowsStoredCheckRedrawsThisOne() async {
+        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        let retracted = Self.check("retracted", at: Self.runDay.addingTimeInterval(Self.day))
+        let second = restore(session)
+        second.useRetractionCheck { _ in throw CheckFailed() }
+        await second.checkRetractionsAgain()
+        let firstAsked = Asked()
+        let first = restore(session, asked: firstAsked)
+        let (gate, open) = AsyncStream<Void>.makeStream()
+        first.useRetractionCheck { papers in
+            firstAsked.calls += 1
+            for await _ in gate {}
+            return Dictionary(papers.map { ($0, retracted) }) { first, _ in first }
+        }
+        let other = restore(makeSession(["10.1000/b"], cited: [0], run: [0: Self.check("clear")]).0)
+        let otherLine = other.retractionSavedWorkLine
+        let running = Task { @MainActor in await first.checkRetractionsAgain() }
+        guard await Self.waitUntil({ firstAsked.calls > 0 }) else {
+            open.finish()
+            return XCTFail("the first window never asked")
+        }
+        await second.checkRetractionsAgain()
+        XCTAssertTrue(second.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainElsewhere) == true)
+        XCTAssertNil(second.retractionSavedWorkWarning, "control: nothing is stored yet")
+
+        open.finish()
+        await running.value
+
+        XCTAssertEqual(documents[0].retractionCheck, retracted)
+        XCTAssertEqual(second.retractionSavedWorkLine, first.retractionSavedWorkLine)
+        XCTAssertFalse(second.retractionSavedWorkLine?.contains(RetractionText.checkAgainFailed) == true)
+        XCTAssertTrue(second.retractionSavedWorkWarning?.contains("• Study 0: Retracted on") == true,
+                      second.retractionSavedWorkWarning ?? "")
+        XCTAssertEqual(other.retractionSavedWorkLine, otherLine, "another session is not redrawn")
+
+        // the superseded caveat stays gone: a later refusal does not bring it back
+        guard let release = await holdCheckAgain(session) else { return XCTFail("the third window never asked") }
+        await second.checkRetractionsAgain()
+        XCTAssertFalse(second.retractionSavedWorkLine?.contains(RetractionText.checkAgainFailed) == true,
+                       second.retractionSavedWorkLine ?? "")
+        await release()
+    }
+
+    /// Starts another window's *Check again* on `session` and holds it at its
+    /// lookup, so this session is refused elsewhere until the returned release
+    /// is awaited; the held check then fails, storing nothing.
+    ///
+    /// - Returns: The release, or `nil` when the check never reached its lookup.
+    private func holdCheckAgain(_ session: FactCheckSession) async -> (() async -> Void)? {
+        let asked = Asked()
+        let holder = restore(session, asked: asked)
+        let (gate, open) = AsyncStream<Void>.makeStream()
+        holder.useRetractionCheck { _ in
+            asked.calls += 1
+            for await _ in gate {}
+            throw CheckFailed()
+        }
+        let running = Task { @MainActor in await holder.checkRetractionsAgain() }
+        guard await Self.waitUntil({ asked.calls > 0 }) else {
+            open.finish()
+            return nil
+        }
+        return {
+            open.finish()
+            await running.value
+        }
+    }
+
     /// Yields until `condition` holds, or ``startDeadline`` passes, so a check
     /// that never starts fails its test instead of hanging the suite.
     private static func waitUntil(_ condition: () -> Bool) async -> Bool {

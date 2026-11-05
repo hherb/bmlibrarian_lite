@@ -161,6 +161,20 @@ final class FactCheckWorkflow {
     /// frees the session at once rather than when the work it waits behind ends.
     private var heldCheckAgainSession: UUID?
 
+    /// What this workflow's own last *Check again* added to the saved-work
+    /// line, and in which piece of work (``runGeneration``), so a later redraw
+    /// keeps it until a restore, a run or another window's stored check
+    /// supersedes it (#714).
+    private var checkAgainCaveat: (
+        generation: Int, note: String, causes: [String], labelled: [String: PaperRetractionCheck]
+    )?
+
+    /// Posted by a workflow (`object`), with the session's id as
+    /// `userInfo["session"]`, once its *Check again* has saved its answers, so every other window
+    /// showing that session's saved work redraws its line (#714).
+    private static let retractionChecksStored = Notification.Name("FactCheckWorkflow.retractionChecksStored")
+    private var retractionChecksStoredObserver: NSObjectProtocol?
+
     /// Shown while the documents about to be scored are checked for retraction.
     static let retractionProgressMessage = "Checking retraction status…"
 
@@ -329,6 +343,27 @@ final class FactCheckWorkflow {
                 await self?.handleBackgroundExpiration()
             }
         }
+        retractionChecksStoredObserver = NotificationCenter.default.addObserver(
+            forName: Self.retractionChecksStored,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let poster = (notification.object as AnyObject?).map(ObjectIdentifier.init)
+            guard let id = notification.userInfo?["session"] as? UUID else { return }
+            // posted on the main actor, so the line is redrawn before the poster's own
+            MainActor.assumeIsolated { self?.otherCheckAgainStored(session: id, by: poster) }
+        }
+    }
+
+    /// Redraws the saved-work line when another workflow's *Check again* has
+    /// saved its answers for this session: they supersede this workflow's own
+    /// caveat, and a refusal's note (#714). A session being worked on shows
+    /// no saved line, and a running *Check again* draws its own.
+    private func otherCheckAgainStored(session id: UUID, by poster: ObjectIdentifier?) {
+        guard poster != ObjectIdentifier(self), session?.id == id,
+              retractionSavedWorkLine != nil, !isCheckingRetractionsAgain else { return }
+        checkAgainCaveat = nil
+        showSavedRetraction()
     }
 
     /// Handle background task expiration.
@@ -543,7 +578,7 @@ final class FactCheckWorkflow {
         if let id = session?.id {
             guard Self.sessionsCheckingAgain.insert(id).inserted else {
                 logger.info("Retraction check again refused: another window is checking this session again")
-                showSavedRetraction(note: RetractionText.checkAgainElsewhere)
+                showSavedRetractionKeepingCaveat(RetractionText.checkAgainElsewhere)
                 return
             }
             heldCheckAgainSession = id
@@ -596,7 +631,7 @@ final class FactCheckWorkflow {
             // only cancelCheckAgain()'s stop reads as one; a cancellation nobody asked for is a failure
             let note = checkAgainStopRequested ? RetractionText.checkAgainStopped : RetractionText.checkAgainFailed
             if checkAgainStopRequested { logger.info("Retraction check again stopped; nothing stored") }
-            showSavedRetraction(note: note, labelled: Self.labelRetractions(documents, papers))
+            showCheckAgainResult(note: note, labelled: Self.labelRetractions(documents, papers))
         }
         // stopped while it waited behind earlier work
         if checkAgainStopRequested { standing(); return }
@@ -618,6 +653,8 @@ final class FactCheckWorkflow {
         var unsaved = ""
         do {
             try modelContext.save()
+            NotificationCenter.default.post(
+                name: Self.retractionChecksStored, object: self, userInfo: ["session": session.id])
         } catch {
             // shortcut: said on this view only, not on a later reopen as the desktop's
             // _unsaved_rechecks does; a later save elsewhere may still keep the answers
@@ -644,7 +681,25 @@ final class FactCheckWorkflow {
             ? RetractionText.uncheckedCauses(still, failed: []) : []
         let again = RetractionText.notCheckedAgainClause(
             missed.count, causes: RetractionText.uncheckedCauses(missed, failed: []))
-        showSavedRetraction(note: again + unsaved, causes: causes)
+        showCheckAgainResult(note: again + unsaved, causes: causes)
+    }
+
+    /// Shows what this *Check again* found, remembering its clause, causes and
+    /// label retractions as ``checkAgainCaveat`` for later redraws (#714).
+    private func showCheckAgainResult(
+        note: String, causes: [String] = [], labelled: [String: PaperRetractionCheck] = [:]
+    ) {
+        checkAgainCaveat = (runGeneration, note, causes, labelled)
+        showSavedRetraction(note: note, causes: causes, labelled: labelled)
+    }
+
+    /// Redraws the saved-work line keeping this workflow's own last *Check
+    /// again* caveat, unless a restore or a run has begun since, then adds `note`.
+    private func showSavedRetractionKeepingCaveat(_ note: String) {
+        guard let caveat = checkAgainCaveat, caveat.generation == runGeneration else {
+            return showSavedRetraction(note: note)
+        }
+        showSavedRetraction(note: caveat.note + note, causes: caveat.causes, labelled: caveat.labelled)
     }
 
     /// The retractions each document's paper label decides, by `Document.id`:
