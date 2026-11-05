@@ -107,6 +107,8 @@ struct MacContentView: View {
         // opened before any window exists, and the user may still be on the
         // disclaimer or onboarding when it turns out to be unreadable.
         .storeRecoveryNotice()
+        // #711: no Cancel reaches a closed window's Check again (see cancelCheckAgain)
+        .onDisappear { activeWorkflow?.cancelCheckAgain() }
     }
 
     private var mainNavigationView: some View {

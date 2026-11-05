@@ -255,15 +255,14 @@ Open issues by family; each issue carries the detail. None blocks another.
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**,
   **#653**, **#654** items 3 and 4 (the not-saved note said once, a failed
-  check recomputing the warning; items 1 and 2 done), **#658** (Android),
-  Apple **#711** (*Check again* on one session from two windows, or from a
-  closed one).
-  **#708 done**: each Apple view that replaces its workflow (restore, *New
-  Question*, a new run; six sites, iOS and macOS) first calls the outgoing
-  one's `cancelCheckAgain()`, as Android's `beginRetractionRun()` cancels
-  `checkAgainJob`; the stopped check stores nothing. Keep the
-  `cancelCheckAgain()` call at any new site that swaps the workflow (its doc
-  comment says so too).
+  check recomputing the warning; items 1 and 2 done), **#658** (Android).
+  **#708, #711 done**: each Apple view that replaces its workflow (six
+  sites) or whose window closes (`onDisappear` on `ContentView` /
+  `MacContentView`) calls the outgoing one's `cancelCheckAgain()`; keep it at
+  any new such site. `FactCheckWorkflow.sessionsCheckingAgain` (process-wide)
+  refuses a second window's *Check again* on a session being checked, and
+  the line ends `RetractionText.checkAgainElsewhere`; a stop frees the
+  session at once (`releaseCheckAgainSession`, only the workflow's own hold).
   **Landed (PR #707: #654 item 2, #663, #675)**: Apple's
   *Check again* has its own Cancel (`cancelCheckAgain`, as Android's), which
   background expiry calls too; it never cancels a run it waits behind, and

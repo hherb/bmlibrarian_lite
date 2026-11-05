@@ -92,6 +92,8 @@ struct ContentView: View {
         // opened before any window exists, and the user may still be on the
         // disclaimer or onboarding when it turns out to be unreadable.
         .storeRecoveryNotice()
+        // #711: no Cancel reaches a closed scene's Check again (see cancelCheckAgain)
+        .onDisappear { factCheckWorkflow?.cancelCheckAgain() }
     }
 
     private var mainTabView: some View {
