@@ -249,6 +249,8 @@ struct MacContentView: View {
         // refresh pagination state before fetching new documents
         restoredWorkflow.restoreForViewing(session)
 
+        // #708: no Cancel reaches the outgoing workflow's Check again (see cancelCheckAgain)
+        activeWorkflow?.cancelCheckAgain()
         // Set the workflow binding so MacFactCheckView receives it
         activeWorkflow = restoredWorkflow
 

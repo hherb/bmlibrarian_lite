@@ -227,6 +227,8 @@ struct ContentView: View {
         // Restore session for viewing (does not run the workflow)
         restoredWorkflow.restoreForViewing(session)
 
+        // #708: no Cancel reaches the outgoing workflow's Check again (see cancelCheckAgain)
+        factCheckWorkflow?.cancelCheckAgain()
         // Set the workflow binding so FactCheckView receives it
         factCheckWorkflow = restoredWorkflow
 

@@ -315,6 +315,8 @@ struct MacFactCheckView: View {
     /// Clears the claim and the current session so a new question starts fresh.
     private func startNewQuestion() {
         claimText = ""
+        // #708: no Cancel reaches the outgoing workflow's Check again (see cancelCheckAgain)
+        workflow?.cancelCheckAgain()
         workflow = nil
     }
 
@@ -346,6 +348,8 @@ struct MacFactCheckView: View {
             showingError = true
         }
 
+        // #708: no Cancel reaches the outgoing workflow's Check again (see cancelCheckAgain)
+        self.workflow?.cancelCheckAgain()
         self.workflow = newWorkflow
 
         Task {
