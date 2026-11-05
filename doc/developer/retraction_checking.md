@@ -82,12 +82,16 @@ paper with its `retraction_status`.
   once, since it stores nothing.
 - **A failed store is not a failed check.** The verdicts are returned even
   when they could not be stored.
-- **Neither is a failed stored read** (#720, all three platforms). Every
-  paper is then asked afresh, as if it had no row, so a retraction found
-  earlier is still found and left out; nothing is stored, since a row not
-  read may hold a retraction a fresh verdict must not overwrite (the
-  desktop's `check`, Android's `decideRetraction`, Apple's
-  `adoptSharedRetractionChecks` returning false).
+- **Neither is a failed stored read** (#720, all three platforms, the run
+  and *Check again* alike). Every paper is then asked afresh, as if it had
+  no row, so a retraction found earlier is still found and left out;
+  nothing is stored, since a row not read may hold a retraction a fresh
+  verdict must not overwrite (the desktop's `check`, Android's
+  `readStoredChecks`). Apple's shared records are the ones not read
+  (`adoptSharedRetractionChecks` returning false): a session's own fresh
+  check is still reused, and nothing is shared. Android's *Check again*,
+  whose answers live only in the shared rows, then says the new status
+  could not be saved.
 - **A failed check is failed document by document.** `RetractionScreen.failed_ids`
   holds the papers whose checks are a failed check's stand-ins: no check time,
   and "the check failed" as the cause of each kept, unchecked one (a paper

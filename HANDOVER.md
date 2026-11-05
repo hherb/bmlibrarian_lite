@@ -253,8 +253,9 @@ Open issues by family; each issue carries the detail. None blocks another.
   decision; `publicationTypes` nullable; `paperKey` a function); the IGNORE
   insert, owed before a second writer lands; whether a full disk's `Refused`
   should wait a day). **#720 done**: a stored read that fails asks every
-  paper afresh and stores nothing, on all three (Apple already did; desktop
-  `check`, Android `decideRetraction`). **The stored-check read
+  paper afresh and stores nothing, on all three, the run and *Check again*
+  alike (Apple already did; desktop `check`, Android `readStoredChecks`,
+  where *Check again* then says not saved). **The stored-check read
   binds at most 999 keys** (SQLite before API 31): read through
   `RetractionService.storedChecks`, never `RetractionCheckDao.get` direct.
   **#708, #711, #714, #716 done**: a view that replaces its workflow or whose

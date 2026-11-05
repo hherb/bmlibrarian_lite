@@ -218,6 +218,12 @@ class RetractionChecker:
         read), so a caller that names the paper by identifier alone never
         loses the PubMed label.
 
+        A stored read that fails is logged and every paper is asked as if it
+        had no row; nothing is then stored, since a row not read may hold a
+        retraction a fresh verdict must not overwrite (#720). Storing never
+        raises either: a failed write is logged, and the verdicts are still
+        returned.
+
         Args:
             documents: The documents.
             refresh: Ask again even for a fresh stored verdict.
@@ -228,15 +234,9 @@ class RetractionChecker:
             A check per ``LiteDocument.id``. After a cancel, a document whose
             Crossref batch was never asked has none, and none is stored.
 
-        A stored read that fails is logged and every paper is asked as if it
-        had no row; nothing is then stored, since a row not read may hold a
-        retraction a fresh verdict must not overwrite (#720). Storing never
-        raises either: a failed write is logged, and the verdicts are still
-        returned.
-
         Raises:
             SQLiteError: Reading the stored documents' publication types
-                failed. Neither is caught here, so the caller marks the
+                failed. It is not caught here, so the caller marks the
                 documents unchecked.
         """
         now = self._now()

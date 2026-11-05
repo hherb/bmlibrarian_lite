@@ -737,7 +737,7 @@ class FactCheckWorkflowRetractionTest {
         assertTrue(warning, warning.contains("• Study d2: Expression of concern"))
     }
 
-    /** #673: an answered check whose rows cannot be read still warns of what it found, storing nothing. */
+    /** #673, #720: an answered check whose rows cannot be read still warns of and badges what it found, storing nothing. */
     @Test
     fun `a Check again whose rows cannot be read still warns of what it found`() = runTest {
         BmlibFfi.assumeAvailable()
@@ -748,8 +748,9 @@ class FactCheckWorkflowRetractionTest {
         workflow.checkRetractionsAgain()
 
         assertTrue(workflow.retractionSavedWork.value?.warning!!.contains("• Study d1: Retracted"))
-        assertTrue(workflow.retractionSavedWork.value?.line!!.endsWith(RetractionText.CHECK_AGAIN_FAILED + RetractionText.STORED_CHECKS_UNREAD))
-        assertTrue("nothing is stored", rows.isEmpty())
+        assertTrue(workflow.retractionSavedWork.value?.checks.orEmpty().getValue("d1").isRetracted)
+        assertTrue(workflow.retractionSavedWork.value?.line!!.endsWith(RetractionText.CHECK_AGAIN_NOT_SAVED + RetractionText.STORED_CHECKS_UNREAD))
+        coVerify(exactly = 0) { retractionService.store(any()) }
     }
 
     @Test
