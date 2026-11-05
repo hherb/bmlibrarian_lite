@@ -8,7 +8,10 @@ This guide covers the architecture, development setup, and contribution guidelin
 
 - Python 3.12 or higher
 - [uv](https://docs.astral.sh/uv/) package manager (recommended) or pip
-- Git
+- Git, also needed by the installer: the `bmlib` dependency is fetched from
+  GitHub at a pinned commit (see [The bmlib Dependency](#the-bmlib-dependency))
+- For the mobile apps only: Xcode (iOS/macOS) or the Android SDK, and a
+  checkout of bmlib with a Rust toolchain for Android's FFI tests
 
 ### Installation
 
@@ -50,7 +53,14 @@ pytest tests/test_storage.py::test_add_document
 
 # Run with coverage
 pytest --cov=src/bmlibrarian_lite
+
+# Integration tests (live PubMed / Europe PMC; deselected by default)
+pytest -m integration
 ```
+
+`pyproject.toml` deselects integration tests by default
+(`addopts = "-m 'not integration'"`). A widget test needs PySide6 and a
+working Qt; on a headless machine set `QT_QPA_PLATFORM=offscreen`.
 
 ### Code Quality
 
@@ -71,38 +81,88 @@ mypy src/
 
 ```
 bmlibrarian_lite/
-├── bmll.py                 # CLI entry point (development)
-├── pyproject.toml           # Project configuration (hatchling build)
+├── bmll.py                  # CLI entry point (development)
+├── pyproject.toml           # Project configuration (hatchling build); pins bmlib
+├── uv.lock                  # Locked dependency set, bmlib's commit included
+├── HOWTO_MCP_SERVER.md      # Setting up the MCP server in a client
 ├── scripts/
 │   ├── set_version.py       # Version management across all files
 │   ├── run_gui.py           # GUI entry point for PyInstaller
-│   └── run_benchmark.py     # Benchmark scoring script
+│   ├── build_macos.sh       # macOS app bundle (see macos-signing.md)
+│   ├── check_bmlib_ledger.py # Every bmlib change has a ledger entry (CI)
+│   ├── run_benchmark.py     # Benchmark scoring script
+│   ├── jats_survey.py, europepmc_xml_survey.py, unpaywall_pdf_survey.py
+│   │                        # Re-runnable surveys of real articles and sources
+│   └── browser_rescue_acceptance.py, core_acceptance_replay.py, elsevier_probe.py
+│                            # Acceptance runs and probes against live services
 ├── src/bmlibrarian_lite/
 │   ├── __init__.py          # Package exports, __version__
+│   ├── cli.py               # bmll: gui, stats, validate, config, clear, keep-pdf, retractions-update
+│   ├── mcp_server.py        # bmlibrarian-lite-mcp: the MCP server's four tools
 │   ├── config.py            # LiteConfig (~/.bmlibrarian_lite/)
-│   ├── storage.py           # SQLite + sqlite-vec storage
-│   ├── embeddings.py        # FastEmbed wrapper
+│   ├── storage.py           # LiteStorage: SQLite + sqlite-vec
+│   ├── embeddings.py        # LiteEmbedder (FastEmbed)
 │   ├── constants.py         # Application constants
-│   ├── exceptions.py        # Custom exceptions
+│   ├── exceptions.py        # Custom exception hierarchy
 │   ├── data_models.py       # Core data structures
+│   ├── utils.py             # Shared utilities (incl. failure classification)
+│   │
+│   │   # Search
+│   ├── search_service.py    # Unified search across PubMed + Europe PMC
 │   ├── europepmc.py         # Europe PMC client (cursor pagination)
-│   ├── jats_markdown.py     # JATS XML → markdown (front/back-matter statements)
 │   ├── search_merger.py     # Deduplication (PMID/DOI/PMC/title)
-│   ├── search_service.py    # Unified search across providers
+│   ├── query_translator.py  # Natural language → structured query
+│   ├── query_converter.py   # Concepts → a PubMed query string
+│   ├── identifiers.py       # PMID canonicalisation (bmlib#470, bmlib#472, bmlib#478)
+│   ├── smart_search.py      # Alternative queries when a question's own finds too little
+│   ├── smart_search_store.py # smart_search_run_queries table (the queries run per run)
 │   ├── search_failures.py   # Failed requests → shortfalls → reader-facing notice
 │   ├── analysis_failures.py # Analysis shortfalls → notice and advice
 │   ├── audit_records.py     # What became of each document, classified not inferred
-│   ├── query_translator.py  # Natural language → structured query
-│   ├── fulltext_discovery.py # Europe PMC XML → PMC open-data bucket → Unpaywall → DOI
+│   │
+│   │   # Reviewed runs, extended later
+│   ├── more_evidence.py     # Find More Evidence: more documents scored into a run, report rewritten
+│   ├── full_text_retry.py   # Retry Full Text: a run's unread full texts and uploads
+│   ├── full_text_upload.py  # Upload Full Text: a reader's file read into text, or refused
+│   ├── uploaded_full_texts_store.py # uploaded_full_texts table
+│   ├── citation_text.py     # Pure: full-text score, the methodology's full-text sentence
+│   ├── citation_full_texts.py # Fetching the full texts citations read
+│   ├── citation_reads_store.py # citation_reads table: which text each paper's citations came from
+│   ├── conversation_export.py # Interrogation chat → JSON / Markdown
+│   │
+│   │   # Full text
+│   ├── fulltext_discovery.py # The discovery chain (see Full-Text Discovery)
+│   ├── pdf_discovery.py     # PDF source discovery and download
 │   ├── pmc_open_data.py     # PMC's open-data S3 bucket (JATS by PMC ID)
-│   ├── pdf_discovery.py     # PDF source discovery
+│   ├── openalex.py          # The PDFs OpenAlex's locations name (by DOI)
+│   ├── elsevier_api.py      # Elsevier's article API, keyed PDF by DOI (10.1016/ only)
+│   ├── core_api.py          # CORE's extracted text by DOI (user's key)
+│   ├── keyed_service_session.py # A keyed service's 429 pause, refused key, refused network
+│   ├── oa_landing_page.py   # Which URL an Unpaywall answer offers; a landing page's PDF
+│   ├── jats_markdown.py     # JATS XML → markdown; front/back-matter statements
+│   ├── pdf_download.py      # Download helpers: .part, .unchecked and .held files
+│   ├── pdf_title_check.py   # Is a PDF the article? (its first page vs the title)
+│   ├── pdf_library_check.py # .mismatch set-aside, .kept marker, bmll keep-pdf
+│   ├── pdf_utils.py         # PDF text extraction; full-text and PDF paths
+│   ├── bot_walls.py         # Bot-wall challenge pages recognised from an answer
 │   ├── browser_rescue.py    # Walled PDFs queued for the embedded browser: states, verdicts
+│   ├── browser_rescue_text.py # What the reader reads about the rescue queue
 │   ├── rescue_queue_store.py # The browser rescue queue's table
-│   ├── chunking.py          # Text chunking utilities
-│   ├── pdf_utils.py         # PDF text extraction
-│   ├── utils.py             # Shared utilities
+│   ├── rate_limit.py        # Host-keyed, thread-safe pacing for outbound requests
+│   ├── polite_session.py    # PoliteAdapter + mount_politely for requests.Session
+│   ├── chunking.py          # Text chunking; analysis_windows for every LLM text path
+│   │
+│   │   # Retraction checking (the rule is bmlib's)
+│   ├── retraction_export.py # Local Retraction Watch copy: state, evidence, refresh
+│   ├── retraction_crossref.py # Crossref lookups over the polite session
+│   ├── retraction_store.py  # retraction_checks table, PaperCheck
+│   ├── retraction_checks.py # RetractionChecker: reuse or replace stored verdicts
+│   ├── retraction_screen.py # Pure: RetractionScreen, screen_with_fallback, RetractionSnapshot
+│   ├── retraction_text.py   # Reader-facing retraction sentences
+│   ├── transparency_terms.py # The words a transparency rating is qualified in
+│   │
 │   ├── agents/              # LLM-powered agents
-│   │   ├── base.py
+│   │   ├── base.py          # LiteBaseAgent
 │   │   ├── search_agent.py
 │   │   ├── scoring_agent.py
 │   │   ├── citation_agent.py
@@ -110,56 +170,60 @@ bmlibrarian_lite/
 │   │   ├── report_risk_helpers.py  # Risk warning integration
 │   │   └── interrogation_agent.py
 │   ├── gui/                 # PySide6 interface
-│   │   ├── app.py           # Main window
-│   │   ├── systematic_review_tab.py
+│   │   ├── app.py           # Main window, Tools menu, status bar
+│   │   ├── systematic_review_tab.py  # WorkflowWorker: the review
 │   │   ├── research_questions_tab.py
 │   │   ├── document_interrogation_tab.py
-│   │   ├── report_tab.py
-│   │   ├── audit_trail_tab.py
-│   │   ├── document_card.py
-│   │   ├── document_viewer.py
-│   │   ├── quality_badge.py
-│   │   ├── quality_filter_panel.py
-│   │   ├── quality_summary.py
+│   │   ├── report_tab.py    # Report display, auto-save, Check again
+│   │   ├── audit_trail_tab.py, audit_queries_tab.py, audit_literature_tab.py, audit_citations_tab.py
+│   │   ├── document_card.py, card_utils.py
+│   │   ├── document_viewer.py, citation_loader.py, text_highlighting.py, chat_widgets.py
+│   │   ├── quality_badge.py, quality_filter_panel.py, quality_summary.py
 │   │   ├── transparency_badge.py          # Risk badges
 │   │   ├── transparency_settings_dialog.py
-│   │   ├── citation_loader.py
-│   │   ├── benchmark_dialog.py
-│   │   ├── quality_benchmark_dialog.py
-│   │   ├── chat_widgets.py
+│   │   ├── retraction_badge.py            # RETRACTED / CONCERN / NOT CHECKED
+│   │   ├── settings_dialog.py, dialogs.py
+│   │   ├── benchmark_dialog.py, benchmark_results_dialog.py
+│   │   ├── quality_benchmark_dialog.py, quality_benchmark_results_dialog.py
 │   │   ├── thread_keeper.py   # Holds a thread its owner let go of until it ends
 │   │   ├── rescue_attempt.py  # One hidden browser visit of a walled PDF
 │   │   ├── browser_rescue_service.py # The hidden browser pass over the queue
+│   │   ├── review_queue_dialog.py    # Walled PDFs' review queue
+│   │   ├── rescue_queue_indicator.py # "Walled PDFs: N" in the status bar
+│   │   ├── rescue_view.py     # The only runtime QtWebEngineWidgets import
 │   │   ├── web_engine.py      # QtWebEngine start-up (prepare_web_engine)
 │   │   └── workers.py
 │   ├── llm/                 # LLM client abstraction
-│   │   ├── client.py
-│   │   ├── token_tracker.py
-│   │   └── providers/       # Anthropic, Ollama
-│   ├── pubmed/              # PubMed API integration
+│   │   ├── client.py, data_types.py, token_tracker.py
+│   │   └── providers/       # anthropic.py, ollama.py
+│   ├── pubmed/              # PubMedSearchClient; record_ids (a record's own ids)
 │   ├── quality/             # Study quality assessment
-│   │   ├── quality_manager.py
-│   │   ├── quality_agent.py
-│   │   ├── study_classifier.py
-│   │   ├── evidence_summary.py
-│   │   ├── metadata_filter.py
-│   │   ├── report_formatter.py
+│   │   ├── quality_manager.py, quality_agent.py, study_classifier.py
+│   │   ├── evidence_summary.py, metadata_filter.py, report_formatter.py
+│   │   ├── window_reduce.py  # Reduces one paper's per-window answers to one
+│   │   ├── json_fields.py    # Ported from bmlib.quality._json_fields
 │   │   └── data_models.py
 │   ├── benchmarking/        # Multi-model benchmarking; display.py states results
 │   ├── transparency/        # Transparency infrastructure
-│   │   ├── transparency_manager.py
-│   │   ├── transparency_models.py
-│   │   └── transparency_settings.py
+│   │   ├── transparency_manager.py, assessment.py
+│   │   ├── transparency_models.py, transparency_settings.py
+│   │   └── risk_explanation.py  # Why a study was rated high risk
 │   ├── study_transparency_analyzer/  # LLM-based transparency scoring
-│   │   ├── study_transparency_analyzer.py
-│   │   └── batch_analyzer.py
+│   │   ├── study_transparency_analyzer.py, batch_analyzer.py
+│   │   └── statement_headings.py
 │   └── resources/           # Styles and assets
-│       └── styles/
-│           └── dpi_scale.py # DPI scaling utilities
-├── tests/                   # Test suite
+│       └── styles/          # dpi_scale.py (scaled()), stylesheet and theme generators
+├── tests/                   # Test suite (pytest)
+├── doc/
+│   ├── user/guide.md        # User guide
+│   ├── developer/           # This guide; retraction_checking, browser_rescue,
+│   │                        # europepmc_and_pubmed, macos-signing
+│   ├── cross_platform/      # Platform-agnostic specs and the parity contracts
+│   │   └── bmlib_sync/      # The bmlib ledger
+│   └── llm/                 # Golden rules (coding standards)
 ├── ios/                     # iOS + macOS multiplatform app (Swift/SwiftUI)
 ├── android/                 # Android app (Kotlin/Compose)
-└── Packages/BioMedLit/      # Shared Swift package (iOS/macOS)
+└── Packages/BioMedLit/      # Shared Swift package (iOS/macOS), incl. BmlibFFI.xcframework
 ```
 
 ### Core Components
@@ -175,9 +239,10 @@ from bmlibrarian_lite import LiteConfig
 config = LiteConfig.load()
 
 # Access configuration sections
-print(config.llm.provider)      # "anthropic" or "ollama"
-print(config.llm.model)         # Model name
-print(config.storage.data_dir)  # Path to data directory
+print(config.models.default_provider)    # "anthropic" or "ollama"
+print(config.models.default_model)       # Model name
+print(config.models.get_model_string("document_scoring"))  # "provider:model" for one task
+print(config.storage.data_dir)           # Path to data directory
 
 # Validate configuration
 errors = config.validate()
@@ -191,26 +256,33 @@ if errors:
 `LiteStorage` manages SQLite with sqlite-vec for vector similarity search:
 
 ```python
-from bmlibrarian_lite import LiteConfig, LiteStorage, LiteDocument
+from bmlibrarian_lite import LiteConfig, LiteDocument, LiteEmbedder, LiteStorage
 
 config = LiteConfig.load()
 storage = LiteStorage(config)
+embedder = LiteEmbedder()
 
 # Add a document
 doc = LiteDocument(
-    id="doc123",
+    id="pmid-12345",
     title="Example Document",
-    content="Document text content...",
-    source="manual"
+    abstract="Abstract text...",
+    pmid="12345",
 )
-storage.add_document(doc)
+storage.add_document(doc, embedding_function=embedder)
 
-# Search with embeddings
-results = storage.search("research question", top_k=10)
+# Search by semantic similarity (sqlite-vec)
+results = storage.search_documents("research question", n_results=10, embedding_function=embedder)
 
 # Get statistics
 stats = storage.get_statistics()
 ```
+
+Every table lives in the one SQLite file (`metadata.db`). Focused modules
+own their table's schema and queries as functions over an open connection
+(`retraction_store`, `rescue_queue_store`, `citation_reads_store`,
+`uploaded_full_texts_store`, `smart_search_store`); `LiteStorage` creates
+their tables, opens the connection and commits.
 
 #### LLM Client (`llm/client.py`)
 
@@ -281,6 +353,10 @@ Both raise `RefusedResponseError` when the model declines (`MODEL_REFUSED`,
 never retried); a declined answer is never kept as prose.
 
 Available agents:
+Each agent sets `TASK_ID` (for example `"document_scoring"`), which selects
+its provider and model from `config.models.tasks` (see `LLM_TASK_TYPES` in
+`constants.py`).
+
 - `SearchAgent`: Converts natural language to PubMed/Europe PMC queries
 - `ScoringAgent`: Scores document relevance
 - `CitationAgent`: Extracts citations from documents
@@ -581,9 +657,25 @@ Automatic full-text retrieval with fallback chain:
    alone falls back to it, labelled, when the refresh fails.
 1. Europe PMC XML (converted via JATS parser)
    1a. PMC's open-data bucket, by PMC ID (the same JATS; `pmc_open_data.py`)
-2. Europe PMC PDF
-3. Unpaywall PDF (open access)
-4. DOI resolution (publisher website)
+   1b. Europe PMC's PDF render
+2. A cached PDF, title-checked (see below)
+3. PDF download (`pdf_discovery.py`): Elsevier's Article API first, for a
+   `10.1016/` DOI with a key (`elsevier_api.py`); then PMC links, every
+   Unpaywall PDF, the open-access PDFs OpenAlex's locations name that
+   Unpaywall did not (`openalex.py`), publisher patterns and the DOI
+   download
+   3a. CORE's extracted text (`core_api.py`), with a key and a DOI: at each
+       exit of the download that obtained no PDF, and after a PDF that yields
+       no text (a scan)
+
+The Europe PMC and PubMed side of this, the per-host pacing and the URL each
+source is asked at are in `doc/developer/europepmc_and_pubmed.md`; the
+platform-agnostic chain is `doc/cross_platform/fulltext_retrieval.md`. CORE
+and Elsevier share `keyed_service_session.py`: one process-wide record of a
+429 pause, a refused key and a refused network, so a key refused once is not
+sent again until the reader changes it. A host answering with a robot check
+(`bot_walls.py`) is a copy *not obtained*, never one that is absent; it is
+queued for the embedded browser (`doc/developer/browser_rescue.md`).
 
 **A PDF whose first page with text is found not to carry the title is not read
 as the article's** (#541; `pdf_title_check.check_pdf_title`, the share of the title's
@@ -639,6 +731,67 @@ Unpaywall URL carries the user's email address. Close the progress dialog
 with `_close_progress_dialog()`, never `close()` directly: Qt's
 `QProgressDialog.close()` emits `canceled`, which is wired to "the user
 stopped it".
+
+#### Retraction Checking (`retraction_*.py`)
+
+Every paper a review, an MCP tool, the interrogation tab or a Research
+Questions pass holds is checked against Retraction Watch's export (a local
+SQLite copy, `retraction_watch.db`), Crossref, and the record's PubMed
+"Retracted Publication" label. **The rule that turns that evidence into a
+verdict is bmlib's** (`bmlib.publications.retraction_status.retraction_status`),
+as are the Crossref request batching and answer parsing and the export's
+import and lookup; lite owns the I/O, the storage of each paper's verdict,
+the screen and every sentence the reader reads. The review leaves retracted
+papers out at one choke point (`WorkflowWorker.run`) before anything is
+filtered or scored.
+
+```python
+from bmlibrarian_lite.retraction_checks import build_retraction_checker
+from bmlibrarian_lite.retraction_screen import screen_with_fallback
+```
+
+The modules, the rules (an outage never erases a verdict; a failure is not
+knowledge; the label survives everything) and *Check again* are in
+`doc/developer/retraction_checking.md`.
+
+#### Reviewed Runs: Smart Search, Find More Evidence, Retry Full Text
+
+A review's checkpoint is its run. Three things extend a run after it was
+reviewed, each written as pure orchestration that imports no Qt and is driven
+by a worker in `gui/workers.py`:
+
+- **Smart search** (`smart_search.py`): when fewer than
+  `SMART_SEARCH_THRESHOLD` (3) documents are relevant and at least one was
+  judged, the model is asked for two or three alternative queries, told of
+  every query the run has already run (`smart_search_store`, keyed by
+  checkpoint). A failed request, a declined answer or a cut-off one stops the
+  round; none of these is a source's failure, so none records a shortfall.
+- **Find More Evidence** (`more_evidence.py`): pages further through the
+  question's own query, then runs a smart-search round once that finds
+  nothing new; screens, scores and extracts the new documents into the same
+  run and writes its report again from every citation of the run. What it
+  learns is checkpointed as it is learnt and marked as owing a report.
+- **Retry Full Text** (`full_text_retry.py`): reads the full texts a run's
+  report was not written from (fetched with *Read citations from full text*
+  on, and every upload, `full_text_upload.py`, whatever the setting) and
+  writes the report again.
+
+Which text each paper's citations were read from is recorded per run in
+`citation_reads` (`citation_reads_store.py`); `citation_text.py` holds the
+full-text score threshold and the methodology's sentence. Every LLM path over
+a text uses `chunking.analysis_windows` (references dropped, overlapping
+windows, never cut). These follow the apps' rules (iOS/macOS's
+`executeSmartSearch` and `fetchMoreEvidence`), and the contract is
+`doc/cross_platform/search_failure_reporting.md`.
+
+#### MCP Server (`mcp_server.py`)
+
+`bmlibrarian-lite-mcp` serves four tools over stdio: `fact_check_claim`,
+`search_literature`, `get_document_fulltext` and `ask_document`. They share
+the desktop's configuration, storage, retraction screen and full-text
+discovery (one `FulltextDiscoverer` across concurrent tool calls, which is
+why discovery keeps its refusals per call). Client setup is in
+`HOWTO_MCP_SERVER.md`.
 
 ### GUI Architecture
 
@@ -770,11 +923,154 @@ Core data structures in `data_models.py`:
 - `SearchProvider`: Enum for PubMed / Europe PMC
 - `CursorPaginationState`: Europe PMC cursor-based pagination
 - `OffsetPaginationState`: PubMed offset-based pagination
+- `RequestFailure` / `RequestFailureKind`: one failed request, classified
+- `RetrievalShortfall`: what a search could not retrieve, and why
+- `AnalysisShortfall`: what scoring or citation extraction could not do
+- `ScoringOutcome`, `CitationOutcome`, `ExtractionFailure`: the agents' answers,
+  carrying their shortfalls
+- `ReportMetadata`: the counts and notices a report is written with
+
+Retraction verdicts are bmlib's `RetractionVerdict`; lite stores one per
+paper as a `PaperCheck` (`retraction_store.py`).
 
 Quality assessment models in `quality/data_models.py`:
 - `QualityAssessment`: Study design, quality tier, extraction details
 - `StudyDesign`: Enum of study types (RCT, SR, Cohort, etc.)
 - `QualityTier`: Evidence quality level
+
+## The bmlib Dependency
+
+[bmlib](https://github.com/hherb/bmlib) is the maintainer's shared library
+for biomedical literature tools (AGPL-3.0-or-later): LLM abstraction,
+quality assessment, transparency analysis, full-text retrieval and JATS
+parsing, publication ingestion and database utilities, in Python, with a Rust
+port (`rust/` in bmlib). This repository relates to it in three ways.
+
+### 1. The desktop imports it
+
+The desktop's runtime dependency is declared in `pyproject.toml`:
+
+```toml
+# Pinned to a commit until bmlib 0.12.0 is on PyPI
+"bmlib @ git+https://github.com/hherb/bmlib@<commit>",
+
+[tool.hatch.metadata]
+allow-direct-references = true
+```
+
+`uv.lock` records the same commit. bmlib's core needs only `jinja2`, and
+the modules lite imports need none of bmlib's extras. Today lite imports
+only the retraction rule and what it rests on:
+
+| bmlib module | What lite uses | Where |
+|--------------|----------------|-------|
+| `bmlib.publications.retraction_status` | `retraction_status()` (the verdict), `RetractionStatus`, `RetractionVerdict`, `RetractionEvidence`, `RetractionSource`, `RetractionLookup`, `evidence_from_notices`; Crossref: `crossref_key`, `crossref_retraction_requests`, `parse_crossref_retraction_response`, `CrossrefResult`, `CrossrefOutcome` | `retraction_checks.py`, `retraction_crossref.py`, `retraction_screen.py`, `retraction_store.py`, `retraction_text.py`, `retraction_export.py`; `RetractionStatus` also in `audit_records.py`, `mcp_server.py`, `agents/reporting_agent.py` and the GUI's cards, badge and report tab |
+| `bmlib.publications.retractions` | `import_retraction_watch_export`, `lookup_retractions` | `retraction_export.py` |
+| `bmlib.publications.schema` | `ensure_schema` (the export copy's tables) | `retraction_export.py` |
+| `bmlib.db` | `connect_sqlite` | `retraction_export.py` |
+
+Rules for this boundary:
+
+- **bmlib decides; lite reports.** Lite never re-derives a verdict from the
+  evidence: a new status, source or lookup comes from bmlib. A stored row
+  naming a status, lookup or evidence this build's bmlib does not know is
+  unreadable and never reused (bmlib's `RetractionEvidence.from_dict`, read in
+  `retraction_store.py`; #705).
+- **The contract is bmlib's fixture.** `doc/cross_platform/retraction_parity/retraction_status.json`
+  is copied verbatim from bmlib's `tests/fixtures/` and never edited here.
+  `tests/test_retraction_contract.py` runs every rule, Crossref-parse and
+  request case through bmlib's API, as the Swift and Kotlin suites do through
+  the Rust library.
+- Keep bmlib imports to the retraction modules and the places that only name
+  a `RetractionStatus`. Anything else lite takes from bmlib is ported, not
+  imported (below), until a decision to import it is made.
+
+**Bumping the pin.** Change the commit in `pyproject.toml`, then refresh the
+lock and the environment and run the suite:
+
+```bash
+uv lock
+uv pip install -e ".[dev]"
+pytest tests/test_retraction_contract.py tests/test_retraction_checks.py
+pytest
+```
+
+Read bmlib's `CHANGELOG.md` between the two commits first: a renamed export
+column, a new verdict or a changed fixture shows up here. If bmlib's fixture
+changed, copy it over `retraction_parity/retraction_status.json` (and say so
+in its README) in the same pull request. To work against a local bmlib
+checkout, `uv pip install -e ~/src/bmlib` replaces the pinned copy in your
+environment until the next `uv pip install -e ".[dev]"`.
+
+**Releasing to PyPI.** PyPI refuses a package with a direct (git) reference,
+so a git pin blocks the upload. Once bmlib 0.12.0 or later is on PyPI,
+replace the pin with `"bmlib>=0.12.0"` and remove
+`[tool.hatch.metadata] allow-direct-references`.
+
+### 2. Lite ports bmlib's fixes: the sync ledger
+
+Most of what bmlib and lite share is not imported but kept in step by hand:
+JATS parsing (`jats_markdown.py`), transparency analysis, full-text
+retrieval, quality-answer parsing (`quality/json_fields.py`, ported from
+`bmlib.quality._json_fields`), PMID handling (`identifiers.py`). Code and
+comments cite the bmlib issue a rule came from as `bmlib#N`; this
+repository's issues are plain `#N`. They are different trackers.
+
+`doc/cross_platform/bmlib_sync/ledger.json` records what became of every
+bmlib change since 0.10.0 on each of the three platforms (`owed`, `ported`,
+`equivalent`, `n/a`, `declined`), and the reverse: what lite has that bmlib
+lacks. Its `bmlib_commit` is the bmlib commit the ledger has been triaged
+against. `scripts/check_bmlib_ledger.py --bmlib <checkout>` lists every
+bmlib changelog entry with no ledger row:
+
+- the `bmlib-ledger` job (`python-tests.yml`) checks the pinned commit on
+  every pull request and push;
+- the weekly `bmlib drift` workflow checks bmlib's `main` and fails until the
+  pin is bumped and the new entries are triaged. It never runs on a pull
+  request, so bmlib moving never blocks a merge here.
+
+The ledger's shape, the check's exit codes and how to start a sync are in
+`doc/cross_platform/bmlib_sync/README.md`. The plan behind it is
+`doc/plans/2026-10-17-port-bmlib-advances.md`.
+
+### 3. The apps link bmlib's Rust library (UniFFI)
+
+The iOS/macOS and Android apps call bmlib's Rust crate through UniFFI
+(decision record: `doc/cross_platform/bmlib_sync/uniffi_spike.md`). They use
+it for the retraction rule, Crossref request and parse, and the Retraction
+Watch index, so all three platforms decide a verdict by the same code;
+`BmlibJATSAdapter` (Swift) and the Android FFI tests also exercise its JATS
+parser.
+
+- **The one pin for both apps** is
+  `Packages/BioMedLit/Frameworks/BmlibFFI.pin.json` (`bmlibCommit`, the
+  rustc, UniFFI and Xcode versions, and the xcframework's tree hash). The
+  generated bindings, `Packages/BioMedLit/Sources/BmlibCore/bmlib_ffi.swift`
+  and `android/…/org/bmlib/ffi/bmlib_ffi.kt`, and the committed
+  `BmlibFFI.xcframework` must all come from that commit; a binding from
+  another fails UniFFI's checksum check at its first call.
+- **Swift**: the `BmlibCore` target wraps the committed xcframework. The
+  `bmlib xcframework` workflow rebuilds it from the pin on every pull request
+  and fails unless it matches; its header says how to re-pin (the committed
+  copy is that workflow's own build).
+- **Android**: Gradle builds the `.so` files with cargo-ndk from a bmlib
+  checkout named by `bmlib.dir` in `local.properties` or `BMLIB_DIR`, and
+  `checkBmlibPin` refuses a checkout at any other commit
+  (`-Pbmlib.allowUnpinnedCommit=true` builds anyway, with a warning). The FFI
+  suites skip without a checkout locally; `android-tests.yml` checks bmlib
+  out at the pin and fails a skipped run. To get a checkout at the pin:
+  `git -C ~/src/bmlib worktree add --detach <dir> <bmlibCommit>`.
+
+### Three pins, three purposes
+
+| Pin | Where | What it fixes |
+|-----|-------|---------------|
+| Python dependency | `pyproject.toml` (and `uv.lock`) | The bmlib the desktop runs |
+| Ledger commit | `ledger.json` `bmlib_commit` | The bmlib changelog the ledger is triaged against |
+| FFI commit | `BmlibFFI.pin.json` `bmlibCommit` | The Rust library both apps link |
+
+They move independently and need not name the same commit. Bump each on its
+own pull request, with the checks above.
 
 ## Code Style Requirements
 
@@ -894,7 +1190,9 @@ This updates:
 - `CLAUDE.md` (`**Current version:**`)
 - `CHANGELOG.md` (promotes `[Unreleased]` — see below)
 
-Before a PyPI upload: a git-pinned dependency (bmlib) blocks the upload until bmlib is released (0.12.0 or later) and the pin becomes a version.
+Before a PyPI upload: a git-pinned dependency (bmlib) blocks the upload until
+bmlib is released (0.12.0 or later) and the pin becomes a version; see
+[Releasing to PyPI](#the-bmlib-dependency).
 
 ### Changelog
 
@@ -948,8 +1246,11 @@ uv pip install build twine
 ### Test Structure
 
 ```python
+from pathlib import Path
+
 import pytest
-from bmlibrarian_lite import LiteConfig, LiteStorage
+from bmlibrarian_lite import LiteConfig, LiteDocument, LiteStorage
+from bmlibrarian_lite.config import StorageConfig
 
 class TestStorage:
     """Tests for LiteStorage class."""
@@ -968,7 +1269,7 @@ class TestStorage:
 
     def test_add_document(self, storage: LiteStorage) -> None:
         """Test adding a document to storage."""
-        doc = LiteDocument(id="test", title="Test", content="Content")
+        doc = LiteDocument(id="test", title="Test", abstract="Abstract")
         storage.add_document(doc)
 
         retrieved = storage.get_document("test")
@@ -1001,6 +1302,13 @@ def test_document_card(qapp, sample_document):
     assert not card.expanded
 ```
 
+Many suites define their own `qapp` fixture as above. A test that exercises
+the network goes through a local HTTP server or a stub client, never the
+real service: `tests/conftest.py` stubs the OpenAlex, CORE and Elsevier
+clients and the settings dialog's model probes unless a test asks for the
+real one with a marker (`real_openalex_client`, `real_core_client`,
+`real_elsevier_client`, `real_model_fetch`).
+
 QtWebEngine is the exception to the `qapp` fixture: never pump it in the
 suite's shared `QApplication` (#516, #517). Its tests drive
 `tests/browser_rescue_harness.py` in a subprocess with its own application, and
@@ -1024,6 +1332,17 @@ pytest --cov=src/bmlibrarian_lite --cov-report=html
 ```
 
 ## Continuous Integration
+
+| Workflow | Runs | Checks |
+|----------|------|--------|
+| `python-tests.yml` | every PR and push to `master` | `pytest`, the bmlib ledger at its pin, the lint delta |
+| `bmlib-drift.yml` | Mondays, and by hand | the bmlib ledger against bmlib's `main` |
+| `bmlib-xcframework.yml` | every PR and push to `master` | `BmlibFFI.xcframework` and both bindings rebuilt from the pin, compared |
+| `swift-tests.yml` | every PR and push to `master` | BioMedLit and the app's Swift tests |
+| `swift-integration-tests.yml` | daily | Swift tests against live PMC |
+| `android-tests.yml` | every PR and push to `master` | Gradle unit tests, the bmlib FFI tests included |
+| `xcode-project-guards.yml` | PRs touching a `.pbxproj` | the Xcode project's guards |
+| `claude-code-review.yml`, `claude.yml` | PRs, mentions | automated review |
 
 `.github/workflows/python-tests.yml` runs on every pull request and on every
 push to `master`.
@@ -1051,6 +1370,14 @@ Two things about this job are deliberate and should not be "optimised" away:
   The preflight is `.github/scripts/qt_preflight.py`; it also checks
   QtWebEngine (the browser rescue), and the job sets
   `QTWEBENGINE_DISABLE_SANDBOX`. See `doc/developer/browser_rescue.md`.
+
+### `bmlib-ledger` job
+
+Checks out bmlib's `CHANGELOG.md` at the ledger's `bmlib_commit` and runs
+`scripts/check_bmlib_ledger.py` against it: every bmlib change must have a
+ledger entry. It can only fail when the ledger is edited, because the pin
+does not move; `bmlib-drift.yml` is what sees bmlib move. See
+[The bmlib Dependency](#the-bmlib-dependency).
 
 ### `lint-delta` job
 

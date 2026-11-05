@@ -2,8 +2,11 @@
 
 `ledger.json` records what became of every change in bmlib (a separate Python
 library with a Rust port) on each platform here, and the reverse: what this
-repository has that bmlib lacks. Nothing imports bmlib, so without the ledger a
-bmlib fix that is not ported by hand goes unnoticed.
+repository has that bmlib lacks. The desktop imports only bmlib's retraction
+rule (pinned in `pyproject.toml`), and the apps link only its Rust library
+(pinned in `Packages/BioMedLit/Frameworks/BmlibFFI.pin.json`); everything else
+bmlib and this repository share is ported by hand, so without the ledger a bmlib
+fix that is not ported goes unnoticed.
 
 ## Shape
 

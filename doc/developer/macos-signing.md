@@ -55,6 +55,18 @@ Find your Team ID at [developer.apple.com/account](https://developer.apple.com/a
 ./scripts/build_macos.sh
 ```
 
+The script creates `.venv` if it is missing, installs the package (`uv pip
+install -e ".[dev]"`, or `pip` without uv) and PyInstaller, removes `build/`
+and the previous app bundle, and runs `pyinstaller bmlibrarian_lite.spec
+--clean --noconfirm`. It writes `dist/BMLibrarian Lite.app` and
+`dist/BMLibrarian-Lite-X.Y.Z.dmg`, the version read from
+`src/bmlibrarian_lite/__init__.py`. Users of an unsigned build must
+right-click → Open to get past Gatekeeper.
+
+The spec builds from `scripts/run_gui.py` with bundle identifier
+`me.proton.bmlibrarian.lite` and `LSMinimumSystemVersion` 10.15. It signs
+nothing itself (`codesign_identity=None`): signing is the script's.
+
 ### Signed and Notarized Build (for distribution)
 
 ```bash
@@ -63,11 +75,20 @@ Find your Team ID at [developer.apple.com/account](https://developer.apple.com/a
 
 This will:
 1. Build the app with PyInstaller
-2. Sign all binaries with your Developer ID certificate
-3. Create a DMG
-4. Sign the DMG
-5. Submit to Apple for notarization
-6. Staple the notarization ticket to the DMG
+2. Sign inside out with your Developer ID certificate, hardened runtime and
+   `assets/entitlements.plist`: every `.so` and `.dylib` (a library that fails
+   to sign is skipped silently), any nested `.app` bundle, the main executable,
+   then the bundle with `--deep`
+3. Verify the signature (`codesign --verify --deep --strict`) and run a
+   Gatekeeper assessment (`spctl`, which does not stop the build)
+4. Create a DMG (`hdiutil`, UDZO, with an `Applications` link)
+5. Sign the DMG
+6. Submit to Apple for notarization and wait
+7. Staple the notarization ticket to the DMG and validate it
+
+Steps 6 and 7 run only if the keychain profile exists (checked with `xcrun
+notarytool history`). Without it the script prints the `store-credentials`
+command and ends with a DMG that is signed but **not** notarized.
 
 ## Environment Variables
 
@@ -84,6 +105,13 @@ export NOTARIZE_PASSWORD="my-notarize-profile"
 ./scripts/build_macos.sh --sign
 ```
 
+Without `DEVELOPER_ID` the script uses the first "Developer ID Application"
+identity `security find-identity -v -p codesigning` lists, and stops if there
+is none. `NOTARIZE_PASSWORD` names the keychain profile, not a password; it
+defaults to `bmlibrarian-notarize`. The script's header also lists `APPLE_ID`
+and `TEAM_ID`, but it reads neither: the Apple ID and team are stored in the
+keychain profile.
+
 ## Manual Signing (if needed)
 
 If you need to sign manually:
@@ -98,6 +126,9 @@ find "dist/BMLibrarian Lite.app" -name "*.so" -o -name "*.dylib" | while read li
         --entitlements assets/entitlements.plist \
         "$lib"
 done
+
+# The script also signs any nested .app bundle and
+# "dist/BMLibrarian Lite.app/Contents/MacOS/BMLibrarian Lite" here, the same way
 
 # Sign the main bundle
 codesign --force --deep --sign "Developer ID Application: Your Name (TEAM_ID)" \
@@ -117,15 +148,15 @@ spctl --assess --type execute --verbose "dist/BMLibrarian Lite.app"
 
 ```bash
 # Submit for notarization
-xcrun notarytool submit "dist/BMLibrarian-Lite-0.1.0.dmg" \
+xcrun notarytool submit "dist/BMLibrarian-Lite-X.Y.Z.dmg" \
     --keychain-profile "bmlibrarian-notarize" \
     --wait
 
 # Staple the ticket
-xcrun stapler staple "dist/BMLibrarian-Lite-0.1.0.dmg"
+xcrun stapler staple "dist/BMLibrarian-Lite-X.Y.Z.dmg"
 
 # Verify
-xcrun stapler validate "dist/BMLibrarian-Lite-0.1.0.dmg"
+xcrun stapler validate "dist/BMLibrarian-Lite-X.Y.Z.dmg"
 ```
 
 ## Troubleshooting
@@ -178,7 +209,7 @@ The app uses these entitlements (see `assets/entitlements.plist`):
 
 Before releasing:
 
-- [ ] Version number updated in `src/bmlibrarian_lite/__init__.py`
+- [ ] Version set with `python scripts/set_version.py X.Y.Z` (`--dry-run` to preview, `--show` to list): it updates `src/bmlibrarian_lite/__init__.py`, `bmll.py`, the spec's three version strings and CLAUDE.md, and promotes CHANGELOG.md's `[Unreleased]` section (`--skip-changelog` leaves it). The DMG's name comes from `__init__.py` and the bundle's version from the spec, so the two must agree
 - [ ] Build with `./scripts/build_macos.sh --sign`
 - [ ] Verify signing: `codesign --verify --deep --strict "dist/BMLibrarian Lite.app"`
 - [ ] Verify notarization: `xcrun stapler validate "dist/BMLibrarian-Lite-X.Y.Z.dmg"`

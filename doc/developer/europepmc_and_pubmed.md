@@ -1,6 +1,6 @@
 # Europe PMC and PubMed API Integration Guide
 
-This document captures lessons learned from implementing Europe PMC and PubMed integrations in the macOS app. Use this as a reference when implementing the same functionality in Kotlin (Android) or Python (desktop).
+This document captures lessons learned from implementing Europe PMC and PubMed integrations, first in the macOS app (the Swift snippets come from it). Use it as a reference when implementing the same functionality on any platform. Where a rule below is enforced, the Python desktop (`src/bmlibrarian_lite/`) is the reference implementation.
 
 ## Table of Contents
 
@@ -14,6 +14,8 @@ This document captures lessons learned from implementing Europe PMC and PubMed i
 8. [Reference Parsing](#reference-parsing)
 9. [Error Handling](#error-handling)
 10. [Rate Limiting](#rate-limiting)
+11. [JSON Response Structure](#json-response-structure)
+12. [Quick Reference](#quick-reference)
 
 ---
 
@@ -25,7 +27,12 @@ This document captures lessons learned from implementing Europe PMC and PubMed i
 
 **Key Endpoints:**
 - Search: `GET /search?query={query}&format={json|xml}&pageSize={n}&cursorMark={cursor}`
-- Full Text XML: `GET /{pmcId}/fullTextXML`
+- Full Text XML: `GET /{pmcId}/fullTextXML` (a preprint, which has no PMC ID, is asked under its `PPR` record ID; Python: `europepmc.fulltext_accession`)
+
+Python's search sends `format=json`, `resultType=core` (`EUROPEPMC_RESULT_TYPE`)
+and pages of 100 (`EUROPEPMC_SEARCH_PAGE_SIZE`), and appends
+`AND HAS_ABSTRACT:Y` and, unless preprints are asked for, `AND (NOT SRC:PPR)`
+(`EuropePMCClient._build_search_query`).
 
 **No API key required** - Europe PMC is free and open.
 
@@ -35,7 +42,11 @@ This document captures lessons learned from implementing Europe PMC and PubMed i
 
 **Key Endpoints** (parameters shown are sent as a POST body; see below):
 - Search: `esearch.fcgi` with `db=pubmed&term={query}&retmax={n}&retstart={offset}`
-- Fetch: `efetch.fcgi` with `db=pubmed&id={pmids}&rettype=xml`
+- Search: Python also sends `retmode=json`; above 1,000 results
+  (`HISTORY_SERVER_THRESHOLD`) it asks with `usehistory=y` and lists the PMIDs
+  through `WebEnv`/`query_key`
+- Fetch: `efetch.fcgi` with `db=pubmed&id={pmids}&retmode=xml`, up to 200 PMIDs
+  per request (`DEFAULT_BATCH_SIZE`)
 
 **Recommended:** Include `email` parameter for identification. API key optional but increases rate limits.
 
@@ -66,7 +77,7 @@ Where each platform enforces these rules, and the test that pins them:
 
 | Platform | POST body | Redirect refused | Test |
 |----------|-----------|------------------|------|
-| Python | `post(data=…)` in both NCBI clients (`requests.post` in `PubMedSearchClient`, `session.post` in the transparency analyzer's `PubMedClient`) | `allow_redirects=False`, raise on `is_redirect` | `tests/test_ncbi_api_key_confinement.py` |
+| Python | `post(data=…)` in both NCBI clients (`self._session.post` in `PubMedSearchClient`, on a session with `mount_politely`; `session.post` in the transparency analyzer's `PubMedClient`) | `allow_redirects=False`, raise on `is_redirect` | `tests/test_ncbi_api_key_confinement.py` |
 | Swift | `EutilsRequest.post` | `RedirectRefusingTaskDelegate`, passed per task | `PubMedCredentialConfinementTests` |
 | Android | `@FormUrlEncoded` + `@Field` on `PubMedApi` | `pubMedHttpClient`: `followRedirects(false)` on a client derived for PubMed only, since Unpaywall and PDF links need redirects | `PubMedCredentialConfinementTest` |
 
@@ -95,6 +106,28 @@ it, or record the difference here:
 **A failed source is not an empty one.** What counts as a failed request, what
 a search does with one, and how the reader is told are specified in
 `doc/cross_platform/search_failure_reporting.md`.
+
+### PMIDs Sent to Either API
+
+**Read a caller's PMID once, and send only canonical digits.** Europe PMC's
+`ext_id:{pmid} src:med` query finds nothing for a padded `0033301246` where
+`33301246` finds the paper, so a padded PMID read as "Europe PMC holds no
+record"; and nothing required digits, so `"1 OR 2"` widened the query past its
+`src:med` guard (bmlib#470, bmlib#472, bmlib#478). Python's
+`identifiers.canonical_pmid` strips whitespace and leading zeros, takes ASCII
+digits only (not all zeros), reads `PMC` plus digits as a PMC ID given as the
+PMID, and refuses anything else; `read_caller_ids` logs a refused value and
+goes on as though no PMID had been given. The rules are shared through
+`doc/cross_platform/fulltext_parity/pmid_canonical.json`.
+
+**Take a record's identifiers from the record asked about.** An efetch
+`PubmedArticle` carries its own IDs at `PubmedData/ArticleIdList`, but every
+cited paper in `PubmedData/ReferenceList` has an `ArticleIdList` too, so a
+`.//ArticleId` search can return a cited paper's PMC ID and DOI (bmlib#474).
+`pubmed.record_ids.own_article_ids` reads the fixed path only, and
+`record_for_pmid` selects the record by its own `MedlineCitation/PMID`,
+compared without leading zeros, never by position: efetch answers
+`id=0033301246` with `<PMID>33301246</PMID>`.
 
 ---
 
@@ -262,11 +295,42 @@ served), the only one the `pmc-not-epmc` stratum found.
 
 ### Fallback Chain
 
-Implement a fallback chain for full text retrieval:
+The desktop's chain (`fulltext_discovery.FulltextDiscoverer`, with the PDF
+steps in `pdf_discovery.PDFDiscoverer`), in order:
 
-1. **Europe PMC XML** - Best quality, machine-readable
-2. **Unpaywall PDF** - Open access PDFs via `https://api.unpaywall.org/v2/{doi}?email={email}`
-3. **DOI Resolution** - Open `https://doi.org/{doi}` in browser
+1. **Cached full-text markdown.** A file an earlier converter wrote is not
+   served: Europe PMC is asked again and the file rewritten (#420).
+2. **Europe PMC XML** (`fullTextXML`), unless the record rules it out
+   (`offers_fulltext_xml`, above).
+3. **PMC's open-data bucket** (`pmc_open_data.PmcOpenDataClient`), when a PMC
+   ID is known (one Europe PMC resolved counts): the same JATS from the
+   public S3 bucket `pmc-oa-opendata` (a listing of `metadata/{PMCID}.`, the
+   newest version's metadata record, then its XML), including the author manuscripts `fullTextXML` answers 500 for (#480).
+4. **Europe PMC's PDF render**, when the record lists a free PDF of Europe
+   PMC's own (`site` `Europe_PMC`, availability code `OA` or `F`).
+5. **A cached PDF**, read only if it carries the article's title; one that
+   does not is set aside (`pdf_library_check.py`, #541).
+6. **The PDF download**, unless the caller passed `skip_pdf`:
+   - **Elsevier's Article API** first, for a `10.1016/` DOI and only with the
+     user's key (`elsevier_api.py`; the key travels in `X-ELS-APIKey`, an
+     institutional token in `X-ELS-Insttoken`, never in the URL);
+   - then PMC's PDF links (by PMC ID, or a PMID through NCBI's ID converter),
+     **Unpaywall**'s PDFs (`https://api.unpaywall.org/v2/{doi}?email={email}`),
+     publisher patterns and the **direct DOI download**, open-access copies
+     first. **OpenAlex**'s PDFs that Unpaywall did not name (`openalex.py`)
+     are asked for once, before the first copy that is not open access, or at
+     once when nothing else was found;
+   - **CORE's extracted text** (`core_api.py`, only with a CORE key and a DOI)
+     at each exit that obtained no PDF, and after a PDF that yields no text.
+
+A downloaded PDF is checked whole, before it replaces the cached file, for the
+article's title on its first page with text (`pdf_title_check.py`, #532,
+#546); one that does not carry it is set aside as `<pdf>.mismatch`, the next
+source is tried, and the reader is told how to keep it (`bmll keep-pdf`). A
+PDF whose host answered with a bot wall's challenge page (`bot_walls.py`) is recorded as `CHALLENGED`, not as the
+host's answer; Unpaywall's and OpenAlex's are queued for the desktop's browser
+rescue (`doc/developer/browser_rescue.md`). The cross-platform algorithm, and
+where the apps differ, is `doc/cross_platform/fulltext_retrieval.md`.
 
 ---
 
@@ -911,6 +975,14 @@ let serverErrorConfig = RetryConfiguration(
 // Retry sequence: 5s → 10s → 20s → 40s → 60s
 ```
 
+That is Swift's `RetryConfiguration.serverError`. In Python the Europe PMC and
+PDF sessions retry `RETRYABLE_HTTP_STATUSES` (the five above) three times
+(`EUROPEPMC_MAX_RETRIES`, `POLITE_MAX_THROTTLE_RETRIES`), and
+`mount_politely` moves those statuses off urllib3's `Retry` into `PoliteAdapter`, so every attempt goes through the
+host's pacing and a status that outlasts the retries is handed back, not
+raised. `PubMedSearchClient._make_request` runs its own loop instead (three
+attempts, 1 s doubling), with the adapter retrying nothing.
+
 ### Implementing Retryable Errors
 
 ```swift
@@ -966,9 +1038,24 @@ enum EuropePMCError: Error, RetryableError {
 - With API key: 10 requests/second
 - Register for API key at: https://www.ncbi.nlm.nih.gov/account/
 
+### How Python Paces
+
+Each client's session (Europe PMC, both NCBI clients, PDF discovery, PMC's
+bucket, OpenAlex, CORE, Elsevier, Crossref) is mounted with
+`polite_session.mount_politely`, which paces each attempt through `rate_limit.limiter_for(host)`: one limiter per
+host, shared process-wide, so threads and clients do not each get a budget.
+The ceilings are `POLITE_RATE_CEILINGS`: E-utilities 3/s (10/s with a key,
+`NCBI_RATE_WITH_API_KEY_PER_SECOND`), `www.ebi.ac.uk` 1/s, PMC's open-data
+bucket 5/s, OpenAlex 10/s, Unpaywall 5/s, CORE 0.4/s, Elsevier 2/s, and 1/s for
+a host not listed. A 429 or 503 penalises the host: its interval doubles, up to
+one request per 30 s, and a `Retry-After` is honoured up to 300 s
+(`POLITE_MAX_PENALTY_SECONDS`); every ten successful answers after a penalty
+earn the rate back by halves. Loopback is never paced. The contract is
+`doc/cross_platform/polite_request_pacing.md`.
+
 ### Best Practices
 
-1. **Add delays between requests:** 100-200ms minimum
+1. **Pace per host, not per client:** one shared limiter per host, as above
 2. **Use batch fetching:** Fetch multiple PMIDs in one efetch call
 3. **Cache results:** Store fetched metadata and full text locally
 4. **Implement exponential backoff:** For 429/5xx errors
@@ -1048,7 +1135,11 @@ struct EPMCResultList: Codable {
 | Europe PMC Figures | `https://europepmc.org/articles/PMC{id}/bin/{filename}.{ext}` |
 | PubMed Search | `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi` |
 | PubMed Fetch | `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi` |
+| PMC open-data bucket | `https://pmc-oa-opendata.s3.amazonaws.com/?list-type=2&prefix=metadata/{PMCID}.` |
 | Unpaywall | `https://api.unpaywall.org/v2/{doi}?email={email}` |
+| OpenAlex | `https://api.openalex.org/works/doi:{doi}?select=locations&mailto={email}` |
+| Elsevier Article API | `https://api.elsevier.com/content/article/doi/{doi}` (key in `X-ELS-APIKey`) |
+| CORE | `https://api.core.ac.uk/v3/search/works/?q=doi:"{doi}"&limit=3` (key as `Authorization: Bearer`) |
 | DOI Resolution | `https://doi.org/{doi}` |
 
 ### Common Pitfalls
