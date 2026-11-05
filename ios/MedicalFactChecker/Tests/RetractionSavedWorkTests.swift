@@ -653,7 +653,8 @@ final class RetractionSavedWorkTests: XCTestCase {
         await ahead.value
         await check.value
         XCTAssertEqual(firstAsked.calls, 0, "a stopped check asks nothing")
-        XCTAssertTrue(first.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainStopped) == true)
+        XCTAssertFalse(first.retractionSavedWorkLine?.contains(RetractionText.checkAgainStopped) == true,
+                       "the second window stored the session's answers meanwhile (#714)")
         let thirdAsked = Asked()
         let third = restore(session, asked: thirdAsked)
         await third.checkRetractionsAgain()
@@ -675,13 +676,13 @@ final class RetractionSavedWorkTests: XCTestCase {
         }
         await second.checkRetractionsAgain()
         XCTAssertTrue(second.retractionSavedWorkWarning?.contains("• Study 0: Retracted") == true)
+        let stopped = second.retractionSavedWorkLine ?? ""
+        XCTAssertTrue(stopped.hasSuffix(RetractionText.checkAgainStopped), stopped)
         guard let release = await holdCheckAgain(session) else { return XCTFail("the first window never asked") }
 
         await second.checkRetractionsAgain()
 
-        XCTAssertTrue(
-            second.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainStopped + RetractionText.checkAgainElsewhere)
-                == true, second.retractionSavedWorkLine ?? "")
+        XCTAssertEqual(second.retractionSavedWorkLine, stopped + RetractionText.checkAgainElsewhere)
         XCTAssertTrue(second.retractionSavedWorkWarning?.contains("• Study 0: Retracted") == true, "the label still warns")
         await release()
         XCTAssertTrue(
@@ -714,8 +715,12 @@ final class RetractionSavedWorkTests: XCTestCase {
             for await _ in gate {}
             return Dictionary(papers.map { ($0, retracted) }) { first, _ in first }
         }
+        // another session's window with a caveat of its own, which a redraw would drop
         let other = restore(makeSession(["10.1000/b"], cited: [0], run: [0: Self.check("clear")]).0)
+        other.useRetractionCheck { _ in throw CheckFailed() }
+        await other.checkRetractionsAgain()
         let otherLine = other.retractionSavedWorkLine
+        XCTAssertTrue(otherLine?.hasSuffix(RetractionText.checkAgainFailed) == true, otherLine ?? "")
         let running = Task { @MainActor in await first.checkRetractionsAgain() }
         guard await Self.waitUntil({ firstAsked.calls > 0 }) else {
             open.finish()
@@ -741,6 +746,71 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertFalse(second.retractionSavedWorkLine?.contains(RetractionText.checkAgainFailed) == true,
                        second.retractionSavedWorkLine ?? "")
         await release()
+    }
+
+    /// #714: a refusal keeps what this window's own *Check again* that stored
+    /// its answers said, the causes it named among it.
+    func testARefusalKeepsAStoredCheckAgainsCauses() async {
+        let (session, _) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("unchecked")])
+        let workflow = restore(session, answers: [
+            "10.1000/a": Self.check("unchecked", at: Self.runDay.addingTimeInterval(Self.day)),
+        ])
+        await workflow.checkRetractionsAgain()
+        let line = workflow.retractionSavedWorkLine ?? ""
+        XCTAssertEqual(line, "Retraction status could not be checked: \(Self.uncheckedCauses)")
+        guard let release = await holdCheckAgain(session) else { return XCTFail("the other window never asked") }
+
+        await workflow.checkRetractionsAgain()
+
+        XCTAssertEqual(workflow.retractionSavedWorkLine, line + RetractionText.checkAgainElsewhere)
+        await release()
+    }
+
+    /// #714: a check stopped while it waits behind earlier work frees its
+    /// session (#711); when another window then stores that session's answers,
+    /// the stopped one ends showing them, never calling them the run's record.
+    func testAStoppedCheckOvertakenElsewhereShowsTheStoredAnswers() async {
+        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        let retracted = Self.check("retracted", at: Self.runDay.addingTimeInterval(Self.day))
+        let first = restore(session)
+        let (gate, open) = AsyncStream<Void>.makeStream()
+        let ahead = Task { @MainActor in
+            await first.runAsWorkflowTask { for await _ in gate {} }
+        }
+        await Task.yield()
+        let check = Task { @MainActor in await first.checkRetractionsAgain() }
+        while !first.isCheckingRetractionsAgain { await Task.yield() }
+        first.cancelCheckAgain()
+        let second = restore(session, answers: ["10.1000/a": retracted])
+        await second.checkRetractionsAgain()
+        XCTAssertEqual(documents[0].retractionCheck, retracted, "control: the other window stored its answers")
+
+        open.finish()
+        await ahead.value
+        await check.value
+
+        XCTAssertEqual(first.retractionSavedWorkLine, second.retractionSavedWorkLine)
+        XCTAssertFalse(first.retractionSavedWorkLine?.contains(RetractionText.checkAgainStopped) == true,
+                       first.retractionSavedWorkLine ?? "")
+        XCTAssertTrue(first.retractionSavedWorkWarning?.contains("• Study 0: Retracted on") == true,
+                      first.retractionSavedWorkWarning ?? "")
+    }
+
+    /// #714: a window whose own work cleared its saved-work line is not given
+    /// one back when another window's *Check again* stores the session's answers.
+    func testAStoredCheckLeavesAWindowAtWorkAlone() async {
+        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        let working = restore(session)
+        await working.retryFailedDocuments(pmids: [documents[0].pmid])
+        XCTAssertNil(working.retractionSavedWorkLine, "control: the work cleared the line")
+        let retracted = Self.check("retracted", at: Self.runDay.addingTimeInterval(Self.day))
+        let other = restore(session, answers: ["10.1000/a": retracted])
+
+        await other.checkRetractionsAgain()
+
+        XCTAssertEqual(documents[0].retractionCheck, retracted, "control: the other window stored its answers")
+        XCTAssertNil(working.retractionSavedWorkLine)
+        XCTAssertNil(working.retractionSavedWorkWarning)
     }
 
     /// Starts another window's *Check again* on `session` and holds it at its

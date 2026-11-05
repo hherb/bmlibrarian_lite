@@ -162,12 +162,17 @@ final class FactCheckWorkflow {
     private var heldCheckAgainSession: UUID?
 
     /// What this workflow's own last *Check again* added to the saved-work
-    /// line, and in which piece of work (``runGeneration``), so a later redraw
-    /// keeps it until a restore, a run or another window's stored check
-    /// supersedes it (#714).
+    /// line and warning, and in which piece of work (``runGeneration``), so a
+    /// later redraw keeps it until a restore, a run or another window's stored
+    /// check supersedes it (#714).
     private var checkAgainCaveat: (
         generation: Int, note: String, causes: [String], labelled: [String: PaperRetractionCheck]
     )?
+
+    /// Set when another window's *Check again* stored this session's answers
+    /// while this one, stopped, still waited to end: its line then shows those
+    /// answers without calling them the run's record (#714).
+    private var checkAgainStoredElsewhereSinceStop = false
 
     /// Posted by a workflow (`object`), with the session's id as
     /// `userInfo["session"]`, once its *Check again* has saved its answers, so every other window
@@ -357,11 +362,16 @@ final class FactCheckWorkflow {
 
     /// Redraws the saved-work line when another workflow's *Check again* has
     /// saved its answers for this session: they supersede this workflow's own
-    /// caveat, and a refusal's note (#714). A session being worked on shows
-    /// no saved line, and a running *Check again* draws its own.
+    /// caveat, and a refusal's note (#714). A window showing no saved line is
+    /// left alone (a run clears it), and a *Check again* still under way here
+    /// draws its own when it ends.
     private func otherCheckAgainStored(session id: UUID, by poster: ObjectIdentifier?) {
-        guard poster != ObjectIdentifier(self), session?.id == id,
-              retractionSavedWorkLine != nil, !isCheckingRetractionsAgain else { return }
+        guard poster != ObjectIdentifier(self), session?.id == id, retractionSavedWorkLine != nil else { return }
+        guard !isCheckingRetractionsAgain else {
+            // only a stopped one frees the session, so only it can be overtaken
+            if checkAgainStopRequested { checkAgainStoredElsewhereSinceStop = true }
+            return
+        }
         checkAgainCaveat = nil
         showSavedRetraction()
     }
@@ -586,6 +596,7 @@ final class FactCheckWorkflow {
         defer { releaseCheckAgainSession() }
         isCheckingRetractionsAgain = true
         checkAgainStopRequested = false
+        checkAgainStoredElsewhereSinceStop = false
         defer { isCheckingRetractionsAgain = false }
         await runAsWorkflowTask { [weak self] in
             await self?.checkRetractionsAgainWork()
@@ -629,7 +640,8 @@ final class FactCheckWorkflow {
         // nothing is stored, but the paper's label (any of its records') still retracts (#673, #675)
         let standing = { [self] in
             // only cancelCheckAgain()'s stop reads as one; a cancellation nobody asked for is a failure
-            let note = checkAgainStopRequested ? RetractionText.checkAgainStopped : RetractionText.checkAgainFailed
+            let note = checkAgainStoredElsewhereSinceStop ? ""
+                : checkAgainStopRequested ? RetractionText.checkAgainStopped : RetractionText.checkAgainFailed
             if checkAgainStopRequested { logger.info("Retraction check again stopped; nothing stored") }
             showCheckAgainResult(note: note, labelled: Self.labelRetractions(documents, papers))
         }
@@ -693,8 +705,9 @@ final class FactCheckWorkflow {
         showSavedRetraction(note: note, causes: causes, labelled: labelled)
     }
 
-    /// Redraws the saved-work line keeping this workflow's own last *Check
-    /// again* caveat, unless a restore or a run has begun since, then adds `note`.
+    /// Redraws the saved-work line with `note` added, keeping this workflow's
+    /// own last *Check again* caveat while it stands (not after a restore, later
+    /// work, or another window's stored check).
     private func showSavedRetractionKeepingCaveat(_ note: String) {
         guard let caveat = checkAgainCaveat, caveat.generation == runGeneration else {
             return showSavedRetraction(note: note)
