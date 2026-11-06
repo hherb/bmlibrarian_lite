@@ -1115,6 +1115,40 @@ final class RetractionSavedWorkTests: XCTestCase {
 
     // MARK: - An unreadable snapshot entry (#647)
 
+    /// A snapshot this build cannot read at all, with no stored check to show,
+    /// reads "could not be read", never "never checked" (#662); a document
+    /// whose own entry or copy cannot be read says so too.
+    func testAnUnreadableSnapshotReadsAsUnread() throws {
+        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [:])
+        session.retractionSnapshotJSON = nil
+        XCTAssertEqual(restore(session).retractionSavedWorkLine, "Retraction status never checked", "control")
+        XCTAssertFalse(session.retractionSnapshotUnread())
+        XCTAssertFalse(documents[0].retractionStatusUnread, "control")
+
+        session.retractionSnapshotJSON = "[1, 2]"
+        XCTAssertTrue(session.retractionSnapshotUnread())
+        XCTAssertEqual(restore(session).retractionSavedWorkLine, RetractionText.statusUnread)
+        XCTAssertTrue(documents[0].retractionStatusUnread)
+
+        // one entry: unread for its own document only
+        session.retractionSnapshotJSON = try XCTUnwrap(String(
+            data: JSONSerialization.data(withJSONObject: [documents[0].id: ["status": 7]]), encoding: .utf8))
+        XCTAssertTrue(session.retractionSnapshotUnread())
+        XCTAssertTrue(session.retractionSnapshotUnread(for: documents[0].id))
+        XCTAssertFalse(session.retractionSnapshotUnread(for: "another"))
+        XCTAssertEqual(restore(session).retractionSavedWorkLine, RetractionText.statusUnread)
+
+        // a stored check is shown instead: the line is the check's
+        documents[0].retractionCheck = Self.check("clear")
+        XCTAssertEqual(restore(session).retractionSavedWorkLine, "Retraction status checked 2026-10-18")
+        XCTAssertFalse(documents[0].retractionStatusUnread)
+
+        // the document's own copy unreadable, with no snapshot
+        session.retractionSnapshotJSON = nil
+        documents[0].retractionCheckJSON = "{\"status\": 7}"
+        XCTAssertTrue(documents[0].retractionStatusUnread)
+    }
+
     /// One entry this build cannot read costs only itself, and a later run's
     /// record keeps it as written: a later build may read it.
     func testAnUnreadableSnapshotEntryIsLeftOutAndKept() throws {

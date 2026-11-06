@@ -196,6 +196,10 @@ public enum RetractionText {
     public static let checkAgainElsewhere = "; another window was checking it again, so check again here once that is done"
     /// Added to the saved-work line when the stored checks could not be read.
     public static let storedChecksUnread = "; later checks could not be read"
+    /// The saved-work line, the report's methods line or a paper's detail
+    /// status when its retraction status is recorded but cannot be read:
+    /// never "never checked", since not knowing is not absence (#600, #662).
+    public static let statusUnread = "Retraction status could not be read"
     /// Added to the saved-work line when *Check again*'s answers could not be saved.
     public static let checkAgainNotSaved = "; the new status could not be saved with this run"
 

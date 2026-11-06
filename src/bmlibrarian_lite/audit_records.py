@@ -53,7 +53,13 @@ from .data_models import (
     ReportMetadata,
     ScoredDocument,
 )
-from .retraction_screen import RetractionRecord, RetractionScreen, run_deciding_of, run_status_of
+from .retraction_screen import (
+    RetractionRecord,
+    RetractionScreen,
+    run_deciding_of,
+    run_status_of,
+    stored_snapshot_unreadable,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -566,6 +572,26 @@ def recorded_retraction_snapshot(checkpoint_metadata: object) -> dict[str, dict[
     if not isinstance(rows, list):
         return {}
     return RetractionScreen.from_snapshot(rows)
+
+
+def retraction_snapshot_unreadable(checkpoint_metadata: object) -> bool:
+    """Whether a checkpoint recorded a retraction snapshot this build cannot read.
+
+    ``recorded_retraction_snapshot`` reads such a record as empty, as for a
+    run from before the check; this tells the two apart, so the reader is
+    told the record could not be read, never that the run was not checked
+    (#600).
+
+    Args:
+        checkpoint_metadata: The checkpoint's stored metadata (input, golden rule 1).
+
+    Returns:
+        True when the snapshot is present but not a list, or a list none of
+        whose rows this build reads.
+    """
+    if not isinstance(checkpoint_metadata, Mapping):
+        return False
+    return stored_snapshot_unreadable(checkpoint_metadata.get(CHECKPOINT_RETRACTION_SNAPSHOT_KEY))
 
 
 def excluded_in_snapshot(

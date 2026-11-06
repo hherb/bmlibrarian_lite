@@ -27,6 +27,10 @@ final class RetractionBadgeTests: XCTestCase {
         let never = RetractionBadge.Content(check: nil, inDetail: true)
         XCTAssertEqual(never?.text, "NOT CHECKED")
         XCTAssertEqual(never?.tooltip, "Retraction status never checked")
+        // recorded but unreadable: said as such (#662), and still only in the detail view
+        XCTAssertEqual(RetractionBadge.Content(check: nil, inDetail: true, unread: true)?.tooltip, RetractionText.statusUnread)
+        XCTAssertNil(RetractionBadge.Content(check: nil, unread: true))
+        XCTAssertEqual(RetractionBadge.Content(check: check("retracted"), inDetail: true, unread: true)?.text, "RETRACTED")
     }
 
     func testTooltipIsThePaperStatusLine() {

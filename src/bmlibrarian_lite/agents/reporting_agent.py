@@ -34,6 +34,7 @@ from ..citation_text import full_text_summary
 from ..data_models import AnalysisShortfall, AnalysisStage, Citation, ReportMetadata
 from ..retraction_screen import RetractionRecord
 from ..retraction_text import (
+    STATUS_UNREAD,
     format_reference_concern_annotation,
     format_retracted_section,
     retraction_methods_line,
@@ -820,6 +821,8 @@ Key passages:
             lines.append(
                 f"- **Retraction Check:** {retraction_methods_line(metadata.retraction_screen)}"
             )
+        elif metadata.retraction_screen_unread is not None:
+            lines.append(f"- **Retraction Check:** {STATUS_UNREAD}")
         # Documents the model could not read are neither accepted nor
         # rejected: recording them as rejected made a failure read as the
         # literature's answer (#261, #262).

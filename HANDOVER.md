@@ -94,7 +94,7 @@ have landed):
 `doc/cross_platform/retraction_parity/`). bmlib is a git dependency
 (`8845ba8`; a git pin blocks a PyPI upload). Snapshot rows keep
 `run_status`/`run_deciding` as facts of the run, set once. Open: #590–#593,
-#595, #599–#604, #607.
+#595, #599–#604 (#600 in part), #607.
 
 ## Recently landed (context)
 
@@ -110,13 +110,7 @@ have landed):
   (first release bundling `BmlibFFI`). **Never pass an `@Observable`
   property `inout`** (#697; pass a `ReferenceWritableKeyPath`).
 
-- **Cut-off, refused and unknown-stop answers** (#629, #631, #637; PRs #630,
-  #632, #636, #638): a cut-off answer raises `TruncatedResponseError`
-  (`.content` kept; smart search searches its complete queries and says so in
-  `smart_search_notice`), `refusal` raises `RefusedResponseError` (never
-  retried); an unknown stop reason is logged and read as finished unless the
-  whole token limit was generated. **A test stubbing the reporting or
-  interrogation answer patches `_chat_prose`, not `_chat`.**
+- **Cut-off, refused, unknown-stop answers** (#629, #631, #637; PRs #630, #632, #636, #638): `TruncatedResponseError` (`.content` kept; smart search searches its complete queries, `smart_search_notice`), `RefusedResponseError` (never retried); an unknown stop reason is read as finished unless the whole token limit was generated. **A test stubbing the reporting or interrogation answer patches `_chat_prose`.**
 - **Desktop: Find More Evidence** (PR #628) scores **into the reviewed run's
   checkpoint**; smart search is told every query already run. **Citations
   from full text, Retry Full Text** (PR #622; *Settings → Full Text*, off by
@@ -140,11 +134,10 @@ have landed):
   `europepmc_free_pdf.json`; converter **6**, analyser **2.7**. **Phase 4
   consumes bmlib's Rust through UniFFI** (no production caller yet). Open:
   #573–#581, #585, #587.
-- **Wrong-article PDFs** (#532, #541, #546; PRs #542, #548, #559; contract
-  `pdf_title_check.json`): a mismatch is set aside as `.mismatch`, never read;
-  the refusal is `wrong_article`, a skip **with its address**, never an
-  absence; no title/text is unchecked, never a match. Desktop: `<pdf>.kept`
-  (`bmll keep-pdf`). Open: #543, #545, #547, #555–#558.
+- **Wrong-article PDFs** (PRs #542, #548, #559; `pdf_title_check.json`): a
+  mismatch is set aside as `.mismatch`, never read; `wrong_article` is a skip
+  with its address, never an absence; no title/text is unchecked, never a
+  match. Open: #543, #545, #547, #555–#558.
 - **Bot-walled PDFs: the desktop browser rescue** (#480; PRs #521, #529,
   #536; spec `docs/superpowers/specs/2026-10-12-browser-rescue-design.md`, doc
   `doc/developer/browser_rescue.md`, which holds stages 2 and 3's binding
@@ -161,7 +154,7 @@ have landed):
   `AUTHENTICATION_ERROR` is "not available from this network", a 401 refuses
   the key; **never a redirect, never a link**; credentials that cannot be sent
   are never sent. Open: #506, #508–#513. **Stage C1: CORE's text** (PR #501):
-  a hit counts only if its own DOI is this article's; no key, nothing recorded.
+  a hit counts only by its own DOI; no key, nothing recorded.
 - **Stage B: every Unpaywall PDF, then OpenAlex's** (all three; PR #491;
   "Tried sources (#480)"). **The first copy served ends the walk; one not
   saved is a caching note, never a shortfall.** Stored: v1 for one
@@ -241,9 +234,10 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **Retraction checking** follow-ups: **#662** (an unchecked run's warning
-  rule, "could not be read" wording, an Apple snapshot entry left out unread,
-  needs a cross-platform decision),
+- **Retraction checking** follow-ups (#662 landed, rules in
+  `retraction_checking.md`): **#600** (audit outcomes of an unreadable
+  snapshot, rows skipped one by one), **#726** (Find More Evidence and the
+  apps write over one), **#727** (apps vs desktop line), **#728**,
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**
   (test gaps mostly closed; `RetractionRun` lives in its own file; left: the
@@ -441,8 +435,7 @@ page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
   (it is JVM-testable since PR #405 added kxml2 as a test dependency).
 - **PubMed parsers (Swift + Android)**: **#402** the year comes from
   `DateCompleted`, not `PubDate`; **#403** Swift appends a translated
-  `<OtherAbstract>`; **#404** Android's `ArticleId` has no `<Reference>`
-  guard; **#190** CI never builds the iOS app target.
+  `<OtherAbstract>`; **#190** CI never builds the iOS app target.
 
 - **Transparency parity and pricing**: #148, #159, #160, #150, #145; Android
   #116, #109; pricing #136/#137, #138, #139; small #140, #126, #111, #225.
@@ -500,7 +493,6 @@ page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
 ### Xcode Cloud contract (macOS ships from the multiplatform project)
 
 Xcode Cloud archives scheme `MedicalFactChecker` from a **fresh clone**;
-`xcode-project-guards.yml` enforces that **no Swift package reference points
-outside this repository** and **the scheme stays shared**. Reproduce: clone to
-`/tmp/x`, then `xcodebuild -scheme MedicalFactChecker -destination
-'platform=macOS' CODE_SIGNING_ALLOWED=NO archive` in `ios/MedicalFactChecker`.
+`xcode-project-guards.yml` keeps every Swift package reference inside this
+repository and the scheme shared. Reproduce: clone to `/tmp/x`; in its `ios/MedicalFactChecker`, `xcodebuild -scheme MedicalFactChecker
+-destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO archive`.

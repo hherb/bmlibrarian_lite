@@ -31,6 +31,7 @@ from bmlibrarian_lite.data_models import (
 from bmlibrarian_lite.retraction_screen import RetractionSnapshot, screen_documents
 from bmlibrarian_lite.retraction_store import PaperCheck
 from bmlibrarian_lite.retraction_text import (
+    STATUS_UNREAD,
     checked_on_line,
     format_reference_concern_annotation,
     format_retracted_section,
@@ -226,6 +227,29 @@ def test_unreadable_stored_screens_read_as_absent() -> None:
     assert sorted(r["document_id"] for r in restored.to_snapshot()) == ["a", "b"]
     assert [r["document_id"] for r in restored.excluded] == ["a"]  # still left out
     assert restored.checked_at is not None
+
+
+def test_an_unreadable_stored_screen_is_kept_and_said_as_unread() -> None:
+    """Not a list: kept as found by the next save, and the methods say unread, never nothing (#600)."""
+    damaged = {"rows": "from another build"}
+    metadata = ReportMetadata.from_dict({"retraction_screen": damaged})
+    assert metadata.retraction_screen_unread == damaged
+    assert metadata.to_dict()["retraction_screen"] == damaged
+    report = _report(None, retraction_screen_unread=damaged)
+    section = report.split("### Document Screening")[1].split("###")[0]
+    assert f"- **Retraction Check:** {STATUS_UNREAD}" in section
+    # a list none of whose rows this build reads is kept and said alike
+    newer = [{"document_id": "a"}]
+    metadata = ReportMetadata.from_dict({"retraction_screen": newer})
+    assert metadata.retraction_screen is None
+    assert metadata.to_dict()["retraction_screen"] == newer
+    # controls: no record is no line; a readable one replaces the unread copy
+    assert ReportMetadata.from_dict({}).retraction_screen_unread is None
+    assert ReportMetadata.from_dict({"retraction_screen": None}).retraction_screen_unread is None
+    screen = _screen(ok=RetractionStatus.CLEAR)
+    readable = ReportMetadata(retraction_screen=screen, retraction_screen_unread=damaged)
+    assert readable.to_dict()["retraction_screen"] == screen.to_snapshot()
+    assert STATUS_UNREAD not in _report(screen, retraction_screen_unread=damaged)
 
 
 def test_snapshot_rows_are_read_one_way_by_every_reader() -> None:

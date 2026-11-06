@@ -184,6 +184,19 @@ class ReportViewModelRetractionTest {
         assertTrue(state.isRetractionCheckUnread)
     }
 
+    /** #662: the run's own entry for this paper cannot be read; another paper's does not count. */
+    @Test
+    fun `a snapshot entry that cannot be read is unread`() {
+        snapshotJson = """{"d2": {"status": 7}}"""
+        assertFalse("control: another paper's entry", open().uiState.value.isRetractionCheckUnread)
+
+        snapshotJson = """{"d1": {"status": 7}}"""
+        val state = open().uiState.value
+
+        assertNull(state.selectedRetractionCheck)
+        assertTrue(state.isRetractionCheckUnread)
+    }
+
     @Test
     fun `a stored row that does not decode is unread`() {
         rows["pmid:1"] = "{not json"

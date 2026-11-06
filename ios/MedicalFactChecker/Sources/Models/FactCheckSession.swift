@@ -407,7 +407,8 @@ final class FactCheckSession {
     }
 
     /// The check each document's run used, keyed by `Document.id`; empty
-    /// when never checked. An entry this build cannot read is left out
+    /// when never checked, or when the snapshot cannot be read as a whole
+    /// (`retractionSnapshotUnread(for:)` tells the two apart). An entry this build cannot read is left out
     /// (logged), never the whole snapshot (#647).
     func retractionSnapshot() -> [String: PaperRetractionCheck] {
         retractionSnapshotEntries().reduce(into: [:]) { checks, entry in
@@ -419,6 +420,19 @@ final class FactCheckSession {
             }
             checks[entry.key] = check
         }
+    }
+
+    /// Whether the run recorded a snapshot this build cannot read: the whole
+    /// of it, or the entry for `documentID` (any entry when `nil`). Unparsed
+    /// is not absent, so a reader is told "could not be read" (#662).
+    ///
+    /// - Parameter documentID: The document whose entry to ask about; `nil` for any.
+    func retractionSnapshotUnread(for documentID: String? = nil) -> Bool {
+        guard let data = retractionSnapshotJSON?.data(using: .utf8) else { return false }
+        guard let entries = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return true }
+        let read = retractionSnapshot()
+        guard let documentID else { return entries.keys.contains { read[$0] == nil } }
+        return entries[documentID] != nil && read[documentID] == nil
     }
 
     /// The check each document is shown and counted by, keyed by `Document.id`:
@@ -443,7 +457,7 @@ final class FactCheckSession {
     /// Adds what a run used to the snapshot; a document checked again is
     /// replaced. Every other entry is kept as written, one this build cannot
     /// read included (#647); a snapshot unreadable as a whole is replaced
-    /// (logged by ``retractionSnapshotEntries()``).
+    /// (logged by ``retractionSnapshotEntries()``, #726).
     ///
     /// - Parameter checks: The checks used, keyed by `Document.id`; nothing is written for none.
     func recordRetractionSnapshot(_ checks: [String: PaperRetractionCheck]) {

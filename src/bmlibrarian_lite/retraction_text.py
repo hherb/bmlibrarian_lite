@@ -241,6 +241,8 @@ CHECK_AGAIN_FAILED = "; it could not be checked again, so this is still the run'
 CHECK_AGAIN_STOPPED = "; checking again was stopped, so this is still the run's record"
 CHECK_AGAIN_NOT_SAVED = "; the new status could not be saved with this run"
 NO_AUDIT_RECORD_LINE = "Retraction status not recorded for this report"
+# a run's record this build cannot read: not knowing is not "never checked" (#600, #662)
+STATUS_UNREAD = "Retraction status could not be read"
 STORED_CHECKS_UNREAD = "; later checks could not be read"
 
 

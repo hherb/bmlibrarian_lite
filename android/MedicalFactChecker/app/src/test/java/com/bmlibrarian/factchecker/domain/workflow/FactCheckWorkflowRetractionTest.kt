@@ -588,6 +588,65 @@ class FactCheckWorkflowRetractionTest {
         workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
     }
 
+    /** #662: a snapshot recorded but unreadable is said as such, never "never checked". */
+    @Test
+    fun `a restored session whose snapshot cannot be read says so`() = runTest {
+        hold("d1")
+        session = session.copy(workflowStep = WorkflowStep.COMPLETED)
+        snapshotJson = null
+        workflow.restoreForViewing(session)
+        assertEquals("control", "Retraction status never checked", workflow.retractionSavedWork.value?.line)
+
+        snapshotJson = "[1, 2]"
+        workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
+
+        assertEquals(RetractionText.STATUS_UNREAD, workflow.retractionSavedWork.value?.line)
+        assertTrue(asked.isEmpty())
+
+        // one entry this build cannot read, and nothing else to show: unread too
+        snapshotJson = """{"d1": {"status": 7}}"""
+        workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
+        assertEquals(RetractionText.STATUS_UNREAD, workflow.retractionSavedWork.value?.line)
+    }
+
+    /** #662's control: a stored check is shown over an unreadable snapshot, as on iOS. */
+    @Test
+    fun `a restored session with an unreadable snapshot shows a stored check instead`() = runTest {
+        hold("d1")
+        documents.replaceAll { _, document -> document.copy(relevanceScore = 5) }
+        citations += CitationEntity(documentId = "d1", passage = "A passage.")
+        rows["pmid:1"] = PaperRetractionCheck.encode(CLEAR.copy(checkedAtMs = RUN_MS))
+        session = session.copy(workflowStep = WorkflowStep.COMPLETED)
+        snapshotJson = "[1, 2]"
+        workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
+
+        assertEquals("Retraction status checked 2026-10-18", workflow.retractionSavedWork.value?.line)
+    }
+
+    /** #662: the report written over an unreadable snapshot says so in its methods. */
+    @Test
+    fun `a report over an unreadable snapshot says its retraction status could not be read`() = runTest {
+        hold("d1")
+        documents["d1"] = documents.getValue("d1").copy(relevanceScore = 5)
+        snapshotJson = "[1, 2]"
+
+        run()
+
+        val report = reports.single()
+        assertTrue(report, report.contains("- **Retraction Check:** ${RetractionText.STATUS_UNREAD}"))
+        assertFalse(report, report.startsWith("> **Retraction check:**"))
+    }
+
+    @Test
+    fun `a report from a session before the check has no retraction line`() = runTest {
+        hold("d1")
+        documents["d1"] = documents.getValue("d1").copy(relevanceScore = 5)
+
+        run()
+
+        assertFalse(reports.single(), reports.single().contains("Retraction Check:"))
+    }
+
     @Test
     fun `a restored session says when its papers were checked, asking nothing`() = runTest {
         restoreCheckedSession()

@@ -59,6 +59,7 @@ from ..audit_records import (
     recorded_extraction_failures,
     recorded_min_score,
     recorded_retraction_snapshot,
+    retraction_snapshot_unreadable,
 )
 from ..benchmarking import BenchmarkRunner
 from ..benchmarking.display import benchmark_status_text
@@ -819,7 +820,9 @@ class LiteMainWindow(QMainWindow):
             )
             # When its papers were checked, a warning for a cited paper
             # retracted since (from the store, no request), and Check again
-            self.report_tab.show_saved_retraction(checkpoint.id)
+            self.report_tab.show_saved_retraction(
+                checkpoint.id, snapshot_unread=retraction_snapshot_unreadable(checkpoint.metadata)
+            )
 
             # 9. Load benchmark results if available
             self._load_benchmark_results_for_question(question)

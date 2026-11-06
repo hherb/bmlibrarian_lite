@@ -23,14 +23,19 @@ package com.bmlibrarian.factchecker.util.retraction
  * @param papers Every paper the run held (kept and left out), by title, with the check it used
  * @param causes Why kept papers are unchecked ([RetractionText.uncheckedCauses]),
  *   when the live run knows; empty gives the count alone, as the desktop's restored snapshot does
+ * @param unread The run's record cannot be read: the methods line says so ([UNREAD])
  */
-class RetractionReportSection(papers: List<Pair<String, PaperRetractionCheck>>, causes: List<String> = emptyList()) {
+class RetractionReportSection(
+    papers: List<Pair<String, PaperRetractionCheck>>,
+    causes: List<String> = emptyList(),
+    unread: Boolean = false
+) {
 
     /** The papers left out as retracted, in the order given. */
     val leftOut: List<Pair<String, PaperRetractionCheck>> = papers.filter { it.second.isRetracted }
 
-    /** [RetractionText.savedWorkLine] for the run: as the desktop, the oldest decided check. */
-    val methodsLine: String = RetractionText.savedWorkLine(papers.map { it.second })
+    /** [RetractionText.savedWorkLine] for the run (as the desktop, the oldest decided check), or [RetractionText.STATUS_UNREAD] when [unread]. */
+    val methodsLine: String = if (unread) RetractionText.STATUS_UNREAD else RetractionText.savedWorkLine(papers.map { it.second })
 
     /** The report's opening notice, or null when nothing was left out and every paper was checked. */
     val notice: String? = RetractionText.runSummaryClause(
@@ -51,4 +56,12 @@ class RetractionReportSection(papers: List<Pair<String, PaperRetractionCheck>>, 
     /** The methods line as a Methodology list item. */
     val methodsMarkdown: String
         get() = "- **Retraction Check:** $methodsLine"
+
+    companion object {
+        /**
+         * A run whose snapshot this build cannot read: the methods line says
+         * so, with no notice and nothing left out (the desktop's and Swift's, #662).
+         */
+        val UNREAD = RetractionReportSection(emptyList(), unread = true)
+    }
 }
