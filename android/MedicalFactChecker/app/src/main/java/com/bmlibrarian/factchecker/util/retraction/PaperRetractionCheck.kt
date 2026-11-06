@@ -333,17 +333,20 @@ object RetractionSnapshot {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    private fun entries(text: String?): Map<String, JsonElement> {
+    /** The stored snapshot's entries; null for one this build cannot read as a whole (none: empty). */
+    private fun parsed(text: String?): Map<String, JsonElement>? {
         if (text == null) return emptyMap()
         return try {
-            json.parseToJsonElement(text) as? JsonObject ?: emptyMap<String, JsonElement>().also {
+            json.parseToJsonElement(text) as? JsonObject ?: null.also {
                 Log.w(TAG, "A retraction snapshot is not an object")
             }
         } catch (e: SerializationException) {
             Log.w(TAG, "A retraction snapshot could not be read")
-            emptyMap()
+            null
         }
     }
+
+    private fun entries(text: String?): Map<String, JsonElement> = parsed(text) ?: emptyMap()
 
     /**
      * The snapshot's readable entries.
@@ -384,14 +387,17 @@ object RetractionSnapshot {
     /**
      * The snapshot with [checks] added; a document checked again is replaced,
      * and every other entry, readable or not, is kept as it was. A snapshot
-     * unreadable as a whole is replaced (#726).
+     * unreadable as a whole is never written over (#726, the desktop's
+     * `_merge_retraction_snapshot`): what the run left out would be lost; the
+     * stored rows keep the answers.
      *
      * @param text The stored snapshot, or null for none
      * @param checks What a run used, by document id
-     * @return The snapshot to store
+     * @return The snapshot to store; null when [text] cannot be read as a whole
      */
-    fun merged(text: String?, checks: Map<String, PaperRetractionCheck>): String {
-        val all = entries(text) + checks.mapValues { json.encodeToJsonElement(PaperRetractionCheck.serializer(), it.value) }
+    fun merged(text: String?, checks: Map<String, PaperRetractionCheck>): String? {
+        val stored = parsed(text) ?: return null
+        val all = stored + checks.mapValues { json.encodeToJsonElement(PaperRetractionCheck.serializer(), it.value) }
         return json.encodeToString(JsonObject.serializer(), JsonObject(all))
     }
 }

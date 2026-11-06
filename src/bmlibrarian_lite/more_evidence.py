@@ -46,12 +46,14 @@ from .analysis_failures import pass_failure_detail
 from .audit_records import (
     CHECKPOINT_MIN_SCORE_KEY,
     CHECKPOINT_QUALITY_FILTERED_KEY,
+    CHECKPOINT_RETRACTED_UNSAVED_KEY,
     CHECKPOINT_RETRACTION_SNAPSHOT_KEY,
     checkpoint_metadata_with_extraction_failures,
     checkpoint_metadata_with_report_metadata,
     recorded_extraction_failures,
     recorded_report_metadata,
     recorded_retraction_snapshot,
+    retraction_snapshot_unreadable,
 )
 from .citation_full_texts import FullTextFetch, fetch_full_texts
 from .citation_text import full_text_min_score
@@ -71,6 +73,7 @@ from .full_text_retry import (
     write_report_again,
 )
 from .quality.data_models import QualityFilter
+from .retraction_text import SCREEN_NOT_SAVED
 from .search_failures import combined_shortfalls
 from .smart_search import NO_NEW_EVIDENCE_TEXT, SmartSearchContext, SmartSearchRound
 from .utils import classify_analysis_exception
@@ -128,10 +131,14 @@ class MoreEvidence:
             read, a report owed).
         left_out: Of the documents screened (held over and new), papers left
             out as retracted.
-        filtered_out: Of those, documents the run's quality filter left out.
+        filtered_out: Of the documents kept, those the run's quality filter
+            left out.
         scored: Documents the model scored.
         relevant: Of those, documents scored at or above the run's threshold.
         scoring_failures: Documents the model could not score.
+        screen_unsaved: Whether the screen's rows could not be saved with
+            the run, whose snapshot this build cannot read (#726); the shared
+            check rows keep the answers.
         extraction_failures: Relevant papers whose citations could not be
             extracted.
         queries: The alternative queries smart search searched, if it ran.
@@ -149,6 +156,7 @@ class MoreEvidence:
     resumed: int = 0
     caught_up: bool = False
     left_out: int = 0
+    screen_unsaved: bool = False
     filtered_out: int = 0
     scored: int = 0
     relevant: int = 0
@@ -189,6 +197,8 @@ def more_evidence_text(outcome: MoreEvidence) -> str:
         )
     if outcome.left_out:
         parts.append(f"{outcome.left_out} left out as retracted.")
+    if outcome.screen_unsaved:
+        parts.append(SCREEN_NOT_SAVED)
     if outcome.filtered_out:
         parts.append(f"{outcome.filtered_out} left out by the review's quality filter.")
     if outcome.scored:
@@ -358,8 +368,11 @@ def find_more_evidence(
         tell(0, 1, "Checking for retractions...")
         screened = screen(held)
         kept = list(screened.kept)
-        outcome = replace(outcome, left_out=len(screened.excluded))
-        _merge_retraction_snapshot(storage, checkpoint.id, screened)
+        saved = _merge_retraction_snapshot(storage, checkpoint.id, screened)
+        outcome = replace(outcome, left_out=len(screened.excluded), screen_unsaved=not saved)
+        if not saved:
+            _record_ids(storage, checkpoint.id, CHECKPOINT_RETRACTED_UNSAVED_KEY,
+                        [d.id for d in screened.excluded])
         _keep_metadata(storage, checkpoint.id, metadata, [d.id for d in kept])
     if should_stop():
         return replace(outcome, cancelled=True)
@@ -371,8 +384,8 @@ def find_more_evidence(
             return replace(outcome, cancelled=True)
         metadata.documents_filtered_by_quality += len(kept) - len(passed)
         outcome = replace(outcome, filtered_out=len(kept) - len(passed))
-        _record_quality_filtered(storage, checkpoint.id,
-                                 [d.id for d in kept if d.id not in {p.id for p in passed}])
+        _record_ids(storage, checkpoint.id, CHECKPOINT_QUALITY_FILTERED_KEY,
+                    [d.id for d in kept if d.id not in {p.id for p in passed}])
         kept = passed
         _keep_metadata(storage, checkpoint.id, metadata, [d.id for d in kept])
 
@@ -420,7 +433,8 @@ def known_document_ids(storage: LiteStorage, question: str) -> set[str]:
     """The documents a search for more must not count as new.
 
     Every document scored for the question, and those its reviewed run
-    screened or whose quality filter left them out: found again, they would
+    screened or whose quality filter left them out, or that it left out as
+    retracted when its snapshot could not take them: found again, they would
     be counted again.
 
     Args:
@@ -437,19 +451,20 @@ def known_document_ids(storage: LiteStorage, question: str) -> set[str]:
         judged | failed
         | set(recorded_retraction_snapshot(stored))
         | set(_stored_ids(stored.get(CHECKPOINT_QUALITY_FILTERED_KEY)))
+        | set(_stored_ids(stored.get(CHECKPOINT_RETRACTED_UNSAVED_KEY)))
     )
 
 
-def _record_quality_filtered(storage: LiteStorage, checkpoint_id: str, ids: list[str]) -> None:
-    """Add documents the run's quality filter left out to its record of them."""
+def _record_ids(storage: LiteStorage, checkpoint_id: str, key: str, ids: list[str]) -> None:
+    """Add documents the run left out to its record of them under ``key``."""
     if not ids:
         return
     current = storage.get_checkpoint(checkpoint_id)
     stored = current.metadata if current is not None else {}
-    earlier = _stored_ids(stored.get(CHECKPOINT_QUALITY_FILTERED_KEY))
+    earlier = _stored_ids(stored.get(key))
     storage.update_checkpoint(
         checkpoint_id=checkpoint_id,
-        metadata={**stored, CHECKPOINT_QUALITY_FILTERED_KEY: [*earlier, *ids]},
+        metadata={**stored, key: [*earlier, *ids]},
         touch=False,
     )
 
@@ -692,17 +707,27 @@ def _stored_ids(value: object) -> list[str]:
 
 def _merge_retraction_snapshot(
     storage: LiteStorage, checkpoint_id: str, screen: RetractionScreen
-) -> None:
+) -> bool:
     """Put the screened documents' rows in the run's retraction snapshot.
 
     A run checked for retractions keeps a row per document it held; a run
     from before the check keeps none, so it gains only these. A screened
     document's row replaces any it had: only documents held over from an
     earlier *Find More Evidence* have one, written by a screen a stop may
-    have cut short, never by the review.
+    have cut short, never by the review. A snapshot this build cannot read
+    is never written over (#726, as *Check again*): what the run left out,
+    and why, would be lost; the shared check rows keep the answers, and the
+    caller records the ids left out. A list with only some unreadable rows
+    still loses those rows here (#600).
+
+    Returns:
+        Whether the rows were saved with the run.
     """
     current = storage.get_checkpoint(checkpoint_id)
     stored = current.metadata if current is not None else {}
+    if retraction_snapshot_unreadable(stored):
+        logger.warning("Not writing over %s's unreadable retraction snapshot", checkpoint_id)
+        return False
     rows = recorded_retraction_snapshot(stored)
     for row in screen.to_snapshot():
         rows[row["document_id"]] = row
@@ -711,6 +736,7 @@ def _merge_retraction_snapshot(
         metadata={**stored, CHECKPOINT_RETRACTION_SNAPSHOT_KEY: list(rows.values())},
         touch=False,
     )
+    return True
 
 
 class _StopEvent(threading.Event):

@@ -223,6 +223,10 @@ object RetractionText {
     /** Added to the saved-work line when *Check again*'s answers could not be saved. */
     const val CHECK_AGAIN_NOT_SAVED = "; the new status could not be saved with this run"
 
+    /** Added to a run's notice when its snapshot could not be read as a whole, so was never written over (#726). */
+    const val SCREEN_NOT_SAVED =
+        "The new retraction status could not be saved with this run, whose record of it could not be read."
+
     /**
      * *Check again*'s note for decided papers no source answered this time, whose record stays; "" for none.
      *

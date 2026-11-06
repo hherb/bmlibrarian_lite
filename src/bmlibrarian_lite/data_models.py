@@ -2531,7 +2531,9 @@ class ReportMetadata:
             as its snapshot rows
         retraction_screen_unread: A stored ``retraction_screen`` this build
             cannot read (not a list, or no row it reads), kept as found so a later save does not
-            erase it, and said as unread, never as no check (#600); None
+            erase it, and said as unread, never as no check (#600); when the
+            report is written again, the checkpoint's unreadable snapshot, so
+            the report says unread as the reopen line does (#726); None
             otherwise
         model_configs: LLM configuration for each workflow task
         citations_extracted: Total citation passages extracted

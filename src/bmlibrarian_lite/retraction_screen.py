@@ -537,10 +537,14 @@ def latest_checks(
 ) -> dict[str, PaperCheck]:
     """The latest check of each paper: a *Check again* row's, or the store's when no older.
 
+    A decided check always wins over an unchecked one, whatever their times.
+
     A row carrying ``run_status`` holds *Check again*'s answer, so it warns
     even when the store has no row (another machine, a reset data directory,
-    a failed read). A store row no older replaces it, except an unchecked
-    one over a decided row: an outage is not knowledge.
+    a failed read). A store row no older replaces it. Whatever the times, a
+    decided check is never replaced by an unchecked one, either way round: an
+    outage is not knowledge (#728: an unchecked *Check again* row never hides
+    an older retraction in the store).
 
     Args:
         snapshot: The run's snapshot rows by document id.
@@ -556,14 +560,13 @@ def latest_checks(
             out[doc_id] = seed
     for doc_id, check in stored.items():
         seed = out.get(doc_id)
-        if seed is not None and (
-            as_utc(check.checked_at) < as_utc(seed.checked_at)
-            or (
-                check.verdict.status is RetractionStatus.UNCHECKED
-                and seed.verdict.status is not RetractionStatus.UNCHECKED
-            )
-        ):
-            continue
+        if seed is not None:
+            check_open = check.verdict.status is RetractionStatus.UNCHECKED
+            seed_open = seed.verdict.status is RetractionStatus.UNCHECKED
+            if check_open and not seed_open:
+                continue
+            if check_open == seed_open and as_utc(check.checked_at) < as_utc(seed.checked_at):
+                continue
         out[doc_id] = check
     return out
 

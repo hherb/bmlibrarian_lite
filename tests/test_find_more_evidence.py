@@ -9,6 +9,7 @@ Also the review's own smart search, when too few documents are relevant.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -55,7 +56,11 @@ from bmlibrarian_lite.more_evidence import (
 )
 from bmlibrarian_lite.quality.data_models import QualityFilter, QualityTier
 from bmlibrarian_lite.retraction_screen import RetractionScreen, unchecked_check
-from bmlibrarian_lite.retraction_text import format_retraction_notice, retraction_methods_line
+from bmlibrarian_lite.retraction_text import (
+    SCREEN_NOT_SAVED,
+    format_retraction_notice,
+    retraction_methods_line,
+)
 from bmlibrarian_lite.smart_search import (
     NO_NEW_EVIDENCE_TEXT,
     NO_USABLE_QUERY_TEXT,
@@ -438,11 +443,12 @@ class TestWhatIsFoundIsScreened:
         run = Run(storage, screen=screen)
         outcome = run(found(storage, "5", "6"))
 
-        assert (outcome.left_out, run.scorer.scored) == (1, ["doc-5"])
+        assert (outcome.left_out, outcome.screen_unsaved, run.scorer.scored) == (1, False, ["doc-5"])
         rows = storage.get_checkpoint(checkpoint_id).metadata[CHECKPOINT_RETRACTION_SNAPSHOT_KEY]
         assert {(r["document_id"], r["excluded"]) for r in rows} == {
             ("doc-5", False), ("doc-6", True)}
         assert "1 left out as retracted." in more_evidence_text(outcome)
+        assert SCREEN_NOT_SAVED not in more_evidence_text(outcome)
 
     def test_a_row_a_stopped_screen_wrote_is_replaced(self, storage: LiteStorage) -> None:
         """Held over unchecked, then found retracted: the report reads it as left out."""
@@ -510,6 +516,47 @@ class TestWhatIsFoundIsScreened:
         assert record is not None
         assert (record.unchecked_count, len(record.to_snapshot())) == (0, 4)
         assert format_retraction_notice(record) is None
+
+    def test_an_unreadable_snapshot_is_never_written_over(self, storage: LiteStorage) -> None:
+        """#726: what the run left out stays; the report says unread, as the reopen line does.
+
+        The report metadata's own copy is readable, as a disagreeing record would be.
+        """
+        checkpoint_id = reviewed(storage)
+        papers = [make_document(p) for p in ("1", "2", "3")]
+        readable = RetractionScreen(kept=tuple(papers), excluded=(),
+                                    checks=RetractingChecker().check(papers))
+        stored = storage.get_checkpoint(checkpoint_id).metadata
+        copy = {**stored[CHECKPOINT_REPORT_METADATA_KEY], "retraction_screen": readable.to_snapshot()}
+        unreadable = {"rows": "a newer build's"}
+        storage.update_checkpoint(checkpoint_id=checkpoint_id, metadata={
+            **stored, CHECKPOINT_REPORT_METADATA_KEY: copy,
+            CHECKPOINT_RETRACTION_SNAPSHOT_KEY: unreadable})
+
+        def retract_6(documents: list[LiteDocument]) -> RetractionScreen:
+            return RetractionScreen(kept=tuple(d for d in documents if d.id != "doc-6"),
+                                    excluded=tuple(d for d in documents if d.id == "doc-6"), checks={})
+
+        run = Run(storage, screen=retract_6)
+        outcome = run(found(storage, "5", "6"))
+
+        kept = storage.get_checkpoint(checkpoint_id).metadata
+        assert kept[CHECKPOINT_RETRACTION_SNAPSHOT_KEY] == unreadable
+        assert (outcome.left_out, outcome.screen_unsaved, run.scorer.scored) == (1, True, ["doc-5"])
+        assert SCREEN_NOT_SAVED in more_evidence_text(outcome)
+        assert run.metadata.retraction_screen is None
+        assert run.metadata.retraction_screen_unread == unreadable
+        assert recorded_report_metadata(kept).retraction_screen_unread == unreadable
+        # control: without screen_unsaved nothing is said
+        assert SCREEN_NOT_SAVED not in more_evidence_text(replace(outcome, screen_unsaved=False))
+
+        # what it left out is still known, so found again it is not new (#729 review)
+        from bmlibrarian_lite.more_evidence import known_document_ids
+
+        assert "doc-6" in known_document_ids(storage, QUESTION)
+        again = Run(storage, screen=retract_6, rounds=[SmartSearchRound((), ("q",))])
+        assert again([]).notice == NO_NEW_EVIDENCE_TEXT
+        assert "doc-6" in again.contexts[0][1]
 
 
 class TestTheRunsQualityFilter:

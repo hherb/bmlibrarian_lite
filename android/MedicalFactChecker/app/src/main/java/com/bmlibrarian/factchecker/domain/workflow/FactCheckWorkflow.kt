@@ -225,9 +225,10 @@ class FactCheckWorkflow @Inject constructor(
 
     /**
      * What this run's retraction screen left out and could not check
-     * ("Retraction check: …."), or null when it left nothing out and checked
-     * every paper. Set as documents are screened before scoring, reset when a
-     * run starts.
+     * ("Retraction check: …."), and that the new status could not be saved
+     * with the session (#726); or null when it left nothing out, checked every
+     * paper and saved them. Set as documents are screened before scoring,
+     * reset when a run starts.
      */
     private val _retractionNotice = MutableStateFlow<String?>(null)
     val retractionNotice: StateFlow<String?> = _retractionNotice.asStateFlow()
@@ -240,19 +241,23 @@ class FactCheckWorkflow @Inject constructor(
         val used = LinkedHashMap<String, Pair<RetractionPaper, PaperRetractionCheck>>()
         val failed = mutableSetOf<RetractionPaper>()
 
+        /** Whether the session's snapshot could not be read, so this run's checks were not saved in it (#726). */
+        var unsaved = false
+
         /** Why the kept papers are unchecked. */
         fun causes(): List<String> = RetractionText.uncheckedCauses(
             used.values.filterNot { it.second.isRetracted }.map { it.first to it.second }, failed
         )
 
-        /** "Retraction check: <the desktop's run summary clause>.", or null. */
+        /** "Retraction check: <the desktop's run summary clause>.", then [RetractionText.SCREEN_NOT_SAVED] when [unsaved]; or null. */
         fun notice(): String? {
             val kept = used.values.filterNot { it.second.isRetracted }
-            return RetractionText.runSummaryClause(
+            val summary = RetractionText.runSummaryClause(
                 excluded = used.size - kept.size,
                 unchecked = kept.count { it.second.isUnchecked },
                 causes = causes()
             )?.let(RetractionText::runNotice)
+            return if (unsaved) listOfNotNull(summary, RetractionText.SCREEN_NOT_SAVED).joinToString(" ") else summary
         }
     }
 
@@ -2064,7 +2069,8 @@ class FactCheckWorkflow @Inject constructor(
 
     /**
      * Screen [documents] for retraction before they are scored, storing each
-     * paper's check and the session's snapshot, and setting [retractionNotice].
+     * paper's check and the session's snapshot (unless that cannot be read as
+     * a whole, #726), and setting [retractionNotice].
      *
      * Each document is checked at most once per run. A paper whose stored row
      * [PaperRetractionCheck.isReusable] is not asked again; otherwise what is
@@ -2102,7 +2108,13 @@ class FactCheckWorkflow @Inject constructor(
             }
             for (document in unseen) run.used[document.id] = papers.getValue(document.id) to used.getValue(document.id)
             val stored = sessionRepository.getSession(session.id)?.retractionSnapshotJson
-            sessionRepository.updateRetractionSnapshot(session.id, RetractionSnapshot.merged(stored, used))
+            val merged = RetractionSnapshot.merged(stored, used)
+            if (merged != null) {
+                sessionRepository.updateRetractionSnapshot(session.id, merged)
+            } else {
+                Log.w(TAG, "Not writing over an unreadable retraction snapshot")
+                run.unsaved = true
+            }
             _retractionNotice.value = run.notice()
         }
         return documents.filterNot { run.used[it.id]?.second?.isRetracted == true }

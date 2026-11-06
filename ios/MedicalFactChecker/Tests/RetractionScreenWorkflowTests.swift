@@ -861,12 +861,46 @@ final class RetractionScreenWorkflowTests: XCTestCase {
     /// not a later stored one, wherever the two disagree.
     func testWhatIsToScoreFollowsTheRunsCheckNotTheStoredOne() async throws {
         let (session, documents) = makeSession(["10.1000/a", "10.1000/b"])
-        session.recordRetractionSnapshot([documents[0].id: Self.retracted(), documents[1].id: Self.clear()])
+        _ = session.recordRetractionSnapshot([documents[0].id: Self.retracted(), documents[1].id: Self.clear()])
         documents[0].retractionCheck = Self.clear()  // a later check: the run still left it out
         documents[1].retractionCheck = Self.retracted()  // a later check: the run kept it
 
         XCTAssertEqual(session.documentsToScore, 1)
         XCTAssertEqual(session.unscoredDocuments.map(\.id), [documents[1].id])
+    }
+
+    /// #726: a snapshot unreadable as a whole is never written over; the run
+    /// still screens, and its notice says the status was not saved.
+    func testAnUnreadableSnapshotIsNeverWrittenOver() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b"])
+        session.retractionSnapshotJSON = "[\"a newer build's\"]"
+        let workflow = restore(session, check: Self.answering([
+            "10.1000/a": Self.retracted(), "10.1000/b": Self.clear(),
+        ]))
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        XCTAssertEqual(session.retractionSnapshotJSON, "[\"a newer build's\"]")
+        XCTAssertNil(documents[0].scoredAt, "the retracted paper is still left out")
+        XCTAssertEqual(documents[0].retractionCheck?.isRetracted, true, "the stored check keeps the answer")
+        XCTAssertNotNil(documents[1].scoredAt)
+        XCTAssertEqual(
+            workflow.retractionNotice,
+            "Retraction check: 1 retracted paper left out. " + RetractionText.screenNotSaved)
+    }
+
+    /// #726: with nothing left out and every paper checked, the notice is the sentence alone.
+    func testAnUnreadableSnapshotUnderAnAllClearRunGivesTheSentenceAlone() async throws {
+        let (session, _) = makeSession(["10.1000/a", "10.1000/b"])
+        session.retractionSnapshotJSON = "\"a newer build's\""
+        let workflow = restore(session, check: Self.answering([
+            "10.1000/a": Self.clear(), "10.1000/b": Self.clear(),
+        ]))
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        XCTAssertEqual(session.retractionSnapshotJSON, "\"a newer build's\"")
+        XCTAssertEqual(workflow.retractionNotice, RetractionText.screenNotSaved)
     }
 
     // MARK: - Failure and cancel

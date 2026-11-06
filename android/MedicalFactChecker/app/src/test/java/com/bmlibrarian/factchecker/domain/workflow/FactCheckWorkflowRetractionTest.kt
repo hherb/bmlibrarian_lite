@@ -575,6 +575,43 @@ class FactCheckWorkflowRetractionTest {
         coVerify(exactly = 1) { sessionRepository.updateRetractionSnapshot(SESSION_ID, any()) }
     }
 
+    /** #726: a snapshot unreadable as a whole is never written over; the run still screens and says so. */
+    @Test
+    fun `an unreadable snapshot is never written over and the notice says the status was not saved`() = runTest {
+        BmlibFfi.assumeAvailable()
+        hold("d1")
+        hold("d2")
+        answers["1"] = RETRACTED
+        snapshotJson = "[\"a newer build's\"]"
+
+        run()
+
+        assertEquals(listOf("d2"), scored)
+        assertEquals("[\"a newer build's\"]", snapshotJson)
+        coVerify(exactly = 0) { sessionRepository.updateRetractionSnapshot(any(), any()) }
+        assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
+        val notice = workflow.retractionNotice.value!!
+        assertTrue(notice, notice.endsWith(RetractionText.SCREEN_NOT_SAVED))
+        // control: a readable snapshot is merged
+        assertTrue(RetractionSnapshot.merged("{}", mapOf("d1" to RETRACTED)) != null)
+    }
+
+    /** #726: with nothing left out and every paper checked, the notice is the sentence alone. */
+    @Test
+    fun `an unreadable snapshot under an all-clear run gives the not-saved sentence alone`() = runTest {
+        BmlibFfi.assumeAvailable()
+        hold("d1")
+        hold("d2")
+        answers["1"] = CLEAR
+        answers["2"] = CLEAR
+        snapshotJson = "\"a newer build's\""
+
+        run()
+
+        assertEquals(listOf("d1", "d2"), scored)
+        assertEquals(RetractionText.SCREEN_NOT_SAVED, workflow.retractionNotice.value)
+    }
+
     // ==================== Saved work: a restored session, Check again ====================
 
     /** A completed session whose run checked d1 (cited) and d2 a day ago and found both clear. */
