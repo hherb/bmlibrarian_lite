@@ -42,6 +42,20 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertEqual(predating["x"]?.status, "clear", "a run that recorded none reads the stored checks")
     }
 
+    /// #728: the run, and any *Check again*, saw an outage; the store knew of
+    /// a retraction before it.
+    func testAnUncheckedRunNeverHidesAnOlderStoredRetraction() {
+        let older = run.addingTimeInterval(-1)
+        let rows = RetractionSavedWork.recheckedChecks(
+            run: ["a": check("unchecked", at: run), "b": check("unchecked", at: run)],
+            stored: ["a": check("retracted", at: older), "b": check("unchecked", at: older)])
+        XCTAssertEqual(rows["a"]?.status, "retracted", "a decided stored check wins whatever its time")
+        XCTAssertEqual(
+            RetractionSavedWork.changedSinceRun(run: ["a": check("unchecked", at: run)], latest: rows, cited: ["a"]),
+            ["a"])
+        XCTAssertEqual(rows["b"]?.checkedAt, run, "an older unchecked stored check still loses to the run's")
+    }
+
     func testRecheckedChecksReadAScoredPaperTheRunHasNoCheckOf() {
         // #684: a session older than the check that Find More Evidence gave a snapshot
         let rows = RetractionSavedWork.recheckedChecks(

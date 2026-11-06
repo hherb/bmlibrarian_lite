@@ -27,7 +27,7 @@ object RetractionSavedWork {
     /**
      * The checks a reopened session's line and badges are read from: each the
      * run's, unless the paper's stored row is newer and is not an unchecked one
-     * over a decided one. A session whose run recorded none (it predates the
+     * over a decided one, or is decided where the run's is unchecked ([rechecked]). A session whose run recorded none (it predates the
      * check) reads the stored rows alone, as does a scored paper the run has
      * no check of (Find More Evidence on such a session, #684); one with no
      * stored row either is unchecked, as in the report written again (#685).
@@ -49,9 +49,17 @@ object RetractionSavedWork {
             run.mapValues { (id, check) -> stored[id]?.let { rechecked(check, it) } ?: check }
     }
 
-    /** One paper's check since its run: [stored] when newer than [run] and not an unchecked one over a decided one. */
-    fun rechecked(run: PaperRetractionCheck, stored: PaperRetractionCheck): PaperRetractionCheck =
-        if (stored.checkedAtMs > run.checkedAtMs && !(stored.isUnchecked && !run.isUnchecked)) stored else run
+    /**
+     * One paper's check since its run: a decided check over an unchecked one,
+     * whatever the times (an outage is not knowledge, either way round: an
+     * unchecked run never hides an older stored retraction, #728), else
+     * [stored] when newer than [run].
+     */
+    fun rechecked(run: PaperRetractionCheck, stored: PaperRetractionCheck): PaperRetractionCheck = when {
+        run.isUnchecked != stored.isUnchecked -> if (run.isUnchecked) stored else run
+        stored.checkedAtMs > run.checkedAtMs -> stored
+        else -> run
+    }
 
     /**
      * The cited papers whose status changed for the worse since the run: the

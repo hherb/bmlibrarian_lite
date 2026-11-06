@@ -331,6 +331,24 @@ def test_latest_checks_seeds_from_checked_again_rows() -> None:
     assert latest_checks(run_snapshot(), {}) == {}
 
 
+def test_an_unchecked_check_again_row_never_hides_an_older_stored_retraction() -> None:
+    """#728: the run and Check again both saw an outage; the store's older retraction still warns."""
+    unchecked_run = {**run_snapshot(), CITED.id: {**run_snapshot()[CITED.id], "status": "unchecked"}}
+    outage = screen_documents(DOCUMENTS, {CITED.id: check(RetractionStatus.UNCHECKED, NOW)})
+    rows = {r["document_id"]: r for r in rechecked_snapshot(unchecked_run, outage).to_snapshot()}
+    assert rows[CITED.id]["status"] == "unchecked" and RUN_STATUS_KEY in rows[CITED.id]
+    older_retraction = check(RetractionStatus.RETRACTED, RUN - timedelta(days=1))
+    latest = latest_checks(rows, {CITED.id: older_retraction})
+    assert latest[CITED.id] == older_retraction
+    assert changed_since_snapshot(rows, latest, {CITED.id}) == [(CITED.id, older_retraction)]
+    # controls: an older unchecked store row is still older news than the Check again row
+    older_outage = check(RetractionStatus.UNCHECKED, RUN - timedelta(days=1))
+    assert latest_checks(rows, {CITED.id: older_outage})[CITED.id].checked_at == NOW
+    # and a decided Check again row still beats an older decided store row by time
+    clear_rows = rechecked_retracted()
+    assert latest_checks(clear_rows, {CITED.id: older_retraction})[CITED.id].checked_at == NOW
+
+
 def test_check_again_writes_only_this_runs_documents() -> None:
     """A document another run linked is checked but not written into this run's snapshot."""
     other = make_document("9")

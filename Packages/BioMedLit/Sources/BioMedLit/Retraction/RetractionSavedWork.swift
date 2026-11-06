@@ -25,7 +25,8 @@ import Foundation
 public enum RetractionSavedWork {
     /// The checks a reopened session's line is read from: each the run's,
     /// unless the document's stored check is newer and is not an unchecked one
-    /// over a decided one. A session whose run recorded none (it predates the
+    /// over a decided one, or is decided where the run's is unchecked
+    /// (`rechecked`). A session whose run recorded none (it predates the
     /// check) reads the stored checks alone, as does a scored paper the run
     /// has no check of (Find More Evidence on such a session, #684); one with
     /// no stored check either is unchecked, as in the report written again (#685).
@@ -46,10 +47,13 @@ public enum RetractionSavedWork {
         return checks.merging(scored.map { ($0, PaperRetractionCheck.failed(at: .distantPast)) }) { kept, _ in kept }
     }
 
-    /// One paper's check since its run: `stored` when it is newer than `run`
-    /// and is not an unchecked one over a decided one, else `run`.
+    /// One paper's check since its run: a decided check over an unchecked
+    /// one, whatever the times (an outage is not knowledge, either way round:
+    /// an unchecked run never hides an older stored retraction, #728), else
+    /// `stored` when it is newer than `run`.
     public static func rechecked(_ run: PaperRetractionCheck, stored: PaperRetractionCheck) -> PaperRetractionCheck {
-        stored.checkedAt > run.checkedAt && !(stored.isUnchecked && !run.isUnchecked) ? stored : run
+        if run.isUnchecked != stored.isUnchecked { return run.isUnchecked ? stored : run }
+        return stored.checkedAt > run.checkedAt ? stored : run
     }
 
     /// The cited papers whose status changed for the worse since the run:

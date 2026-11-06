@@ -88,7 +88,7 @@ final class RetractionSavedWorkTests: XCTestCase {
             if let check = run[index] { document.retractionCheck = check }
             return document
         }
-        session.recordRetractionSnapshot(Dictionary(uniqueKeysWithValues: run.map { (documents[$0.key].id, $0.value) }))
+        _ = session.recordRetractionSnapshot(Dictionary(uniqueKeysWithValues: run.map { (documents[$0.key].id, $0.value) }))
         let report = EvidenceReport(
             verdict: .supported, summary: "Supported.", fullReport: "The saved report.",
             citationCount: cited.count, uniqueSourceCount: cited.count, documentsReviewed: dois.count,
@@ -1154,7 +1154,7 @@ final class RetractionSavedWorkTests: XCTestCase {
     func testAnUnreadableSnapshotEntryIsLeftOutAndKept() throws {
         let session = FactCheckSession(claim: "Aspirin prevents stroke")
         context.insert(session)
-        session.recordRetractionSnapshot(["a": Self.check("retracted")])
+        _ = session.recordRetractionSnapshot(["a": Self.check("retracted")])
         var written = try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(try XCTUnwrap(session.retractionSnapshotJSON).utf8)) as? [String: Any]
         )
@@ -1165,7 +1165,7 @@ final class RetractionSavedWorkTests: XCTestCase {
 
         XCTAssertEqual(session.retractionSnapshot(), ["a": Self.check("retracted")])
 
-        session.recordRetractionSnapshot(["c": Self.check("clear")])
+        _ = session.recordRetractionSnapshot(["c": Self.check("clear")])
         XCTAssertEqual(session.retractionSnapshot(), ["a": Self.check("retracted"), "c": Self.check("clear")])
         let kept = try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(try XCTUnwrap(session.retractionSnapshotJSON).utf8)) as? [String: Any]
@@ -1182,16 +1182,30 @@ final class RetractionSavedWorkTests: XCTestCase {
         let old = ["a": Self.check("retracted", at: Date(timeIntervalSinceReferenceDate: 814_008_600.123_456_7))]
         session.retractionSnapshotJSON = String(data: try JSONEncoder().encode(old), encoding: .utf8)
         XCTAssertEqual(session.retractionSnapshot(), old)
-        session.recordRetractionSnapshot(["c": Self.check("clear")])
+        _ = session.recordRetractionSnapshot(["c": Self.check("clear")])
         XCTAssertEqual(session.retractionSnapshot()["a"], old["a"])
+    }
+
+    /// #726: a snapshot unreadable as a whole is never written over.
+    func testASnapshotUnreadableAsAWholeIsNeverWrittenOver() {
+        let session = FactCheckSession(claim: "Aspirin prevents stroke")
+        context.insert(session)
+        for text in ["not json", "[1]", "\"text\""] {
+            session.retractionSnapshotJSON = text
+            XCTAssertFalse(session.recordRetractionSnapshot(["c": Self.check("clear")]), text)
+            XCTAssertEqual(session.retractionSnapshotJSON, text)
+        }
+        session.retractionSnapshotJSON = nil
+        XCTAssertTrue(session.recordRetractionSnapshot(["c": Self.check("clear")]), "control: none yet")
+        XCTAssertEqual(session.retractionSnapshot(), ["c": Self.check("clear")])
     }
 
     /// Control: a document checked again is replaced.
     func testASnapshotEntryCheckedAgainIsReplaced() {
         let session = FactCheckSession(claim: "Aspirin prevents stroke")
         context.insert(session)
-        session.recordRetractionSnapshot(["a": Self.check("unchecked")])
-        session.recordRetractionSnapshot(["a": Self.check("retracted")])
+        _ = session.recordRetractionSnapshot(["a": Self.check("unchecked")])
+        _ = session.recordRetractionSnapshot(["a": Self.check("retracted")])
         XCTAssertEqual(session.retractionSnapshot(), ["a": Self.check("retracted")])
     }
 }

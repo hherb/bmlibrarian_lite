@@ -234,10 +234,15 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **Retraction checking** follow-ups (#662 landed, rules in
-  `retraction_checking.md`): **#600** (audit outcomes of an unreadable
-  snapshot, rows skipped one by one), **#726** (Find More Evidence and the
-  apps write over one), **#727** (apps vs desktop line), **#728**,
+- **Retraction checking** follow-ups (#662, #726, #728 landed, rules in
+  `retraction_checking.md`): **nothing writes over an unreadable run
+  snapshot** (#726, maintainer's option 2: refuse, say `SCREEN_NOT_SAVED`,
+  the shared rows keep the answers; the desktop's report written again then
+  says unread, as the line does); **an unchecked check never hides a decided
+  one, whatever the times** (#728, `latest_checks` / `rechecked`).
+  **#600** (audit outcomes of an unreadable snapshot; rows skipped one by
+  one, which Find More Evidence's merge still drops), **#727** (apps vs
+  desktop line, needs a decision),
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**
   (test gaps mostly closed; `RetractionRun` lives in its own file; left: the

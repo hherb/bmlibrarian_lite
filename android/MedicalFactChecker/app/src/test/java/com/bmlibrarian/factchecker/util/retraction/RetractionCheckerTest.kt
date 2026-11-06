@@ -377,9 +377,19 @@ class RetractionCheckerTest {
     fun `an unreadable snapshot entry is kept as it was and the rest are read`() {
         val text = """{"a":{"status":"clear","checkedAtMs":1},"b":{"status":5}}"""
         assertEquals(setOf("a"), RetractionSnapshot.read(text).keys)
-        val merged = RetractionSnapshot.merged(text, mapOf("c" to stored("retracted")))
+        val merged = RetractionSnapshot.merged(text, mapOf("c" to stored("retracted")))!!
         assertTrue(merged, merged.contains(""""b":{"status":5}"""))
         assertEquals(setOf("a", "c"), RetractionSnapshot.read(merged).keys)
         assertTrue(RetractionSnapshot.read(null).isEmpty())
+    }
+
+    @Test
+    fun `a snapshot unreadable as a whole is never merged over`() {
+        // #726: what the run left out would be lost
+        for (text in listOf("not json", "[1]", "\"text\"")) {
+            assertEquals(text, null, RetractionSnapshot.merged(text, mapOf("c" to stored("retracted"))))
+        }
+        assertEquals("control: none yet", setOf("c"),
+            RetractionSnapshot.read(RetractionSnapshot.merged(null, mapOf("c" to stored("retracted")))).keys)
     }
 }

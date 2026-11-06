@@ -24,6 +24,9 @@ struct RetractionRun {
     let generation: Int
     var used: [(id: String, paper: RetractionPaper, check: PaperRetractionCheck)] = []
     var failed: Set<RetractionPaper> = []
+    /// Whether the session's snapshot could not be read as a whole, so this
+    /// run's checks were not saved in it (#726).
+    var unsaved = false
 
     /// The used checks of the papers not left out as retracted.
     private var kept: [(id: String, paper: RetractionPaper, check: PaperRetractionCheck)] {
@@ -35,7 +38,8 @@ struct RetractionRun {
         RetractionText.uncheckedCauses(kept.map { (paper: $0.paper, check: Optional($0.check)) }, failed: failed)
     }
 
-    /// "Retraction check: <the desktop's run summary clause>.", or `nil`.
+    /// "Retraction check: <the desktop's run summary clause>.", then
+    /// `RetractionText.screenNotSaved` when ``unsaved``; or `nil`.
     var notice: String? {
         let kept = kept
         let clause = RetractionText.runSummaryClause(
@@ -43,6 +47,8 @@ struct RetractionRun {
             unchecked: kept.filter { $0.check.isUnchecked }.count,
             causes: causes
         )
-        return clause.map { "Retraction check: \($0)." }
+        let summary = clause.map { "Retraction check: \($0)." }
+        guard unsaved else { return summary }
+        return [summary, RetractionText.screenNotSaved].compactMap { $0 }.joined(separator: " ")
     }
 }

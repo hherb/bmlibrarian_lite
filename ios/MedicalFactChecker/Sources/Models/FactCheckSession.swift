@@ -456,27 +456,37 @@ final class FactCheckSession {
 
     /// Adds what a run used to the snapshot; a document checked again is
     /// replaced. Every other entry is kept as written, one this build cannot
-    /// read included (#647); a snapshot unreadable as a whole is replaced
-    /// (logged by ``retractionSnapshotEntries()``, #726).
+    /// read included (#647); a snapshot unreadable as a whole is never
+    /// written over (#726, the desktop's `_merge_retraction_snapshot`): what
+    /// the run left out would be lost, and the stored checks keep the answers.
     ///
     /// - Parameter checks: The checks used, keyed by `Document.id`; nothing is written for none.
-    func recordRetractionSnapshot(_ checks: [String: PaperRetractionCheck]) {
-        guard !checks.isEmpty else { return }
+    /// - Returns: `false` when the snapshot cannot be read as a whole, so was
+    ///   not written over; `true` otherwise (a check that cannot be encoded
+    ///   is logged and nothing is written, as before).
+    func recordRetractionSnapshot(_ checks: [String: PaperRetractionCheck]) -> Bool {
+        guard !checks.isEmpty else { return true }
+        if let data = retractionSnapshotJSON?.data(using: .utf8),
+           !((try? JSONSerialization.jsonObject(with: data)) is [String: Any]) {
+            sessionLog.error("Retraction snapshot unreadable as a whole; not written over")
+            return false
+        }
         var entries = retractionSnapshotEntries()
         for (id, check) in checks {
             guard let data = try? JSONEncoder().encode(check),
                   let entry = try? JSONSerialization.jsonObject(with: data)
             else {
                 sessionLog.error("Retraction check not encodable; the snapshot is not written")
-                return
+                return true
             }
             entries[id] = entry
         }
         guard let data = try? JSONSerialization.data(withJSONObject: entries, options: .sortedKeys) else {
             sessionLog.error("Retraction snapshot not serialisable; the snapshot is not written")
-            return
+            return true
         }
         retractionSnapshotJSON = String(data: data, encoding: .utf8)
+        return true
     }
 
     // MARK: - Methods

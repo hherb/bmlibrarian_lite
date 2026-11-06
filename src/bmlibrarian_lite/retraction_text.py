@@ -244,6 +244,10 @@ NO_AUDIT_RECORD_LINE = "Retraction status not recorded for this report"
 # a run's record this build cannot read: not knowing is not "never checked" (#600, #662)
 STATUS_UNREAD = "Retraction status could not be read"
 STORED_CHECKS_UNREAD = "; later checks could not be read"
+# Find More Evidence over a run's record this build cannot read: never written over (#726)
+SCREEN_NOT_SAVED = (
+    "The new retraction status could not be saved with this run, whose record of it could not be read."
+)
 
 
 def not_checked_again_clause(count: int, causes: Sequence[str] = ()) -> str:

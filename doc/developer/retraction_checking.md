@@ -131,18 +131,28 @@ paper with its `retraction_status`.
   the desktop that line follows `ReportMetadata.retraction_screen`, read by
   the same rule and kept as found (`retraction_screen_unread`) so a later
   save does not erase it. The apps' detail view says it for a paper whose
-  own entry or copy cannot be read. The desktop's *Check again* never writes
-  over such a record: it says the new status could not be saved, and the
-  shared rows keep the answers. Find More Evidence and the apps' screen
-  still replace a wholly unreadable snapshot (#726); the apps show a stored
-  check over one where the desktop says unread (#727).
+  own entry or copy cannot be read. Nothing writes over such a record
+  (#726, all three platforms): the desktop's *Check again* says the new
+  status could not be saved; Find More Evidence and the apps' screen still
+  screen, leave out the retracted and store each paper's check in the shared
+  rows, but keep the snapshot as found and add `SCREEN_NOT_SAVED` /
+  `RetractionText.screenNotSaved` to what they report (the desktop's
+  `MoreEvidence.screen_unsaved`, the apps' `RetractionRun.unsaved`). The
+  desktop's report written again follows the checkpoint's record, so it says
+  unread whenever the reopen line does, even over a readable copy in the
+  report metadata. A desktop list with some unreadable rows still loses them
+  on Find More Evidence's merge (#600). The apps show a stored check over
+  an unreadable snapshot where the desktop says unread (#727).
 - **A paper the run saw unchecked warns of any retraction or concern**, of
   whatever time (#662, all three platforms: the desktop's
   `changed_since_snapshot`, the apps' `RetractionSavedWork.changedSinceRun`).
   An unchecked check's time is no check time, so a retraction stored before
-  it (one a failed stored read hid from the run, #720) is still news. An
-  unchecked *Check again* answer newer than a stored retraction still hides
-  it (#728).
+  it (one a failed stored read hid from the run, #720) is still news. The
+  latest check a reopen reads never puts an unchecked check over a decided
+  one, whatever their times, either way round (#728: the desktop's
+  `latest_checks`, the apps' `RetractionSavedWork.rechecked`), so an
+  unchecked run row or *Check again* answer never hides an older stored
+  retraction; between two decided or two unchecked checks the newer wins.
 - **A paper no screen saw is unchecked, never clear.** *Find More Evidence*
   on a run reviewed before retraction checking screens only the papers it
   finds, so the report written again counts every scored paper with no

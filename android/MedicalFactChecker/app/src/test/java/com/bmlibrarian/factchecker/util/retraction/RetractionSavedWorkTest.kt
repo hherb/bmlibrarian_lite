@@ -49,6 +49,20 @@ class RetractionSavedWorkTest {
     }
 
     @Test
+    fun `an unchecked run never hides an older stored retraction`() {
+        // #728: the run, and any Check again, saw an outage; the store knew of a retraction before it
+        val rows = RetractionSavedWork.recheckedChecks(
+            run = mapOf("a" to check("unchecked", run), "b" to check("unchecked", run)),
+            stored = mapOf("a" to check("retracted", run - 1), "b" to check("unchecked", run - 1))
+        )
+        assertEquals("a decided stored check wins whatever its time", "retracted", rows["a"]?.status)
+        assertEquals(listOf("a"), RetractionSavedWork.changedSinceRun(
+            mapOf("a" to check("unchecked", run)), rows, listOf("a")
+        ))
+        assertEquals("an older unchecked stored check still loses to the run's", run, rows["b"]?.checkedAtMs)
+    }
+
+    @Test
     fun `rechecked checks read a scored paper the run has no check of`() {
         // #684: a session older than the check that Find More Evidence gave a snapshot
         val rows = RetractionSavedWork.recheckedChecks(

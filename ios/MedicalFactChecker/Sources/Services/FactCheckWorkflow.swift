@@ -4007,7 +4007,7 @@ final class FactCheckWorkflow {
             retractionRun.used.append((id: document.id, paper: paper, check: check))
         }
         if adopted { shareRetractionChecks(unseen) }
-        session.recordRetractionSnapshot(used)
+        if !session.recordRetractionSnapshot(used) { retractionRun.unsaved = true }
         try? modelContext.save()
         retractionNotice = retractionRun.notice
     }
