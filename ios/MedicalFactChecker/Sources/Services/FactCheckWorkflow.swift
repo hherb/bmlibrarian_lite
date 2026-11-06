@@ -194,27 +194,6 @@ final class FactCheckWorkflow {
     /// retraction screen knows when a new run starts.
     private var runGeneration = 0
 
-    /// What one run's retraction screen has used, in the order it met the
-    /// documents, and the papers whose check failed.
-    private struct RetractionRun {
-        let generation: Int
-        var used: [(id: String, paper: RetractionPaper, check: PaperRetractionCheck)] = []
-        var failed: Set<RetractionPaper> = []
-
-        /// "Retraction check: <the desktop's run summary clause>.", or `nil`.
-        var notice: String? {
-            let kept = used.filter { !$0.check.isRetracted }
-            let clause = RetractionText.runSummaryClause(
-                excluded: used.count - kept.count,
-                unchecked: kept.filter { $0.check.isUnchecked }.count,
-                causes: RetractionText.uncheckedCauses(
-                    kept.map { (paper: $0.paper, check: Optional($0.check)) }, failed: failed
-                )
-            )
-            return clause.map { "Retraction check: \($0)." }
-        }
-    }
-
     /// This run's retraction screen so far.
     private var retractionRun = RetractionRun(generation: 0)
 
@@ -4062,9 +4041,7 @@ final class FactCheckWorkflow {
     private func retractionRunCauses(covering snapshot: [String: PaperRetractionCheck]) -> [String] {
         guard retractionRun.generation == runGeneration,
               Set(retractionRun.used.map(\.id)) == Set(snapshot.keys) else { return [] }
-        let kept = retractionRun.used.filter { !$0.check.isRetracted }
-        return RetractionText.uncheckedCauses(
-            kept.map { (paper: $0.paper, check: Optional($0.check)) }, failed: retractionRun.failed)
+        return retractionRun.causes
     }
 
     /// Whether this run leaves a document out as retracted: by the check the

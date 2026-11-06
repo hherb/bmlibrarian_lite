@@ -109,6 +109,7 @@
 		A1000073001 /* ReportFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000073000 /* ReportFormatter.swift */; };
 		A5DF3C2C750F93571F536572 /* MedicalFactCheckerMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80B0502275D5E267C0701E56 /* MedicalFactCheckerMacApp.swift */; };
 		AA20BA03F3578738656E720B /* ProgressReporting.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */; };
+		7072386304FC7509A187D115 /* RetractionRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10E12E24BBF84A227E6409E7 /* RetractionRun.swift */; };
 		AC7F5F9D117D0C62AB84424D /* MacUtilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B1A551C72E0132CF2D53022 /* MacUtilities.swift */; };
 		AF795A30DE8C130B1F39446D /* CheckpointedScoringService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A209B35A85EFF3CFCE9C2141 /* CheckpointedScoringService.swift */; };
 		AF7C55453F1847A521E940C1 /* MacHelpViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A2ED4E6BF01BA8A836174C9 /* MacHelpViews.swift */; };
@@ -239,6 +240,7 @@
 		F111ED9AA6EE0B4437331914 /* MacSearchOptionsToolbar.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacSearchOptionsToolbar.swift; sourceTree = "<group>"; };
 		F3414FA46C1181D7951C1166 /* MacHistoryView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacHistoryView.swift; sourceTree = "<group>"; };
 		FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProgressReporting.swift; sourceTree = "<group>"; };
+		10E12E24BBF84A227E6409E7 /* RetractionRun.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RetractionRun.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -351,6 +353,7 @@
 				A1000066000 /* ParallelCitationService.swift */,
 				A1000059000 /* ParallelScoringService.swift */,
 				FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */,
+				10E12E24BBF84A227E6409E7 /* RetractionRun.swift */,
 				A1000039000 /* SearchServiceProtocol.swift */,
 				A1000065000 /* WorkflowConstants.swift */,
 			);
@@ -718,6 +721,7 @@
 				63B5FF64C127DE738D15D95A /* ProcessingCheckpoint.swift in Sources */,
 				C66F3BFC5B474797CD4D732C /* CheckpointManager.swift in Sources */,
 				AA20BA03F3578738656E720B /* ProgressReporting.swift in Sources */,
+				7072386304FC7509A187D115 /* RetractionRun.swift in Sources */,
 				AF795A30DE8C130B1F39446D /* CheckpointedScoringService.swift in Sources */,
 				A1000060001 /* SortingControlsView.swift in Sources */,
 				A1000061001 /* ErrorQueueView.swift in Sources */,

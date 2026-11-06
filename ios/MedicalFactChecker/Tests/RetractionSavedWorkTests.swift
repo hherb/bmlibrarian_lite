@@ -688,6 +688,35 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertFalse(workflow.isCheckingRetractionsAgain)
     }
 
+    /// A second tap while *Check again* still waits behind earlier work asks
+    /// nothing either, and leaves the line alone: this window's own check is
+    /// not another window's, which the session hold alone would say.
+    func testASecondTapWhileCheckAgainWaitsAsksNothing() async {
+        let (session, _) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        let asked = Asked()
+        let workflow = restore(session, asked: asked)
+        let (gate, open) = AsyncStream<Void>.makeStream()
+        let ahead = Task { @MainActor in
+            await workflow.runAsWorkflowTask { for await _ in gate {} }
+        }
+        await Task.yield()
+        let check = Task { @MainActor in await workflow.checkRetractionsAgain() }
+        while !workflow.isCheckingRetractionsAgain { await Task.yield() }
+        let line = workflow.retractionSavedWorkLine
+        XCTAssertNotNil(line, "control: the saved-work line is shown")
+
+        await workflow.checkRetractionsAgain()
+        XCTAssertEqual(workflow.retractionSavedWorkLine, line)
+        XCTAssertEqual(asked.calls, 0, "the first still waits; the second asked nothing")
+        XCTAssertTrue(workflow.isCheckingRetractionsAgain, "the first still waits")
+
+        open.finish()
+        await ahead.value
+        await check.value
+        XCTAssertEqual(asked.calls, 1, "only the first asks")
+        XCTAssertFalse(workflow.isCheckingRetractionsAgain)
+    }
+
     /// #711: two windows on one session check it again once at a time; the second is told why.
     func testASecondWindowCannotCheckTheSameSessionAgainMeanwhile() async {
         let (session, _) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
