@@ -782,7 +782,10 @@ final class FactCheckWorkflow {
         latest.merge(labelled) { stored, label in
             stored.isRetracted ? stored : label
         }
-        retractionSavedWorkLine = RetractionText.savedWorkLine(Array(rows.values), causes: causes) + note
+        // a snapshot this build cannot read, with nothing else to show, is unread, never "never checked" (#662)
+        retractionSavedWorkLine = (rows.isEmpty && session.retractionSnapshotUnread()
+            ? RetractionText.statusUnread
+            : RetractionText.savedWorkLine(Array(rows.values), causes: causes)) + note
         let changed = RetractionSavedWork.changedSinceRun(run: run, latest: latest, cited: cited.map(\.id))
         let byID = Dictionary(cited.map { ($0.id, $0) }) { first, _ in first }
         retractionSavedWorkWarning = RetractionText.savedWorkWarning(changed.compactMap { id in
@@ -3333,7 +3336,9 @@ final class FactCheckWorkflow {
         // a scored paper no run screened (Find More Evidence on a session older
         // than the check) is unchecked, never silently clear (#657)
         let unscreened = (session.documents ?? []).filter { snapshot[$0.id] == nil && $0.relevanceScore != nil }
-        let retraction: RetractionReportSection? = snapshot.isEmpty ? nil : RetractionReportSection(
+        // a snapshot recorded but unreadable says so, never "never checked" (#662)
+        let retraction: RetractionReportSection? = snapshot.isEmpty
+            ? (session.retractionSnapshotUnread() ? .unread : nil) : RetractionReportSection(
             papers: (session.documents ?? []).compactMap { doc in
                 snapshot[doc.id].map { (title: doc.title, check: $0) }
             } + unscreened.map { (title: $0.title, check: PaperRetractionCheck.failed(at: Date())) },

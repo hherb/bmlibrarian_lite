@@ -213,9 +213,10 @@ object RetractionText {
     const val STORED_CHECKS_UNREAD = "; later checks could not be read"
 
     /**
-     * A restored session's saved-work line, or a document's detail status, when
-     * its retraction status could not be read at all (Android only so far):
-     * never "never checked", since not knowing is not absence.
+     * A restored session's saved-work line, the report's methods line, or a
+     * document's detail status, when its retraction status is recorded but
+     * could not be read (all three platforms, #662): never "never checked",
+     * since not knowing is not absence.
      */
     const val STATUS_UNREAD = "Retraction status could not be read"
 

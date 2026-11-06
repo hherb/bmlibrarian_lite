@@ -709,6 +709,25 @@ final class RetractionScreenWorkflowTests: XCTestCase {
             "> **Retraction check:** 1 paper's retraction status could not be checked.\n\n"), report)
     }
 
+    /// A snapshot this build cannot read: a report written again says the
+    /// status could not be read, never nothing (#662).
+    func testAReportWrittenOverAnUnreadableSnapshotSaysSo() async throws {
+        let (session, _) = makeSession(["10.1000/a"])
+        let workflow = restore(session, check: Self.answering([:]))
+        let line = "- **Retraction Check:** \(RetractionText.statusUnread)"
+        let rewrite = { _ = try await workflow.regenerateReportWithNewEvidence(analyzeTransparencyUsing: { _, _, _ in
+            XCTFail("nothing is relevant, so nothing is rated")
+            throw CancellationError()
+        }) }
+        try await rewrite()
+        XCTAssertFalse(try XCTUnwrap(session.report?.fullReport).contains("Retraction Check"), "control: never checked")
+
+        session.retractionSnapshotJSON = "not json"
+        try await rewrite()
+
+        XCTAssertTrue(try XCTUnwrap(session.report?.fullReport).contains(line))
+    }
+
     /// A restore shows the session as saved: the last run's notice is not its own.
     func testRestoringClearsTheRunsNotice() async {
         let (session, _) = makeSession(["10.1000/a"])

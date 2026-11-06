@@ -472,7 +472,10 @@ def changed_since_snapshot(
     now says retracted or concern, and the run saw another status: the row's
     ``run_status`` once *Check again* rewrote it, else its ``status``. A
     paper without a row, or whose row has no check time, the run never
-    checked, so any warning is news.
+    checked, so any warning is news. So is any warning for a paper the run
+    saw unchecked: an unchecked check's time is no check time, so a
+    retraction known before it (a stored row a failed read hid from the run,
+    #720) is still news, as on both apps (#662).
 
     Args:
         snapshot: The run's snapshot rows by document id.
@@ -488,9 +491,14 @@ def changed_since_snapshot(
             continue
         row = snapshot.get(doc_id) or {}
         stamp = row.get("checked_at")
-        if stamp and as_utc(check.checked_at) < as_utc(datetime.fromisoformat(stamp)):
+        seen = row.get(RUN_STATUS_KEY, row.get("status") if stamp else None)
+        if (
+            stamp
+            and seen != RetractionStatus.UNCHECKED.value
+            and as_utc(check.checked_at) < as_utc(datetime.fromisoformat(stamp))
+        ):
             continue
-        if row.get(RUN_STATUS_KEY, row.get("status") if stamp else None) == check.verdict.status.value:
+        if seen == check.verdict.status.value:
             continue
         changed.append((doc_id, check))
     return changed

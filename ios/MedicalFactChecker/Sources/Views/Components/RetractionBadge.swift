@@ -42,10 +42,13 @@ struct RetractionBadge: View {
         ///   - check: The paper's check; `nil` when it was never checked.
         ///   - inDetail: Whether this is the detail view (viewer), where a
         ///     never-checked paper is called NOT CHECKED.
-        init?(check: PaperRetractionCheck?, inDetail: Bool = false) {
+        ///   - unread: With no check, whether one is recorded that cannot be
+        ///     read: said as such, never as never checked (#662).
+        init?(check: PaperRetractionCheck?, inDetail: Bool = false, unread: Bool = false) {
             guard let check else {
                 guard inDetail else { return nil }
-                self.init(text: "NOT CHECKED", tooltip: RetractionText.checkedOnLine(nil),
+                self.init(text: "NOT CHECKED",
+                          tooltip: unread ? RetractionText.statusUnread : RetractionText.checkedOnLine(nil),
                           isRetracted: false, isConcern: false)
                 return
             }
@@ -77,8 +80,8 @@ struct RetractionBadge: View {
     let content: Content
 
     /// Builds the badge, or `nil` when the check shows none.
-    init?(check: PaperRetractionCheck?, inDetail: Bool = false) {
-        guard let content = Content(check: check, inDetail: inDetail) else { return nil }
+    init?(check: PaperRetractionCheck?, inDetail: Bool = false, unread: Bool = false) {
+        guard let content = Content(check: check, inDetail: inDetail, unread: unread) else { return nil }
         self.content = content
     }
 
@@ -100,9 +103,11 @@ struct RetractionBadge: View {
 /// Nothing for a clear paper.
 struct RetractionBanner: View {
     let check: PaperRetractionCheck?
+    /// With no check, whether one is recorded that cannot be read.
+    var unread = false
 
     var body: some View {
-        if let badge = RetractionBadge(check: check, inDetail: true) {
+        if let badge = RetractionBadge(check: check, inDetail: true, unread: unread) {
             HStack(spacing: RetractionBadgeConstants.bannerSpacing) {
                 badge
                 Text(badge.content.tooltip)

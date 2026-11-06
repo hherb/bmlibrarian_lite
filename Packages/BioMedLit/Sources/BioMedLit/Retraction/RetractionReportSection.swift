@@ -43,6 +43,17 @@ public struct RetractionReportSection: Sendable {
         ).map(RetractionText.reportNotice)
     }
 
+    /// A run whose record this build cannot read: the methods line says so,
+    /// with no notice and nothing left out (the desktop's methods line for an
+    /// unreadable `retraction_screen`, #600).
+    public static let unread = RetractionReportSection(leftOut: [], methodsLine: RetractionText.statusUnread, notice: nil)
+
+    private init(leftOut: [(title: String, check: PaperRetractionCheck)], methodsLine: String, notice: String?) {
+        self.leftOut = leftOut
+        self.methodsLine = methodsLine
+        self.notice = notice
+    }
+
     /// `text` with the notice in front (the desktop's `with_retraction_notice`);
     /// unchanged when it already opens with one.
     func withNotice(_ text: String) -> String {

@@ -568,6 +568,26 @@ def recorded_retraction_snapshot(checkpoint_metadata: object) -> dict[str, dict[
     return RetractionScreen.from_snapshot(rows)
 
 
+def retraction_snapshot_unreadable(checkpoint_metadata: object) -> bool:
+    """Whether a checkpoint recorded a retraction snapshot this build cannot read.
+
+    ``recorded_retraction_snapshot`` reads such a record as empty, as for a
+    run from before the check; this tells the two apart, so the reader is
+    told the record could not be read, never that the run was not checked
+    (#600).
+
+    Args:
+        checkpoint_metadata: The checkpoint's stored metadata (input, golden rule 1).
+
+    Returns:
+        True when the snapshot is present but not a list.
+    """
+    if not isinstance(checkpoint_metadata, Mapping):
+        return False
+    rows = checkpoint_metadata.get(CHECKPOINT_RETRACTION_SNAPSHOT_KEY)
+    return rows is not None and not isinstance(rows, list)
+
+
 def excluded_in_snapshot(
     documents: Sequence[LiteDocument],
     retraction_snapshot: Mapping[str, Mapping[str, Any]] | None,

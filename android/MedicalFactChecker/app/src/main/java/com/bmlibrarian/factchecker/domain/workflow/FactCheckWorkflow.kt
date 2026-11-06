@@ -1180,7 +1180,8 @@ class FactCheckWorkflow @Inject constructor(
         found: Map<String, PaperRetractionCheck> = emptyMap()
     ) {
         val documents = documentRepository.getDocumentsBySessionSync(sessionId)
-        val run = RetractionSnapshot.read(sessionRepository.getSession(sessionId)?.retractionSnapshotJson)
+        val snapshotJson = sessionRepository.getSession(sessionId)?.retractionSnapshotJson
+        val run = RetractionSnapshot.read(snapshotJson)
         var unread = false
         val read = try {
             val keys = documents.mapNotNull { document -> document.retractionPaper.paperKey?.let { document.id to it } }.toMap()
@@ -1225,7 +1226,9 @@ class FactCheckWorkflow @Inject constructor(
         }
         if (screen != savedWorkScreen) return
         _retractionSavedWork.value = RetractionSavedWorkState(
-            line = RetractionText.savedWorkLine(rows.values, causes) +
+            // a snapshot this build cannot read, with nothing else to show, is unread, never "never checked" (#662)
+            line = (if (rows.isEmpty() && RetractionSnapshot.unread(snapshotJson)) RetractionText.STATUS_UNREAD
+                else RetractionText.savedWorkLine(rows.values, causes)) +
                 RetractionText.notCheckedAgainClause(missed.size, missedCauses) + note +
                 if (unread) RetractionText.STORED_CHECKS_UNREAD else "",
             warning = RetractionText.savedWorkWarning(changed.map { titles.getValue(it) to latest.getValue(it) }),
@@ -1988,7 +1991,7 @@ class FactCheckWorkflow @Inject constructor(
 
         // What the run saw: the checks it used, never whatever is stored now
         val snapshot = RetractionSnapshot.read(stored.retractionSnapshotJson)
-        val retraction = retractionSection(documents, snapshot)
+        val retraction = retractionSection(documents, snapshot, RetractionSnapshot.unread(stored.retractionSnapshotJson))
 
         // Build citation data for LLM
         val citationData = citations.mapNotNull { citation ->
@@ -2698,12 +2701,15 @@ class FactCheckWorkflow @Inject constructor(
      *
      * @param documents The session's documents
      * @param snapshot The check each document's run used
+     * @param unread The session recorded a snapshot this build cannot read
      */
     private fun retractionSection(
         documents: List<DocumentEntity>,
-        snapshot: Map<String, PaperRetractionCheck>
+        snapshot: Map<String, PaperRetractionCheck>,
+        unread: Boolean = false
     ): RetractionReportSection? {
-        if (snapshot.isEmpty()) return null
+        // a snapshot recorded but unreadable says so, never "never checked" (#662)
+        if (snapshot.isEmpty()) return if (unread) RetractionReportSection.UNREAD else null
         // a scored paper no run screened (Find More Evidence on a session older
         // than the check) is unchecked, never silently clear (#657)
         val unscreened = documents.filter { it.id !in snapshot && it.isScored }

@@ -2528,6 +2528,10 @@ class ReportMetadata:
 
         retraction_screen: What the retraction check left out and found, or
             None when none ran; serialised as its snapshot rows
+        retraction_screen_unread: A stored ``retraction_screen`` this build
+            cannot read (not a list), kept as found so a later save does not
+            erase it, and said as unread, never as no check (#600); None
+            otherwise
         model_configs: LLM configuration for each workflow task
         citations_extracted: Total citation passages extracted
         unique_sources_cited: Number of unique documents cited
@@ -2588,6 +2592,7 @@ class ReportMetadata:
     # What the retraction check left out (a RetractionScreen, or a
     # RetractionSnapshot once read back); None when no check ran
     retraction_screen: "RetractionRecord | None" = None
+    retraction_screen_unread: Any = None
 
     # LLM configuration by task
     model_configs: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -2647,7 +2652,7 @@ class ReportMetadata:
             "retraction_screen": (
                 self.retraction_screen.to_snapshot()
                 if self.retraction_screen is not None
-                else None
+                else self.retraction_screen_unread
             ),
             "model_configs": self.model_configs,
             "citations_extracted": self.citations_extracted,
@@ -2696,6 +2701,7 @@ class ReportMetadata:
         from .retraction_screen import RetractionSnapshot  # circular at import time
 
         screen = RetractionSnapshot.from_stored(stored_screen)
+        unread_screen = stored_screen if stored_screen is not None and screen is None else None
 
         stored_distribution = data.get("score_distribution", {})
         if not isinstance(stored_distribution, dict):
@@ -2709,6 +2715,7 @@ class ReportMetadata:
 
         return cls(
             retraction_screen=screen,
+            retraction_screen_unread=unread_screen,
             version=data.get("version", 1),
             generated_at=generated_at,
             research_question=data.get("research_question", ""),

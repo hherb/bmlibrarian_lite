@@ -119,6 +119,22 @@ paper with its `retraction_status`.
   checked again"), its own answers' causes after the count (#668). When an
   unchecked row was not reached (its document is gone), the unchecked count
   stands alone, as on a reopen, since the others' causes would claim it too.
+- **A run's record that cannot be read is unread, never "never checked"**
+  (#600, #662, all three platforms). A snapshot this build cannot read (the
+  desktop's checkpoint `retraction_snapshot` or audit JSON `snapshot` not a
+  list, or `ReportMetadata.retraction_screen` not a list; the apps' snapshot
+  JSON, whole or one entry) makes the saved-work line "Retraction status
+  could not be read" (`STATUS_UNREAD` / `RetractionText.statusUnread`) while
+  there is nothing else to show, and a report written again says so as its
+  methods line (`RetractionReportSection.unread` / `UNREAD`, no notice). The
+  apps' detail view says it for a paper whose own entry or copy cannot be
+  read. The desktop keeps an unreadable `retraction_screen` as found
+  (`retraction_screen_unread`), so a later save does not erase it.
+- **A paper the run saw unchecked warns of any retraction or concern**, of
+  whatever time (#662, all three platforms: the desktop's
+  `changed_since_snapshot`, the apps' `RetractionSavedWork.changedSinceRun`).
+  An unchecked check's time is no check time, so a retraction stored before
+  it (one a failed stored read hid from the run, #720) is still news.
 - **A paper no screen saw is unchecked, never clear.** *Find More Evidence*
   on a run reviewed before retraction checking screens only the papers it
   finds, so the report written again counts every scored paper with no

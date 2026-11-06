@@ -421,6 +421,19 @@ final class FactCheckSession {
         }
     }
 
+    /// Whether the run recorded a snapshot this build cannot read: the whole
+    /// of it, or the entry for `documentID` (any entry when `nil`). Unparsed
+    /// is not absent, so a reader is told "could not be read" (#662).
+    ///
+    /// - Parameter documentID: The document whose entry to ask about; `nil` for any.
+    func retractionSnapshotUnread(for documentID: String? = nil) -> Bool {
+        guard let data = retractionSnapshotJSON?.data(using: .utf8) else { return false }
+        guard let entries = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return true }
+        let read = retractionSnapshot()
+        guard let documentID else { return entries.keys.contains { read[$0] == nil } }
+        return entries[documentID] != nil && read[documentID] == nil
+    }
+
     /// The check each document is shown and counted by, keyed by `Document.id`:
     /// the one its run used (the snapshot), else the stored one. Decode it
     /// once per view or computation, not per row.

@@ -37,6 +37,7 @@ from bmlibrarian_lite.audit_records import (  # noqa: E402
     CHECKPOINT_RETRACTION_SNAPSHOT_KEY,
     checkpoint_metadata_with_retraction_snapshot,
     recorded_retraction_snapshot,
+    retraction_snapshot_unreadable,
 )
 from bmlibrarian_lite.config import LiteConfig  # noqa: E402
 from bmlibrarian_lite.data_models import (  # noqa: E402
@@ -68,6 +69,7 @@ from bmlibrarian_lite.retraction_text import (  # noqa: E402
     CHECK_AGAIN_NOT_SAVED,
     CHECK_AGAIN_STOPPED,
     NO_AUDIT_RECORD_LINE,
+    STATUS_UNREAD,
     STORED_CHECKS_UNREAD,
 )
 from bmlibrarian_lite.storage import LiteStorage  # noqa: E402
@@ -242,6 +244,11 @@ def test_changed_since_snapshot_names_used_papers_newly_warned() -> None:
     assert changed_since_snapshot(concern_run, concern, {CITED.id}) == []
     # a run that never checked the paper: any warning is news
     assert changed_since_snapshot({}, concern, {CITED.id}) == [(CITED.id, concern[CITED.id])]
+    # a run that checked it without an answer: an older warning is news too (#662)
+    unchecked_run = {**snapshot, CITED.id: {**snapshot[CITED.id], "status": "unchecked"}}
+    assert changed_since_snapshot(unchecked_run, older, {CITED.id}) == [(CITED.id, older[CITED.id])]
+    rechecked = {**snapshot, CITED.id: {**snapshot[CITED.id], "status": "clear", RUN_STATUS_KEY: "unchecked"}}
+    assert changed_since_snapshot(rechecked, older, {CITED.id}) == [(CITED.id, older[CITED.id])]
 
 
 def test_rechecked_snapshot_keeps_what_the_run_did() -> None:
@@ -889,9 +896,14 @@ def test_reopen_keeps_excluded_as_excluded(
     # control: a paper still retracted as the run saw it gets the run's line alone
     window.audit_trail_tab.show_retraction_snapshot(run_snapshot())
     assert card._excluded_label.text() == run_line
-    window.report_tab.show_saved_retraction.assert_called_once_with(checkpoint_id)
+    window.report_tab.show_saved_retraction.assert_called_once_with(checkpoint_id, snapshot_unread=False)
     kwargs = window.report_tab.display_report.call_args.kwargs
     assert kwargs["retraction_snapshot"][LEFT_OUT.id]["excluded"] is True
+    # a snapshot this build cannot read is passed on as unread (#600)
+    storage.update_checkpoint(checkpoint_id, metadata={CHECKPOINT_RETRACTION_SNAPSHOT_KEY: "damaged"})
+    window.report_tab.reset_mock()
+    LiteMainWindow._on_question_selected(window, QUESTION, "aspirin")
+    window.report_tab.show_saved_retraction.assert_called_once_with(checkpoint_id, snapshot_unread=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1578,6 +1590,40 @@ def test_a_file_screened_without_a_snapshot_reads_as_not_recorded(
     # a reopened question afterwards is not taken for that file
     reopen(tab, None)
     assert tab.retraction_line.text() == "Retraction status never checked"
+
+
+def test_an_unreadable_snapshot_reads_as_unread_never_never_checked(
+    tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A checkpoint's or a file's snapshot this build cannot read: "could not be read" (#600)."""
+    metadata = {CHECKPOINT_RETRACTION_SNAPSHOT_KEY: {"not": "a list"}}
+    assert retraction_snapshot_unreadable(metadata)
+    assert recorded_retraction_snapshot(metadata) == {}
+    reopen(tab, None)
+    tab.show_saved_retraction("cp", snapshot_unread=True)
+    assert tab.retraction_line.text() == STATUS_UNREAD
+    # controls: a run from before the check, and a readable snapshot
+    assert not retraction_snapshot_unreadable({})
+    assert not retraction_snapshot_unreadable({CHECKPOINT_RETRACTION_SNAPSHOT_KEY: []})
+    reopen(tab, None)
+    assert tab.retraction_line.text() == "Retraction status never checked"
+    # a loaded report file whose snapshot is not a list
+    report_path = saved_with_left_out(tab, run_snapshot())
+    audit_path = audit_of(report_path)
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    audit["retraction"]["snapshot"] = "damaged"
+    audit_path.write_text(json.dumps(audit), encoding="utf-8")
+    load(tab, report_path, monkeypatch)
+    assert tab.retraction_line.text() == STATUS_UNREAD
+    audit["retraction"] = "damaged"
+    audit_path.write_text(json.dumps(audit), encoding="utf-8")
+    load(tab, report_path, monkeypatch)
+    assert tab.retraction_line.text() == STATUS_UNREAD
+    # control: the same file read whole
+    del audit["retraction"]
+    audit_path.write_text(json.dumps(audit), encoding="utf-8")
+    load(tab, report_path, monkeypatch)
+    assert tab.retraction_line.text() == NO_AUDIT_RECORD_LINE
 
 
 def test_a_check_again_not_saved_after_the_reader_moved_on_is_said_on_return(

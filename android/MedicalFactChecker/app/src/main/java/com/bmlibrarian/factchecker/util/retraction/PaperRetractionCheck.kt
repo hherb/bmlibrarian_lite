@@ -362,6 +362,25 @@ object RetractionSnapshot {
     }.toMap()
 
     /**
+     * Whether the run recorded a snapshot this build cannot read: the whole of
+     * it, or the entry for [documentId] (any entry when null). Unparsed is not
+     * absent, so a reader is told "could not be read" (#662).
+     *
+     * @param text The stored snapshot, or null for a session never checked
+     * @param documentId The document whose entry to ask about; null for any
+     */
+    fun unread(text: String?, documentId: String? = null): Boolean {
+        if (text == null) return false
+        val all = try {
+            json.parseToJsonElement(text) as? JsonObject
+        } catch (e: SerializationException) {
+            null
+        } ?: return true
+        val read = read(text)
+        return if (documentId == null) all.keys.any { it !in read } else documentId in all && documentId !in read
+    }
+
+    /**
      * The snapshot with [checks] added; a document checked again is replaced,
      * and every other entry, readable or not, is kept as it was.
      *

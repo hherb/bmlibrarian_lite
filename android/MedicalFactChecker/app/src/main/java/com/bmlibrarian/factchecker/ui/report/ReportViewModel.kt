@@ -312,7 +312,10 @@ class ReportViewModel @Inject constructor(
     private suspend fun retractionCheckFor(document: DocumentEntity): Pair<PaperRetractionCheck?, Boolean> {
         var unread = false
         val run = try {
-            RetractionSnapshot.read(sessionRepository.getSession(document.sessionId)?.retractionSnapshotJson)[document.id]
+            val snapshotJson = sessionRepository.getSession(document.sessionId)?.retractionSnapshotJson
+            // an entry recorded but unreadable is not "never checked" (#662)
+            if (RetractionSnapshot.unread(snapshotJson, document.id)) unread = true
+            RetractionSnapshot.read(snapshotJson)[document.id]
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

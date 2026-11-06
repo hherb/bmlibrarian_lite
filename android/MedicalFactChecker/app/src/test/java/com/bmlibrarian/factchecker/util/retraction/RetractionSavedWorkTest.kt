@@ -102,4 +102,24 @@ class RetractionSavedWorkTest {
             )
         )
     }
+
+    /** #662: unparsed is not absent, whole or one entry; never checked is neither. */
+    @Test
+    fun `a snapshot this build cannot read is unread`() {
+        assertEquals(false, RetractionSnapshot.unread(null))
+        assertEquals(false, RetractionSnapshot.unread(RetractionSnapshot.merged(null, mapOf("a" to check("clear", run)))))
+        assertEquals(true, RetractionSnapshot.unread("{not json"))
+        assertEquals(true, RetractionSnapshot.unread("[1, 2]"))
+        val partly = """{"a": {"status": 7}}"""
+        assertEquals(true, RetractionSnapshot.unread(partly))
+        assertEquals(true, RetractionSnapshot.unread(partly, "a"))
+        assertEquals(false, RetractionSnapshot.unread(partly, "b"))
+    }
+
+    @Test
+    fun `an unreadable run's report section says so, with no notice`() {
+        assertEquals("- **Retraction Check:** Retraction status could not be read", RetractionReportSection.UNREAD.methodsMarkdown)
+        assertNull(RetractionReportSection.UNREAD.notice)
+        assertEquals("", RetractionReportSection.UNREAD.leftOutMarkdown)
+    }
 }

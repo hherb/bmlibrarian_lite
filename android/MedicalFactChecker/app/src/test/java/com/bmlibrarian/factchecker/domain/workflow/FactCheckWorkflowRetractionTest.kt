@@ -588,6 +588,22 @@ class FactCheckWorkflowRetractionTest {
         workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
     }
 
+    /** #662: a snapshot recorded but unreadable is said as such, never "never checked". */
+    @Test
+    fun `a restored session whose snapshot cannot be read says so`() = runTest {
+        hold("d1")
+        session = session.copy(workflowStep = WorkflowStep.COMPLETED)
+        snapshotJson = null
+        workflow.restoreForViewing(session)
+        assertEquals("control", "Retraction status never checked", workflow.retractionSavedWork.value?.line)
+
+        snapshotJson = "[1, 2]"
+        workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
+
+        assertEquals(RetractionText.STATUS_UNREAD, workflow.retractionSavedWork.value?.line)
+        assertTrue(asked.isEmpty())
+    }
+
     @Test
     fun `a restored session says when its papers were checked, asking nothing`() = runTest {
         restoreCheckedSession()

@@ -408,6 +408,13 @@ final class Document {
     /// ``FactCheckSession/shownRetractionChecks()`` once instead.
     var shownRetractionCheck: PaperRetractionCheck? { session?.retractionSnapshot()[id] ?? retractionCheck }
 
+    /// Whether this document shows no check only because the one recorded
+    /// (its own copy or its run's snapshot entry) cannot be read (#662).
+    var retractionStatusUnread: Bool {
+        shownRetractionCheck == nil
+            && (retractionCheckJSON != nil || session?.retractionSnapshotUnread(for: id) == true)
+    }
+
     /// The check this document's badge and banner show over `shown` (the one
     /// its run used), as the desktop's card badges the latest: the stored
     /// check where *Check again* has replaced it
