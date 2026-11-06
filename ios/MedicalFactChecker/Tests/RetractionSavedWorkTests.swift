@@ -610,7 +610,10 @@ final class RetractionSavedWorkTests: XCTestCase {
         }
         await Task.yield()
         let check = Task { @MainActor in await workflow.checkRetractionsAgain() }
-        while !workflow.isCheckingRetractionsAgain { await Task.yield() }
+        guard await Self.waitUntil({ workflow.isCheckingRetractionsAgain }) else {
+            open.finish()
+            return XCTFail("Check again never began waiting")
+        }
 
         workflow.cancelCheckAgain()
         XCTAssertTrue(workflow.checkAgainStopRequested, "the badge's Cancel is disabled while it waits")
@@ -700,10 +703,15 @@ final class RetractionSavedWorkTests: XCTestCase {
             await workflow.runAsWorkflowTask { for await _ in gate {} }
         }
         await Task.yield()
+        let restored = workflow.retractionSavedWorkLine
+        XCTAssertNotNil(restored, "control: the saved-work line is shown")
         let check = Task { @MainActor in await workflow.checkRetractionsAgain() }
-        while !workflow.isCheckingRetractionsAgain { await Task.yield() }
+        guard await Self.waitUntil({ workflow.isCheckingRetractionsAgain }) else {
+            open.finish()
+            return XCTFail("Check again never began waiting")
+        }
         let line = workflow.retractionSavedWorkLine
-        XCTAssertNotNil(line, "control: the saved-work line is shown")
+        XCTAssertEqual(line, restored, "control: the first check waits, its body (the checking line) not yet begun")
 
         await workflow.checkRetractionsAgain()
         XCTAssertEqual(workflow.retractionSavedWorkLine, line)

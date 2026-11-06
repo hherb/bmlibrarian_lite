@@ -248,8 +248,9 @@ Open issues by family; each issue carries the detail. None blocks another.
   fail-under-XCTest default, an unreadable index file logged), **#649**
   (test gaps mostly closed; `RetractionRun` lives in its own file; left: the
   cited report's wiring, *Check again*'s failed save and `smartSearchNotice`'s
-  reset, each needing a seam (no LLM stub reaches the run's smart-search
-  step without a real PubMed search); the type items;
+  reset, each needing a seam (for the last: `SearchServiceFactory.search`
+  builds its own services from settings, ignoring `useServices`, so neither
+  setter of the notice is reachable offline); the type items;
   an unknown lookup name falling back to its raw key in reader text; an
   all-orphaned snapshot reading "never checked", a wording decision;
   `RetractionCrossrefLookup` now takes a `retry:` for tests),

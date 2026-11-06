@@ -581,7 +581,6 @@ final class FactCheckWorkflow {
     /// It is refused, and the line says so, while another workflow checks the
     /// same session again (#711); a stopped one no longer counts.
     func checkRetractionsAgain() async {
-        // set before the wait for earlier work, so a second tap meanwhile asks nothing
         guard !isCheckingRetractionsAgain else { return }
         if let id = session?.id {
             guard Self.sessionsCheckingAgain.insert(id).inserted else {
@@ -592,6 +591,7 @@ final class FactCheckWorkflow {
             heldCheckAgainSession = id
         }
         defer { releaseCheckAgainSession() }
+        // set before the wait for earlier work, so a second tap meanwhile stops at the guard above
         isCheckingRetractionsAgain = true
         checkAgainStopRequested = false
         checkAgainStoredElsewhereSinceStop = false
