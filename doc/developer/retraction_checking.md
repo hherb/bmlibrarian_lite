@@ -138,9 +138,11 @@ paper with its `retraction_status`.
   rows, but keep the snapshot as found and add `SCREEN_NOT_SAVED` /
   `RetractionText.screenNotSaved` to what they report (the desktop's
   `MoreEvidence.screen_unsaved`, the apps' `RetractionRun.unsaved`). The
-  desktop's report written again follows the checkpoint's record, so it says
-  unread whenever the reopen line does, even over a readable copy in the
-  report metadata. A desktop list with some unreadable rows still loses them
+  desktop keeps the ids it left out under `retracted_left_out_unsaved`, so a
+  later Find More Evidence does not find them again as new. The desktop's
+  report written again sets `retraction_screen_unread` from the checkpoint's
+  record, so it says unread whenever the reopen line does, even over a
+  readable copy in the report metadata. A desktop list with some unreadable rows still loses them
   on Find More Evidence's merge (#600). The apps show a stored check over
   an unreadable snapshot where the desktop says unread (#727).
 - **A paper the run saw unchecked warns of any retraction or concern**, of

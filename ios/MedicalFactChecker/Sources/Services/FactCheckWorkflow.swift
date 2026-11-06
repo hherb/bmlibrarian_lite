@@ -123,7 +123,8 @@ final class FactCheckWorkflow {
     /// What this run's retraction screen left out and could not check, for
     /// the screen to show (the desktop's retraction notice, as plain text).
     ///
-    /// `nil` when nothing was left out and every paper was checked, and until
+    /// Also says when the new status could not be saved with the session (#726).
+    /// `nil` when nothing was left out, every paper was checked and saved, and until
     /// a run screens its documents (``screenForRetraction(_:)``). Not a
     /// failure: a check that fails never stops the run.
     private(set) var retractionNotice: String?
@@ -3941,7 +3942,8 @@ final class FactCheckWorkflow {
     // MARK: - Retraction Screen
 
     /// Screens `documents` for retraction before they are scored, recording
-    /// each document's check and the session's snapshot, and setting
+    /// each document's check and the session's snapshot (unless that cannot
+    /// be read as a whole, #726), and setting
     /// ``retractionNotice`` for the run.
     ///
     /// Each document is checked at most once per run. One whose stored check

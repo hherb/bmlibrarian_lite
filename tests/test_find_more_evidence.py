@@ -443,11 +443,12 @@ class TestWhatIsFoundIsScreened:
         run = Run(storage, screen=screen)
         outcome = run(found(storage, "5", "6"))
 
-        assert (outcome.left_out, run.scorer.scored) == (1, ["doc-5"])
+        assert (outcome.left_out, outcome.screen_unsaved, run.scorer.scored) == (1, False, ["doc-5"])
         rows = storage.get_checkpoint(checkpoint_id).metadata[CHECKPOINT_RETRACTION_SNAPSHOT_KEY]
         assert {(r["document_id"], r["excluded"]) for r in rows} == {
             ("doc-5", False), ("doc-6", True)}
         assert "1 left out as retracted." in more_evidence_text(outcome)
+        assert SCREEN_NOT_SAVED not in more_evidence_text(outcome)
 
     def test_a_row_a_stopped_screen_wrote_is_replaced(self, storage: LiteStorage) -> None:
         """Held over unchecked, then found retracted: the report reads it as left out."""
@@ -546,8 +547,16 @@ class TestWhatIsFoundIsScreened:
         assert run.metadata.retraction_screen is None
         assert run.metadata.retraction_screen_unread == unreadable
         assert recorded_report_metadata(kept).retraction_screen_unread == unreadable
-        # control: a readable snapshot is saved, and nothing is said
+        # control: without screen_unsaved nothing is said
         assert SCREEN_NOT_SAVED not in more_evidence_text(replace(outcome, screen_unsaved=False))
+
+        # what it left out is still known, so found again it is not new (#729 review)
+        from bmlibrarian_lite.more_evidence import known_document_ids
+
+        assert "doc-6" in known_document_ids(storage, QUESTION)
+        again = Run(storage, screen=retract_6, rounds=[SmartSearchRound((), ("q",))])
+        assert again([]).notice == NO_NEW_EVIDENCE_TEXT
+        assert "doc-6" in again.contexts[0][1]
 
 
 class TestTheRunsQualityFilter:

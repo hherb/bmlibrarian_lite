@@ -889,6 +889,20 @@ final class RetractionScreenWorkflowTests: XCTestCase {
             "Retraction check: 1 retracted paper left out. " + RetractionText.screenNotSaved)
     }
 
+    /// #726: with nothing left out and every paper checked, the notice is the sentence alone.
+    func testAnUnreadableSnapshotUnderAnAllClearRunGivesTheSentenceAlone() async throws {
+        let (session, _) = makeSession(["10.1000/a", "10.1000/b"])
+        session.retractionSnapshotJSON = "\"a newer build's\""
+        let workflow = restore(session, check: Self.answering([
+            "10.1000/a": Self.clear(), "10.1000/b": Self.clear(),
+        ]))
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        XCTAssertEqual(session.retractionSnapshotJSON, "\"a newer build's\"")
+        XCTAssertEqual(workflow.retractionNotice, RetractionText.screenNotSaved)
+    }
+
     // MARK: - Failure and cancel
 
     /// Ruling 3: a check that throws leaves every paper it was given

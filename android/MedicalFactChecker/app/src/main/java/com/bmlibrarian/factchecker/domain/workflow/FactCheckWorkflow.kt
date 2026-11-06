@@ -225,9 +225,10 @@ class FactCheckWorkflow @Inject constructor(
 
     /**
      * What this run's retraction screen left out and could not check
-     * ("Retraction check: …."), or null when it left nothing out and checked
-     * every paper. Set as documents are screened before scoring, reset when a
-     * run starts.
+     * ("Retraction check: …."), and that the new status could not be saved
+     * with the session (#726); or null when it left nothing out, checked every
+     * paper and saved them. Set as documents are screened before scoring,
+     * reset when a run starts.
      */
     private val _retractionNotice = MutableStateFlow<String?>(null)
     val retractionNotice: StateFlow<String?> = _retractionNotice.asStateFlow()
@@ -2068,7 +2069,8 @@ class FactCheckWorkflow @Inject constructor(
 
     /**
      * Screen [documents] for retraction before they are scored, storing each
-     * paper's check and the session's snapshot, and setting [retractionNotice].
+     * paper's check and the session's snapshot (unless that cannot be read as
+     * a whole, #726), and setting [retractionNotice].
      *
      * Each document is checked at most once per run. A paper whose stored row
      * [PaperRetractionCheck.isReusable] is not asked again; otherwise what is

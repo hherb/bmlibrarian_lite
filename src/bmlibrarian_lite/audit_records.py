@@ -99,6 +99,11 @@ CHECKPOINT_RETRACTION_SNAPSHOT_KEY = "retraction_snapshot"
 #: filter left out, so a search for more does not find them again as new.
 CHECKPOINT_QUALITY_FILTERED_KEY = "quality_filtered_out"
 
+#: Where a review checkpoint keeps the ids of the documents a search for more
+#: left out as retracted when its snapshot could not take them (#726), so they
+#: are not found again as new.
+CHECKPOINT_RETRACTED_UNSAVED_KEY = "retracted_left_out_unsaved"
+
 #: How older builds began the explanation of a scoring call that raised,
 #: stored with a score of 1: the benchmark runner until #306, and the review
 #: scorer until 2025-12-23. What followed was the raw exception text.

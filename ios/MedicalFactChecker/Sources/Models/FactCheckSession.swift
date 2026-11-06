@@ -462,8 +462,8 @@ final class FactCheckSession {
     ///
     /// - Parameter checks: The checks used, keyed by `Document.id`; nothing is written for none.
     /// - Returns: `false` when the snapshot cannot be read as a whole, so was
-    ///   not written over; `true` otherwise (a check that cannot be encoded
-    ///   is logged and nothing is written, as before).
+    ///   not written over; `true` otherwise, including when a check cannot be
+    ///   encoded (logged, nothing written).
     func recordRetractionSnapshot(_ checks: [String: PaperRetractionCheck]) -> Bool {
         guard !checks.isEmpty else { return true }
         if let data = retractionSnapshotJSON?.data(using: .utf8),

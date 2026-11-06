@@ -341,12 +341,17 @@ def test_an_unchecked_check_again_row_never_hides_an_older_stored_retraction() -
     latest = latest_checks(rows, {CITED.id: older_retraction})
     assert latest[CITED.id] == older_retraction
     assert changed_since_snapshot(rows, latest, {CITED.id}) == [(CITED.id, older_retraction)]
-    # controls: an older unchecked store row is still older news than the Check again row
+    # controls: between two unchecked rows the newer wins, either way round
     older_outage = check(RetractionStatus.UNCHECKED, RUN - timedelta(days=1))
     assert latest_checks(rows, {CITED.id: older_outage})[CITED.id].checked_at == NOW
+    newer_outage = check(RetractionStatus.UNCHECKED, NOW + timedelta(days=1))
+    assert latest_checks(rows, {CITED.id: newer_outage})[CITED.id] == newer_outage
+    # an older clear store row is decided too, so it speaks for the unchecked paper
+    older_clear = check(RetractionStatus.CLEAR, RUN - timedelta(days=1))
+    assert latest_checks(rows, {CITED.id: older_clear})[CITED.id] == older_clear
     # and a decided Check again row still beats an older decided store row by time
-    clear_rows = rechecked_retracted()
-    assert latest_checks(clear_rows, {CITED.id: older_retraction})[CITED.id].checked_at == NOW
+    retracted_rows = rechecked_retracted()
+    assert latest_checks(retracted_rows, {CITED.id: older_retraction})[CITED.id].checked_at == NOW
 
 
 def test_check_again_writes_only_this_runs_documents() -> None:

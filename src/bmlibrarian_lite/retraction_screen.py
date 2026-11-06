@@ -537,6 +537,8 @@ def latest_checks(
 ) -> dict[str, PaperCheck]:
     """The latest check of each paper: a *Check again* row's, or the store's when no older.
 
+    A decided check always wins over an unchecked one, whatever their times.
+
     A row carrying ``run_status`` holds *Check again*'s answer, so it warns
     even when the store has no row (another machine, a reset data directory,
     a failed read). A store row no older replaces it. Whatever the times, a
