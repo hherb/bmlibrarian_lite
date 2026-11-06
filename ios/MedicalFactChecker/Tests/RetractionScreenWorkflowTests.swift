@@ -136,8 +136,8 @@ final class RetractionScreenWorkflowTests: XCTestCase {
     }
 
     /// Asks and counts, answering each paper from `answers`.
-    /// `@unchecked Sendable` is safe only because a run calls its check
-    /// sequentially, on the main actor; no two calls touch it at once.
+    /// `@unchecked Sendable` is safe only because each test awaits its run's
+    /// check before reading `calls` or `papers`, and none runs two at once.
     private final class Asked: @unchecked Sendable {
         var calls = 0
         var papers: [RetractionPaper] = []
@@ -688,7 +688,8 @@ final class RetractionScreenWorkflowTests: XCTestCase {
 
     /// Control for the rule above: a report written again after a restore, with
     /// no screen since, gives the count alone (no run saw why, as the desktop's
-    /// restored snapshot).
+    /// restored snapshot). Also the one test that replaces a report: linking the
+    /// new one before inserting it crashed SwiftData on iOS 18 / macOS 15.
     func testAReportWrittenAgainWithoutAScreenGivesTheCountAlone() async throws {
         let (session, _) = makeSession([nil])
         let workflow = restore(session, check: Self.answering([

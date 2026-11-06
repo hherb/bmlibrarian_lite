@@ -196,6 +196,8 @@ class RetractionTextTest {
         )
         // a special before a combining mark is still escaped (#649), and Unicode spaces collapse
         assertEquals("- \\*\u0301 a b. Retracted (PubMed's label)", RetractionText.leftOutEntry("*\u0301\u00a0a\u2003b", check("retracted")))
+        // Python's split set: NEL and U+001C separate, a space keeps the mark after it
+        assertEquals("- a b c \u0301d. Retracted (PubMed's label)", RetractionText.leftOutEntry("a\u0085b\u001cc \u0301d", check("retracted")))
     }
 
     @Test

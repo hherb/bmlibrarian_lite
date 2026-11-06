@@ -99,11 +99,12 @@ final class RetractionCrossrefLookupTests: XCTestCase {
     }
 
     /// A status bmlib does not read as an answer is asked once, never retried,
-    /// and leaves the DOI unanswered with that status, never "not retracted".
+    /// and leaves the DOI unanswered with that status, never "not retracted":
+    /// even when its body is a well-formed list naming no retraction.
     func testNonRetryableStatusIsUnreachableAfterOneRequest() async throws {
         for status in [400, 404] {
             StubURLProtocol.reset()
-            StubURLProtocol.stubbed = (status, Data())
+            StubURLProtocol.stubbed = (status, Self.body(""))
             let out = try await lookup().results(for: ["10.1000/a0"])
             guard case .unreachable = out["10.1000/a0"]?.result else {
                 return XCTFail("\(status) should be unreachable: \(String(describing: out["10.1000/a0"]))")

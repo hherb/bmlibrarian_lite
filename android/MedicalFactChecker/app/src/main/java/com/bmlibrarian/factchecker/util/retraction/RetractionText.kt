@@ -299,10 +299,15 @@ object RetractionText {
         return out.toString()
     }
 
-    /** Runs of whitespace as one space, trimmed. */
+    /** Runs of whitespace as one space, trimmed, over Python's `str.split` set. */
     private fun collapsedWhitespace(text: String): String =
-        // Char.isWhitespace, not a regex \s: ASCII-only on the JVM, Unicode on Android
-        text.map { if (it.isWhitespace()) ' ' else it }.joinToString("").split(' ').filter { it.isNotEmpty() }.joinToString(" ")
+        // Char.isWhitespace, not a regex \s: ASCII-only on the JVM, Unicode on Android;
+        // it misses NEL, which Python splits on
+        text.map { if (it.isWhitespace() || it == NEXT_LINE) ' ' else it }
+            .joinToString("").split(' ').filter { it.isNotEmpty() }.joinToString(" ")
+
+    /** U+0085, whitespace to Python but not to `Char.isWhitespace`. */
+    private const val NEXT_LINE = '\u0085'
 
     private const val MARKDOWN_SPECIALS = "\\`*_[]<>"
 

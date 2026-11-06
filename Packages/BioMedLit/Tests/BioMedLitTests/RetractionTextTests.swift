@@ -192,6 +192,14 @@ final class RetractionTextTests: XCTestCase {
         XCTAssertEqual(RetractionText.plainTitle("a*\u{0301}b _\u{0308}"), "a\\*\u{0301}b \\_\u{0308}")
     }
 
+    /// Whitespace is collapsed by code point too, over Python's set: a space
+    /// keeps the combining mark after it, and U+001C–U+001F separate.
+    func testWhitespaceCollapsesAsPythonsSplit() {
+        XCTAssertEqual(RetractionText.plainTitle("a \u{0301}b"), "a \u{0301}b")
+        XCTAssertEqual(RetractionText.plainTitle("a\u{1C}b"), "a b")
+        XCTAssertEqual(RetractionText.plainTitle("  a\u{85} *\u{0301} "), "a \\*\u{0301}")
+    }
+
     func testConcernCaveat() {
         XCTAssertEqual(
             RetractionText.concernCaveat(check("concern", evidence(kind: "expression_of_concern", day: "2026-03"))),

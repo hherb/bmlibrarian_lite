@@ -247,9 +247,12 @@ Open issues by family; each issue carries the detail. None blocks another.
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**
   (test gaps mostly closed; left: the cited report's wiring and *Check
-  again*'s failed save, each needing a seam; `smartSearchNotice`'s reset; the
-  type items; an all-orphaned snapshot reading "never checked", a wording
-  decision; `RetractionCrossrefLookup` now takes a `retry:` for tests),
+  again*'s failed save, each needing a seam; `smartSearchNotice`'s reset; a
+  second *Check again* tap while the first waits behind a run; the type
+  items; moving `RetractionRun` and its notice out of `FactCheckWorkflow.swift`;
+  an unknown lookup name falling back to its raw key in reader text; an
+  all-orphaned snapshot reading "never checked", a wording decision;
+  `RetractionCrossrefLookup` now takes a `retry:` for tests),
   **#653**, **#654** items 3 and 4 (the not-saved note said once, a failed
   check recomputing the warning; items 1 and 2 done), **#658** (Android;
   left: the at-most-once-per-run test; the type items (the
@@ -261,7 +264,11 @@ Open issues by family; each issue carries the detail. None blocks another.
   999 keys** (SQLite before API 31): read through
   `RetractionService.storedChecks`, never `RetractionCheckDao.get` direct.
   **A view that replaces its workflow or whose window closes calls the
-  outgoing one's `cancelCheckAgain()`** (#708; keep it at any new such site).
+  outgoing one's `cancelCheckAgain()`** (#708, #711; keep it at any new such site).
+  **A SwiftData model is inserted before it is linked**: an `EvidenceReport`
+  linked, uninserted, to a session that already had one crashed iOS 18 /
+  macOS 15 on every second report (Find More Evidence, Retry Report; PR #722).
+  Only CI's macos-15 runner or an iOS 18 simulator shows it, not macOS 26+.
   **Open: #713** (does a closed iPad scene's root `onDisappear` fire? needs a
   simulator or device by hand); **#704** (a full disk is only logged; reader
   text needs a decision).

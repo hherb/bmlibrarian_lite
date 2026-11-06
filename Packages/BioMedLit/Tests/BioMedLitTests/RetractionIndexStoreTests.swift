@@ -255,6 +255,8 @@ final class RetractionIndexStoreTests: RecordingLoggerTestCase {
     func testConcurrentRefreshesDownloadOnce() async throws {
         HeldExportProtocol.reset(serving: RetractionFixture.csv())
         let started = expectation(description: "the download started")
+        // a second download, should sharing break, fails `requests` rather than crashing here
+        started.assertForOverFulfill = false
         HeldExportProtocol.started = started
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [HeldExportProtocol.self]
@@ -465,6 +467,7 @@ private final class HeldExportProtocol: URLProtocol {
         Self.started?.fulfill()
         DispatchQueue.global().async {
             Self.release.wait()
+            Self.release.signal() // passed on, so every held request is served
             let response = HTTPURLResponse(url: self.request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             self.client?.urlProtocol(self, didLoad: Self.body)

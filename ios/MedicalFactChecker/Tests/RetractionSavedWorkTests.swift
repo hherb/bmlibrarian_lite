@@ -148,8 +148,8 @@ final class RetractionSavedWorkTests: XCTestCase {
 
     private struct CheckFailed: Error {}
 
-    /// No key is stored, so it never reaches the Keychain, and a new claim's
-    /// services cannot be made: the run stops there, before any request.
+    /// A secret store with no key, in place of the Keychain: a new claim's
+    /// services cannot be made, so its run stops there, before any request.
     private final class NoSecrets: SecretStore {
         func load(key: String) throws -> String? { nil }
         func save(key: String, value: String) -> Bool { false }
@@ -278,11 +278,11 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertNil(workflow.retractionSavedWorkWarning)
     }
 
-    /// A new claim answers for itself: no notice or line of the last session's
-    /// survives into it, even when the new run stops at once.
-    func testANewClaimClearsTheLastSessionsNoticesAndLine() async throws {
-        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
-        storeElsewhere("10.1000/a", Self.check("retracted", at: Self.runDay.addingTimeInterval(Self.day)))
+    /// A workflow whose new claim stops at its services, before any request:
+    /// its secret store holds no key. The provider is read from the standard
+    /// defaults (setting it would write there), so a machine set to a keyless
+    /// one skips: its claim would run for real.
+    private func keylessWorkflow(checking check: @escaping RetractionCheck = { _ in [:] }) throws -> FactCheckWorkflow {
         let flags = try XCTUnwrap(UserDefaults(suiteName: "RetractionSavedWorkTests.newClaim"))
         let settings = AppSettings(secretStore: NoSecrets(), credentialFlags: flags)
         try XCTSkipUnless(settings.selectedProvider.requiresAPIKey, "a keyless provider would run the claim for real")
@@ -291,23 +291,46 @@ final class RetractionSavedWorkTests: XCTestCase {
             llm: LLMService(baseURL: Self.unservedScheme, apiKey: "test-key", model: "test-model"),
             pubMed: BMLPubMedService.create(from: .shared)
         )
+        workflow.useRetractionCheck(check)
+        return workflow
+    }
+
+    /// Starts a new claim on `workflow`, which stops at its services.
+    private func startStoppedClaim(on workflow: FactCheckWorkflow) async {
+        var errors: [Error] = []
+        workflow.onError = { errors.append($0) }
+        await workflow.startFactCheck(claim: "Statins prevent dementia")
+        XCTAssertEqual(errors.count, 1, "control: the run stopped at its services, before any request")
+    }
+
+    /// A new claim answers for itself: the last run's notice does not survive
+    /// into it, even when the new run stops at once.
+    func testANewClaimClearsTheLastRunsNotice() async throws {
+        let (session, documents) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
         let retracted = Self.check("retracted")
-        workflow.useRetractionCheck { papers in
+        let workflow = try keylessWorkflow { papers in
             Dictionary(uniqueKeysWithValues: papers.map { ($0, retracted) })
         }
         workflow.restoreForViewing(session)
-        XCTAssertNotNil(workflow.retractionSavedWorkWarning, "control")
         await workflow.retryFailedDocuments(pmids: [documents[0].pmid])
         XCTAssertNotNil(workflow.retractionNotice, "control: the run left the paper out")
+
+        await startStoppedClaim(on: workflow)
+
+        XCTAssertNil(workflow.retractionNotice)
+    }
+
+    /// Nor do the last session's saved-work line and warning.
+    func testANewClaimClearsTheSavedWorkLineAndWarning() async throws {
+        let (session, _) = makeSession(["10.1000/a"], cited: [0], run: [0: Self.check("clear")])
+        storeElsewhere("10.1000/a", Self.check("retracted", at: Self.runDay.addingTimeInterval(Self.day)))
+        let workflow = try keylessWorkflow()
         workflow.restoreForViewing(session)
         XCTAssertNotNil(workflow.retractionSavedWorkLine, "control")
-        var errors: [Error] = []
-        workflow.onError = { errors.append($0) }
+        XCTAssertNotNil(workflow.retractionSavedWorkWarning, "control")
 
-        await workflow.startFactCheck(claim: "Statins prevent dementia")
+        await startStoppedClaim(on: workflow)
 
-        XCTAssertEqual(errors.count, 1, "control: the run stopped at its services, before any request")
-        XCTAssertNil(workflow.retractionNotice)
         XCTAssertNil(workflow.retractionSavedWorkLine)
         XCTAssertNil(workflow.retractionSavedWorkWarning)
     }
@@ -656,7 +679,7 @@ final class RetractionSavedWorkTests: XCTestCase {
         await workflow.checkRetractionsAgain()
         XCTAssertEqual(asked.calls, 1, "the second tap asks nothing")
         XCTAssertTrue(workflow.isCheckingRetractionsAgain, "the first is still running")
-        XCTAssertFalse(workflow.retractionSavedWorkLine?.hasSuffix(RetractionText.checkAgainElsewhere) == true,
+        XCTAssertEqual(workflow.retractionSavedWorkLine, RetractionText.checkingAgainLine,
                        "this window's own check is no other window's")
 
         open.finish()
