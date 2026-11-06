@@ -40,8 +40,16 @@ final class RetractionCrossrefLookupTests: XCTestCase {
     private func lookup() -> RetractionCrossrefLookup {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]
-        return RetractionCrossrefLookup(email: "t@example.org", session: URLSession(configuration: config))
+        return RetractionCrossrefLookup(
+            email: "t@example.org", session: URLSession(configuration: config), retry: Self.fastRetry
+        )
     }
+
+    /// The production attempt count without its seconds of backoff.
+    private static let fastRetry = RetryConfiguration(
+        maxAttempts: RetryConfiguration.networkDefault.maxAttempts,
+        initialDelay: 0.001, maxDelay: 0.001, backoffMultiplier: 1, jitterFactor: 0
+    )
 
     private static func body(_ items: String) -> Data {
         Data(#"{"status":"ok","message-type":"work-list","message":{"items":[\#(items)]}}"#.utf8)
@@ -88,6 +96,22 @@ final class RetractionCrossrefLookupTests: XCTestCase {
         let out = try await lookup().results(for: ["10.1000/a0"])
         guard case .served = out["10.1000/a0"]?.result else { return XCTFail("should be served") }
         XCTAssertEqual(StubURLProtocol.requestedURLs.count, 2)
+    }
+
+    /// A status bmlib does not read as an answer is asked once, never retried,
+    /// and leaves the DOI unanswered with that status, never "not retracted":
+    /// even when its body is a well-formed list naming no retraction.
+    func testNonRetryableStatusIsUnreachableAfterOneRequest() async throws {
+        for status in [400, 404] {
+            StubURLProtocol.reset()
+            StubURLProtocol.stubbed = (status, Self.body(""))
+            let out = try await lookup().results(for: ["10.1000/a0"])
+            guard case .unreachable = out["10.1000/a0"]?.result else {
+                return XCTFail("\(status) should be unreachable: \(String(describing: out["10.1000/a0"]))")
+            }
+            XCTAssertEqual(out["10.1000/a0"]?.failure, .httpStatus(status))
+            XCTAssertEqual(StubURLProtocol.requestedURLs.count, 1, "\(status) is not retried")
+        }
     }
 
     func testMalformedJSONIsUnreachable() async throws {

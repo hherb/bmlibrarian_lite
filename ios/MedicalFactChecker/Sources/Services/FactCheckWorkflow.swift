@@ -3379,7 +3379,8 @@ final class FactCheckWorkflow {
                 documentsReviewed: session.documentsScored,
                 searchShortfallsRecord: shortfallsRecord
             )
-            report.session = session
+            // inserted before it is linked: linking an uninserted report to a
+            // session that has one crashes SwiftData on iOS 18 / macOS 15
             modelContext.insert(report)
             session.report = report
             try? modelContext.save()
@@ -3456,7 +3457,7 @@ final class FactCheckWorkflow {
             documentsReviewed: session.documentsScored,
             searchShortfallsRecord: shortfallsRecord
         )
-        report.session = session
+        // inserted before it is linked (see the no-evidence report above)
         modelContext.insert(report)
         session.report = report
         try? modelContext.save()

@@ -42,7 +42,8 @@ public enum RetractionIndexRefresh: Equatable, Sendable {
 /// refresh replaces the file atomically, and any refusal keeps the old one.
 public actor RetractionIndexStore {
     private let directory: URL
-    private let session: URLSession
+    /// Internal so a test can see which session ``production(email:)`` built.
+    let session: URLSession
     private let email: String
     /// bmlib's `buildRetractionIndex`; a test injects one it can hold.
     private let build: @Sendable (Data, String) throws -> RetractionIndexBuild

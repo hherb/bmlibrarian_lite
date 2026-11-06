@@ -20,7 +20,7 @@ import BmlibCore
 
 /// The stored Retraction Watch index: read only while current, and replaced
 /// only by a download bmlib builds that has not shrunk (retraction_export.py).
-final class RetractionIndexStoreTests: XCTestCase {
+final class RetractionIndexStoreTests: RecordingLoggerTestCase {
     private var directory: URL!
 
     override func setUpWithError() throws {
@@ -116,6 +116,21 @@ final class RetractionIndexStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), before)
     }
 
+    /// Exactly the keep ratio (19 of 20 notices) is kept; one notice fewer is refused.
+    func testTheKeepRatioItselfIsKept() async throws {
+        let kept = Int(Double(20) * BioMedLitConstants.retractionWatchMinKeepRatio)
+        try storeIndex(RetractionFixture.retractions(20), dataAsOf: "2026-01-01")
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv(RetractionFixture.retractions(kept)))
+        let outcome = await store().refreshIfStale(now: RetractionFixture.now)
+        XCTAssertEqual(outcome, .refreshed(noticeCount: UInt64(kept)))
+
+        try FileManager.default.removeItem(at: directory)
+        try storeIndex(RetractionFixture.retractions(20), dataAsOf: "2026-01-01")
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv(RetractionFixture.retractions(kept - 1)))
+        let below = await store().refreshIfStale(now: RetractionFixture.now)
+        guard case .refused = below else { return XCTFail("under the ratio is refused: \(below)") }
+    }
+
     /// A refused export would be refused again: not downloaded again within the
     /// day, by a later launch either (#647).
     func testARefusedExportIsNotDownloadedAgainWithinTheDay() async throws {
@@ -202,6 +217,29 @@ final class RetractionIndexStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), before)
     }
 
+    /// A connection that fails is a failed download: the old file stays, no wait is recorded.
+    func testATransportErrorKeepsThePreviousFile() async throws {
+        try storeIndex(dataAsOf: "2026-01-01")
+        let before = try Data(contentsOf: file)
+        StubURLProtocol.failures = ["retractionwatch": URLError(.cannotConnectToHost)]
+        let outcome = await store().refreshIfStale(now: RetractionFixture.now)
+        XCTAssertEqual(outcome, .failed(.connection))
+        XCTAssertEqual(try Data(contentsOf: file), before)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: refusalFile.path))
+    }
+
+    /// A content-encoded body arrives decoded, so its Content-Length (the
+    /// encoded size) is no measure of it: the export is stored.
+    func testAContentEncodedBodyIsNotMeasuredByItsLength() async throws {
+        let body = RetractionFixture.csv()
+        StubURLProtocol.stubbed = (200, body)
+        StubURLProtocol.headers = ["retractionwatch": [
+            "Content-Length": String(body.count / 4), "Content-Encoding": "gzip",
+        ]]
+        let outcome = await store().refreshIfStale(now: RetractionFixture.now)
+        XCTAssertEqual(outcome, .refreshed(noticeCount: 3))
+    }
+
     func testCutShortDownloadIsRefused() async throws {
         let body = RetractionFixture.csv()
         StubURLProtocol.stubbed = (200, body)
@@ -212,15 +250,27 @@ final class RetractionIndexStoreTests: XCTestCase {
     }
 
     /// Launch and a run may both ask while the copy is stale: one download serves both.
+    /// The download is held until the second call has come in, so this cannot
+    /// pass by the first finishing early (the second would then read `.fresh`).
     func testConcurrentRefreshesDownloadOnce() async throws {
-        StubURLProtocol.stubbed = (200, RetractionFixture.csv())
-        let store = store()
-        async let first = store.refreshIfStale(now: RetractionFixture.now)
-        async let second = store.refreshIfStale(now: RetractionFixture.now)
-        _ = await (first, second)
-        XCTAssertEqual(StubURLProtocol.requestedURLs.count, 1)
-        let index = await store.currentIndex(now: RetractionFixture.now)
-        XCTAssertEqual(index?.dataAsOf(), RetractionFixture.today)
+        HeldExportProtocol.reset(serving: RetractionFixture.csv())
+        let started = expectation(description: "the download started")
+        // a second download, should sharing break, fails `requests` rather than crashing here
+        started.assertForOverFulfill = false
+        HeldExportProtocol.started = started
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldExportProtocol.self]
+        let store = RetractionIndexStore(directory: directory, session: URLSession(configuration: config), email: "t@example.org")
+        let first = Task { await store.refreshIfStale(now: RetractionFixture.now) }
+        await fulfillment(of: [started], timeout: 10)
+        let second = Task { await store.refreshIfStale(now: RetractionFixture.now) }
+        // the actor is free while the download is held, so the second call reaches it at once
+        try await Task.sleep(nanoseconds: 200_000_000)
+        HeldExportProtocol.release.signal()
+        let outcomes = await (first.value, second.value)
+        XCTAssertEqual(outcomes.0, .refreshed(noticeCount: 3))
+        XCTAssertEqual(outcomes.1, .refreshed(noticeCount: 3), "the second call shares the first download")
+        XCTAssertEqual(HeldExportProtocol.requests, 1)
     }
 
     /// A run reads the stored copy while a refresh builds the next one (#681):
@@ -338,12 +388,47 @@ final class RetractionIndexStoreTests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.requestedURLs.count, 2)
     }
 
+    /// Skipped rows and natures bmlib does not know are logged, the latter as a
+    /// warning: their notices decide nothing.
+    func testSkippedRowsAndUnknownNaturesAreLogged() async throws {
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv())
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubURLProtocol.self]
+        let store = RetractionIndexStore(
+            directory: directory, session: URLSession(configuration: config), email: "t@example.org"
+        ) { csv, dataAsOf in
+            let built = try buildRetractionIndex(csv: csv, dataAsOf: dataAsOf)
+            return RetractionIndexBuild(index: built.index, skippedRows: 2, unknownNatures: ["Mystery", "Riddle"])
+        }
+        let outcome = await store.refreshIfStale(now: RetractionFixture.now)
+        XCTAssertEqual(outcome, .refreshed(noticeCount: 3))
+        XCTAssertTrue(logger.recorded.contains("INFO: Retraction Watch export: 2 rows skipped"), "\(logger.recorded)")
+        XCTAssertTrue(
+            logger.problems.contains("WARNING: Retraction Watch natures not recognised: Mystery, Riddle"),
+            "\(logger.recorded)")
+    }
+
+    /// Control: a clean build logs neither.
+    func testACleanBuildLogsNoSkipsOrNatures() async throws {
+        StubURLProtocol.stubbed = (200, RetractionFixture.csv())
+        _ = await store().refreshIfStale(now: RetractionFixture.now)
+        XCTAssertFalse(logger.recorded.contains { $0.contains("skipped") || $0.contains("natures") }, "\(logger.recorded)")
+    }
+
     /// The ~68 MB copy is downloaded again, never backed up.
     func testIndexFolderIsExcludedFromBackup() async throws {
         StubURLProtocol.stubbed = (200, RetractionFixture.csv())
         _ = await store().refreshIfStale(now: RetractionFixture.now)
         let values = try URL(fileURLWithPath: directory.path).resourceValues(forKeys: [.isExcludedFromBackupKey])
         XCTAssertEqual(values.isExcludedFromBackup, true)
+    }
+
+    /// The store the app builds downloads over the Wi-Fi-only session, not just any.
+    func testProductionDownloadsOverTheWiFiOnlySession() async {
+        let config = await RetractionIndexStore.production(email: "t@example.org").session.configuration
+        XCTAssertFalse(config.allowsExpensiveNetworkAccess)
+        XCTAssertFalse(config.allowsConstrainedNetworkAccess)
+        XCTAssertEqual(config.timeoutIntervalForRequest, BioMedLitConstants.retractionWatchDownloadTimeoutSeconds)
     }
 
     func testRefreshUsesAWiFiOnlySession() {
@@ -357,4 +442,38 @@ final class RetractionIndexStoreTests: XCTestCase {
         let path = RetractionIndexStore.productionDirectory.path
         XCTAssertTrue(path.hasSuffix("/\(BioMedLitConstants.appSupportFolderName)/\(BioMedLitConstants.retractionFolderName)"), path)
     }
+}
+
+/// Serves the export only once ``release`` is signalled, off the loading
+/// thread, so a test can make a second call while the first download waits.
+private final class HeldExportProtocol: URLProtocol {
+    static var started: XCTestExpectation?
+    static var release = DispatchSemaphore(value: 0)
+    private(set) static var requests = 0
+    private static var body = Data()
+
+    static func reset(serving body: Data) {
+        self.body = body
+        requests = 0
+        started = nil
+        release = DispatchSemaphore(value: 0)
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.requests += 1
+        Self.started?.fulfill()
+        DispatchQueue.global().async {
+            Self.release.wait()
+            Self.release.signal() // passed on, so every held request is served
+            let response = HTTPURLResponse(url: self.request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            self.client?.urlProtocol(self, didLoad: Self.body)
+            self.client?.urlProtocolDidFinishLoading(self)
+        }
+    }
+
+    override func stopLoading() {}
 }

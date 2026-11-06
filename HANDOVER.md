@@ -245,38 +245,33 @@ Open issues by family; each issue carries the detail. None blocks another.
   rule, "could not be read" wording, an Apple snapshot entry left out unread,
   needs a cross-platform decision),
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
-  fail-under-XCTest default, an unreadable index file logged), **#649**,
+  fail-under-XCTest default, an unreadable index file logged), **#649**
+  (test gaps mostly closed; left: the cited report's wiring and *Check
+  again*'s failed save, each needing a seam; `smartSearchNotice`'s reset; a
+  second *Check again* tap while the first waits behind a run; the type
+  items; moving `RetractionRun` and its notice out of `FactCheckWorkflow.swift`;
+  an unknown lookup name falling back to its raw key in reader text; an
+  all-orphaned snapshot reading "never checked", a wording decision;
+  `RetractionCrossrefLookup` now takes a `retry:` for tests),
   **#653**, **#654** items 3 and 4 (the not-saved note said once, a failed
   check recomputing the warning; items 1 and 2 done), **#658** (Android;
   left: the at-most-once-per-run test; the type items (the
   `PaperRetractionCheck` and `CrossrefAnswer` invariants, a cross-platform
   decision; `publicationTypes` nullable; `paperKey` a function); the IGNORE
   insert, owed before a second writer lands; whether a full disk's `Refused`
-  should wait a day). **#720 done**: a stored read that fails asks every
-  paper afresh and stores nothing, on all three, the run and *Check again*
-  alike (Apple already did; desktop `check`, Android `readStoredChecks`,
-  where *Check again* then says not saved). **The stored-check read
-  binds at most 999 keys** (SQLite before API 31): read through
+  should wait a day). **A failed stored read asks every paper afresh and
+  stores nothing** (#720, all three). **The stored-check read binds at most
+  999 keys** (SQLite before API 31): read through
   `RetractionService.storedChecks`, never `RetractionCheckDao.get` direct.
-  **#708, #711, #714, #716 done**: a view that replaces its workflow or whose
-  window closes calls the outgoing one's `cancelCheckAgain()` (keep it at any
-  new such site); `sessionsCheckingAgain` refuses a second window's *Check
-  again* on one session; a stored *Check again* posts
-  `retractionChecksStored` and other windows redraw; the workflow's
-  `deinit` removes its two observers (tokens `nonisolated(unsafe)`; a test
-  injects a counting `notificationCenter` and asserts both removals).
-  **Open: #713** (does a closed iPad
-  scene's root `onDisappear` fire? needs a simulator or device by hand).
-  **PR #707 (#654 item 2, #663, #675)**: Apple's *Check again* has its own
-  Cancel (as Android's; background expiry calls it), never cancels a run it
-  waits behind, records no stop, and a stopped one says `checkAgainStopped`
-  and still warns by the label, on all three (maintainer, 2026-11-04).
-  **#700, #702, #694**: only a refused export records the day's wait; an
-  unwritable index or < 100 MB free (`retractionWatchMinFreeBytes` /
-  `RETRACTION_WATCH_MIN_FREE_BYTES`, checked just before downloading; a
-  folder that cannot be made has none) is
-  `notStored` / `NotStored`, never recorded. Follow-up: **#704** (a full disk
-  is only logged; reader text needs a decision).
+  **A view that replaces its workflow or whose window closes calls the
+  outgoing one's `cancelCheckAgain()`** (#708, #711; keep it at any new such site).
+  **A SwiftData model is inserted before it is linked**: an `EvidenceReport`
+  linked, uninserted, to a session that already had one crashed iOS 18 /
+  macOS 15 on every second report (Find More Evidence, Retry Report; PR #722).
+  Only CI's macos-15 runner or an iOS 18 simulator shows it, not macOS 26+.
+  **Open: #713** (does a closed iPad scene's root `onDisappear` fire? needs a
+  simulator or device by hand); **#704** (a full disk is only logged; reader
+  text needs a decision).
 - **bmlib port plan** (`doc/plans/2026-10-17-port-bmlib-advances.md`):
   Phases 3–6, each needing its own plan first (Phase 4 as adapter work over
   the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,

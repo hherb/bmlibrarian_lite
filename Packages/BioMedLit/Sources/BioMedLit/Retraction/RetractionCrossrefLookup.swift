@@ -34,14 +34,17 @@ public actor RetractionCrossrefLookup {
 
     private let email: String
     private let session: URLSession
+    private let retry: RetryConfiguration
     private var lastRequestTime = Date.distantPast
 
     /// - Parameters:
     ///   - email: Contact address for Crossref's polite pool.
     ///   - session: The session requests go over.
-    public init(email: String, session: URLSession = .shared) {
+    ///   - retry: How a transient failure is retried (tests pass a fast one).
+    public init(email: String, session: URLSession = .shared, retry: RetryConfiguration = .networkDefault) {
         self.email = email
         self.session = session
+        self.retry = retry
     }
 
     /// Ask Crossref about `dois`.
@@ -76,7 +79,7 @@ public actor RetractionCrossrefLookup {
         let body: Data
         do {
             (status, body) = try await RetryHelper.retry(
-                config: .networkDefault,
+                config: retry,
                 shouldRetry: RetryHelper.retryOnlyTransient
             ) {
                 let (data, response) = try await self.session.data(for: request)
