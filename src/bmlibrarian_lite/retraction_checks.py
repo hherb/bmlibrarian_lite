@@ -218,6 +218,12 @@ class RetractionChecker:
         read), so a caller that names the paper by identifier alone never
         loses the PubMed label.
 
+        A stored read that fails is logged and every paper is asked as if it
+        had no row; nothing is then stored, since a row not read may hold a
+        retraction a fresh verdict must not overwrite (#720). Storing never
+        raises either: a failed write is logged, and the verdicts are still
+        returned.
+
         Args:
             documents: The documents.
             refresh: Ask again even for a fresh stored verdict.
@@ -229,11 +235,8 @@ class RetractionChecker:
             Crossref batch was never asked has none, and none is stored.
 
         Raises:
-            sqlite3.Error: Reading the stored verdicts failed. Storing them
-                never raises: a failed write is logged, and the verdicts are
-                still returned.
             SQLiteError: Reading the stored documents' publication types
-                failed. Neither is caught here, so the caller marks the
+                failed. It is not caught here, so the caller marks the
                 documents unchecked.
         """
         now = self._now()
@@ -249,7 +252,13 @@ class RetractionChecker:
                 )
                 out[doc.id] = PaperCheck(verdict, now, None, None)
 
-        stored = self._storage.retraction_checks(papers)
+        try:
+            stored = self._storage.retraction_checks(papers)
+            readable = True
+        except sqlite3.Error as e:
+            # a known retraction is still found by the fresh lookups (#720)
+            logger.warning("Stored retraction checks could not be read (%s); all asked afresh", type(e).__name__)
+            stored, readable = {}, False
         max_age = timedelta(days=RETRACTION_CHECK_MAX_AGE_DAYS)
         due: dict[str, list[LiteDocument]] = {}
         for key, docs in papers.items():
@@ -308,6 +317,8 @@ class RetractionChecker:
                 continue
             decided[key] = fresh
             out.update((doc.id, fresh) for doc in docs)
+        if not readable:
+            return out
         # A verdict resting on a failure fills only a missing row: a row this
         # build could not read, or one another process stored meanwhile, may
         # hold a retraction an outage must not erase. A retraction erases

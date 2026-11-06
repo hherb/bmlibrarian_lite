@@ -1013,7 +1013,9 @@ class FactCheckWorkflow @Inject constructor(
      * label retracts unless the documents cannot be read again (#673, #675; a
      * failed one also of what an answered check found before its rows could be
      * read); once they are in, they are stored and shown
-     * whole, and badged though the rows cannot be read back. A new run or restore
+     * whole, and badged though the rows cannot be read back. Rows that cannot
+     * be read before the answers are taken leave them unstored, said as not
+     * saved (#720). A new run or restore
      * cancels it, and it never writes their screen.
      *
      * @throws Exception When the store cannot be read, even to say so
@@ -1089,6 +1091,7 @@ class FactCheckWorkflow @Inject constructor(
         }
         var papers: Map<String, RetractionPaper> = emptyMap()
         var fresh: Map<String, PaperRetractionCheck> = emptyMap()
+        var rowsRead = true
         val taken = try {
             val documents = documentRepository.getDocumentsBySessionSync(sessionId)
             papers = documents.associate { it.id to it.retractionPaper }
@@ -1097,8 +1100,9 @@ class FactCheckWorkflow @Inject constructor(
             val keys = papers.mapValues { it.value.paperKey }
             val checks = retractionService.check(papers.values.distinct())
             fresh = documents.mapNotNull { document -> checks[papers.getValue(document.id)]?.let { document.id to it } }.toMap()
-            val stored = retractionService.storedChecks(keys.values.filterNotNull().toSet())
-            takeRetractionChecks(documents.filter { it.id in fresh }, keys, stored, fresh)
+            val stored = readStoredChecks(keys.values.filterNotNull().toSet())
+            rowsRead = stored != null
+            takeRetractionChecks(documents.filter { it.id in fresh }, keys, stored.orEmpty(), fresh)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -1118,7 +1122,7 @@ class FactCheckWorkflow @Inject constructor(
         currentCoroutineContext().ensureActive()
         // the answers are in: a cancel now would call the rows they change the run's record
         withContext(NonCancellable) {
-            val saved = storeRetractionChecks(taken.rows)
+            val saved = rowsRead && storeRetractionChecks(taken.rows)
             val unsaved = if (saved) {
                 ""
             } else {
@@ -2064,8 +2068,9 @@ class FactCheckWorkflow @Inject constructor(
      * stored and used follows [PaperRetractionCheck.take]. A failing lookup
      * leaves unchecked every paper with no stored warning that stands (a
      * stored retraction or concern still holds); a failure before the lookup
-     * (stored rows unreadable, bmlib's native library missing) leaves every
-     * paper unchecked. Either way a paper its own label retracts is still
+     * (bmlib's native library missing) leaves every paper unchecked. Stored
+     * rows that cannot be read are no such failure ([readStoredChecks]).
+     * Either way a paper its own label retracts is still
      * left out ([PaperRetractionCheck.failedFor]), the run goes on, and a
      * cancel records nothing.
      *
@@ -2114,7 +2119,8 @@ class FactCheckWorkflow @Inject constructor(
     /**
      * Decide each document's check: a reusable stored row, else a fresh check
      * taken against the stored row ([PaperRetractionCheck.take]), written as
-     * the paper's new row when it replaces it.
+     * the paper's new row when it replaces it. Stored rows that cannot be read
+     * leave every paper to the fresh check, and nothing is written.
      *
      * @param papers Each document's paper, [RetractionPaper.merged], so a
      *   paper two documents share is decided once
@@ -2126,11 +2132,11 @@ class FactCheckWorkflow @Inject constructor(
         now: Long
     ): Map<String, PaperRetractionCheck> {
         val keys = papers.mapValues { it.value.paperKey }
-        val stored = retractionService.storedChecks(keys.values.filterNotNull().toSet())
+        val stored = readStoredChecks(keys.values.filterNotNull().toSet())
         val used = mutableMapOf<String, PaperRetractionCheck>()
         val due = documents.filter { document ->
             val paper = papers.getValue(document.id)
-            val reusable = keys[document.id]?.let(stored::get)?.let(PaperRetractionCheck::decode)
+            val reusable = keys[document.id]?.let { stored?.get(it) }?.let(PaperRetractionCheck::decode)
                 ?.takeIf { it.isReusable(now, paper.publicationTypes) }
             reusable?.let { used[document.id] = it }
             reusable == null
@@ -2143,19 +2149,19 @@ class FactCheckWorkflow @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.w(TAG, "Retraction lookup failed; only stored warnings and labels decide: ${e.javaClass.simpleName}")
+            Log.w(TAG, "Retraction lookup failed; only stored warnings read and labels decide: ${e.javaClass.simpleName}")
             emptyMap()
         } catch (e: LinkageError) {
             // a build without bmlib's native library: the reusable rows above still stand
-            Log.w(TAG, "Retraction lookup unavailable; only stored warnings decide: ${e.javaClass.simpleName}")
+            Log.w(TAG, "Retraction lookup unavailable; only stored warnings read and labels decide: ${e.javaClass.simpleName}")
             emptyMap()
         }
         val fresh = due.associate { document ->
             val paper = papers.getValue(document.id)
             document.id to (checks[paper] ?: PaperRetractionCheck.failedFor(paper, now).also { retractionRun.failed += paper })
         }
-        val taken = takeRetractionChecks(due, keys, stored, fresh)
-        storeRetractionChecks(taken.rows)
+        val taken = takeRetractionChecks(due, keys, stored.orEmpty(), fresh)
+        if (stored != null) storeRetractionChecks(taken.rows)
         return used + taken.use
     }
 
@@ -2213,6 +2219,22 @@ class FactCheckWorkflow @Inject constructor(
         // the run's snapshot still records what it used; the next run asks again
         Log.w(TAG, "Retraction checks not stored: ${e.javaClass.simpleName}")
         false
+    }
+
+    /**
+     * The stored rows for these paper keys, or null when they cannot be read:
+     * every paper is then asked afresh and nothing is stored, since a row not
+     * read may hold a retraction a fresh check must not overwrite (#720, the
+     * desktop's `check`). A failure is logged, never thrown.
+     */
+    private suspend fun readStoredChecks(keys: Collection<String>): Map<String, String>? = try {
+        retractionService.storedChecks(keys)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        // the fresh lookups still find a known retraction
+        Log.w(TAG, "Stored retraction checks could not be read; all asked afresh, none stored: ${e.javaClass.simpleName}")
+        null
     }
 
     // ==================== Transparency Analysis ====================

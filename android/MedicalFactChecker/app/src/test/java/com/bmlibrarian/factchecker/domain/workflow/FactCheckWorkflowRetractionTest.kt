@@ -455,17 +455,22 @@ class FactCheckWorkflowRetractionTest {
         assertEquals("Retraction check: 1 retracted paper left out.", workflow.retractionNotice.value)
     }
 
+    /** #720, the desktop's `test_a_failed_stored_read_still_asks_afresh_and_stores_nothing`. */
     @Test
-    fun `stored checks that cannot be read leave every paper unchecked, and the run goes on`() = runTest {
+    fun `stored checks that cannot be read leave every paper to the fresh check, and nothing is stored`() = runTest {
         hold("d1")
+        hold("d2")
+        answers["2"] = RETRACTED
         coEvery { retractionService.storedChecks(any()) } throws IOException("database locked")
 
         run()
 
         assertEquals(listOf("d1"), scored)
-        assertTrue(asked.isEmpty())
-        assertTrue(snapshot().getValue("d1").isUnchecked)
-        assertEquals("Retraction check: 1 paper's retraction status could not be checked: the check failed.", workflow.retractionNotice.value)
+        assertEquals(listOf("1", "2"), asked.single().map { it.pmid })
+        assertTrue(snapshot().getValue("d1").isClear)
+        assertTrue(snapshot().getValue("d2").isRetracted)
+        assertEquals("Retraction check: 1 retracted paper left out.", workflow.retractionNotice.value)
+        coVerify(exactly = 0) { retractionService.store(any()) }
     }
 
     /** The desktop's `test_one_typed_document_reads_the_label_for_the_paper`. */
@@ -732,7 +737,7 @@ class FactCheckWorkflowRetractionTest {
         assertTrue(warning, warning.contains("• Study d2: Expression of concern"))
     }
 
-    /** #673: an answered check whose rows cannot be read still warns of what it found, storing nothing. */
+    /** #673, #720: an answered check whose rows cannot be read still warns of and badges what it found, storing nothing. */
     @Test
     fun `a Check again whose rows cannot be read still warns of what it found`() = runTest {
         BmlibFfi.assumeAvailable()
@@ -743,8 +748,9 @@ class FactCheckWorkflowRetractionTest {
         workflow.checkRetractionsAgain()
 
         assertTrue(workflow.retractionSavedWork.value?.warning!!.contains("• Study d1: Retracted"))
-        assertTrue(workflow.retractionSavedWork.value?.line!!.endsWith(RetractionText.CHECK_AGAIN_FAILED + RetractionText.STORED_CHECKS_UNREAD))
-        assertTrue("nothing is stored", rows.isEmpty())
+        assertTrue(workflow.retractionSavedWork.value?.checks.orEmpty().getValue("d1").isRetracted)
+        assertTrue(workflow.retractionSavedWork.value?.line!!.endsWith(RetractionText.CHECK_AGAIN_NOT_SAVED + RetractionText.STORED_CHECKS_UNREAD))
+        coVerify(exactly = 0) { retractionService.store(any()) }
     }
 
     @Test
