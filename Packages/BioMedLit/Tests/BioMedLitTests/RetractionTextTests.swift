@@ -186,6 +186,12 @@ final class RetractionTextTests: XCTestCase {
             "- A \\*bold\\* \\[x\\]\\_y\\_ \\<b\\> \\`c\\` \\\\. Retracted 2026-03-09; notice 10.9/n")
     }
 
+    /// A special followed by a combining mark is escaped too: Python's regex
+    /// matches by code point, where a Swift `Character` joins the two.
+    func testASpecialCarryingACombiningMarkIsEscaped() {
+        XCTAssertEqual(RetractionText.plainTitle("a*\u{0301}b _\u{0308}"), "a\\*\u{0301}b \\_\u{0308}")
+    }
+
     func testConcernCaveat() {
         XCTAssertEqual(
             RetractionText.concernCaveat(check("concern", evidence(kind: "expression_of_concern", day: "2026-03"))),

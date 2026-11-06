@@ -264,10 +264,13 @@ public enum RetractionText {
     /// A title safe inside one markdown line: whitespace collapsed, specials escaped.
     static func plainTitle(_ title: String) -> String {
         let collapsed = title.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        return collapsed.reduce(into: "") { out, ch in
-            if "\\`*_[]<>".contains(ch) { out.append("\\") }
-            out.append(ch)
+        // by scalar, as Python's regex: a special carrying a combining mark is one Character
+        var out = String.UnicodeScalarView()
+        for scalar in collapsed.unicodeScalars {
+            if "\\`*_[]<>".unicodeScalars.contains(scalar) { out.append("\\") }
+            out.append(scalar)
         }
+        return String(out)
     }
 
     /// The desktop's `{n:,}`.

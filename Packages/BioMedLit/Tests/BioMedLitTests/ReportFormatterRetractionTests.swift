@@ -48,6 +48,33 @@ final class ReportFormatterRetractionTests: XCTestCase {
         XCTAssertLessThan(leftOut, text.range(of: "## References")!.lowerBound)
     }
 
+    /// Every paper left out gets its own line, in the order the run held them.
+    func testSeveralLeftOutPapersEachGetALine() {
+        let label = PaperRetractionCheck(
+            status: "retracted",
+            deciding: StoredRetractionEvidence(
+                source: "pubmed_label", kind: "retraction", date: nil, noticeDOI: nil, recordID: nil, rawKind: nil),
+            unanswered: [], checkedAt: when, exportDataAsOf: nil, crossrefFailure: nil)
+        let text = report(section([
+            ("First", check("retracted", deciding: notice)), ("Kept", check("clear")), ("Second", label),
+        ]))
+        XCTAssertTrue(text.contains(
+            "## Left out as retracted\n\n- First. Retracted 2026-03-09; notice 10.9/n\n"
+                + "- Second. Retracted (PubMed's label)\n"), text)
+        XCTAssertTrue(text.hasPrefix("> **Retraction check:** 2 retracted papers left out."), text)
+    }
+
+    /// A paper under a concern is kept, not left out; uncited, the report names
+    /// it nowhere (its caveat goes under its reference, and it has none).
+    func testAnUncitedConcernIsNeitherLeftOutNorNoticed() {
+        let text = report(section([("Concerned trial", check("concern", deciding: notice))]))
+        XCTAssertFalse(text.contains("## Left out as retracted"), text)
+        XCTAssertFalse(text.contains("Concerned trial"), text)
+        XCTAssertFalse(text.contains("Expression of concern"), text)
+        XCTAssertTrue(text.hasPrefix("The analysis."), "a concern alone opens no notice")
+        XCTAssertTrue(text.contains("- **Retraction Check:** Retraction status checked 2026-10-18"), text)
+    }
+
     func testConcernCaveatUnderItsReference() {
         let ref = ReportFormatter.ReferenceData(
             authors: "A", year: 2020, title: "T", journal: nil, identifier: nil,

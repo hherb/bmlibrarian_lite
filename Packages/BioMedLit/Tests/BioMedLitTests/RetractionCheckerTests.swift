@@ -155,6 +155,17 @@ final class RetractionCheckerTests: XCTestCase {
         XCTAssertEqual(result.crossrefFailure, RequestFailure.malformedResponse.describe())
     }
 
+    /// A DOI bmlib cannot put in a Crossref filter (a comma) is never sent,
+    /// and Crossref stays unanswered for it: not asked is not "not retracted".
+    func testAnUnsendableDOIIsNotAskedAndNeverClear() async throws {
+        let result = try await check(RetractionPaper(doi: "10.1000/a,b", pmid: nil, publicationTypes: []),
+                                     index: try RetractionFixture.index())
+        XCTAssertTrue(StubURLProtocol.requestedURLs.isEmpty, "\(StubURLProtocol.requestedURLs)")
+        XCTAssertEqual(result.unanswered, ["crossref"])
+        XCTAssertNotEqual(result.status, "clear")
+        XCTAssertNil(result.crossrefFailure, "no request, so no request failure to name")
+    }
+
     func testConcernByIndex() async throws {
         let result = try await check(RetractionPaper(doi: "10.1000/concerned", pmid: nil, publicationTypes: []),
                                      index: try RetractionFixture.index())

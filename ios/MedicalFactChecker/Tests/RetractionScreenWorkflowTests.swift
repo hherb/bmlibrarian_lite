@@ -136,6 +136,8 @@ final class RetractionScreenWorkflowTests: XCTestCase {
     }
 
     /// Asks and counts, answering each paper from `answers`.
+    /// `@unchecked Sendable` is safe only because a run calls its check
+    /// sequentially, on the main actor; no two calls touch it at once.
     private final class Asked: @unchecked Sendable {
         var calls = 0
         var papers: [RetractionPaper] = []
@@ -684,6 +686,40 @@ final class RetractionScreenWorkflowTests: XCTestCase {
             "> **Retraction check:** 1 paper's retraction status could not be checked: no DOI or PMID.\n\n"), report)
     }
 
+    /// Control for the rule above: a report written again after a restore, with
+    /// no screen since, gives the count alone (no run saw why, as the desktop's
+    /// restored snapshot).
+    func testAReportWrittenAgainWithoutAScreenGivesTheCountAlone() async throws {
+        let (session, _) = makeSession([nil])
+        let workflow = restore(session, check: Self.answering([
+            nil: Self.unchecked(["retraction_watch_export", "crossref"]),
+        ]))
+        await workflow.proceedWithCurrentDocuments()
+        XCTAssertTrue(session.report?.fullReport.contains(": no DOI or PMID.") == true, "control: the run names it")
+
+        workflow.restoreForViewing(session)
+        _ = try await workflow.regenerateReportWithNewEvidence(analyzeTransparencyUsing: { _, _, _ in
+            XCTFail("nothing is relevant, so nothing is rated")
+            throw CancellationError()
+        })
+
+        let report = try XCTUnwrap(session.report?.fullReport)
+        XCTAssertTrue(report.hasPrefix(
+            "> **Retraction check:** 1 paper's retraction status could not be checked.\n\n"), report)
+    }
+
+    /// A restore shows the session as saved: the last run's notice is not its own.
+    func testRestoringClearsTheRunsNotice() async {
+        let (session, _) = makeSession(["10.1000/a"])
+        let workflow = restore(session, check: Self.answering(["10.1000/a": Self.retracted()]))
+        await workflow.retryFailedDocuments(pmids: [])
+        XCTAssertNotNil(workflow.retractionNotice, "control: the run left a paper out")
+
+        workflow.restoreForViewing(session)
+
+        XCTAssertNil(workflow.retractionNotice)
+    }
+
     /// #657: a paper scored before the session was ever screened (Find More
     /// Evidence on a session older than the check) is counted unchecked, never
     /// left to read as clear, and no run's cause is put on it.
@@ -791,6 +827,14 @@ final class RetractionScreenWorkflowTests: XCTestCase {
 
         XCTAssertEqual(session.documentsToScore, 1)
         XCTAssertEqual(session.progressPercent, 60, accuracy: 0.001)
+        // nothing is left, so the prompt names no count; a count left is named
+        XCTAssertEqual(
+            FactCheckWorkflow.stopPrompt(.user, scored: 1, remaining: session.documentsToScore - session.documentsScored),
+            "Processing cancelled. Proceed with Current continues from where it stopped.")
+        XCTAssertEqual(
+            FactCheckWorkflow.stopPrompt(.background, scored: 1, remaining: 2),
+            "Processing paused when the app was backgrounded. 1 document(s) scored, 2 remaining. "
+                + "Proceed with Current continues from where it stopped.")
     }
 
     /// #648 item 4: what is still to score follows the check the run used,
