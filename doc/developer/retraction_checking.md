@@ -120,21 +120,29 @@ paper with its `retraction_status`.
   unchecked row was not reached (its document is gone), the unchecked count
   stands alone, as on a reopen, since the others' causes would claim it too.
 - **A run's record that cannot be read is unread, never "never checked"**
-  (#600, #662, all three platforms). A snapshot this build cannot read (the
-  desktop's checkpoint `retraction_snapshot` or audit JSON `snapshot` not a
-  list, or `ReportMetadata.retraction_screen` not a list; the apps' snapshot
-  JSON, whole or one entry) makes the saved-work line "Retraction status
-  could not be read" (`STATUS_UNREAD` / `RetractionText.statusUnread`) while
-  there is nothing else to show, and a report written again says so as its
-  methods line (`RetractionReportSection.unread` / `UNREAD`, no notice). The
-  apps' detail view says it for a paper whose own entry or copy cannot be
-  read. The desktop keeps an unreadable `retraction_screen` as found
-  (`retraction_screen_unread`), so a later save does not erase it.
+  (#600, #662, all three platforms). The saved-work line says "Retraction
+  status could not be read" (`STATUS_UNREAD` / `RetractionText.statusUnread`)
+  while there is nothing else to show, for a record this build cannot read:
+  on the desktop the checkpoint's `retraction_snapshot`, or a loaded file's
+  audit JSON `retraction` entry, that is not a list or is a list none of
+  whose rows it reads (`stored_snapshot_unreadable`); on the apps the
+  snapshot JSON, whole or one entry. A report written again says so as its
+  methods line (`RetractionReportSection.unread` / `UNREAD`, no notice): on
+  the desktop that line follows `ReportMetadata.retraction_screen`, read by
+  the same rule and kept as found (`retraction_screen_unread`) so a later
+  save does not erase it. The apps' detail view says it for a paper whose
+  own entry or copy cannot be read. The desktop's *Check again* never writes
+  over such a record: it says the new status could not be saved, and the
+  shared rows keep the answers. Find More Evidence and the apps' screen
+  still replace a wholly unreadable snapshot (#726); the apps show a stored
+  check over one where the desktop says unread (#727).
 - **A paper the run saw unchecked warns of any retraction or concern**, of
   whatever time (#662, all three platforms: the desktop's
   `changed_since_snapshot`, the apps' `RetractionSavedWork.changedSinceRun`).
   An unchecked check's time is no check time, so a retraction stored before
-  it (one a failed stored read hid from the run, #720) is still news.
+  it (one a failed stored read hid from the run, #720) is still news. An
+  unchecked *Check again* answer newer than a stored retraction still hides
+  it (#728).
 - **A paper no screen saw is unchecked, never clear.** *Find More Evidence*
   on a run reviewed before retraction checking screens only the papers it
   finds, so the report written again counts every scored paper with no
@@ -214,8 +222,8 @@ BioMedLit; the app never imports `BmlibCore`.
   unchecked (`RetractionText.savedWorkLine(_:causes:)`, #660). Its own
   Cancel and background expiry stop it (`cancelCheckAgain`, #654), never a
   run it waits behind, and record no stop on the session. A run row that is unchecked (a failed
-  check carries its attempt's time) is no check time, so any later warning is
-  news. The rules are BioMedLit's `RetractionSavedWork`. A left-out row says
+  check carries its attempt's time) has no check time, so any warning is
+  news, whatever its time (#662). The rules are BioMedLit's `RetractionSavedWork`. A left-out row says
   `RetractionText.excludedLine`; the report opens with
   `RetractionReportSection.notice`. The line and warning show above the
   report too (`RetractionSavedWorkSection`, only for the workflow's own

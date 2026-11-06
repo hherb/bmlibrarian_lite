@@ -238,6 +238,11 @@ def test_an_unreadable_stored_screen_is_kept_and_said_as_unread() -> None:
     report = _report(None, retraction_screen_unread=damaged)
     section = report.split("### Document Screening")[1].split("###")[0]
     assert f"- **Retraction Check:** {STATUS_UNREAD}" in section
+    # a list none of whose rows this build reads is kept and said alike
+    newer = [{"document_id": "a"}]
+    metadata = ReportMetadata.from_dict({"retraction_screen": newer})
+    assert metadata.retraction_screen is None
+    assert metadata.to_dict()["retraction_screen"] == newer
     # controls: no record is no line; a readable one replaces the unread copy
     assert ReportMetadata.from_dict({}).retraction_screen_unread is None
     assert ReportMetadata.from_dict({"retraction_screen": None}).retraction_screen_unread is None

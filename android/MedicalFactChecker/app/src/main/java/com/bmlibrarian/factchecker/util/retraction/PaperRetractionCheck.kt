@@ -368,6 +368,7 @@ object RetractionSnapshot {
      *
      * @param text The stored snapshot, or null for a session never checked
      * @param documentId The document whose entry to ask about; null for any
+     * @return True when the snapshot, or the asked-about entry, cannot be read
      */
     fun unread(text: String?, documentId: String? = null): Boolean {
         if (text == null) return false
@@ -382,7 +383,8 @@ object RetractionSnapshot {
 
     /**
      * The snapshot with [checks] added; a document checked again is replaced,
-     * and every other entry, readable or not, is kept as it was.
+     * and every other entry, readable or not, is kept as it was. A snapshot
+     * unreadable as a whole is replaced (#726).
      *
      * @param text The stored snapshot, or null for none
      * @param checks What a run used, by document id

@@ -110,6 +110,7 @@ class RetractionSavedWorkTest {
         assertEquals(false, RetractionSnapshot.unread(RetractionSnapshot.merged(null, mapOf("a" to check("clear", run)))))
         assertEquals(true, RetractionSnapshot.unread("{not json"))
         assertEquals(true, RetractionSnapshot.unread("[1, 2]"))
+        assertEquals("unreadable whole is unread for every paper", true, RetractionSnapshot.unread("[1, 2]", "a"))
         val partly = """{"a": {"status": 7}}"""
         assertEquals(true, RetractionSnapshot.unread(partly))
         assertEquals(true, RetractionSnapshot.unread(partly, "a"))

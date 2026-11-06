@@ -407,7 +407,8 @@ final class FactCheckSession {
     }
 
     /// The check each document's run used, keyed by `Document.id`; empty
-    /// when never checked. An entry this build cannot read is left out
+    /// when never checked, or when the snapshot cannot be read as a whole
+    /// (`retractionSnapshotUnread(for:)` tells the two apart). An entry this build cannot read is left out
     /// (logged), never the whole snapshot (#647).
     func retractionSnapshot() -> [String: PaperRetractionCheck] {
         retractionSnapshotEntries().reduce(into: [:]) { checks, entry in
@@ -456,7 +457,7 @@ final class FactCheckSession {
     /// Adds what a run used to the snapshot; a document checked again is
     /// replaced. Every other entry is kept as written, one this build cannot
     /// read included (#647); a snapshot unreadable as a whole is replaced
-    /// (logged by ``retractionSnapshotEntries()``).
+    /// (logged by ``retractionSnapshotEntries()``, #726).
     ///
     /// - Parameter checks: The checks used, keyed by `Document.id`; nothing is written for none.
     func recordRetractionSnapshot(_ checks: [String: PaperRetractionCheck]) {

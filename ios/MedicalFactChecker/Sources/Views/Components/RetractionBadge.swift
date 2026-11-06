@@ -39,7 +39,8 @@ struct RetractionBadge: View {
         /// The content for a check, or `nil` when no badge is shown.
         ///
         /// - Parameters:
-        ///   - check: The paper's check; `nil` when it was never checked.
+        ///   - check: The paper's check; `nil` when it was never checked, or
+        ///     its record cannot be read (`unread`).
         ///   - inDetail: Whether this is the detail view (viewer), where a
         ///     never-checked paper is called NOT CHECKED.
         ///   - unread: With no check, whether one is recorded that cannot be

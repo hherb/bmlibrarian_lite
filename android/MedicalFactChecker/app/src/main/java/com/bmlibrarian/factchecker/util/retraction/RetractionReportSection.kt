@@ -34,7 +34,7 @@ class RetractionReportSection(
     /** The papers left out as retracted, in the order given. */
     val leftOut: List<Pair<String, PaperRetractionCheck>> = papers.filter { it.second.isRetracted }
 
-    /** [RetractionText.savedWorkLine] for the run: as the desktop, the oldest decided check. */
+    /** [RetractionText.savedWorkLine] for the run (as the desktop, the oldest decided check), or [RetractionText.STATUS_UNREAD] when [unread]. */
     val methodsLine: String = if (unread) RetractionText.STATUS_UNREAD else RetractionText.savedWorkLine(papers.map { it.second })
 
     /** The report's opening notice, or null when nothing was left out and every paper was checked. */

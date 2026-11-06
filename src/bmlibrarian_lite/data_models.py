@@ -2527,9 +2527,10 @@ class ReportMetadata:
             (#386)
 
         retraction_screen: What the retraction check left out and found, or
-            None when none ran; serialised as its snapshot rows
+            None when none ran (or the stored one is unreadable); serialised
+            as its snapshot rows
         retraction_screen_unread: A stored ``retraction_screen`` this build
-            cannot read (not a list), kept as found so a later save does not
+            cannot read (not a list, or no row it reads), kept as found so a later save does not
             erase it, and said as unread, never as no check (#600); None
             otherwise
         model_configs: LLM configuration for each workflow task
@@ -2590,8 +2591,10 @@ class ReportMetadata:
     transparency_provisional_count: int = 0
 
     # What the retraction check left out (a RetractionScreen, or a
-    # RetractionSnapshot once read back); None when no check ran
+    # RetractionSnapshot once read back); None when no check ran, or when the
+    # stored one is unreadable
     retraction_screen: "RetractionRecord | None" = None
+    # A stored retraction_screen this build cannot read, kept as found
     retraction_screen_unread: Any = None
 
     # LLM configuration by task

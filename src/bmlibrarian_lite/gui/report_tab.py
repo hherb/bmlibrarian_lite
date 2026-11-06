@@ -77,6 +77,7 @@ from ..audit_records import (
     predates_outcome_split,
     readable_extraction_failures,
     recorded_retraction_snapshot,
+    retraction_snapshot_unreadable,
     score_failure_reason,
     without_invented_reason,
 )
@@ -94,6 +95,7 @@ from ..retraction_screen import (
     latest_checks,
     rechecked_snapshot,
     screen_documents,
+    stored_snapshot_unreadable,
 )
 from ..retraction_text import (
     CHECK_AGAIN_FAILED,
@@ -205,7 +207,7 @@ class ReportTab(QWidget):
         self._file_documents: list[LiteDocument] = []
         # A loaded report file whose run was screened but kept no snapshot
         self._retraction_unrecorded = False
-        # A reopened run whose snapshot this build cannot read (#600)
+        # A reopened run or loaded report whose snapshot this build cannot read (#600)
         self._retraction_unread = False
         # Runs whose latest Check again could not be saved, said whenever shown
         self._unsaved_rechecks: set[str] = set()
@@ -565,6 +567,9 @@ class ReportTab(QWidget):
                             checkpoint.research_question, checkpoint_id=checkpoint_id
                         )
                     }
+                if retraction_snapshot_unreadable(checkpoint.metadata):
+                    # written over, what the run left out would read as never left out (#600)
+                    raise ValueError("the run's retraction snapshot is unreadable")
                 updated = rechecked_snapshot(recorded_retraction_snapshot(checkpoint.metadata), screen, run_ids)
                 self.storage.update_checkpoint(
                     checkpoint_id,
@@ -626,7 +631,8 @@ class ReportTab(QWidget):
 
         Raises:
             OSError: The file could not be read or replaced.
-            ValueError: The file is not a JSON object.
+            ValueError: The file is not a JSON object, or its retraction
+                snapshot is one this build cannot read.
         """
         audit_path = report_path.with_name(report_path.name.replace("_report.md", "_audit.json"))
         audit = json.loads(audit_path.read_text(encoding="utf-8"))
@@ -634,6 +640,9 @@ class ReportTab(QWidget):
             raise ValueError("the audit JSON is not an object")
         record = audit.get("retraction")
         rows = record.get("snapshot") if isinstance(record, Mapping) else None
+        if record is not None and (rows is None or stored_snapshot_unreadable(rows)):
+            # written over, the run's record would be lost: unread, never replaced (#600)
+            raise ValueError("the audit JSON's retraction snapshot is unreadable")
         old = RetractionScreen.from_snapshot(rows) if isinstance(rows, list) else {}
         updated = rechecked_snapshot(old, screen)
         if not old:
@@ -1125,7 +1134,7 @@ class ReportTab(QWidget):
         rows = record.get("snapshot") if isinstance(record, Mapping) else None
         self._retraction_snapshot = RetractionScreen.from_snapshot(rows) if isinstance(rows, list) else {}
         # an entry present but not one this build reads is unread, never absent (#600)
-        unread = record is not None and not isinstance(rows, list)
+        unread = record is not None and (rows is None or stored_snapshot_unreadable(rows))
         summary = audit_data.get("workflow_summary")
         self._retraction_unrecorded = (
             isinstance(summary, Mapping) and summary.get("documents_excluded_retracted") is not None

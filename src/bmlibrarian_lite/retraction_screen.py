@@ -35,6 +35,32 @@ RUN_DECIDING_KEY = "run_deciding"
 _WARNING_STATUSES = (RetractionStatus.RETRACTED, RetractionStatus.CONCERN)
 
 
+def snapshot_row_readable(row: object) -> bool:
+    """Whether this build can read a stored snapshot row: a mapping with an id and a status."""
+    return isinstance(row, Mapping) and all(k in row for k in _SNAPSHOT_REQUIRED)
+
+
+def stored_snapshot_unreadable(stored: object) -> bool:
+    """Whether a stored snapshot is present but this build reads none of it.
+
+    Not a list, or a list with rows none of which this build reads (a newer
+    build's rows): either way the run's record is unknown, which the reader
+    is told, never that the run was not checked (#600, #662). ``None`` and
+    an empty list are a run from before the check, never unread.
+
+    Args:
+        stored: The stored value (input, golden rule 1).
+
+    Returns:
+        True when the record is present and unreadable as a whole.
+    """
+    if stored is None:
+        return False
+    if not isinstance(stored, list):
+        return True
+    return bool(stored) and not any(snapshot_row_readable(row) for row in stored)
+
+
 def as_utc(moment: datetime) -> datetime:
     """Read a naive datetime as UTC, the zone every stored check is in."""
     return moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment
@@ -229,7 +255,7 @@ class RetractionScreen:
         known = {status.value for status in RetractionStatus}
         out: dict[str, dict[str, Any]] = {}
         for row in rows:
-            if not isinstance(row, Mapping) or any(k not in row for k in _SNAPSHOT_REQUIRED):
+            if not snapshot_row_readable(row):
                 logger.warning("Skipping a retraction snapshot row from an older build")
                 continue
             read = dict(row)
@@ -301,11 +327,11 @@ class RetractionSnapshot:
 
     @classmethod
     def from_stored(cls, stored: Any) -> RetractionSnapshot | None:
-        """Read a stored value: ``None`` for none, or for one that is not a list."""
+        """Read a stored value: ``None`` for none, or for one this build cannot read at all."""
         if stored is None:
             return None
-        if not isinstance(stored, list):
-            logger.warning("Ignoring a stored retraction_screen that is not a list")
+        if stored_snapshot_unreadable(stored):
+            logger.warning("Ignoring a stored retraction_screen this build cannot read")
             return None
         return cls.from_rows(stored)
 
@@ -468,9 +494,11 @@ def changed_since_snapshot(
 ) -> list[tuple[str, PaperCheck]]:
     """The used papers whose retraction status changed for the worse since the run.
 
-    A paper counts when its current check is no older than its snapshot row,
-    now says retracted or concern, and the run saw another status: the row's
-    ``run_status`` once *Check again* rewrote it, else its ``status``. A
+    A paper counts when its current check is no older than its snapshot row
+    (of any age when the run saw it unchecked, below), now says retracted or
+    concern, and the run saw another status: the row's ``run_status`` once
+    *Check again* rewrote it (a ``None`` one, not recorded, keeps the time
+    test), else its ``status``. A
     paper without a row, or whose row has no check time, the run never
     checked, so any warning is news. So is any warning for a paper the run
     saw unchecked: an unchecked check's time is no check time, so a

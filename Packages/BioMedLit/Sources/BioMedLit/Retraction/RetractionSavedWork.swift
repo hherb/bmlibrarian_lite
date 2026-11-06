@@ -56,8 +56,8 @@ public enum RetractionSavedWork {
     /// the latest check is no older than the run's, says retracted or concern,
     /// and the run saw another status. A paper the run never checked, or
     /// checked without an answer, warns whenever its latest check does: an
-    /// unchecked check's time is no check time (as the desktop's failed row
-    /// has none), so an older retraction known elsewhere is still news.
+    /// unchecked check's time is no check time (as on the desktop, #662), so
+    /// an older retraction known elsewhere is still news.
     ///
     /// - Parameters:
     ///   - run: The checks the run used, by document id.
