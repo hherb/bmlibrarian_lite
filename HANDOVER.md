@@ -246,10 +246,11 @@ Open issues by family; each issue carries the detail. None blocks another.
   needs a cross-platform decision),
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**
-  (test gaps mostly closed; left: the cited report's wiring and *Check
-  again*'s failed save, each needing a seam; `smartSearchNotice`'s reset; a
-  second *Check again* tap while the first waits behind a run; the type
-  items; moving `RetractionRun` and its notice out of `FactCheckWorkflow.swift`;
+  (test gaps mostly closed; `RetractionRun` lives in its own file; left: the
+  cited report's wiring, *Check again*'s failed save and `smartSearchNotice`'s
+  reset, each needing a seam (for the last: `SearchServiceFactory.search`
+  builds its own services from settings, ignoring `useServices`, so neither
+  setter of the notice is reachable offline); the type items;
   an unknown lookup name falling back to its raw key in reader text; an
   all-orphaned snapshot reading "never checked", a wording decision;
   `RetractionCrossrefLookup` now takes a `retry:` for tests),
