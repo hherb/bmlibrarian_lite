@@ -209,6 +209,8 @@ class ReportTab(QWidget):
         self._retraction_unrecorded = False
         # A reopened run or loaded report whose snapshot this build cannot read (#600)
         self._retraction_unread = False
+        # The run's papers' stored checks, the line's rows while its snapshot is unread (#727)
+        self._stored_run_checks: Mapping[str, Any] = {}
         # Runs whose latest Check again could not be saved, said whenever shown
         self._unsaved_rechecks: set[str] = set()
         self._recheck_worker: RetractionRecheckWorker | None = None
@@ -409,6 +411,7 @@ class ReportTab(QWidget):
         self._saved_checkpoint_id = None
         self._retraction_unrecorded = False
         self._retraction_unread = False
+        self._stored_run_checks = {}
         self.retraction_line.setVisible(False)
         self.check_again_btn.setVisible(False)
         self.retraction_warning.clear()
@@ -425,20 +428,28 @@ class ReportTab(QWidget):
         Args:
             checkpoint_id: The reopened run, which *Check again* updates.
             snapshot_unread: The run recorded a snapshot this build cannot
-                read; the line says so while no row is shown, never "never
-                checked" (#600).
+                read; the line is its papers' stored checks, as on the apps
+                (#727), and says "could not be read" while there are none,
+                never "never checked" (#600).
         """
         self._saved_checkpoint_id = checkpoint_id
         self._retraction_unread = snapshot_unread
         note = CHECK_AGAIN_NOT_SAVED if checkpoint_id in self._unsaved_rechecks else ""
         try:
-            stored = stored_checks(self.storage, self._used_documents())
+            stored = stored_checks(self.storage, self._run_documents())
         except (SQLiteError, sqlite3.Error) as e:
             # Not knowing is not "no change": the snapshot still warns, and the line says so
             logger.warning("Could not read the stored retraction checks (%s)", type(e).__name__)
             stored = {}
             note += STORED_CHECKS_UNREAD
+        self._stored_run_checks = stored
         self._show_saved_retraction(latest_checks(self._retraction_snapshot or {}, stored), note)
+
+    def _run_documents(self) -> list[LiteDocument]:
+        """The run's papers: those it scored (a loaded file's, those it names) and those the report cites."""
+        is_file = (self._saved_checkpoint_id or "").startswith(FILE_ID_PREFIX)
+        held = self._file_documents if is_file else [d.document for d in self._all_scored_documents]
+        return list({d.id: d for d in (*held, *self._used_documents())}.values())
 
     def _used_documents(self) -> list[LiteDocument]:
         """The documents the report cites: the only ones whose change warrants a warning."""
@@ -465,7 +476,10 @@ class ReportTab(QWidget):
             unscreened = [d.document for d in self._all_scored_documents if d.document.id not in snapshot]
             rows += screen_documents(unscreened, {}).to_snapshot()
         if self._retraction_unread and not snapshot:
-            line = STATUS_UNREAD
+            # the stored checks stand in for the run's unread record, as on the apps (#727)
+            stored = self._stored_run_checks
+            held = [d for d in self._run_documents() if d.id in stored]
+            line = saved_work_line(screen_documents(held, stored).to_snapshot()) if held else STATUS_UNREAD
         elif self._retraction_unrecorded and not snapshot:
             line = NO_AUDIT_RECORD_LINE
         else:

@@ -1662,6 +1662,33 @@ def test_an_unreadable_snapshot_reads_as_unread_never_never_checked(
     assert tab.retraction_line.text() == NO_AUDIT_RECORD_LINE
 
 
+def test_an_unreadable_snapshot_shows_the_runs_stored_checks(
+    tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """As on the apps (#727): the run's papers' stored checks stand in, uncited scored ones too."""
+    checkpoint_id = saved_checkpoint(storage, {CHECKPOINT_RETRACTION_SNAPSHOT_KEY: {"not": "a list"}})
+    store_rows(storage, {CITED.id: check(RetractionStatus.CLEAR, LATER_RUN),
+                         UNCITED.id: check(RetractionStatus.CLEAR, RUN)})
+    reopen(tab, None, checkpoint_id)
+    tab.show_saved_retraction(checkpoint_id, snapshot_unread=True)
+    assert tab.retraction_line.text() == "Retraction status checked 2026-10-01"
+    # a failed Check again's label stand-in is no check: the line keeps the stored date
+    storage.add_document(replace(CITED, publication_types=LABEL))
+    monkeypatch.setattr(report_tab_module, "build_retraction_checker", lambda *_a, **_k: DownChecker())
+    monkeypatch.setattr(RetractionRecheckWorker, "start", RetractionRecheckWorker.run)
+    tab.check_again_btn.click()
+    assert tab.retraction_line.text() == "Retraction status checked 2026-10-01" + CHECK_AGAIN_FAILED
+    assert CITED.title in tab.retraction_warning.text()
+    # nothing stored: nothing stands in, and the label's stand-in never becomes the line
+    monkeypatch.setattr(report_tab_module, "stored_checks", lambda *_a: {})
+    reopen(tab, None, checkpoint_id)
+    tab.show_saved_retraction(checkpoint_id, snapshot_unread=True)
+    assert tab.retraction_line.text() == STATUS_UNREAD
+    tab.check_again_btn.click()
+    assert tab.retraction_line.text() == STATUS_UNREAD + CHECK_AGAIN_FAILED
+    assert CITED.title in tab.retraction_warning.text()
+
+
 def test_check_again_never_writes_over_a_record_this_build_cannot_read(
     tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -2100,10 +2100,18 @@ class MoreEvidenceWorker(SingleOutcome, QThread):
         self.retraction_checker = retraction_checker
         self.max_results = max_results
         self._cancelled = False
+        # the screen's rows could not be saved: said even when the outcome is lost (#731)
+        self._screen_unsaved = False
 
     def run(self) -> None:
         """Execute it in a background thread."""
-        self._run_once(self._find, lambda error: self._end(self.error, error))
+        self._run_once(self._find, lambda error: self._end(self.error, self._with_unsaved(error)))
+
+    def _with_unsaved(self, error: str) -> str:
+        """*error*, with the screen's not-saved sentence when its rows could not be saved."""
+        from ..retraction_text import SCREEN_NOT_SAVED
+
+        return f"{error.rstrip()} {SCREEN_NOT_SAVED}" if self._screen_unsaved else error
 
     def _find(self) -> None:
         """Find more evidence, and end the run."""
@@ -2139,6 +2147,9 @@ class MoreEvidenceWorker(SingleOutcome, QThread):
                 should_stop=should_stop,
                 progress=lambda message: self.progress.emit(0, 0, message),
             )
+
+        def screen_unsaved() -> None:
+            self._screen_unsaved = True
 
         def screen(documents: list["LiteDocument"]) -> RetractionScreen:
             result = screen_with_fallback(self.retraction_checker, documents, should_stop)
@@ -2176,25 +2187,28 @@ class MoreEvidenceWorker(SingleOutcome, QThread):
                 ),
                 should_stop=should_stop,
                 progress=self.progress.emit,
+                on_screen_unsaved=screen_unsaved,
             )
         except (RetryNotPossible, SmartSearchError) as e:
-            self._end(self.error, str(e))
+            self._end(self.error, self._with_unsaved(str(e)))
             return
         except SearchFailedError as e:
             # Nothing it lost is kept, and the report stands
+            stopped = MoreEvidence(cancelled=True, screen_unsaved=self._screen_unsaved)
             if self._cancelled:
-                self._end(self.cancelled, MoreEvidence(cancelled=True), format_search_failure_message(e))
+                self._end(self.cancelled, stopped, format_search_failure_message(e))
             else:
-                self._end(self.error, format_search_failure_message(e))
+                self._end(self.error, self._with_unsaved(format_search_failure_message(e)))
             return
         except Exception as e:
             # The provider's text stays in the log (#330)
             cause = classify_analysis_exception(e)
             logger.exception(f"Find More Evidence failed ({cause.name})")
+            stopped = MoreEvidence(cancelled=True, screen_unsaved=self._screen_unsaved)
             if self._cancelled:
-                self._end(self.cancelled, MoreEvidence(cancelled=True), failure_cause_text(cause))
+                self._end(self.cancelled, stopped, failure_cause_text(cause))
             else:
-                self._end(self.error, failure_cause_text(cause))
+                self._end(self.error, self._with_unsaved(failure_cause_text(cause)))
             return
         if outcome.cancelled:
             self._end(self.cancelled, outcome, "")
