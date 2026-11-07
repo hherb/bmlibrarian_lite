@@ -237,8 +237,9 @@ _LABEL = " (PubMed's label)"
 
 CHECK_AGAIN_LABEL = "Check again"
 CHECKING_AGAIN_LINE = "Checking retraction status…"
-CHECK_AGAIN_FAILED = "; it could not be checked again, so this is still the run's record"
-CHECK_AGAIN_STOPPED = "; checking again was stopped, so this is still the run's record"
+_STILL_THE_RECORD = ", so this is still the run's record"
+CHECK_AGAIN_FAILED = "; it could not be checked again" + _STILL_THE_RECORD
+CHECK_AGAIN_STOPPED = "; checking again was stopped" + _STILL_THE_RECORD
 CHECK_AGAIN_NOT_SAVED = "; the new status could not be saved with this run"
 NO_AUDIT_RECORD_LINE = "Retraction status not recorded for this report"
 # a run's record this build cannot read: not knowing is not "never checked" (#600, #662)
@@ -248,6 +249,22 @@ STORED_CHECKS_UNREAD = "; later checks could not be read"
 SCREEN_NOT_SAVED = (
     "The new retraction status could not be saved with this run, whose record of it could not be read."
 )
+
+
+def over_unread_record(note: str) -> str:
+    """*note* as said over a run's record that could not be read (#733).
+
+    The line then shows stored checks or "could not be read", never the
+    run's record, so a failed or stopped *Check again* drops "so this is
+    still the run's record"; any other clause in it is kept.
+
+    Args:
+        note: The clause added to the saved-work line.
+
+    Returns:
+        The clause to add.
+    """
+    return note.replace(_STILL_THE_RECORD, "")
 
 
 def not_checked_again_clause(count: int, causes: Sequence[str] = ()) -> str:

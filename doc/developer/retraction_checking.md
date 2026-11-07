@@ -121,13 +121,17 @@ paper with its `retraction_status`.
   stands alone, as on a reopen, since the others' causes would claim it too.
 - **A run's record that cannot be read is unread, never "never checked"**
   (#600, #662, all three platforms). Over a record this build cannot read,
-  the saved-work line shows the run's papers' stored checks (the desktop
-  since #727: its scored and cited papers, a loaded file's own, those with
-  none counted as could not be checked; the apps: `recheckedChecks` with an
-  empty run, every session document's, none counted; a failed *Check
-  again*'s label stand-ins only warn), and says "Retraction
+  the saved-work line shows the run's papers' stored checks (#727 desktop,
+  #733 apps: its scored and cited papers, on the desktop a loaded file's own,
+  those with none counted as could not be checked; an answered *Check again*'s
+  answers join them, the record still unread; the apps' `unreadRunChecks`, while
+  their badges keep every document's check; a failed *Check again*'s label
+  stand-ins only warn), and says "Retraction
   status could not be read" (`STATUS_UNREAD` / `RetractionText.statusUnread`)
-  while there is nothing else to show. Such a record is:
+  while none of them has one. A failed or stopped *Check again* over it
+  never says "so this is still the run's record", which could not be read
+  (`over_unread_record` / `overUnreadRecord`, #733); on the desktop
+  "later checks could not be read" stays after it until a *Check again* answers. Such a record is:
   on the desktop the checkpoint's `retraction_snapshot`, or a loaded file's
   audit JSON `retraction` entry, that is not a list or is a list none of
   whose rows it reads (`stored_snapshot_unreadable`); on the apps the

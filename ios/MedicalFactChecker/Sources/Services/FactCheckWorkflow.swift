@@ -674,9 +674,7 @@ final class FactCheckWorkflow {
         }
 
         // a decided check kept over an unchecked answer: no source could be reached for it
-        let rows = RetractionSavedWork.recheckedChecks(
-            run: session.retractionSnapshot(), stored: Self.storedRetractionChecks(documents),
-            scored: Self.scoredIDs(documents))
+        let rows = Self.savedWorkChecks(session, documents, run: session.retractionSnapshot()).checks
         let missed = zip(documents, papers).compactMap { document, paper -> (paper: RetractionPaper, check: PaperRetractionCheck?)? in
             guard let check = checks[paper], check.isUnchecked, rows[document.id].map({ !$0.isUnchecked }) == true
             else { return nil }
@@ -739,6 +737,23 @@ final class FactCheckWorkflow {
         Set(documents.filter { $0.relevanceScore != nil }.map(\.id))
     }
 
+    /// The checks the saved-work line is read from: the run's, as
+    /// ``RetractionSavedWork/recheckedChecks(run:stored:scored:)`` lays the
+    /// stored ones over them, or, over a snapshot this build cannot read at
+    /// all, the scored and cited papers' stored checks (the desktop's #727 rule, #733).
+    ///
+    /// - Returns: The checks by `Document.id`, and whether the run's record could not be read.
+    private static func savedWorkChecks(
+        _ session: FactCheckSession, _ documents: [Document], run: [String: PaperRetractionCheck]
+    ) -> (checks: [String: PaperRetractionCheck], unreadRecord: Bool) {
+        let stored = storedRetractionChecks(documents)
+        guard run.isEmpty, session.retractionSnapshotUnread() else {
+            return (RetractionSavedWork.recheckedChecks(run: run, stored: stored, scored: scoredIDs(documents)), false)
+        }
+        let cited = documents.filter { !($0.citations ?? []).isEmpty }.map(\.id)
+        return (RetractionSavedWork.unreadRunChecks(stored: stored, papers: scoredIDs(documents).union(cited)), true)
+    }
+
     /// Each document's stored retraction check, by `Document.id`.
     private static func storedRetractionChecks(_ documents: [Document]) -> [String: PaperRetractionCheck] {
         Dictionary(documents.compactMap { doc in doc.retractionCheck.map { (doc.id, $0) } }) { _, new in new }
@@ -750,7 +765,8 @@ final class FactCheckWorkflow {
     /// same paper, warns where the run did not.
     ///
     /// - Parameters:
-    ///   - note: A clause to add to the line (a failed or partial *Check again*).
+    ///   - note: A clause to add to the line (a failed or partial *Check again*);
+    ///     over a record that could not be read, said by ``RetractionText/overUnreadRecord(_:)``.
     ///   - causes: Why papers stay unchecked, by *Check again*'s answers; none on a plain reopen.
     ///   - labelled: A failed *Check again*'s label retractions by `Document.id`,
     ///     which warn though nothing stored them.
@@ -760,9 +776,9 @@ final class FactCheckWorkflow {
         guard let session else { return }
         let documents = session.documents ?? []
         let run = session.retractionSnapshot()
-        let rows = RetractionSavedWork.recheckedChecks(
-            run: run, stored: Self.storedRetractionChecks(documents), scored: Self.scoredIDs(documents))
-        var note = note
+        let (rows, unreadRecord) = Self.savedWorkChecks(session, documents, run: run)
+        // the line is then the stored checks or "could not be read", never the run's record (#733)
+        var note = unreadRecord ? RetractionText.overUnreadRecord(note) : note
         let cited = documents.filter { !($0.citations ?? []).isEmpty }
         var latest: [String: PaperRetractionCheck] = [:]
         // unparsed is not absent: a row this build cannot read may hold a retraction
@@ -784,7 +800,7 @@ final class FactCheckWorkflow {
             stored.isRetracted ? stored : label
         }
         // a snapshot this build cannot read, with nothing else to show, is unread, never "never checked" (#662)
-        retractionSavedWorkLine = (rows.isEmpty && session.retractionSnapshotUnread()
+        retractionSavedWorkLine = (rows.isEmpty && unreadRecord
             ? RetractionText.statusUnread
             : RetractionText.savedWorkLine(Array(rows.values), causes: causes)) + note
         let changed = RetractionSavedWork.changedSinceRun(run: run, latest: latest, cited: cited.map(\.id))

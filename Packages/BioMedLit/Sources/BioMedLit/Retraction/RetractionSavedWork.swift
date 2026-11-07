@@ -47,6 +47,24 @@ public enum RetractionSavedWork {
         return checks.merging(scored.map { ($0, PaperRetractionCheck.failed(at: .distantPast)) }) { kept, _ in kept }
     }
 
+    /// The checks a reopened session's line is read from when its run's
+    /// snapshot could not be read at all (the desktop's #727 rule, #733): each
+    /// of the run's papers' stored check, one with none unchecked, never
+    /// dropped (#685). Empty when none has a stored check, so the line says
+    /// "could not be read", never "never checked".
+    ///
+    /// - Parameters:
+    ///   - stored: Each of the session's documents' stored check, by document id.
+    ///   - papers: The run's papers: its scored and cited documents' ids.
+    /// - Returns: The checks, by document id.
+    public static func unreadRunChecks(
+        stored: [String: PaperRetractionCheck], papers: Set<String>
+    ) -> [String: PaperRetractionCheck] {
+        guard papers.contains(where: { stored[$0] != nil }) else { return [:] }
+        // an unchecked check's time is no check time, so the stand-in's never shows
+        return Dictionary(uniqueKeysWithValues: papers.map { ($0, stored[$0] ?? .failed(at: .distantPast)) })
+    }
+
     /// One paper's check since its run: a decided check over an unchecked
     /// one, whatever the times (an outage is not knowledge, either way round:
     /// an unchecked run never hides an older stored retraction, #728), else

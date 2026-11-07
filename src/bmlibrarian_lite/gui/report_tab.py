@@ -107,6 +107,7 @@ from ..retraction_text import (
     STATUS_UNREAD,
     STORED_CHECKS_UNREAD,
     not_checked_again_clause,
+    over_unread_record,
     plain_title,
     saved_work_line,
     unchecked_causes,
@@ -211,6 +212,8 @@ class ReportTab(QWidget):
         self._retraction_unread = False
         # The run's papers' stored checks, the line's rows while its snapshot is unread (#727)
         self._stored_run_checks: Mapping[str, Any] = {}
+        # The stored checks could not be read on reopen: said until a Check again answers (#733)
+        self._stored_checks_unread = False
         # Runs whose latest Check again could not be saved, said whenever shown
         self._unsaved_rechecks: set[str] = set()
         self._recheck_worker: RetractionRecheckWorker | None = None
@@ -412,6 +415,7 @@ class ReportTab(QWidget):
         self._retraction_unrecorded = False
         self._retraction_unread = False
         self._stored_run_checks = {}
+        self._stored_checks_unread = False
         self.retraction_line.setVisible(False)
         self.check_again_btn.setVisible(False)
         self.retraction_warning.clear()
@@ -435,13 +439,14 @@ class ReportTab(QWidget):
         self._saved_checkpoint_id = checkpoint_id
         self._retraction_unread = snapshot_unread
         note = CHECK_AGAIN_NOT_SAVED if checkpoint_id in self._unsaved_rechecks else ""
+        self._stored_checks_unread = False
         try:
             stored = stored_checks(self.storage, self._run_documents())
         except (SQLiteError, sqlite3.Error) as e:
             # Not knowing is not "no change": the snapshot still warns, and the line says so
             logger.warning("Could not read the stored retraction checks (%s)", type(e).__name__)
             stored = {}
-            note += STORED_CHECKS_UNREAD
+            self._stored_checks_unread = True
         self._stored_run_checks = stored
         self._show_saved_retraction(latest_checks(self._retraction_snapshot or {}, stored), note)
 
@@ -463,7 +468,8 @@ class ReportTab(QWidget):
         Args:
             current: The latest checks by document id; ``None`` keeps the
                 ones last shown.
-            note: A clause to add to the line (a failed or partial *Check again*).
+            note: A clause to add to the line (a failed or partial *Check again*);
+                "later checks could not be read" follows it while that holds.
             causes: Why papers stay unchecked, by *Check again*'s answers;
                 none on a plain reopen.
         """
@@ -476,17 +482,19 @@ class ReportTab(QWidget):
             unscreened = [d.document for d in self._all_scored_documents if d.document.id not in snapshot]
             rows += screen_documents(unscreened, {}).to_snapshot()
         if self._retraction_unread and not snapshot:
+            note = over_unread_record(note)
             # the stored checks stand in for the run's unread record (#727); a paper
             # with none is unchecked, never dropped, as in the readable branch (#685)
             stored = self._stored_run_checks
             papers = self._run_documents()
             held = any(d.id in stored for d in papers)
-            line = saved_work_line(screen_documents(papers, stored).to_snapshot()) if held else STATUS_UNREAD
+            line = saved_work_line(screen_documents(papers, stored).to_snapshot(), causes) if held else STATUS_UNREAD
         elif self._retraction_unrecorded and not snapshot:
             line = NO_AUDIT_RECORD_LINE
         else:
             line = saved_work_line(rows, causes)
-        self.retraction_line.setText(line + note)
+        # still said after a failed or stopped Check again, which reads no stored check (#733)
+        self.retraction_line.setText(line + note + (STORED_CHECKS_UNREAD if self._stored_checks_unread else ""))
         self.retraction_line.setVisible(True)
         self.check_again_btn.setVisible(True)
         # one Check again at a time, even across reopened questions
@@ -603,6 +611,18 @@ class ReportTab(QWidget):
             self._unsaved_rechecks.add(checkpoint_id)
         if not showing:
             return
+        # its answers stand in for the stored checks the reopen could not read
+        self._stored_checks_unread = False
+        if self._retraction_unread:
+            # the record stays unread: the answers join the stored checks the line is read
+            # from (#727, #733), a decided check kept over an unchecked answer (#728)
+            stored = self._stored_run_checks
+            self._stored_run_checks = {**stored, **{
+                doc_id: c for doc_id, c in screen.checks.items()
+                if c.verdict.status is not RetractionStatus.UNCHECKED
+                or doc_id not in stored or stored[doc_id].verdict.status is RetractionStatus.UNCHECKED
+            }}
+            updated = RetractionSnapshot(tuple(screen_documents(self._run_documents(), self._stored_run_checks).to_snapshot()))
         still = {row["document_id"] for row in updated.rows if row["status"] == RetractionStatus.UNCHECKED.value}
         decided = {row["document_id"] for row in updated.rows} - still
         # a decided row kept over an unchecked answer: no source could be reached for it
@@ -617,7 +637,8 @@ class ReportTab(QWidget):
         # a row this check never reached has no cause: the count alone, as on a reopen, never others' causes
         causes = unchecked_causes(replace(screen, kept=kept)) if len(kept) == len(still) else []
         rows = RetractionScreen.from_snapshot(updated.to_snapshot())
-        self._retraction_snapshot = rows
+        if not self._retraction_unread:
+            self._retraction_snapshot = rows
         self._show_saved_retraction(
             latest_checks(rows, screen.checks),
             not_checked_again_clause(len(missed), unchecked_causes(replace(screen, kept=missed))) + note,
@@ -696,7 +717,8 @@ class ReportTab(QWidget):
 
         Args:
             screen: The failed screen.
-            note: Why the run's record stands.
+            note: The failed or stopped clause (said without "still the run's
+                record" over an unread one, #733).
         """
         shown = self._shown_checks
         labelled = {

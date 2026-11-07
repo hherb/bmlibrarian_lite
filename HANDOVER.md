@@ -239,18 +239,17 @@ Open issues by family; each issue carries the detail. None blocks another.
   failure or cancel still says it, #731). A report written again over one
   says unread but **keeps the metadata's readable copy stored** (#730,
   maintainer's option 2: written from a `replace`d copy). **Over an unread
-  snapshot the desktop line shows the run's scored and cited papers' stored
-  checks** (#727 item 1, maintainer's option b; `_stored_run_checks`, never
-  a failed *Check again*'s label stand-ins; a paper with none is counted as
-  could not be checked, which the apps do not do yet). **An unchecked check never hides
-  a decided one, whatever the times** (#728).
+  snapshot every line shows the run's scored and cited papers' stored
+  checks** (#727 item 1 desktop, #733 apps: `_stored_run_checks` /
+  `unreadRunChecks`, never a failed *Check again*'s label stand-ins; a paper
+  with none is counted as could not be checked; Android's badges keep every
+  document's row), and a failed or stopped *Check again* there drops "so
+  this is still the run's record" (`over_unread_record`, maintainer's
+  choice). **An unchecked check never hides a decided one, whatever the times** (#728).
   **#600** (audit outcomes of an unreadable snapshot; rows skipped one by
   one, which Find More Evidence's merge still drops), **#727 item 2** (the
   apps count one unreadable entry as "could not be checked", or drop an
-  unscored one; needs a decision, with #600), **#733** (over an unread
-  snapshot: "still the run's record" said over stored checks, the apps drop a
-  paper with no stored check, a failed *Check again* drops "later checks
-  could not be read"),
+  unscored one; needs a decision, with #600),
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**
   (test gaps mostly closed; `RetractionRun` lives in its own file; left: the
@@ -455,12 +454,10 @@ page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
 
 ### Verify
 
-- **Closing an issue is a claim; check the commit made it true.** Five
-  deferred issues were closed by their own commits: "Lodged rather than
-  fixed: #217" contains `fixed: #217`, "not fixed: #N" is no negation to
-  GitHub, and quoting the phrase to explain it closes the issue again. Write
-  no closing keyword before a deferred number ("Deferred: #N"). After every
-  merge, confirm each deferred issue is still open and each fixed one closed.
+- **Closing an issue is a claim; check the commit made it true.** Any closing
+  keyword before a number closes it, even inside "not fixed: #N" or "rather
+  than fixed: #N" (five lost so); write "Deferred: #N". After
+  every merge, confirm each deferred issue is open and each fixed one closed.
 - Touching any data-availability pattern? Run all three parity suites; a change
   that does not update `doc/cross_platform/transparency_parity/` **and** all
   three platforms is meant to fail.
