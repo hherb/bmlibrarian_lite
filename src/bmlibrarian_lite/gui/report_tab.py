@@ -488,7 +488,7 @@ class ReportTab(QWidget):
             stored = self._stored_run_checks
             papers = self._run_documents()
             held = any(d.id in stored for d in papers)
-            line = saved_work_line(screen_documents(papers, stored).to_snapshot()) if held else STATUS_UNREAD
+            line = saved_work_line(screen_documents(papers, stored).to_snapshot(), causes) if held else STATUS_UNREAD
         elif self._retraction_unrecorded and not snapshot:
             line = NO_AUDIT_RECORD_LINE
         else:
@@ -613,6 +613,16 @@ class ReportTab(QWidget):
             return
         # its answers stand in for the stored checks the reopen could not read
         self._stored_checks_unread = False
+        if self._retraction_unread:
+            # the record stays unread: the answers join the stored checks the line is read
+            # from (#727, #733), a decided check kept over an unchecked answer (#728)
+            stored = self._stored_run_checks
+            self._stored_run_checks = {**stored, **{
+                doc_id: c for doc_id, c in screen.checks.items()
+                if c.verdict.status is not RetractionStatus.UNCHECKED
+                or doc_id not in stored or stored[doc_id].verdict.status is RetractionStatus.UNCHECKED
+            }}
+            updated = RetractionSnapshot(tuple(screen_documents(self._run_documents(), self._stored_run_checks).to_snapshot()))
         still = {row["document_id"] for row in updated.rows if row["status"] == RetractionStatus.UNCHECKED.value}
         decided = {row["document_id"] for row in updated.rows} - still
         # a decided row kept over an unchecked answer: no source could be reached for it
@@ -627,7 +637,8 @@ class ReportTab(QWidget):
         # a row this check never reached has no cause: the count alone, as on a reopen, never others' causes
         causes = unchecked_causes(replace(screen, kept=kept)) if len(kept) == len(still) else []
         rows = RetractionScreen.from_snapshot(updated.to_snapshot())
-        self._retraction_snapshot = rows
+        if not self._retraction_unread:
+            self._retraction_snapshot = rows
         self._show_saved_retraction(
             latest_checks(rows, screen.checks),
             not_checked_again_clause(len(missed), unchecked_causes(replace(screen, kept=missed))) + note,
@@ -706,7 +717,8 @@ class ReportTab(QWidget):
 
         Args:
             screen: The failed screen.
-            note: Why the run's record stands.
+            note: The failed or stopped clause (said without "still the run's
+                record" over an unread one, #733).
         """
         shown = self._shown_checks
         labelled = {

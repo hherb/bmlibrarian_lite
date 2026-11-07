@@ -889,12 +889,22 @@ def test_a_late_result_for_another_question_changes_neither_view_nor_audit_trail
     reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
     rechecked: list[Any] = []
     tab.retraction_rechecked.connect(rechecked.append)
+
+    def unreadable(*_a: Any) -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(report_tab_module, "stored_checks", unreadable)
     reopen(tab, None, "another-checkpoint")
     line, warning = tab.retraction_line.text(), tab.retraction_warning.text()
     late = screen_documents(DOCUMENTS, {CITED.id: check(RetractionStatus.RETRACTED, NOW)})
     tab._on_rechecked(checkpoint_id, late)
     assert (tab.retraction_line.text(), tab.retraction_warning.text()) == (line, warning)
     assert rechecked == [] and tab._retraction_snapshot is None
+    # nor does it stand in for the shown run's unread stored checks (#733)
+    monkeypatch.setattr(report_tab_module, "build_retraction_checker", lambda *_a, **_k: DownChecker())
+    monkeypatch.setattr(RetractionRecheckWorker, "start", RetractionRecheckWorker.run)
+    tab.check_again_btn.click()
+    assert tab.retraction_line.text().endswith(CHECK_AGAIN_FAILED + STORED_CHECKS_UNREAD)
     rows = recorded_retraction_snapshot(storage.get_checkpoint(checkpoint_id).metadata)
     assert rows[CITED.id]["status"] == "retracted"
 
@@ -1730,6 +1740,32 @@ def test_an_unreadable_snapshot_shows_the_runs_stored_checks(
     tab.check_again_btn.click()
     assert tab.retraction_line.text() == STATUS_UNREAD + "; it could not be checked again"
     assert CITED.title in tab.retraction_warning.text()
+
+
+def test_an_answered_check_again_over_an_unreadable_snapshot_keeps_to_the_runs_papers(
+    tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its answers join the stored checks, never the record they could not be saved to (#733).
+
+    LEFT_OUT is linked to the question but is not this run's: its outage is
+    never counted, and a later failure never says the record stands.
+    """
+    checkpoint_id = saved_checkpoint(storage, {CHECKPOINT_RETRACTION_SNAPSHOT_KEY: {"not": "a list"}})
+    store_rows(storage, {CITED.id: check(RetractionStatus.CLEAR, RUN)})
+    reopen(tab, None, checkpoint_id)
+    tab.show_saved_retraction(checkpoint_id, snapshot_unread=True)
+    outage = check(RetractionStatus.UNCHECKED, NOW)
+    run_check_again(tab, storage, monkeypatch, {
+        CITED.id: check(RetractionStatus.CLEAR, NOW), UNCITED.id: outage, LEFT_OUT.id: outage,
+    })
+    answered = f"Retraction status checked {NOW:%Y-%m-%d}; 1 paper could not be checked: {OUTAGE_CAUSES}"
+    assert tab.retraction_line.text() == answered + CHECK_AGAIN_NOT_SAVED
+    monkeypatch.setattr(report_tab_module, "build_retraction_checker", lambda *_a, **_k: DownChecker())
+    tab.check_again_btn.click()
+    assert tab.retraction_line.text() == (
+        f"Retraction status checked {NOW:%Y-%m-%d}; 1 paper could not be checked"
+        "; it could not be checked again"
+    )
 
 
 def test_an_unreadable_snapshots_papers_without_a_stored_check_are_unchecked(

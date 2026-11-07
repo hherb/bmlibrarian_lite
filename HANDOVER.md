@@ -454,8 +454,9 @@ page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
 
 ### Verify
 
-- **Closing an issue is a claim; check the commit made it true.** "not
-  fixed: #N" closes #N on GitHub (five lost so); write "Deferred: #N". After
+- **Closing an issue is a claim; check the commit made it true.** Any closing
+  keyword before a number closes it, even inside "not fixed: #N" or "rather
+  than fixed: #N" (five lost so); write "Deferred: #N". After
   every merge, confirm each deferred issue is open and each fixed one closed.
 - Touching any data-availability pattern? Run all three parity suites; a change
   that does not update `doc/cross_platform/transparency_parity/` **and** all

@@ -122,8 +122,9 @@ paper with its `retraction_status`.
 - **A run's record that cannot be read is unread, never "never checked"**
   (#600, #662, all three platforms). Over a record this build cannot read,
   the saved-work line shows the run's papers' stored checks (#727 desktop,
-  #733 apps: its scored and cited papers, a loaded file's own, those with
-  none counted as could not be checked; the apps' `unreadRunChecks`, while
+  #733 apps: its scored and cited papers, on the desktop a loaded file's own,
+  those with none counted as could not be checked; an answered *Check again*'s
+  answers join them, the record still unread; the apps' `unreadRunChecks`, while
   their badges keep every document's check; a failed *Check again*'s label
   stand-ins only warn), and says "Retraction
   status could not be read" (`STATUS_UNREAD` / `RetractionText.statusUnread`)

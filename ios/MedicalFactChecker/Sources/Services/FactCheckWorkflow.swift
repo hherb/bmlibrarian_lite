@@ -765,7 +765,8 @@ final class FactCheckWorkflow {
     /// same paper, warns where the run did not.
     ///
     /// - Parameters:
-    ///   - note: A clause to add to the line (a failed or partial *Check again*).
+    ///   - note: A clause to add to the line (a failed or partial *Check again*);
+    ///     over a record that could not be read, said by ``RetractionText/overUnreadRecord(_:)``.
     ///   - causes: Why papers stay unchecked, by *Check again*'s answers; none on a plain reopen.
     ///   - labelled: A failed *Check again*'s label retractions by `Document.id`,
     ///     which warn though nothing stored them.

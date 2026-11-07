@@ -38,6 +38,7 @@ import com.bmlibrarian.factchecker.util.retraction.RetractionPaper
 import com.bmlibrarian.factchecker.util.retraction.RetractionService
 import com.bmlibrarian.factchecker.util.retraction.RetractionSnapshot
 import com.bmlibrarian.factchecker.util.retraction.RetractionText
+import com.bmlibrarian.factchecker.util.retraction.retractionPaper
 import com.bmlibrarian.factchecker.util.retraction.StoredRetractionEvidence
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -698,6 +699,81 @@ class FactCheckWorkflowRetractionTest {
         assertEquals(RetractionText.STATUS_UNREAD + "; it could not be checked again", workflow.retractionSavedWork.value?.line)
     }
 
+    /** An unreadable snapshot's session: d1 scored and cited, d2 scored, d4 cited only, d3 neither, with an older row. */
+    private suspend fun restoreUnreadSession() {
+        listOf("d1", "d2", "d3", "d4").forEach { hold(it) }
+        documents.replaceAll { id, document -> if (id == "d1" || id == "d2") document.copy(relevanceScore = 5) else document }
+        citations += CitationEntity(documentId = "d1", passage = "A passage.")
+        citations += CitationEntity(documentId = "d4", passage = "Another passage.")
+        rows["pmid:1"] = PaperRetractionCheck.encode(CLEAR.copy(checkedAtMs = RUN_MS))
+        rows["pmid:3"] = PaperRetractionCheck.encode(CLEAR.copy(checkedAtMs = RUN_MS))
+        session = session.copy(workflowStep = WorkflowStep.COMPLETED)
+        snapshotJson = "[1, 2]"
+        workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
+    }
+
+    /** #733: a cited paper never scored is the run's; an answered Check again counts only the run's papers. */
+    @Test
+    fun `an answered Check again over an unreadable snapshot counts only the run's papers`() = runTest {
+        restoreUnreadSession()
+        assertEquals("Retraction status checked 2026-10-18; 2 papers could not be checked", workflow.retractionSavedWork.value?.line)
+
+        answers["1"] = CLEAR.copy(checkedAtMs = RUN_MS + DAY_MS)
+        answers["2"] = OUTAGE
+        // not the run's: its outage is never "could not be checked again"
+        answers["3"] = OUTAGE
+        answers["4"] = CLEAR.copy(checkedAtMs = RUN_MS + DAY_MS)
+        workflow.checkRetractionsAgain()
+
+        assertEquals(
+            "Retraction status checked 2026-10-19; 1 paper could not be checked: " +
+                RetractionText.uncheckedCauses(listOf(documents.getValue("d2").retractionPaper to OUTAGE), emptySet()).joinToString("; "),
+            workflow.retractionSavedWork.value?.line
+        )
+    }
+
+    /** #733: a Check again that cannot read the store, failed or stopped, never says the unread record stands. */
+    @Test
+    fun `a Check again that cannot read the store over an unreadable snapshot never says the record stands`() = runTest {
+        restoreUnreadSession()
+        val line = "Retraction status checked 2026-10-18; 2 papers could not be checked"
+        coEvery { documentRepository.getDocumentsBySessionSync(SESSION_ID) } throws IOException("disk")
+        repeat(2) {
+            assertThrows(IOException::class.java) { kotlinx.coroutines.runBlocking { workflow.checkRetractionsAgain() } }
+            assertEquals("$line; it could not be checked again", workflow.retractionSavedWork.value?.line)
+        }
+
+        coEvery { documentRepository.getDocumentsBySessionSync(SESSION_ID) } answers { documents.values.toList() }
+        coEvery { retractionService.check(any()) } coAnswers {
+            coEvery { documentRepository.getDocumentsBySessionSync(SESSION_ID) } throws IOException("disk")
+            awaitCancellation()
+        }
+        val job = launch { workflow.checkRetractionsAgain() }
+        runCurrent()
+        workflow.cancelCheckAgain()
+        job.join()
+        assertEquals("$line; checking again was stopped", workflow.retractionSavedWork.value?.line)
+    }
+
+    /** #733: answers stored but not shown keep the unread record's line, and its rule for a later failure. */
+    @Test
+    fun `answers stored but not shown over an unreadable snapshot keep its line`() = runTest {
+        restoreUnreadSession()
+        val line = "Retraction status checked 2026-10-18; 2 papers could not be checked"
+        coEvery { retractionService.check(any()) } throws IOException("down")
+        workflow.checkRetractionsAgain()
+        assertEquals("$line; it could not be checked again", workflow.retractionSavedWork.value?.line)
+
+        coEvery { retractionService.check(any()) } coAnswers {
+            firstArg<List<RetractionPaper>>().associateWith { CLEAR }
+        }
+        coEvery { documentRepository.getCitationsBySessionSync(SESSION_ID) } throws IOException("disk")
+        workflow.checkRetractionsAgain()
+
+        assertEquals(line + RetractionText.STORED_CHECKS_UNREAD, workflow.retractionSavedWork.value?.line)
+        assertTrue(workflow.retractionSavedWork.value!!.unreadRecord)
+    }
+
     /** #662: the report written over an unreadable snapshot says so in its methods. */
     @Test
     fun `a report over an unreadable snapshot says its retraction status could not be read`() = runTest {
@@ -1272,6 +1348,10 @@ class FactCheckWorkflowRetractionTest {
         workflow.restoreForViewing(session)
 
         assertEquals("Retraction status could not be read", workflow.retractionSavedWork.value?.line)
+        // nothing of the run's record was read: a failed Check again never says it stands (#733)
+        coEvery { retractionService.check(any()) } throws IOException("down")
+        assertThrows(IOException::class.java) { kotlinx.coroutines.runBlocking { workflow.checkRetractionsAgain() } }
+        assertEquals("Retraction status could not be read; it could not be checked again", workflow.retractionSavedWork.value?.line)
     }
 
     @Test

@@ -1179,6 +1179,33 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertEqual(unread.retractionSavedWorkLine, RetractionText.statusUnread + "; it could not be checked again")
     }
 
+    /// #733: a cited paper never scored is the run's, one neither scored nor
+    /// cited is not; an answered *Check again* counts only the run's papers.
+    func testAnAnsweredCheckAgainOverAnUnreadableSnapshotCountsOnlyTheRunsPapers() async {
+        let (session, documents) = makeSession(
+            ["10.1000/a", "10.1000/b", "10.1000/c", "10.1000/d"], cited: [0, 3], run: [:])
+        documents[0].retractionCheck = Self.check("clear")
+        for index in [2, 3] {
+            documents[index].relevanceScore = nil
+            documents[index].scoredAt = nil
+        }
+        documents[2].retractionCheck = Self.check("clear")
+        session.retractionSnapshotJSON = "[1, 2]"
+        let later = Self.runDay.addingTimeInterval(Self.day)
+        let workflow = restore(session, answers: [
+            "10.1000/a": Self.check("clear", at: later), "10.1000/b": Self.check("unchecked", at: later),
+            // not the run's: its outage is never "could not be checked again"
+            "10.1000/c": Self.check("unchecked", at: later), "10.1000/d": Self.check("clear", at: later),
+        ])
+        XCTAssertEqual(workflow.retractionSavedWorkLine, "Retraction status checked 2026-10-18; 2 papers could not be checked")
+
+        await workflow.checkRetractionsAgain()
+
+        XCTAssertEqual(
+            workflow.retractionSavedWorkLine,
+            "Retraction status checked 2026-10-19; 1 paper could not be checked: \(Self.uncheckedCauses)")
+    }
+
     /// One entry this build cannot read costs only itself, and a later run's
     /// record keeps it as written: a later build may read it.
     func testAnUnreadableSnapshotEntryIsLeftOutAndKept() throws {

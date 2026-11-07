@@ -111,7 +111,8 @@ object RetractionSavedWork {
  * @property line The retraction line, offered with *Check again*
  * @property warning That papers the report cites are now retracted or under concern; null when none is
  * @property checks The check each document is badged by ([RetractionSavedWork.recheckedChecks]), by document id
- * @property unreadRecord The run's record could not be read, so [line] never says it stands
+ * @property unreadRecord Nothing of the run's record could be read (its snapshot is unreadable, or the
+ *   saved status could not be shown at all), so [line] never says it stands
  *   ([RetractionText.overUnreadRecord], #733)
  */
 data class RetractionSavedWorkState(
