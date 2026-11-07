@@ -571,6 +571,41 @@ class TestWhatIsFoundIsScreened:
         assert again([]).notice == NO_NEW_EVIDENCE_TEXT
         assert "doc-6" in again.contexts[0][1]
 
+    def test_a_row_this_build_cannot_read_is_kept_and_counted_unread(self, storage: LiteStorage) -> None:
+        """#600, #727: the merge keeps it as found; its paper is neither new nor unchecked."""
+        checkpoint_id = reviewed(storage)
+        papers = [make_document(p) for p in ("1", "2")]
+        rows = RetractionScreen(kept=tuple(papers), excluded=(),
+                                checks=RetractingChecker().check(papers)).to_snapshot()
+        newer = {"document_id": "doc-3", "verdict": "a newer build's"}
+        stored = storage.get_checkpoint(checkpoint_id).metadata
+        storage.update_checkpoint(checkpoint_id=checkpoint_id, metadata={
+            **stored, CHECKPOINT_RETRACTION_SNAPSHOT_KEY: [*rows, newer]})
+
+        def screen(documents: list[LiteDocument]) -> RetractionScreen:
+            return RetractionScreen(kept=tuple(documents), excluded=(),
+                                    checks=RetractingChecker().check(documents))
+
+        run = Run(storage, screen=screen)
+        run(found(storage, "5", "3"))
+
+        kept = storage.get_checkpoint(checkpoint_id).metadata[CHECKPOINT_RETRACTION_SNAPSHOT_KEY]
+        assert newer in kept
+        # doc-3's record is never written over by a new row
+        assert [r["document_id"] for r in kept].count("doc-3") == 1
+        assert {r["document_id"] for r in kept} == {"doc-1", "doc-2", "doc-3", "doc-5"}
+        record = run.metadata.retraction_screen
+        assert record is not None
+        # unread, never unchecked
+        assert record.unchecked_count == 0
+        assert retraction_methods_line(record).endswith("; 1 paper's record could not be read")
+        assert format_retraction_notice(record) == (
+            "> **Retraction check:** 1 paper's retraction record could not be read.")
+
+        from bmlibrarian_lite.more_evidence import known_document_ids
+
+        assert "doc-3" in known_document_ids(storage, QUESTION)
+
     def test_the_screen_not_saved_hook_fires_before_the_left_out_ids_are_recorded(
         self, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
     ) -> None:

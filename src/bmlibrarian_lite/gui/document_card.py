@@ -60,7 +60,7 @@ from ..quality.data_models import QualityAssessment
 from ..transparency import TransparencyResult
 from bmlib.publications.retraction_status import RetractionStatus
 from ..retraction_store import PaperCheck
-from ..retraction_text import excluded_line
+from ..retraction_text import STATUS_UNREAD, excluded_line
 from .retraction_badge import RetractionBadge, status_stylesheet
 from ..audit_records import score_failure_reason
 from .card_utils import (
@@ -811,7 +811,11 @@ class DocumentCard(QFrame):
                         )
 
     def set_retraction_check(
-        self, check: PaperCheck, excluded: bool = False, run_check: PaperCheck | None = None
+        self,
+        check: PaperCheck,
+        excluded: bool = False,
+        run_check: PaperCheck | None = None,
+        unread: bool = False,
     ) -> None:
         """Show the paper's retraction status as a badge before the others.
 
@@ -821,6 +825,8 @@ class DocumentCard(QFrame):
                 the card then says in a line under the title.
             run_check: The check as the run saw it, when *Check again* has
                 replaced it; the line gives the run's evidence first.
+            unread: The run's record of the paper could not be read: the
+                badge's tooltip says so (#600).
         """
         header_layout = self._header_widget.layout() if self._header_widget else None
         title_row_item = header_layout.itemAt(0) if header_layout else None
@@ -839,6 +845,8 @@ class DocumentCard(QFrame):
         self._retraction_badge = self._excluded_label = None
         if check.verdict.status is not RetractionStatus.CLEAR:
             self._retraction_badge = RetractionBadge(check)
+            if unread:
+                self._retraction_badge.setToolTip(STATUS_UNREAD)
             title_row.insertWidget(0, self._retraction_badge)
         if excluded:
             self._excluded_label = QLabel(excluded_line(run_check or check, check))

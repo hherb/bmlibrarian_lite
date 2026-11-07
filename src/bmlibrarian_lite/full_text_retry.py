@@ -37,6 +37,7 @@ from .audit_records import (
     recorded_extraction_failures,
     recorded_report_metadata,
     recorded_retraction_snapshot,
+    recorded_unread_rows,
     retraction_snapshot_unreadable,
 )
 from .chunking import analysis_windows
@@ -49,7 +50,7 @@ from .data_models import (
     ReportMetadata,
     ScoredDocument,
 )
-from .retraction_screen import RetractionSnapshot, screen_documents
+from .retraction_screen import RetractionSnapshot, screen_documents, unread_row_ids
 from .transparency.assessment import record_transparency_counts
 from .utils import classify_analysis_exception
 
@@ -468,11 +469,14 @@ def write_report_again(
     snapshot = recorded_retraction_snapshot(checkpoint.metadata)
     unread = retraction_snapshot_unreadable(checkpoint.metadata)
     if snapshot:
+        unread_rows = recorded_unread_rows(checkpoint.metadata)
         # a scored paper no screen saw (left by Find More Evidence on a run
-        # older than the check) is unchecked, never silently clear (#657)
-        unscreened = [d.document for d in scored if d.document.id not in snapshot]
+        # older than the check) is unchecked, never silently clear (#657); one
+        # whose row this build cannot read is counted as such, not unchecked (#727)
+        seen = {*snapshot, *unread_row_ids(unread_rows)}
+        unscreened = [d.document for d in scored if d.document.id not in seen]
         unchecked = screen_documents(unscreened, {}).to_snapshot()
-        metadata.retraction_screen = RetractionSnapshot((*snapshot.values(), *unchecked))
+        metadata.retraction_screen = RetractionSnapshot((*snapshot.values(), *unchecked), tuple(unread_rows))
 
     citations = storage.get_citations_for_question(question, checkpoint_id=checkpoint_id)
     cited = list(dict.fromkeys(c.document.id for c in citations))

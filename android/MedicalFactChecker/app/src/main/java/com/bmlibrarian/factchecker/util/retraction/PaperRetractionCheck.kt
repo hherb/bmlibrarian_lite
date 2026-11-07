@@ -365,6 +365,17 @@ object RetractionSnapshot {
     }.toMap()
 
     /**
+     * The documents whose entries this build cannot read, in a snapshot that
+     * parses: each a paper whose run record is unknown, counted as
+     * "could not be read", never as unchecked and never dropped (#727).
+     *
+     * @param text The stored snapshot, or null for a session never checked
+     * @return Their ids; empty when there are none or the snapshot does not parse;
+     *   every entry's id when none decodes (which [unread] calls unread as a whole)
+     */
+    fun unreadIds(text: String?): Set<String> = entries(text).keys - read(text).keys
+
+    /**
      * Whether the run recorded a snapshot this build cannot read: the whole of
      * it, or the entry for [documentId] (any entry when null). Unparsed is not
      * absent, so a reader is told "could not be read" (#662).
@@ -386,7 +397,9 @@ object RetractionSnapshot {
 
     /**
      * The snapshot with [checks] added; a document checked again is replaced,
-     * and every other entry, readable or not, is kept as it was. A snapshot
+     * and every other entry, readable or not, is kept as it was; one this build
+     * cannot read is never replaced, as it may hold what the run left out
+     * (#600, the desktop's `keeping_unread_rows`). A snapshot
      * unreadable as a whole is never written over (#726, the desktop's
      * `_merge_retraction_snapshot`): what the run left out would be lost; the
      * stored rows keep the answers.
@@ -397,7 +410,9 @@ object RetractionSnapshot {
      */
     fun merged(text: String?, checks: Map<String, PaperRetractionCheck>): String? {
         val stored = parsed(text) ?: return null
-        val all = stored + checks.mapValues { json.encodeToJsonElement(PaperRetractionCheck.serializer(), it.value) }
+        val unread = unreadIds(text)
+        val all = stored + checks.filterKeys { it !in unread }
+            .mapValues { json.encodeToJsonElement(PaperRetractionCheck.serializer(), it.value) }
         return json.encodeToString(JsonObject.serializer(), JsonObject(all))
     }
 }

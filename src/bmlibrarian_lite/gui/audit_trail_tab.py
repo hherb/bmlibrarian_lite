@@ -28,7 +28,7 @@ its sub-tabs in real-time during workflow execution.
 """
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -53,7 +53,7 @@ from ..data_models import (
     TransparencyAnalysisFailure,
 )
 from ..quality.data_models import QualityAssessment
-from ..retraction_screen import RetractionScreen, as_the_run_saw_it, check_from_snapshot_row
+from ..retraction_screen import RetractionScreen, as_the_run_saw_it, check_from_snapshot_row, unchecked_check
 from ..transparency import (
     TransparencyOutcome,
     TransparencyResult,
@@ -428,7 +428,9 @@ class AuditTrailTab(QWidget):
         for doc_id, check in screen.checks.items():
             self.literature_tab.update_retraction(doc_id, check, doc_id in excluded)
 
-    def show_retraction_snapshot(self, rows: Mapping[str, Mapping[str, Any]]) -> None:
+    def show_retraction_snapshot(
+        self, rows: Mapping[str, Mapping[str, Any]], unread: Collection[str] = ()
+    ) -> None:
         """Show a reopened question's stored snapshot the same way.
 
         A left-out paper's line gives the run's evidence, and its status now
@@ -436,10 +438,16 @@ class AuditTrailTab(QWidget):
 
         Args:
             rows: The snapshot rows by document id.
+            unread: Documents whose rows this build cannot read: badged NOT
+                CHECKED, "could not be read", never left bare (#600).
         """
+        for doc_id in unread:
+            if doc_id not in rows:
+                self.literature_tab.update_retraction(doc_id, unchecked_check(), False, unread=True)
         for doc_id, row in rows.items():
             check = check_from_snapshot_row(row)
-            if check is None:
+            if check is None:  # its evidence this build cannot parse: unread, never bare
+                self.literature_tab.update_retraction(doc_id, unchecked_check(), False, unread=True)
                 continue
             excluded = bool(row.get("excluded"))
             run_check = check_from_snapshot_row(as_the_run_saw_it(row)) if excluded else None

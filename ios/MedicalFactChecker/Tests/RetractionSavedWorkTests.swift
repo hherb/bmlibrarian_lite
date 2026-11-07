@@ -1230,6 +1230,27 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertEqual(kept["b"] as? [String: Int], ["status": 7], "the unreadable entry is kept as written")
     }
 
+    /// #727: a scored paper whose own entry cannot be read is counted "could
+    /// not be read", never "could not be checked" (no stand-in), and a later
+    /// screen never writes over its entry.
+    func testAScoredPapersUnreadableEntryIsCountedUnreadNeverUnchecked() throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b"], cited: [0], run: [0: Self.check("clear")])
+        XCTAssertEqual(restore(session).retractionSavedWorkLine, "Retraction status checked 2026-10-18; 1 paper could not be checked",
+                       "control: a scored paper with no entry is unchecked")
+        var written = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(try XCTUnwrap(session.retractionSnapshotJSON).utf8)) as? [String: Any])
+        written[documents[1].id] = ["status": 7]
+        session.retractionSnapshotJSON = String(data: try JSONSerialization.data(withJSONObject: written), encoding: .utf8)
+        XCTAssertEqual(session.retractionSnapshotUnreadIDs(), [documents[1].id])
+        // its stored check is not the run's record either
+        documents[1].retractionCheck = Self.check("clear", at: Self.runDay.addingTimeInterval(Self.day))
+
+        XCTAssertEqual(restore(session).retractionSavedWorkLine, "Retraction status checked 2026-10-18; 1 paper's record could not be read")
+
+        XCTAssertTrue(session.recordRetractionSnapshot([documents[1].id: Self.check("clear")]))
+        XCTAssertEqual(session.retractionSnapshotUnreadIDs(), [documents[1].id], "never written over")
+    }
+
     /// A snapshot the earlier build wrote (one `JSONEncoder` pass over the whole
     /// map) reads back unchanged, and a fractional `checkedAt` survives a later
     /// run's rewrite through `JSONSerialization`.

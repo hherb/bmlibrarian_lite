@@ -36,8 +36,18 @@ _WARNING_STATUSES = (RetractionStatus.RETRACTED, RetractionStatus.CONCERN)
 
 
 def snapshot_row_readable(row: object) -> bool:
-    """Whether this build can read a stored snapshot row: a mapping with an id and a status."""
-    return isinstance(row, Mapping) and all(k in row for k in _SNAPSHOT_REQUIRED)
+    """Whether this build can read a stored snapshot row: a mapping with an id and a status.
+
+    The status, and ``run_status`` when set, must be strings: the apps cannot
+    decode any other, and here one would crash every reader (an unknown
+    string reads as unchecked, as on the apps).
+    """
+    return (
+        isinstance(row, Mapping)
+        and all(k in row for k in _SNAPSHOT_REQUIRED)
+        and isinstance(row["status"], str)
+        and isinstance(row.get(RUN_STATUS_KEY, ""), (str, type(None)))
+    )
 
 
 def stored_snapshot_unreadable(stored: object) -> bool:
@@ -59,6 +69,72 @@ def stored_snapshot_unreadable(stored: object) -> bool:
     if not isinstance(stored, list):
         return True
     return bool(stored) and not any(snapshot_row_readable(row) for row in stored)
+
+
+def unread_snapshot_rows(stored: object) -> list[Any]:
+    """The rows of a stored snapshot list this build cannot read, as found.
+
+    Each is a paper whose run record could not be read: counted as such,
+    never as unchecked or as not left out (#600, #727), and never written
+    over (:func:`keeping_unread_rows`).
+
+    Args:
+        stored: The stored value (input, golden rule 1).
+
+    Returns:
+        Those rows, in order; empty when the value is not a list.
+    """
+    if not isinstance(stored, list):
+        return []
+    return [row for row in stored if not snapshot_row_readable(row)]
+
+
+def unread_paper_count(rows: Iterable[Any], read_ids: Collection[str] = ()) -> int:
+    """How many papers unreadable rows stand for, as the apps count them: one per id.
+
+    An id also among *read_ids* (a readable row for the same paper) is not
+    counted; a row naming no id counts as one paper.
+
+    Args:
+        rows: The unreadable rows.
+        read_ids: Ids the readable rows hold.
+
+    Returns:
+        The count.
+    """
+    rows = list(rows)
+    named = unread_row_ids(rows)
+    return len(named - set(read_ids)) + sum(1 for row in rows if not unread_row_ids([row]))
+
+
+def unread_row_ids(rows: Iterable[Any]) -> set[str]:
+    """The document ids unreadable rows still name (a row without one names none)."""
+    return {
+        str(row["document_id"])
+        for row in rows
+        if isinstance(row, Mapping) and row.get("document_id") is not None
+    }
+
+
+def keeping_unread_rows(rows: Iterable[Mapping[str, Any]], stored: object) -> list[Any]:
+    """New snapshot rows to store over *stored*, its unreadable rows kept as found.
+
+    An unreadable row may hold what the run saw (a retraction it left out),
+    so nothing writes over it (#726's rule, row by row): a new row for the
+    same document is not stored (the shared check rows keep the answer),
+    unless *stored* also reads a row for it, which the new row replaces.
+
+    Args:
+        rows: The readable rows to store.
+        stored: The snapshot they replace (input, golden rule 1).
+
+    Returns:
+        The rows to store: the new ones, then the unreadable ones.
+    """
+    unread = unread_snapshot_rows(stored)
+    readable = stored if isinstance(stored, list) else []
+    ids = unread_row_ids(unread) - {str(r["document_id"]) for r in readable if snapshot_row_readable(r)}
+    return [dict(row) for row in rows if str(row["document_id"]) not in ids] + unread
 
 
 def as_utc(moment: datetime) -> datetime:
@@ -130,6 +206,16 @@ class RetractionRecord(Protocol):
         """The oldest decided check's time; ``None`` without one (an unchecked answer's never counts)."""
         ...
 
+    @property
+    def unread_rows(self) -> Sequence[Any]:
+        """Stored rows this build cannot read, as found (none for a live screen)."""
+        ...
+
+    @property
+    def unread_count(self) -> int:
+        """The papers those rows stand for (:func:`unread_paper_count`)."""
+        ...
+
     def to_snapshot(self) -> list[dict[str, Any]]:
         """One row per held document."""
         ...
@@ -194,6 +280,16 @@ class RetractionScreen:
             default=None,
         )
 
+    @property
+    def unread_rows(self) -> tuple[Any, ...]:
+        """Empty: a live screen read every paper it holds."""
+        return ()
+
+    @property
+    def unread_count(self) -> int:
+        """0: a live screen read every paper it holds."""
+        return 0
+
     def to_snapshot(self) -> list[dict[str, Any]]:
         """Rows for the report and audit trail, one per held document.
 
@@ -242,8 +338,10 @@ class RetractionScreen:
         ``checked_at`` as none; ``run_status`` and ``run_deciding``, when
         present, are read like ``status`` and ``deciding``, except that a
         ``run_status`` of none (not recorded) stays none. A row is kept through all of these, so a
-        paper left out never reads as not scored; only a row without
-        ``document_id`` or ``status`` is skipped with a warning.
+        paper left out never reads as not scored; only a row
+        :func:`snapshot_row_readable` refuses (no ``document_id`` or
+        ``status``, or a status that is not a string) is skipped with a
+        warning: it is read apart (:func:`unread_snapshot_rows`).
 
         Args:
             rows: Rows as ``to_snapshot`` wrote them.
@@ -293,9 +391,13 @@ class RetractionSnapshot:
 
     Attributes:
         rows: Snapshot rows as ``RetractionScreen.to_snapshot`` wrote them.
+        unread_rows: Stored rows this build cannot read, as found: each a
+            paper whose record could not be read, kept so a save never
+            erases it (#600).
     """
 
     rows: tuple[dict[str, Any], ...]
+    unread_rows: tuple[Any, ...] = ()
 
     @property
     def excluded(self) -> tuple[dict[str, Any], ...]:
@@ -316,14 +418,20 @@ class RetractionSnapshot:
         """The oldest decided row's check time; ``None`` without one."""
         return decided_checked_at(self.rows)
 
+    @property
+    def unread_count(self) -> int:
+        """The papers the unreadable rows stand for, one per id (:func:`unread_paper_count`)."""
+        return unread_paper_count(self.unread_rows, {str(r["document_id"]) for r in self.rows})
+
     def to_snapshot(self) -> list[dict[str, Any]]:
         """The rows, as given."""
         return [dict(r) for r in self.rows]
 
     @classmethod
-    def from_rows(cls, rows: Iterable[Mapping[str, Any]]) -> RetractionSnapshot:
-        """Build from stored rows, skipping any an older build wrote short."""
-        return cls(tuple(RetractionScreen.from_snapshot(rows).values()))
+    def from_rows(cls, rows: Iterable[Any]) -> RetractionSnapshot:
+        """Build from stored rows; those this build cannot read are kept apart, as found."""
+        rows = list(rows)
+        return cls(tuple(RetractionScreen.from_snapshot(rows).values()), tuple(unread_snapshot_rows(rows)))
 
     @classmethod
     def from_stored(cls, stored: Any) -> RetractionSnapshot | None:

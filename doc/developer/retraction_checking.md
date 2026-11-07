@@ -154,8 +154,34 @@ paper with its `retraction_status`.
   report written again over an unreadable checkpoint record says unread, even
   over a readable copy in the report metadata, but that copy stays stored as
   it was, never erased (#730: the report is written from a copy of the
-  metadata carrying `retraction_screen_unread`). A desktop list with some
-  unreadable rows still loses them on Find More Evidence's merge (#600).
+  metadata carrying `retraction_screen_unread`).
+- **One unreadable entry in a readable record is its own count** (#600,
+  #727 item 2, all three platforms). A desktop snapshot row it cannot read
+  (`unread_snapshot_rows`; `RetractionSnapshot.unread_rows`) or an app's
+  snapshot entry that does not decode (`retractionSnapshotUnreadIDs` /
+  `RetractionSnapshot.unreadIds`) is a paper whose run record is unknown:
+  the notice says "N papers' retraction records could not be read" and the
+  methods and saved-work lines "; N papers' records could not be read"
+  (`not_read_clause` / `notReadClause`), after the rest. N counts papers,
+  one per id, as the apps do (`unread_paper_count`): two unreadable desktop
+  rows for one paper are one, one beside a readable row for its paper is
+  none, and a row naming no id is one. A desktop row is unreadable without
+  `document_id` or `status`, or with a status that is not a string (the
+  apps cannot decode one either); an unknown status string reads as
+  unchecked on every platform (Deferred: #737). It is never counted
+  "could not be checked" (no unchecked stand-in, in the line or in a report
+  written again), and never listed as left out: whether the run left it out
+  is unknown. Nothing writes over it (`keeping_unread_rows`: Check again,
+  Find More Evidence's merge, the audit JSON saved again; a report's
+  metadata stores `RetractionSnapshot.unread_rows` after its rows; the apps'
+  snapshot merge), unless the record also reads a row for that paper, so a *Check again* answer for that paper
+  stays in the shared rows only and the line still counts it unread. On the
+  desktop its paper counts as seen for Find More Evidence, its audit entry
+  (unscored) carries `retraction_record_unread` and the Audit Trail dialog
+  lists it under "Retraction Record Could Not Be Read", never "Not Scored",
+  and its audit trail card badges NOT CHECKED, "could not be read" (as does
+  a row whose deciding evidence this build cannot parse). Android's list badges keep its
+  row (the line alone drops it).
 - **A paper the run saw unchecked warns of any retraction or concern**, of
   whatever time (#662, all three platforms: the desktop's
   `changed_since_snapshot`, the apps' `RetractionSavedWork.changedSinceRun`).

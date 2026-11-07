@@ -56,6 +56,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -991,6 +992,58 @@ class FactCheckWorkflowRetractionTest {
             "Retraction status could not be checked: the Retraction Watch data could not be used (no up-to-date copy is on this device)",
             workflow.retractionSavedWork.value?.line
         )
+    }
+
+    /** A run's snapshot: d1 clear, d2's entry one this build cannot read. */
+    private fun snapshotWithAnUnreadableEntry(): String =
+        RetractionSnapshot.merged(null, mapOf("d1" to CLEAR.copy(checkedAtMs = RUN_MS)))!!
+            .removeSuffix("}").plus(", \"d2\": {\"status\": 7}}").also {
+                assertEquals(setOf("d2"), RetractionSnapshot.unreadIds(it))
+            }
+
+    /** #727: a scored paper whose own entry cannot be read is "could not be read", never "could not be checked". */
+    @Test
+    fun `a scored paper's unreadable entry is counted unread on the line, never unchecked`() = runTest {
+        hold("d1")
+        hold("d2")
+        documents.replaceAll { _, document -> document.copy(relevanceScore = 5) }
+        // its stored row is not the run's record either
+        rows["pmid:2"] = PaperRetractionCheck.encode(CLEAR.copy(checkedAtMs = RUN_MS + DAY_MS))
+        snapshotJson = snapshotWithAnUnreadableEntry()
+        session = session.copy(workflowStep = WorkflowStep.COMPLETED)
+        workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
+
+        assertEquals(
+            "Retraction status checked 2026-10-18; 1 paper's record could not be read",
+            workflow.retractionSavedWork.value?.line
+        )
+        // its badge keeps its row
+        assertNotNull(workflow.retractionSavedWork.value?.checks?.get("d2"))
+    }
+
+    /** #727: the report written again counts it the same way, in its notice and methods line. */
+    @Test
+    fun `a report counts a scored paper's unreadable entry as unread`() = runTest {
+        hold("d1")
+        hold("d2")
+        documents.replaceAll { _, document -> document.copy(relevanceScore = 5) }
+        snapshotJson = snapshotWithAnUnreadableEntry()
+
+        run()
+
+        val report = reports.single()
+        assertTrue(report, report.startsWith("> **Retraction check:** 1 paper's retraction record could not be read."))
+        assertTrue(report, report.contains("- **Retraction Check:** Retraction status checked 2026-10-18; 1 paper's record could not be read"))
+        assertFalse(report, report.contains("could not be checked"))
+    }
+
+    /** #600: a later screen never writes over an entry this build cannot read. */
+    @Test
+    fun `an unreadable entry is never written over`() {
+        val stored = snapshotWithAnUnreadableEntry()
+        val merged = RetractionSnapshot.merged(stored, mapOf("d2" to CLEAR, "d3" to CLEAR))!!
+        assertEquals(setOf("d2"), RetractionSnapshot.unreadIds(merged))
+        assertEquals(setOf("d1", "d3"), RetractionSnapshot.read(merged).keys)
     }
 
     /** #684: a session older than the check, given a snapshot by Find More Evidence. */

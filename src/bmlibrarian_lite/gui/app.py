@@ -59,6 +59,7 @@ from ..audit_records import (
     recorded_extraction_failures,
     recorded_min_score,
     recorded_retraction_snapshot,
+    recorded_unread_rows,
     retraction_snapshot_unreadable,
 )
 from ..benchmarking import BenchmarkRunner
@@ -67,6 +68,7 @@ from ..browser_rescue import RescueEntry, reanalyse_rescued
 from ..config import LiteConfig
 from ..constants import BROWSER_RESCUE_UNAVAILABLE_NOTE, STATUS_MESSAGE_TIMEOUT_MS
 from ..exceptions import SQLiteError
+from ..retraction_screen import unread_row_ids
 from ..storage import LiteStorage
 from ..transparency import TransparencyUnassessed, stored_transparency_outcomes
 from .audit_trail_tab import AuditTrailTab
@@ -789,7 +791,8 @@ class LiteMainWindow(QMainWindow):
 
             badge_failure = self._show_stored_transparency(documents_found)
             retraction_rows = recorded_retraction_snapshot(checkpoint.metadata)
-            self.audit_trail_tab.show_retraction_snapshot(retraction_rows)
+            unread_rows = recorded_unread_rows(checkpoint.metadata)
+            self.audit_trail_tab.show_retraction_snapshot(retraction_rows, unread_row_ids(unread_rows))
 
             self.audit_trail_tab.on_workflow_finished()
 
@@ -814,6 +817,7 @@ class LiteMainWindow(QMainWindow):
                 # Its papers left out as retracted are linked to the question;
                 # without this they would be audited as never scored
                 retraction_snapshot=retraction_rows or None,
+                retraction_unread_rows=unread_rows,
                 # The run saved its own report and audit when it ran; a record
                 # rebuilt from the database would be a second, poorer one.
                 auto_save=False,
