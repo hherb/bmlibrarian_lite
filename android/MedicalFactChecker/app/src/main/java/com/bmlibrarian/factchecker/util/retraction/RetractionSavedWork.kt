@@ -50,6 +50,23 @@ object RetractionSavedWork {
     }
 
     /**
+     * The checks a reopened session's line is read from when its run's
+     * snapshot could not be read at all (the desktop's #727 rule, #733): each
+     * of the run's papers' stored row, one with none unchecked, never dropped
+     * (#685). Empty when none has a stored row, so the line says "could not
+     * be read", never "never checked".
+     *
+     * @param stored Each document's paper's stored row, by document id
+     * @param papers The run's papers: its scored and cited documents' ids
+     * @return The checks, by document id
+     */
+    fun unreadRunChecks(stored: Map<String, PaperRetractionCheck>, papers: Set<String>): Map<String, PaperRetractionCheck> {
+        if (papers.none { it in stored }) return emptyMap()
+        // an unchecked check's time is no check time, so the stand-in's never shows
+        return papers.associateWith { stored[it] ?: PaperRetractionCheck.failed(0L) }
+    }
+
+    /**
      * One paper's check since its run: a decided check over an unchecked one,
      * whatever the times (an outage is not knowledge, either way round: an
      * unchecked run never hides an older stored retraction, #728), else
@@ -94,9 +111,12 @@ object RetractionSavedWork {
  * @property line The retraction line, offered with *Check again*
  * @property warning That papers the report cites are now retracted or under concern; null when none is
  * @property checks The check each document is badged by ([RetractionSavedWork.recheckedChecks]), by document id
+ * @property unreadRecord The run's record could not be read, so [line] never says it stands
+ *   ([RetractionText.overUnreadRecord], #733)
  */
 data class RetractionSavedWorkState(
     val line: String,
     val warning: String? = null,
-    val checks: Map<String, PaperRetractionCheck> = emptyMap()
+    val checks: Map<String, PaperRetractionCheck> = emptyMap(),
+    val unreadRecord: Boolean = false
 )

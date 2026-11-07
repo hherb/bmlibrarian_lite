@@ -1149,6 +1149,36 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertTrue(documents[0].retractionStatusUnread)
     }
 
+    /// #733, the desktop's #727 rule: over a snapshot this build cannot read
+    /// at all, the line is the scored and cited papers' stored checks, one
+    /// with none counted unchecked; a failed or stopped *Check again* never
+    /// says "still the run's record", which could not be read.
+    func testAnUnreadableSnapshotsLineIsTheRunsPapersStoredChecks() async {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b", "10.1000/c"], cited: [0], run: [:])
+        documents[0].retractionCheck = Self.check("clear")
+        // not scored, not cited: its older check is not the run's
+        documents[2].relevanceScore = nil
+        documents[2].scoredAt = nil
+        documents[2].retractionCheck = Self.check("clear", at: Self.runDay.addingTimeInterval(-Self.day))
+        session.retractionSnapshotJSON = "[1, 2]"
+        let workflow = restore(session)
+        XCTAssertEqual(workflow.retractionSavedWorkLine, "Retraction status checked 2026-10-18; 1 paper could not be checked")
+
+        workflow.useRetractionCheck { _ in throw CheckFailed() }
+        await workflow.checkRetractionsAgain()
+        XCTAssertEqual(
+            workflow.retractionSavedWorkLine,
+            "Retraction status checked 2026-10-18; 1 paper could not be checked; it could not be checked again")
+
+        // nothing of the run's stored: "could not be read", and still no record said to stand
+        documents[0].retractionCheck = nil
+        let unread = restore(session)
+        XCTAssertEqual(unread.retractionSavedWorkLine, RetractionText.statusUnread)
+        unread.useRetractionCheck { _ in throw CheckFailed() }
+        await unread.checkRetractionsAgain()
+        XCTAssertEqual(unread.retractionSavedWorkLine, RetractionText.statusUnread + "; it could not be checked again")
+    }
+
     /// One entry this build cannot read costs only itself, and a later run's
     /// record keeps it as written: a later build may read it.
     func testAnUnreadableSnapshotEntryIsLeftOutAndKept() throws {

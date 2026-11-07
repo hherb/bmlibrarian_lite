@@ -185,10 +185,20 @@ public enum RetractionText {
     public static let checkAgainLabel = "Check again"
     /// The saved-work line while *Check again* runs.
     public static let checkingAgainLine = "Checking retraction status…"
+    private static let stillTheRecord = ", so this is still the run's record"
     /// Added to the saved-work line when *Check again* failed.
-    public static let checkAgainFailed = "; it could not be checked again, so this is still the run's record"
+    public static let checkAgainFailed = "; it could not be checked again" + stillTheRecord
     /// Added to the saved-work line when *Check again* was stopped (its Cancel, background expiry; the desktop's, a quit).
-    public static let checkAgainStopped = "; checking again was stopped, so this is still the run's record"
+    public static let checkAgainStopped = "; checking again was stopped" + stillTheRecord
+
+    /// `note` as said over a run's record that could not be read (the
+    /// desktop's `over_unread_record`, #733): the line then shows stored
+    /// checks or "could not be read", never the run's record, so a failed or
+    /// stopped *Check again* drops "so this is still the run's record". Any
+    /// other clause in it is kept.
+    public static func overUnreadRecord(_ note: String) -> String {
+        note.replacingOccurrences(of: stillTheRecord, with: "")
+    }
     /// Added to the saved-work line when *Check again* is refused because another
     /// window is already checking the same session again (Apple only, #711). Past
     /// tense: the line is redrawn when that window's check stores its answers

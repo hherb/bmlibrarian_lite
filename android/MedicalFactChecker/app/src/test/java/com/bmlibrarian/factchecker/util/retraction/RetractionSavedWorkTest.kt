@@ -98,6 +98,28 @@ class RetractionSavedWorkTest {
     }
 
     @Test
+    fun `an unread run reads its papers' stored rows and counts the rest unchecked`() {
+        // #733, the desktop's #727 rule: the run's scored and cited papers only, none dropped
+        val rows = RetractionSavedWork.unreadRunChecks(
+            stored = mapOf("a" to check("clear", run), "y" to check("clear", run - 86_400_000L)),
+            papers = setOf("a", "z")
+        )
+        assertEquals(setOf("a", "z"), rows.keys)
+        assertEquals(true, rows["z"]?.isUnchecked)
+        assertEquals("Retraction status checked 2026-10-18; 1 paper could not be checked", RetractionText.savedWorkLine(rows.values))
+        // none of the run's papers stored: nothing stands in, so the line says unread
+        assertEquals(emptyMap<String, PaperRetractionCheck>(), RetractionSavedWork.unreadRunChecks(mapOf("y" to check("clear", run)), setOf("z")))
+    }
+
+    @Test
+    fun `a note over an unread record never says the record stands`() {
+        // #733: the desktop's over_unread_record
+        assertEquals("; it could not be checked again", RetractionText.overUnreadRecord(RetractionText.CHECK_AGAIN_FAILED))
+        assertEquals("; checking again was stopped", RetractionText.overUnreadRecord(RetractionText.CHECK_AGAIN_STOPPED))
+        assertEquals(RetractionText.CHECK_AGAIN_NOT_SAVED, RetractionText.overUnreadRecord(RetractionText.CHECK_AGAIN_NOT_SAVED))
+    }
+
+    @Test
     fun `only a cited paper's change for the worse warns`() {
         val runChecks = mapOf("a" to check("clear", run), "b" to check("retracted", run), "c" to check("clear", run))
         val latest = mapOf(

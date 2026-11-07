@@ -84,6 +84,30 @@ final class RetractionSavedWorkTests: XCTestCase {
                       "a run that recorded none stays never checked")
     }
 
+    func testAnUnreadRunReadsItsPapersStoredChecksAndCountsTheRestUnchecked() {
+        // #733, the desktop's #727 rule: the run's scored and cited papers only, none dropped
+        let rows = RetractionSavedWork.unreadRunChecks(
+            stored: ["a": check("clear", at: run), "y": check("clear", at: run.addingTimeInterval(-86_400))],
+            papers: ["a", "z"])
+        XCTAssertEqual(Set(rows.keys), ["a", "z"], "a document outside the run is never read")
+        XCTAssertEqual(rows["z"]?.isUnchecked, true)
+        XCTAssertEqual(
+            RetractionText.savedWorkLine(Array(rows.values)),
+            "Retraction status checked 2026-10-18; 1 paper could not be checked")
+        XCTAssertTrue(RetractionSavedWork.unreadRunChecks(stored: ["y": check("clear", at: run)], papers: ["z"]).isEmpty,
+                      "none of the run's papers stored: nothing stands in, so the line says unread")
+    }
+
+    func testANoteOverAnUnreadRecordNeverSaysTheRecordStands() {
+        // #733: the desktop's over_unread_record
+        XCTAssertEqual(RetractionText.overUnreadRecord(RetractionText.checkAgainFailed), "; it could not be checked again")
+        XCTAssertEqual(RetractionText.overUnreadRecord(RetractionText.checkAgainStopped), "; checking again was stopped")
+        XCTAssertEqual(
+            RetractionText.overUnreadRecord(RetractionText.checkAgainFailed + RetractionText.checkAgainElsewhere),
+            "; it could not be checked again" + RetractionText.checkAgainElsewhere)
+        XCTAssertEqual(RetractionText.overUnreadRecord(RetractionText.checkAgainNotSaved), RetractionText.checkAgainNotSaved)
+    }
+
     func testOnlyACitedPapersChangeForTheWorseWarns() {
         let runChecks = ["a": check("clear", at: run), "b": check("retracted", at: run), "c": check("clear", at: run)]
         let latest = [

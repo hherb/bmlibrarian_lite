@@ -200,11 +200,22 @@ object RetractionText {
     /** The saved-work line while *Check again* runs. */
     const val CHECKING_AGAIN_LINE = "Checking retraction status…"
 
+    private const val STILL_THE_RECORD = ", so this is still the run's record"
+
     /** Added to the saved-work line when *Check again* failed. */
-    const val CHECK_AGAIN_FAILED = "; it could not be checked again, so this is still the run's record"
+    const val CHECK_AGAIN_FAILED = "; it could not be checked again$STILL_THE_RECORD"
 
     /** Added to the saved-work line when *Check again* was stopped (its Cancel, or its scope cancelled, e.g. the ViewModel cleared). */
-    const val CHECK_AGAIN_STOPPED = "; checking again was stopped, so this is still the run's record"
+    const val CHECK_AGAIN_STOPPED = "; checking again was stopped$STILL_THE_RECORD"
+
+    /**
+     * [note] as said over a run's record that could not be read (the
+     * desktop's `over_unread_record`, #733): the line then shows stored
+     * checks or "could not be read", never the run's record, so a failed or
+     * stopped *Check again* drops "so this is still the run's record". Any
+     * other clause in it is kept.
+     */
+    fun overUnreadRecord(note: String): String = note.replace(STILL_THE_RECORD, "")
 
     /** The error shown when *Check again* failed outright (the line says how the record stands). */
     const val CHECK_AGAIN_ERROR = "Retraction status could not be checked again"

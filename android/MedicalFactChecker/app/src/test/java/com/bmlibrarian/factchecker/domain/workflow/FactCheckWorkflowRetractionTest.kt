@@ -660,6 +660,44 @@ class FactCheckWorkflowRetractionTest {
         assertEquals("Retraction status checked 2026-10-18", workflow.retractionSavedWork.value?.line)
     }
 
+    /**
+     * #733, the desktop's #727 rule: over a snapshot this build cannot read at
+     * all, the line is the scored and cited papers' stored rows, one with none
+     * counted unchecked; a failed *Check again* never says the unread record stands.
+     */
+    @Test
+    fun `an unreadable snapshot's line is the run's papers' stored rows`() = runTest {
+        hold("d1")
+        hold("d2")
+        hold("d3")
+        documents.replaceAll { id, document -> if (id == "d3") document else document.copy(relevanceScore = 5) }
+        citations += CitationEntity(documentId = "d1", passage = "A passage.")
+        rows["pmid:1"] = PaperRetractionCheck.encode(CLEAR.copy(checkedAtMs = RUN_MS))
+        // not scored, not cited: its older row is not the run's
+        rows["pmid:3"] = PaperRetractionCheck.encode(CLEAR.copy(checkedAtMs = RUN_MS - 86_400_000L))
+        session = session.copy(workflowStep = WorkflowStep.COMPLETED)
+        snapshotJson = "[1, 2]"
+        workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
+
+        assertEquals("Retraction status checked 2026-10-18; 1 paper could not be checked", workflow.retractionSavedWork.value?.line)
+        // the badges keep every document's row
+        assertEquals("clear", workflow.retractionSavedWork.value?.checks?.get("d3")?.status)
+
+        coEvery { retractionService.check(any()) } throws IOException("down")
+        workflow.checkRetractionsAgain()
+        assertEquals(
+            "Retraction status checked 2026-10-18; 1 paper could not be checked; it could not be checked again",
+            workflow.retractionSavedWork.value?.line
+        )
+
+        // nothing of the run's stored: "could not be read", and still no record said to stand
+        rows.remove("pmid:1")
+        workflow.restoreForViewing(session.copy(retractionSnapshotJson = snapshotJson))
+        assertEquals(RetractionText.STATUS_UNREAD, workflow.retractionSavedWork.value?.line)
+        workflow.checkRetractionsAgain()
+        assertEquals(RetractionText.STATUS_UNREAD + "; it could not be checked again", workflow.retractionSavedWork.value?.line)
+    }
+
     /** #662: the report written over an unreadable snapshot says so in its methods. */
     @Test
     fun `a report over an unreadable snapshot says its retraction status could not be read`() = runTest {

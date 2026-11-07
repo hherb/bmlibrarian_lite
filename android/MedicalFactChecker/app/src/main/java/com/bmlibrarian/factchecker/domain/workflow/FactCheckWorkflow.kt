@@ -997,7 +997,7 @@ class FactCheckWorkflow @Inject constructor(
         } catch (e: Exception) {
             // the session is shown all the same: its retraction status is unknown, never just absent
             Log.w(TAG, "Could not show the saved retraction status: ${e.javaClass.simpleName}")
-            _retractionSavedWork.value = RetractionSavedWorkState(RetractionText.STATUS_UNREAD)
+            _retractionSavedWork.value = RetractionSavedWorkState(RetractionText.STATUS_UNREAD, unreadRecord = true)
         }
     }
 
@@ -1035,9 +1035,10 @@ class FactCheckWorkflow @Inject constructor(
         val standing = { note: String ->
             if (screen == savedWorkScreen) {
                 _retractionSavedWork.value = shown?.let {
-                    val line = it.line.removeSuffix(RetractionText.CHECK_AGAIN_FAILED)
-                        .removeSuffix(RetractionText.CHECK_AGAIN_STOPPED)
-                    it.copy(line = line + note)
+                    val said = { clause: String -> if (it.unreadRecord) RetractionText.overUnreadRecord(clause) else clause }
+                    val line = it.line.removeSuffix(said(RetractionText.CHECK_AGAIN_FAILED))
+                        .removeSuffix(said(RetractionText.CHECK_AGAIN_STOPPED))
+                    it.copy(line = line + said(note))
                 }
             }
         }
@@ -1145,14 +1146,16 @@ class FactCheckWorkflow @Inject constructor(
                 Log.w(TAG, "Could not show Check again's stored answers: ${e.javaClass.simpleName}")
                 if (screen == savedWorkScreen) {
                     _retractionSavedWork.value = shown?.let { before ->
+                        val failed = RetractionText.CHECK_AGAIN_FAILED
                         val line = before.line.removeSuffix(RetractionText.STORED_CHECKS_UNREAD)
-                            .removeSuffix(RetractionText.CHECK_AGAIN_FAILED).removeSuffix(RetractionText.CHECK_AGAIN_NOT_SAVED)
+                            .removeSuffix(if (before.unreadRecord) RetractionText.overUnreadRecord(failed) else failed)
+                            .removeSuffix(RetractionText.CHECK_AGAIN_NOT_SAVED)
                         // the answers are in hand, as the desktop shows them: a found retraction is badged,
                         // though its warning cannot be read
                         val checks = before.checks + taken.use.mapValues { (id, check) ->
                             before.checks[id]?.let { RetractionSavedWork.rechecked(it, check) } ?: check
                         }
-                        RetractionSavedWorkState(line + RetractionText.STORED_CHECKS_UNREAD, before.warning, checks)
+                        RetractionSavedWorkState(line + RetractionText.STORED_CHECKS_UNREAD, before.warning, checks, before.unreadRecord)
                     }
                 }
             }
@@ -1211,20 +1214,25 @@ class FactCheckWorkflow @Inject constructor(
         }
         if (unread) Log.w(TAG, "A stored retraction check of this session could not be read")
         val stored = read + taken
-        val rows = RetractionSavedWork.recheckedChecks(run, stored, documents.filter { it.isScored }.map { it.id }.toSet())
+        val scored = documents.filter { it.isScored }.map { it.id }.toSet()
+        val rows = RetractionSavedWork.recheckedChecks(run, stored, scored)
         val cited = documentRepository.getCitationsBySessionSync(sessionId).map { it.documentId }.toSet()
         val citedDocuments = documents.filter { it.id in cited }
+        // a snapshot this build cannot read at all: the line is the scored and cited papers' stored
+        // checks (the desktop's #727 rule, #733); the badges keep every document's
+        val unreadRecord = run.isEmpty() && RetractionSnapshot.unread(snapshotJson)
+        val lineChecks = if (unreadRecord) RetractionSavedWork.unreadRunChecks(stored, scored + cited) else rows
         // a stored retraction keeps its own notice
         val latest = stored + found.filterKeys { stored[it]?.isRetracted != true }
         val changed = RetractionSavedWork.changedSinceRun(run, latest, citedDocuments.map { it.id })
         val titles = citedDocuments.associate { it.id to it.title }
         val papers = documents.associate { it.id to it.retractionPaper }
         // a decided check kept over an unchecked answer: no source could be reached for it
-        val missed = again.filter { (id, check) -> check.isUnchecked && rows[id]?.isUnchecked == false }
+        val missed = again.filter { (id, check) -> check.isUnchecked && lineChecks[id]?.isUnchecked == false }
         val missedCauses = RetractionText.uncheckedCauses(missed.map { (id, check) -> papers.getValue(id) to check }, emptySet())
-        val still = again.filterKeys { rows[it]?.isUnchecked == true }
+        val still = again.filterKeys { lineChecks[it]?.isUnchecked == true }
         // a row this check never reached has no cause: the count alone, as on a reopen, never others' causes
-        val causes = if (still.size == rows.values.count { it.isUnchecked }) {
+        val causes = if (still.size == lineChecks.values.count { it.isUnchecked }) {
             RetractionText.uncheckedCauses(still.map { (id, check) -> papers.getValue(id) to check }, emptySet())
         } else {
             emptyList()
@@ -1232,12 +1240,15 @@ class FactCheckWorkflow @Inject constructor(
         if (screen != savedWorkScreen) return
         _retractionSavedWork.value = RetractionSavedWorkState(
             // a snapshot this build cannot read, with nothing else to show, is unread, never "never checked" (#662)
-            line = (if (rows.isEmpty() && RetractionSnapshot.unread(snapshotJson)) RetractionText.STATUS_UNREAD
-                else RetractionText.savedWorkLine(rows.values, causes)) +
-                RetractionText.notCheckedAgainClause(missed.size, missedCauses) + note +
+            line = (if (lineChecks.isEmpty() && unreadRecord) RetractionText.STATUS_UNREAD
+                else RetractionText.savedWorkLine(lineChecks.values, causes)) +
+                RetractionText.notCheckedAgainClause(missed.size, missedCauses) +
+                // the line is then the stored checks or "could not be read", never the run's record (#733)
+                (if (unreadRecord) RetractionText.overUnreadRecord(note) else note) +
                 if (unread) RetractionText.STORED_CHECKS_UNREAD else "",
             warning = RetractionText.savedWorkWarning(changed.map { titles.getValue(it) to latest.getValue(it) }),
-            checks = rows
+            checks = rows,
+            unreadRecord = unreadRecord
         )
     }
 

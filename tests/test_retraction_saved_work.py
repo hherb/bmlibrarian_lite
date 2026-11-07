@@ -71,6 +71,7 @@ from bmlibrarian_lite.retraction_text import (  # noqa: E402
     NO_AUDIT_RECORD_LINE,
     STATUS_UNREAD,
     STORED_CHECKS_UNREAD,
+    over_unread_record,
 )
 from bmlibrarian_lite.storage import LiteStorage  # noqa: E402
 
@@ -741,9 +742,13 @@ def test_a_cancelled_check_again_keeps_a_stored_retractions_notice(
 
 
 def test_check_again_sentences_are_the_apps() -> None:
-    """Python is canonical: the apps' tests pin these same words (#663)."""
+    """Python is canonical: the apps' tests pin these same words (#663, #733)."""
     assert CHECK_AGAIN_STOPPED == "; checking again was stopped, so this is still the run's record"
     assert CHECK_AGAIN_FAILED == "; it could not be checked again, so this is still the run's record"
+    assert over_unread_record(CHECK_AGAIN_STOPPED) == "; checking again was stopped"
+    assert over_unread_record(CHECK_AGAIN_FAILED) == "; it could not be checked again"
+    # any other note is said as given
+    assert over_unread_record(CHECK_AGAIN_NOT_SAVED) == CHECK_AGAIN_NOT_SAVED
 
 
 def test_quit_cancels_check_again_and_leaves_the_one_bounded_wait_to_the_keeper() -> None:
@@ -1600,6 +1605,43 @@ def test_a_failed_store_read_on_reopen_says_so_and_still_warns(
     assert STORED_CHECKS_UNREAD not in tab.retraction_line.text()
 
 
+def test_a_failed_or_stopped_check_again_still_says_later_checks_could_not_be_read(
+    tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reopen's store-read failure is still said after a failed or stopped Check again (#733)."""
+    def unreadable(*_a: Any) -> None:
+        raise sqlite3.OperationalError("database is locked")
+
+    metadata = checkpoint_metadata_with_retraction_snapshot({}, screen_documents(DOCUMENTS, run_checks()))
+    checkpoint_id = saved_checkpoint(storage, metadata)
+    monkeypatch.setattr(report_tab_module, "stored_checks", unreadable)
+    reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
+    line = tab.retraction_line.text().removesuffix(STORED_CHECKS_UNREAD)
+    monkeypatch.setattr(report_tab_module, "build_retraction_checker", lambda *_a, **_k: DownChecker())
+    monkeypatch.setattr(RetractionRecheckWorker, "start", RetractionRecheckWorker.run)
+    tab.check_again_btn.click()
+    assert tab.retraction_line.text() == line + CHECK_AGAIN_FAILED + STORED_CHECKS_UNREAD
+
+    def cancelled_run(worker: RetractionRecheckWorker) -> None:
+        worker.cancel()
+        worker.run()
+
+    monkeypatch.setattr(RetractionRecheckWorker, "start", cancelled_run)
+    tab.check_again_btn.click()
+    assert tab.retraction_line.text() == line + CHECK_AGAIN_STOPPED + STORED_CHECKS_UNREAD
+    # control: an answered Check again stands in for the unread checks
+    monkeypatch.setattr(report_tab_module, "build_retraction_checker", lambda *_a, **_k: RecordingChecker(storage, {}))
+    monkeypatch.setattr(RetractionRecheckWorker, "start", RetractionRecheckWorker.run)
+    tab.check_again_btn.click()
+    assert STORED_CHECKS_UNREAD not in tab.retraction_line.text()
+    # control: a reopen that reads the store says nothing of it
+    monkeypatch.setattr(report_tab_module, "stored_checks", lambda *_a: {})
+    reopen(tab, recorded_retraction_snapshot(metadata), checkpoint_id)
+    monkeypatch.setattr(report_tab_module, "build_retraction_checker", lambda *_a, **_k: DownChecker())
+    tab.check_again_btn.click()
+    assert tab.retraction_line.text() == line + CHECK_AGAIN_FAILED
+
+
 def test_a_file_screened_without_a_snapshot_reads_as_not_recorded(
     tab: ReportTab, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1677,7 +1719,8 @@ def test_an_unreadable_snapshot_shows_the_runs_stored_checks(
     monkeypatch.setattr(report_tab_module, "build_retraction_checker", lambda *_a, **_k: DownChecker())
     monkeypatch.setattr(RetractionRecheckWorker, "start", RetractionRecheckWorker.run)
     tab.check_again_btn.click()
-    assert tab.retraction_line.text() == "Retraction status checked 2026-10-01" + CHECK_AGAIN_FAILED
+    # the date is the store's, not the unread record's: never "still the run's record" (#733)
+    assert tab.retraction_line.text() == "Retraction status checked 2026-10-01; it could not be checked again"
     assert CITED.title in tab.retraction_warning.text()
     # nothing stored: nothing stands in, and the label's stand-in never becomes the line
     monkeypatch.setattr(report_tab_module, "stored_checks", lambda *_a: {})
@@ -1685,7 +1728,7 @@ def test_an_unreadable_snapshot_shows_the_runs_stored_checks(
     tab.show_saved_retraction(checkpoint_id, snapshot_unread=True)
     assert tab.retraction_line.text() == STATUS_UNREAD
     tab.check_again_btn.click()
-    assert tab.retraction_line.text() == STATUS_UNREAD + CHECK_AGAIN_FAILED
+    assert tab.retraction_line.text() == STATUS_UNREAD + "; it could not be checked again"
     assert CITED.title in tab.retraction_warning.text()
 
 
