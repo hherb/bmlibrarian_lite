@@ -446,7 +446,8 @@ class AuditTrailTab(QWidget):
                 self.literature_tab.update_retraction(doc_id, unchecked_check(), False, unread=True)
         for doc_id, row in rows.items():
             check = check_from_snapshot_row(row)
-            if check is None:
+            if check is None:  # its evidence this build cannot parse: unread, never bare
+                self.literature_tab.update_retraction(doc_id, unchecked_check(), False, unread=True)
                 continue
             excluded = bool(row.get("excluded"))
             run_check = check_from_snapshot_row(as_the_run_saw_it(row)) if excluded else None

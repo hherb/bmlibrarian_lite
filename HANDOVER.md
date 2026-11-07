@@ -246,7 +246,7 @@ Open issues by family; each issue carries the detail. None blocks another.
   document's row), and a failed or stopped *Check again* there drops "so
   this is still the run's record" (`over_unread_record`, maintainer's
   choice). **An unchecked check never hides a decided one, whatever the times** (#728).
-  **One unreadable entry is its own count** (#600, #727 item 2, this PR,
+  **One unreadable entry is its own count** (#600, #727 item 2, PR #736,
   maintainer's choice): "N papers' retraction records could not be read",
   never "could not be checked", never listed as left out, never written
   over (`keeping_unread_rows`; rule in `retraction_checking.md`).

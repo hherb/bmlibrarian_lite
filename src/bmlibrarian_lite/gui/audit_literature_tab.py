@@ -95,7 +95,8 @@ class AuditLiteratureTab(QWidget):
         # analysis still running used to look identical here (#361).
         self._transparency_outcomes: Dict[str, TransparencyOutcome] = {}
         # doc id -> (current check, whether the run left the paper out as
-        # retracted, the check as the run saw it or None)
+        # retracted, the check as the run saw it or None, whether the run's
+        # record of it could not be read)
         self._retractions: dict[str, tuple[PaperCheck, bool, PaperCheck | None, bool]] = {}
 
         # Thread safety

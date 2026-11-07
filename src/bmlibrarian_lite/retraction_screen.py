@@ -36,8 +36,18 @@ _WARNING_STATUSES = (RetractionStatus.RETRACTED, RetractionStatus.CONCERN)
 
 
 def snapshot_row_readable(row: object) -> bool:
-    """Whether this build can read a stored snapshot row: a mapping with an id and a status."""
-    return isinstance(row, Mapping) and all(k in row for k in _SNAPSHOT_REQUIRED)
+    """Whether this build can read a stored snapshot row: a mapping with an id and a status.
+
+    The status, and ``run_status`` when set, must be strings: the apps cannot
+    decode any other, and here one would crash every reader (an unknown
+    string reads as unchecked, as on the apps).
+    """
+    return (
+        isinstance(row, Mapping)
+        and all(k in row for k in _SNAPSHOT_REQUIRED)
+        and isinstance(row["status"], str)
+        and isinstance(row.get(RUN_STATUS_KEY, ""), (str, type(None)))
+    )
 
 
 def stored_snapshot_unreadable(stored: object) -> bool:
@@ -79,6 +89,24 @@ def unread_snapshot_rows(stored: object) -> list[Any]:
     return [row for row in stored if not snapshot_row_readable(row)]
 
 
+def unread_paper_count(rows: Iterable[Any], read_ids: Collection[str] = ()) -> int:
+    """How many papers unreadable rows stand for, as the apps count them: one per id.
+
+    An id also among *read_ids* (a readable row for the same paper) is not
+    counted; a row naming no id counts as one paper.
+
+    Args:
+        rows: The unreadable rows.
+        read_ids: Ids the readable rows hold.
+
+    Returns:
+        The count.
+    """
+    rows = list(rows)
+    named = unread_row_ids(rows)
+    return len(named - set(read_ids)) + sum(1 for row in rows if not unread_row_ids([row]))
+
+
 def unread_row_ids(rows: Iterable[Any]) -> set[str]:
     """The document ids unreadable rows still name (a row without one names none)."""
     return {
@@ -93,7 +121,8 @@ def keeping_unread_rows(rows: Iterable[Mapping[str, Any]], stored: object) -> li
 
     An unreadable row may hold what the run saw (a retraction it left out),
     so nothing writes over it (#726's rule, row by row): a new row for the
-    same document is not stored (the shared check rows keep the answer).
+    same document is not stored (the shared check rows keep the answer),
+    unless *stored* also reads a row for it, which the new row replaces.
 
     Args:
         rows: The readable rows to store.
@@ -103,7 +132,8 @@ def keeping_unread_rows(rows: Iterable[Mapping[str, Any]], stored: object) -> li
         The rows to store: the new ones, then the unreadable ones.
     """
     unread = unread_snapshot_rows(stored)
-    ids = unread_row_ids(unread)
+    readable = stored if isinstance(stored, list) else []
+    ids = unread_row_ids(unread) - {str(r["document_id"]) for r in readable if snapshot_row_readable(r)}
     return [dict(row) for row in rows if str(row["document_id"]) not in ids] + unread
 
 
@@ -181,6 +211,11 @@ class RetractionRecord(Protocol):
         """Stored rows this build cannot read, as found (none for a live screen)."""
         ...
 
+    @property
+    def unread_count(self) -> int:
+        """The papers those rows stand for (:func:`unread_paper_count`)."""
+        ...
+
     def to_snapshot(self) -> list[dict[str, Any]]:
         """One row per held document."""
         ...
@@ -247,8 +282,13 @@ class RetractionScreen:
 
     @property
     def unread_rows(self) -> tuple[Any, ...]:
-        """None: a live screen read every paper it holds."""
+        """Empty: a live screen read every paper it holds."""
         return ()
+
+    @property
+    def unread_count(self) -> int:
+        """0: a live screen read every paper it holds."""
+        return 0
 
     def to_snapshot(self) -> list[dict[str, Any]]:
         """Rows for the report and audit trail, one per held document.
@@ -298,8 +338,10 @@ class RetractionScreen:
         ``checked_at`` as none; ``run_status`` and ``run_deciding``, when
         present, are read like ``status`` and ``deciding``, except that a
         ``run_status`` of none (not recorded) stays none. A row is kept through all of these, so a
-        paper left out never reads as not scored; only a row without
-        ``document_id`` or ``status`` is skipped with a warning.
+        paper left out never reads as not scored; only a row
+        :func:`snapshot_row_readable` refuses (no ``document_id`` or
+        ``status``, or a status that is not a string) is skipped with a
+        warning: it is read apart (:func:`unread_snapshot_rows`).
 
         Args:
             rows: Rows as ``to_snapshot`` wrote them.
@@ -375,6 +417,11 @@ class RetractionSnapshot:
     def checked_at(self) -> datetime | None:
         """The oldest decided row's check time; ``None`` without one."""
         return decided_checked_at(self.rows)
+
+    @property
+    def unread_count(self) -> int:
+        """The papers the unreadable rows stand for, one per id (:func:`unread_paper_count`)."""
+        return unread_paper_count(self.unread_rows, {str(r["document_id"]) for r in self.rows})
 
     def to_snapshot(self) -> list[dict[str, Any]]:
         """The rows, as given."""

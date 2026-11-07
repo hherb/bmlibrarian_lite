@@ -443,8 +443,9 @@ def known_document_ids(storage: LiteStorage, question: str) -> set[str]:
 
     Every document scored for the question, and those its reviewed run
     screened or whose quality filter left them out, or that it left out as
-    retracted when its snapshot could not take them: found again, they would
-    be counted again.
+    retracted when its snapshot could not take them, or whose snapshot rows
+    this build cannot read (the run may have left them out, #727): found
+    again, they would be counted again.
 
     Args:
         storage: The store.

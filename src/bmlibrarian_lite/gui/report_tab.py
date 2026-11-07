@@ -66,6 +66,7 @@ from ..data_models import (
 )
 from ..audit_records import (
     EXTRACTION_FAILED_COUNT_KEY,
+    UNREAD_RETRACTION_RECORD_KEY,
     DocumentOutcomes,
     checkpoint_metadata_with_retraction_snapshot,
     classify_document_outcomes,
@@ -97,6 +98,7 @@ from ..retraction_screen import (
     rechecked_snapshot,
     screen_documents,
     stored_snapshot_unreadable,
+    unread_paper_count,
     unread_row_ids,
     unread_snapshot_rows,
 )
@@ -507,7 +509,7 @@ class ReportTab(QWidget):
         elif self._retraction_unrecorded and not snapshot:
             line = NO_AUDIT_RECORD_LINE
         else:
-            line = saved_work_line(rows, causes, len(unread))
+            line = saved_work_line(rows, causes, unread_paper_count(unread, snapshot))
         # still said after a failed or stopped Check again, which reads no stored check (#733)
         self.retraction_line.setText(line + note + (STORED_CHECKS_UNREAD if self._stored_checks_unread else ""))
         self.retraction_line.setVisible(True)
@@ -1372,7 +1374,9 @@ class ReportTab(QWidget):
             lines.append("")
             lines.extend(self._audit_document_lines(failed))
 
-        unscored = self._audit_entries(audit_data, "unscored_documents")
+        entries = self._audit_entries(audit_data, "unscored_documents")
+        unscored = [e for e in entries if not e.get(UNREAD_RETRACTION_RECORD_KEY)]
+        unread = [e for e in entries if e.get(UNREAD_RETRACTION_RECORD_KEY)]
         if unscored:
             lines.extend(["", "## Documents Not Scored", ""])
             lines.append(
@@ -1381,6 +1385,16 @@ class ReportTab(QWidget):
             )
             lines.append("")
             lines.extend(self._audit_document_lines(unscored))
+
+        # never "not scored" alone: the run may have left them out as retracted (#600)
+        if unread:
+            lines.extend(["", "## Retraction Record Could Not Be Read", ""])
+            lines.append(
+                "This build cannot read the run's retraction record of these "
+                "papers, so whether the run left them out as retracted is unknown."
+            )
+            lines.append("")
+            lines.extend(self._audit_document_lines(unread))
 
         retracted = self._audit_entries(audit_data, "retracted_documents")
         if retracted:

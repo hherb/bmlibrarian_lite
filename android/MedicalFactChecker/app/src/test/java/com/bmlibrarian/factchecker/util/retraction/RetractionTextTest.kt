@@ -117,6 +117,23 @@ class RetractionTextTest {
             "1,234 retracted papers left out; 1,234 papers' retraction status could not be checked: a; b",
             RetractionText.runSummaryClause(1234, 1234, listOf("a", "b"))
         )
+        // #727: entries this build cannot read, their own count, last (the desktop's wording)
+        assertEquals(
+            "1 retracted paper left out; 2 papers' retraction records could not be read",
+            RetractionText.runSummaryClause(1, 0, emptyList(), unread = 2)
+        )
+        assertEquals("1 paper's retraction record could not be read", RetractionText.runSummaryClause(0, 0, emptyList(), unread = 1))
+        assertEquals(
+            "1 paper's retraction status could not be checked: no DOI or PMID; 1,234 papers' retraction records could not be read",
+            RetractionText.runSummaryClause(0, 1, listOf("no DOI or PMID"), unread = 1234)
+        )
+        assertEquals("", RetractionText.notReadClause(0))
+        assertEquals("; 1,234 papers' records could not be read", RetractionText.notReadClause(1234))
+        assertEquals(
+            "Retraction status could not be checked; 2 papers' records could not be read",
+            RetractionText.methodsLine(null, 0, heldPapers = true, notRead = 2)
+        )
+        assertEquals("Retraction status never checked; 1 paper's record could not be read", RetractionText.methodsLine(null, 0, heldPapers = false, notRead = 1))
     }
 
     @Test

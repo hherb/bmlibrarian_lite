@@ -423,9 +423,11 @@ final class FactCheckSession {
     }
 
     /// The documents whose snapshot entries this build cannot read, in a
-    /// snapshot it reads as a whole: each a paper whose run record is
+    /// snapshot that parses: each a paper whose run record is
     /// unknown, counted as "could not be read", never as unchecked and never
-    /// dropped (#727). Empty when the snapshot is absent or unread as a whole.
+    /// dropped (#727). Empty when the snapshot is absent or does not parse;
+    /// every entry's id when none decodes (which `retractionSnapshotUnread()`
+    /// calls unread as a whole).
     func retractionSnapshotUnreadIDs() -> Set<String> {
         let read = retractionSnapshot()
         return Set(retractionSnapshotEntries().keys.filter { read[$0] == nil })

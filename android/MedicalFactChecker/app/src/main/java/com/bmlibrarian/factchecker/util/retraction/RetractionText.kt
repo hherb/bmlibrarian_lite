@@ -102,7 +102,8 @@ object RetractionText {
      * @param excluded Papers left out as retracted
      * @param unchecked Kept papers whose status could not be checked
      * @param causes [uncheckedCauses]; empty for a restored snapshot, which records none
-     * @return The clause; null when both counts are 0
+     * @param unread Papers whose snapshot entries this build cannot read (#727)
+     * @return The clause; null when every count is 0
      */
     fun runSummaryClause(excluded: Int, unchecked: Int, causes: List<String>, unread: Int = 0): String? {
         val parts = mutableListOf<String>()
@@ -167,6 +168,7 @@ object RetractionText {
      * @param checkedAtMs The oldest check time among decided papers, or null
      * @param notChecked Kept papers that could not be checked
      * @param heldPapers Whether the run held any paper to check
+     * @param notRead Papers whose snapshot entries this build cannot read: [notReadClause] ends the line
      */
     fun methodsLine(checkedAtMs: Long?, notChecked: Int, heldPapers: Boolean, notRead: Int = 0): String {
         if (checkedAtMs == null) {

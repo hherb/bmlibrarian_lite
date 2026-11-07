@@ -27,7 +27,8 @@ public struct RetractionReportSection: Sendable {
     /// line and a reopened session's line are the same sentence.
     public let methodsLine: String
     /// The report's opening notice (``RetractionText/reportNotice(_:)``), or
-    /// `nil` when nothing was left out and every paper was checked.
+    /// `nil` when nothing was left out, every paper was checked and no entry
+    /// was unread.
     public let notice: String?
 
     /// - Parameters:

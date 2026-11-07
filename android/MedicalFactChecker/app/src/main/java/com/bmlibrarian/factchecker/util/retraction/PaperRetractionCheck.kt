@@ -365,12 +365,13 @@ object RetractionSnapshot {
     }.toMap()
 
     /**
-     * The documents whose entries this build cannot read, in a snapshot it
-     * reads as a whole: each a paper whose run record is unknown, counted as
+     * The documents whose entries this build cannot read, in a snapshot that
+     * parses: each a paper whose run record is unknown, counted as
      * "could not be read", never as unchecked and never dropped (#727).
      *
      * @param text The stored snapshot, or null for a session never checked
-     * @return Their ids; empty when there are none or the snapshot is unread as a whole
+     * @return Their ids; empty when there are none or the snapshot does not parse;
+     *   every entry's id when none decodes (which [unread] calls unread as a whole)
      */
     fun unreadIds(text: String?): Set<String> = entries(text).keys - read(text).keys
 

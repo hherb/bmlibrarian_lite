@@ -126,7 +126,7 @@ def run_summary_clause(screen: RetractionRecord) -> str | None:
         clause = f"{owner} retraction status could not be checked"
         causes = unchecked_causes(screen) if isinstance(screen, RetractionScreen) else []
         parts.append(f"{clause}: {'; '.join(causes)}" if causes else clause)
-    unread = len(screen.unread_rows)
+    unread = screen.unread_count
     if unread:
         parts.append(
             "1 paper's retraction record could not be read"
@@ -208,7 +208,8 @@ def saved_work_line(rows: Iterable[Mapping[str, Any]], causes: Sequence[str] = (
     Returns:
         E.g. "Retraction status checked 2026-10-01; 2 papers could not be
         checked"; "Retraction status could not be checked" when no row is
-        decided; "Retraction status never checked" without rows.
+        decided; "Retraction status never checked" without rows. Each
+        ends with :func:`not_read_clause` when *unread* is not 0.
     """
     rows = list(rows)
     if not rows:
@@ -231,9 +232,10 @@ def retraction_methods_line(record: RetractionRecord) -> str:
     failed or went unanswered, or was cancelled first); that is said, never a
     date. One checked in part says how many kept papers could not be checked,
     with :func:`saved_work_line`'s clause, so the line alone never reads as
-    complete.
+    complete. Papers whose rows could not be read end it, with
+    :func:`not_read_clause`.
     """
-    unread = not_read_clause(len(record.unread_rows))
+    unread = not_read_clause(record.unread_count)
     if record.checked_at is None:
         line = "Retraction status could not be checked" if record.to_snapshot() else checked_on_line(None)
         return line + unread

@@ -110,6 +110,10 @@ final class RetractionTextTests: XCTestCase {
         XCTAssertEqual(RetractionText.runSummaryClause(excluded: 0, unchecked: 0, causes: [], unread: 1),
                        "1 paper's retraction record could not be read")
         XCTAssertEqual(RetractionText.savedWorkLine([], unread: 1), "Retraction status never checked; 1 paper's record could not be read")
+        XCTAssertEqual(RetractionText.runSummaryClause(excluded: 0, unchecked: 1, causes: ["no DOI or PMID"], unread: 1_234),
+                       "1 paper's retraction status could not be checked: no DOI or PMID; 1,234 papers' retraction records could not be read")
+        XCTAssertEqual(RetractionText.methodsLine(checkedAt: nil, notChecked: 0, heldPapers: true, notRead: 2),
+                       "Retraction status could not be checked; 2 papers' records could not be read")
         XCTAssertEqual(RetractionText.notReadClause(0), "")
         XCTAssertEqual(RetractionText.notReadClause(1_234), "; 1,234 papers' records could not be read")
     }

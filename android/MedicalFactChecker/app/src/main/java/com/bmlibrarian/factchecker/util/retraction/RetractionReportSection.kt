@@ -41,7 +41,7 @@ class RetractionReportSection(
     val methodsLine: String = if (unread) RetractionText.STATUS_UNREAD
         else RetractionText.savedWorkLine(papers.map { it.second }, unread = unreadEntries)
 
-    /** The report's opening notice, or null when nothing was left out and every paper was checked. */
+    /** The report's opening notice, or null when nothing was left out, every paper was checked and no entry was unread. */
     val notice: String? = RetractionText.runSummaryClause(
         excluded = leftOut.size,
         unchecked = papers.count { it.second.isUnchecked },
