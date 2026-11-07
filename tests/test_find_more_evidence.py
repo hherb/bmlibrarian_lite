@@ -9,6 +9,7 @@ Also the review's own smart search, when too few documents are relevant.
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +22,7 @@ from bmlibrarian_lite.audit_records import (
     CHECKPOINT_MIN_SCORE_KEY,
     CHECKPOINT_QUALITY_FILTERED_KEY,
     CHECKPOINT_REPORT_METADATA_KEY,
+    CHECKPOINT_RETRACTED_UNSAVED_KEY,
     CHECKPOINT_RETRACTION_SNAPSHOT_KEY,
     recorded_report_metadata,
 )
@@ -189,6 +191,7 @@ class Run:
         self.assessed = assessed
         self.assess = assess
         self.filtered: list[tuple[list[str], QualityFilter]] = []
+        self.unsaved_told = 0
 
     def quality_filter(self, documents: list[LiteDocument],
                        settings: QualityFilter) -> list[LiteDocument]:
@@ -214,7 +217,12 @@ class Run:
             scoring_agent=self.scorer, citation_agent=self.extractor,
             reporting_agent=self.reporter, fetch=lambda doc: None,
             assess_transparency=assess, should_stop=lambda: self.stop(self),
+            on_screen_unsaved=self.tell_unsaved,
         )
+
+    def tell_unsaved(self) -> None:
+        """Count the screen's not-saved hook."""
+        self.unsaved_told += 1
 
     @property
     def metadata(self) -> ReportMetadata:
@@ -444,6 +452,7 @@ class TestWhatIsFoundIsScreened:
         outcome = run(found(storage, "5", "6"))
 
         assert (outcome.left_out, outcome.screen_unsaved, run.scorer.scored) == (1, False, ["doc-5"])
+        assert run.unsaved_told == 0  # control: a saved screen never tells
         rows = storage.get_checkpoint(checkpoint_id).metadata[CHECKPOINT_RETRACTION_SNAPSHOT_KEY]
         assert {(r["document_id"], r["excluded"]) for r in rows} == {
             ("doc-5", False), ("doc-6", True)}
@@ -518,7 +527,7 @@ class TestWhatIsFoundIsScreened:
         assert format_retraction_notice(record) is None
 
     def test_an_unreadable_snapshot_is_never_written_over(self, storage: LiteStorage) -> None:
-        """#726: what the run left out stays; the report says unread, as the reopen line does.
+        """#726: what the run left out stays; the report says unread, the stored copy kept (#730).
 
         The report metadata's own copy is readable, as a disagreeing record would be.
         """
@@ -544,9 +553,13 @@ class TestWhatIsFoundIsScreened:
         assert kept[CHECKPOINT_RETRACTION_SNAPSHOT_KEY] == unreadable
         assert (outcome.left_out, outcome.screen_unsaved, run.scorer.scored) == (1, True, ["doc-5"])
         assert SCREEN_NOT_SAVED in more_evidence_text(outcome)
+        assert run.unsaved_told == 1  # told at once, for a later failure to say (#731)
         assert run.metadata.retraction_screen is None
         assert run.metadata.retraction_screen_unread == unreadable
-        assert recorded_report_metadata(kept).retraction_screen_unread == unreadable
+        # the stored metadata keeps its readable copy: the report alone says unread (#730)
+        stored_copy = recorded_report_metadata(kept)
+        assert stored_copy.retraction_screen_unread is None
+        assert stored_copy.retraction_screen.to_snapshot() == readable.to_snapshot()
         # control: without screen_unsaved nothing is said
         assert SCREEN_NOT_SAVED not in more_evidence_text(replace(outcome, screen_unsaved=False))
 
@@ -557,6 +570,32 @@ class TestWhatIsFoundIsScreened:
         again = Run(storage, screen=retract_6, rounds=[SmartSearchRound((), ("q",))])
         assert again([]).notice == NO_NEW_EVIDENCE_TEXT
         assert "doc-6" in again.contexts[0][1]
+
+    def test_the_screen_not_saved_hook_fires_before_the_left_out_ids_are_recorded(
+        self, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """#731: a failure recording the ids left out still has the worker say the screen went unsaved."""
+        checkpoint_id = reviewed(storage)
+        stored = storage.get_checkpoint(checkpoint_id).metadata
+        storage.update_checkpoint(checkpoint_id=checkpoint_id, metadata={
+            **stored, CHECKPOINT_RETRACTION_SNAPSHOT_KEY: {"rows": "a newer build's"}})
+        update = storage.update_checkpoint
+
+        def failing(*args: Any, **kwargs: Any) -> Any:
+            if CHECKPOINT_RETRACTED_UNSAVED_KEY in (kwargs.get("metadata") or {}):
+                raise sqlite3.OperationalError("disk I/O error")
+            return update(*args, **kwargs)
+
+        monkeypatch.setattr(storage, "update_checkpoint", failing)
+
+        def retract_6(documents: list[LiteDocument]) -> RetractionScreen:
+            return RetractionScreen(kept=tuple(d for d in documents if d.id != "doc-6"),
+                                    excluded=tuple(d for d in documents if d.id == "doc-6"), checks={})
+
+        run = Run(storage, screen=retract_6)
+        with pytest.raises(sqlite3.OperationalError):
+            run(found(storage, "5", "6"))
+        assert run.unsaved_told == 1
 
 
 class TestTheRunsQualityFilter:
@@ -1214,8 +1253,8 @@ class TestTheWorker:
     """Exactly one ending, and the reader's words, never the provider's (#330)."""
 
     def run_worker(self, monkeypatch: pytest.MonkeyPatch, find: Any,
-                   cancel: bool = False) -> dict[str, list[tuple[Any, ...]]]:
-        """Run the worker in this thread over a scripted run."""
+                   cancel: bool = False, unsaved: bool = False) -> dict[str, list[tuple[Any, ...]]]:
+        """Run the worker in this thread over a scripted run; *unsaved*: its screen's rows were not saved."""
         pytest.importorskip("PySide6")
         from bmlibrarian_lite import agents, citation_full_texts, more_evidence
         from bmlibrarian_lite.gui.workers import MoreEvidenceWorker
@@ -1226,6 +1265,8 @@ class TestTheWorker:
         monkeypatch.setattr(citation_full_texts, "full_text_fetcher", lambda config: None)
 
         def scripted(*args: Any, **kwargs: Any) -> MoreEvidence:
+            if unsaved:
+                kwargs["on_screen_unsaved"]()
             if cancel:
                 worker.cancel()
             return find()
@@ -1303,6 +1344,39 @@ class TestTheWorker:
         outcome = MoreEvidence(found=1, cancelled=True)
         ended = self.run_worker(monkeypatch, lambda: outcome, cancel=True)
         assert ended == {"cancelled": [(outcome, "")]}
+
+    def test_a_screen_not_saved_is_said_when_a_later_step_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """#731: the outcome carrying it never arrives, so the error and the cancel say it."""
+        def fail() -> MoreEvidence:
+            raise ConnectionError("the report's model call")
+
+        ended = self.run_worker(monkeypatch, fail, unsaved=True)
+        assert list(ended) == ["error"] and ended["error"][0][0].endswith(SCREEN_NOT_SAVED)
+        ended = self.run_worker(monkeypatch, fail, cancel=True, unsaved=True)
+        assert ended["cancelled"][0][0].screen_unsaved
+        assert SCREEN_NOT_SAVED in more_evidence_text(ended["cancelled"][0][0])
+
+        def refuse() -> MoreEvidence:
+            raise RetryNotPossible(NO_REPORT_TEXT)
+
+        assert self.run_worker(monkeypatch, refuse, unsaved=True) == {
+            "error": [(f"{NO_REPORT_TEXT} {SCREEN_NOT_SAVED}",)]}
+
+        def search_fails() -> MoreEvidence:
+            raise SearchFailedError([RetrievalShortfall(SearchProvider.PUBMED,
+                                                        RequestFailure(RequestFailureKind.TIMEOUT))])
+
+        ended = self.run_worker(monkeypatch, search_fails, unsaved=True)
+        assert list(ended) == ["error"] and ended["error"][0][0].endswith(SCREEN_NOT_SAVED)
+        ended = self.run_worker(monkeypatch, search_fails, cancel=True, unsaved=True)
+        assert ended["cancelled"][0][0].screen_unsaved
+        # controls: a screen that saved says nothing of it
+        ended = self.run_worker(monkeypatch, fail)
+        assert SCREEN_NOT_SAVED not in ended["error"][0][0]
+        ended = self.run_worker(monkeypatch, fail, cancel=True)
+        assert not ended["cancelled"][0][0].screen_unsaved
 
     def test_a_failed_search_after_a_cancel_is_still_said(
         self, monkeypatch: pytest.MonkeyPatch

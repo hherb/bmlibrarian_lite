@@ -89,12 +89,9 @@ have landed):
   ScienceDirect entry, tick the check, quit; download a supplement there and
   see *Keep this PDF* offered (offscreen smoke passed bar #530's segfault).
 
-**Retraction checking, desktop: done** (PRs #594, #597, #605; spec
-`docs/superpowers/specs/2026-10-18-retraction-checking-design.md`; contract
-`doc/cross_platform/retraction_parity/`). bmlib is a git dependency
-(`8845ba8`; a git pin blocks a PyPI upload). Snapshot rows keep
-`run_status`/`run_deciding` as facts of the run, set once. Open: #590–#593,
-#595, #599–#604 (#600 in part), #607.
+**Retraction checking, desktop: done** (PRs #594, #597, #605; spec `docs/superpowers/specs/2026-10-18-retraction-checking-design.md`;
+contract `doc/cross_platform/retraction_parity/`). bmlib is a git dependency (`8845ba8`; a git pin blocks a PyPI
+upload). Snapshot rows keep `run_status`/`run_deciding` as set-once facts of the run. Open: #590–#593, #595, #599–#604 (#600 in part), #607.
 
 ## Recently landed (context)
 
@@ -234,20 +231,26 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **Retraction checking** follow-ups (#662, #726, #728 landed, rules in
-  `retraction_checking.md`): **nothing writes over an unreadable run
-  snapshot** (#726, maintainer's option 2: refuse, say `SCREEN_NOT_SAVED`,
-  the shared rows keep the answers, the desktop records the ids it left out
-  under `retracted_left_out_unsaved` so they are never new again; the
-  desktop's report written again then says unread, as the line does);
-  **an unchecked check never hides a decided one, whatever the times** (#728,
-  `latest_checks` / `rechecked`).
+- **Retraction checking** follow-ups (#662, #726, #728, #730, #731 and
+  #727 item 1 landed, rules in `retraction_checking.md`): **nothing writes
+  over an unreadable run snapshot** (#726: say `SCREEN_NOT_SAVED`, the shared
+  rows keep the answers, `retracted_left_out_unsaved` keeps the ids left
+  out; the worker hears it at once through `on_screen_unsaved`, so a later
+  failure or cancel still says it, #731). A report written again over one
+  says unread but **keeps the metadata's readable copy stored** (#730,
+  maintainer's option 2: written from a `replace`d copy). **Over an unread
+  snapshot the desktop line shows the run's scored and cited papers' stored
+  checks** (#727 item 1, maintainer's option b; `_stored_run_checks`, never
+  a failed *Check again*'s label stand-ins; a paper with none is counted as
+  could not be checked, which the apps do not do yet). **An unchecked check never hides
+  a decided one, whatever the times** (#728).
   **#600** (audit outcomes of an unreadable snapshot; rows skipped one by
-  one, which Find More Evidence's merge still drops), **#727** (apps vs
-  desktop line, needs a decision), **#730** (a report written again over an
-  unreadable checkpoint snapshot erases the report metadata's readable copy,
-  needs a decision), **#731** (the not-saved sentence is lost when Find More
-  Evidence fails after the screen),
+  one, which Find More Evidence's merge still drops), **#727 item 2** (the
+  apps count one unreadable entry as "could not be checked", or drop an
+  unscored one; needs a decision, with #600), **#733** (over an unread
+  snapshot: "still the run's record" said over stored checks, the apps drop a
+  paper with no stored check, a failed *Check again* drops "later checks
+  could not be read"),
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**
   (test gaps mostly closed; `RetractionRun` lives in its own file; left: the
@@ -473,14 +476,11 @@ page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
   doc/cross_platform/jats_corpus/` line by line — regenerating unread is how a
   regression becomes a committed expectation. Then **run** bmlib's Python parser
   over the same files; Android's needs a source read until #121.
-- Mutation-testing? **Back up with `cp`, never `git checkout`**, key on `swift
-  test`'s exit code, and read a survivor as a claim about the test (#186).
-- **Touching a SwiftData model, or `SchemaVersions.swift`?** A probe that opens
-  a store whose checksum *matches* a listed version proves nothing — two of them
-  passed while the change would have crashed every upgrading app at launch. Write
-  the store in an **earlier build's** model shape first (`StoreMigrationTests`
-  shows how, with a snapshot `@Model` in the test); that is the only path that
-  reaches the duplicate-checksum exception and an unclassified migration error.
+- Mutation-testing? **Back up with `cp`, never `git checkout`**; a survivor is a claim about the test (#186).
+- **Touching a SwiftData model or `SchemaVersions.swift`?** A store whose checksum
+  *matches* a listed version proves nothing (two such probes passed a crashing
+  change): write it in an **earlier build's** shape first (`StoreMigrationTests`,
+  a snapshot `@Model`), the only path to the duplicate-checksum exception.
 - **`swift test` compiles neither app target's platform-guarded sources.** On a
   macOS host every `#if os(iOS)` file becomes nothing, and the SPM target excludes
   `Sources/macOS` — so a break behind either guard is invisible to it *and* to
@@ -490,10 +490,7 @@ page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
 - Adding a Swift file either app needs? It must be in `project.pbxproj`, and
   a **duplicate pbxproj UUID silently drops it** ("cannot find X in scope"
   elsewhere); `xcode_project_guards.py` does not check absent files.
-- 0 failures from `pytest tests/` (Python is the reference), `swift test` in
-  `Packages/BioMedLit` and in `ios/MedicalFactChecker`, and `./gradlew test` in
-  `android/MedicalFactChecker`; the macOS app builds with `xcodebuild -scheme
-  MedicalFactChecker -destination 'platform=macOS' build`.
+- 0 failures from `pytest tests/`, both `swift test`s, `./gradlew test`; the macOS app builds (`xcodebuild … 'platform=macOS' build`).
 - `ruff check .` / `mypy src/` carry pre-existing debt, so the gate is **no new
   findings vs. the merge base**, enforced in CI and reproduced locally with
   `python .github/scripts/lint_delta.py --base-ref origin/master`. **Never record
@@ -502,7 +499,6 @@ page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
 
 ### Xcode Cloud contract (macOS ships from the multiplatform project)
 
-Xcode Cloud archives scheme `MedicalFactChecker` from a **fresh clone**;
-`xcode-project-guards.yml` keeps every Swift package reference inside this
-repository and the scheme shared. Reproduce: clone to `/tmp/x`; in its `ios/MedicalFactChecker`, `xcodebuild -scheme MedicalFactChecker
--destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO archive`.
+Xcode Cloud archives scheme `MedicalFactChecker` from a **fresh clone**; `xcode-project-guards.yml`
+keeps package references in-repo and the scheme shared. Reproduce: clone to `/tmp/x`, then in its
+`ios/MedicalFactChecker` `xcodebuild -scheme MedicalFactChecker -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO archive`.

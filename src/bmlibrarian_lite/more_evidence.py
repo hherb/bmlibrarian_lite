@@ -256,6 +256,7 @@ def find_more_evidence(
     assess_transparency: AssessTransparency | None,
     should_stop: Callable[[], bool],
     progress: Callable[[int, int, str], None] | None = None,
+    on_screen_unsaved: Callable[[], None] | None = None,
 ) -> MoreEvidence:
     """Take a reviewed question further, and write its report again.
 
@@ -279,6 +280,9 @@ def find_more_evidence(
             transparency analysis is off.
         should_stop: Asked between steps and documents; true cancels.
         progress: Told (current, total, message) along the way.
+        on_screen_unsaved: Told at once when the screen's rows could not be
+            saved with the run, so a later failure, whose outcome never
+            arrives, can still say so (#731).
 
     Returns:
         What it did.
@@ -371,6 +375,9 @@ def find_more_evidence(
         saved = _merge_retraction_snapshot(storage, checkpoint.id, screened)
         outcome = replace(outcome, left_out=len(screened.excluded), screen_unsaved=not saved)
         if not saved:
+            if on_screen_unsaved:
+                # first: a failure recording the ids must not lose the sentence
+                on_screen_unsaved()
             _record_ids(storage, checkpoint.id, CHECKPOINT_RETRACTED_UNSAVED_KEY,
                         [d.id for d in screened.excluded])
         _keep_metadata(storage, checkpoint.id, metadata, [d.id for d in kept])

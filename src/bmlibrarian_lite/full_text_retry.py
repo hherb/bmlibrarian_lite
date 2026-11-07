@@ -417,8 +417,8 @@ def write_report_again(
     retraction answers while the texts were read, and the report states
     those, not the ones it was first written with. A scored paper with no
     snapshot row is stated unchecked, the stored snapshot left as it is. A
-    snapshot this build cannot read is stated unread, as the reopen line
-    states it, never the report's earlier copy (#726).
+    snapshot this build cannot read is stated unread, never the report's
+    earlier copy (#726), which stays stored as it was (#730).
     Transparency is counted again when the run counted it, from the rows as
     they are now.
 
@@ -466,10 +466,8 @@ def write_report_again(
     record_uploaded_reads(metadata, read_papers, read_full_text, uploaded)
 
     snapshot = recorded_retraction_snapshot(checkpoint.metadata)
-    if retraction_snapshot_unreadable(checkpoint.metadata):
-        metadata.retraction_screen = None
-        metadata.retraction_screen_unread = checkpoint.metadata[CHECKPOINT_RETRACTION_SNAPSHOT_KEY]
-    elif snapshot:
+    unread = retraction_snapshot_unreadable(checkpoint.metadata)
+    if snapshot:
         # a scored paper no screen saw (left by Find More Evidence on a run
         # older than the check) is unchecked, never silently clear (#657)
         unscreened = [d.document for d in scored if d.document.id not in snapshot]
@@ -488,8 +486,16 @@ def write_report_again(
     metadata.version += 1
     metadata.generated_at = datetime.now()
 
+    written = metadata
+    if unread:
+        # the report says unread; the metadata's own copy is kept, not erased (#730)
+        written = replace(
+            metadata,
+            retraction_screen=None,
+            retraction_screen_unread=checkpoint.metadata[CHECKPOINT_RETRACTION_SNAPSHOT_KEY],
+        )
     report = reporting_agent.generate_report(
-        question, citations, metadata, transparency_results=transparency_results
+        question, citations, written, transparency_results=transparency_results
     )
     kept = {k: v for k, v in checkpoint.metadata.items() if k != REPORT_PENDING_KEY}
     if failures is not None:

@@ -120,9 +120,14 @@ paper with its `retraction_status`.
   unchecked row was not reached (its document is gone), the unchecked count
   stands alone, as on a reopen, since the others' causes would claim it too.
 - **A run's record that cannot be read is unread, never "never checked"**
-  (#600, #662, all three platforms). The saved-work line says "Retraction
+  (#600, #662, all three platforms). Over a record this build cannot read,
+  the saved-work line shows the run's papers' stored checks (the desktop
+  since #727: its scored and cited papers, a loaded file's own, those with
+  none counted as could not be checked; the apps: `recheckedChecks` with an
+  empty run, every session document's, none counted; a failed *Check
+  again*'s label stand-ins only warn), and says "Retraction
   status could not be read" (`STATUS_UNREAD` / `RetractionText.statusUnread`)
-  while there is nothing else to show, for a record this build cannot read:
+  while there is nothing else to show. Such a record is:
   on the desktop the checkpoint's `retraction_snapshot`, or a loaded file's
   audit JSON `retraction` entry, that is not a list or is a list none of
   whose rows it reads (`stored_snapshot_unreadable`); on the apps the
@@ -137,14 +142,16 @@ paper with its `retraction_status`.
   screen, leave out the retracted and store each paper's check in the shared
   rows, but keep the snapshot as found and add `SCREEN_NOT_SAVED` /
   `RetractionText.screenNotSaved` to what they report (the desktop's
-  `MoreEvidence.screen_unsaved`, the apps' `RetractionRun.unsaved`). The
+  `MoreEvidence.screen_unsaved`, the apps' `RetractionRun.unsaved`); on the
+  desktop the worker is told at once (`on_screen_unsaved`), so a run that
+  fails or is cancelled after the screen still says it (#731). The
   desktop keeps the ids it left out under `retracted_left_out_unsaved`, so a
   later Find More Evidence does not find them again as new. The desktop's
-  report written again sets `retraction_screen_unread` from the checkpoint's
-  record, so it says unread whenever the reopen line does, even over a
-  readable copy in the report metadata. A desktop list with some unreadable rows still loses them
-  on Find More Evidence's merge (#600). The apps show a stored check over
-  an unreadable snapshot where the desktop says unread (#727).
+  report written again over an unreadable checkpoint record says unread, even
+  over a readable copy in the report metadata, but that copy stays stored as
+  it was, never erased (#730: the report is written from a copy of the
+  metadata carrying `retraction_screen_unread`). A desktop list with some
+  unreadable rows still loses them on Find More Evidence's merge (#600).
 - **A paper the run saw unchecked warns of any retraction or concern**, of
   whatever time (#662, all three platforms: the desktop's
   `changed_since_snapshot`, the apps' `RetractionSavedWork.changedSinceRun`).
