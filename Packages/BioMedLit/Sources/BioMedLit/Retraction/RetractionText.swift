@@ -91,8 +91,10 @@ public enum RetractionText {
     ///   - excluded: Papers left out as retracted.
     ///   - unchecked: Kept papers whose status could not be checked.
     ///   - causes: ``uncheckedCauses(_:failed:)``; empty for a restored snapshot, which records none.
-    /// - Returns: The clause; `nil` when both counts are 0.
-    public static func runSummaryClause(excluded: Int, unchecked: Int, causes: [String]) -> String? {
+    ///   - unread: Papers whose snapshot entries this build cannot read: their
+    ///     own count, never unchecked, never listed as left out (#727).
+    /// - Returns: The clause; `nil` when every count is 0.
+    public static func runSummaryClause(excluded: Int, unchecked: Int, causes: [String], unread: Int = 0) -> String? {
         var parts: [String] = []
         if excluded > 0 {
             parts.append("\(grouped(excluded)) \(excluded == 1 ? "retracted paper" : "retracted papers") left out")
@@ -101,6 +103,11 @@ public enum RetractionText {
             let owner = unchecked == 1 ? "1 paper's" : "\(grouped(unchecked)) papers'"
             let clause = "\(owner) retraction status could not be checked"
             parts.append(causes.isEmpty ? clause : "\(clause): \(causes.joined(separator: "; "))")
+        }
+        if unread > 0 {
+            parts.append(unread == 1
+                ? "1 paper's retraction record could not be read"
+                : "\(grouped(unread)) papers' retraction records could not be read")
         }
         return parts.isEmpty ? nil : parts.joined(separator: "; ")
     }
@@ -148,13 +155,21 @@ public enum RetractionText {
     ///   - checkedAt: The oldest check time among decided papers, or `nil`.
     ///   - notChecked: Kept papers that could not be checked.
     ///   - heldPapers: Whether the run held any paper to check.
-    public static func methodsLine(checkedAt: Date?, notChecked: Int, heldPapers: Bool) -> String {
+    ///   - notRead: Papers whose snapshot entries this build cannot read, said last (#727).
+    public static func methodsLine(checkedAt: Date?, notChecked: Int, heldPapers: Bool, notRead: Int = 0) -> String {
         guard let checkedAt else {
-            return heldPapers ? "Retraction status could not be checked" : checkedOnLine(nil)
+            return (heldPapers ? "Retraction status could not be checked" : checkedOnLine(nil)) + notReadClause(notRead)
         }
         var line = checkedOnLine(checkedAt)
         if notChecked > 0 { line += "; \(notChecked == 1 ? "1 paper" : "\(grouped(notChecked)) papers") could not be checked" }
-        return line
+        return line + notReadClause(notRead)
+    }
+
+    /// "; N papers' records could not be read" ("1 paper's record" for one), or "" for none
+    /// (the desktop's `not_read_clause`).
+    public static func notReadClause(_ count: Int) -> String {
+        guard count > 0 else { return "" }
+        return "; \(count == 1 ? "1 paper's record" : "\(grouped(count)) papers' records") could not be read"
     }
 
     /// The report's opening notice (the desktop's `format_retraction_notice`):
@@ -173,12 +188,15 @@ public enum RetractionText {
     ///   - causes: ``uncheckedCauses(_:failed:)`` of the unchecked papers (after
     ///     *Check again*); added only when a paper is unchecked. A plain
     ///     reopen has none: the snapshot records none.
-    public static func savedWorkLine(_ checks: [PaperRetractionCheck], causes: [String] = []) -> String {
+    ///   - unread: The run's papers whose snapshot entries this build cannot
+    ///     read: said after the rest, never counted unchecked (#727).
+    public static func savedWorkLine(_ checks: [PaperRetractionCheck], causes: [String] = [], unread: Int = 0) -> String {
         let line = methodsLine(
             checkedAt: checks.filter { !$0.isUnchecked }.map(\.checkedAt).min(),
             notChecked: checks.filter(\.isUnchecked).count, heldPapers: !checks.isEmpty)
         // the causes follow the not-checked count, as they follow the run notice's
-        return causes.isEmpty || !checks.contains(where: \.isUnchecked) ? line : "\(line): \(causes.joined(separator: "; "))"
+        let named = causes.isEmpty || !checks.contains(where: \.isUnchecked) ? line : "\(line): \(causes.joined(separator: "; "))"
+        return named + notReadClause(unread)
     }
 
     /// The button that checks a reopened session's papers again.

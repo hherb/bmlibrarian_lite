@@ -96,7 +96,7 @@ class AuditLiteratureTab(QWidget):
         self._transparency_outcomes: Dict[str, TransparencyOutcome] = {}
         # doc id -> (current check, whether the run left the paper out as
         # retracted, the check as the run saw it or None)
-        self._retractions: dict[str, tuple[PaperCheck, bool, PaperCheck | None]] = {}
+        self._retractions: dict[str, tuple[PaperCheck, bool, PaperCheck | None, bool]] = {}
 
         # Thread safety
         self._lock = threading.RLock()
@@ -307,7 +307,12 @@ class AuditLiteratureTab(QWidget):
                 logger.debug(f"Transparency received before document: {doc_id}")
 
     def update_retraction(
-        self, doc_id: str, check: PaperCheck, excluded: bool, run_check: PaperCheck | None = None
+        self,
+        doc_id: str,
+        check: PaperCheck,
+        excluded: bool,
+        run_check: PaperCheck | None = None,
+        unread: bool = False,
     ) -> None:
         """Show a document's retraction status on its card (now, or once it is added).
 
@@ -316,12 +321,13 @@ class AuditLiteratureTab(QWidget):
             check: The paper's latest check
             excluded: Whether the run left it out as retracted
             run_check: The check as the run saw it, when *Check again* replaced it
+            unread: The run's record of it could not be read
         """
         with self._lock:
-            self._retractions[doc_id] = (check, excluded, run_check)
+            self._retractions[doc_id] = (check, excluded, run_check, unread)
             card = self._cards_by_doc_id.get(doc_id)
             if card:
-                card.set_retraction_check(check, excluded, run_check)
+                card.set_retraction_check(check, excluded, run_check, unread)
 
     def get_transparency_result(
         self,

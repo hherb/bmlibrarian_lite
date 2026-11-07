@@ -232,7 +232,7 @@ Open issues by family; each issue carries the detail. None blocks another.
 ### Next up
 
 - **Retraction checking** follow-ups (#662, #726, #728, #730, #731 and
-  #727 item 1 landed, rules in `retraction_checking.md`): **nothing writes
+  #727 landed, rules in `retraction_checking.md`): **nothing writes
   over an unreadable run snapshot** (#726: say `SCREEN_NOT_SAVED`, the shared
   rows keep the answers, `retracted_left_out_unsaved` keeps the ids left
   out; the worker hears it at once through `on_screen_unsaved`, so a later
@@ -246,10 +246,10 @@ Open issues by family; each issue carries the detail. None blocks another.
   document's row), and a failed or stopped *Check again* there drops "so
   this is still the run's record" (`over_unread_record`, maintainer's
   choice). **An unchecked check never hides a decided one, whatever the times** (#728).
-  **#600** (audit outcomes of an unreadable snapshot; rows skipped one by
-  one, which Find More Evidence's merge still drops), **#727 item 2** (the
-  apps count one unreadable entry as "could not be checked", or drop an
-  unscored one; needs a decision, with #600),
+  **One unreadable entry is its own count** (#600, #727 item 2, this PR,
+  maintainer's choice): "N papers' retraction records could not be read",
+  never "could not be checked", never listed as left out, never written
+  over (`keeping_unread_rows`; rule in `retraction_checking.md`).
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**
   (test gaps mostly closed; `RetractionRun` lives in its own file; left: the

@@ -111,7 +111,9 @@ def run_summary_clause(screen: RetractionRecord) -> str | None:
 
     Returns:
         E.g. ``"2 retracted papers left out; 3 papers' retraction status could
-        not be checked: no DOI or PMID"``; ``None`` when both counts are 0.
+        not be checked: no DOI or PMID"``, then how many papers' records could
+        not be read (a restored snapshot's, #727: never counted unchecked,
+        never listed as left out); ``None`` when every count is 0.
     """
     parts = []
     left_out = len(screen.excluded)
@@ -124,6 +126,13 @@ def run_summary_clause(screen: RetractionRecord) -> str | None:
         clause = f"{owner} retraction status could not be checked"
         causes = unchecked_causes(screen) if isinstance(screen, RetractionScreen) else []
         parts.append(f"{clause}: {'; '.join(causes)}" if causes else clause)
+    unread = len(screen.unread_rows)
+    if unread:
+        parts.append(
+            "1 paper's retraction record could not be read"
+            if unread == 1
+            else f"{unread:,} papers' retraction records could not be read"
+        )
     return "; ".join(parts) or None
 
 
@@ -182,7 +191,7 @@ def checked_on_line(checked_at: datetime | None) -> str:
     return f"Retraction status checked {as_utc(checked_at).date().isoformat()}"
 
 
-def saved_work_line(rows: Iterable[Mapping[str, Any]], causes: Sequence[str] = ()) -> str:
+def saved_work_line(rows: Iterable[Mapping[str, Any]], causes: Sequence[str] = (), unread: int = 0) -> str:
     """A reopened run's line: when its decided papers were checked, and how many were not.
 
     The date is the oldest check time among decided rows (retracted,
@@ -193,6 +202,8 @@ def saved_work_line(rows: Iterable[Mapping[str, Any]], causes: Sequence[str] = (
         causes: :func:`unchecked_causes` of the unchecked papers (after
             *Check again*); added only when a row is unchecked. A plain
             reopen has none: the snapshot records none.
+        unread: The run's papers whose rows this build cannot read: said
+            after the rest, never counted unchecked (#727).
 
     Returns:
         E.g. "Retraction status checked 2026-10-01; 2 papers could not be
@@ -201,7 +212,7 @@ def saved_work_line(rows: Iterable[Mapping[str, Any]], causes: Sequence[str] = (
     """
     rows = list(rows)
     if not rows:
-        return checked_on_line(None)
+        return checked_on_line(None) + not_read_clause(unread)
     unchecked = sum(1 for r in rows if r.get("status") == RetractionStatus.UNCHECKED.value)
     checked_at = decided_checked_at(rows)
     if checked_at is None:
@@ -209,7 +220,8 @@ def saved_work_line(rows: Iterable[Mapping[str, Any]], causes: Sequence[str] = (
     else:
         line = checked_on_line(checked_at) + _not_checked_clause(unchecked)
     # the causes follow the not-checked count, as they follow the run notice's
-    return f"{line}: {'; '.join(causes)}" if causes and unchecked else line
+    line = f"{line}: {'; '.join(causes)}" if causes and unchecked else line
+    return line + not_read_clause(unread)
 
 
 def retraction_methods_line(record: RetractionRecord) -> str:
@@ -221,9 +233,19 @@ def retraction_methods_line(record: RetractionRecord) -> str:
     with :func:`saved_work_line`'s clause, so the line alone never reads as
     complete.
     """
+    unread = not_read_clause(len(record.unread_rows))
     if record.checked_at is None:
-        return "Retraction status could not be checked" if record.to_snapshot() else checked_on_line(None)
-    return checked_on_line(record.checked_at) + _not_checked_clause(record.unchecked_count)
+        line = "Retraction status could not be checked" if record.to_snapshot() else checked_on_line(None)
+        return line + unread
+    return checked_on_line(record.checked_at) + _not_checked_clause(record.unchecked_count) + unread
+
+
+def not_read_clause(count: int) -> str:
+    """The clause "; N papers' records could not be read" ("1 paper's record" for one), or "" for none."""
+    if not count:
+        return ""
+    owner = "1 paper's record" if count == 1 else f"{count:,} papers' records"
+    return f"; {owner} could not be read"
 
 
 def _not_checked_clause(count: int) -> str:

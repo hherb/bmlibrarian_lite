@@ -1221,7 +1221,10 @@ class FactCheckWorkflow @Inject constructor(
         // a snapshot this build cannot read at all: the line is the scored and cited papers' stored
         // checks (the desktop's #727 rule, #733); the badges keep every document's
         val unreadRecord = run.isEmpty() && RetractionSnapshot.unread(snapshotJson)
-        val lineChecks = if (unreadRecord) RetractionSavedWork.unreadRunChecks(stored, scored + cited) else rows
+        // a paper whose own entry cannot be read is counted as such on the line, never as unchecked (#727);
+        // its badge keeps its row
+        val unreadIds = RetractionSnapshot.unreadIds(snapshotJson)
+        val lineChecks = if (unreadRecord) RetractionSavedWork.unreadRunChecks(stored, scored + cited) else rows - unreadIds
         // a stored retraction keeps its own notice
         val latest = stored + found.filterKeys { stored[it]?.isRetracted != true }
         val changed = RetractionSavedWork.changedSinceRun(run, latest, citedDocuments.map { it.id })
@@ -1241,7 +1244,7 @@ class FactCheckWorkflow @Inject constructor(
         _retractionSavedWork.value = RetractionSavedWorkState(
             // a snapshot this build cannot read, with nothing else to show, is unread, never "never checked" (#662)
             line = (if (lineChecks.isEmpty() && unreadRecord) RetractionText.STATUS_UNREAD
-                else RetractionText.savedWorkLine(lineChecks.values, causes)) +
+                else RetractionText.savedWorkLine(lineChecks.values, causes, if (unreadRecord) 0 else unreadIds.size)) +
                 RetractionText.notCheckedAgainClause(missed.size, missedCauses) +
                 // the line is then the stored checks or "could not be read", never the run's record (#733)
                 (if (unreadRecord) RetractionText.overUnreadRecord(note) else note) +
@@ -2007,7 +2010,10 @@ class FactCheckWorkflow @Inject constructor(
 
         // What the run saw: the checks it used, never whatever is stored now
         val snapshot = RetractionSnapshot.read(stored.retractionSnapshotJson)
-        val retraction = retractionSection(documents, snapshot, RetractionSnapshot.unread(stored.retractionSnapshotJson))
+        val retraction = retractionSection(
+            documents, snapshot, RetractionSnapshot.unread(stored.retractionSnapshotJson),
+            RetractionSnapshot.unreadIds(stored.retractionSnapshotJson)
+        )
 
         // Build citation data for LLM
         val citationData = citations.mapNotNull { citation ->
@@ -2729,13 +2735,15 @@ class FactCheckWorkflow @Inject constructor(
     private fun retractionSection(
         documents: List<DocumentEntity>,
         snapshot: Map<String, PaperRetractionCheck>,
-        unread: Boolean = false
+        unread: Boolean = false,
+        unreadIds: Set<String> = emptySet()
     ): RetractionReportSection? {
         // a snapshot recorded but unreadable says so, never "never checked" (#662)
         if (snapshot.isEmpty()) return if (unread) RetractionReportSection.UNREAD else null
         // a scored paper no run screened (Find More Evidence on a session older
-        // than the check) is unchecked, never silently clear (#657)
-        val unscreened = documents.filter { it.id !in snapshot && it.isScored }
+        // than the check) is unchecked, never silently clear (#657); one whose
+        // entry this build cannot read is counted as such, never unchecked (#727)
+        val unscreened = documents.filter { it.id !in snapshot && it.id !in unreadIds && it.isScored }
         val now = System.currentTimeMillis()
         // Causes are named only when this run screened exactly the papers
         // counted; otherwise the count stands alone, as the desktop's restored
@@ -2744,7 +2752,8 @@ class FactCheckWorkflow @Inject constructor(
         return RetractionReportSection(
             documents.mapNotNull { doc -> snapshot[doc.id]?.let { doc.title to it } } +
                 unscreened.map { it.title to PaperRetractionCheck.failed(now) },
-            causes
+            causes,
+            unreadEntries = unreadIds.size
         )
     }
 

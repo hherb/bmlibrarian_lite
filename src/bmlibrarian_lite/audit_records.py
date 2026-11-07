@@ -39,7 +39,7 @@ The companion of :mod:`~bmlibrarian_lite.analysis_failures`, whose contract is
 """
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -56,9 +56,12 @@ from .data_models import (
 from .retraction_screen import (
     RetractionRecord,
     RetractionScreen,
+    keeping_unread_rows,
     run_deciding_of,
     run_status_of,
     stored_snapshot_unreadable,
+    unread_row_ids,
+    unread_snapshot_rows,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,6 +106,10 @@ CHECKPOINT_QUALITY_FILTERED_KEY = "quality_filtered_out"
 #: left out as retracted when its snapshot could not take them (#726), so they
 #: are not found again as new.
 CHECKPOINT_RETRACTED_UNSAVED_KEY = "retracted_left_out_unsaved"
+
+#: Marks an audit entry of a document whose retraction snapshot row this
+#: build cannot read (#600): whether the run left it out is unknown
+UNREAD_RETRACTION_RECORD_KEY = "retraction_record_unread"
 
 #: How older builds began the explanation of a scoring call that raised,
 #: stored with a score of 1: the benchmark runner until #306, and the review
@@ -456,6 +463,7 @@ def outcome_summary(
 def outcome_entries(
     outcomes: DocumentOutcomes,
     retraction_snapshot: Mapping[str, Mapping[str, Any]] | None = None,
+    retraction_unread: Collection[str] = (),
 ) -> dict[str, list[dict[str, Any]]]:
     """One entry per document, under the list its outcome names.
 
@@ -463,6 +471,10 @@ def outcome_entries(
         outcomes: What became of each document.
         retraction_snapshot: The run's retraction snapshot rows by document
             id, for each left-out paper's date and notice; None when none.
+        retraction_unread: The documents whose snapshot rows this build
+            cannot read: an unscored one may have been left out as retracted,
+            so its entry says its record could not be read (#600), never
+            plainly not scored.
 
     Returns:
         The audit record's document lists. ``scored_documents`` is the
@@ -519,7 +531,11 @@ def outcome_entries(
         # A document scoring never reached. No reason is recorded, because
         # none was given.
         "unscored_documents": [
-            {"id": document.id, "title": document.title}
+            {
+                "id": document.id,
+                "title": document.title,
+                **({UNREAD_RETRACTION_RECORD_KEY: True} if document.id in retraction_unread else {}),
+            }
             for document in outcomes.not_scored
         ],
     }
@@ -555,9 +571,11 @@ def checkpoint_metadata_with_retraction_snapshot(
         screen: The run's retraction screen, or a snapshot *Check again* rewrote.
 
     Returns:
-        The new metadata: one snapshot row per document the run held.
+        The new metadata: one snapshot row per document the run held; a row
+        this build cannot read is kept as found, never written over (#600).
     """
-    return {**metadata, CHECKPOINT_RETRACTION_SNAPSHOT_KEY: screen.to_snapshot()}
+    stored = metadata.get(CHECKPOINT_RETRACTION_SNAPSHOT_KEY)
+    return {**metadata, CHECKPOINT_RETRACTION_SNAPSHOT_KEY: keeping_unread_rows(screen.to_snapshot(), stored)}
 
 
 def recorded_retraction_snapshot(checkpoint_metadata: object) -> dict[str, dict[str, Any]]:
@@ -577,6 +595,25 @@ def recorded_retraction_snapshot(checkpoint_metadata: object) -> dict[str, dict[
     if not isinstance(rows, list):
         return {}
     return RetractionScreen.from_snapshot(rows)
+
+
+def recorded_unread_rows(checkpoint_metadata: object) -> list[Any]:
+    """The rows of a checkpoint's retraction snapshot this build cannot read, as found.
+
+    Args:
+        checkpoint_metadata: The checkpoint's stored metadata (input, golden rule 1).
+
+    Returns:
+        Those rows; empty when there are none or the snapshot is not a list.
+    """
+    if not isinstance(checkpoint_metadata, Mapping):
+        return []
+    return unread_snapshot_rows(checkpoint_metadata.get(CHECKPOINT_RETRACTION_SNAPSHOT_KEY))
+
+
+def recorded_unread_ids(checkpoint_metadata: object) -> set[str]:
+    """The document ids a checkpoint's unreadable snapshot rows still name."""
+    return unread_row_ids(recorded_unread_rows(checkpoint_metadata))
 
 
 def retraction_snapshot_unreadable(checkpoint_metadata: object) -> bool:

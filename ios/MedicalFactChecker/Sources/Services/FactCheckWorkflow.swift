@@ -742,13 +742,18 @@ final class FactCheckWorkflow {
     /// stored ones over them, or, over a snapshot this build cannot read at
     /// all, the scored and cited papers' stored checks (the desktop's #727 rule, #733).
     ///
+    /// A paper whose own entry cannot be read is left out of the checks (it
+    /// is counted as "could not be read", #727), never given a stand-in.
+    ///
     /// - Returns: The checks by `Document.id`, and whether the run's record could not be read.
     private static func savedWorkChecks(
         _ session: FactCheckSession, _ documents: [Document], run: [String: PaperRetractionCheck]
     ) -> (checks: [String: PaperRetractionCheck], unreadRecord: Bool) {
         let stored = storedRetractionChecks(documents)
         guard run.isEmpty, session.retractionSnapshotUnread() else {
-            return (RetractionSavedWork.recheckedChecks(run: run, stored: stored, scored: scoredIDs(documents)), false)
+            let unread = session.retractionSnapshotUnreadIDs()
+            return (RetractionSavedWork.recheckedChecks(
+                run: run, stored: stored, scored: scoredIDs(documents).subtracting(unread)), false)
         }
         let cited = documents.filter { !($0.citations ?? []).isEmpty }.map(\.id)
         return (RetractionSavedWork.unreadRunChecks(stored: stored, papers: scoredIDs(documents).union(cited)), true)
@@ -802,7 +807,9 @@ final class FactCheckWorkflow {
         // a snapshot this build cannot read, with nothing else to show, is unread, never "never checked" (#662)
         retractionSavedWorkLine = (rows.isEmpty && unreadRecord
             ? RetractionText.statusUnread
-            : RetractionText.savedWorkLine(Array(rows.values), causes: causes)) + note
+            : RetractionText.savedWorkLine(
+                Array(rows.values), causes: causes,
+                unread: unreadRecord ? 0 : session.retractionSnapshotUnreadIDs().count)) + note
         let changed = RetractionSavedWork.changedSinceRun(run: run, latest: latest, cited: cited.map(\.id))
         let byID = Dictionary(cited.map { ($0.id, $0) }) { first, _ in first }
         retractionSavedWorkWarning = RetractionText.savedWorkWarning(changed.compactMap { id in
@@ -3351,8 +3358,12 @@ final class FactCheckWorkflow {
         // What the run saw: the checks it used, not whatever is stored now
         let snapshot = session.retractionSnapshot()
         // a scored paper no run screened (Find More Evidence on a session older
-        // than the check) is unchecked, never silently clear (#657)
-        let unscreened = (session.documents ?? []).filter { snapshot[$0.id] == nil && $0.relevanceScore != nil }
+        // than the check) is unchecked, never silently clear (#657); one whose
+        // entry this build cannot read is counted as such, never unchecked (#727)
+        let unreadIDs = session.retractionSnapshotUnreadIDs()
+        let unscreened = (session.documents ?? []).filter {
+            snapshot[$0.id] == nil && !unreadIDs.contains($0.id) && $0.relevanceScore != nil
+        }
         // a snapshot recorded but unreadable says so, never "never checked" (#662)
         let retraction: RetractionReportSection? = snapshot.isEmpty
             ? (session.retractionSnapshotUnread() ? .unread : nil) : RetractionReportSection(
@@ -3360,7 +3371,8 @@ final class FactCheckWorkflow {
                 snapshot[doc.id].map { (title: doc.title, check: $0) }
             } + unscreened.map { (title: $0.title, check: PaperRetractionCheck.failed(at: Date())) },
             // no run saw why those went unchecked, so the count stands alone
-            causes: unscreened.isEmpty ? retractionRunCauses(covering: snapshot) : [])
+            causes: unscreened.isEmpty ? retractionRunCauses(covering: snapshot) : [],
+            unread: unreadIDs.count)
 
         // Handle no evidence case using ReportFormatter
         guard !allCitations.isEmpty else {

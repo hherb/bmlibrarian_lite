@@ -61,6 +61,52 @@ def stored_snapshot_unreadable(stored: object) -> bool:
     return bool(stored) and not any(snapshot_row_readable(row) for row in stored)
 
 
+def unread_snapshot_rows(stored: object) -> list[Any]:
+    """The rows of a stored snapshot list this build cannot read, as found.
+
+    Each is a paper whose run record could not be read: counted as such,
+    never as unchecked or as not left out (#600, #727), and never written
+    over (:func:`keeping_unread_rows`).
+
+    Args:
+        stored: The stored value (input, golden rule 1).
+
+    Returns:
+        Those rows, in order; empty when the value is not a list.
+    """
+    if not isinstance(stored, list):
+        return []
+    return [row for row in stored if not snapshot_row_readable(row)]
+
+
+def unread_row_ids(rows: Iterable[Any]) -> set[str]:
+    """The document ids unreadable rows still name (a row without one names none)."""
+    return {
+        str(row["document_id"])
+        for row in rows
+        if isinstance(row, Mapping) and row.get("document_id") is not None
+    }
+
+
+def keeping_unread_rows(rows: Iterable[Mapping[str, Any]], stored: object) -> list[Any]:
+    """New snapshot rows to store over *stored*, its unreadable rows kept as found.
+
+    An unreadable row may hold what the run saw (a retraction it left out),
+    so nothing writes over it (#726's rule, row by row): a new row for the
+    same document is not stored (the shared check rows keep the answer).
+
+    Args:
+        rows: The readable rows to store.
+        stored: The snapshot they replace (input, golden rule 1).
+
+    Returns:
+        The rows to store: the new ones, then the unreadable ones.
+    """
+    unread = unread_snapshot_rows(stored)
+    ids = unread_row_ids(unread)
+    return [dict(row) for row in rows if str(row["document_id"]) not in ids] + unread
+
+
 def as_utc(moment: datetime) -> datetime:
     """Read a naive datetime as UTC, the zone every stored check is in."""
     return moment.replace(tzinfo=UTC) if moment.tzinfo is None else moment
@@ -130,6 +176,11 @@ class RetractionRecord(Protocol):
         """The oldest decided check's time; ``None`` without one (an unchecked answer's never counts)."""
         ...
 
+    @property
+    def unread_rows(self) -> Sequence[Any]:
+        """Stored rows this build cannot read, as found (none for a live screen)."""
+        ...
+
     def to_snapshot(self) -> list[dict[str, Any]]:
         """One row per held document."""
         ...
@@ -193,6 +244,11 @@ class RetractionScreen:
             ),
             default=None,
         )
+
+    @property
+    def unread_rows(self) -> tuple[Any, ...]:
+        """None: a live screen read every paper it holds."""
+        return ()
 
     def to_snapshot(self) -> list[dict[str, Any]]:
         """Rows for the report and audit trail, one per held document.
@@ -293,9 +349,13 @@ class RetractionSnapshot:
 
     Attributes:
         rows: Snapshot rows as ``RetractionScreen.to_snapshot`` wrote them.
+        unread_rows: Stored rows this build cannot read, as found: each a
+            paper whose record could not be read, kept so a save never
+            erases it (#600).
     """
 
     rows: tuple[dict[str, Any], ...]
+    unread_rows: tuple[Any, ...] = ()
 
     @property
     def excluded(self) -> tuple[dict[str, Any], ...]:
@@ -321,9 +381,10 @@ class RetractionSnapshot:
         return [dict(r) for r in self.rows]
 
     @classmethod
-    def from_rows(cls, rows: Iterable[Mapping[str, Any]]) -> RetractionSnapshot:
-        """Build from stored rows, skipping any an older build wrote short."""
-        return cls(tuple(RetractionScreen.from_snapshot(rows).values()))
+    def from_rows(cls, rows: Iterable[Any]) -> RetractionSnapshot:
+        """Build from stored rows; those this build cannot read are kept apart, as found."""
+        rows = list(rows)
+        return cls(tuple(RetractionScreen.from_snapshot(rows).values()), tuple(unread_snapshot_rows(rows)))
 
     @classmethod
     def from_stored(cls, stored: Any) -> RetractionSnapshot | None:

@@ -53,6 +53,7 @@ from .audit_records import (
     recorded_extraction_failures,
     recorded_report_metadata,
     recorded_retraction_snapshot,
+    recorded_unread_ids,
     retraction_snapshot_unreadable,
 )
 from .citation_full_texts import FullTextFetch, fetch_full_texts
@@ -73,6 +74,7 @@ from .full_text_retry import (
     write_report_again,
 )
 from .quality.data_models import QualityFilter
+from .retraction_screen import keeping_unread_rows
 from .retraction_text import SCREEN_NOT_SAVED
 from .search_failures import combined_shortfalls
 from .smart_search import NO_NEW_EVIDENCE_TEXT, SmartSearchContext, SmartSearchRound
@@ -457,6 +459,8 @@ def known_document_ids(storage: LiteStorage, question: str) -> set[str]:
     return (
         judged | failed
         | set(recorded_retraction_snapshot(stored))
+        # a paper whose row this build cannot read may have been left out as retracted
+        | recorded_unread_ids(stored)
         | set(_stored_ids(stored.get(CHECKPOINT_QUALITY_FILTERED_KEY)))
         | set(_stored_ids(stored.get(CHECKPOINT_RETRACTED_UNSAVED_KEY)))
     )
@@ -724,8 +728,9 @@ def _merge_retraction_snapshot(
     have cut short, never by the review. A snapshot this build cannot read
     is never written over (#726, as *Check again*): what the run left out,
     and why, would be lost; the shared check rows keep the answers, and the
-    caller records the ids left out. A list with only some unreadable rows
-    still loses those rows here (#600).
+    caller records the ids left out. A row this build cannot read in an
+    otherwise readable list is kept as found, and its document gains no new
+    row (#600).
 
     Returns:
         Whether the rows were saved with the run.
@@ -738,9 +743,10 @@ def _merge_retraction_snapshot(
     rows = recorded_retraction_snapshot(stored)
     for row in screen.to_snapshot():
         rows[row["document_id"]] = row
+    snapshot = keeping_unread_rows(rows.values(), stored.get(CHECKPOINT_RETRACTION_SNAPSHOT_KEY))
     storage.update_checkpoint(
         checkpoint_id=checkpoint_id,
-        metadata={**stored, CHECKPOINT_RETRACTION_SNAPSHOT_KEY: list(rows.values())},
+        metadata={**stored, CHECKPOINT_RETRACTION_SNAPSHOT_KEY: snapshot},
         touch=False,
     )
     return True

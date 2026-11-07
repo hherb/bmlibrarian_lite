@@ -104,13 +104,18 @@ object RetractionText {
      * @param causes [uncheckedCauses]; empty for a restored snapshot, which records none
      * @return The clause; null when both counts are 0
      */
-    fun runSummaryClause(excluded: Int, unchecked: Int, causes: List<String>): String? {
+    fun runSummaryClause(excluded: Int, unchecked: Int, causes: List<String>, unread: Int = 0): String? {
         val parts = mutableListOf<String>()
         if (excluded > 0) parts += "${grouped(excluded)} ${if (excluded == 1) "retracted paper" else "retracted papers"} left out"
         if (unchecked > 0) {
             val owner = if (unchecked == 1) "1 paper's" else "${grouped(unchecked)} papers'"
             val clause = "$owner retraction status could not be checked"
             parts += if (causes.isEmpty()) clause else "$clause: ${causes.joinToString("; ")}"
+        }
+        // entries this build cannot read: their own count, never unchecked, never listed as left out (#727)
+        if (unread > 0) {
+            parts += if (unread == 1) "1 paper's retraction record could not be read"
+                else "${grouped(unread)} papers' retraction records could not be read"
         }
         return if (parts.isEmpty()) null else parts.joinToString("; ")
     }
@@ -163,12 +168,19 @@ object RetractionText {
      * @param notChecked Kept papers that could not be checked
      * @param heldPapers Whether the run held any paper to check
      */
-    fun methodsLine(checkedAtMs: Long?, notChecked: Int, heldPapers: Boolean): String {
-        if (checkedAtMs == null) return if (heldPapers) "Retraction status could not be checked" else checkedOnLine(null)
+    fun methodsLine(checkedAtMs: Long?, notChecked: Int, heldPapers: Boolean, notRead: Int = 0): String {
+        if (checkedAtMs == null) {
+            return (if (heldPapers) "Retraction status could not be checked" else checkedOnLine(null)) + notReadClause(notRead)
+        }
         val line = checkedOnLine(checkedAtMs)
-        if (notChecked == 0) return line
-        return "$line; ${if (notChecked == 1) "1 paper" else "${grouped(notChecked)} papers"} could not be checked"
+        if (notChecked == 0) return line + notReadClause(notRead)
+        return "$line; ${if (notChecked == 1) "1 paper" else "${grouped(notChecked)} papers"} could not be checked" +
+            notReadClause(notRead)
     }
+
+    /** "; N papers' records could not be read" ("1 paper's record" for one), or "" for none (the desktop's `not_read_clause`, #727). */
+    fun notReadClause(count: Int): String =
+        if (count <= 0) "" else "; ${if (count == 1) "1 paper's record" else "${grouped(count)} papers' records"} could not be read"
 
     /** The report's opening notice (the desktop's `format_retraction_notice`): "> **Retraction check:** <clause>.". */
     fun reportNotice(clause: String): String = "$NOTICE_OPENING$clause."
@@ -183,15 +195,18 @@ object RetractionText {
      *
      * @param checks The session's checks
      * @param causes [uncheckedCauses] of the unchecked papers; added only when a paper is unchecked
+     * @param unread The run's papers whose snapshot entries this build cannot read: said after the rest,
+     *   never counted unchecked (#727)
      */
-    fun savedWorkLine(checks: Collection<PaperRetractionCheck>, causes: List<String> = emptyList()): String {
+    fun savedWorkLine(checks: Collection<PaperRetractionCheck>, causes: List<String> = emptyList(), unread: Int = 0): String {
         val line = methodsLine(
             checkedAtMs = checks.filterNot { it.isUnchecked }.minOfOrNull { it.checkedAtMs },
             notChecked = checks.count { it.isUnchecked },
             heldPapers = checks.isNotEmpty()
         )
         // the causes follow the not-checked count, as they follow the run notice's
-        return if (causes.isEmpty() || checks.none { it.isUnchecked }) line else "$line: ${causes.joinToString("; ")}"
+        val named = if (causes.isEmpty() || checks.none { it.isUnchecked }) line else "$line: ${causes.joinToString("; ")}"
+        return named + notReadClause(unread)
     }
 
     /** The button that checks a reopened session's papers again. */

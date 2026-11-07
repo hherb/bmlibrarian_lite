@@ -1092,6 +1092,33 @@ class TestRetryFullText:
         # the stored snapshot does not gain them
         assert [r["document_id"] for r in kept[CHECKPOINT_RETRACTION_SNAPSHOT_KEY]] == ["doc-1"]
 
+    def test_a_row_this_build_cannot_read_is_counted_unread_never_unchecked(
+        self, storage: LiteStorage
+    ) -> None:
+        """#727: doc-2's row is a newer build's; the report counts it unread and keeps it."""
+        checkpoint_id = reviewed(storage)
+        stored = storage.get_checkpoint(checkpoint_id)
+        newer = {"document_id": "doc-2", "verdict": {"status": "retracted"}}
+        storage.update_checkpoint(checkpoint_id, metadata={
+            **stored.metadata,
+            CHECKPOINT_RETRACTION_SNAPSHOT_KEY: [{
+                "document_id": "doc-1", "status": RetractionStatus.CLEAR.value,
+                "excluded": False, "title": "Aspirin trial 1",
+            }, newer],
+        }, touch=False)
+
+        _, _, reporter = retry(storage, {"doc-1": "T1."}, {"doc-1": ["New 1."]})
+
+        screen = reporter.generate_report.call_args.args[2].retraction_screen
+        assert "doc-2" not in {r["document_id"] for r in screen.to_snapshot()}
+        assert screen.unread_rows == (newer,)
+        # doc-3 and doc-4 have no row: unchecked; doc-2 is unread, never unchecked
+        assert screen.unchecked_count == 2
+        kept = storage.get_checkpoint(checkpoint_id).metadata
+        assert newer in kept[CHECKPOINT_RETRACTION_SNAPSHOT_KEY]
+        # the report's own metadata keeps it too, never erased on the next save
+        assert newer in kept[CHECKPOINT_REPORT_METADATA_KEY]["retraction_screen"]
+
     def test_a_run_never_screened_states_no_retraction_check(self, storage: LiteStorage) -> None:
         """Without a snapshot no paper reads as could-not-be-checked: none was tried."""
         reviewed(storage)

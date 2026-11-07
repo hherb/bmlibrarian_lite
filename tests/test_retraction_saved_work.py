@@ -35,7 +35,10 @@ from bmlib.publications.retraction_status import (  # noqa: E402
 
 from bmlibrarian_lite.audit_records import (  # noqa: E402
     CHECKPOINT_RETRACTION_SNAPSHOT_KEY,
+    UNREAD_RETRACTION_RECORD_KEY,
     checkpoint_metadata_with_retraction_snapshot,
+    classify_document_outcomes,
+    outcome_entries,
     recorded_retraction_snapshot,
     retraction_snapshot_unreadable,
 )
@@ -44,6 +47,7 @@ from bmlibrarian_lite.data_models import (  # noqa: E402
     Citation,
     DocumentSource,
     LiteDocument,
+    ReportMetadata,
     ScoredDocument,
 )
 from bmlibrarian_lite.gui import report_tab as report_tab_module  # noqa: E402
@@ -54,14 +58,18 @@ from bmlibrarian_lite.retraction_checks import paper_key  # noqa: E402
 from bmlibrarian_lite.retraction_screen import (  # noqa: E402
     RUN_STATUS_KEY,
     RetractionScreen,
+    RetractionSnapshot,
     as_the_run_saw_it,
     changed_since_snapshot,
     check_from_snapshot_row,
+    keeping_unread_rows,
     label_types_of,
     latest_checks,
     rechecked_snapshot,
     screen_documents,
     screen_with_fallback,
+    unread_row_ids,
+    unread_snapshot_rows,
 )
 from bmlibrarian_lite.retraction_store import PaperCheck  # noqa: E402
 from bmlibrarian_lite.retraction_text import (  # noqa: E402
@@ -72,6 +80,9 @@ from bmlibrarian_lite.retraction_text import (  # noqa: E402
     STATUS_UNREAD,
     STORED_CHECKS_UNREAD,
     over_unread_record,
+    retraction_methods_line,
+    run_summary_clause,
+    saved_work_line,
 )
 from bmlibrarian_lite.storage import LiteStorage  # noqa: E402
 
@@ -1825,6 +1836,123 @@ def test_check_again_never_writes_over_a_record_this_build_cannot_read(
     )
     assert audit_path.read_bytes() == before
     assert CHECK_AGAIN_NOT_SAVED in tab.retraction_line.text()
+
+
+#: A row a newer build wrote for UNCITED: its id is readable, nothing else
+NEWER_ROW = {"document_id": UNCITED.id, "verdict": {"status": "retracted"}}
+
+
+def snapshot_with_one_unread_row() -> list[Any]:
+    """The run's rows, UNCITED's in a shape this build cannot read."""
+    return [r for i, r in run_snapshot().items() if i != UNCITED.id] + [NEWER_ROW, "junk"]
+
+
+def test_unreadable_rows_are_read_apart_and_kept_as_found() -> None:
+    """#600: kept apart, by the id they still name; never written over."""
+    stored = snapshot_with_one_unread_row()
+    assert unread_snapshot_rows(stored) == [NEWER_ROW, "junk"]
+    assert unread_row_ids(unread_snapshot_rows(stored)) == {UNCITED.id}
+    assert unread_snapshot_rows({"not": "a list"}) == []
+    record = RetractionSnapshot.from_rows(stored)
+    assert {r["document_id"] for r in record.rows} == {CITED.id, LEFT_OUT.id}
+    assert record.unread_rows == (NEWER_ROW, "junk")
+    # a new row for UNCITED never replaces its unread one
+    fresh = screen_documents(DOCUMENTS, run_checks()).to_snapshot()
+    written = keeping_unread_rows(fresh, stored)
+    assert [r for r in written if isinstance(r, dict) and r.get("document_id") == UNCITED.id] == [NEWER_ROW]
+    assert written[-2:] == [NEWER_ROW, "junk"]
+    metadata = checkpoint_metadata_with_retraction_snapshot(
+        {CHECKPOINT_RETRACTION_SNAPSHOT_KEY: stored}, screen_documents(DOCUMENTS, run_checks()))
+    assert metadata[CHECKPOINT_RETRACTION_SNAPSHOT_KEY] == written
+    # a report's metadata saved again keeps them too
+    saved = ReportMetadata(research_question=QUESTION, retraction_screen=record).to_dict()
+    assert saved["retraction_screen"][-2:] == [NEWER_ROW, "junk"]
+    assert ReportMetadata.from_dict(saved).retraction_screen.unread_rows == (NEWER_ROW, "junk")
+
+
+def test_unreadable_rows_are_counted_could_not_be_read_never_could_not_be_checked() -> None:
+    """#727: their own count, in the notice, the methods line and the reopen line."""
+    record = RetractionSnapshot.from_rows(snapshot_with_one_unread_row())
+    assert run_summary_clause(record) == (
+        "1 retracted paper left out; 2 papers' retraction records could not be read")
+    assert retraction_methods_line(record) == (
+        "Retraction status checked 2026-10-01; 2 papers' records could not be read")
+    assert saved_work_line(record.rows, unread=1) == (
+        "Retraction status checked 2026-10-01; 1 paper's record could not be read")
+    # control: none unread, no clause
+    readable = RetractionSnapshot.from_rows(run_snapshot().values())
+    assert run_summary_clause(readable) == "1 retracted paper left out"
+    assert retraction_methods_line(readable) == "Retraction status checked 2026-10-01"
+
+
+def test_reopen_counts_a_scored_papers_unread_row_never_as_unchecked(
+    tab: ReportTab, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """UNCITED is scored; its row is unreadable, so no unchecked stand-in is added (#727)."""
+    stored = snapshot_with_one_unread_row()
+    checkpoint_id = saved_checkpoint(storage, {CHECKPOINT_RETRACTION_SNAPSHOT_KEY: stored})
+    tab.display_report(
+        report=REPORT, question=QUESTION,
+        citations=[Citation(document=CITED, passage="Aspirin reduced stroke.", relevance_score=4)],
+        documents_found=list(DOCUMENTS),
+        all_scored_documents=[
+            ScoredDocument(document=CITED, score=4, explanation="On topic."),
+            ScoredDocument(document=UNCITED, score=2, explanation="Off topic."),
+        ],
+        auto_save=False,
+        retraction_snapshot=recorded_retraction_snapshot({CHECKPOINT_RETRACTION_SNAPSHOT_KEY: stored}),
+        retraction_unread_rows=unread_snapshot_rows(stored),
+    )
+    tab.show_saved_retraction(checkpoint_id)
+    assert tab.retraction_line.text() == (
+        "Retraction status checked 2026-10-01; 2 papers' records could not be read")
+    # the audit record marks the unscored-or-not paper's entry, keeps the rows as found
+    audit = tab._audit_trail_data()
+    assert tab._retraction_record()["retraction"]["snapshot"][-2:] == [NEWER_ROW, "junk"]
+    assert not any(UNREAD_RETRACTION_RECORD_KEY in e for e in audit["unscored_documents"])
+    # Check again: the unread row is never written over, the answers shown here
+    run_check_again(tab, storage, monkeypatch, {d.id: check(RetractionStatus.CLEAR, NOW) for d in DOCUMENTS})
+    kept = storage.get_checkpoint(checkpoint_id).metadata[CHECKPOINT_RETRACTION_SNAPSHOT_KEY]
+    assert kept[-2:] == [NEWER_ROW, "junk"]
+    assert [r for r in kept if isinstance(r, dict) and r.get("document_id") == UNCITED.id] == [NEWER_ROW]
+    # its answer is not saved into the unread row, so the line still counts it, as on a reopen
+    assert tab.retraction_line.text() == (
+        f"Retraction status checked {NOW:%Y-%m-%d}; 2 papers' records could not be read")
+
+
+def test_an_unscored_papers_unread_row_marks_its_audit_entry() -> None:
+    """#600: an unscored paper whose row is unread may have been left out: never plainly not scored."""
+    outcomes = classify_document_outcomes(DOCUMENTS, [], 3)
+    entries = outcome_entries(outcomes, {}, {LEFT_OUT.id})
+    marked = {e["id"] for e in entries["unscored_documents"] if e.get(UNREAD_RETRACTION_RECORD_KEY)}
+    assert marked == {LEFT_OUT.id}
+
+
+def test_the_audit_trail_badges_an_unread_row(qapp: Any) -> None:
+    """NOT CHECKED, saying "could not be read" (#600); a readable row keeps its own badge."""
+    from bmlibrarian_lite.gui.audit_trail_tab import AuditTrailTab
+
+    audit = AuditTrailTab(config=MagicMock(), storage=MagicMock())
+    audit.literature_tab.update_retraction = MagicMock()  # type: ignore[method-assign]
+    audit.show_retraction_snapshot(run_snapshot(), {UNCITED.id, "gone"})
+    unread = [c for c in audit.literature_tab.update_retraction.call_args_list if c.kwargs.get("unread")]
+    assert [c.args[0] for c in unread] == ["gone"]  # UNCITED has a readable row here
+    audit.literature_tab.update_retraction.reset_mock()
+    audit.show_retraction_snapshot({}, {UNCITED.id})
+    (call,) = audit.literature_tab.update_retraction.call_args_list
+    assert call.args[0] == UNCITED.id and call.args[1].verdict.status is RetractionStatus.UNCHECKED
+
+
+def test_a_card_whose_record_is_unread_says_so(qapp: Any) -> None:
+    """The badge's tooltip is "could not be read", never the stand-in's sources."""
+    from bmlibrarian_lite.gui.document_card import DocumentCard
+    from bmlibrarian_lite.retraction_screen import unchecked_check
+
+    card = DocumentCard(CITED)
+    card.set_retraction_check(unchecked_check(), unread=True)
+    assert card._retraction_badge is not None and card._retraction_badge.toolTip() == STATUS_UNREAD
+    card.set_retraction_check(unchecked_check())
+    assert card._retraction_badge.toolTip() != STATUS_UNREAD
 
 
 def test_a_check_again_not_saved_after_the_reader_moved_on_is_said_on_return(

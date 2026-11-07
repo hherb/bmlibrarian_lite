@@ -761,6 +761,31 @@ final class RetractionScreenWorkflowTests: XCTestCase {
             "> **Retraction check:** 1 paper's retraction status could not be checked.\n\n"), report)
     }
 
+    /// #727: a scored paper whose snapshot entry cannot be read is counted
+    /// "could not be read" in a report written again, never unchecked.
+    func testAReportWrittenAgainCountsAnUnreadableEntryAsUnread() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b"])
+        documents[0].relevanceScore = 1
+        documents[0].scoredAt = Date()
+        let workflow = restore(session, check: Self.answering(["10.1000/b": Self.clear()]))
+        await workflow.retryFailedDocuments(pmids: [])
+        var entries = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(try XCTUnwrap(session.retractionSnapshotJSON).utf8)) as? [String: Any])
+        entries[documents[0].id] = ["status": 7]
+        session.retractionSnapshotJSON = String(data: try JSONSerialization.data(withJSONObject: entries), encoding: .utf8)
+
+        _ = try await workflow.regenerateReportWithNewEvidence(analyzeTransparencyUsing: { _, _, _ in
+            XCTFail("nothing is relevant, so nothing is rated")
+            throw CancellationError()
+        })
+
+        let report = try XCTUnwrap(session.report?.fullReport)
+        XCTAssertTrue(report.hasPrefix(
+            "> **Retraction check:** 1 paper's retraction record could not be read.\n\n"), report)
+        XCTAssertTrue(report.contains("; 1 paper's record could not be read"), report)
+        XCTAssertFalse(report.contains("could not be checked"), report)
+    }
+
     /// Control for the rule above: it covers a label verdict only. A stored
     /// Retraction Watch retraction on a document with no label recorded is
     /// replaced by a fresh clear every lookup answered (a reinstatement).

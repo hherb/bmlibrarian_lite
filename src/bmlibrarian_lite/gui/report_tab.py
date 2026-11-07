@@ -93,9 +93,12 @@ from ..retraction_screen import (
     decided_checked_at,
     label_types_of,
     latest_checks,
+    keeping_unread_rows,
     rechecked_snapshot,
     screen_documents,
     stored_snapshot_unreadable,
+    unread_row_ids,
+    unread_snapshot_rows,
 )
 from ..retraction_text import (
     CHECK_AGAIN_FAILED,
@@ -128,14 +131,16 @@ logger = logging.getLogger(__name__)
 FILE_ID_PREFIX = "file:"
 
 
-def retraction_entry(rows: Any) -> dict[str, Any]:
+def retraction_entry(rows: Any, stored: object = None) -> dict[str, Any]:
     """The audit JSON's ``retraction`` value for snapshot *rows*.
 
     ``checked_at`` follows the saved-work line: the oldest decided row's time.
+    The rows of *stored* this build cannot read are kept as found, never
+    written over (#600).
     """
     snapshot = RetractionSnapshot.from_rows(rows).to_snapshot()
     stamp = decided_checked_at(snapshot)
-    return {"snapshot": snapshot, "checked_at": stamp.isoformat() if stamp else None}
+    return {"snapshot": keeping_unread_rows(snapshot, stored), "checked_at": stamp.isoformat() if stamp else None}
 
 
 class ReportTab(QWidget):
@@ -210,6 +215,8 @@ class ReportTab(QWidget):
         self._retraction_unrecorded = False
         # A reopened run or loaded report whose snapshot this build cannot read (#600)
         self._retraction_unread = False
+        # The snapshot's rows this build cannot read, as found: papers whose record is unread (#727)
+        self._retraction_unread_rows: list[Any] = []
         # The run's papers' stored checks, the line's rows while its snapshot is unread (#727)
         self._stored_run_checks: Mapping[str, Any] = {}
         # The stored checks could not be read on reopen: said until a Check again answers (#733)
@@ -319,6 +326,7 @@ class ReportTab(QWidget):
         auto_save: bool = True,
         citation_extraction_failures: Sequence[ExtractionFailure] | None = None,
         retraction_snapshot: Mapping[str, Mapping[str, Any]] | None = None,
+        retraction_unread_rows: Sequence[Any] = (),
     ) -> None:
         """
         Display a report from the systematic review workflow.
@@ -354,6 +362,9 @@ class ReportTab(QWidget):
                 document id. Documents it records as left out (``excluded``)
                 are audited as retracted papers left out before scoring. None when the
                 run was not checked, which the audit trail states
+            retraction_unread_rows: The snapshot's rows this build cannot
+                read, as found: counted "could not be read" on the line and
+                kept in the audit record (#600, #727)
         """
         self._current_report = report
         self._current_question = question
@@ -374,6 +385,7 @@ class ReportTab(QWidget):
             if retraction_snapshot is None
             else {doc_id: dict(row) for doc_id, row in retraction_snapshot.items()}
         )
+        self._retraction_unread_rows = list(retraction_unread_rows)
         self._loaded_audit_data = None
         self._hide_saved_retraction()
 
@@ -477,9 +489,12 @@ class ReportTab(QWidget):
             self._shown_checks = current
         snapshot = self._retraction_snapshot or {}
         rows = list(snapshot.values())
+        # a paper whose row this build cannot read is counted as such, never unchecked (#727)
+        unread = self._retraction_unread_rows
         if snapshot and not (self._saved_checkpoint_id or "").startswith(FILE_ID_PREFIX):
             # a scored paper no screen saw is unchecked, as in the report written again (#685)
-            unscreened = [d.document for d in self._all_scored_documents if d.document.id not in snapshot]
+            seen = {*snapshot, *unread_row_ids(unread)}
+            unscreened = [d.document for d in self._all_scored_documents if d.document.id not in seen]
             rows += screen_documents(unscreened, {}).to_snapshot()
         if self._retraction_unread and not snapshot:
             note = over_unread_record(note)
@@ -492,7 +507,7 @@ class ReportTab(QWidget):
         elif self._retraction_unrecorded and not snapshot:
             line = NO_AUDIT_RECORD_LINE
         else:
-            line = saved_work_line(rows, causes)
+            line = saved_work_line(rows, causes, len(unread))
         # still said after a failed or stopped Check again, which reads no stored check (#733)
         self.retraction_line.setText(line + note + (STORED_CHECKS_UNREAD if self._stored_checks_unread else ""))
         self.retraction_line.setVisible(True)
@@ -623,6 +638,10 @@ class ReportTab(QWidget):
                 or doc_id not in stored or stored[doc_id].verdict.status is RetractionStatus.UNCHECKED
             }}
             updated = RetractionSnapshot(tuple(screen_documents(self._run_documents(), self._stored_run_checks).to_snapshot()))
+        else:
+            # a paper whose row this build cannot read keeps it, as saved: still unread (#727, as the apps)
+            unread_ids = unread_row_ids(self._retraction_unread_rows)
+            updated = RetractionSnapshot(tuple(r for r in updated.rows if r["document_id"] not in unread_ids))
         still = {row["document_id"] for row in updated.rows if row["status"] == RetractionStatus.UNCHECKED.value}
         decided = {row["document_id"] for row in updated.rows} - still
         # a decided row kept over an unchecked answer: no source could be reached for it
@@ -688,7 +707,7 @@ class ReportTab(QWidget):
             left_out = left_out if isinstance(left_out, list) else []
             ids = {str(e["id"]) for e in left_out if isinstance(e, Mapping) and "id" in e}
             updated = RetractionSnapshot(tuple({**r, "excluded": r["document_id"] in ids} for r in updated.rows))
-        audit["retraction"] = retraction_entry(updated.rows)
+        audit["retraction"] = retraction_entry(updated.rows, rows)
         handle, temp = tempfile.mkstemp(dir=audit_path.parent, prefix=audit_path.name, suffix=".tmp")
         try:
             with os.fdopen(handle, "w", encoding="utf-8") as out:
@@ -957,7 +976,7 @@ class ReportTab(QWidget):
         """
         if self._retraction_snapshot is None:
             return {}
-        return {"retraction": retraction_entry(self._retraction_snapshot.values())}
+        return {"retraction": retraction_entry(self._retraction_snapshot.values(), self._retraction_unread_rows)}
 
     def _auto_save_report(self) -> None:
         """
@@ -1035,7 +1054,9 @@ class ReportTab(QWidget):
                     }
                     for doc in self._documents_found
                 ],
-                **outcome_entries(outcomes, self._retraction_snapshot),
+                **outcome_entries(
+                    outcomes, self._retraction_snapshot, unread_row_ids(self._retraction_unread_rows)
+                ),
                 **extraction_failure_record(self._citation_extraction_failures),
                 **self._retraction_record(),
                 "citations": [
@@ -1089,6 +1110,7 @@ class ReportTab(QWidget):
             self._current_report = report
             self._hide_saved_retraction()
             self._retraction_snapshot = None
+            self._retraction_unread_rows = []
             self._all_citations = []
             self._file_documents = []
 
@@ -1171,6 +1193,7 @@ class ReportTab(QWidget):
         record = audit_data.get("retraction")
         rows = record.get("snapshot") if isinstance(record, Mapping) else None
         self._retraction_snapshot = RetractionScreen.from_snapshot(rows) if isinstance(rows, list) else {}
+        self._retraction_unread_rows = unread_snapshot_rows(rows)
         # an entry present but not one this build reads is unread, never absent (#600)
         unread = record is not None and (rows is None or stored_snapshot_unreadable(rows))
         summary = audit_data.get("workflow_summary")
@@ -1230,7 +1253,7 @@ class ReportTab(QWidget):
                 "citations_extracted": len(self._all_citations),
                 **extraction_failure_summary(self._citation_extraction_failures),
             },
-            **outcome_entries(outcomes, self._retraction_snapshot),
+            **outcome_entries(outcomes, self._retraction_snapshot, unread_row_ids(self._retraction_unread_rows)),
             **extraction_failure_record(self._citation_extraction_failures),
             "citations": [
                 {

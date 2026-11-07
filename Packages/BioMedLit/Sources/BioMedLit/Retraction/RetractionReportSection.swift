@@ -34,12 +34,15 @@ public struct RetractionReportSection: Sendable {
     ///   - papers: Every paper the run held (kept and left out) with the check it used.
     ///   - causes: Why kept papers are unchecked (``RetractionText/uncheckedCauses(_:failed:)``),
     ///     when the live run knows; empty gives the count alone, as the desktop's restored snapshot does.
-    public init(papers: [(title: String, check: PaperRetractionCheck)], causes: [String] = []) {
+    ///   - unread: The run's papers whose snapshot entries this build cannot read:
+    ///     counted as such, never unchecked and never listed as left out (#727).
+    public init(papers: [(title: String, check: PaperRetractionCheck)], causes: [String] = [], unread: Int = 0) {
         leftOut = papers.filter { $0.check.isRetracted }
         // As the desktop: the oldest *decided* check; an unchecked answer's time never counts.
-        methodsLine = RetractionText.savedWorkLine(papers.map(\.check))
+        methodsLine = RetractionText.savedWorkLine(papers.map(\.check), unread: unread)
         notice = RetractionText.runSummaryClause(
-            excluded: leftOut.count, unchecked: papers.filter { $0.check.isUnchecked }.count, causes: causes
+            excluded: leftOut.count, unchecked: papers.filter { $0.check.isUnchecked }.count, causes: causes,
+            unread: unread
         ).map(RetractionText.reportNotice)
     }
 

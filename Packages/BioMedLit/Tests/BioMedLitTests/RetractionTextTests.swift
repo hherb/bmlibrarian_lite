@@ -104,6 +104,14 @@ final class RetractionTextTests: XCTestCase {
                        "1 paper's retraction status could not be checked: no DOI or PMID")
         XCTAssertEqual(RetractionText.runSummaryClause(excluded: 1234, unchecked: 1234, causes: ["a", "b"]),
                        "1,234 retracted papers left out; 1,234 papers' retraction status could not be checked: a; b")
+        // #727: entries this build cannot read, their own count, last (the desktop's wording)
+        XCTAssertEqual(RetractionText.runSummaryClause(excluded: 1, unchecked: 0, causes: [], unread: 2),
+                       "1 retracted paper left out; 2 papers' retraction records could not be read")
+        XCTAssertEqual(RetractionText.runSummaryClause(excluded: 0, unchecked: 0, causes: [], unread: 1),
+                       "1 paper's retraction record could not be read")
+        XCTAssertEqual(RetractionText.savedWorkLine([], unread: 1), "Retraction status never checked; 1 paper's record could not be read")
+        XCTAssertEqual(RetractionText.notReadClause(0), "")
+        XCTAssertEqual(RetractionText.notReadClause(1_234), "; 1,234 papers' records could not be read")
     }
 
     func testEveryUncheckedPaperHasANamedCause() {

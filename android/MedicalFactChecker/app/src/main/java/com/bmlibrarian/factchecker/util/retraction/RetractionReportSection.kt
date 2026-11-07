@@ -24,24 +24,29 @@ package com.bmlibrarian.factchecker.util.retraction
  * @param causes Why kept papers are unchecked ([RetractionText.uncheckedCauses]),
  *   when the live run knows; empty gives the count alone, as the desktop's restored snapshot does
  * @param unread The run's record cannot be read: the methods line says so ([UNREAD])
+ * @param unreadEntries The run's papers whose snapshot entries this build cannot read:
+ *   counted as such, never unchecked and never listed as left out (#727)
  */
 class RetractionReportSection(
     papers: List<Pair<String, PaperRetractionCheck>>,
     causes: List<String> = emptyList(),
-    unread: Boolean = false
+    unread: Boolean = false,
+    unreadEntries: Int = 0
 ) {
 
     /** The papers left out as retracted, in the order given. */
     val leftOut: List<Pair<String, PaperRetractionCheck>> = papers.filter { it.second.isRetracted }
 
     /** [RetractionText.savedWorkLine] for the run (as the desktop, the oldest decided check), or [RetractionText.STATUS_UNREAD] when [unread]. */
-    val methodsLine: String = if (unread) RetractionText.STATUS_UNREAD else RetractionText.savedWorkLine(papers.map { it.second })
+    val methodsLine: String = if (unread) RetractionText.STATUS_UNREAD
+        else RetractionText.savedWorkLine(papers.map { it.second }, unread = unreadEntries)
 
     /** The report's opening notice, or null when nothing was left out and every paper was checked. */
     val notice: String? = RetractionText.runSummaryClause(
         excluded = leftOut.size,
         unchecked = papers.count { it.second.isUnchecked },
-        causes = causes
+        causes = causes,
+        unread = unreadEntries
     )?.let(RetractionText::reportNotice)
 
     /** [text] with the notice in front (the desktop's `with_retraction_notice`); unchanged when it already opens with one. */

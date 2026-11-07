@@ -2528,7 +2528,7 @@ class ReportMetadata:
 
         retraction_screen: What the retraction check left out and found, or
             None when none ran (or the stored one is unreadable); serialised
-            as its snapshot rows
+            as its snapshot rows, then its rows this build cannot read, as found
         retraction_screen_unread: A stored ``retraction_screen`` this build
             cannot read (not a list, or no row it reads), kept as found so a later save does not
             erase it, and said as unread, never as no check (#600); in the
@@ -2655,7 +2655,8 @@ class ReportMetadata:
             "transparency_limited_count": self.transparency_limited_count,
             "transparency_provisional_count": self.transparency_provisional_count,
             "retraction_screen": (
-                self.retraction_screen.to_snapshot()
+                # rows this build cannot read are kept as found, never erased (#600)
+                [*self.retraction_screen.to_snapshot(), *self.retraction_screen.unread_rows]
                 if self.retraction_screen is not None
                 else self.retraction_screen_unread
             ),

@@ -422,6 +422,15 @@ final class FactCheckSession {
         }
     }
 
+    /// The documents whose snapshot entries this build cannot read, in a
+    /// snapshot it reads as a whole: each a paper whose run record is
+    /// unknown, counted as "could not be read", never as unchecked and never
+    /// dropped (#727). Empty when the snapshot is absent or unread as a whole.
+    func retractionSnapshotUnreadIDs() -> Set<String> {
+        let read = retractionSnapshot()
+        return Set(retractionSnapshotEntries().keys.filter { read[$0] == nil })
+    }
+
     /// Whether the run recorded a snapshot this build cannot read: the whole
     /// of it, or the entry for `documentID` (any entry when `nil`). Unparsed
     /// is not absent, so a reader is told "could not be read" (#662).
@@ -456,7 +465,8 @@ final class FactCheckSession {
 
     /// Adds what a run used to the snapshot; a document checked again is
     /// replaced. Every other entry is kept as written, one this build cannot
-    /// read included (#647); a snapshot unreadable as a whole is never
+    /// read included (#647), and never replaced: it may hold what the run
+    /// left out (#600, the desktop's `keeping_unread_rows`); a snapshot unreadable as a whole is never
     /// written over (#726, the desktop's `_merge_retraction_snapshot`): what
     /// the run left out would be lost, and the stored checks keep the answers.
     ///
@@ -472,7 +482,8 @@ final class FactCheckSession {
             return false
         }
         var entries = retractionSnapshotEntries()
-        for (id, check) in checks {
+        let unread = retractionSnapshotUnreadIDs()
+        for (id, check) in checks where !unread.contains(id) {
             guard let data = try? JSONEncoder().encode(check),
                   let entry = try? JSONSerialization.jsonObject(with: data)
             else {
