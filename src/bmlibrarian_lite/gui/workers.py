@@ -75,7 +75,7 @@ from ..retraction_screen import (
     screen_with_fallback,
     unchecked_check,
 )
-from ..retraction_text import run_summary_clause
+from ..retraction_text import SCREEN_NOT_SAVED, run_summary_clause
 
 if TYPE_CHECKING:
     from ..config import LiteConfig
@@ -2109,8 +2109,6 @@ class MoreEvidenceWorker(SingleOutcome, QThread):
 
     def _with_unsaved(self, error: str) -> str:
         """*error*, with the screen's not-saved sentence when its rows could not be saved."""
-        from ..retraction_text import SCREEN_NOT_SAVED
-
         return f"{error.rstrip()} {SCREEN_NOT_SAVED}" if self._screen_unsaved else error
 
     def _find(self) -> None:

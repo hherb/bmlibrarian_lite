@@ -428,9 +428,9 @@ class ReportTab(QWidget):
         Args:
             checkpoint_id: The reopened run, which *Check again* updates.
             snapshot_unread: The run recorded a snapshot this build cannot
-                read; the line is its papers' stored checks, as on the apps
-                (#727), and says "could not be read" while there are none,
-                never "never checked" (#600).
+                read; the line is its scored and cited papers' stored checks
+                (#727), those with none counted unchecked, and says "could not
+                be read" while there are none, never "never checked" (#600).
         """
         self._saved_checkpoint_id = checkpoint_id
         self._retraction_unread = snapshot_unread
@@ -476,10 +476,12 @@ class ReportTab(QWidget):
             unscreened = [d.document for d in self._all_scored_documents if d.document.id not in snapshot]
             rows += screen_documents(unscreened, {}).to_snapshot()
         if self._retraction_unread and not snapshot:
-            # the stored checks stand in for the run's unread record, as on the apps (#727)
+            # the stored checks stand in for the run's unread record (#727); a paper
+            # with none is unchecked, never dropped, as in the readable branch (#685)
             stored = self._stored_run_checks
-            held = [d for d in self._run_documents() if d.id in stored]
-            line = saved_work_line(screen_documents(held, stored).to_snapshot()) if held else STATUS_UNREAD
+            papers = self._run_documents()
+            held = any(d.id in stored for d in papers)
+            line = saved_work_line(screen_documents(papers, stored).to_snapshot()) if held else STATUS_UNREAD
         elif self._retraction_unrecorded and not snapshot:
             line = NO_AUDIT_RECORD_LINE
         else:

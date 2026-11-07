@@ -91,7 +91,7 @@ have landed):
 
 **Retraction checking, desktop: done** (PRs #594, #597, #605; spec `docs/superpowers/specs/2026-10-18-retraction-checking-design.md`;
 contract `doc/cross_platform/retraction_parity/`). bmlib is a git dependency (`8845ba8`; a git pin blocks a PyPI
-upload). Snapshot rows keep `run_status`/`run_deciding` as set-once facts of the run. Open: #590–#593, #595, #599–#604, #607.
+upload). Snapshot rows keep `run_status`/`run_deciding` as set-once facts of the run. Open: #590–#593, #595, #599–#604 (#600 in part), #607.
 
 ## Recently landed (context)
 
@@ -239,14 +239,18 @@ Open issues by family; each issue carries the detail. None blocks another.
   failure or cancel still says it, #731). A report written again over one
   says unread but **keeps the metadata's readable copy stored** (#730,
   maintainer's option 2: written from a `replace`d copy). **Over an unread
-  snapshot the desktop line shows the run's papers' stored checks, as the
-  apps do** (#727 item 1, maintainer's option b; `_stored_run_checks`, never
-  a failed *Check again*'s label stand-ins). **An unchecked check never hides
+  snapshot the desktop line shows the run's scored and cited papers' stored
+  checks** (#727 item 1, maintainer's option b; `_stored_run_checks`, never
+  a failed *Check again*'s label stand-ins; a paper with none is counted as
+  could not be checked, which the apps do not do yet). **An unchecked check never hides
   a decided one, whatever the times** (#728).
   **#600** (audit outcomes of an unreadable snapshot; rows skipped one by
   one, which Find More Evidence's merge still drops), **#727 item 2** (the
   apps count one unreadable entry as "could not be checked", or drop an
-  unscored one; needs a decision, with #600),
+  unscored one; needs a decision, with #600), **#733** (over an unread
+  snapshot: "still the run's record" said over stored checks, the apps drop a
+  paper with no stored check, a failed *Check again* drops "later checks
+  could not be read"),
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**
   (test gaps mostly closed; `RetractionRun` lives in its own file; left: the
