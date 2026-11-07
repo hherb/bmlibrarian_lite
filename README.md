@@ -4,474 +4,260 @@
 
 # BMLibrarian Lite
 
-A lightweight biomedical literature research tool - no PostgreSQL required.
+Biomedical literature research and fact-checking with AI, without a database server.
 
-BMLibrarian Lite is a simplified version of BMLibrarian that provides AI-powered literature search and analysis capabilities without requiring a PostgreSQL database nor a powerful GPU and fast memory for local AI. It uses PubMed E-utilities and Europe PMC APIs for searching and fetching article metadata. It uses SQLite with sqlite-vec for vector storage and metadata, making it easy to install and use on any machine. In order to allow it to run on computers with limited resources, it uses FastEmbed for local embeddings and allows use of cloud LLM providers like Anthropic Claude instead of relying exclusively on local inference. Using local models with Ollama is optional.
+Ask a clinical question or state a medical claim. BMLibrarian Lite searches PubMed and Europe PMC, leaves out retracted papers, scores every paper's relevance with an LLM, checks each study's transparency about funding, conflicts of interest, data and trial registration, extracts citable passages (from the full text when it can get one) and writes a referenced report. Everything it learns is kept on your own machine in SQLite.
 
-## Platform Support
+It is the lightweight sibling of [BMLibrarian](https://github.com/hherb/bmlibrarian): no PostgreSQL, no local copy of PubMed, no GPU. It runs on an ordinary laptop with a cloud LLM (Anthropic Claude), or fully locally with [Ollama](https://ollama.com), and it also ships as native iOS, macOS and Android apps.
 
-BMLibrarian Lite is available on multiple platforms:
+**One rule runs through all of it: a failure is never reported as an absence.** A database that could not be reached is not "no articles", a paper that could not be scored is not "irrelevant", a retraction source that did not answer is not "not retracted", and a statement the parser could not read is not "no conflict of interest". Every report opens with a notice when it rests on less than was asked for, and its methodology says what was missing and why.
 
-| Platform | Technology | Status |
-|----------|------------|--------|
-| **Desktop** | Python/PySide6 | Production |
-| **iOS** | Swift/SwiftUI | Production |
-| **macOS** | Swift/SwiftUI | Production |
-| **Android** | Kotlin/Jetpack Compose | Production |
+## Platforms
+
+| Platform | Technology | Storage | Location |
+|----------|------------|---------|----------|
+| **Desktop** (Windows, macOS, Linux) | Python 3.12+, PySide6 | SQLite + sqlite-vec | `src/bmlibrarian_lite/` |
+| **iOS** and **macOS** | Swift, SwiftUI (one multiplatform project) | SwiftData | `ios/MedicalFactChecker/`, `Packages/BioMedLit/` |
+| **Android** | Kotlin, Jetpack Compose | Room | `android/MedicalFactChecker/` |
+
+The three platforms implement the same algorithms, pinned to shared contract files and corpora under [`doc/cross_platform/`](doc/cross_platform/) and checked in CI, so the same evidence gets the same verdict everywhere. The retraction rule comes from [bmlib](https://github.com/hherb/bmlib), the maintainer's shared biomedical-literature library.
 
 ## Features
 
-### Desktop Application (Python/PySide6)
+### Desktop application
 
-Cross-platform desktop application for comprehensive systematic literature review.
+- **Systematic review** from a question to a report: query conversion, search, retraction screen, optional quality filter, relevance scoring (1–5, in parallel for cloud providers), transparency analysis, citation extraction and a referenced report with risk warnings.
+- **Retraction checking** against a local copy of Retraction Watch's database, Crossref and PubMed's "Retracted Publication" label. Retracted papers are left out before scoring and listed in the report; papers under an expression of concern are kept with a caveat; a paper that could not be checked is marked **NOT CHECKED**, never "clear". Saved reports can be checked again later.
+- **Smart search**: when fewer than three papers are relevant, the model proposes alternative queries, which are searched, screened and scored the same way.
+- **Research Questions**: every past question can be loaded, re-run, re-scored, re-classified, re-analysed for transparency, or taken further with **Find More Evidence** (more of its own query, then a fresh smart-search round, scored into the same run and the report written again) and **Retry Full Text**.
+- **Full-text discovery** through a ten-step chain: your library → Europe PMC XML → PMC's open-access bucket → Europe PMC PDF → Elsevier's Article API (with your key) → Unpaywall → OpenAlex → the publisher's DOI link → CORE's extracted text (with your key) → your own upload. Every PDF is checked against the article's title before it is used.
+- **Bot-walled PDFs**: an open-access PDF behind a robot check is fetched later by a hidden built-in browser, or queued for you to open in a review window. A rescued PDF re-analyses its paper.
+- **Upload Full Text** for any paper no source has (PDF, HTML, Markdown or text).
+- **Citations from full text**, optionally, for papers scored 4 or higher. Long texts are read in overlapping windows and never cut.
+- **Study transparency analysis**: funding disclosure (with funder classification), conflicts of interest (including industry intermediaries), data availability (including effective refusals) and trial registration, with ClinicalTrials.gov and Crossref lookups. Each High rating is explained by the rules that produced it; a rating made without the full text is marked as such and re-run once the full text arrives.
+- **Quality assessment**: study-design classification and quality tiers, with a minimum-tier filter.
+- **Audit trail**: what became of every document (accepted, rejected with the model's reason, not scored, could not be scored, left out as retracted), the queries and the citations, live during a run.
+- **Document interrogation**: chat with a paper, a PDF or a text file, answered from its text.
+- **Multi-model benchmarking** of relevance scoring and study classification: agreement matrices, score distributions, cost and latency.
+- **MCP server** exposing the fact-checker to Claude Desktop, Claude Code or any [MCP](https://modelcontextprotocol.io/) client.
+- **LLM providers**: Anthropic Claude or Ollama, chosen per task (query conversion, scoring, citations, report, Q&A and the rest).
+- **Polite networking**: every request to PubMed, Europe PMC and the full-text services is paced per host and honours `Retry-After`.
 
-- **Systematic Literature Review**: Search PubMed and Europe PMC, score documents, extract citations, and generate reports
-- **Study Transparency Analysis**: Multi-pass analysis of funding disclosure, conflict of interest (with industry intermediary detection), data availability (with effective refusal detection), and trial registration — with risk warnings in reports
-- **MCP Server**: Expose bmlibrarian_lite as an expert medical fact-checker via [Model Context Protocol](https://modelcontextprotocol.io/) for use with Claude Desktop, Claude Code, or any MCP-compatible client
-- **Document Interrogation**: Interactive RAG-based Q&A with loaded documents
-- **Full-Text Discovery**: Automatic full-text retrieval via Europe PMC XML, Europe PMC PDF, Unpaywall PDF, and DOI resolution
-- **Quality Assessment**: Automated study quality evaluation with evidence grading
-- **Multi-Model Benchmarking**: Compare LLM models on relevance scoring and quality classification
-- **Parallel Processing**: Concurrent scoring and citation extraction with checkpointing and cancellation support
-- **Smart Search**: Automatic alternative query generation when initial results are insufficient
-- **Research Questions Management**: Save, re-run, and manage past research questions
-- **Audit Trail**: Real-time visibility into the review workflow with LLM reasoning transparency
-- **Multiple LLM Providers**: Support for both Anthropic Claude (online) and Ollama (local)
-- **Unified SQLite Storage**: Single database for metadata and vector embeddings - no external database needed
+### iOS, macOS and Android apps
 
-### iOS App (Swift/SwiftUI)
+A medical fact-checker built on the same workflow: enter a claim, get scored papers with transparency and retraction badges, and an evidence report with a verdict and clickable citations.
 
-Native iOS app for medical fact-checking on-the-go.
+- **LLM providers**: Anthropic, OpenAI, DeepSeek, Groq, Mistral, Ollama and any OpenAI-compatible endpoint, with live model lists. (On Android the Ollama preset reaches a server on the device; use Custom for one elsewhere.)
+- **Retraction checking** with the same sources as the desktop, decided by bmlib's Rust core (through UniFFI); retracted papers are left out before scoring.
+- **Study transparency analysis** with risk badges, detail views and explained ratings.
+- **Smart search**, **Find More Evidence**, **New Question**, **Retry Full Text** and **Upload Full Text** on each paper card.
+- **Full-text chain**: Europe PMC XML → PMC's open-access bucket → Europe PMC PDF → Elsevier (with your key) → Unpaywall → OpenAlex → CORE (with your key) → the DOI link, with title-checked PDFs, JATS rendering and optional full-text citations for papers scored 4–5.
+- **Dual scoring**: on-device embedding similarity (Apple NLEmbedding; a Universal Sentence Encoder model on Android) alongside the LLM score, with HyDE.
+- **Parallel scoring and citation extraction** with checkpointing, so an interrupted run resumes.
+- **Hybrid search**: PubMed, Europe PMC, or both with deduplication.
+- **Budget controls**: per-run and monthly spending limits with live cost tracking.
+- **PDF export** of reports, and a **history** of past sessions.
+- **iOS/macOS** (iOS 17, macOS 14 or later): optional iCloud sync, background processing on iOS, and a macOS layout for large screens. **Android**: 8.0 (API 26) or later, 64-bit devices.
 
-- **Medical Fact Checker**: Verify medical claims against peer-reviewed literature
-- **Multiple LLM Providers**: Anthropic, OpenAI, DeepSeek, Groq, Mistral, Ollama, and custom endpoints
-- **Dual Scoring System**: LLM-based relevance scoring plus on-device NLEmbedding semantic similarity
-- **HyDE Enhancement**: Hypothetical Document Embedding for improved semantic matching
-- **Study Transparency Analysis**: Funding, COI, data availability, and trial registration analysis with risk badges and detailed breakdown views
-- **Smart Search**: Automatic alternative query generation when initial results are insufficient
-- **Parallel Processing**: Concurrent document scoring and citation extraction with checkpointing
-- **Full-Text Access**: Multi-source retrieval (Europe PMC XML, Europe PMC PDF, Unpaywall PDF, DOI) with JATS XML rendering
-- **Hybrid Search**: Search PubMed, Europe PMC, or both simultaneously with deduplication
-- **Budget Controls**: Per-run and monthly spending limits with real-time cost tracking
-- **iCloud Sync**: Optional CloudKit integration for syncing data across devices
-- **PDF Export**: Generate evidence reports as PDF documents
-- **Session History**: Browse and revisit past fact-check sessions
+## Quick start (desktop)
 
-### macOS App (Swift/SwiftUI)
+### Install
 
-Native macOS app optimized for desktop workflows.
+From source (recommended):
 
-- **Native macOS UI**: Optimized layouts for larger screens with keyboard navigation
-- **Multiple LLM Providers**: Anthropic, OpenAI, DeepSeek, Groq, Mistral, Ollama, and custom endpoints
-- **Study Transparency Analysis**: Funding, COI, data availability, and trial registration analysis with risk badges and detailed breakdown views
-- **Smart Search**: Automatic alternative query generation when initial results are insufficient
-- **Parallel Processing**: Concurrent document scoring and citation extraction with checkpointing
-- **Full-Text Viewer**: View retrieved full-text articles with JATS XML rendering and Europe PMC PDF fallback
-- **Hybrid Search**: Search both PubMed and Europe PMC simultaneously
-- **PDF Export**: Native AppKit-based PDF generation with A4/Letter paper sizes
-- **iCloud Sync**: CloudKit integration for syncing with iOS devices
+```bash
+git clone https://github.com/hherb/bmlibrarian_lite.git
+cd bmlibrarian_lite
+uv venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+uv pip install -e .
+```
 
-### Android App (Kotlin/Jetpack Compose)
+`git` must be on your `PATH`: the installer fetches [bmlib](https://github.com/hherb/bmlib) from GitHub at a pinned commit until bmlib 0.12.0 is on PyPI.
 
-Native Android app with Material 3 design.
-
-- **Material 3 Design**: Modern UI following Google's Material You guidelines
-- **Medical Fact Checker**: Same fact-checking workflow as iOS/macOS
-- **Multiple LLM Providers**: Anthropic, OpenAI, DeepSeek, Groq, Mistral, and custom endpoints
-- **Study Transparency Analysis**: Funding, COI, data availability, and trial registration badges
-- **Smart Search**: Automatic alternative query generation when initial results are insufficient
-- **HyDE Enhancement**: Hypothetical Document Embedding for improved semantic matching
-- **Full-Text Access**: Multi-source retrieval (Europe PMC XML, Europe PMC PDF, Unpaywall PDF, DOI) with JATS XML parsing
-- **Hybrid Search**: PubMed, Europe PMC, or both simultaneously
-- **Parallel Processing**: Concurrent document scoring and citation extraction
-- **Budget Controls**: Per-run and monthly spending limits
-- **PDF Export**: Generate evidence reports as PDF documents
-- **Session History**: Browse and revisit past fact-check sessions
-- **Room Database**: Local persistence with SQLite via Room
-- **Hilt Dependency Injection**: Clean architecture with Dagger Hilt
-
-### BioMedLit Swift Package
-
-Shared iOS/macOS library (`Packages/BioMedLit/`) providing:
-
-- **JATS XML Parsing**: Full-featured parser converting Journal Article Tag Suite XML to HTML/Markdown
-- **Search Services**: PubMed and Europe PMC API clients with pagination
-- **Full-Text Service**: Unified retrieval with fallback chain (Europe PMC XML → Europe PMC PDF → Unpaywall PDF → DOI)
-- **Transparency Analysis**: Funding, COI, data availability, and trial compliance analyzers with CrossRef and ClinicalTrials.gov integration
-- **Sync Engine**: iCloud/local folder synchronization with selective sync, change tracking, and conflict resolution
-- **Utilities**: Retry helpers, cost calculator, query translator, response parser
-
-## Quick Start
-
-### Desktop Installation
-
-**From PyPI (recommended):**
+From PyPI:
 
 ```bash
 pip install bmlibrarian-lite
 ```
 
-**From source:**
+The PyPI release is **0.5.0**. It predates retraction checking, Find More Evidence, full-text uploads, the bot-walled PDF browser and the PMC bucket, Elsevier, OpenAlex and CORE sources. Install from source to get them; a new release follows once bmlib 0.12.0 is published.
+
+### Configure
+
+Pick an LLM:
 
 ```bash
-# Clone the repository
-git clone https://github.com/hherb/bmlibrarian_lite.git
-cd bmlibrarian_lite
-
-# Create virtual environment and install
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -e .
+export ANTHROPIC_API_KEY="your-api-key"          # Anthropic Claude (recommended)
+# or run locally:
+ollama pull llama3.2 && export OLLAMA_HOST="http://localhost:11434"
 ```
 
-### Configuration
-
-1. **Set your Anthropic API key** (for Claude):
-   ```bash
-   export ANTHROPIC_API_KEY="your-api-key-here"
-   ```
-
-2. **Or configure Ollama** (for local models):
-   ```bash
-   # Install Ollama: https://ollama.ai
-   ollama pull llama3.2
-   export OLLAMA_HOST="http://localhost:11434"
-   ```
-
-3. **Optional: Set your email for PubMed** (recommended):
-   ```bash
-   export NCBI_EMAIL="your@email.com"
-   ```
-
-4. **Optional: Configure PDF Discovery** (for Unpaywall API):
-   - Go to Settings in the GUI
-   - Enter your email address for Unpaywall API access
-   - Configure OpenAthens if you have institutional access
-
-### Running the Application
+Tell NCBI who you are (recommended):
 
 ```bash
-# Launch the GUI (short command)
-bmll
-
-# Or using the full name
-bmlibrarian-lite
-
-# Or using Python module
-python -m bmlibrarian_lite
+export NCBI_EMAIL="your@email.com"
+export NCBI_API_KEY="your-ncbi-key"   # optional, raises PubMed's rate limit
 ```
 
-### CLI Commands
+All of these can also be set in the GUI under **Settings**, or written as `NAME=value` lines in `~/.bmlibrarian_lite/.env`. Optional keys for more full-text sources (Unpaywall email, CORE, Elsevier, OpenAthens) are under **Settings → Full Text**.
+
+### Run
 
 ```bash
-# Show storage statistics
-bmll stats
+bmlibrarian-lite-gui     # the GUI
+bmll                     # the same GUI: bmll with no command launches it
+```
 
-# Validate configuration
-bmll validate --verbose
+The main window's tabs are **Research Questions**, **Systematic Review**, **Audit Trail**, **Report**, **Document Interrogation**, **Benchmark Results** and **Quality Benchmark**. Reports are saved automatically to `~/bmlibrarian_reports/LITE/`, with an audit record beside each one.
 
-# Show current configuration
-bmll config
+### CLI
 
-# Clear all data
-bmll clear
-
-# Show version
+```bash
+bmll stats [--json]          # storage statistics
+bmll validate                # check the configuration (bmll -v validate for detail)
+bmll config [--json]         # show the configuration
+bmll retractions-update      # refresh the local Retraction Watch copy
+bmll keep-pdf <file>         # keep a PDF the title check set aside
+bmll clear [-f]              # delete all stored data
 bmll --version
 ```
 
-### MCP Server
-
-BMLibrarian Lite can be used as an MCP server, allowing Claude Desktop, Claude Code, or any MCP-compatible client to use it as an expert medical fact-checker. See [HOWTO_MCP_SERVER.md](HOWTO_MCP_SERVER.md) for full setup instructions.
+### MCP server
 
 ```bash
-# Install as a uv tool (recommended)
-uv tool install bmlibrarian-lite
-
-# Or run from a local checkout
 bmlibrarian-lite-mcp
 ```
 
-The MCP server exposes four tools:
-- **`fact_check_claim`**: Full evidence pipeline (search, score, cite, report) with progress notifications
-- **`search_literature`**: Search PubMed and/or Europe PMC for articles
-- **`get_document_fulltext`**: Retrieve full text by PMID, DOI, or PMC ID
-- **`ask_document`**: RAG-based Q&A on loaded documents
+It offers four tools, using the desktop's configuration, library and retraction checking:
 
-### iOS App
+- `fact_check_claim`: search, score, cite and report on a claim, with progress notifications
+- `search_literature`: search PubMed and/or Europe PMC
+- `get_document_fulltext`: a paper's full text as Markdown, by PMID, DOI or PMC ID
+- `ask_document`: a question about the paper loaded last
 
-The iOS app is located in `ios/MedicalFactChecker/`. To build:
+Client setup (Claude Desktop, Claude Code, `uv tool install`) is in [HOWTO_MCP_SERVER.md](HOWTO_MCP_SERVER.md).
 
-1. **Open in Xcode**: Open `ios/MedicalFactChecker/MedicalFactChecker.xcodeproj`
-2. **Configure signing**: Set your development team in project settings
-3. **Build and run**: Select your target device/simulator and build
+## Building the apps
 
-**Configuration in iOS:**
-- Open Settings tab to configure:
-  - LLM provider and API key (Anthropic, OpenAI, DeepSeek, Groq, Mistral, Ollama, or custom)
-  - NCBI email for PubMed API
-  - Search provider (PubMed, Europe PMC, or both)
-  - Per-run and monthly budget limits
-  - Enable/disable embedding scoring
-  - iCloud sync (opt-in)
+**iOS and macOS** (one multiplatform project): open `ios/MedicalFactChecker/MedicalFactChecker.xcodeproj` in Xcode, set your signing team, choose an iPhone, iPad or **My Mac** destination and run. From the command line:
 
-### macOS App
-
-The macOS app is built from the same multiplatform project as the iOS app (`ios/MedicalFactChecker/`). To build:
-
-1. **Open in Xcode**: Open `ios/MedicalFactChecker/MedicalFactChecker.xcodeproj`
-2. **Configure signing**: Set your development team in project settings
-3. **Build and run**: Select "My Mac" as the run destination and build
-
-**Or build from command line:**
 ```bash
-cd ios/MedicalFactChecker
-xcodebuild -project MedicalFactChecker.xcodeproj \
-           -scheme MedicalFactChecker \
-           -destination 'platform=macOS' \
-           -configuration Debug \
-           build
+xcodebuild -project ios/MedicalFactChecker/MedicalFactChecker.xcodeproj \
+           -scheme MedicalFactChecker -destination 'platform=macOS' build
+swift test --package-path ios/MedicalFactChecker     # app tests
+swift test --package-path Packages/BioMedLit         # shared package tests
 ```
 
-### Android App
+**Android**: open `android/MedicalFactChecker` in Android Studio and run, or:
 
-The Android app is located in `android/MedicalFactChecker/`. To build:
-
-1. **Open in Android Studio**: Open the `android/MedicalFactChecker` directory
-2. **Sync Gradle**: Android Studio will automatically sync dependencies
-3. **Build and run**: Select your target device/emulator and click Run
-
-**Or build from command line:**
 ```bash
 cd android/MedicalFactChecker
 ./gradlew assembleDebug
+./gradlew testDebugUnitTest
 ```
 
-**Configuration in Android:**
-- Open Settings screen to configure:
-  - LLM provider and API endpoint (Anthropic, OpenAI, DeepSeek, Groq, Mistral, or custom)
-  - API key (stored securely in EncryptedSharedPreferences)
-  - NCBI email for PubMed API
-  - Per-run and monthly budget limits
-  - Search provider preferences (PubMed, Europe PMC, or both)
-
-**Requirements:**
-- Android 8.0 (API 26) or higher
-- Internet connection for API access
-
-## Usage
-
-### Systematic Review Workflow
-
-1. **Enter your research question** in the main text area
-2. **Click "Search"** to query PubMed and/or Europe PMC
-3. **Review found articles** and adjust filters as needed
-4. **Score documents** for relevance (1-5 scale) with parallel processing
-5. **Review transparency analysis** for funding, COI, and data availability concerns
-6. **Extract citations** from high-scoring documents
-7. **Generate a report** synthesizing the evidence with risk warnings
-
-### Research Questions Tab
-
-The Research Questions tab helps you manage and revisit past research:
-
-- **View past questions**: See all research questions with document counts and scores
-- **Re-run searches**: Incrementally search for new documents with automatic deduplication
-- **Context menu actions**: Re-classify study designs, re-score relevance, or delete questions
-- **Run benchmarks**: Compare model performance directly from saved questions
-
-### Multi-Model Benchmarking
-
-Compare how different LLM models perform on your documents:
-
-- **Relevance Score Benchmarking**: Compare scoring consistency across models
-  - Agreement matrices showing model-to-model consistency
-  - Score distribution analysis
-  - Cost and latency tracking per model
-
-- **Quality Assessment Benchmarking**: Compare study design classification
-  - Design agreement matrix
-  - Tier agreement for quality levels
-  - Document-level disagreement highlighting
-
-Access benchmarking from the Systematic Review tab after scoring documents.
-
-### Audit Trail
-
-The Audit Trail tab provides real-time visibility into the systematic review workflow:
-
-- **Queries Tab**: View generated search queries and statistics
-- **Literature Tab**: Browse document cards with relevance scores, quality badges, and transparency risk badges
-  - Click cards to expand and view abstracts
-  - See LLM rationales for scoring and quality decisions
-  - Quality badges show study design (RCT, Systematic Review, etc.)
-  - Transparency risk badges flag funding, COI, or data availability concerns
-- **Citations Tab**: View extracted citation passages with highlighting
-
-Right-click any document card to send it to the Document Interrogator for deeper analysis.
-
-### iOS/macOS Medical Fact Checker
-
-1. **Enter a medical claim or question** (e.g., "Vitamin D reduces COVID-19 severity")
-2. **Tap "Check Evidence"** to start the workflow
-3. **Review scored documents** with dual LLM/Embedding scores and transparency badges
-4. **View the evidence report** with verdict and supporting citations
-5. **Tap citations** to view source document details or full text
-6. **Export to PDF** or share
-
-### Android Medical Fact Checker
-
-1. **Enter a medical claim** on the Fact Check screen
-2. **Tap "Check"** to start the fact-checking workflow
-3. **Review scored documents** as they are processed with transparency badges
-4. **Optionally fetch more documents** if initial results are insufficient
-5. **View the evidence report** with verdict badge and supporting citations
-6. **Tap references** to view source document details or full text
-7. **Export as PDF** to share or save the report
-
-### Document Interrogation
-
-1. **Switch to the "Document Interrogation" tab**
-2. **Load a document** (PDF, TXT, or MD file)
-3. **Ask questions** about the document content
-4. **Get AI-powered answers** with source references
+LLM provider, API keys, NCBI email and key, search provider, budgets and full-text keys are set in each app's Settings screen. API keys are kept in the Keychain (Apple) or EncryptedSharedPreferences (Android).
 
 ## Configuration
 
-Configuration is stored in `~/.bmlibrarian_lite/config.json`:
+Desktop settings live in `~/.bmlibrarian_lite/config.json` and are easiest to change in the GUI. Each task can use its own provider and model:
 
 ```json
 {
-  "llm": {
-    "provider": "anthropic",
-    "model": "claude-sonnet-4-20250514",
-    "temperature": 0.7,
-    "max_tokens": 4096
+  "models": {
+    "default_provider": "anthropic",
+    "default_model": "claude-sonnet-4-6",
+    "tasks": {
+      "document_scoring": { "provider": "ollama", "model": "llama3.2" },
+      "citation_extraction": { "provider": "ollama", "model": "llama3.2", "context_window": 32768 }
+    }
   },
-  "embeddings": {
-    "model": "BAAI/bge-small-en-v1.5"
-  },
-  "pubmed": {
-    "email": "your@email.com"
-  },
-  "search": {
-    "chunk_size": 512,
-    "chunk_overlap": 50,
-    "similarity_threshold": 0.7,
-    "max_results": 100
-  }
+  "pubmed": { "email": "your@email.com" },
+  "search": { "search_provider": "pubmed", "max_results": 100 }
 }
 ```
 
-### LLM Providers
+Task IDs include `query_conversion`, `document_scoring`, `citation_extraction`, `report_generation`, `query_expansion`, `document_qa`, `document_summary`, `study_classification` and `quality_assessment`. For Ollama, set `context_window` for long documents (it is sent as `num_ctx`). The full reference is in the [user guide](doc/user/guide.md#settings).
 
-**Anthropic Claude** (default):
-```json
-{
-  "llm": {
-    "provider": "anthropic",
-    "model": "claude-sonnet-4-20250514"
-  }
-}
-```
+### Where data is kept
 
-**Ollama** (local):
-```json
-{
-  "llm": {
-    "provider": "ollama",
-    "model": "llama3.2"
-  }
-}
-```
+| Path | Contents |
+|------|----------|
+| `~/.bmlibrarian_lite/metadata.db` | Documents, embeddings, runs, scores, citations, transparency and retraction checks, uploads |
+| `~/.bmlibrarian_lite/retraction_watch.db` | Local copy of Retraction Watch's database (refreshed when over five weeks old) |
+| `~/.bmlibrarian_lite/config.json`, `.env` | Settings and optional environment variables |
+| `~/knowledgebase/pdf/`, `~/knowledgebase/fulltext/` | Downloaded PDFs and full texts as Markdown |
+| `~/bmlibrarian_reports/LITE/` | Reports and their audit records |
 
-You can also use the model string format: `anthropic:claude-sonnet-4-20250514` or `ollama:llama3.2`
+The embedding model (BAAI/bge-small-en-v1.5, about 100 MB) is downloaded on first use.
 
-## Requirements
+## BMLibrarian and BMLibrarian Lite
 
-- Python 3.12+
-- Internet connection (for PubMed/Europe PMC search and Claude API)
-- ~500MB disk space for embeddings cache
+[BMLibrarian](https://github.com/hherb/bmlibrarian) is a researcher's workbench built around a local PostgreSQL mirror of the literature: it works offline once the data is imported, and offers analyses Lite does not (peer-review-style paper assessment, PICO, PRISMA 2020, counterfactual search, a writing editor). Lite asks the literature databases live, so it needs an internet connection but no database server, no bulk download and no GPU, and it adds what a bedside or mobile fact-check needs: retraction screening, a full-text chain, native apps and an MCP server.
 
-### Dependencies
-
-- **sqlite-vec**: Vector similarity search extension for SQLite
-- **fastembed**: CPU-optimized embeddings
-- **anthropic**: Claude API client
-- **ollama**: Ollama API client
-- **PySide6**: GUI framework
-- **PyMuPDF**: PDF processing
-
-## Differences from Full BMLibrarian
-
-BMLibrarian Lite is designed for ease of use and portability:
-
-| Feature | BMLibrarian | Desktop (Python) | iOS App | macOS App | Android App |
-|---------|-------------|------------------|---------|-----------|-------------|
-| Database | PostgreSQL + pgvector | SQLite + sqlite-vec | SwiftData | SwiftData | Room (SQLite) |
-| Embeddings | Ollama (local) | FastEmbed (CPU) | Apple NLEmbedding | Apple NLEmbedding | N/A |
-| Full-Text Discovery | Full | Europe PMC XML/PDF + Unpaywall + DOI | Europe PMC XML/PDF + Unpaywall + DOI | Europe PMC XML/PDF + Unpaywall + DOI | Europe PMC XML/PDF + Unpaywall + DOI |
-| PDF Export | N/A | N/A | Included | Included | Included |
-| Transparency Analysis | N/A | Included | Included | Included | Included |
-| Parallel Processing | N/A | Included | Included | Included | Included |
-| Multi-Agent Workflow | Full orchestration | Simplified | Streamlined | Streamlined | Streamlined |
-| Plugin System | Lab plugins | N/A | N/A | N/A | N/A |
-| MCP Server | N/A | Included | N/A | N/A | N/A |
-| Multi-Model Benchmarking | N/A | Included | N/A | N/A | N/A |
-| Smart Search | N/A | Included | Included | Included | Included |
-| Research Questions | N/A | Save & re-run | History view | History view | History view |
-| Budget Controls | N/A | N/A | Per-run & monthly | Per-run & monthly | Per-run & monthly |
-| HyDE Embedding | N/A | N/A | Included | Included | Included |
-| Local LLM Support | N/A | Ollama | Ollama | Ollama | N/A |
-| Search Providers | N/A | PubMed + Europe PMC | PubMed + Europe PMC | PubMed + Europe PMC | PubMed + Europe PMC |
-| iCloud Sync | N/A | N/A | Included | Included | N/A |
-| Installation | Complex | `pip install` | Xcode build | Xcode build | Android Studio |
+| | BMLibrarian | Lite desktop | Lite iOS / macOS | Lite Android |
+|---|---|---|---|---|
+| **Focus** | Research workbench: systematic review, paper review, fact-checking, writing | Systematic review and fact-checking | Fact-checking | Fact-checking |
+| **Where the literature comes from** | Local mirror: PubMed, medRxiv, PMC/Europe PMC bulk, ClinicalTrials.gov, MeSH | Live: PubMed E-utilities, Europe PMC | Live: PubMed, Europe PMC | Live: PubMed, Europe PMC |
+| **Works offline** | Yes, after import | No (searches are live; results are kept locally) | No | No |
+| **Database** | PostgreSQL + pgvector | SQLite + sqlite-vec | SwiftData | Room (SQLite) |
+| **Setup** | PostgreSQL and bulk imports (a one-click installer is in development) | `pip` / `uv` install | Xcode build | Android Studio build |
+| **Hardware** | Local LLMs want a GPU or plenty of fast memory | Any laptop | iOS 17+, macOS 14+ | Android 8.0+, 64-bit |
+| **LLMs** | Local Ollama first; cloud models via bmlib | Anthropic or Ollama, per task | Anthropic, OpenAI, DeepSeek, Groq, Mistral, Ollama, custom | Anthropic, OpenAI, DeepSeek, Groq, Mistral, Ollama, custom |
+| **Embeddings** | Ollama (snowflake-arctic-embed2, nomic-embed-text) | FastEmbed on CPU (bge-small-en-v1.5) | Apple NLEmbedding, on device | Universal Sentence Encoder (MediaPipe), on device |
+| **Search** | Semantic, keyword, hybrid, HyDE, MeSH expansion, counterfactual | LLM-built query; smart search (alternative queries) | LLM-built query, HyDE, smart search | LLM-built query, HyDE, smart search |
+| **Retracted papers** | Retraction Watch imported for transparency; "retracted" titles filtered | Left out before scoring (Retraction Watch, Crossref, PubMed label; bmlib's rule) | Left out before scoring (Retraction Watch, Crossref; bmlib's Rust core) | Same as iOS / macOS |
+| **Transparency analysis** | Funding, COI, data, registration, author contributions | Funding, COI, data, registration; explained ratings | Same, with detail views | Same |
+| **Quality assessment** | Study assessment, paper weight, PICO, PRISMA 2020, GRADE | Study design and quality tiers | — | — |
+| **Full text** | Bulk PMC/Europe PMC import, PDF discovery, OpenAthens | Ten-step chain, bot-wall browser, uploads, OpenAthens | Chain and uploads | Chain and uploads |
+| **Citations from full text** | No (citations quote abstracts) | Optional (score ≥ 4), windowed, never cut | Optional | Optional |
+| **Fact-checking** | Statement fact-checker, PaperChecker for abstracts | Systematic review; MCP `fact_check_claim` | Claim → verdict report | Claim → verdict report |
+| **Document Q&A** | Yes | Yes | — | — |
+| **Audit** | Audit trail and multi-reviewer validation GUI | Audit trail of every document | Per-session history | Per-session history |
+| **Model benchmarking** | Yes | Yes (relevance and classification) | — | — |
+| **MCP server** | — | Yes | — | — |
+| **Report export** | Markdown, PDF, JSON | Markdown | PDF | PDF |
+| **Budget limits** | — | Token and cost display | Per-run and monthly | Per-run and monthly |
+| **Sync** | — | — | iCloud (optional) | — |
+| **Extensibility** | Qt plugin tabs and labs | — | — | — |
 
 ## Documentation
 
-Documentation is organized into several categories:
-
-- **Changelog** (`CHANGELOG.md`): Release history and notable changes
-- **User Documentation** (`doc/user/`): End-user guides and tutorials
-- **Developer Documentation** (`doc/developer/`): Architecture, API, and contribution guides
-- **Cross-Platform Algorithms** (`doc/cross_platform/`): Platform-agnostic algorithm specifications
-  - `parallel_processing.md` - Parallel scoring and citation extraction
-  - `fulltext_retrieval.md` - Full-text discovery chain
-  - `hybrid_search.md` - Multi-provider search
-  - `jats_parsing.md` - JATS XML parsing
-  - `sync_protocol.md` - Sync protocol specification
-- **LLM Context** (`doc/llm/`): Context for AI assistants working with the codebase
-  - `golden_rules.md` - Python/PySide6 coding standards
-  - `general_golden_rules.md` - Swift/Kotlin coding standards
-  - `database-schema.md` - Database schema reference
+- [User guide](doc/user/guide.md): the desktop application in full, from installation to troubleshooting
+- [Transparency on iOS/macOS](doc/ios/user/transparency.md)
+- [HOWTO_MCP_SERVER.md](HOWTO_MCP_SERVER.md): the MCP server in each client
+- [CHANGELOG.md](CHANGELOG.md): release history
+- [Developer guide](doc/developer/guide.md): architecture, code style, release process
+- [Retraction checking](doc/developer/retraction_checking.md), [browser rescue](doc/developer/browser_rescue.md), [PubMed and Europe PMC](doc/developer/europepmc_and_pubmed.md)
+- [Cross-platform specifications](doc/cross_platform/): full-text retrieval, hybrid search, JATS parsing, parallel processing, request pacing, failure reporting, and the parity contracts
+- [ROADMAP.md](ROADMAP.md): planned work
+- [`doc/llm/`](doc/llm/): coding standards (`golden_rules.md` for Python, `general_golden_rules.md` for Swift/Kotlin) and the database schema
 
 ## Development
 
 ```bash
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Run linting
+uv venv && source .venv/bin/activate && uv pip install -e ".[dev]"
+pytest tests/
 ruff check .
-
-# Run type checking
 mypy src/
 ```
+
+CI runs the Python, Swift and Android suites and the cross-platform parity guards on every pull request.
+
+## Related projects
+
+- [BMLibrarian](https://github.com/hherb/bmlibrarian): the full workbench, with a local literature database
+- [bmlib](https://github.com/hherb/bmlib): the shared library behind both (LLM providers, publication ingestion, transparency and retraction rules)
+- [biasbuster](https://github.com/hherb/biasbuster): datasets and fine-tuning for detecting bias in biomedical abstracts
+- [BioMedicalNews](https://github.com/hherb/BioMedicalNews): curated digests of new preprints and papers
 
 ## License
 
 Copyright (C) 2024-2026 Dr Horst Herb
 
-AGPL-3.0 License - see LICENSE file for details.
-
-## Acknowledgments
-
-BMLibrarian Lite is derived from [BMLibrarian](https://github.com/hherb/bmlibrarian), a comprehensive biomedical literature research platform.
+AGPL-3.0-or-later. See [LICENSE](LICENSE).
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/hherb/bmlibrarian_lite/issues)
-- **Documentation**: See the `doc/` directory for detailed guides
+- [GitHub Issues](https://github.com/hherb/bmlibrarian_lite/issues)
+- The [`doc/`](doc/) directory
