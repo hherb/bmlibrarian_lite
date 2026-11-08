@@ -64,8 +64,7 @@ apps, not a Wi-Fi hint a reader on Wi-Fi was given too. **A scored paper with no
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
 error follows a cancel). Open, lodged by recent rounds: #641 (JATS whitespace,
-Swift, Kotlin, desktop journal title), #642 (citation highlight; use bmlib's
-`find_passage`), #598, #621, #624, #625, #627, #633–#635; Apple #612, #613;
+Swift, Kotlin, desktop journal title), #598, #621, #624, #625, #627, #633–#635; Apple #612, #613;
 Android #614, #615, #617–#619. The apps have no refusal handling yet (the
 Python-only rows in `doc/cross_platform/analysis_failure_reporting.md`).
 
@@ -95,6 +94,7 @@ upload). Snapshot rows keep `run_status`/`run_deciding` as set-once facts of the
 
 ## Recently landed (context)
 
+- **Citation highlight by bmlib's `find_passage`** (#642): the abstract's own span, ≥ 0.9 similarity; a near match carries `CITATION_NEAR_MATCH_NOTE`.
 - **Apple release blockers** (fixed for 1.7, never shipped; PRs #676,
   #678–#680, #682); the Mac app is sandboxed (`network.client`, `print`).
   **A run never waits for the Retraction Watch refresh** (`currentIndex` is
@@ -494,9 +494,4 @@ page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
   `python .github/scripts/lint_delta.py --base-ref origin/master`. **Never record
   an absolute baseline count**: the mypy total differs between macOS and the
   Linux runner and drifts with every commit.
-
-### Xcode Cloud contract (macOS ships from the multiplatform project)
-
-Xcode Cloud archives scheme `MedicalFactChecker` from a **fresh clone**; `xcode-project-guards.yml`
-keeps package references in-repo and the scheme shared. Reproduce: clone to `/tmp/x`, then in its
-`ios/MedicalFactChecker` `xcodebuild -scheme MedicalFactChecker -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO archive`.
+- **Xcode Cloud** archives scheme `MedicalFactChecker` from a fresh clone (`xcode-project-guards.yml` keeps package refs in-repo, the scheme shared); reproduce with a clone's `xcodebuild … 'platform=macOS' CODE_SIGNING_ALLOWED=NO archive`.

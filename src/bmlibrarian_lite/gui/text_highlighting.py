@@ -22,12 +22,16 @@ for PySide6/Qt text widgets.
 """
 
 import logging
-import re
-from typing import Optional, Tuple
+from typing import Tuple
 
+from bmlib.citations import PassageMatch, find_passage
 from PySide6.QtWidgets import QTextBrowser
 
-from ..constants import CITATION_HIGHLIGHT_COLOR
+from ..constants import (
+    CITATION_HIGHLIGHT_COLOR,
+    CITATION_HIGHLIGHT_MIN_SIMILARITY,
+    CITATION_NEAR_MATCH_NOTE,
+)
 from .card_utils import escape_html
 
 logger = logging.getLogger(__name__)
@@ -36,43 +40,31 @@ logger = logging.getLogger(__name__)
 def find_passage_in_abstract(
     abstract: str,
     passage: str,
-) -> Optional[Tuple[int, int]]:
+) -> PassageMatch | None:
     """
-    Find passage location within abstract text.
+    Find a cited passage, or its closest wording, within an abstract.
 
-    Performs case-insensitive search for the passage.
-    Returns start and end indices if found.
+    Uses bmlib's ``find_passage``: case, whitespace and typographic variants
+    are ignored, and the span returned is the abstract's own, so it can be
+    sliced from the original text. A near match (``exact`` False) is the
+    abstract's closest wording, not proof the quote is verbatim.
 
     Args:
         abstract: Full abstract text
         passage: Passage to find within abstract
 
     Returns:
-        Tuple of (start, end) indices if found, None otherwise
+        The accepted match (``start``/``end`` into ``abstract``), or None
     """
     if not abstract or not passage:
         return None
+    match = find_passage(passage, abstract, CITATION_HIGHLIGHT_MIN_SIMILARITY)
+    return match if match.matched else None
 
-    # Try exact match first (case-insensitive)
-    pattern = re.compile(re.escape(passage), re.IGNORECASE)
-    match = pattern.search(abstract)
 
-    if match:
-        return match.span()
-
-    # Try fuzzy match - normalize whitespace and try again
-    normalized_passage = re.sub(r'\s+', ' ', passage.strip())
-    normalized_abstract = re.sub(r'\s+', ' ', abstract.strip())
-
-    pattern = re.compile(re.escape(normalized_passage), re.IGNORECASE)
-    match = pattern.search(normalized_abstract)
-
-    if match:
-        # Map back to original abstract positions (approximate)
-        # This is imperfect but better than no match
-        return match.span()
-
-    return None
+def _near_match_note() -> str:
+    """The line said above an abstract whose highlight is not verbatim."""
+    return f"<p><em>{escape_html(CITATION_NEAR_MATCH_NOTE)}</em></p>"
 
 
 def create_highlighted_html(
@@ -105,9 +97,10 @@ def create_highlighted_html(
     match_result = find_passage_in_abstract(abstract, passage)
 
     if match_result:
-        start, end = match_result
+        start, end = match_result.start, match_result.end
         # Build HTML with highlighted section
         html = (
+            f"{'' if match_result.exact else _near_match_note()}"
             f"{escape_html(abstract[:start])}"
             f"<span style='background-color: {highlight_color}; "
             f"font-weight: bold; padding: 2px 4px; border-radius: 3px;'>"
@@ -220,10 +213,14 @@ def highlight_multiple_passages(
 
     # Find all passage locations
     highlights: list[Tuple[int, int]] = []
+    all_exact = True
     for passage in passages:
         match_result = find_passage_in_abstract(abstract, passage)
         if match_result:
-            highlights.append(match_result)
+            start, end = match_result.start, match_result.end
+            assert start is not None and end is not None  # an accepted match
+            highlights.append((start, end))
+            all_exact = all_exact and match_result.exact
 
     if not highlights:
         # No passages found - show them separately
@@ -251,7 +248,7 @@ def highlight_multiple_passages(
             merged.append((start, end))
 
     # Build HTML with all highlights
-    result_parts = []
+    result_parts = [] if all_exact else [_near_match_note()]
     last_end = 0
     for start, end in merged:
         # Add text before highlight

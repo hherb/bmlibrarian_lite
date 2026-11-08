@@ -756,6 +756,14 @@ SCORE_COLOR_FAILED = "#757575"
 
 # Citation highlight color (yellow)
 CITATION_HIGHLIGHT_COLOR = "#FFEB3B"
+# Least similarity at which a cited passage's closest wording in the abstract
+# is highlighted (bmlib's find_passage locates reliably at high thresholds).
+CITATION_HIGHLIGHT_MIN_SIMILARITY = 0.9
+# Said above an abstract whose highlight is a near match, never verbatim.
+CITATION_NEAR_MATCH_NOTE = (
+    "The highlighted wording is the closest the abstract has; the cited "
+    "passage does not appear in it word for word."
+)
 
 # Batched UI update delay (milliseconds)
 # Prevents UI lag during rapid document additions
