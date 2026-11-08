@@ -37,10 +37,10 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .analysis_failures import pass_failure_detail
 from .audit_records import (
@@ -54,6 +54,7 @@ from .audit_records import (
     recorded_report_metadata,
     recorded_retraction_snapshot,
     recorded_unread_ids,
+    recorded_unread_rows,
     retraction_snapshot_unreadable,
 )
 from .citation_full_texts import FullTextFetch, fetch_full_texts
@@ -74,7 +75,7 @@ from .full_text_retry import (
     write_report_again,
 )
 from .quality.data_models import QualityFilter
-from .retraction_screen import keeping_unread_rows
+from .retraction_screen import keeping_unread_rows, unread_row_ids
 from .retraction_text import SCREEN_NOT_SAVED
 from .search_failures import combined_shortfalls
 from .smart_search import NO_NEW_EVIDENCE_TEXT, SmartSearchContext, SmartSearchRound
@@ -104,6 +105,11 @@ QualityGate = Callable[[list["LiteDocument"], "QualityFilter"], list["LiteDocume
 QUALITY_FILTER_UNREADABLE_TEXT = (
     "This report's review applied a quality filter that cannot be read back, so "
     "documents found now could not be filtered alike. Run the review again."
+)
+RETRACTION_RECORD_UNREADABLE_TEXT = (
+    "This report's run kept a retraction record this build cannot read, so the "
+    "papers it left out as retracted are not known and could be counted again "
+    "as new evidence. Run the review again."
 )
 
 #: Checkpoint metadata: the ids of documents found for the run that a stop
@@ -291,7 +297,8 @@ def find_more_evidence(
 
     Raises:
         RetryNotPossible: The question has no report, or its run did not keep
-            the report's metadata, or its quality filter cannot be read back.
+            the report's metadata, or its quality filter cannot be read back,
+            or its retraction snapshot does not name the papers it holds.
         SmartSearchError: No alternative search could run.
         SearchFailedError: Failures left the alternative searches with nothing.
     """
@@ -309,6 +316,8 @@ def find_more_evidence(
             settings = QualityFilter.from_report_settings(metadata.quality_filter_settings)
         except ValueError as e:
             raise RetryNotPossible(QUALITY_FILTER_UNREADABLE_TEXT) from e
+    if _snapshot_hides_papers(checkpoint.metadata):
+        raise RetryNotPossible(RETRACTION_RECORD_UNREADABLE_TEXT)
     stored_min = checkpoint.metadata.get(CHECKPOINT_MIN_SCORE_KEY)
     min_score = (
         stored_min
@@ -465,6 +474,19 @@ def known_document_ids(storage: LiteStorage, question: str) -> set[str]:
         | set(_stored_ids(stored.get(CHECKPOINT_QUALITY_FILTERED_KEY)))
         | set(_stored_ids(stored.get(CHECKPOINT_RETRACTED_UNSAVED_KEY)))
     )
+
+
+def _snapshot_hides_papers(metadata: Mapping[str, Any]) -> bool:
+    """Whether the run's retraction snapshot holds papers it does not name (#739).
+
+    Not a list, or a row this build cannot read that names no document:
+    what the run left out as retracted is then unknown, so found again it
+    would count as new.
+    """
+    stored = metadata.get(CHECKPOINT_RETRACTION_SNAPSHOT_KEY)
+    if stored is not None and not isinstance(stored, list):
+        return True
+    return any(not unread_row_ids([row]) for row in recorded_unread_rows(metadata))
 
 
 def _record_ids(storage: LiteStorage, checkpoint_id: str, key: str, ids: list[str]) -> None:

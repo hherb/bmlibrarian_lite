@@ -1247,8 +1247,34 @@ final class RetractionSavedWorkTests: XCTestCase {
 
         XCTAssertEqual(restore(session).retractionSavedWorkLine, "Retraction status checked 2026-10-18; 1 paper's record could not be read")
 
-        XCTAssertTrue(session.recordRetractionSnapshot([documents[1].id: Self.check("clear")]))
+        // #738: the check not stored over it is said not saved; another paper's is written
+        XCTAssertFalse(session.recordRetractionSnapshot([documents[1].id: Self.check("clear"), "c": Self.check("clear")]))
         XCTAssertEqual(session.retractionSnapshotUnreadIDs(), [documents[1].id], "never written over")
+        XCTAssertEqual(session.retractionSnapshot()["c"], Self.check("clear"))
+        XCTAssertTrue(session.recordRetractionSnapshot(["c": Self.check("retracted")]), "control: a readable paper's check")
+    }
+
+    /// #737: a newer build's status is an entry this build cannot read,
+    /// never unchecked, and kept as written.
+    func testASnapshotEntryNamingAnUnknownStatusIsUnreadAndKept() throws {
+        let session = FactCheckSession(claim: "Aspirin prevents stroke")
+        context.insert(session)
+        _ = session.recordRetractionSnapshot(["a": Self.check("clear"), "b": Self.check("clear")])
+        var written = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(try XCTUnwrap(session.retractionSnapshotJSON).utf8)) as? [String: Any])
+        var newer = try XCTUnwrap(written["b"] as? [String: Any])
+        newer["status"] = "withdrawn"
+        written["b"] = newer
+        session.retractionSnapshotJSON = String(data: try JSONSerialization.data(withJSONObject: written), encoding: .utf8)
+
+        XCTAssertEqual(session.retractionSnapshot(), ["a": Self.check("clear")])
+        XCTAssertEqual(session.retractionSnapshotUnreadIDs(), ["b"])
+        XCTAssertTrue(session.retractionSnapshotUnread(for: "b"))
+        XCTAssertFalse(session.retractionSnapshotUnread(for: "a"), "control: a known status reads")
+        XCTAssertFalse(session.recordRetractionSnapshot(["b": Self.check("clear")]))
+        let kept = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(try XCTUnwrap(session.retractionSnapshotJSON).utf8)) as? [String: Any])
+        XCTAssertEqual((kept["b"] as? [String: Any])?["status"] as? String, "withdrawn")
     }
 
     /// A snapshot the earlier build wrote (one `JSONEncoder` pass over the whole

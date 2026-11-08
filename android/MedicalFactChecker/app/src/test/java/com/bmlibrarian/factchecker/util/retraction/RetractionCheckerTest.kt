@@ -383,6 +383,18 @@ class RetractionCheckerTest {
         assertTrue(RetractionSnapshot.read(null).isEmpty())
     }
 
+    /** #737: a newer build's status is an entry this build cannot read, never unchecked, and kept on merge. */
+    @Test
+    fun `a snapshot entry naming an unknown status is unread and kept as it was`() {
+        val text = """{"a":{"status":"clear","checkedAtMs":1},"b":{"status":"withdrawn","checkedAtMs":1}}"""
+        assertEquals(setOf("a"), RetractionSnapshot.read(text).keys)
+        assertEquals(setOf("b"), RetractionSnapshot.unreadIds(text))
+        assertTrue(RetractionSnapshot.unread(text, "b"))
+        val merged = RetractionSnapshot.merged(text, mapOf("b" to stored("clear")))!!
+        assertTrue(merged, merged.contains(""""b":{"status":"withdrawn","checkedAtMs":1}"""))
+        assertFalse("control: a known status reads", RetractionSnapshot.unread(text, "a"))
+    }
+
     @Test
     fun `a snapshot unreadable as a whole is never merged over`() {
         // #726: what the run left out would be lost

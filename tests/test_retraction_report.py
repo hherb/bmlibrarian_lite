@@ -253,26 +253,43 @@ def test_an_unreadable_stored_screen_is_kept_and_said_as_unread() -> None:
 
 
 def test_snapshot_rows_are_read_one_way_by_every_reader() -> None:
-    """A truthy non-bool, an unknown status, a missing title: one reading for all."""
+    """A truthy non-bool, a non-mapping notice, a missing title: one reading for all."""
     from bmlibrarian_lite.retraction_screen import RetractionScreen
 
     rows = RetractionScreen.from_snapshot(
         [
             {"document_id": "a", "status": "retracted", "excluded": 1},
-            {"document_id": "b", "status": "retracted_v2", "excluded": True, "deciding": "x"},
-            {"document_id": "c", "status": "clear", "run_status": "retracted_v2", "run_deciding": "x"},
+            {"document_id": "b", "status": "retracted", "excluded": True, "deciding": "x"},
+            {"document_id": "c", "status": "clear", "run_status": "concern", "run_deciding": "x"},
         ]
     )
     assert rows["a"]["excluded"] is False  # only true left a paper out
-    assert rows["b"]["status"] == RetractionStatus.UNCHECKED.value
     assert rows["b"]["deciding"] is None
-    assert rows["c"]["run_status"] == RetractionStatus.UNCHECKED.value
+    assert rows["c"]["run_status"] == RetractionStatus.CONCERN.value
     assert rows["c"]["run_deciding"] is None
     assert "run_status" not in rows["a"]  # an older row gains no run fields
     assert rows["a"]["title"] == ""
     assert format_retracted_section(RetractionSnapshot.from_rows(rows.values())).startswith(
         "## Left out as retracted\n\n- . Retracted"
     )
+
+
+def test_an_unknown_status_is_a_record_this_build_cannot_read() -> None:
+    """#737: a newer build's status or run status is unread, never unchecked, and kept as found."""
+    from bmlibrarian_lite.retraction_screen import keeping_unread_rows
+
+    newer = {"document_id": "b", "status": "withdrawn", "excluded": True}
+    newer_run = {"document_id": "c", "status": "clear", "run_status": "withdrawn"}
+    stored = [{"document_id": "a", "status": "clear"}, newer, newer_run]
+    snapshot = RetractionSnapshot.from_rows(stored)
+
+    assert [r["document_id"] for r in snapshot.rows] == ["a"]
+    assert (snapshot.unread_count, snapshot.unchecked_count) == (2, 0)
+    # a save keeps both as found, and a new row for either is not stored over it
+    kept = keeping_unread_rows([*snapshot.to_snapshot(), {"document_id": "b", "status": "clear"}], stored)
+    assert kept == [{**stored[0], "excluded": False, "title": "", "deciding": None}, newer, newer_run]
+    # control: a known status reads
+    assert RetractionSnapshot.from_rows([{**newer, "status": "retracted"}]).unread_count == 0
 
 
 def test_left_out_titles_cannot_break_the_markdown() -> None:

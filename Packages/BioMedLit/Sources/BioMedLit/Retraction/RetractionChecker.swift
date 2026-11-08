@@ -128,6 +128,10 @@ public struct PaperRetractionCheck: Codable, Equatable, Sendable {
         RetractionNames.value(status, in: RetractionNames.statuses) ?? .unchecked
     }
 
+    /// Whether this build knows the status; a snapshot entry naming another
+    /// is unread, never unchecked (#737).
+    public var hasKnownStatus: Bool { RetractionNames.value(status, in: RetractionNames.statuses) != nil }
+
     /// Whether the paper is retracted.
     public var isRetracted: Bool { retractionStatus == .retracted }
     /// Whether an expression of concern stands.
@@ -142,7 +146,7 @@ public struct PaperRetractionCheck: Codable, Equatable, Sendable {
     /// unreadable, as the desktop's `_decode`, so an outage never overwrites
     /// it (#669, #705).
     public var isReadable: Bool {
-        RetractionNames.value(status, in: RetractionNames.statuses) != nil
+        hasKnownStatus
             && unanswered.allSatisfy { RetractionNames.value($0, in: RetractionNames.lookups) != nil }
             && deciding.map {
                 RetractionNames.value($0.source, in: RetractionNames.sources) != nil

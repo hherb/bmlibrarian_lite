@@ -2128,6 +2128,8 @@ class FactCheckWorkflow @Inject constructor(
             val merged = RetractionSnapshot.merged(stored, used)
             if (merged != null) {
                 sessionRepository.updateRetractionSnapshot(session.id, merged)
+                // an unreadable entry kept over a new check: that check is not the run's record (#738)
+                if (RetractionSnapshot.unreadIds(stored).any { it in used }) run.unsaved = true
             } else {
                 Log.w(TAG, "Not writing over an unreadable retraction snapshot")
                 run.unsaved = true

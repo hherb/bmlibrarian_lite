@@ -137,27 +137,19 @@ upload). Snapshot rows keep `run_status`/`run_deciding` as set-once facts of the
   match. Open: #543, #545, #547, #555–#558.
 - **Bot-walled PDFs: the desktop browser rescue** (#480; PRs #521, #529,
   #536; spec `docs/superpowers/specs/2026-10-12-browser-rescue-design.md`, doc
-  `doc/developer/browser_rescue.md`, which holds stages 2 and 3's binding
-  rules): SQLite queue, hidden QtWebEngine pass, review-queue window. Live:
-  PMC 12/12, ScienceDirect `needs_person`. **One visit at a time, all in the
-  service**; a challenged copy is never a paywall; a visit that learnt nothing
-  is `transport` (retried, `needs_person` after 3); QtWebEngine is prepared
-  before any `QApplication`, and engine tests run only in
-  `tests/browser_rescue_harness.py`'s subprocess. Detection
-  (`challenge_detection.json`): header names only; change a needle only
-  against live pages.
+  `doc/developer/browser_rescue.md`, which holds the binding rules): **one
+  visit at a time, all in the service**; engine tests run only in
+  `tests/browser_rescue_harness.py`'s subprocess; change a detection needle
+  (`challenge_detection.json`) only against live pages.
 - **Stage C2: Elsevier's article API** (all three; PR #507; contract
   `elsevier_article.json`). **A first-page PDF is never served**; a 403
   `AUTHENTICATION_ERROR` is "not available from this network", a 401 refuses
   the key; **never a redirect, never a link**; credentials that cannot be sent
   are never sent. Open: #506, #508–#513. **Stage C1: CORE's text** (PR #501):
   a hit counts only by its own DOI; no key, nothing recorded.
-- **Stage B: every Unpaywall PDF, then OpenAlex's** (all three; PR #491;
-  "Tried sources (#480)"). **The first copy served ends the walk; one not
-  saved is a caching note, never a shortfall.** Stored: v1 for one
-  address-less entry, else v2 `entries`. **Stage A: PMC's open-data bucket**
-  (PR #487): 81% of failed Unpaywall PDFs are bot walls (**re-analyse, never
-  re-fetch**); **no stealth clients**; a listing 404 is unreachable.
+- **Stages A and B** (PRs #487, #491): PMC's open-data bucket, then every
+  Unpaywall PDF, then OpenAlex's; **the first copy served ends the walk**;
+  **no stealth clients**; a listing 404 is unreachable.
 - **Retrieval and statements, compressed** (PRs #426–#482). Unpaywall: a
   PDF not obtained is refused, never a link; non-`%PDF` is
   `malformed_response`; **no absence while an `OpenAccessShortfall` is set**.
@@ -231,8 +223,8 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **Retraction checking** follow-ups (#662, #726, #728, #730, #731 and
-  #727 landed, rules in `retraction_checking.md`): **nothing writes
+- **Retraction checking** follow-ups (#662, #726–#728, #730, #731 and
+  #737–#739 landed, rules in `retraction_checking.md`): **nothing writes
   over an unreadable run snapshot** (#726: say `SCREEN_NOT_SAVED`, the shared
   rows keep the answers, `retracted_left_out_unsaved` keeps the ids left
   out; the worker hears it at once through `on_screen_unsaved`, so a later
@@ -249,7 +241,14 @@ Open issues by family; each issue carries the detail. None blocks another.
   **One unreadable entry is its own count** (#600, #727 item 2, PR #736,
   maintainer's choice): "N papers' retraction records could not be read",
   never "could not be checked", never listed as left out, never written
-  over (`keeping_unread_rows`; rule in `retraction_checking.md`).
+  over (`keeping_unread_rows`; rule in `retraction_checking.md`). **A
+  status this build does not know is unreadable too** (#737, all three,
+  maintainer's choice: `snapshot_row_readable` checks `status` and
+  `run_status`, the apps' `hasKnownStatus`), so a newer build's row is kept
+  as found. An app run that screens a paper over its unreadable entry
+  reports not saved (#738). Find More Evidence refuses a snapshot that is
+  not a list or holds an unreadable row naming no paper
+  (`RETRACTION_RECORD_UNREADABLE_TEXT`, #739, maintainer's choice).
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**
   (test gaps mostly closed; `RetractionRun` lives in its own file; left: the

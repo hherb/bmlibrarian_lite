@@ -408,12 +408,14 @@ final class FactCheckSession {
 
     /// The check each document's run used, keyed by `Document.id`; empty
     /// when never checked, or when the snapshot cannot be read as a whole
-    /// (`retractionSnapshotUnread(for:)` tells the two apart). An entry this build cannot read is left out
-    /// (logged), never the whole snapshot (#647).
+    /// (`retractionSnapshotUnread(for:)` tells the two apart). An entry this build cannot read (one that
+    /// does not decode, or names a status this build does not know, #737) is left out (logged), never
+    /// the whole snapshot (#647).
     func retractionSnapshot() -> [String: PaperRetractionCheck] {
         retractionSnapshotEntries().reduce(into: [:]) { checks, entry in
             guard let data = try? JSONSerialization.data(withJSONObject: entry.value, options: .fragmentsAllowed),
-                  let check = try? JSONDecoder().decode(PaperRetractionCheck.self, from: data)
+                  let check = try? JSONDecoder().decode(PaperRetractionCheck.self, from: data),
+                  check.hasKnownStatus
             else {
                 sessionLog.error("Retraction snapshot entry unreadable; left out")
                 return
@@ -474,8 +476,9 @@ final class FactCheckSession {
     ///
     /// - Parameter checks: The checks used, keyed by `Document.id`; nothing is written for none.
     /// - Returns: `false` when the snapshot cannot be read as a whole, so was
-    ///   not written over; `true` otherwise, including when a check cannot be
-    ///   encoded (logged, nothing written).
+    ///   not written over, or when a check was not stored over its paper's
+    ///   unreadable entry (#738; the rest are written); `true` otherwise,
+    ///   including when a check cannot be encoded (logged, nothing written).
     func recordRetractionSnapshot(_ checks: [String: PaperRetractionCheck]) -> Bool {
         guard !checks.isEmpty else { return true }
         if let data = retractionSnapshotJSON?.data(using: .utf8),
@@ -499,7 +502,7 @@ final class FactCheckSession {
             return true
         }
         retractionSnapshotJSON = String(data: data, encoding: .utf8)
-        return true
+        return checks.keys.allSatisfy { !unread.contains($0) }
     }
 
     // MARK: - Methods

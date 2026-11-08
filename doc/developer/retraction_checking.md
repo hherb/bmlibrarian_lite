@@ -142,7 +142,8 @@ paper with its `retraction_status`.
   save does not erase it. The apps' detail view says it for a paper whose
   own entry or copy cannot be read. Nothing writes over such a record
   (#726, all three platforms): the desktop's *Check again* says the new
-  status could not be saved; Find More Evidence and the apps' screen still
+  status could not be saved; Find More Evidence (over a list whose rows
+  each name their paper; otherwise it refuses, #739) and the apps' screen still
   screen, leave out the retracted and store each paper's check in the shared
   rows, but keep the snapshot as found and add `SCREEN_NOT_SAVED` /
   `RetractionText.screenNotSaved` to what they report (the desktop's
@@ -166,17 +167,23 @@ paper with its `retraction_status`.
   one per id, as the apps do (`unread_paper_count`): two unreadable desktop
   rows for one paper are one, one beside a readable row for its paper is
   none, and a row naming no id is one. A desktop row is unreadable without
-  `document_id` or `status`, or with a status that is not a string (the
-  apps cannot decode one either); an unknown status string reads as
-  unchecked on every platform (Deferred: #737). It is never counted
+  `document_id` or `status`, or with a status or `run_status` this build
+  does not know (a newer build's `"withdrawn"`, a list); an app's entry is
+  unreadable when it does not decode or names an unknown status
+  (`hasKnownStatus`, #737, all three platforms). It is never counted
   "could not be checked" (no unchecked stand-in, in the line or in a report
   written again), and never listed as left out: whether the run left it out
   is unknown. Nothing writes over it (`keeping_unread_rows`: Check again,
   Find More Evidence's merge, the audit JSON saved again; a report's
   metadata stores `RetractionSnapshot.unread_rows` after its rows; the apps'
   snapshot merge), unless the record also reads a row for that paper, so a *Check again* answer for that paper
-  stays in the shared rows only and the line still counts it unread. On the
-  desktop its paper counts as seen for Find More Evidence, its audit entry
+  stays in the shared rows only and the line still counts it unread; an
+  app run that screens such a paper again (a restored session's retry)
+  keeps its entry and reports `RetractionRun.unsaved` (#738). On the
+  desktop its paper counts as seen for Find More Evidence, which refuses a
+  run whose snapshot is not a list or holds an unreadable row naming no
+  document (`RETRACTION_RECORD_UNREADABLE_TEXT`, #739): what it left out
+  would be unknown, so found again it would count as new. Its audit entry
   (unscored) carries `retraction_record_unread` and the Audit Trail dialog
   lists it under "Retraction Record Could Not Be Read", never "Not Scored",
   and its audit trail card badges NOT CHECKED, "could not be read" (as does
