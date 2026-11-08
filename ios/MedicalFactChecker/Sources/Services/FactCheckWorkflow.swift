@@ -3971,7 +3971,8 @@ final class FactCheckWorkflow {
 
     /// Screens `documents` for retraction before they are scored, recording
     /// each document's check and the session's snapshot (unless that cannot
-    /// be read as a whole, #726), and setting
+    /// be read as a whole, #726; a paper's unreadable entry is kept, never
+    /// replaced, and the run reports not saved, #738), and setting
     /// ``retractionNotice`` for the run.
     ///
     /// Each document is checked at most once per run. One whose stored check

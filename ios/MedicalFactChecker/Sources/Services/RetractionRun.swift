@@ -24,8 +24,9 @@ struct RetractionRun {
     let generation: Int
     var used: [(id: String, paper: RetractionPaper, check: PaperRetractionCheck)] = []
     var failed: Set<RetractionPaper> = []
-    /// Whether the session's snapshot could not be read as a whole, so this
-    /// run's checks were not saved in it (#726).
+    /// Whether this run's checks were not all saved in the session's
+    /// snapshot: it could not be read as a whole (#726), or a paper's own
+    /// entry could not be read and was kept (#738).
     var unsaved = false
 
     /// The used checks of the papers not left out as retracted.

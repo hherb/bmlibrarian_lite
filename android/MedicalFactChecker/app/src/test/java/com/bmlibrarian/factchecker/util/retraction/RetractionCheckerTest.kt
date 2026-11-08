@@ -395,6 +395,14 @@ class RetractionCheckerTest {
         assertFalse("control: a known status reads", RetractionSnapshot.unread(text, "a"))
     }
 
+    /** #737: only an unknown status makes an entry unread; a newer lookup name is shown as written. */
+    @Test
+    fun `a snapshot entry with a known status and an unknown lookup name still reads`() {
+        val text = """{"a":{"status":"clear","unanswered":["a_newer_lookup"],"checkedAtMs":1}}"""
+        assertEquals(setOf("a"), RetractionSnapshot.read(text).keys)
+        assertTrue(RetractionSnapshot.unreadIds(text).isEmpty())
+    }
+
     @Test
     fun `a snapshot unreadable as a whole is never merged over`() {
         // #726: what the run left out would be lost

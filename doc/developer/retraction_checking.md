@@ -159,7 +159,7 @@ paper with its `retraction_status`.
 - **One unreadable entry in a readable record is its own count** (#600,
   #727 item 2, all three platforms). A desktop snapshot row it cannot read
   (`unread_snapshot_rows`; `RetractionSnapshot.unread_rows`) or an app's
-  snapshot entry that does not decode (`retractionSnapshotUnreadIDs` /
+  snapshot entry that this build cannot read (`retractionSnapshotUnreadIDs` /
   `RetractionSnapshot.unreadIds`) is a paper whose run record is unknown:
   the notice says "N papers' retraction records could not be read" and the
   methods and saved-work lines "; N papers' records could not be read"
@@ -177,9 +177,11 @@ paper with its `retraction_status`.
   Find More Evidence's merge, the audit JSON saved again; a report's
   metadata stores `RetractionSnapshot.unread_rows` after its rows; the apps'
   snapshot merge), unless the record also reads a row for that paper, so a *Check again* answer for that paper
-  stays in the shared rows only and the line still counts it unread; an
-  app run that screens such a paper again (a restored session's retry)
-  keeps its entry and reports `RetractionRun.unsaved` (#738). On the
+  stays in the shared rows only and the line still counts it unread; a
+  run that screens such a paper again (an app's restored session's retry,
+  the desktop's Find More Evidence over a paper a stopped run held over)
+  keeps its entry and reports not saved (`RetractionRun.unsaved`,
+  `MoreEvidence.screen_unsaved`, #738, all three platforms). On the
   desktop its paper counts as seen for Find More Evidence, which refuses a
   run whose snapshot is not a list or holds an unreadable row naming no
   document (`RETRACTION_RECORD_UNREADABLE_TEXT`, #739): what it left out

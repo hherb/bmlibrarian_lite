@@ -428,7 +428,7 @@ final class FactCheckSession {
     /// snapshot that parses: each a paper whose run record is
     /// unknown, counted as "could not be read", never as unchecked and never
     /// dropped (#727). Empty when the snapshot is absent or does not parse;
-    /// every entry's id when none decodes (which `retractionSnapshotUnread()`
+    /// every entry's id when none reads (which `retractionSnapshotUnread()`
     /// calls unread as a whole).
     func retractionSnapshotUnreadIDs() -> Set<String> {
         let read = retractionSnapshot()
@@ -476,9 +476,10 @@ final class FactCheckSession {
     ///
     /// - Parameter checks: The checks used, keyed by `Document.id`; nothing is written for none.
     /// - Returns: `false` when the snapshot cannot be read as a whole, so was
-    ///   not written over, or when a check was not stored over its paper's
-    ///   unreadable entry (#738; the rest are written); `true` otherwise,
-    ///   including when a check cannot be encoded (logged, nothing written).
+    ///   not written over, when a check was not stored over its paper's
+    ///   unreadable entry (#738; the rest are written), or when a check or
+    ///   the snapshot cannot be encoded (logged, nothing written); `true`
+    ///   when every check was stored.
     func recordRetractionSnapshot(_ checks: [String: PaperRetractionCheck]) -> Bool {
         guard !checks.isEmpty else { return true }
         if let data = retractionSnapshotJSON?.data(using: .utf8),
@@ -493,13 +494,13 @@ final class FactCheckSession {
                   let entry = try? JSONSerialization.jsonObject(with: data)
             else {
                 sessionLog.error("Retraction check not encodable; the snapshot is not written")
-                return true
+                return false
             }
             entries[id] = entry
         }
         guard let data = try? JSONSerialization.data(withJSONObject: entries, options: .sortedKeys) else {
             sessionLog.error("Retraction snapshot not serialisable; the snapshot is not written")
-            return true
+            return false
         }
         retractionSnapshotJSON = String(data: data, encoding: .utf8)
         return checks.keys.allSatisfy { !unread.contains($0) }

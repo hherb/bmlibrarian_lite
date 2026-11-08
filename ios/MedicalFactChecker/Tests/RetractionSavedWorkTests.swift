@@ -1277,6 +1277,19 @@ final class RetractionSavedWorkTests: XCTestCase {
         XCTAssertEqual((kept["b"] as? [String: Any])?["status"] as? String, "withdrawn")
     }
 
+    /// #737: only an unknown status makes an entry unread; a newer lookup
+    /// name is shown as written.
+    func testASnapshotEntryWithAKnownStatusAndAnUnknownLookupStillReads() throws {
+        let session = FactCheckSession(claim: "Aspirin prevents stroke")
+        context.insert(session)
+        let newer = PaperRetractionCheck(
+            status: "clear", deciding: nil, unanswered: ["a_newer_lookup"],
+            checkedAt: Self.runDay, exportDataAsOf: nil, crossrefFailure: nil)
+        XCTAssertTrue(session.recordRetractionSnapshot(["a": newer]))
+        XCTAssertEqual(session.retractionSnapshot(), ["a": newer])
+        XCTAssertTrue(session.retractionSnapshotUnreadIDs().isEmpty)
+    }
+
     /// A snapshot the earlier build wrote (one `JSONEncoder` pass over the whole
     /// map) reads back unchanged, and a fractional `checkedAt` survives a later
     /// run's rewrite through `JSONSerialization`.

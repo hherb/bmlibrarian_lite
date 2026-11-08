@@ -245,9 +245,11 @@ Open issues by family; each issue carries the detail. None blocks another.
   status this build does not know is unreadable too** (#737, all three,
   maintainer's choice: `snapshot_row_readable` checks `status` and
   `run_status`, the apps' `hasKnownStatus`), so a newer build's row is kept
-  as found. An app run that screens a paper over its unreadable entry
-  reports not saved (#738). Find More Evidence refuses a snapshot that is
-  not a list or holds an unreadable row naming no paper
+  as found. A run that screens a paper over its unreadable entry reports
+  not saved (#738, all three: the apps' retry, the desktop's Find More
+  Evidence over a held-over paper). Find More Evidence refuses a snapshot
+  that is not a list or holds an unreadable row naming no paper (or a
+  non-string id)
   (`RETRACTION_RECORD_UNREADABLE_TEXT`, #739, maintainer's choice).
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**

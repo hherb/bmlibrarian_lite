@@ -375,7 +375,7 @@ object RetractionSnapshot {
      *
      * @param text The stored snapshot, or null for a session never checked
      * @return Their ids; empty when there are none or the snapshot does not parse;
-     *   every entry's id when none decodes (which [unread] calls unread as a whole)
+     *   every entry's id when none reads (which [unread] calls unread as a whole)
      */
     fun unreadIds(text: String?): Set<String> = entries(text).keys - read(text).keys
 

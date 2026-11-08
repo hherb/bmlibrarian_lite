@@ -230,8 +230,8 @@ public enum RetractionText {
     public static let statusUnread = "Retraction status could not be read"
     /// Added to the saved-work line when *Check again*'s answers could not be saved.
     public static let checkAgainNotSaved = "; the new status could not be saved with this run"
-    /// Added to a run's notice when its snapshot could not be read as a
-    /// whole, so was never written over (#726).
+    /// Added to a run's notice when its snapshot, or a screened paper's
+    /// entry in it, could not be read, so was never written over (#726, #738).
     public static let screenNotSaved =
         "The new retraction status could not be saved with this run, whose record of it could not be read."
 

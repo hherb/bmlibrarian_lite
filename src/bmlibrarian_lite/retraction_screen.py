@@ -40,11 +40,11 @@ _KNOWN_STATUSES = tuple(status.value for status in RetractionStatus)
 
 
 def snapshot_row_readable(row: object) -> bool:
-    """Whether this build can read a stored snapshot row: a mapping with an id and a status.
+    """Whether this build can read a stored snapshot row: a mapping with an id and a known status.
 
     The status, and ``run_status`` when set, must be one this build knows: a
     newer build's (``"withdrawn"``, say) is a record this build cannot read,
-    never unchecked, and is kept as found (#737, as on the apps).
+    never unchecked, so callers keep it as found (#737, as on the apps).
     """
     return (
         isinstance(row, Mapping)
@@ -337,8 +337,8 @@ class RetractionScreen:
 
         The rows are stored JSON, so every reader gets them normalised here:
         ``excluded`` is a strict bool (only ``true`` left a paper out), a
-        missing ``title`` as "", a ``deciding`` or ``run_deciding`` that is
-        not a mapping as none and an unreadable ``checked_at`` as none. A
+        missing ``title`` reads as "", a ``deciding`` or ``run_deciding``
+        that is not a mapping as none and an unreadable ``checked_at`` as none. A
         row is kept through all of these, so a paper left out never reads as
         not scored; only a row :func:`snapshot_row_readable` refuses (no
         ``document_id`` or ``status``, or a status or ``run_status`` this
