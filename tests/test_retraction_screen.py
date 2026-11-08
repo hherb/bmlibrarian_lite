@@ -102,7 +102,7 @@ def test_snapshot_tolerates_older_rows(caplog):
     got = RetractionScreen.from_snapshot([{"document_id": "x"}, {"document_id": "y", "status": "clear"}])
     assert list(got) == ["y"]
     assert "Skipping a retraction snapshot row" in caplog.text
-    assert "older build" in caplog.text
+    assert "cannot read" in caplog.text
 
 
 def test_snapshot_covers_a_kept_document_without_a_check():

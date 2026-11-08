@@ -598,6 +598,46 @@ class FactCheckWorkflowRetractionTest {
         assertTrue(RetractionSnapshot.merged("{}", mapOf("d1" to RETRACTED)) != null)
     }
 
+    /** #738: a paper screened again over its unreadable entry keeps the entry, and the run says its status was not saved. */
+    @Test
+    fun `a new check refused over an unreadable entry is said not saved`() = runTest {
+        BmlibFfi.assumeAvailable()
+        hold("d1")
+        hold("d2")
+        answers["1"] = RETRACTED
+        val newer = "{\"d1\": {\"status\": \"withdrawn\", \"checkedAtMs\": $RUN_MS}}"
+        snapshotJson = newer
+
+        run()
+
+        assertEquals(listOf("d2"), scored)
+        // #737: the newer build's entry is kept as it was; d2's check is added
+        assertEquals(setOf("d1"), RetractionSnapshot.unreadIds(snapshotJson))
+        assertEquals(setOf("d2"), snapshot().keys)
+        val notice = workflow.retractionNotice.value!!
+        assertTrue(notice, notice.startsWith("Retraction check: 1 retracted paper left out"))
+        assertTrue(notice, notice.endsWith(RetractionText.SCREEN_NOT_SAVED))
+    }
+
+    /** #738's control: an unreadable entry for a paper outside the run leaves the run saved. */
+    @Test
+    fun `an unreadable entry for a paper the run does not screen leaves the run saved`() = runTest {
+        BmlibFfi.assumeAvailable()
+        hold("d1")
+        hold("d2")
+        answers["1"] = RETRACTED
+        snapshotJson = "{\"dX\": {\"status\": \"withdrawn\", \"checkedAtMs\": $RUN_MS}}"
+
+        run()
+
+        assertEquals(listOf("d2"), scored)
+        assertEquals(setOf("dX"), RetractionSnapshot.unreadIds(snapshotJson))
+        assertEquals(setOf("d1", "d2"), snapshot().keys)
+        val notice = workflow.retractionNotice.value!!
+        assertTrue(notice, notice.startsWith("Retraction check: 1 retracted paper left out"))
+        assertFalse(notice, notice.contains(RetractionText.SCREEN_NOT_SAVED))
+    }
+
     /** #726: with nothing left out and every paper checked, the notice is the sentence alone. */
     @Test
     fun `an unreadable snapshot under an all-clear run gives the not-saved sentence alone`() = runTest {

@@ -35,18 +35,22 @@ RUN_DECIDING_KEY = "run_deciding"
 _WARNING_STATUSES = (RetractionStatus.RETRACTED, RetractionStatus.CONCERN)
 
 
-def snapshot_row_readable(row: object) -> bool:
-    """Whether this build can read a stored snapshot row: a mapping with an id and a status.
+#: A tuple, not a set: a stored status may be unhashable (a list), never a crash
+_KNOWN_STATUSES = tuple(status.value for status in RetractionStatus)
 
-    The status, and ``run_status`` when set, must be strings: the apps cannot
-    decode any other, and here one would crash every reader (an unknown
-    string reads as unchecked, as on the apps).
+
+def snapshot_row_readable(row: object) -> bool:
+    """Whether this build can read a stored snapshot row: a mapping with an id and a known status.
+
+    The status, and ``run_status`` when set, must be one this build knows: a
+    newer build's (``"withdrawn"``, say) is a record this build cannot read,
+    never unchecked, so callers keep it as found (#737, as on the apps).
     """
     return (
         isinstance(row, Mapping)
         and all(k in row for k in _SNAPSHOT_REQUIRED)
-        and isinstance(row["status"], str)
-        and isinstance(row.get(RUN_STATUS_KEY, ""), (str, type(None)))
+        and row["status"] in _KNOWN_STATUSES
+        and (row.get(RUN_STATUS_KEY) is None or row[RUN_STATUS_KEY] in _KNOWN_STATUSES)
     )
 
 
@@ -332,16 +336,14 @@ class RetractionScreen:
         """Read stored snapshot rows back, keyed by document id, each read once.
 
         The rows are stored JSON, so every reader gets them normalised here:
-        ``excluded`` is a strict bool (only ``true`` left a paper out), an
-        unknown ``status`` reads as unchecked, a missing ``title`` as "", a
-        ``deciding`` that is not a mapping as none and an unreadable
-        ``checked_at`` as none; ``run_status`` and ``run_deciding``, when
-        present, are read like ``status`` and ``deciding``, except that a
-        ``run_status`` of none (not recorded) stays none. A row is kept through all of these, so a
-        paper left out never reads as not scored; only a row
-        :func:`snapshot_row_readable` refuses (no ``document_id`` or
-        ``status``, or a status that is not a string) is skipped with a
-        warning: it is read apart (:func:`unread_snapshot_rows`).
+        ``excluded`` is a strict bool (only ``true`` left a paper out), a
+        missing ``title`` reads as "", a ``deciding`` or ``run_deciding``
+        that is not a mapping as none and an unreadable ``checked_at`` as none. A
+        row is kept through all of these, so a paper left out never reads as
+        not scored; only a row :func:`snapshot_row_readable` refuses (no
+        ``document_id`` or ``status``, or a status or ``run_status`` this
+        build does not know) is skipped with a warning: it is read apart
+        (:func:`unread_snapshot_rows`).
 
         Args:
             rows: Rows as ``to_snapshot`` wrote them.
@@ -350,11 +352,10 @@ class RetractionScreen:
             The normalised rows by document id; keys beyond those named are
             returned as found.
         """
-        known = {status.value for status in RetractionStatus}
         out: dict[str, dict[str, Any]] = {}
         for row in rows:
             if not snapshot_row_readable(row):
-                logger.warning("Skipping a retraction snapshot row from an older build")
+                logger.warning("Skipping a retraction snapshot row this build cannot read")
                 continue
             read = dict(row)
             stamp = read.get("checked_at")
@@ -364,14 +365,6 @@ class RetractionScreen:
                 except (TypeError, ValueError):
                     logger.warning("A retraction snapshot row's time is unreadable; read as none")
                     read["checked_at"] = None
-            if read["status"] not in known:
-                logger.warning("A retraction snapshot row's status is unknown; read as unchecked")
-                read["status"] = RetractionStatus.UNCHECKED.value
-            # a None run_status is a run saved before the feature: "not recorded", kept as is
-            run_status = read.get(RUN_STATUS_KEY)
-            if run_status is not None and run_status not in known:
-                logger.warning("A retraction snapshot row's run status is unknown; read as unchecked")
-                read[RUN_STATUS_KEY] = RetractionStatus.UNCHECKED.value
             read["excluded"] = read.get("excluded") is True
             read["title"] = str(read.get("title") or "")
             if not isinstance(read.get("deciding"), Mapping):

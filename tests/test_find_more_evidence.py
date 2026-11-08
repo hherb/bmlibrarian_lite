@@ -537,7 +537,7 @@ class TestWhatIsFoundIsScreened:
                                     checks=RetractingChecker().check(papers))
         stored = storage.get_checkpoint(checkpoint_id).metadata
         copy = {**stored[CHECKPOINT_REPORT_METADATA_KEY], "retraction_screen": readable.to_snapshot()}
-        unreadable = {"rows": "a newer build's"}
+        unreadable = [{"document_id": "doc-1", "status": "a newer build's"}]  # named, so not refused (#739)
         storage.update_checkpoint(checkpoint_id=checkpoint_id, metadata={
             **stored, CHECKPOINT_REPORT_METADATA_KEY: copy,
             CHECKPOINT_RETRACTION_SNAPSHOT_KEY: unreadable})
@@ -606,6 +606,60 @@ class TestWhatIsFoundIsScreened:
 
         assert "doc-3" in known_document_ids(storage, QUESTION)
 
+    @pytest.mark.parametrize(("status", "unsaved"), [("withdrawn", True), ("clear", False)])
+    def test_a_held_paper_screened_over_its_unread_row_is_told_unsaved(
+        self, storage: LiteStorage, status: str, unsaved: bool
+    ) -> None:
+        """#738, as on the apps: the row is kept, so the run's record lacks the new check."""
+        checkpoint_id = reviewed(storage)
+        found(storage, "6")
+        row = {"document_id": "doc-6", "status": status}
+        stored = storage.get_checkpoint(checkpoint_id).metadata
+        storage.update_checkpoint(checkpoint_id=checkpoint_id, metadata={
+            **stored, UNSCORED_KEY: ["doc-6"],
+            CHECKPOINT_RETRACTION_SNAPSHOT_KEY: [{"document_id": "doc-1", "status": "clear"}, row]})
+
+        def retract_6(documents: list[LiteDocument]) -> RetractionScreen:
+            return RetractionScreen(kept=tuple(d for d in documents if d.id != "doc-6"),
+                                    excluded=tuple(d for d in documents if d.id == "doc-6"), checks={})
+
+        run = Run(storage, screen=retract_6)
+        outcome = run([])
+
+        kept = storage.get_checkpoint(checkpoint_id).metadata
+        assert (outcome.left_out, outcome.screen_unsaved, run.unsaved_told) == (1, unsaved, int(unsaved))
+        assert (row in kept[CHECKPOINT_RETRACTION_SNAPSHOT_KEY]) is unsaved  # kept as found
+        assert (kept.get(CHECKPOINT_RETRACTED_UNSAVED_KEY) == ["doc-6"]) is unsaved
+
+    @pytest.mark.parametrize("snapshot", [
+        {"rows": "a newer build's"},
+        [{"document_id": "doc-1", "status": "clear"}, {"status": "retracted"}],
+        [{"document_id": None, "status": "newer"}],
+        [{"document_id": "", "status": "newer"}],
+        [{"document_id": 6, "status": "newer"}],
+    ])
+    def test_a_snapshot_that_hides_its_papers_is_refused(self, storage: LiteStorage, snapshot: Any) -> None:
+        """#739: what the run left out is unknown, so nothing found could be told new."""
+        from bmlibrarian_lite.more_evidence import RETRACTION_RECORD_UNREADABLE_TEXT
+
+        checkpoint_id = reviewed(storage)
+        stored = storage.get_checkpoint(checkpoint_id).metadata
+        storage.update_checkpoint(checkpoint_id=checkpoint_id, metadata={
+            **stored, CHECKPOINT_RETRACTION_SNAPSHOT_KEY: snapshot})
+        run = Run(storage)
+
+        with pytest.raises(RetryNotPossible) as raised:
+            run(found(storage, "5"))
+        assert str(raised.value) == RETRACTION_RECORD_UNREADABLE_TEXT
+        assert run.scorer.scored == []
+        assert storage.get_checkpoint(checkpoint_id).metadata[CHECKPOINT_RETRACTION_SNAPSHOT_KEY] == snapshot
+        # control: the same row naming its paper is not refused
+        storage.update_checkpoint(checkpoint_id=checkpoint_id, metadata={
+            **stored, CHECKPOINT_RETRACTION_SNAPSHOT_KEY: [{"document_id": "doc-1", "status": "newer"}]})
+        control = Run(storage)
+        control(found(storage, "5"))
+        assert control.scorer.scored == ["doc-5"]
+
     def test_the_screen_not_saved_hook_fires_before_the_left_out_ids_are_recorded(
         self, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -613,7 +667,7 @@ class TestWhatIsFoundIsScreened:
         checkpoint_id = reviewed(storage)
         stored = storage.get_checkpoint(checkpoint_id).metadata
         storage.update_checkpoint(checkpoint_id=checkpoint_id, metadata={
-            **stored, CHECKPOINT_RETRACTION_SNAPSHOT_KEY: {"rows": "a newer build's"}})
+            **stored, CHECKPOINT_RETRACTION_SNAPSHOT_KEY: [{"document_id": "doc-1", "status": "newer"}]})
         update = storage.update_checkpoint
 
         def failing(*args: Any, **kwargs: Any) -> Any:

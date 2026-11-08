@@ -122,6 +122,9 @@ data class PaperRetractionCheck(
     val retractionStatus: RetractionStatus
         get() = RetractionNames.status(status) ?: RetractionStatus.UNCHECKED
 
+    /** Whether this build knows the status; a snapshot entry naming another is unread, never unchecked (#737). */
+    val hasKnownStatus: Boolean get() = RetractionNames.status(status) != null
+
     /** Whether the paper is retracted. */
     val isRetracted: Boolean get() = retractionStatus == RetractionStatus.RETRACTED
 
@@ -141,7 +144,7 @@ data class PaperRetractionCheck(
      * it (#669, #705).
      */
     val isReadable: Boolean
-        get() = RetractionNames.status(status) != null &&
+        get() = hasKnownStatus &&
             unanswered.all { RetractionNames.lookup(it) != null } &&
             (deciding == null || (RetractionNames.source(deciding.source) != null && RetractionNames.kind(deciding.kind) != null))
 
@@ -352,11 +355,12 @@ object RetractionSnapshot {
      * The snapshot's readable entries.
      *
      * @param text The stored snapshot, or null for a session never checked
-     * @return Each document's check; an entry this build cannot read is left out
+     * @return Each document's check; an entry this build cannot read (one that
+     *   does not decode, or names a status this build does not know, #737) is left out
      */
     fun read(text: String?): Map<String, PaperRetractionCheck> = entries(text).mapNotNull { (id, entry) ->
         try {
-            id to json.decodeFromJsonElement(PaperRetractionCheck.serializer(), entry)
+            json.decodeFromJsonElement(PaperRetractionCheck.serializer(), entry).takeIf { it.hasKnownStatus }?.let { id to it }
         } catch (e: SerializationException) {
             null
         } catch (e: IllegalArgumentException) {
@@ -371,7 +375,7 @@ object RetractionSnapshot {
      *
      * @param text The stored snapshot, or null for a session never checked
      * @return Their ids; empty when there are none or the snapshot does not parse;
-     *   every entry's id when none decodes (which [unread] calls unread as a whole)
+     *   every entry's id when none reads (which [unread] calls unread as a whole)
      */
     fun unreadIds(text: String?): Set<String> = entries(text).keys - read(text).keys
 

@@ -914,6 +914,33 @@ final class RetractionScreenWorkflowTests: XCTestCase {
             "Retraction check: 1 retracted paper left out. " + RetractionText.screenNotSaved)
     }
 
+    /// #738: a paper screened again over its unreadable entry keeps the entry,
+    /// and the run says its status was not saved; another paper's is written.
+    func testANewCheckRefusedOverAnUnreadableEntryIsSaidNotSaved() async throws {
+        let (session, documents) = makeSession(["10.1000/a", "10.1000/b"])
+        XCTAssertTrue(session.recordRetractionSnapshot([documents[0].id: Self.clear()]))
+        var entries = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: Data(try XCTUnwrap(session.retractionSnapshotJSON).utf8)) as? [String: Any])
+        var newer = try XCTUnwrap(entries[documents[0].id] as? [String: Any])
+        newer["status"] = "withdrawn"
+        entries[documents[0].id] = newer
+        session.retractionSnapshotJSON = String(
+            data: try JSONSerialization.data(withJSONObject: entries), encoding: .utf8)
+        let workflow = restore(session, check: Self.answering([
+            "10.1000/a": Self.retracted(), "10.1000/b": Self.clear(),
+        ]))
+
+        await workflow.retryFailedDocuments(pmids: [])
+
+        XCTAssertEqual(session.retractionSnapshotUnreadIDs(), [documents[0].id], "kept as written")
+        XCTAssertNotNil(session.retractionSnapshot()[documents[1].id])
+        XCTAssertNil(documents[0].scoredAt, "the retracted paper is still left out")
+        XCTAssertNotNil(documents[1].scoredAt)
+        XCTAssertEqual(
+            workflow.retractionNotice,
+            "Retraction check: 1 retracted paper left out. " + RetractionText.screenNotSaved)
+    }
+
     /// #726: with nothing left out and every paper checked, the notice is the sentence alone.
     func testAnUnreadableSnapshotUnderAnAllClearRunGivesTheSentenceAlone() async throws {
         let (session, _) = makeSession(["10.1000/a", "10.1000/b"])

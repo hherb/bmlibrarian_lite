@@ -37,10 +37,10 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .analysis_failures import pass_failure_detail
 from .audit_records import (
@@ -54,6 +54,7 @@ from .audit_records import (
     recorded_report_metadata,
     recorded_retraction_snapshot,
     recorded_unread_ids,
+    recorded_unread_rows,
     retraction_snapshot_unreadable,
 )
 from .citation_full_texts import FullTextFetch, fetch_full_texts
@@ -74,7 +75,7 @@ from .full_text_retry import (
     write_report_again,
 )
 from .quality.data_models import QualityFilter
-from .retraction_screen import keeping_unread_rows
+from .retraction_screen import keeping_unread_rows, snapshot_row_readable
 from .retraction_text import SCREEN_NOT_SAVED
 from .search_failures import combined_shortfalls
 from .smart_search import NO_NEW_EVIDENCE_TEXT, SmartSearchContext, SmartSearchRound
@@ -104,6 +105,11 @@ QualityGate = Callable[[list["LiteDocument"], "QualityFilter"], list["LiteDocume
 QUALITY_FILTER_UNREADABLE_TEXT = (
     "This report's review applied a quality filter that cannot be read back, so "
     "documents found now could not be filtered alike. Run the review again."
+)
+RETRACTION_RECORD_UNREADABLE_TEXT = (
+    "This report's run kept a retraction record this build cannot read, so the "
+    "papers it left out as retracted are not known and could be counted again "
+    "as new evidence. Run the review again."
 )
 
 #: Checkpoint metadata: the ids of documents found for the run that a stop
@@ -291,7 +297,8 @@ def find_more_evidence(
 
     Raises:
         RetryNotPossible: The question has no report, or its run did not keep
-            the report's metadata, or its quality filter cannot be read back.
+            the report's metadata, or its quality filter cannot be read back,
+            or its retraction snapshot does not name the papers it holds.
         SmartSearchError: No alternative search could run.
         SearchFailedError: Failures left the alternative searches with nothing.
     """
@@ -309,6 +316,8 @@ def find_more_evidence(
             settings = QualityFilter.from_report_settings(metadata.quality_filter_settings)
         except ValueError as e:
             raise RetryNotPossible(QUALITY_FILTER_UNREADABLE_TEXT) from e
+    if _snapshot_hides_papers(checkpoint.metadata):
+        raise RetryNotPossible(RETRACTION_RECORD_UNREADABLE_TEXT)
     stored_min = checkpoint.metadata.get(CHECKPOINT_MIN_SCORE_KEY)
     min_score = (
         stored_min
@@ -464,6 +473,23 @@ def known_document_ids(storage: LiteStorage, question: str) -> set[str]:
         | recorded_unread_ids(stored)
         | set(_stored_ids(stored.get(CHECKPOINT_QUALITY_FILTERED_KEY)))
         | set(_stored_ids(stored.get(CHECKPOINT_RETRACTED_UNSAVED_KEY)))
+    )
+
+
+def _snapshot_hides_papers(metadata: Mapping[str, Any]) -> bool:
+    """Whether the run's retraction snapshot holds papers it does not name (#739).
+
+    Not a list, or a row this build cannot read that names no document (no
+    ``document_id``, or one that is not a non-empty string, so no paper's):
+    what the run left out as retracted is then unknown, so found again it
+    would count as new.
+    """
+    stored = metadata.get(CHECKPOINT_RETRACTION_SNAPSHOT_KEY)
+    if stored is not None and not isinstance(stored, list):
+        return True
+    return any(
+        not (isinstance(row, Mapping) and isinstance(row.get("document_id"), str) and row["document_id"])
+        for row in recorded_unread_rows(metadata)
     )
 
 
@@ -731,10 +757,10 @@ def _merge_retraction_snapshot(
     and why, would be lost; the shared check rows keep the answers, and the
     caller records the ids left out. A row this build cannot read in an
     otherwise readable list is kept as found, and its document gains no new
-    row (#600).
+    row (#600), so the run's record lacks that check (#738, as on the apps).
 
     Returns:
-        Whether the rows were saved with the run.
+        Whether every screened document's row was saved with the run.
     """
     current = storage.get_checkpoint(checkpoint_id)
     stored = current.metadata if current is not None else {}
@@ -742,7 +768,8 @@ def _merge_retraction_snapshot(
         logger.warning("Not writing over %s's unreadable retraction snapshot", checkpoint_id)
         return False
     rows = recorded_retraction_snapshot(stored)
-    for row in screen.to_snapshot():
+    screened = screen.to_snapshot()
+    for row in screened:
         rows[row["document_id"]] = row
     snapshot = keeping_unread_rows(rows.values(), stored.get(CHECKPOINT_RETRACTION_SNAPSHOT_KEY))
     storage.update_checkpoint(
@@ -750,7 +777,8 @@ def _merge_retraction_snapshot(
         metadata={**stored, CHECKPOINT_RETRACTION_SNAPSHOT_KEY: snapshot},
         touch=False,
     )
-    return True
+    written = {row["document_id"] for row in snapshot if snapshot_row_readable(row)}
+    return all(row["document_id"] in written for row in screened)
 
 
 class _StopEvent(threading.Event):

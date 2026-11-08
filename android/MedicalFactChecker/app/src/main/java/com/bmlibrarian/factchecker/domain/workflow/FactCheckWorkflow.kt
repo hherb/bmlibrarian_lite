@@ -241,7 +241,10 @@ class FactCheckWorkflow @Inject constructor(
         val used = LinkedHashMap<String, Pair<RetractionPaper, PaperRetractionCheck>>()
         val failed = mutableSetOf<RetractionPaper>()
 
-        /** Whether the session's snapshot could not be read, so this run's checks were not saved in it (#726). */
+        /**
+         * Whether this run's checks were not all saved in the session's snapshot: it could not be
+         * read as a whole (#726), or a paper's own entry could not be read and was kept (#738).
+         */
         var unsaved = false
 
         /** Why the kept papers are unchecked. */
@@ -2087,7 +2090,8 @@ class FactCheckWorkflow @Inject constructor(
     /**
      * Screen [documents] for retraction before they are scored, storing each
      * paper's check and the session's snapshot (unless that cannot be read as
-     * a whole, #726), and setting [retractionNotice].
+     * a whole, #726; a paper's unreadable entry is kept, never replaced, and
+     * the run reports not saved, #738), and setting [retractionNotice].
      *
      * Each document is checked at most once per run. A paper whose stored row
      * [PaperRetractionCheck.isReusable] is not asked again; otherwise what is
@@ -2128,6 +2132,8 @@ class FactCheckWorkflow @Inject constructor(
             val merged = RetractionSnapshot.merged(stored, used)
             if (merged != null) {
                 sessionRepository.updateRetractionSnapshot(session.id, merged)
+                // a paper's unreadable entry is kept in place of its new check, so the run's record lacks it (#738)
+                if (RetractionSnapshot.unreadIds(stored).any { it in used }) run.unsaved = true
             } else {
                 Log.w(TAG, "Not writing over an unreadable retraction snapshot")
                 run.unsaved = true

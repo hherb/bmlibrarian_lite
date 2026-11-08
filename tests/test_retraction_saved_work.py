@@ -1920,8 +1920,8 @@ def test_a_status_that_is_not_a_string_is_read_apart_never_crashing_a_reader() -
     assert {r["document_id"] for r in record.rows} == {CITED.id, LEFT_OUT.id}
     assert record.unread_count == 2
     assert ReportMetadata.from_dict({"retraction_screen": stored}).retraction_screen.unread_rows == tuple(bad)
-    # control: an unknown status string is still read, as unchecked, on every platform
-    assert RetractionScreen.from_snapshot([{"document_id": "y", "status": "withdrawn"}])["y"]["status"] == "unchecked"
+    # an unknown status string is unread too, never unchecked, on every platform (#737)
+    assert RetractionScreen.from_snapshot([{"document_id": "y", "status": "withdrawn"}]) == {}
 
 
 def test_the_line_says_why_papers_went_unchecked_before_it_counts_unread_records() -> None:
