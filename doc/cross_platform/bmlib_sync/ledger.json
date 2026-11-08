@@ -2021,11 +2021,11 @@
     {
       "id": "bmlib:unreleased-find-passage",
       "title": "`bmlib.citations.find_passage` locates an LLM's near-verbatim quote in its source",
-      "python": "owed",
+      "python": "ported",
       "swift": "n/a",
       "android": "n/a",
       "issue": "#642",
-      "note": "The desktop's `gui/text_highlighting.find_passage_in_abstract` returns a span into the whitespace-collapsed abstract, so a highlight is misplaced; the apps locate no passage."
+      "note": "The desktop's citation highlight (`gui/text_highlighting.find_passage_in_abstract`) slices the abstract by `find_passage`'s own span at similarity 0.9 and says when the match is not verbatim; the apps locate no passage."
     },
     {
       "id": "bmlib:unreleased-retraction-short-row",

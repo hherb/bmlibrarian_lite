@@ -64,8 +64,7 @@ apps, not a Wi-Fi hint a reader on Wi-Fi was given too. **A scored paper with no
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
 error follows a cancel). Open, lodged by recent rounds: #641 (JATS whitespace,
-Swift, Kotlin, desktop journal title), #642 (citation highlight; use bmlib's
-`find_passage`), #598, #621, #624, #625, #627, #633–#635; Apple #612, #613;
+Swift, Kotlin, desktop journal title), #598, #621, #624, #625, #627, #633–#635; Apple #612, #613;
 Android #614, #615, #617–#619. The apps have no refusal handling yet (the
 Python-only rows in `doc/cross_platform/analysis_failure_reporting.md`).
 
@@ -90,11 +89,12 @@ have landed):
   see *Keep this PDF* offered (offscreen smoke passed bar #530's segfault).
 
 **Retraction checking, desktop: done** (PRs #594, #597, #605; spec `docs/superpowers/specs/2026-10-18-retraction-checking-design.md`;
-contract `doc/cross_platform/retraction_parity/`). bmlib is a git dependency (`8845ba8`; a git pin blocks a PyPI
+contract `doc/cross_platform/retraction_parity/`). bmlib is a git dependency (`514cda2`, the first with `find_passage`'s contradiction guard; a git pin blocks a PyPI
 upload). Snapshot rows keep `run_status`/`run_deciding` as set-once facts of the run. Open: #590–#593, #595, #599–#604 (#600 in part), #607.
 
 ## Recently landed (context)
 
+- **Citation highlight by bmlib's `find_passage`** (#642): the abstract's own span, ≥ 0.9 similarity; a near match carries `CITATION_NEAR_MATCH_NOTE`; a quote changing a number, negation or direction is refused (bmlib pin → `514cda2`).
 - **Apple release blockers** (fixed for 1.7, never shipped; PRs #676,
   #678–#680, #682); the Mac app is sandboxed (`network.client`, `print`).
   **A run never waits for the Retraction Watch refresh** (`currentIndex` is
