@@ -89,12 +89,12 @@ have landed):
   see *Keep this PDF* offered (offscreen smoke passed bar #530's segfault).
 
 **Retraction checking, desktop: done** (PRs #594, #597, #605; spec `docs/superpowers/specs/2026-10-18-retraction-checking-design.md`;
-contract `doc/cross_platform/retraction_parity/`). bmlib is a git dependency (`8845ba8`; a git pin blocks a PyPI
+contract `doc/cross_platform/retraction_parity/`). bmlib is a git dependency (`514cda2`, the first with `find_passage`'s contradiction guard; a git pin blocks a PyPI
 upload). Snapshot rows keep `run_status`/`run_deciding` as set-once facts of the run. Open: #590–#593, #595, #599–#604 (#600 in part), #607.
 
 ## Recently landed (context)
 
-- **Citation highlight by bmlib's `find_passage`** (#642): the abstract's own span, ≥ 0.9 similarity; a near match carries `CITATION_NEAR_MATCH_NOTE`.
+- **Citation highlight by bmlib's `find_passage`** (#642): the abstract's own span, ≥ 0.9 similarity; a near match carries `CITATION_NEAR_MATCH_NOTE`; a quote changing a number, negation or direction is refused (bmlib pin → `514cda2`).
 - **Apple release blockers** (fixed for 1.7, never shipped; PRs #676,
   #678–#680, #682); the Mac app is sandboxed (`network.client`, `print`).
   **A run never waits for the Retraction Watch refresh** (`currentIndex` is
@@ -494,4 +494,9 @@ page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
   `python .github/scripts/lint_delta.py --base-ref origin/master`. **Never record
   an absolute baseline count**: the mypy total differs between macOS and the
   Linux runner and drifts with every commit.
-- **Xcode Cloud** archives scheme `MedicalFactChecker` from a fresh clone (`xcode-project-guards.yml` keeps package refs in-repo, the scheme shared); reproduce with a clone's `xcodebuild … 'platform=macOS' CODE_SIGNING_ALLOWED=NO archive`.
+
+### Xcode Cloud contract (macOS ships from the multiplatform project)
+
+Xcode Cloud archives scheme `MedicalFactChecker` from a **fresh clone**; `xcode-project-guards.yml`
+keeps package references in-repo and the scheme shared. Reproduce: clone to `/tmp/x`, then in its
+`ios/MedicalFactChecker` `xcodebuild -scheme MedicalFactChecker -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO archive`.

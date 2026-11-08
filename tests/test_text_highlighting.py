@@ -35,12 +35,26 @@ def test_exact_match_is_highlighted_without_a_note() -> None:
 def test_near_match_is_highlighted_with_the_note() -> None:
     """A near quote is highlighted and said not to be verbatim."""
     # The quote drops a word the abstract has.
-    passage = "We enrolled 1200 adults with cholesterol."
+    passage = "We enrolled 1200 with high cholesterol."
     match = find_passage_in_abstract(ABSTRACT, passage)
     assert match is not None and not match.exact
+    own = "We enrolled  1200 adults with high cholesterol."
+    assert ABSTRACT[match.start : match.end] == own
     html = create_highlighted_html(ABSTRACT, passage)
     assert NOTE in html
-    assert "<span" in html
+    assert f"{escape_html(own)}</span>" in html
+
+
+def test_quote_contradicting_the_abstract_is_never_highlighted() -> None:
+    """A changed number or a dropped negation is shown apart, unhighlighted."""
+    cases = [
+        (ABSTRACT, "Mortality fell by 21%."),
+        ("The drug was not effective in adults.", "The drug was effective in adults."),
+    ]
+    for abstract, passage in cases:
+        assert find_passage_in_abstract(abstract, passage) is None
+        html = create_highlighted_html(abstract, passage)
+        assert "Cited Passage:" in html and "<span" not in html
 
 
 def test_unrelated_passage_is_shown_separately() -> None:
@@ -53,8 +67,9 @@ def test_unrelated_passage_is_shown_separately() -> None:
 
 def test_word_inside_a_word_is_not_exact() -> None:
     """A word found inside another word is never an exact match."""
-    match = find_passage_in_abstract("The drug was ineffective.", "effective")
-    assert match is None or not match.exact
+    abstract = "The drug was ineffective."
+    assert find_passage_in_abstract(abstract, "effective") is None
+    assert "<span" not in create_highlighted_html(abstract, "effective")
 
 
 def test_multiple_passages_note_only_when_one_is_near() -> None:
@@ -62,5 +77,5 @@ def test_multiple_passages_note_only_when_one_is_near() -> None:
     exact = ["Statins are widely used", "Mortality fell by 12%"]
     html = highlight_multiple_passages(ABSTRACT, exact)
     assert html.count("<span") == 2 and NOTE not in html
-    near = exact + ["We enrolled 1200 adults with cholesterol."]
+    near = exact + ["We enrolled 1200 with high cholesterol."]
     assert NOTE in highlight_multiple_passages(ABSTRACT, near)
