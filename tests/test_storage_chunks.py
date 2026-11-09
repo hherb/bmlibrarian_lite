@@ -73,3 +73,35 @@ def test_opening_a_store_sweeps_orphan_vectors(tmp_path: Path) -> None:
         conn.commit()
     reopened = _store(tmp_path)
     assert _vec_rowids(reopened) == [_rowid(reopened)]
+
+
+class TextEmbedder:
+    """A vector that depends on the text, so a stale one shows."""
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """One vector per text, its first value the text's length."""
+        return [[float(len(t))] + [0.0] * (DIMS - 1) for t in texts]
+
+
+def test_readding_changed_text_updates_the_chunk_and_its_vector(tmp_path: Path) -> None:
+    """A re-chunked document's new text, offsets, count and vector are stored."""
+    storage = _store(tmp_path)
+    storage.add_chunks([_chunk()], TextEmbedder())
+    first = _rowid(storage)
+    changed = LiteChunk(id="d_0", document_id="d", text="longer text", chunk_index=0,
+                        start_char=0, end_char=11)
+    second = LiteChunk(id="d_1", document_id="d", text="more", chunk_index=1,
+                       start_char=11, end_char=15)
+    storage.add_chunks([changed, second], TextEmbedder())
+
+    [stored, _] = storage.get_chunks_for_document("d")
+    assert stored.text == "longer text"
+    assert stored.end_char == 11
+    assert _rowid(storage) == first
+    with storage._sqlite_connection() as conn:
+        total, blob = conn.execute(
+            "SELECT c.total_chunks, v.embedding FROM chunks c "
+            "JOIN vec_chunks v ON v.rowid = c.rowid WHERE c.id = 'd_0'"
+        ).fetchone()
+    assert total == 2
+    assert blob == storage._serialize_embedding(TextEmbedder().embed(["longer text"])[0])

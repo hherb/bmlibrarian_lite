@@ -30,7 +30,7 @@ hidden_imports = [
     "PySide6.QtGui",
     "PySide6.QtWidgets",
     "PySide6.QtNetwork",
-    # Hidden browser (web_engine.py imports QtWebEngineCore inside a function)
+    # Hidden browser (#527): named so PyInstaller's QtWebEngine hook always runs and bundles QtWebEngineProcess
     "PySide6.QtWebEngineCore",
     "PySide6.QtWebEngineWidgets",
     # SQLite

@@ -777,18 +777,25 @@ class LiteStorage:
         """Delete chunk vectors whose chunk row is gone (idempotent).
 
         The old ``INSERT OR REPLACE`` chunk upsert gave a re-added chunk a new
-        rowid and left its vector behind under the old one (#592).
+        rowid and left its vector behind under the old one (#592). Runs on
+        every open, from ``_init_sqlite``.
 
         Args:
             conn: The open connection to sweep on.
 
         Returns:
             The number of vectors removed.
+
+        Raises:
+            SQLiteError: If the sweep fails.
         """
-        removed = conn.execute(
-            "DELETE FROM vec_chunks WHERE rowid NOT IN (SELECT rowid FROM chunks)"
-        ).rowcount
-        conn.commit()
+        try:
+            removed = conn.execute(
+                "DELETE FROM vec_chunks WHERE rowid NOT IN (SELECT rowid FROM chunks)"
+            ).rowcount
+            conn.commit()
+        except sqlite3.Error as e:
+            raise SQLiteError(f"Could not sweep orphaned chunk vectors: {e}") from e
         if removed > 0:
             logger.info(f"Removed {removed} orphaned chunk vectors.")
         return removed
@@ -1710,6 +1717,10 @@ class LiteStorage:
     ) -> list[str]:
         """
         Add document chunks with embeddings for interrogation.
+
+        A chunk already stored under its id is updated in place, so it keeps
+        its rowid and the vector stored at it (#592). With no embedding
+        function that vector is left as it was, even when the text changed.
 
         Args:
             chunks: List of LiteChunk objects

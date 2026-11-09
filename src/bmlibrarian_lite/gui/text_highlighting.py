@@ -183,4 +183,3 @@ def create_highlighted_passage_widget(
     browser.setOpenLinks(False)
 
     return browser
-

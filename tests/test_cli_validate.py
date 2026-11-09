@@ -1,15 +1,32 @@
 """``bmll -v validate``: the verbose details name the configured models."""
 
+import importlib.util
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from bmlibrarian_lite import LiteConfig
-from bmlibrarian_lite.cli import create_parser
+from bmlibrarian_lite import LiteConfig, cli
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
+def _dev_cli() -> Any:
+    """The development entry point at the repository root, ``bmll.py``."""
+    spec = importlib.util.spec_from_file_location("bmll_dev", ROOT / "bmll.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("entry", [lambda: cli, _dev_cli], ids=["bmll", "bmll.py"])
 def test_verbose_validate_prints_the_configured_models(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    entry: Callable[[], Any],
 ) -> None:
     """A valid configuration exits 0 and its verbose details name the default provider and model."""
     config = LiteConfig()
@@ -18,7 +35,7 @@ def test_verbose_validate_prints_the_configured_models(
     config.models.default_model = "claude-x"
     monkeypatch.setattr(LiteConfig, "load", classmethod(lambda cls, config_path=None: config))
 
-    args = create_parser().parse_args(["-v", "validate"])
+    args = entry().create_parser().parse_args(["-v", "validate"])
     assert int(args.func(args)) == 0
 
     out = capsys.readouterr().out

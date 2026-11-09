@@ -67,9 +67,10 @@ here turn either record into what a reader sees.
   conflict of interest reasons on it: no source that carries a disclosure was
   read, or the article's full text was not (#352).
 
-Only :func:`also_failed_text` puts the provider's own words on the screen, and
-it runs them through :func:`redact_secrets` first: they can print the request,
-credentials and all. The raw text stays in the log (#330).
+Of this module's sentences only :func:`also_failed_text` puts the provider's
+own words on the screen; the GUI workers that show an error's text do too.
+Both run them through :func:`redact_secrets` first: they can print the
+request, credentials and all. The raw text stays in the log (#330).
 
 The wording follows the search contract in
 ``doc/cross_platform/search_failure_reporting.md``; this family's own contract
@@ -267,17 +268,34 @@ def advice_for_causes(causes: Iterable[EvaluationErrorCode]) -> str:
     return " ".join(advice) if advice else _FALLBACK_ADVICE
 
 
-# A password in a URL's userinfo (https://user:pass@host/...), as httpx prints it.
-_URL_USERINFO_RE = re.compile(r"(https?://)[^\s/@]+@", re.IGNORECASE)
-# A URL's query string, where a provider puts the key (?key=...); stops short
-# of a closing quote so the sentence around the URL survives.
-_URL_QUERY_RE = re.compile(r"""(https?://[^\s?#]+)\?[^\s#'"]*""", re.IGNORECASE)
-# The token after "Bearer", up to the quote or brace that closes it.
-_BEARER_RE = re.compile(r"""(bearer\s+)[^\s'",})]+""", re.IGNORECASE)
+# A URL's userinfo (scheme://user:pass@host/...), up to the last "@" before the
+# path or query, so a password holding an "@" is taken whole and a query's "@"
+# is not mistaken for one.
+_URL_USERINFO_RE = re.compile(r"([a-z][a-z0-9+.-]*://)[^\s/?#]+@", re.IGNORECASE)
+# A URL's query string, where a provider puts the key (?key=...): an absolute
+# URL's, or the path urllib3 prints ("Max retries exceeded with url: /x?...").
+# Stops short of a closing quote or bracket so the sentence around it survives.
+_URL_QUERY_RE = re.compile(
+    r"""((?:[a-z][a-z0-9+.-]*://|\burl: /)[^\s?#]*)\?[^\s#'")]*""", re.IGNORECASE
+)
+# An Authorization header's credentials, whatever the scheme (Basic, Bearer, ...).
+_AUTHORIZATION_RE = re.compile(
+    r"""(authorization["']?\s*[:=]\s*["']?(?:[a-z]+\s+)?)[^\s'",})]+""", re.IGNORECASE
+)
+# The token after "Bearer", up to the quote or brace that closes it; a token is
+# long, so "the bearer of" is left alone.
+_BEARER_RE = re.compile(r"""(bearer\s+)[^\s'",})]{8,}""", re.IGNORECASE)
 # A value given for an api key / x-api-key header or parameter, or Elsevier's
 # institution token header.
 _API_KEY_RE = re.compile(
     r"""((?:(?:x-)?api[-_]?key|x-els-insttoken)["']?\s*[:=]\s*["']?)[^\s"',]+""",
+    re.IGNORECASE,
+)
+# A credential-named parameter's value outside a URL's query (a form body, a
+# printed dict): token=, access_token=, password=, secret=, key=, signature=.
+_CREDENTIAL_PARAM_RE = re.compile(
+    r"(?<![A-Za-z0-9])([A-Za-z0-9_-]*(?:token|password|passwd|secret|signature|key)=)"
+    r"""[^\s&"',)#]+""",
     re.IGNORECASE,
 )
 # A bare provider key in the sk-... shape, starting a token (not "risk-...").
@@ -288,9 +306,13 @@ def redact_secrets(text: str) -> str:
     """Take the credentials out of an error's text, keeping the rest.
 
     The reader still sees what failed and where ("Connection refused:
-    http://localhost:11434/api/chat"); only a URL's userinfo and query string, a
-    bearer token and an API key or institution token value are replaced. The raw text belongs in the log
-    (golden rule 8), not on screen (#330).
+    http://localhost:11434/api/chat"). Replaced are: a URL's userinfo and query
+    string (an absolute URL's, or the path urllib3 prints after "url: "), an
+    Authorization header's credentials, a bearer token, an API key or
+    institution token value, a credential-named parameter's value (token=,
+    password=, secret=, key=, ...) and a bare ``sk-`` key. The raw text belongs
+    in the log (golden rule 8), not on screen (#330). Redacting twice changes
+    nothing, so text that passes through two redacting steps reads the same.
 
     Args:
         text: An exception's text.
@@ -300,8 +322,10 @@ def redact_secrets(text: str) -> str:
     """
     text = _URL_USERINFO_RE.sub(rf"\1{REDACTED_PLACEHOLDER}@", text)
     text = _URL_QUERY_RE.sub(rf"\1?{REDACTED_PLACEHOLDER}", text)
+    text = _AUTHORIZATION_RE.sub(rf"\1{REDACTED_PLACEHOLDER}", text)
     text = _BEARER_RE.sub(rf"\1{REDACTED_PLACEHOLDER}", text)
     text = _API_KEY_RE.sub(rf"\1{REDACTED_PLACEHOLDER}", text)
+    text = _CREDENTIAL_PARAM_RE.sub(rf"\1{REDACTED_PLACEHOLDER}", text)
     return _BARE_KEY_RE.sub(REDACTED_PLACEHOLDER, text)
 
 

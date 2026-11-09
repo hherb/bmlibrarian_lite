@@ -83,6 +83,7 @@ from ..elsevier_api import ElsevierCredentials
 from ..storage import LiteStorage
 from ..pdf_library_check import check_cached_pdf, forget_kept, set_aside_note
 from ..agents import LiteInterrogationAgent
+from ..analysis_failures import redact_secrets
 from ..pdf_utils import (
     get_pdf_base_dir,
     find_existing_pdf,
@@ -556,9 +557,9 @@ class DocumentInterrogationTab(QWidget):
             self.status_message.emit(f"Loaded document: {path.name}")
         except Exception as e:
             logger.exception("Failed to load document")
-            self.doc_label.setText(f"Error: {str(e)}")
+            self.doc_label.setText(f"Error: {redact_secrets(str(e))}")
             self.progress_label.setVisible(False)
-            QMessageBox.critical(self, "Error", f"Failed to load document:\n{str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to load document:\n{redact_secrets(str(e))}")
 
     def _clear_document(self) -> None:
         """Clear the loaded document, and stop waiting for its walled PDF."""
@@ -1016,7 +1017,7 @@ class DocumentInterrogationTab(QWidget):
             self.status_message.emit(f"Loaded: {title}")
         except Exception as e:
             logger.exception("Failed to load PDF")
-            QMessageBox.critical(self, "Error", f"Failed to load PDF:\n{str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to load PDF:\n{redact_secrets(str(e))}")
 
     # -------------------------------------------------------------------------
     # Citation Loading
@@ -1386,7 +1387,7 @@ class DocumentInterrogationTab(QWidget):
             self._finalize_citation_load(citation, abstract_source_label(degradation))
         except Exception as e:
             logger.exception("Failed to load abstract")
-            QMessageBox.critical(self, "Error", f"Failed to load document:\n{str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to load document:\n{redact_secrets(str(e))}")
 
     def _finalize_citation_load(self, citation: 'Citation', source_type: str, show_wrong_pdf: bool = False) -> None:
         """Finalize citation document load."""

@@ -95,3 +95,37 @@ def test_a_benchmark_error_redacts(
 
     [(text,)] = errors
     assert SECRET not in text
+
+
+@pytest.mark.parametrize(
+    ("worker_name", "method", "args"),
+    [
+        ("PDFDiscoveryWorker", "discover_and_download", ({"doi": "10.1/x"}, MagicMock())),
+        ("FulltextDiscoveryWorker", "discover_fulltext", ({"doi": "10.1/x"},)),
+    ],
+)
+def test_a_discovery_error_redacts(
+    monkeypatch: pytest.MonkeyPatch, worker_name: str, method: str, args: tuple[Any, ...]
+) -> None:
+    """A discoverer that raises, or reports a failure, shows no key."""
+    monkeypatch.setattr(workers, "generate_pdf_path", lambda *a: MagicMock())
+    for discoverer_fails in (
+        lambda d: setattr(getattr(d, method), "side_effect", RuntimeError(LEAKY)),
+        lambda d: setattr(
+            getattr(d, method),
+            "return_value",
+            MagicMock(success=False, is_paywall=False, error=LEAKY, set_aside=None,
+                      set_aside_pdf_note=None, lookups=[]),
+        ),
+    ):
+        discoverer = MagicMock()
+        discoverer_fails(discoverer)
+        worker = getattr(workers, worker_name)(*args)
+        monkeypatch.setattr(worker, "_build_discoverer", lambda d=discoverer: d)
+        errors = collect(worker.error)
+
+        worker.run()
+
+        [(text,)] = errors
+        assert SECRET not in text
+        assert "Client error" in text

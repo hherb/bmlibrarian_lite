@@ -66,3 +66,58 @@ def test_more_credential_shapes_are_redacted(text: str, secret: str, kept: str) 
     assert secret not in out
     assert "alice:" not in out
     assert kept in out
+
+
+@pytest.mark.parametrize(
+    ("text", "secret", "kept"),
+    [
+        # A path-less URL whose query holds an "@": the host is not userinfo
+        (
+            "fail https://api.example.org?mail=me@x.org&key=S",
+            "key=S",
+            "https://api.example.org?[redacted]",
+        ),
+        ("https://user:p@ss@host/x", "ss@host", "https://[redacted]@host/x"),
+        ("socks5://user:pa55@proxy:1080 refused", "pa55", "[redacted]@proxy:1080"),
+        # The shape requests/urllib3 print: a path, no scheme
+        (
+            "Max retries exceeded with url: /v1/x?token=ABC&access_token=DEF (Caused by X)",
+            "ABC",
+            "url: /v1/x?[redacted] (Caused by X)",
+        ),
+        ("{'Authorization': 'Basic dXNlcjpwYXNz'}", "dXNlcjpwYXNz", "'Basic [redacted]'}"),
+        ("body password=hunter2&id=5", "hunter2", "password=[redacted]&id=5"),
+        ("for https://h/p?key=S).", "key=S", "?[redacted])."),
+    ],
+)
+def test_review_shapes_are_redacted(text: str, secret: str, kept: str) -> None:
+    """Shapes the #330 review found leaking, and the text around them kept."""
+    out = redact_secrets(text)
+    assert secret not in out
+    assert kept in out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "the bearer of bad news",
+        "Connection refused: http://localhost:11434/api/chat",
+        "write to bob@example.org",
+        "{'message': 'invalid x-api-key'}}",
+        "prompt is too long: 250000 tokens > 200000 maximum",
+        "Authorization header missing",
+    ],
+)
+def test_text_with_no_secret_is_unchanged(text: str) -> None:
+    """Prose, a bare URL, an email and a provider's own words are kept."""
+    assert redact_secrets(text) == text
+
+
+def test_redacting_twice_changes_nothing() -> None:
+    """Workers redact and also_failed_text redacts again: the text reads the same."""
+    text = (
+        "https://u:p@h/x?key=S Authorization: Bearer abcdefghij api_key=K "
+        "token=T sk-abcdefghijk url: /p?q=1"
+    )
+    once = redact_secrets(text)
+    assert redact_secrets(once) == once

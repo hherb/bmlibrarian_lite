@@ -55,14 +55,18 @@ android {
     val keystoreFile = rootProject.file("keystore.properties")
     if (keystoreFile.exists()) {
         val keystoreProps = Properties().apply { keystoreFile.inputStream().use { load(it) } }
+        fun prop(key: String): String =
+            keystoreProps.getProperty(key) ?: error("keystore.properties has no $key")
         signingConfigs {
             create("release") {
-                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
-                storePassword = keystoreProps.getProperty("storePassword")
-                keyAlias = keystoreProps.getProperty("keyAlias")
-                keyPassword = keystoreProps.getProperty("keyPassword")
+                storeFile = rootProject.file(prop("storeFile"))
+                storePassword = prop("storePassword")
+                keyAlias = prop("keyAlias")
+                keyPassword = prop("keyPassword")
             }
         }
+    } else {
+        logger.warn("keystore.properties not found: the release build is UNSIGNED")
     }
 
     buildTypes {
@@ -399,7 +403,6 @@ dependencies {
     implementation("io.noties.markwon:core:4.6.2")
     implementation("io.noties.markwon:ext-tables:4.6.2")
     implementation("io.noties.markwon:html:4.6.2")
-    implementation("io.noties.markwon:ext-strikethrough:4.6.2")
 
     // PDF generation (AGPL license - compatible with open source projects)
     implementation("com.itextpdf:itext7-core:7.2.5")
