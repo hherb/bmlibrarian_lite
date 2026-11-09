@@ -43,6 +43,22 @@ def test_the_shared_unexpected_error_path_redacts() -> None:
     assert "Client error" in text
 
 
+def test_a_stopped_run_still_ends_redacted_and_keeps_unwinding() -> None:
+    """A ``BaseException`` ends the run with redacted text, then propagates."""
+    worker = workers.AnswerWorker(MagicMock(), "q")
+    seen: list[str] = []
+
+    def body() -> None:
+        raise SystemExit(LEAKY)
+
+    with pytest.raises(SystemExit):
+        worker._run_once(body, seen.append)
+
+    [text] = seen
+    assert SECRET not in text
+    assert "Client error" in text
+
+
 def test_the_interrogation_answer_error_redacts() -> None:
     """The error shown in the chat carries no key."""
     agent = MagicMock()
@@ -67,6 +83,29 @@ def test_the_quality_filter_error_redacts() -> None:
 
     [(text,)] = errors
     assert SECRET not in text
+
+
+def test_a_quality_filter_error_mid_cancel_redacts() -> None:
+    """An error that also ends a cancelled filter reaches ``cancelled`` without its key.
+
+    The tab redacts it again in ``also_failed_text``, so only the signal shows
+    whether the worker did.
+    """
+    manager = MagicMock()
+    worker = workers.QualityFilterWorker(manager, [], MagicMock())
+
+    def cancel_then_fail(*args: Any, **kwargs: Any) -> None:
+        worker.cancel()
+        raise RuntimeError(LEAKY)
+
+    manager.filter_documents.side_effect = cancel_then_fail
+    cancelled = collect(worker.cancelled)
+
+    worker.run()
+
+    [(_, _, _, text)] = cancelled
+    assert SECRET not in text
+    assert "Client error" in text
 
 
 @pytest.mark.parametrize(
@@ -95,6 +134,41 @@ def test_a_benchmark_error_redacts(
 
     [(text,)] = errors
     assert SECRET not in text
+
+
+@pytest.mark.parametrize(
+    ("module", "worker_name", "runner_name"),
+    [
+        ("benchmark_dialog", "BenchmarkWorker", "BenchmarkRunner"),
+        ("quality_benchmark_dialog", "QualityBenchmarkWorker", "QualityBenchmarkRunner"),
+    ],
+)
+def test_a_benchmark_error_mid_cancel_redacts(
+    monkeypatch: pytest.MonkeyPatch, module: str, worker_name: str, runner_name: str
+) -> None:
+    """An error that also ends a cancelled benchmark reaches ``cancelled`` without its key."""
+    import importlib
+
+    import bmlibrarian_lite.benchmarking as benchmarking
+
+    runner = MagicMock()
+    monkeypatch.setattr(benchmarking, runner_name, lambda *a, **k: runner)
+    dialog = importlib.import_module(f"bmlibrarian_lite.gui.{module}")
+    worker = getattr(dialog, worker_name)(MagicMock(), MagicMock(), "q", [], ["m"])
+
+    def cancel_then_fail(*args: Any, **kwargs: Any) -> None:
+        worker.cancel()
+        raise RuntimeError(LEAKY)
+
+    runner.run_quick_benchmark.side_effect = cancel_then_fail
+    cancelled = collect(worker.cancelled)
+
+    worker.run()
+
+    [(partial, text)] = cancelled
+    assert partial is None
+    assert SECRET not in text
+    assert "Client error" in text
 
 
 @pytest.mark.parametrize(
