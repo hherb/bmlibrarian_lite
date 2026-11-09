@@ -25,5 +25,9 @@
     <!-- Hardened Runtime: Disable library validation (required for bundled libraries) -->
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
+
+    <!-- Hardened Runtime: Allow JIT (required by Chromium's V8 in QtWebEngine) -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
 </dict>
 </plist>

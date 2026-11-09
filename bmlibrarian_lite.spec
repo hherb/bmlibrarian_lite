@@ -30,6 +30,9 @@ hidden_imports = [
     "PySide6.QtGui",
     "PySide6.QtWidgets",
     "PySide6.QtNetwork",
+    # Hidden browser (web_engine.py imports QtWebEngineCore inside a function)
+    "PySide6.QtWebEngineCore",
+    "PySide6.QtWebEngineWidgets",
     # SQLite
     "sqlite3",
     # Posthog telemetry
