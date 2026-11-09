@@ -11,24 +11,76 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 
 ## [Unreleased]
 
-### Fixed
-
-- Ollama requests now honor the configured per-task `context_window` as
-  `options.num_ctx` instead of silently ignoring it (#620). Invalid configured
-  limits fail before the request; an unset limit preserves the server/model
-  default. No prompt data is shortened or automatic context size inferred.
-
 ### Added
 
-- **A hidden built-in browser for bot-walled PDFs (#480).** An open-access PDF
-  whose host answers our downloads with a robot check is queued and fetched
-  later by a hidden QtWebEngine page while the app is open; a rescued PDF is
-  saved to the library and, when the article is in your library, its
-  transparency is re-checked. Switch it off under Settings with "Try bot-walled
-  PDFs in a hidden browser".
+- **Retraction checking (#594, #597, #605).** Every paper a review finds is
+  checked against a local copy of the Retraction Watch data and against
+  Crossref, and by its own PubMed label. Retracted papers are left out of the
+  review, counted, and named in the report; papers under an expression of
+  concern stay in, and the report carries the concern. Badges read RETRACTED,
+  CONCERN or NOT CHECKED, and the report says why any paper could not be
+  checked. The Retraction Watch copy is downloaded once a month into the data
+  directory (`bmll retractions-update` refreshes it). A reopened research
+  question says when its papers were checked, warns of any cited paper retracted
+  or flagged since, and offers *Check again*. A source that could not be reached
+  never counts as "no retraction found", and a stored record this build cannot
+  read is never written over (#725, #729, #732, #735, #736, #740).
+- **Find More Evidence and repeated smart search (#628).** A reviewed research
+  question can be searched again for more papers, which are scored into the
+  same run before the report is written again. Each smart-search round asks the
+  model for alternative queries and lists every query already run, so it does
+  not repeat itself.
+- **Citations from full text and Retry Full Text (#622).** Under *Settings →
+  Full Text*, *Read citations from full text* (off by default) fetches the full
+  text of every paper scored at least *Fetch Full Text From Score* (default 4)
+  and extracts citations from it. *Research Questions → Retry Full Text* reads
+  any full texts a reviewed run missed and writes its report again.
+- **Upload Full Text (#626).** Right-click a paper on the Audit Trail's
+  literature cards to give it your own PDF, HTML, Markdown or text file; Retry
+  Full Text then reads it.
+- **More full-text sources (#487, #491, #501, #507).** PMC's open-data bucket,
+  then every PDF Unpaywall and OpenAlex name. With your own key (Settings), CORE's
+  extracted text and Elsevier's article API (PDFs for `10.1016/` DOIs). The first copy served ends the search, and the
+  report names every source that was tried.
+- **A hidden built-in browser for bot-walled PDFs (#480; #521, #529, #536).** An
+  open-access PDF whose host answers our downloads with a robot check is queued
+  and fetched later by a hidden QtWebEngine page while the app is open; a
+  rescued PDF is saved to the library and, when the article is in your library,
+  its transparency is re-checked. *Tools → Walled PDFs…* (and the "Walled PDFs:
+  N" status-bar count) lists the queue and shows a page so you can tick a
+  robot check yourself. Switch the hidden browser off under Settings with "Try
+  bot-walled PDFs in a hidden browser".
+- **Another article's PDF is set aside, never read (#542, #548).** A PDF whose
+  first page does not carry the article's title is renamed to `.mismatch` and
+  not used for transparency, interrogation or MCP. If the check is wrong,
+  `bmll keep-pdf <path>` (or *Keep this PDF* in the walled-PDF window) restores
+  it.
+- **Transparency certainty and High explained (#419).** A rating made without
+  the full text reads "Limited certainty because of lack of full text access"
+  (badge `High · limited`), and a High rating names the rules that made it High.
+  The wording matches the iOS/macOS and Android apps.
 
 ### Changed
 
+- **Long texts are read whole (#622).** Citation extraction and the quality
+  analyses read a paper's text in overlapping 16,000-character windows, without
+  the reference list, instead of cutting it short. If one window fails, the paper fails; half a text is never reported as
+  read.
+- **The transparency analyser reads the article's end matter (#426, #431).**
+  Funding, conflict-of-interest and data statements in a full text's front and
+  back matter now reach the analysis. A missing statement is charged only when
+  the end matter was recognised. The analyser version is now 2.7, so stored
+  ratings are offered for re-analysis, and cached full texts are converted
+  again.
+- **Citation highlights use bmlib's passage matcher (#741).** A highlight is
+  exact in the abstract as written. A near match is marked as one, and a quote
+  that changes a number, a negation or a direction is not highlighted.
+- Europe PMC's full-text XML is asked for only when its record says the article
+  is open access (#452), and a preprint's steady HTTP 500 is asked once rather
+  than retried (#455).
+- BMLibrarian Lite now depends on bmlib, for the retraction rules and passage
+  matching (#594). PySide6 is capped below 6.12, which crashes at
+  exit (#515).
 - A copy behind a robot check is no longer reported as paywalled, so no
   OpenAthens offer is made for it.
 
@@ -39,6 +91,95 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   `browser_headless` parameters of `PDFDiscoverer`, `FulltextDiscoverer` and
   `StudyTransparencyAnalyzer`; and the transparency CLI's `--no-browser` flag.
   There is no compatibility shim.
+
+### Fixed
+
+- **A source that could not answer is not an absence.** A Europe PMC full-text
+  fetch that failed (429, 5xx, timeout) was recorded as "no full text" (#433);
+  an exhausted throttle at doi.org read as no PDF (#448); and a lookup that
+  answered "not served" read as one that could not be asked (#444, #449).
+- **Unpaywall:** a repository landing page was saved as the PDF (#465), and an
+  Unpaywall PDF that could not be downloaded read as "no open-access copy"
+  (#482).
+- **A model's cut-off or refused answer is never read as a whole one (#630,
+  #632, #636, #638, #640).** An answer stopped at its token limit is reported as
+  cut off instead of failing to parse and being paid for again; a refusal is
+  not retried; a cut-off smart-search answer's complete queries are still run,
+  and the reader is told.
+- **Identifiers (#565, #566).** A padded or malformed PMID is normalised or not
+  sent, rather than recorded as "not found"; the transparency analyser no longer
+  takes a *cited* paper's PMC ID and DOI from PubMed's reference list.
+- A `null` or non-numeric value in a model's quality answer no longer makes the
+  study unclassified or crashes the assessment (#568).
+- Europe PMC's own open-access PDFs are now used (#569); authors declared on the
+  JATS author group are kept (#570); text around inline markup in PubMed titles
+  and abstracts is kept (#397); a trial is recognised only by whole words in its
+  title (#410).
+- The settings dialog no longer aborts the app when closed while a model list
+  is loading (#518).
+- Ollama requests now honor the configured per-task `context_window` as
+  `options.num_ctx` instead of silently ignoring it (#620). Invalid configured
+  limits fail before the request; an unset limit preserves the server/model
+  default. No prompt data is shortened or automatic context size inferred.
+- `bmll -v validate` crashed after "Configuration is valid." (#589).
+- A re-added document's chunks lost their search vectors; opening a store now
+  removes the orphaned vectors earlier versions left behind (#592).
+
+### Security
+
+- **Credentials are kept out of error text (#330).** URL query strings and
+  passwords, bearer and API-key headers (Elsevier's included) and `sk-` keys are
+  redacted from every error a reader sees: the review, interrogation, quality
+  filter, benchmarks, PDF and full-text discovery, and OpenAthens (#743). The
+  full text stays in the log.
+- Dependency updates for published advisories: fastembed 0.9.1 and pillow 13.0.0
+  (#677), pyjwt, urllib3, fsspec, mcp, certifi and filelock.
+
+#### iOS / macOS 1.9.0
+
+Since the App Store's 1.6 (1.7 and 1.8 did not reach the store; 1.8.0 shipped
+as a macOS beta DMG).
+
+- **Retraction checking (#650, #652).** As on the desktop: retracted papers
+  left out, counted, badged and reported; concerns carried; saved sessions show
+  when they were checked and offer *Check again*, which can be cancelled and
+  runs in one window at a time (#707, #712).
+- **Taking a fact check further (#611, #458).** *Find More Evidence* for the
+  same claim, repeated smart search, *Fetch Full Text for Top Papers* (scored 4
+  or 5), Retry Full Text, and uploading your own full text.
+- **More full-text sources** (PMC's open-data bucket, every Unpaywall PDF,
+  OpenAlex; CORE and Elsevier with your key), and another article's PDF is
+  refused, also when it was already cached (#559, #562).
+- **Cancel works** on every run and records no failure (#469).
+- The Mac app is sandboxed, and the app carries a privacy manifest (#676,
+  #679).
+- Fixed: every second report crashed on iOS 18 / macOS 15 (#722); runs hung at
+  "Checking retraction status" (#680); the iPhone Settings tab froze and was
+  killed (#697); macOS *Get More Evidence* did nothing (#608); a transparency
+  failure showed a successful run as failed (#460); studies added by
+  *Get More Evidence* went unrated (#463); a Keychain key that could not be read
+  was treated as no key (#678); PubMed titles lost the text around italics
+  (#397); references lost their punctuation (#405); a source outage became a
+  permanent transparency finding (#410); an unreadable relevance score is a
+  parse failure, never a score (#567).
+
+#### Android 1.9.0
+
+Since 1.6.0.
+
+- **Retraction checking (#655, #661),** as on the desktop and the Apple apps.
+- **Taking a fact check further (#616):** *Find More Evidence*, repeated smart
+  search, full text for top papers, Retry Full Text and uploads.
+- **More full-text sources,** as on iOS/macOS, and another article's PDF is
+  refused (#559, #562).
+- **Cancel stops a running fact check,** at once, even mid-download (#664,
+  #666).
+- Fixed: an unreadable relevance score was read as 3, which made the paper
+  relevant (#567); a link-only record offered *Get Full Text* (#479); a source
+  outage became a permanent transparency finding (#410); references lost their
+  punctuation (#405).
+- The release build works again (R8, #555) and targets Android 16 (API 36), as
+  Google Play requires; it ships as an AAB on Google Play.
 
 ## [0.5.0] - 2026-09-24
 

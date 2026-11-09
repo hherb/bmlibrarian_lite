@@ -8,6 +8,20 @@ its slice has landed; add a new section when handing off new work.
 
 ## In flight
 
+**Release: desktop 0.6.0, apps 1.9.0** (plan
+`docs/superpowers/plans/2026-11-08-release-0.6.0-and-1.9.0.md`; a botched
+edit in PR #743 had blown it up to 21k lines, restored by the changelog PR).
+- **Phase 1 done** (PR #743: #589, #742, #330 `redact_secrets`, #592, #555
+  R8 + API 36 + `keystore.properties` signing, #527 spec/entitlements).
+  Deferred: #744, #527 (signed build from a second account, one hidden visit).
+- **Phase 2 blocked**: Task 8 waits for bmlib 0.13.0 on PyPI (PyPI has
+  0.12.0; bmlib `main` holds the `514cda2` guard). Then `bmlib>=0.13.0`, drop
+  `allow-direct-references`, `uv lock`, delete the guide's git-pin paragraph.
+- **Task 9 (changelog)**: `[Unreleased]` written, with `#### iOS / macOS
+  1.9.0` and `#### Android 1.9.0` subsections; awaits the maintainer's read.
+- **Task 10** (`scripts/set_version.py 0.6.0`, both `MARKETING_VERSION =
+  1.9.0`) after Tasks 8–9 merge; **Task 11** (publish) is the maintainer's.
+
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
 unchecked from its own answers only (#660, #668, all three platforms).
@@ -94,13 +108,9 @@ upload). Snapshot rows keep `run_status`/`run_deciding` as set-once facts of the
 
 ## Recently landed (context)
 
-- **Citation highlight by bmlib's `find_passage`** (#642): the abstract's own span, ≥ 0.9 similarity; a near match carries `CITATION_NEAR_MATCH_NOTE`; a quote changing a number, negation or direction is refused (bmlib pin → `514cda2`).
-- **Apple release blockers** (fixed for 1.7, never shipped; PRs #676,
-  #678–#680, #682); the Mac app is sandboxed (`network.client`, `print`).
-  **A run never waits for the Retraction Watch refresh** (`currentIndex` is
-  `nonisolated`, #681). A failed Keychain read is never cached as no key
-  (CORE/Elsevier unreachable, not unasked, #511). **Apps 1.8.0** (PR #709, `ios/MedicalFactChecker/APP_STORE.md`)
-  went out only as a notarized macOS DMG. **Owed by the maintainer before the
+- **Apple** (PRs #676–#682): the Mac app is sandboxed; **a run never waits
+  for the Retraction Watch refresh** (#681); **apps 1.8.0** (PR #709,
+  `ios/MedicalFactChecker/APP_STORE.md`) went out only as a macOS DMG. **Owed by the maintainer before the
   App Store**: the latest Program License Agreement (if not yet accepted), deploy the CloudKit
   schema to Production (`RetractionCheckRecord`, new `Document` fields), App
   Privacy answers per `PRIVACY.md`, archive and Validate on both platforms
@@ -131,36 +141,24 @@ upload). Snapshot rows keep `run_status`/`run_deciding` as set-once facts of the
   `europepmc_free_pdf.json`; converter **6**, analyser **2.7**. **Phase 4
   consumes bmlib's Rust through UniFFI** (no production caller yet). Open:
   #573–#581, #585, #587.
-- **Wrong-article PDFs** (PRs #542, #548, #559; `pdf_title_check.json`): a
-  mismatch is set aside as `.mismatch`, never read; `wrong_article` is a skip
-  with its address, never an absence; no title/text is unchecked, never a
-  match. Open: #543, #545, #547, #555–#558.
+- **Wrong-article PDFs** (PRs #542, #548, #559): `.mismatch`, never read;
+  `wrong_article` is a skip, never an absence. Open: #543, #545, #547, #556–#558.
 - **Bot-walled PDFs: the desktop browser rescue** (#480; PRs #521, #529,
   #536; spec `docs/superpowers/specs/2026-10-12-browser-rescue-design.md`, doc
   `doc/developer/browser_rescue.md`, which holds the binding rules): **one
   visit at a time, all in the service**; engine tests run only in
   `tests/browser_rescue_harness.py`'s subprocess; change a detection needle
   (`challenge_detection.json`) only against live pages.
-- **Stage C2: Elsevier's article API** (all three; PR #507; contract
-  `elsevier_article.json`). **A first-page PDF is never served**; a 403
-  `AUTHENTICATION_ERROR` is "not available from this network", a 401 refuses
-  the key; **never a redirect, never a link**; credentials that cannot be sent
-  are never sent. Open: #506, #508–#513. **Stage C1: CORE's text** (PR #501):
-  a hit counts only by its own DOI; no key, nothing recorded.
-- **Stages A and B** (PRs #487, #491): PMC's open-data bucket, then every
-  Unpaywall PDF, then OpenAlex's; **the first copy served ends the walk**;
-  **no stealth clients**; a listing 404 is unreachable.
-- **Retrieval and statements, compressed** (PRs #426–#482). Unpaywall: a
-  PDF not obtained is refused, never a link; non-`%PDF` is
-  `malformed_response`; **no absence while an `OpenAccessShortfall` is set**.
-  Europe PMC: a typed XML fetch (served / absent 404 / unreachable); **preprints
-  by their `PPR` ID**; closed text answers `fullTextXML` with a **500**; **an
-  `HTTP_STATUS` is an answer except a 429 or a 5xx** (`answered_lookup_verb.json`).
-  iOS: one stop path, `stopWork(_:)`; `session.errorMessage` means a failure
-  only. Python: `jats_markdown.py` is the converter (bump
-  `JATS_MARKDOWN_CONVERTER_VERSION` when output changes); `END_MATTER_MARKER`
-  (converter **5**) — **no marker, no charge**; recognising more end matter
-  creates charges (#359); no full text, no data-availability request (#421).
+- **Full-text stages A–C2** (PRs #487, #491, #501, #507): **the first copy
+  served ends the walk**; **no stealth clients**; Elsevier: **a first-page PDF
+  is never served**, 403 `AUTHENTICATION_ERROR` = "not from this network", 401
+  refuses the key, **never a redirect**; CORE counts a hit only by its own DOI.
+- **Retrieval and statements** (PRs #426–#482): an Unpaywall PDF not obtained
+  is refused, never a link; **no absence while an `OpenAccessShortfall` is
+  set**; **preprints by their `PPR` ID**; **an `HTTP_STATUS` is an answer
+  except a 429 or a 5xx**. iOS: one stop path, `stopWork(_:)`. Bump
+  `JATS_MARKDOWN_CONVERTER_VERSION` when `jats_markdown.py`'s output changes;
+  **no `END_MATTER_MARKER`, no charge** (#359).
 - **Transparency, compressed** (PRs #358–#419): every no-full-text rating
   says "Limited certainty because of lack of full text access". **Score =
   clamped sum of `score_components`; High iff `high_risk_triggers` is
@@ -285,10 +283,10 @@ Open issues by family; each issue carries the detail. None blocks another.
   the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,
   **#585**.
 - **#545** sweep the PDF library for other articles' PDFs (CLI, maintainer's
-  call); **#547** keep a set-aside PDF from the GUI; **#563** (PR #562's, checked downloads); **#555** Android release builds fail R8; **#556**–**#558** (#546's).
+  call); **#547** keep a set-aside PDF from the GUI; **#563** (PR #562's, checked downloads); **#556**–**#558** (#546's).
 - **C2's probe and acceptance, and C1's replay** (maintainer); the **embedded
   browser rescue's follow-ups**: **#524**, **#525**, **#527**, **#528**, **#530**, **#531**, **#533** (stage 2 follow-ups), **#534**, **#535**, **#537**–**#540**, **#544** (stage 3); **#481** follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
-  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2); **#516** (PySide6 cap, leaked widgets), **#517** (GC on worker threads); **#467**, **#468** / **#470**, **#476**.
+  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2); **#516** (PySide6 cap, leaked widgets), **#517** (GC on worker threads); **#467**, **#468** / **#470**, **#476**; **#744** (redaction follow-ups).
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 
