@@ -50,7 +50,7 @@ europepmc.py          # EuropePMCClient (cursor pagination)
 jats_markdown.py      # JATS XML → markdown; front/back-matter statements; cache version
 search_service.py     # Unified search across PubMed + Europe PMC
 search_failures.py    # RequestFailure from requests errors; shortfall clauses, notice, advice, session metadata
-analysis_failures.py  # AnalysisShortfall → notice, advice (the stages after the search); also_failed_text
+analysis_failures.py  # AnalysisShortfall → notice, advice (the stages after the search); also_failed_text; redact_secrets (credentials out of error text)
 audit_records.py      # What became of each document: accepted/rejected/failed/not scored
 search_merger.py      # Deduplication (PMID/DOI/PMC/title)
 citation_text.py      # Pure: full-text score, the methodology's full-text sentence

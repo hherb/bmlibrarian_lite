@@ -51,7 +51,7 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 from PySide6.QtCore import QThread, Signal, SignalInstance
 from PySide6.QtWidgets import QWidget
 
-from ..analysis_failures import advice_for_causes, failure_cause_text
+from ..analysis_failures import advice_for_causes, failure_cause_text, redact_secrets
 from ..data_models import (
     EvaluationErrorCode,
     LookupRecord,
@@ -141,13 +141,13 @@ class SingleOutcome:
         except Exception as e:
             logger.exception(f"{type(self).__name__} ended unexpectedly")
             if not self._ended:
-                fallback(str(e))
+                fallback(redact_secrets(str(e)))
         except BaseException as e:
             # A SystemExit or the like: end the run so the tab is not left
             # waiting, then let it carry on unwinding the thread
             logger.exception(f"{type(self).__name__} was stopped")
             if not self._ended:
-                fallback(str(e))
+                fallback(redact_secrets(str(e)))
             raise
 
 
@@ -349,7 +349,7 @@ class AnswerWorker(SingleOutcome, QThread):
             answer, sources = self.agent.ask(self.question)
         except Exception as e:
             logger.exception("Answer generation error")
-            message = str(e)
+            message = redact_secrets(str(e))
             if isinstance(e, (TruncatedResponseError, RefusedResponseError)):
                 message += f". {advice_for_causes([classify_llm_exception(e)])}"
             self._end(self.error, message)
@@ -926,9 +926,9 @@ class QualityFilterWorker(SingleOutcome, QThread):
                     for doc, assessment in zip(self.documents, assessed, strict=False)
                     if assessment.passes_filter(self.filter_settings)
                 ]
-                self._end(self.cancelled, kept, assessed, total, str(e))
+                self._end(self.cancelled, kept, assessed, total, redact_secrets(str(e)))
             else:
-                self._end(self.error, str(e))
+                self._end(self.error, redact_secrets(str(e)))
             return
 
         # A cancel that came after the last document stopped nothing

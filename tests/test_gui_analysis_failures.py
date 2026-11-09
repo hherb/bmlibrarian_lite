@@ -345,6 +345,42 @@ class TestAReportThatCouldNotBeWritten:
         assert step == "report"
         assert "Connection refused" in message
 
+    def test_the_report_and_workflow_errors_redact(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A provider's error text reaches the tab without its key (#330)."""
+        leaky = "Client error for url 'https://h/p?key=SECRET123'"
+        documents = [make_document("1")]
+        scores = {
+            documents[0].id: ScoredDocument(
+                document=documents[0], score=4, explanation="On topic."
+            )
+        }
+        citation = Citation(
+            document=documents[0], passage="Aspirin reduced stroke.", relevance_score=4
+        )
+        worker, recorder, _ = workflow_worker(
+            monkeypatch,
+            documents,
+            scores,
+            citations=CitationOutcome(citations=[citation], documents_attempted=1),
+            report=RuntimeError(leaky),
+        )
+        worker.run()
+        [(_, message)] = recorder.calls["error"]
+        assert "SECRET123" not in message
+
+        worker, recorder, _ = workflow_worker(monkeypatch, documents, scores)
+        monkeypatch.setattr(
+            systematic_review_tab,
+            "LiteSearchAgent",
+            MagicMock(side_effect=RuntimeError(leaky)),
+        )
+        worker.run()
+        [(step, message)] = recorder.calls["error"]
+        assert step == "workflow"
+        assert "SECRET123" not in message
+
     def test_a_failed_report_never_completes_the_checkpoint(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

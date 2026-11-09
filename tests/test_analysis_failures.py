@@ -43,3 +43,26 @@ def test_words_containing_sk_dash_are_unchanged() -> None:
     """A word that merely ends in "sk" is not mistaken for a key."""
     text = "risk-adjusted outcomes for a task-specific-thing"
     assert redact_secrets(text) == text
+
+
+@pytest.mark.parametrize(
+    ("text", "secret", "kept"),
+    [
+        (
+            "Client error for url 'https://alice:s3cret@ollama.example.org/api/chat'",
+            "s3cret",
+            "[redacted]@ollama.example.org",
+        ),
+        ("Incorrect API key provided: sk-proj-abcdefgh1234", "sk-proj-abcdefgh1234", "provided: [redacted]"),
+        ("headers {'X-ELS-Insttoken': 'INST123'}", "INST123", "X-ELS-Insttoken"),
+        ("X-ELS-APIKey: KEY456", "KEY456", "X-ELS-APIKey"),
+        ("url 'https://h/p?key=S'", "key=S", "[redacted]'"),
+        ("{'Authorization': 'Bearer TOK789'}", "TOK789", "[redacted]'}"),
+    ],
+)
+def test_more_credential_shapes_are_redacted(text: str, secret: str, kept: str) -> None:
+    """Userinfo, a bare key, Elsevier headers; closing punctuation survives."""
+    out = redact_secrets(text)
+    assert secret not in out
+    assert "alice:" not in out
+    assert kept in out
