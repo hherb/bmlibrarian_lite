@@ -19,8 +19,9 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   review, counted, and named in the report; papers under an expression of
   concern stay in, and the report carries the concern. Badges read RETRACTED,
   CONCERN or NOT CHECKED, and the report says why any paper could not be
-  checked. The Retraction Watch copy is downloaded once a month into the data
-  directory (`bmll retractions-update` refreshes it). A reopened research
+  checked. The Retraction Watch copy is downloaded into the data directory
+  when a review finds it more than 35 days old (`bmll retractions-update`
+  refreshes it at once). A reopened research
   question says when its papers were checked, warns of any cited paper retracted
   or flagged since, and offers *Check again*. A source that could not be reached
   never counts as "no retraction found", and a stored record this build cannot
@@ -38,10 +39,10 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 - **Upload Full Text (#626).** Right-click a paper on the Audit Trail's
   literature cards to give it your own PDF, HTML, Markdown or text file; Retry
   Full Text then reads it.
-- **More full-text sources (#487, #491, #501, #507).** PMC's open-data bucket,
-  then every PDF Unpaywall and OpenAlex name. With your own key (Settings), CORE's
-  extracted text and Elsevier's article API (PDFs for `10.1016/` DOIs). The first copy served ends the search, and the
-  report names every source that was tried.
+- **More full-text sources (#487, #491, #501, #507).** PMC's open-data bucket
+  and every PDF OpenAlex names; with your own key (Settings), CORE's extracted
+  text and Elsevier's article API (PDFs for `10.1016/` DOIs). The first copy
+  served ends the search, and the report names every source that was tried.
 - **A hidden built-in browser for bot-walled PDFs (#480; #521, #529, #536).** An
   open-access PDF whose host answers our downloads with a robot check is queued
   and fetched later by a hidden QtWebEngine page while the app is open; a
@@ -53,19 +54,18 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 - **Another article's PDF is set aside, never read (#542, #548).** A PDF whose
   first page does not carry the article's title is renamed to `.mismatch` and
   not used for transparency, interrogation or MCP. If the check is wrong,
-  `bmll keep-pdf <path>` (or *Keep this PDF* in the walled-PDF window) restores
-  it.
+  `bmll keep-pdf <path>` restores it.
 - **Transparency certainty and High explained (#419).** A rating made without
   the full text reads "Limited certainty because of lack of full text access"
-  (badge `High · limited`), and a High rating names the rules that made it High.
-  The wording matches the iOS/macOS and Android apps.
+  (its badge carries `· limited`), and a High rating names the rules that made
+  it High. The wording matches the iOS/macOS and Android apps.
 
 ### Changed
 
 - **Long texts are read whole (#622).** Citation extraction and the quality
   analyses read a paper's text in overlapping 16,000-character windows, without
-  the reference list, instead of cutting it short. If one window fails, the paper fails; half a text is never reported as
-  read.
+  the reference list, instead of cutting it short. If one window fails, the
+  paper fails; half a text is never reported as read.
 - **The transparency analyser reads the article's end matter (#426, #431).**
   Funding, conflict-of-interest and data statements in a full text's front and
   back matter now reach the analysis. A missing statement is charged only when
@@ -96,8 +96,9 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 
 - **A source that could not answer is not an absence.** A Europe PMC full-text
   fetch that failed (429, 5xx, timeout) was recorded as "no full text" (#433);
-  an exhausted throttle at doi.org read as no PDF (#448); and a lookup that
-  answered "not served" read as one that could not be asked (#444, #449).
+  an exhausted throttle at doi.org read as no PDF (#448); a lookup that
+  answered "not served" read as one that could not be asked (#444); and a 5xx
+  read as an answer (#449).
 - **Unpaywall:** a repository landing page was saved as the PDF (#465), and an
   Unpaywall PDF that could not be downloaded read as "no open-access copy"
   (#482).
@@ -135,6 +136,8 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 - Dependency updates for published advisories: fastembed 0.9.1 and pillow 13.0.0
   (#677), pyjwt, urllib3, fsspec, mcp, certifi and filelock.
 
+### Apps
+
 #### iOS / macOS 1.9.0
 
 Since the App Store's 1.6 (1.7 and 1.8 did not reach the store; 1.8.0 shipped
@@ -162,6 +165,11 @@ as a macOS beta DMG).
   (#397); references lost their punctuation (#405); a source outage became a
   permanent transparency finding (#410); an unreadable relevance score is a
   parse failure, never a score (#567).
+- Also fixed as on the desktop: an Unpaywall landing page saved as the PDF,
+  and an Unpaywall PDF that could not be downloaded read as no open-access
+  copy (#465, #482); a preprint's steady HTTP 500 is asked once (#455); a
+  padded PMID is normalised (#565); Europe PMC's own open-access PDFs are used
+  (#569); a trial is recognised only by whole words in its title (#410).
 
 #### Android 1.9.0
 
@@ -178,6 +186,8 @@ Since 1.6.0.
   relevant (#567); a link-only record offered *Get Full Text* (#479); a source
   outage became a permanent transparency finding (#410); references lost their
   punctuation (#405).
+- Also fixed as on the desktop and the Apple apps: #465, #482, #455, #565,
+  #569 and #410's whole-word trial test.
 - The release build works again (R8, #555) and targets Android 16 (API 36), as
   Google Play requires; it ships as an AAB on Google Play.
 

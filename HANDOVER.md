@@ -108,10 +108,10 @@ upload). Snapshot rows keep `run_status`/`run_deciding` as set-once facts of the
 
 ## Recently landed (context)
 
-- **Apple** (PRs #676–#682): the Mac app is sandboxed; **a run never waits
-  for the Retraction Watch refresh** (#681); **apps 1.8.0** (PR #709,
-  `ios/MedicalFactChecker/APP_STORE.md`) went out only as a macOS DMG. **Owed by the maintainer before the
-  App Store**: the latest Program License Agreement (if not yet accepted), deploy the CloudKit
+- **Apple** (PRs #676, #678–#680, #682): the Mac app is sandboxed; **a run
+  never waits for the Retraction Watch refresh** (#681); **apps 1.8.0** (PR
+  #709, `ios/MedicalFactChecker/APP_STORE.md`) went out only as a macOS DMG.
+  **Owed by the maintainer before the App Store**: the latest Program License Agreement (if not yet accepted), deploy the CloudKit
   schema to Production (`RetractionCheckRecord`, new `Document` fields), App
   Privacy answers per `PRIVACY.md`, archive and Validate on both platforms
   (first release bundling `BmlibFFI`). **Never pass an `@Observable`
