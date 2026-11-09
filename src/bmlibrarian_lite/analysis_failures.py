@@ -274,8 +274,8 @@ _BEARER_RE = re.compile(r"(bearer\s+)\S+", re.IGNORECASE)
 _API_KEY_RE = re.compile(
     r"""((?:x-)?api[-_]?key["']?\s*[:=]\s*["']?)[^\s"',]+""", re.IGNORECASE
 )
-# A bare provider key in the sk-... shape.
-_BARE_KEY_RE = re.compile(r"sk-[A-Za-z0-9_-]{8,}", re.IGNORECASE)
+# A bare provider key in the sk-... shape, starting a token (not "risk-...").
+_BARE_KEY_RE = re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{8,}", re.IGNORECASE)
 
 
 def redact_secrets(text: str) -> str:
