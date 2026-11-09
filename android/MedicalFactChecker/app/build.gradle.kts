@@ -22,14 +22,14 @@ val appMinSdk = 26
 
 android {
     namespace = "com.bmlibrarian.factchecker"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.bmlibrarian.factchecker"
         minSdk = appMinSdk
-        targetSdk = 35
-        versionCode = 3
-        versionName = "1.6.0"
+        targetSdk = 36
+        versionCode = 4
+        versionName = "1.9.0"
 
         // Custom test runner for Hilt dependency injection in instrumented tests
         testInstrumentationRunner = "com.bmlibrarian.factchecker.HiltTestRunner"
@@ -50,12 +50,28 @@ android {
         }
     }
 
+    // Play upload key: read from keystore.properties (gitignored) when present;
+    // without it the release build stays unsigned so CI and other checkouts build.
+    val keystoreFile = rootProject.file("keystore.properties")
+    if (keystoreFile.exists()) {
+        val keystoreProps = Properties().apply { keystoreFile.inputStream().use { load(it) } }
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isDebuggable = true
             applicationIdSuffix = ".debug"
         }
         release {
+            signingConfigs.findByName("release")?.let { signingConfig = it }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
