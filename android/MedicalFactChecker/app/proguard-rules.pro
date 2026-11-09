@@ -61,3 +61,15 @@
 -keep class * implements com.sun.jna.** { *; }
 -keep class org.bmlib.ffi.** { *; }
 -dontwarn java.awt.**
+
+# Annotation-processor code (AutoValue's shaded javapoet) on the runtime classpath; never loaded
+-dontwarn javax.lang.model.**
+-dontwarn autovalue.shaded.**
+# Markwon's HTML StrikeHandler probes for this with Class.forName and falls back to StrikethroughSpan
+-dontwarn org.commonmark.ext.gfm.strikethrough.**
+# iText's slf4j-api falls back to NOP when no binding is present
+-dontwarn org.slf4j.impl.StaticLoggerBinder
+
+# Retrofit 2.9 suspend funs: R8 full mode strips the generic Signature of Response, so the call fails "Response must include generic type"
+-keep,allowobfuscation,allowshrinking class retrofit2.Response
+-keep,allowobfuscation,allowshrinking class kotlin.coroutines.Continuation

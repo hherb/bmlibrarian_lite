@@ -163,9 +163,9 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
         if args.verbose:
             print("\nConfiguration details:")
-            print(f"  LLM Provider: {config.llm.provider}")
-            print(f"  LLM Model: {config.llm.model}")
-            print(f"  Temperature: {config.llm.temperature}")
+            print(f"  Default Provider: {config.models.default_provider}")
+            print(f"  Default Model: {config.models.default_model or '(provider default)'}")
+            print(f"  Default Temperature: {config.models.default_temperature}")
             print(f"  Embedding Model: {config.embeddings.model}")
             print(f"  Data Directory: {config.storage.data_dir}")
             print(f"  PubMed Email: {config.pubmed.email or '(not set)'}")

@@ -301,6 +301,8 @@ class LiteStorage:
             self._migrate_transparency_results()
             self._migrate_document_publication_types()
             self._sweep_orphaned_document_vectors()
+            with self._sqlite_connection() as conn:
+                self._sweep_orphan_chunk_vectors(conn)
             logger.debug(f"SQLite initialized at {self._storage_config.sqlite_path}")
         except sqlite3.Error as e:
             raise SQLiteError(
@@ -769,6 +771,34 @@ class LiteStorage:
                 conn.commit()
         except sqlite3.Error as e:
             raise SQLiteError(f"Could not sweep orphaned vectors: {e}") from e
+
+    @staticmethod
+    def _sweep_orphan_chunk_vectors(conn: sqlite3.Connection) -> int:
+        """Delete chunk vectors whose chunk row is gone (idempotent).
+
+        The old ``INSERT OR REPLACE`` chunk upsert gave a re-added chunk a new
+        rowid and left its vector behind under the old one (#592). Runs on
+        every open, from ``_init_sqlite``.
+
+        Args:
+            conn: The open connection to sweep on.
+
+        Returns:
+            The number of vectors removed.
+
+        Raises:
+            SQLiteError: If the sweep fails.
+        """
+        try:
+            removed = conn.execute(
+                "DELETE FROM vec_chunks WHERE rowid NOT IN (SELECT rowid FROM chunks)"
+            ).rowcount
+            conn.commit()
+        except sqlite3.Error as e:
+            raise SQLiteError(f"Could not sweep orphaned chunk vectors: {e}") from e
+        if removed > 0:
+            logger.info(f"Removed {removed} orphaned chunk vectors.")
+        return removed
 
     @staticmethod
     def _retract_migrated_coi_indicators(conn: sqlite3.Connection) -> None:
@@ -1688,6 +1718,10 @@ class LiteStorage:
         """
         Add document chunks with embeddings for interrogation.
 
+        A chunk already stored under its id is updated in place, so it keeps
+        its rowid and the vector stored at it (#592). With no embedding
+        function that vector is left as it was, even when the text changed.
+
         Args:
             chunks: List of LiteChunk objects
             embedding_function: Embedding function with embed() method
@@ -1715,9 +1749,16 @@ class LiteStorage:
 
                     conn.execute(
                         """
-                        INSERT OR REPLACE INTO chunks
+                        INSERT INTO chunks
                         (id, source_id, title, content, chunk_index, total_chunks, metadata)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            source_id = excluded.source_id,
+                            title = excluded.title,
+                            content = excluded.content,
+                            chunk_index = excluded.chunk_index,
+                            total_chunks = excluded.total_chunks,
+                            metadata = excluded.metadata
                         """,
                         (
                             chunk.id,

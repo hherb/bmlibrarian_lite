@@ -67,19 +67,23 @@ here turn either record into what a reader sees.
   conflict of interest reasons on it: no source that carries a disclosure was
   read, or the article's full text was not (#352).
 
-None of these put the provider's own words on the screen: those can print the
-request, credentials and all, and stay in the log (#330).
+Of this module's sentences only :func:`also_failed_text` puts the provider's
+own words on the screen; the GUI workers that show an error's text do too.
+Both run them through :func:`redact_secrets` first: they can print the
+request, credentials and all. The raw text stays in the log (#330).
 
 The wording follows the search contract in
 ``doc/cross_platform/search_failure_reporting.md``; this family's own contract
 is ``doc/cross_platform/analysis_failure_reporting.md``.
 """
 
+import re
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from urllib.parse import urlsplit
 
 from .constants import (
+    REDACTED_PLACEHOLDER,
     SERVICE_CORE,
     SERVICE_ELSEVIER,
     SERVICE_OPENALEX,
@@ -264,6 +268,67 @@ def advice_for_causes(causes: Iterable[EvaluationErrorCode]) -> str:
     return " ".join(advice) if advice else _FALLBACK_ADVICE
 
 
+# A URL's userinfo (scheme://user:pass@host/...), up to the last "@" before the
+# path or query, so a password holding an "@" is taken whole and a query's "@"
+# is not mistaken for one.
+_URL_USERINFO_RE = re.compile(r"([a-z][a-z0-9+.-]*://)[^\s/?#]+@", re.IGNORECASE)
+# A URL's query string, where a provider puts the key (?key=...): an absolute
+# URL's, or the path urllib3 prints ("Max retries exceeded with url: /x?...").
+# Stops short of a closing quote or bracket so the sentence around it survives.
+_URL_QUERY_RE = re.compile(
+    r"""((?:[a-z][a-z0-9+.-]*://|\burl: /)[^\s?#]*)\?[^\s#'")]*""", re.IGNORECASE
+)
+# An Authorization header's credentials, whatever the scheme (Basic, Bearer, ...).
+_AUTHORIZATION_RE = re.compile(
+    r"""(authorization["']?\s*[:=]\s*["']?(?:[a-z]+\s+)?)[^\s'",})]+""", re.IGNORECASE
+)
+# The token after "Bearer", up to the quote or brace that closes it; a token is
+# long, so "the bearer of" is left alone.
+_BEARER_RE = re.compile(r"""(bearer\s+)[^\s'",})]{8,}""", re.IGNORECASE)
+# A value given for an api key / x-api-key header or parameter, or Elsevier's
+# institution token header.
+_API_KEY_RE = re.compile(
+    r"""((?:(?:x-)?api[-_]?key|x-els-insttoken)["']?\s*[:=]\s*["']?)[^\s"',]+""",
+    re.IGNORECASE,
+)
+# A credential-named parameter's value outside a URL's query (a form body, a
+# printed dict): token=, access_token=, password=, secret=, key=, signature=.
+_CREDENTIAL_PARAM_RE = re.compile(
+    r"(?<![A-Za-z0-9])([A-Za-z0-9_-]*(?:token|password|passwd|secret|signature|key)=)"
+    r"""[^\s&"',)#]+""",
+    re.IGNORECASE,
+)
+# A bare provider key in the sk-... shape, starting a token (not "risk-...").
+_BARE_KEY_RE = re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{8,}", re.IGNORECASE)
+
+
+def redact_secrets(text: str) -> str:
+    """Take the credentials out of an error's text, keeping the rest.
+
+    The reader still sees what failed and where ("Connection refused:
+    http://localhost:11434/api/chat"). Replaced are: a URL's userinfo and query
+    string (an absolute URL's, or the path urllib3 prints after "url: "), an
+    Authorization header's credentials, a bearer token, an API key or
+    institution token value, a credential-named parameter's value (token=,
+    password=, secret=, key=, ...) and a bare ``sk-`` key. The raw text belongs
+    in the log (golden rule 8), not on screen (#330). Redacting twice changes
+    nothing, so text that passes through two redacting steps reads the same.
+
+    Args:
+        text: An exception's text.
+
+    Returns:
+        The text with each secret replaced by ``REDACTED_PLACEHOLDER``.
+    """
+    text = _URL_USERINFO_RE.sub(rf"\1{REDACTED_PLACEHOLDER}@", text)
+    text = _URL_QUERY_RE.sub(rf"\1?{REDACTED_PLACEHOLDER}", text)
+    text = _AUTHORIZATION_RE.sub(rf"\1{REDACTED_PLACEHOLDER}", text)
+    text = _BEARER_RE.sub(rf"\1{REDACTED_PLACEHOLDER}", text)
+    text = _API_KEY_RE.sub(rf"\1{REDACTED_PLACEHOLDER}", text)
+    text = _CREDENTIAL_PARAM_RE.sub(rf"\1{REDACTED_PLACEHOLDER}", text)
+    return _BARE_KEY_RE.sub(REDACTED_PLACEHOLDER, text)
+
+
 def also_failed_text(error: str) -> str:
     """What a cancelled run adds when an error ended it too.
 
@@ -271,11 +336,12 @@ def also_failed_text(error: str) -> str:
         error: The error that ended the run, or an empty string.
 
     Returns:
-        A sentence naming the error, or "" when nothing went wrong. A cancel
-        is not a licence to hide a failure (golden rule 8): without this, a
-        crash mid-cancel read as an orderly stop (#320).
+        A sentence naming the error with its credentials redacted, or ""
+        when nothing went wrong. A cancel is not a licence to hide a
+        failure (golden rule 8): without this, a crash mid-cancel read as
+        an orderly stop (#320).
     """
-    return f" It also stopped on an error: {error}" if error else ""
+    return f" It also stopped on an error: {redact_secrets(error)}" if error else ""
 
 
 def pass_failure_detail(failures: Sequence[PassFailure]) -> str:

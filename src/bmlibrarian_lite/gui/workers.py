@@ -51,7 +51,7 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 from PySide6.QtCore import QThread, Signal, SignalInstance
 from PySide6.QtWidgets import QWidget
 
-from ..analysis_failures import advice_for_causes, failure_cause_text
+from ..analysis_failures import advice_for_causes, failure_cause_text, redact_secrets
 from ..data_models import (
     EvaluationErrorCode,
     LookupRecord,
@@ -141,13 +141,13 @@ class SingleOutcome:
         except Exception as e:
             logger.exception(f"{type(self).__name__} ended unexpectedly")
             if not self._ended:
-                fallback(str(e))
+                fallback(redact_secrets(str(e)))
         except BaseException as e:
             # A SystemExit or the like: end the run so the tab is not left
             # waiting, then let it carry on unwinding the thread
             logger.exception(f"{type(self).__name__} was stopped")
             if not self._ended:
-                fallback(str(e))
+                fallback(redact_secrets(str(e)))
             raise
 
 
@@ -349,7 +349,7 @@ class AnswerWorker(SingleOutcome, QThread):
             answer, sources = self.agent.ask(self.question)
         except Exception as e:
             logger.exception("Answer generation error")
-            message = str(e)
+            message = redact_secrets(str(e))
             if isinstance(e, (TruncatedResponseError, RefusedResponseError)):
                 message += f". {advice_for_causes([classify_llm_exception(e)])}"
             self._end(self.error, message)
@@ -442,6 +442,7 @@ class PDFDiscoveryWorker(SingleOutcome, QThread):
         Args:
             error: What went wrong.
         """
+        error = redact_secrets(error)
         if self._cancelled:
             self._end(self.cancelled, error)
         else:
@@ -524,11 +525,11 @@ class PDFDiscoveryWorker(SingleOutcome, QThread):
                 self._end(
                     self.paywall_detected,
                     result.paywall_url or "",
-                    result.error or "Access requires subscription",
+                    redact_secrets(result.error or "Access requires subscription"),
                 )
             else:
                 self._end(
-                    self.error, result.error or "Unknown error during PDF discovery"
+                    self.error, redact_secrets(result.error or "Unknown error during PDF discovery")
                 )
 
         except Exception as e:
@@ -635,6 +636,7 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
         Args:
             error: What went wrong.
         """
+        error = redact_secrets(error)
         if self._cancelled:
             self._end(self.cancelled, error)
         else:
@@ -711,10 +713,10 @@ class FulltextDiscoveryWorker(SingleOutcome, QThread):
                 self._end(
                     self.paywall_detected,
                     result.paywall_url or "",
-                    result.error or "Access requires subscription",
+                    redact_secrets(result.error or "Access requires subscription"),
                 )
             else:
-                self._end(self.error, result.error or "Full-text not available")
+                self._end(self.error, redact_secrets(result.error or "Full-text not available"))
 
         except Exception as e:
             logger.exception("Full-text discovery failed")
@@ -825,7 +827,7 @@ class OpenAthensAuthWorker(SingleOutcome, QThread):
 
         except Exception as e:
             logger.exception("OpenAthens authentication failed")
-            self._end(self.error, f"Authentication error: {str(e)}")
+            self._end(self.error, f"Authentication error: {redact_secrets(str(e))}")
 
 
 class QualityFilterWorker(SingleOutcome, QThread):
@@ -926,9 +928,9 @@ class QualityFilterWorker(SingleOutcome, QThread):
                     for doc, assessment in zip(self.documents, assessed, strict=False)
                     if assessment.passes_filter(self.filter_settings)
                 ]
-                self._end(self.cancelled, kept, assessed, total, str(e))
+                self._end(self.cancelled, kept, assessed, total, redact_secrets(str(e)))
             else:
-                self._end(self.error, str(e))
+                self._end(self.error, redact_secrets(str(e)))
             return
 
         # A cancel that came after the last document stopped nothing
@@ -1294,12 +1296,13 @@ class IncrementalSearchWorker(SingleOutcome, QThread):
                 self._end(self.error, format_search_failure_message(e))
         except Exception as e:
             logger.exception("Incremental search failed")
+            message = redact_secrets(str(e))
             if self._cancelled:
-                self._end(self.cancelled, str(e))
+                self._end(self.cancelled, message)
             else:
                 self._end(
                     self.error,
-                    unexpected_rerun_error_text(str(e), len(self.retry_documents)),
+                    unexpected_rerun_error_text(message, len(self.retry_documents)),
                 )
 
     def _store(

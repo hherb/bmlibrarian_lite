@@ -439,6 +439,9 @@ CONFIG_DIR_PERMISSIONS = 0o700
 # config.py, which discards this value rather than loading it as a key.
 REDACTED_SECRET_PLACEHOLDER = "<redacted>"
 
+# What error text shown to the reader carries in place of a credential (#330).
+REDACTED_PLACEHOLDER = "[redacted]"
+
 # =============================================================================
 # Quality Filtering Settings
 # =============================================================================

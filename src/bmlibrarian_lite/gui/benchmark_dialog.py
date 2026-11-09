@@ -47,6 +47,7 @@ from PySide6.QtCore import Signal, QThread
 
 from bmlibrarian_lite.resources.styles.dpi_scale import scaled
 
+from ..analysis_failures import redact_secrets
 from ..config import LiteConfig, BenchmarkModelConfig
 from ..data_models import LiteDocument, ScoredDocument
 from ..benchmarking.display import documents_left_to_score, reusable_documents_by_model
@@ -166,9 +167,9 @@ class BenchmarkWorker(SingleOutcome, QThread):
             # Cancelling is not failing, but a failure is never hidden
             # (golden rule 8): a crash mid-cancel is named, not swallowed
             if self._stopped:
-                self._end(self.cancelled, None, str(e))
+                self._end(self.cancelled, None, redact_secrets(str(e)))
             else:
-                self._end(self.error, str(e))
+                self._end(self.error, redact_secrets(str(e)))
             return
 
         if result.cancellation is not None:

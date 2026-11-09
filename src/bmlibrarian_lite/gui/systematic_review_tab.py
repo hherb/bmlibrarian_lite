@@ -85,6 +85,7 @@ from ..analysis_failures import (
     analysis_failure_advice,
     describe_analysis_shortfalls,
     failure_cause_text,
+    redact_secrets,
     with_analysis_shortfall_notice,
 )
 from ..utils import classify_analysis_exception
@@ -667,7 +668,7 @@ class WorkflowWorker(QThread):
                 # The error text used to be the report: checkpointed as
                 # complete, auto-saved and listed under Load Report (#263).
                 logger.exception("Report generation failed")
-                self.error.emit("report", str(e))
+                self.error.emit("report", redact_secrets(str(e)))
                 return
             self.step_complete.emit("report", report)
 
@@ -685,7 +686,7 @@ class WorkflowWorker(QThread):
 
         except Exception as e:
             logger.exception("Workflow error")
-            self.error.emit("workflow", str(e))
+            self.error.emit("workflow", redact_secrets(str(e)))
 
     def _score_documents(
         self,

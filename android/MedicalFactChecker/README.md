@@ -198,12 +198,24 @@ Output: `app/build/outputs/apk/debug/app-debug.apk`
 
 ### Release Build
 
-```bash
-# Create a keystore first, then:
-./gradlew assembleRelease
+Create `keystore.properties` in this directory (gitignored, as are `*.jks` and
+`*.keystore`) with the upload key:
+
+```properties
+storeFile=upload.jks
+storePassword=...
+keyAlias=...
+keyPassword=...
 ```
 
-Output: `app/build/outputs/apk/release/app-release.apk`
+`storeFile` is resolved relative to this directory. Then:
+
+```bash
+./gradlew bundleRelease
+```
+
+Output: `app/build/outputs/bundle/release/app-release.aab` (upload this to Play).
+Without `keystore.properties` the bundle is built unsigned.
 
 ### Running Tests
 
