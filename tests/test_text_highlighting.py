@@ -5,7 +5,6 @@ from bmlibrarian_lite.gui.card_utils import escape_html
 from bmlibrarian_lite.gui.text_highlighting import (
     create_highlighted_html,
     find_passage_in_abstract,
-    highlight_multiple_passages,
 )
 
 ABSTRACT = (
@@ -71,11 +70,3 @@ def test_word_inside_a_word_is_not_exact() -> None:
     assert find_passage_in_abstract(abstract, "effective") is None
     assert "<span" not in create_highlighted_html(abstract, "effective")
 
-
-def test_multiple_passages_note_only_when_one_is_near() -> None:
-    """The note appears once any highlighted passage is near."""
-    exact = ["Statins are widely used", "Mortality fell by 12%"]
-    html = highlight_multiple_passages(ABSTRACT, exact)
-    assert html.count("<span") == 2 and NOTE not in html
-    near = exact + ["We enrolled 1200 with high cholesterol."]
-    assert NOTE in highlight_multiple_passages(ABSTRACT, near)

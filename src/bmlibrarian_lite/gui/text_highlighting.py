@@ -22,7 +22,6 @@ for PySide6/Qt text widgets.
 """
 
 import logging
-from typing import Tuple
 
 from bmlib.citations import PassageMatch, find_passage
 from PySide6.QtWidgets import QTextBrowser
@@ -185,84 +184,3 @@ def create_highlighted_passage_widget(
 
     return browser
 
-
-def highlight_multiple_passages(
-    abstract: str,
-    passages: list[str],
-    highlight_color: str = CITATION_HIGHLIGHT_COLOR,
-) -> str:
-    """
-    Create HTML with multiple passages highlighted.
-
-    Highlights all provided passages within the abstract.
-    Overlapping highlights are merged.
-
-    Args:
-        abstract: Full abstract text
-        passages: List of passages to highlight
-        highlight_color: Background color for highlighting (hex)
-
-    Returns:
-        HTML string with all passages highlighted
-    """
-    if not abstract:
-        return "<p>No abstract available.</p>"
-
-    if not passages:
-        return f"<p>{escape_html(abstract)}</p>"
-
-    # Find all passage locations
-    highlights: list[Tuple[int, int]] = []
-    all_exact = True
-    for passage in passages:
-        match_result = find_passage_in_abstract(abstract, passage)
-        if match_result:
-            start, end = match_result.start, match_result.end
-            assert start is not None and end is not None  # an accepted match
-            highlights.append((start, end))
-            all_exact = all_exact and match_result.exact
-
-    if not highlights:
-        # No passages found - show them separately
-        passages_html = "".join(
-            f"<li><em>{escape_html(p)}</em></li>" for p in passages
-        )
-        return (
-            f"<div style='background-color: {highlight_color}; "
-            f"padding: 10px; border-radius: 5px; margin-bottom: 12px;'>"
-            f"<strong>Cited Passages:</strong>"
-            f"<ul style='margin: 5px 0; padding-left: 20px;'>{passages_html}</ul>"
-            f"</div>"
-            f"<strong>Full Abstract:</strong><br>"
-            f"{escape_html(abstract)}"
-        )
-
-    # Sort and merge overlapping highlights
-    highlights.sort()
-    merged: list[Tuple[int, int]] = []
-    for start, end in highlights:
-        if merged and start <= merged[-1][1]:
-            # Overlapping - extend previous highlight
-            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
-        else:
-            merged.append((start, end))
-
-    # Build HTML with all highlights
-    result_parts = [] if all_exact else [_near_match_note()]
-    last_end = 0
-    for start, end in merged:
-        # Add text before highlight
-        result_parts.append(escape_html(abstract[last_end:start]))
-        # Add highlighted text
-        result_parts.append(
-            f"<span style='background-color: {highlight_color}; "
-            f"font-weight: bold; padding: 2px 4px; border-radius: 3px;'>"
-            f"{escape_html(abstract[start:end])}"
-            f"</span>"
-        )
-        last_end = end
-
-    # Add remaining text after last highlight
-    result_parts.append(escape_html(abstract[last_end:]))
-
-    return "".join(result_parts)
