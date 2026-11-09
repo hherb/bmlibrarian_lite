@@ -288,7 +288,7 @@ Open issues by family; each issue carries the detail. None blocks another.
   call); **#547** keep a set-aside PDF from the GUI; **#563** (PR #562's, checked downloads); **#556**–**#558** (#546's).
 - **C2's probe and acceptance, and C1's replay** (maintainer); the **embedded
   browser rescue's follow-ups**: **#524**, **#525**, **#527**, **#528**, **#530**, **#531**, **#533** (stage 2 follow-ups), **#534**, **#535**, **#537**–**#540**, **#544** (stage 3); **#481** follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
-  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2); **#516** (PySide6 cap, leaked widgets), **#517** (GC on worker threads); **#467**, **#468** / **#470**, **#476**; **#744** (redaction: its tests landed; left are two decisions, keep a URL's non-credential query parameters, and `api_key=None` reading as a hidden key).
+  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2); **#516** (PySide6 cap, leaked widgets), **#517** (GC on worker threads); **#467**, **#468** / **#470**, **#476**; **#744** (redaction: its tests landed; left are two decisions, keep a URL's non-credential query parameters, and `api_key=None` reading as a hidden key); **#747** (the Document Interrogation tab's redacted load errors are untested).
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 

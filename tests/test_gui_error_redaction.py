@@ -70,6 +70,7 @@ def test_the_interrogation_answer_error_redacts() -> None:
 
     [(text,)] = errors
     assert SECRET not in text
+    assert "Client error" in text
 
 
 def test_the_quality_filter_error_redacts() -> None:
@@ -83,13 +84,14 @@ def test_the_quality_filter_error_redacts() -> None:
 
     [(text,)] = errors
     assert SECRET not in text
+    assert "Client error" in text
 
 
 def test_a_quality_filter_error_mid_cancel_redacts() -> None:
     """An error that also ends a cancelled filter reaches ``cancelled`` without its key.
 
-    The tab redacts it again in ``also_failed_text``, so only the signal shows
-    whether the worker did.
+    No tab connects this signal yet, so the worker is the only place it is
+    redacted.
     """
     manager = MagicMock()
     worker = workers.QualityFilterWorker(manager, [], MagicMock())
@@ -134,6 +136,60 @@ def test_a_benchmark_error_redacts(
 
     [(text,)] = errors
     assert SECRET not in text
+    assert "Client error" in text
+
+
+def test_the_openathens_error_redacts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An OpenAthens failure says ``Authentication error`` without the key."""
+
+    def fail(url: str) -> bool:
+        raise RuntimeError(LEAKY)
+
+    monkeypatch.setattr(workers.webbrowser, "open", fail)
+    worker = workers.OpenAthensAuthWorker("https://login.example.org")
+    errors = collect(worker.error)
+
+    worker.run()
+
+    [(text,)] = errors
+    assert SECRET not in text
+    assert text.startswith("Authentication error: Client error")
+
+
+@pytest.mark.parametrize("cancel", [False, True], ids=["error", "cancelled"])
+def test_an_unexpected_rerun_search_error_redacts(
+    monkeypatch: pytest.MonkeyPatch, cancel: bool
+) -> None:
+    """A rerun's search that stops on an unexpected error ends without the key.
+
+    Both arms are covered: the error, and the cancel the error also ended.
+    """
+    from bmlibrarian_lite.config import LiteConfig
+
+    config = LiteConfig()
+    config.pubmed.email = "test@example.com"
+    worker = workers.IncrementalSearchWorker(
+        question="q",
+        pubmed_query="q",
+        target_new_docs=1,
+        already_scored_ids=set(),
+        config=config,
+        storage=MagicMock(),
+    )
+
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        if cancel:
+            worker.cancel()
+        raise RuntimeError(LEAKY)
+
+    monkeypatch.setattr("bmlibrarian_lite.pubmed.PubMedSearchClient.search_with_offset", fail)
+    ended = collect(worker.cancelled if cancel else worker.error)
+
+    worker.run()
+
+    [(text,)] = ended
+    assert SECRET not in text
+    assert "Client error" in text
 
 
 @pytest.mark.parametrize(
