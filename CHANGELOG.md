@@ -11,6 +11,8 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-10
+
 ### Added
 
 - **Retraction checking (#594, #597, #605).** Every paper a review finds is
@@ -156,9 +158,8 @@ as a macOS beta DMG).
 - **Cancel works** on every run and records no failure (#469).
 - The Mac app is sandboxed, and the app carries a privacy manifest (#676,
   #679).
-- Fixed: every second report crashed on iOS 18 / macOS 15 (#722); runs hung at
-  "Checking retraction status" (#680); the iPhone Settings tab froze and was
-  killed (#697); macOS *Get More Evidence* did nothing (#608); a transparency
+- Fixed: every second report crashed on iOS 18 / macOS 15 (#722); macOS
+  *Get More Evidence* did nothing (#608); a transparency
   failure showed a successful run as failed (#460); studies added by
   *Get More Evidence* went unrated (#463); a Keychain key that could not be read
   was treated as no key (#678); PubMed titles lost the text around italics
@@ -458,7 +459,8 @@ First published release.
   `QTimer`.
 - Ollama model listing using object attributes rather than dict access.
 
-[Unreleased]: https://github.com/hherb/bmlibrarian_lite/compare/0.5.0...HEAD
+[Unreleased]: https://github.com/hherb/bmlibrarian_lite/compare/0.6.0...HEAD
+[0.6.0]: https://github.com/hherb/bmlibrarian_lite/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/hherb/bmlibrarian_lite/compare/0.4.1...0.5.0
 [0.4.1]: https://github.com/hherb/bmlibrarian_lite/compare/0.4.0...0.4.1
 [0.4.0]: https://github.com/hherb/bmlibrarian_lite/compare/0.3.0...0.4.0

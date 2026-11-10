@@ -8,7 +8,7 @@ interest, extracts citable passages and writes a referenced report. Your
 data stays on your own computer, in SQLite. No database server is needed.
 
 This guide describes the desktop application (Python/PySide6) as it stands
-on `master`: version 0.5.0 plus the work listed under `[Unreleased]` in
+on `master`: version 0.6.0 plus the work listed under `[Unreleased]` in
 `CHANGELOG.md`. The iOS, macOS and Android apps are described briefly under
 [Cross-Platform Apps](#cross-platform-apps).
 
@@ -71,11 +71,6 @@ setting up.
 ```bash
 uv pip install bmlibrarian-lite
 ```
-
-The PyPI release is 0.5.0. It predates much of what this guide describes,
-including retraction checking, smart search, Find More Evidence, full-text
-uploads and the CORE, Elsevier and OpenAlex sources. Install from source to
-get them until the next PyPI release.
 
 ### Choosing an LLM Provider
 
