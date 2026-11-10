@@ -60,11 +60,8 @@ dependencies = [
     "pygments>=2.17.0",
     # MCP server
     "mcp>=1.0.0,<2.0",
-    # The maintainer's shared library: owns the retraction rule
-    # (bmlib.publications.retraction_status) and find_passage's contradiction
-    # guard (bmlib#632, after 0.12.0). Pinned to a commit until a release with
-    # that guard is on PyPI; then "bmlib>=<it>" and drop the hatch setting.
-    "bmlib @ git+https://github.com/hherb/bmlib@514cda29146e79cf76670bbd1d05496169de486c",
+    # 0.13.0 is the first release with retraction_status and find_passage's contradiction guard.
+    "bmlib>=0.13.0",
 ]
 
 [project.optional-dependencies]
@@ -94,9 +91,6 @@ Issues = "https://github.com/hherb/bmlibrarian_lite/issues"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.hatch.version]
 path = "src/bmlibrarian_lite/__init__.py"

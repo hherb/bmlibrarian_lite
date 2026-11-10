@@ -68,10 +68,14 @@ wheels = [
 
 [[package]]
 name = "bmlib"
-version = "0.12.0"
-source = { git = "https://github.com/hherb/bmlib?rev=514cda29146e79cf76670bbd1d05496169de486c#514cda29146e79cf76670bbd1d05496169de486c" }
+version = "0.13.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jinja2" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/54/96/3128bfbe126dcea3c3fa6a5ac883b72895d32cb60056ba30135d9b008d05/bmlib-0.13.0.tar.gz", hash = "sha256:cfe2e1a539d457213cb7572515ad6443e7f04c1fb7a194e7902725405916f317", size = 2171869, upload-time = "2026-11-10T02:39:16.247Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/46/90/b0d8a9440d6bdf33f24ffcb4cd9d6b2406fef6192c558668c338a7b7c845/bmlib-0.13.0-py3-none-any.whl", hash = "sha256:f656380b615c315372970da29841104694f5c684b9182c7fa8dc1c682ba5b71e", size = 868463, upload-time = "2026-11-10T02:39:14.579Z" },
 ]
 
 [[package]]
@@ -109,7 +113,7 @@ dev = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.34.0" },
     { name = "backoff", specifier = ">=2.2.1" },
-    { name = "bmlib", git = "https://github.com/hherb/bmlib?rev=514cda29146e79cf76670bbd1d05496169de486c" },
+    { name = "bmlib", specifier = ">=0.13.0" },
     { name = "fastembed", specifier = ">=0.3.0" },
     { name = "markdown", specifier = ">=3.5.0" },
     { name = "mcp", specifier = ">=1.0.0,<2.0" },

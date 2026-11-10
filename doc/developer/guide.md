@@ -8,8 +8,7 @@ This guide covers the architecture, development setup, and contribution guidelin
 
 - Python 3.12 or higher
 - [uv](https://docs.astral.sh/uv/) package manager (recommended) or pip
-- Git, also needed by the installer: the `bmlib` dependency is fetched from
-  GitHub at a pinned commit (see [The bmlib Dependency](#the-bmlib-dependency))
+- Git
 - For the mobile apps only: Xcode (iOS/macOS) or the Android SDK, and a
   checkout of bmlib with a Rust toolchain for Android's FFI tests
 
@@ -951,14 +950,10 @@ port (`rust/` in bmlib). This repository relates to it in three ways.
 The desktop's runtime dependency is declared in `pyproject.toml`:
 
 ```toml
-# Pinned to a commit until bmlib 0.12.0 is on PyPI
-"bmlib @ git+https://github.com/hherb/bmlib@<commit>",
-
-[tool.hatch.metadata]
-allow-direct-references = true
+"bmlib>=0.13.0",
 ```
 
-`uv.lock` records the same commit. bmlib's core needs only `jinja2`, and
+`uv.lock` records the version resolved from PyPI. bmlib's core needs only `jinja2`, and
 the modules lite imports need none of bmlib's extras. Today lite imports
 only the retraction rule and what it rests on:
 
@@ -985,8 +980,8 @@ Rules for this boundary:
   a `RetractionStatus`. Anything else lite takes from bmlib is ported, not
   imported (below), until a decision to import it is made.
 
-**Bumping the pin.** Change the commit in `pyproject.toml`, then refresh the
-lock and the environment and run the suite:
+**Raising the floor.** Change the version in `pyproject.toml`, then refresh
+the lock and the environment and run the suite:
 
 ```bash
 uv lock
@@ -995,17 +990,16 @@ pytest tests/test_retraction_contract.py tests/test_retraction_checks.py
 pytest
 ```
 
-Read bmlib's `CHANGELOG.md` between the two commits first: a renamed export
+Read bmlib's `CHANGELOG.md` between the two versions first: a renamed export
 column, a new verdict or a changed fixture shows up here. If bmlib's fixture
 changed, copy it over `retraction_parity/retraction_status.json` (and say so
 in its README) in the same pull request. To work against a local bmlib
-checkout, `uv pip install -e ~/src/bmlib` replaces the pinned copy in your
+checkout, `uv pip install -e ~/src/bmlib` replaces the PyPI copy in your
 environment until the next `uv pip install -e ".[dev]"`.
 
 **Releasing to PyPI.** PyPI refuses a package with a direct (git) reference,
-so a git pin blocks the upload. Once bmlib 0.12.0 or later is on PyPI,
-replace the pin with `"bmlib>=0.12.0"` and remove
-`[tool.hatch.metadata] allow-direct-references`.
+so never pin bmlib to a commit in a release: a fix lite needs waits for a
+bmlib release on PyPI.
 
 ### 2. Lite ports bmlib's fixes: the sync ledger
 
@@ -1190,10 +1184,6 @@ This updates:
 - `CLAUDE.md` (`**Current version:**`)
 - `CHANGELOG.md` (promotes `[Unreleased]` — see below)
 
-Before a PyPI upload: a git-pinned dependency (bmlib) blocks the upload until
-bmlib is released (0.12.0 or later) and the pin becomes a version; see
-[Releasing to PyPI](#the-bmlib-dependency).
-
 ### Changelog
 
 `CHANGELOG.md` is the canonical release history ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
@@ -1238,9 +1228,11 @@ git push && git push --tags
 ### Build Dependencies
 
 ```bash
-uv pip install build twine
+uv pip install -U build twine "packaging>=26"
 ```
 
+hatchling writes Metadata-Version 2.5, which `twine check` refuses as
+invalid under `packaging` 25.
 ## Testing Guidelines
 
 ### Test Structure
