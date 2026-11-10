@@ -81,8 +81,8 @@ mypy src/
 ```
 bmlibrarian_lite/
 ├── bmll.py                  # CLI entry point (development)
-├── pyproject.toml           # Project configuration (hatchling build); pins bmlib
-├── uv.lock                  # Locked dependency set, bmlib's commit included
+├── pyproject.toml           # Project configuration (hatchling build); bmlib's floor
+├── uv.lock                  # Locked dependency set, bmlib's version included
 ├── HOWTO_MCP_SERVER.md      # Setting up the MCP server in a client
 ├── scripts/
 │   ├── set_version.py       # Version management across all files
@@ -955,7 +955,7 @@ The desktop's runtime dependency is declared in `pyproject.toml`:
 
 `uv.lock` records the version resolved from PyPI. bmlib's core needs only `jinja2`, and
 the modules lite imports need none of bmlib's extras. Today lite imports
-only the retraction rule and what it rests on:
+only the retraction rule, what it rests on, and `find_passage`:
 
 | bmlib module | What lite uses | Where |
 |--------------|----------------|-------|
@@ -963,6 +963,7 @@ only the retraction rule and what it rests on:
 | `bmlib.publications.retractions` | `import_retraction_watch_export`, `lookup_retractions` | `retraction_export.py` |
 | `bmlib.publications.schema` | `ensure_schema` (the export copy's tables) | `retraction_export.py` |
 | `bmlib.db` | `connect_sqlite` | `retraction_export.py` |
+| `bmlib.citations` | `find_passage`, `PassageMatch` (citation highlighting; its contradiction guard sets the 0.13.0 floor) | `gui/text_highlighting.py` |
 
 Rules for this boundary:
 
@@ -976,8 +977,8 @@ Rules for this boundary:
   `tests/test_retraction_contract.py` runs every rule, Crossref-parse and
   request case through bmlib's API, as the Swift and Kotlin suites do through
   the Rust library.
-- Keep bmlib imports to the retraction modules and the places that only name
-  a `RetractionStatus`. Anything else lite takes from bmlib is ported, not
+- Keep bmlib imports to the retraction modules, `find_passage` and the places
+  that only name a `RetractionStatus`. Anything else lite takes from bmlib is ported, not
   imported (below), until a decision to import it is made.
 
 **Raising the floor.** Change the version in `pyproject.toml`, then refresh
@@ -991,7 +992,11 @@ pytest
 ```
 
 Read bmlib's `CHANGELOG.md` between the two versions first: a renamed export
-column, a new verdict or a changed fixture shows up here. If bmlib's fixture
+column, a new verdict or a changed fixture shows up here. The floor holds
+nothing back: a new bmlib release reaches CI and fresh installs with no change
+here (only `uv.lock` keeps the older one), so a changed fixture or export can
+first show up as a red `test_retraction_contract.py` on an unrelated pull
+request. Fix lite there, or raise the floor on purpose. If bmlib's fixture
 changed, copy it over `retraction_parity/retraction_status.json` (and say so
 in its README) in the same pull request. To work against a local bmlib
 checkout, `uv pip install -e ~/src/bmlib` replaces the PyPI copy in your
@@ -1055,15 +1060,16 @@ parser.
   out at the pin and fails a skipped run. To get a checkout at the pin:
   `git -C ~/src/bmlib worktree add --detach <dir> <bmlibCommit>`.
 
-### Three pins, three purposes
+### A version floor and two pins
 
-| Pin | Where | What it fixes |
+| Entry | Where | What it fixes |
 |-----|-------|---------------|
-| Python dependency | `pyproject.toml` (and `uv.lock`) | The bmlib the desktop runs |
+| Python dependency | `pyproject.toml` floor (`uv.lock` records one resolution) | The oldest bmlib the desktop accepts; CI and PyPI installs take the newest release |
 | Ledger commit | `ledger.json` `bmlib_commit` | The bmlib changelog the ledger is triaged against |
 | FFI commit | `BmlibFFI.pin.json` `bmlibCommit` | The Rust library both apps link |
 
-They move independently and need not name the same commit. Bump each on its
+They move independently. The ledger and FFI entries name commits; the Python
+entry names a version. Bump each on its
 own pull request, with the checks above.
 
 ## Code Style Requirements
@@ -1233,6 +1239,7 @@ uv pip install -U build twine "packaging>=26"
 
 hatchling writes Metadata-Version 2.5, which `twine check` refuses as
 invalid under `packaging` 25.
+
 ## Testing Guidelines
 
 ### Test Structure

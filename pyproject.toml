@@ -60,7 +60,7 @@ dependencies = [
     "pygments>=2.17.0",
     # MCP server
     "mcp>=1.0.0,<2.0",
-    # 0.13.0 is the first release with retraction_status and find_passage's contradiction guard.
+    # 0.13.0 is the first release with find_passage's contradiction guard (bmlib#632).
     "bmlib>=0.13.0",
 ]
 
