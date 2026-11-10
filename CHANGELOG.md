@@ -11,6 +11,8 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-10
+
 ### Added
 
 - **Retraction checking (#594, #597, #605).** Every paper a review finds is
@@ -458,7 +460,8 @@ First published release.
   `QTimer`.
 - Ollama model listing using object attributes rather than dict access.
 
-[Unreleased]: https://github.com/hherb/bmlibrarian_lite/compare/0.5.0...HEAD
+[Unreleased]: https://github.com/hherb/bmlibrarian_lite/compare/0.6.0...HEAD
+[0.6.0]: https://github.com/hherb/bmlibrarian_lite/compare/0.5.0...0.6.0
 [0.5.0]: https://github.com/hherb/bmlibrarian_lite/compare/0.4.1...0.5.0
 [0.4.1]: https://github.com/hherb/bmlibrarian_lite/compare/0.4.0...0.4.1
 [0.4.0]: https://github.com/hherb/bmlibrarian_lite/compare/0.3.0...0.4.0

@@ -78,8 +78,6 @@ From PyPI:
 pip install bmlibrarian-lite
 ```
 
-The PyPI release is **0.5.0**. It predates retraction checking, Find More Evidence, full-text uploads, the bot-walled PDF browser and the PMC bucket, Elsevier, OpenAlex and CORE sources. Install from source to get them until the next release.
-
 ### Configure
 
 Pick an LLM:

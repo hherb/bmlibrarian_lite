@@ -58,7 +58,7 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
 
 ---
 
-## What's New (Version 1.8.0)
+## What's New (Version 1.9.0)
 
 **Retraction Checking**
 - Every paper is checked against Retraction Watch and Crossref before it
@@ -83,10 +83,14 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
 **Research Tools**
 - Find More Evidence, a repeated smart search, and a retry for full texts
   that could not be read, on a saved report
+- Fetch Full Text for Top Papers (those scored 4 or 5)
 - Transparency is analysed again once a paper's full text arrives
+- Cancel stops any run at once and records no failure
 
 **Bug Fixes & Improvements**
 - The Mac app now runs in Apple's app sandbox
+- Every second report no longer crashes on iOS 18 and macOS 15
+- Runs no longer hang at "Checking retraction status"
 - Settings no longer freezes while reading a saved key
 - "Get More Evidence" on the Mac Report tab starts the fetch
 
@@ -103,7 +107,12 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
 
 ## Version History
 
-### Version 1.8.0 (November 2026)
+### Version 1.9.0 (November 2026)
+- First App Store release since 1.6.0, with everything in 1.8.0
+- Fetch Full Text for Top Papers; Cancel stops any run
+- Fixed: a crash on every second report (iOS 18 / macOS 15), runs hung at the retraction check
+
+### Version 1.8.0 (November 2026, macOS DMG only)
 - Retraction checking before scoring, with badges, report sections and Check again
 - Full text from PMC's open-access collection, OpenAlex, CORE and Elsevier
 - Another article's PDF refused; full-text upload; long texts read in full

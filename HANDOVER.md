@@ -9,21 +9,18 @@ its slice has landed; add a new section when handing off new work.
 ## In flight
 
 **Release: desktop 0.6.0, apps 1.9.0** (plan
-`docs/superpowers/plans/2026-11-08-release-0.6.0-and-1.9.0.md`; a botched
-edit in PR #743 had blown it up to 21k lines, restored by the changelog PR).
-- **Phase 1 done** (PR #743: #589, #742, #330 `redact_secrets`, #592, #555
-  R8 + API 36 + `keystore.properties` signing, #527 spec/entitlements).
+`docs/superpowers/plans/2026-11-08-release-0.6.0-and-1.9.0.md`).
+- **Tasks 1–9 done** (PRs #743, #745, #748: bmlib `>=0.13.0` from PyPI).
   Deferred: #744, #527 (signed build from a second account, one hidden visit).
-- **Phase 2 (Task 8) in review** (branch `build/bmlib-0.13.0-pypi`): bmlib
-  0.13.0 reached PyPI 2026-11-10 (it holds `514cda2`; the retraction fixture
-  is unchanged). `bmlib>=0.13.0`, no `allow-direct-references`, `uv lock`,
-  the guide's git-pin text gone.
-- **Task 9 (changelog) done** (PR #745): `[Unreleased]` with `#### iOS /
-  macOS 1.9.0` and `#### Android 1.9.0` subsections.
-- **Task 10 is next** (`scripts/set_version.py 0.6.0`, both
-  `MARKETING_VERSION = 1.9.0`) once Task 8 merges; **Task 11** (publish) is
-  the maintainer's. **`twine check` needs `packaging>=26`**: hatchling writes
-  Metadata 2.5, which packaging 25 (this venv's) calls invalid.
+- **Task 10 in review** (branch `chore/release-0.6.0`): `set_version.py
+  0.6.0`, `MARKETING_VERSION = 1.9.0` (twice), `[0.6.0] - 2026-11-10`; the
+  README and user guide lose their "PyPI is 0.5.0" notes; `APP_STORE.md`
+  has 1.9.0's What's New (store users come from 1.6). Android was already
+  `1.9.0` / `versionCode = 4` (Task 6).
+- **Task 11 (publish) is the maintainer's**, from the Task 10 merge commit,
+  with all four CI workflows green. **`twine check` needs `packaging>=26`**
+  (hatchling writes Metadata 2.5). If the release date moves, re-date
+  `## [0.6.0]` in `CHANGELOG.md`.
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
