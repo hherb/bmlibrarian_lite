@@ -22,9 +22,12 @@ its slice has landed; add a new section when handing off new work.
   a fresh venv resolves bmlib 0.13.0, validates and starts the GUI. `twine`
   needs `packaging>=26`. The DMG carries mypy (#750). Deferred: #527's
   second-account launch.
-- **Task 11, apps: the maintainer's.** Apple: the iOS 1.6 → 1.9.0 upgrade
-  test (stop and reopen #289 if it crashes), archive both schemes, upload,
-  tags `appstore_1.9` / `macos_1.9.0`. Android: an **unsigned** release AAB
+- **Task 11, apps: the maintainer's.** Apple: **the 1.6 → 1.9.0 upgrade
+  passed on an iPhone 13 Pro Max (2026-11-11)**: a Debug build from
+  `0641e80c` installed over 1.6 kept every session and report, and they open
+  (a new check not yet run there). Left: archive both schemes, upload, tags
+  `appstore_1.9` / `macos_1.9.0`. Android 1.9.0 (debug variant, from
+  `0641e80c`) runs on the maintainer's phone over 1.6.0, "better than 1.6". Android: an **unsigned** release AAB
   built at `0641e80c` (R8, `libbmlib_ffi.so` for arm64-v8a and x86_64);
   no upload key is on this machine, so sign it (Android Studio → *Generate
   Signed App Bundle*, or `keystore.properties` + `./gradlew bundleRelease`;
