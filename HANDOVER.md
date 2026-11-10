@@ -14,15 +14,16 @@ edit in PR #743 had blown it up to 21k lines, restored by the changelog PR).
 - **Phase 1 done** (PR #743: #589, #742, #330 `redact_secrets`, #592, #555
   R8 + API 36 + `keystore.properties` signing, #527 spec/entitlements).
   Deferred: #744, #527 (signed build from a second account, one hidden visit).
-- **Phase 2 blocked**: Task 8 waits for bmlib 0.13.0 on PyPI (PyPI has
-  0.12.0 as of 2026-11-09; bmlib `main` still says 0.12.0 and holds the
-  `514cda2` guard; its `release.yml` publishes on a published GitHub Release).
-  Then `bmlib>=0.13.0`, drop `allow-direct-references`, `uv lock`, delete the
-  guide's git-pin paragraph.
+- **Phase 2 (Task 8) in review** (branch `build/bmlib-0.13.0-pypi`): bmlib
+  0.13.0 reached PyPI 2026-11-10 (it holds `514cda2`; the retraction fixture
+  is unchanged). `bmlib>=0.13.0`, no `allow-direct-references`, `uv lock`,
+  the guide's git-pin text gone.
 - **Task 9 (changelog) done** (PR #745): `[Unreleased]` with `#### iOS /
   macOS 1.9.0` and `#### Android 1.9.0` subsections.
-- **Task 10** (`scripts/set_version.py 0.6.0`, both `MARKETING_VERSION =
-  1.9.0`) after Tasks 8–9 merge; **Task 11** (publish) is the maintainer's.
+- **Task 10 is next** (`scripts/set_version.py 0.6.0`, both
+  `MARKETING_VERSION = 1.9.0`) once Task 8 merges; **Task 11** (publish) is
+  the maintainer's. **`twine check` needs `packaging>=26`**: hatchling writes
+  Metadata 2.5, which packaging 25 (this venv's) calls invalid.
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
@@ -105,8 +106,7 @@ have landed):
   see *Keep this PDF* offered (offscreen smoke passed bar #530's segfault).
 
 **Retraction checking, desktop: done** (PRs #594, #597, #605; spec `docs/superpowers/specs/2026-10-18-retraction-checking-design.md`;
-contract `doc/cross_platform/retraction_parity/`). bmlib is a git dependency (`514cda2`, the first with `find_passage`'s contradiction guard; a git pin blocks a PyPI
-upload). Snapshot rows keep `run_status`/`run_deciding` as set-once facts of the run. Open: #590–#593, #595, #599–#604 (#600 in part), #607.
+contract `doc/cross_platform/retraction_parity/`). bmlib comes from PyPI (`>=0.13.0`, the first release with `find_passage`'s contradiction guard; never a git pin, which PyPI refuses). Snapshot rows keep `run_status`/`run_deciding` as set-once facts of the run. Open: #590–#593, #595, #599–#604 (#600 in part), #607.
 
 ## Recently landed (context)
 

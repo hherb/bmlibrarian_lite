@@ -40,8 +40,7 @@ on `master`: version 0.5.0 plus the work listed under `[Unreleased]` in
 - Git, for an installation from source. BMLibrarian Lite depends on
   [bmlib](https://github.com/hherb/bmlib), the maintainer's shared
   biomedical-literature library, which decides each paper's retraction
-  status. Until bmlib 0.12.0 is published on PyPI, the installer fetches it
-  from GitHub at a fixed commit, so `git` must be on your `PATH`.
+  status; the installer takes it from PyPI.
 - An LLM: an Anthropic API key, or a local [Ollama](https://ollama.com)
   server.
 
@@ -76,7 +75,7 @@ uv pip install bmlibrarian-lite
 The PyPI release is 0.5.0. It predates much of what this guide describes,
 including retraction checking, smart search, Find More Evidence, full-text
 uploads and the CORE, Elsevier and OpenAlex sources. Install from source to
-get them. A new PyPI release follows once bmlib 0.12.0 is on PyPI.
+get them until the next PyPI release.
 
 ### Choosing an LLM Provider
 

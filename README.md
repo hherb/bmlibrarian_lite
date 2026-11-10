@@ -72,15 +72,13 @@ uv venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 uv pip install -e .
 ```
 
-`git` must be on your `PATH`: the installer fetches [bmlib](https://github.com/hherb/bmlib) from GitHub at a pinned commit until bmlib 0.12.0 is on PyPI.
-
 From PyPI:
 
 ```bash
 pip install bmlibrarian-lite
 ```
 
-The PyPI release is **0.5.0**. It predates retraction checking, Find More Evidence, full-text uploads, the bot-walled PDF browser and the PMC bucket, Elsevier, OpenAlex and CORE sources. Install from source to get them; a new release follows once bmlib 0.12.0 is published.
+The PyPI release is **0.5.0**. It predates retraction checking, Find More Evidence, full-text uploads, the bot-walled PDF browser and the PMC bucket, Elsevier, OpenAlex and CORE sources. Install from source to get them until the next release.
 
 ### Configure
 
