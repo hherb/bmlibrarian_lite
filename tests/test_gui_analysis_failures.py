@@ -367,8 +367,10 @@ class TestAReportThatCouldNotBeWritten:
             report=RuntimeError(leaky),
         )
         worker.run()
-        [(_, message)] = recorder.calls["error"]
+        [(step, message)] = recorder.calls["error"]
+        assert step == "report"
         assert "SECRET123" not in message
+        assert "Client error for url 'https://h/p?[redacted]'" in message
 
         worker, recorder, _ = workflow_worker(monkeypatch, documents, scores)
         monkeypatch.setattr(
@@ -380,6 +382,7 @@ class TestAReportThatCouldNotBeWritten:
         [(step, message)] = recorder.calls["error"]
         assert step == "workflow"
         assert "SECRET123" not in message
+        assert "Client error for url 'https://h/p?[redacted]'" in message
 
     def test_a_failed_report_never_completes_the_checkpoint(
         self, monkeypatch: pytest.MonkeyPatch
