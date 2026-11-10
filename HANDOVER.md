@@ -12,15 +12,25 @@ its slice has landed; add a new section when handing off new work.
 `docs/superpowers/plans/2026-11-08-release-0.6.0-and-1.9.0.md`).
 - **Tasks 1–9 done** (PRs #743, #745, #746, #748: bmlib `>=0.13.0` from PyPI).
   Deferred: #744, #527 (signed build from a second account, one hidden visit).
-- **Task 10 in review** (branch `chore/release-0.6.0`): `set_version.py
-  0.6.0`, `MARKETING_VERSION = 1.9.0` (twice), `[0.6.0] - 2026-11-10`; the
-  README and user guide lose their "PyPI is 0.5.0" notes; `APP_STORE.md`
-  has 1.9.0's What's New (store users come from 1.6). Android was already
-  `1.9.0` / `versionCode = 4` (Task 6).
-- **Task 11 (publish) is the maintainer's**, from the Task 10 merge commit,
-  with all four CI workflows green. **`twine check` needs `packaging>=26`**
-  (hatchling writes Metadata 2.5). If the release date moves, re-date
-  `## [0.6.0]` in `CHANGELOG.md`.
+- **Task 10 done** (PR #749, merge `0641e80c`; Python, Swift, Android and
+  bmlib-xcframework CI all green there). `APP_STORE.md` has 1.9.0's What's
+  New (store users come from 1.6).
+- **Task 11, desktop: published 2026-11-10** from `0641e80c`: PyPI 0.6.0
+  (wheel + sdist), tag `0.6.0`, GitHub release with both plus the signed,
+  notarized, stapled DMG (`spctl` accepted; QtWebEngine helper bundled; the
+  app starts with no "hidden browser is unavailable"). A from-PyPI install in
+  a fresh venv resolves bmlib 0.13.0, validates and starts the GUI. `twine`
+  needs `packaging>=26`. The DMG carries mypy (#750). Deferred: #527's
+  second-account launch.
+- **Task 11, apps: the maintainer's.** Apple: the iOS 1.6 → 1.9.0 upgrade
+  test (stop and reopen #289 if it crashes), archive both schemes, upload,
+  tags `appstore_1.9` / `macos_1.9.0`. Android: an **unsigned** release AAB
+  built at `0641e80c` (R8, `libbmlib_ffi.so` for arm64-v8a and x86_64);
+  no upload key is on this machine, so sign it (Android Studio → *Generate
+  Signed App Bundle*, or `keystore.properties` + `./gradlew bundleRelease`;
+  build with `JAVA_HOME` = Android Studio's `jbr` and `BMLIB_DIR` = a bmlib
+  worktree at `aa47a57`), internal track, smoke test, tag `android_1.9.0`.
+  The release body already holds the Apple and Android notes.
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
