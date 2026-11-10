@@ -90,8 +90,6 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
 **Bug Fixes & Improvements**
 - The Mac app now runs in Apple's app sandbox
 - Every second report no longer crashes on iOS 18 and macOS 15
-- Runs no longer hang at "Checking retraction status"
-- Settings no longer freezes while reading a saved key
 - "Get More Evidence" on the Mac Report tab starts the fetch
 
 **Supported AI Models**
@@ -117,7 +115,7 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
 - Full text from PMC's open-access collection, OpenAlex, CORE and Elsevier
 - Another article's PDF refused; full-text upload; long texts read in full
 - Find More Evidence, Fetch Full Text for Top Papers, Retry Full Text; a working Cancel
-- Sandboxed Mac app; fixed runs hung at the retraction check
+- Sandboxed Mac app
 
 ### Version 1.6.0 (September 2026)
 - High-risk transparency ratings explained in every report

@@ -10,7 +10,7 @@ its slice has landed; add a new section when handing off new work.
 
 **Release: desktop 0.6.0, apps 1.9.0** (plan
 `docs/superpowers/plans/2026-11-08-release-0.6.0-and-1.9.0.md`).
-- **Tasks 1–9 done** (PRs #743, #745, #748: bmlib `>=0.13.0` from PyPI).
+- **Tasks 1–9 done** (PRs #743, #745, #746, #748: bmlib `>=0.13.0` from PyPI).
   Deferred: #744, #527 (signed build from a second account, one hidden visit).
 - **Task 10 in review** (branch `chore/release-0.6.0`): `set_version.py
   0.6.0`, `MARKETING_VERSION = 1.9.0` (twice), `[0.6.0] - 2026-11-10`; the

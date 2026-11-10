@@ -158,9 +158,8 @@ as a macOS beta DMG).
 - **Cancel works** on every run and records no failure (#469).
 - The Mac app is sandboxed, and the app carries a privacy manifest (#676,
   #679).
-- Fixed: every second report crashed on iOS 18 / macOS 15 (#722); runs hung at
-  "Checking retraction status" (#680); the iPhone Settings tab froze and was
-  killed (#697); macOS *Get More Evidence* did nothing (#608); a transparency
+- Fixed: every second report crashed on iOS 18 / macOS 15 (#722); macOS
+  *Get More Evidence* did nothing (#608); a transparency
   failure showed a successful run as failed (#460); studies added by
   *Get More Evidence* went unrated (#463); a Keychain key that could not be read
   was treated as no key (#678); PubMed titles lost the text around italics
