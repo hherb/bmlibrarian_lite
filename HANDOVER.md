@@ -10,18 +10,20 @@ its slice has landed; add a new section when handing off new work.
 
 **Release: desktop 0.6.0, apps 1.9.0** (plan
 `docs/superpowers/plans/2026-11-08-release-0.6.0-and-1.9.0.md`).
-- **Tasks 1–9 done** (PRs #743, #745, #746, #748: bmlib `>=0.13.0` from PyPI).
-  Deferred: #744, #527 (signed build from a second account, one hidden visit).
-- **Task 10 done** (PR #749, merge `0641e80c`; Python, Swift, Android and
-  bmlib-xcframework CI all green there). `APP_STORE.md` has 1.9.0's What's
-  New (store users come from 1.6).
-- **Task 11, desktop: published 2026-11-10** from `0641e80c`: PyPI 0.6.0
-  (wheel + sdist), tag `0.6.0`, GitHub release with both plus the signed,
-  notarized, stapled DMG (`spctl` accepted; QtWebEngine helper bundled; the
-  app starts with no "hidden browser is unavailable"). A from-PyPI install in
-  a fresh venv resolves bmlib 0.13.0, validates and starts the GUI. `twine`
-  needs `packaging>=26`. The DMG carries mypy (#750). Deferred: #527's
-  second-account launch.
+- **Tasks 1–10 done** (PRs #743, #745, #746, #748, #749; merge `0641e80c`,
+  all CI green). Deferred: #744, #527 (signed build from a second account).
+- **Task 11, desktop: published 2026-11-10** from `0641e80c` (PyPI 0.6.0,
+  tag `0.6.0`, GitHub release with the signed, notarized DMG). `twine` needs
+  `packaging>=26`. **mypy is out of the next DMG** (#750: pydantic's mypy
+  plugins pulled it in; the spec now excludes them, checked by a PyInstaller
+  analysis, not yet by a full build: `ls "dist/BMLibrarian Lite.app/Contents/Frameworks"`).
+- **Store listings and medfactcheck.org** (PR #753): `website/` is the
+  static site (Cloudflare assets-only Worker, `website/wrangler.jsonc`);
+  `privacy.html` is generated from `ios/MedicalFactChecker/PRIVACY.md` by
+  `website/build_privacy.py` (`tests/test_website_privacy.py` keeps them in
+  step: edit the policy, re-run the script). Both apps' Settings link to
+  https://medfactcheck.org/privacy; `PLAY_STORE.md` and `APP_STORE.md`
+  carry the 1.9.0 text (App Store Connect is plain text: strip `**`).
 - **Task 11, apps: the maintainer's.** Apple: **the 1.6 → 1.9.0 upgrade
   passed on an iPhone 13 Pro Max (2026-11-11)**: a Debug build from
   `0641e80c` installed over 1.6 kept every session and report, they open,
@@ -235,33 +237,9 @@ Open issues by family; each issue carries the detail. None blocks another.
 ### Next up
 
 - **Retraction checking** follow-ups (#662, #726–#728, #730, #731 and
-  #737–#739 landed, rules in `retraction_checking.md`): **nothing writes
-  over an unreadable run snapshot** (#726: say `SCREEN_NOT_SAVED`, the shared
-  rows keep the answers, `retracted_left_out_unsaved` keeps the ids left
-  out; the worker hears it at once through `on_screen_unsaved`, so a later
-  failure or cancel still says it, #731). A report written again over one
-  says unread but **keeps the metadata's readable copy stored** (#730,
-  maintainer's option 2: written from a `replace`d copy). **Over an unread
-  snapshot every line shows the run's scored and cited papers' stored
-  checks** (#727 item 1 desktop, #733 apps: `_stored_run_checks` /
-  `unreadRunChecks`, never a failed *Check again*'s label stand-ins; a paper
-  with none is counted as could not be checked; Android's badges keep every
-  document's row), and a failed or stopped *Check again* there drops "so
-  this is still the run's record" (`over_unread_record`, maintainer's
-  choice). **An unchecked check never hides a decided one, whatever the times** (#728).
-  **One unreadable entry is its own count** (#600, #727 item 2, PR #736,
-  maintainer's choice): "N papers' retraction records could not be read",
-  never "could not be checked", never listed as left out, never written
-  over (`keeping_unread_rows`; rule in `retraction_checking.md`). **A
-  status this build does not know is unreadable too** (#737, all three,
-  maintainer's choice: `snapshot_row_readable` checks `status` and
-  `run_status`, the apps' `hasKnownStatus`), so a newer build's row is kept
-  as found. A run that screens a paper over its unreadable entry reports
-  not saved (#738, all three: the apps' retry, the desktop's Find More
-  Evidence over a held-over paper). Find More Evidence refuses a snapshot
-  that is not a list or holds an unreadable row naming no paper (or a
-  non-string id)
-  (`RETRACTION_RECORD_UNREADABLE_TEXT`, #739, maintainer's choice).
+  #737–#739 landed; **their rules, the unreadable-snapshot ones above all,
+  are in `doc/developer/retraction_checking.md`**: read it before touching
+  a snapshot, a stored check or a *Check again* line).
   Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
   fail-under-XCTest default, an unreadable index file logged), **#649**
   (test gaps mostly closed; `RetractionRun` lives in its own file; left: the
@@ -299,7 +277,7 @@ Open issues by family; each issue carries the detail. None blocks another.
   call); **#547** keep a set-aside PDF from the GUI; **#563** (PR #562's, checked downloads); **#556**–**#558** (#546's).
 - **C2's probe and acceptance, and C1's replay** (maintainer); the **embedded
   browser rescue's follow-ups**: **#524**, **#525**, **#527**, **#528**, **#530**, **#531**, **#533** (stage 2 follow-ups), **#534**, **#535**, **#537**–**#540**, **#544** (stage 3); **#481** follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
-  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2); **#516** (PySide6 cap, leaked widgets), **#517** (GC on worker threads); **#467**, **#468** / **#470**, **#476**; **#744** (redaction: its tests landed; left are two decisions, keep a URL's non-credential query parameters, and `api_key=None` reading as a hidden key); **#747** (the Document Interrogation tab's redacted load errors are untested).
+  **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2); **#516** (PySide6 cap, leaked widgets), **#517** (GC on worker threads); **#467**, **#468** / **#470**, **#476**; **#744** (redaction: its tests landed; left are two decisions, keep a URL's non-credential query parameters, and `api_key=None` reading as a hidden key).
 
 ### Left by the #420 and #428 rounds (PRs #426, #431), Python unless noted
 

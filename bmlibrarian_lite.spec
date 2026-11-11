@@ -111,6 +111,10 @@ a = Analysis(
         "doctest",
         "lib2to3",
         "idlelib",
+        # Dev tooling (#750): pydantic's mypy plugins import mypy whenever the build venv has it
+        "mypy",
+        "pydantic.mypy",
+        "pydantic.v1.mypy",
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

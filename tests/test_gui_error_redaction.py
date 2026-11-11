@@ -259,3 +259,83 @@ def test_a_discovery_error_redacts(
         [(text,)] = errors
         assert SECRET not in text
         assert "Client error" in text
+
+
+@pytest.fixture
+def interrogation_tab(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> Any:
+    """The Document Interrogation tab, its agent failing every load with a key in the error (#747).
+
+    The QApplication is never pumped; the tab is deleted at the end so it
+    does not leak into later tests (#516).
+    """
+    from PySide6.QtWidgets import QApplication
+
+    from bmlibrarian_lite.config import LiteConfig
+    from bmlibrarian_lite.gui import document_interrogation_tab as tab_module
+    from bmlibrarian_lite.storage import LiteStorage
+
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(tab_module, "LiteInterrogationAgent", MagicMock())
+    monkeypatch.setattr(tab_module, "RetractionCheckWorker", MagicMock())
+    monkeypatch.setattr(tab_module, "keep_until_finished", MagicMock())
+    monkeypatch.setattr(tab_module, "QMessageBox", MagicMock())
+    config = LiteConfig()
+    config.storage.data_dir = tmp_path
+    tab = tab_module.DocumentInterrogationTab(config=config, storage=LiteStorage(config))
+    tab.document_view = MagicMock()
+    tab.document_view.load_file.return_value = "Some text."
+    tab._agent.load_document.side_effect = RuntimeError(LEAKY)
+    yield tab, tab_module
+    tab.close()
+    tab.deleteLater()
+
+
+def shown_error(tab_module: Any) -> str:
+    """The text of the one error box the tab showed."""
+    [call] = tab_module.QMessageBox.critical.call_args_list
+    return str(call.args[2])
+
+
+def test_a_file_load_error_redacts(interrogation_tab: Any, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Loading a file: neither the document label nor the error box shows the key."""
+    tab, tab_module = interrogation_tab
+    path = tmp_path / "paper.txt"
+    path.write_text("Some text.")
+    monkeypatch.setattr(tab_module.QFileDialog, "getOpenFileName", lambda *a, **k: (str(path), ""))
+
+    tab._load_document()
+
+    for text in (tab.doc_label.text(), shown_error(tab_module)):
+        assert SECRET not in text
+        assert "Client error" in text
+
+
+def test_a_discovered_pdf_load_error_redacts(
+    interrogation_tab: Any, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Loading a PDF that discovery found: the error box shows no key."""
+    tab, tab_module = interrogation_tab
+    path = tmp_path / "paper.pdf"
+    path.write_bytes(b"%PDF-1.4")
+    monkeypatch.setattr(tab_module, "extract_pdf_text", lambda _p: "Some text.")
+
+    tab._load_pdf_file(path, "Paper")
+
+    text = shown_error(tab_module)
+    assert SECRET not in text
+    assert "Client error" in text
+
+
+def test_an_abstract_load_error_redacts(interrogation_tab: Any) -> None:
+    """Loading a citation's abstract: the error box shows no key."""
+    from bmlibrarian_lite.data_models import Citation, DocumentSource, LiteDocument
+
+    tab, tab_module = interrogation_tab
+    document = LiteDocument(id="doc-1", title="Trial", abstract="An abstract.", authors=["Smith J"],
+                            year=2024, journal="J", pmid="1", source=DocumentSource.PUBMED)
+
+    tab._load_citation_abstract(Citation(document=document, passage="An abstract.", relevance_score=4))
+
+    text = shown_error(tab_module)
+    assert SECRET not in text
+    assert "Client error" in text
