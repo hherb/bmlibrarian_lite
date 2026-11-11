@@ -25,7 +25,8 @@ its slice has landed; add a new section when handing off new work.
 - **Task 11, apps: the maintainer's.** Apple: **the 1.6 → 1.9.0 upgrade
   passed on an iPhone 13 Pro Max (2026-11-11)**: a Debug build from
   `0641e80c` installed over 1.6 kept every session and report, they open,
-  and a new fact check ran well (#289's risk did not show). Left: archive both schemes, upload, tags
+  and a new fact check ran well (#289's risk did not show). Validation's "no dSYM
+  for the A" warning is `BmlibFFI` (built stripped, #752): expected, not blocking. Left: archive both schemes, upload, tags
   `appstore_1.9` / `macos_1.9.0`. Android 1.9.0 (debug variant, from
   `0641e80c`) runs on the maintainer's phone over 1.6.0, "better than 1.6". Android: an **unsigned** release AAB
   built at `0641e80c` (R8, `libbmlib_ffi.so` for arm64-v8a and x86_64);
