@@ -663,7 +663,7 @@ class DocumentInterrogationTab(QWidget):
             Path(file_path).write_text(content, encoding='utf-8')
             self.status_message.emit(f"Saved conversation to: {Path(file_path).name}")
         except Exception as e:
-            QMessageBox.critical(self, "Save Error", f"Failed to save:\n{str(e)}")
+            QMessageBox.critical(self, "Save Error", f"Failed to save:\n{redact_secrets(str(e))}")
 
     # -------------------------------------------------------------------------
     # PDF Discovery

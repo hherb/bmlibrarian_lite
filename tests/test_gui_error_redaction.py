@@ -339,3 +339,20 @@ def test_an_abstract_load_error_redacts(interrogation_tab: Any) -> None:
     text = shown_error(tab_module)
     assert SECRET not in text
     assert "Client error" in text
+
+
+def test_a_save_error_redacts(interrogation_tab: Any, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Saving the conversation: the error box shows no key."""
+    tab, tab_module = interrogation_tab
+    target = tmp_path / "conversation.json"
+    monkeypatch.setattr(tab_module.QFileDialog, "getSaveFileName", lambda *a, **k: (str(target), ""))
+    tab.conversation_history = [{"role": "user", "content": "Q"}]
+
+    def failing_export(*_args: Any) -> str:
+        raise RuntimeError(LEAKY)
+
+    tab._save_as_format("json", failing_export)
+
+    text = shown_error(tab_module)
+    assert SECRET not in text
+    assert "Client error" in text
