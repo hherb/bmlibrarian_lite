@@ -28,7 +28,8 @@ its slice has landed; add a new section when handing off new work.
   passed on an iPhone 13 Pro Max (2026-11-11)**: a Debug build from
   `0641e80c` installed over 1.6 kept every session and report, they open,
   and a new fact check ran well (#289's risk did not show). Validation's "no dSYM
-  for the A" warning is `BmlibFFI` (built stripped, #752): expected, not blocking. Left: archive both schemes, upload, tags
+  for the A" warning is `BmlibFFI` (built stripped, #752): expected for
+  1.9.0, not blocking. Left: archive both schemes, upload, tags
   `appstore_1.9` / `macos_1.9.0`. Android 1.9.0 (debug variant, from
   `0641e80c`) runs on the maintainer's phone over 1.6.0, "better than 1.6". Android: an **unsigned** release AAB
   built at `0641e80c` (R8, `libbmlib_ffi.so` for arm64-v8a and x86_64);
@@ -37,6 +38,18 @@ its slice has landed; add a new section when handing off new work.
   build with `JAVA_HOME` = Android Studio's `jbr` and `BMLIB_DIR` = a bmlib
   worktree at `aa47a57`), internal track, smoke test, tag `android_1.9.0`.
   The release body already holds the Apple and Android notes.
+
+**BmlibFFI dSYMs (#752): fixed in bmlib, ships at the next re-pin.** bmlib
+PR hherb/bmlib#742 (`44c0a821`) makes `build-xcframework.sh` put a
+line-tables dSYM in each slice (`<slice>/dSYMs`, `-debug-symbols`), linked
+with `-oso_prefix .` so the UUIDs stay path-independent (hherb/bmlib#490).
+This repo's `.gitignore` now re-includes
+`BmlibFFI.xcframework/*/dSYMs/*.dSYM`. Checked locally: UUIDs match, `atos`
+gives file:line, two checkouts give one tree hash, a macOS archive lists
+`BmlibFFI.framework.dSYM`. **The re-pin is a full bmlib sync** (`main` was
+281 commits past `aa47a57` on 2026-11-11: ledger triage, bindings, the Kotlin
+`.kt`); the xcframework grows from ~4 MB to 30 MB (≈6.5 MB per re-pin in
+git). After it, validate an archive and close #752.
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
