@@ -40,16 +40,16 @@ its slice has landed; add a new section when handing off new work.
   The release body already holds the Apple and Android notes.
 
 **BmlibFFI dSYMs (#752): fixed in bmlib, ships at the next re-pin.** bmlib
-PR hherb/bmlib#742 (`44c0a821`) makes
-`build-xcframework.sh` put a line-tables dSYM in each slice (`<slice>/dSYMs`,
-`-debug-symbols`), linked with `-oso_prefix .` so the UUIDs stay
-path-independent (#490). This repo's `.gitignore` now re-includes
+PR hherb/bmlib#742 (`44c0a821`) makes `build-xcframework.sh` put a
+line-tables dSYM in each slice (`<slice>/dSYMs`, `-debug-symbols`), linked
+with `-oso_prefix .` so the UUIDs stay path-independent (hherb/bmlib#490).
+This repo's `.gitignore` now re-includes
 `BmlibFFI.xcframework/*/dSYMs/*.dSYM`. Checked locally: UUIDs match, `atos`
 gives file:line, two checkouts give one tree hash, a macOS archive lists
-`BmlibFFI.framework.dSYM`. **The re-pin is a full bmlib sync** (`main` is 243
-commits past `aa47a57`: ledger triage, bindings, the Kotlin `.kt`); the
-xcframework grows from ~4 MB to 30 MB (≈6.5 MB per re-pin in git). After it,
-validate an archive and close #752.
+`BmlibFFI.framework.dSYM`. **The re-pin is a full bmlib sync** (`main` was
+281 commits past `aa47a57` on 2026-11-11: ledger triage, bindings, the Kotlin
+`.kt`); the xcframework grows from ~4 MB to 30 MB (≈6.5 MB per re-pin in
+git). After it, validate an archive and close #752.
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
