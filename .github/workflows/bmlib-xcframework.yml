@@ -12,7 +12,8 @@ permissions:
 # matches a runner's. To re-pin:
 #   1. set bmlibCommit (and rustc, if it moves) in the pin, on a PR branch;
 #   2. this workflow's run on that PR fails and uploads `bmlib-xcframework`;
-#   3. unpack its xcframework.tgz: BmlibFFI.xcframework into
+#   3. unpack its xcframework.tgz: BmlibFFI.xcframework (with each slice's
+#      dSYMs/, which .gitignore re-includes, #752) into
 #      Packages/BioMedLit/Frameworks, Swift/bmlib_ffi.swift into
 #      Packages/BioMedLit/Sources/BmlibCore, Kotlin/bmlib_ffi.kt into
 #      android/MedicalFactChecker/app/src/main/java/org/bmlib/ffi; copy

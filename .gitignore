@@ -106,6 +106,8 @@ DerivedData/
 *.ipa
 *.dSYM.zip
 *.dSYM
+# bmlib's own dSYMs ship inside the committed xcframework (#752).
+!Packages/BioMedLit/Frameworks/BmlibFFI.xcframework/*/dSYMs/*.dSYM
 
 # Xcode workspace shared data
 **/project.xcworkspace/xcshareddata/
