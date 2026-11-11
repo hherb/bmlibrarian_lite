@@ -1942,6 +1942,31 @@ extension Document {
 
 // MARK: - Retraction Check Per Paper
 
+/// A process-wide memo of a pure decode, keyed by the text decoded (#647).
+/// `@unchecked Sendable`: `NSCache` is thread-safe and the values are not mutated.
+final class DecodeMemo<Value>: @unchecked Sendable {
+    private final class Box {
+        let value: Value
+        init(_ value: Value) { self.value = value }
+    }
+
+    private let cache = NSCache<NSString, Box>()
+
+    /// - Parameter limit: How many decoded values are kept; `NSCache` may evict sooner.
+    init(limit: Int) { cache.countLimit = limit }
+
+    /// What `decode` gives for `text`, decoded at most once while it is kept.
+    func value(for text: String, decode: (String) -> Value) -> Value {
+        if let box = cache.object(forKey: text as NSString) { return box.value }
+        let value = decode(text)
+        cache.setObject(Box(value), forKey: text as NSString)
+        return value
+    }
+}
+
+/// Stored checks decoded, by their JSON (``RetractionCheckRecord/check(_:)``).
+private let decodedChecks = DecodeMemo<PaperRetractionCheck?>(limit: WorkflowConstants.decodedRetractionCheckCacheLimit)
+
 /// A paper's latest retraction check, shared by every session holding the
 /// paper and kept when they are deleted: the desktop's `retraction_checks`
 /// row (#651). ``Document/retractionCheckJSON`` is each session's copy.
@@ -1966,9 +1991,12 @@ final class RetractionCheckRecord {
     }
 
     /// `json` decoded, readable or not; `nil` when absent or undecodable.
+    /// Memoised by the text, since lists and counts read checks on every redraw (#647).
     private static func decoded(_ json: String?) -> PaperRetractionCheck? {
-        guard let data = json?.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(PaperRetractionCheck.self, from: data)
+        guard let json else { return nil }
+        return decodedChecks.value(for: json) { json in
+            json.data(using: .utf8).flatMap { try? JSONDecoder().decode(PaperRetractionCheck.self, from: $0) }
+        }
     }
 
     /// The one of several stored checks of a paper that stands for them all:

@@ -152,7 +152,16 @@ public actor RetractionIndexStore {
 
     /// The stored index, whatever its age; `nil` when missing or unreadable.
     private nonisolated func storedIndex() -> RetractionIndex? {
-        guard let bytes = try? Data(contentsOf: file) else { return nil }
+        let bytes: Data
+        do {
+            bytes = try Data(contentsOf: file)
+        } catch {
+            // unreadable is not absent: say so, though both download it again (#647)
+            if FileManager.default.fileExists(atPath: file.path) {
+                BioMedLitLib.logger?.warning("Retraction Watch index file unreadable: \(error)", category: .network)
+            }
+            return nil
+        }
         do {
             return try RetractionIndex.fromBytes(bytes: bytes)
         } catch {

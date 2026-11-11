@@ -45,4 +45,13 @@ interface RetractionCheckDao {
      */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(checks: List<RetractionCheckEntity>)
+
+    /**
+     * Store these checks where a paper has no row, leaving any row, readable
+     * or not, in place (the desktop's `keep_existing`).
+     *
+     * @param checks The rows to write
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(checks: List<RetractionCheckEntity>)
 }

@@ -86,4 +86,12 @@ enum WorkflowConstants {
     /// Local inference typically runs on a single GPU/CPU, so concurrent
     /// requests provide no speedup and may cause contention.
     static let localConcurrencyDefault = 1
+
+    // MARK: - Retraction
+
+    /// How many decoded stored checks are kept, by their JSON text (#647).
+    static let decodedRetractionCheckCacheLimit = 2_000
+
+    /// How many decoded run snapshots are kept, by their JSON text (#647).
+    static let decodedRetractionSnapshotCacheLimit = 32
 }
