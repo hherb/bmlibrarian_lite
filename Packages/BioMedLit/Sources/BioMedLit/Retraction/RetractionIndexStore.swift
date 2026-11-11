@@ -156,7 +156,7 @@ public actor RetractionIndexStore {
         do {
             bytes = try Data(contentsOf: file)
         } catch {
-            // unreadable is not absent: say so, though both download it again (#647)
+            // unreadable is not absent: say so (#647), though, like a missing file, it is downloaded again
             if FileManager.default.fileExists(atPath: file.path) {
                 BioMedLitLib.logger?.warning("Retraction Watch index file unreadable: \(error)", category: .network)
             }

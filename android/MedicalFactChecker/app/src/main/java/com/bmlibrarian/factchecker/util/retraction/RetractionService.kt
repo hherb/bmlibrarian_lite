@@ -132,14 +132,22 @@ class RetractionService @Inject constructor(
     /**
      * Store these checks as their papers' rows.
      *
-     * @param checks The checks, by paper key
-     * @param keepExisting Leave a paper's existing row in place instead (the desktop's `keep_existing`)
+     * Both maps are written in one transaction: all or nothing.
+     *
+     * @param checks The checks written over their papers' rows, by paper key
+     * @param keepingExisting The checks written only where a paper has no row
+     *   (the desktop's `keep_existing`), by paper key
      */
-    suspend fun store(checks: Map<String, PaperRetractionCheck>, keepExisting: Boolean = false) {
-        if (checks.isEmpty()) return
-        val rows = checks.map { (key, check) -> RetractionCheckEntity(key, PaperRetractionCheck.encode(check)) }
-        if (keepExisting) retractionCheckDao.insertIfAbsent(rows) else retractionCheckDao.upsert(rows)
+    suspend fun store(
+        checks: Map<String, PaperRetractionCheck>,
+        keepingExisting: Map<String, PaperRetractionCheck> = emptyMap(),
+    ) {
+        if (checks.isEmpty() && keepingExisting.isEmpty()) return
+        retractionCheckDao.store(entities(checks), entities(keepingExisting))
     }
+
+    private fun entities(checks: Map<String, PaperRetractionCheck>): List<RetractionCheckEntity> =
+        checks.map { (key, check) -> RetractionCheckEntity(key, PaperRetractionCheck.encode(check)) }
 
     private companion object {
         const val TAG = "RetractionService"

@@ -248,8 +248,9 @@ Open issues by family; each issue carries the detail. None blocks another.
   are in `doc/developer/retraction_checking.md`**: read it before touching
   a snapshot, a stored check or a *Check again* line).
   Apple **#647** (left: a fail-under-XCTest default; the shared Crossref
-  lookup, decoding once per JSON text (`DecodeMemo`) and the unreadable-index
-  log landed in PR #756), **#649**
+  lookup (its pacing reserved before the sleep, so concurrent callers queue),
+  decoding once per JSON text (`DecodeMemo`) and the unreadable-index log
+  landed in PR #756), **#649**
   (test gaps mostly closed; `RetractionRun` lives in its own file; left: the
   cited report's wiring, *Check again*'s failed save and `smartSearchNotice`'s
   reset, each needing a seam (for the last: `SearchServiceFactory.search`
@@ -264,8 +265,9 @@ Open issues by family; each issue carries the detail. None blocks another.
   invariants, a cross-platform decision; `publicationTypes` nullable;
   `paperKey` a function); whether a full disk's `Refused` should wait a
   day). **A failed stored read asks every paper afresh and stores nothing**
-  (#720, all three). **A failed check fills only a missing row** (Android's
-  `insertIfAbsent`, the desktop's `keep_existing`). **The stored-check read
+  (#720, all three). **A failed check for a paper with no row fills only a
+  row still missing** (Android's `insertIfAbsent`, in one transaction with
+  the REPLACE rows; the desktop's `keep_existing`). **The stored-check read
   binds at most 999 keys** (SQLite before API 31): read through
   `RetractionService.storedChecks`, never `RetractionCheckDao.get` direct.
   **A view that replaces its workflow or whose window closes calls the

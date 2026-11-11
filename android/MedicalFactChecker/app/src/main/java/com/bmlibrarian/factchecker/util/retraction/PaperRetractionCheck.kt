@@ -294,8 +294,9 @@ data class PaperRetractionCheck(
          * retraction (#669): it may hold a retraction an outage must not
          * erase, and a retraction erases nothing that warns more.
          *
-         * With no row, even a failed check is stored, but only where no row
-         * has appeared meanwhile (`FactCheckWorkflow.storeRetractionChecks`).
+         * With no row, even a failed check is stored; unless it is a
+         * retraction, only where no row has appeared meanwhile
+         * (`FactCheckWorkflow.storeRetractionChecks`).
          *
          * @param storedJson The paper's stored row, or null for none
          * @param fresh The check just made

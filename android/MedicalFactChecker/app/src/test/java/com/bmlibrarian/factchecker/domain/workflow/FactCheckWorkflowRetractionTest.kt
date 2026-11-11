@@ -160,10 +160,7 @@ class FactCheckWorkflowRetractionTest {
             firstArg<Collection<String>>().mapNotNull { key -> rows[key]?.let { key to it } }.toMap()
         }
         coEvery { retractionService.store(any(), any()) } answers {
-            val keepExisting = secondArg<Boolean>()
-            firstArg<Map<String, PaperRetractionCheck>>().forEach { (key, check) ->
-                if (!keepExisting || key !in rows) rows[key] = PaperRetractionCheck.encode(check)
-            }
+            storeLikeRoom(firstArg(), secondArg())
         }
         coEvery { retractionService.check(any()) } coAnswers {
             val papers = firstArg<List<RetractionPaper>>()
@@ -194,6 +191,12 @@ class FactCheckWorkflowRetractionTest {
 
     @After
     fun tearDown() = unmockkObject(RetractionChecker.Companion)
+
+    /** `RetractionService.store` as Room runs it: the first map replaces rows, the second fills only missing ones. */
+    private fun storeLikeRoom(replacing: Map<String, PaperRetractionCheck>, keepingExisting: Map<String, PaperRetractionCheck>) {
+        replacing.forEach { (key, check) -> rows[key] = PaperRetractionCheck.encode(check) }
+        keepingExisting.forEach { (key, check) -> rows.putIfAbsent(key, PaperRetractionCheck.encode(check)) }
+    }
 
     private fun hold(id: String, pmid: String? = id.removePrefix("d"), doi: String? = null, types: List<String>? = null) {
         documents[id] = DocumentEntity(
@@ -459,6 +462,42 @@ class FactCheckWorkflowRetractionTest {
         run()
 
         assertTrue("control: every lookup answered", PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isClear)
+    }
+
+    @Test
+    fun `a retraction found with a lookup down replaces a row another writer stored meanwhile`() = runTest {
+        hold("d1")
+        answers["1"] = RETRACTED.copy(unanswered = listOf("crossref"))
+        coEvery { retractionService.storedChecks(any()) } answers {
+            rows["pmid:1"] = PaperRetractionCheck.encode(CLEAR)
+            emptyMap()
+        }
+
+        run()
+
+        assertTrue("it erases nothing that warns more", PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
+    }
+
+    /** The two rules above, at Check again's own store. */
+    @Test
+    fun `a Check again's failed check fills only a missing row, though its retraction replaces one`() = runTest {
+        restoreCheckedSession()
+        answers["1"] = RETRACTED.copy(checkedAtMs = RUN_MS + DAY_MS, unanswered = listOf("crossref"))
+        answers["2"] = OUTAGE.copy(checkedAtMs = RUN_MS + DAY_MS)
+        // no rows when first read; another writer stores both papers' before this one writes
+        var reads = 0
+        coEvery { retractionService.storedChecks(any()) } answers {
+            val keys = firstArg<Collection<String>>()
+            if (reads++ > 0) return@answers keys.mapNotNull { key -> rows[key]?.let { key to it } }.toMap()
+            rows["pmid:1"] = PaperRetractionCheck.encode(CLEAR)
+            rows["pmid:2"] = PaperRetractionCheck.encode(RETRACTED)
+            emptyMap()
+        }
+
+        workflow.checkRetractionsAgain()
+
+        assertTrue(PaperRetractionCheck.decode(rows.getValue("pmid:1"))!!.isRetracted)
+        assertTrue("the other writer's row stands", PaperRetractionCheck.decode(rows.getValue("pmid:2"))!!.isRetracted)
     }
 
     @Test
@@ -1287,7 +1326,7 @@ class FactCheckWorkflowRetractionTest {
         val storing = CompletableDeferred<Unit>()
         coEvery { retractionService.store(any(), any()) } coAnswers {
             storing.await()
-            firstArg<Map<String, PaperRetractionCheck>>().forEach { (key, check) -> rows[key] = PaperRetractionCheck.encode(check) }
+            storeLikeRoom(firstArg(), secondArg())
         }
 
         val job = launch { workflow.checkRetractionsAgain() }
@@ -1358,10 +1397,7 @@ class FactCheckWorkflowRetractionTest {
         workflow.checkRetractionsAgain()
         assertTrue(workflow.retractionSavedWork.value!!.line.endsWith(RetractionText.CHECK_AGAIN_NOT_SAVED))
         coEvery { retractionService.store(any(), any()) } answers {
-            val keepExisting = secondArg<Boolean>()
-            firstArg<Map<String, PaperRetractionCheck>>().forEach { (key, check) ->
-                if (!keepExisting || key !in rows) rows[key] = PaperRetractionCheck.encode(check)
-            }
+            storeLikeRoom(firstArg(), secondArg())
         }
         coEvery { documentRepository.getCitationsBySessionSync(SESSION_ID) } throws IOException("disk")
 
@@ -1444,7 +1480,7 @@ class FactCheckWorkflowRetractionTest {
         val gate = CompletableDeferred<Unit>()
         coEvery { retractionService.store(any(), any()) } coAnswers {
             gate.await()
-            firstArg<Map<String, PaperRetractionCheck>>().forEach { (key, check) -> rows[key] = PaperRetractionCheck.encode(check) }
+            storeLikeRoom(firstArg(), secondArg())
         }
 
         val job = launch { workflow.checkRetractionsAgain() }

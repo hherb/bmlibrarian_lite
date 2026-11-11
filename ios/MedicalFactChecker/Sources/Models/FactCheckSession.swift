@@ -406,7 +406,8 @@ final class FactCheckSession {
         json.data(using: .utf8).flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
     }
 
-    /// The snapshot read, once per text however often a view asks (#647).
+    /// The snapshot read, once per text while it is kept, however often a view
+    /// asks (#647); its unreadable entries are therefore logged once, not per redraw.
     private var retractionSnapshotReading: RetractionSnapshotReading? {
         retractionSnapshotJSON.map { snapshotReadings.value(for: $0, decode: Self.readSnapshot) }
     }

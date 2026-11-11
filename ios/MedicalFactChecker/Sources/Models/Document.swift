@@ -1942,9 +1942,9 @@ extension Document {
 
 // MARK: - Retraction Check Per Paper
 
-/// A process-wide memo of a pure decode, keyed by the text decoded (#647).
-/// `@unchecked Sendable`: `NSCache` is thread-safe and the values are not mutated.
-final class DecodeMemo<Value>: @unchecked Sendable {
+/// A memo of a pure decode, keyed by the text decoded (#647).
+/// `@unchecked Sendable`: `NSCache` is thread-safe and `Value` is `Sendable`.
+final class DecodeMemo<Value: Sendable>: @unchecked Sendable {
     private final class Box {
         let value: Value
         init(_ value: Value) { self.value = value }
@@ -1955,7 +1955,8 @@ final class DecodeMemo<Value>: @unchecked Sendable {
     /// - Parameter limit: How many decoded values are kept; `NSCache` may evict sooner.
     init(limit: Int) { cache.countLimit = limit }
 
-    /// What `decode` gives for `text`, decoded at most once while it is kept.
+    /// What `decode` gives for `text`, decoded once while it is kept (two
+    /// callers missing at the same moment may both decode; harmless, as it is pure).
     func value(for text: String, decode: (String) -> Value) -> Value {
         if let box = cache.object(forKey: text as NSString) { return box.value }
         let value = decode(text)

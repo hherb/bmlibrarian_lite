@@ -144,4 +144,24 @@ final class RetractionCrossrefLookupTests: XCTestCase {
             XCTAssertTrue(error.isCancellation)
         }
     }
+
+    /// #647: one lookup is shared by every screen, so callers let in while
+    /// another sleeps must queue behind it, never send at the same moment.
+    func testConcurrentCallersArePacedOneAfterAnother() async throws {
+        StubURLProtocol.stubbed = (200, Self.body(""))
+        let shared = lookup()
+        let start = Date()
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for i in 0..<3 {
+                group.addTask { _ = try await shared.results(for: ["10.1000/c\(i)"]) }
+            }
+            try await group.waitForAll()
+        }
+
+        // the first sends at once, the other two an interval apart
+        let interval = TransparencyConstants.minimumRequestInterval
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(start), 2 * interval * 0.95)
+        XCTAssertEqual(StubURLProtocol.requestedURLs.count, 3)
+    }
 }

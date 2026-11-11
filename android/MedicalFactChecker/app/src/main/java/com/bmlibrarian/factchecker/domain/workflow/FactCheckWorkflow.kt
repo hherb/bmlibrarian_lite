@@ -2246,19 +2246,20 @@ class FactCheckWorkflow @Inject constructor(
     /**
      * Store these rows; a failure is logged, never thrown.
      *
-     * A check resting on a failure fills only a missing row (the desktop's
-     * `keep_existing`): a row another writer stored meanwhile may hold a
-     * retraction an outage must not erase. A retraction is stored whatever
-     * was down, as it erases nothing that warns more (#669).
+     * A check resting on a failure, for a paper that had no row when read,
+     * fills only a row still missing (the desktop's `keep_existing`): a row
+     * another writer stored meanwhile may hold a retraction an outage must
+     * not erase. A retraction is stored whatever was down, as it erases
+     * nothing that warns more (#669). Every row is written in one
+     * transaction, so a failure stores none.
      *
      * @param rows The rows to write, by paper key
      * @param stored The rows read before deciding, by paper key
-     * @return Whether they were stored
+     * @return Whether they were stored (all of them; none when false)
      */
     private suspend fun storeRetractionChecks(rows: Map<String, PaperRetractionCheck>, stored: Map<String, String>): Boolean = try {
         val failing = rows.filter { (key, check) -> check.unanswered.isNotEmpty() && !check.isRetracted && key !in stored }
-        retractionService.store(rows - failing.keys)
-        retractionService.store(failing, keepExisting = true)
+        retractionService.store(rows - failing.keys, keepingExisting = failing)
         true
     } catch (e: CancellationException) {
         throw e
