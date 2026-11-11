@@ -40,7 +40,7 @@ its slice has landed; add a new section when handing off new work.
   The release body already holds the Apple and Android notes.
 
 **BmlibFFI dSYMs (#752): fixed in bmlib, ships at the next re-pin.** bmlib
-branch `fix/xcframework-dsyms` (`44c0a821`; PR to open) makes
+PR hherb/bmlib#742 (`44c0a821`) makes
 `build-xcframework.sh` put a line-tables dSYM in each slice (`<slice>/dSYMs`,
 `-debug-symbols`), linked with `-oso_prefix .` so the UUIDs stay
 path-independent (#490). This repo's `.gitignore` now re-includes
