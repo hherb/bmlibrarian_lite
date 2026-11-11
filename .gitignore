@@ -120,3 +120,6 @@ macos/**/Medical Fact CheckerUITests/
 concordance_output/
 research_report_*.md
 .claude/settings.local.json
+
+# Cloudflare Wrangler local state
+.wrangler/

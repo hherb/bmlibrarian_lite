@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Medical Fact Checker</title>
+<meta name="description" content="Check a medical claim against the published research. Medical Fact Checker searches PubMed and Europe PMC, reads the studies and writes an evidence report with citations. For iPhone, iPad, Mac and Android.">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://medfactcheck.org/">
+<meta property="og:title" content="Medical Fact Checker">
+<meta property="og:description" content="Check a medical claim against the published research, with citations you can follow.">
+<meta property="og:url" content="https://medfactcheck.org/">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="site-head">
+    <a class="brand" href="/"><img src="/icon.svg" alt="" width="32" height="32">Medical Fact Checker</a>
+    <nav aria-label="Site">
+      <a href="#how">How it works</a>
+      <a href="#support">Support</a>
+      <a href="/privacy">Privacy</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="claim-sheet">
+        <div>
+          <p class="claim"><mark>Intermittent fasting lowers blood pressure.</mark></p>
+          <p class="example-note">An example claim, and what the app's report on it covers.</p>
+          <h1 id="hero-title" class="hero-lede">Type a health claim. Medical Fact Checker searches the medical literature, reads the studies and tells you what the evidence says, with citations you can check yourself.</h1>
+          <div class="actions">
+            <a class="button" href="#get">Get the app</a>
+            <a href="/privacy">Read the privacy policy</a>
+          </div>
+        </div>
+        <ul class="margin-notes" aria-label="What a report on this claim contains">
+          <li><strong>Searched</strong>PubMed and Europe PMC, with queries built from the claim</li>
+          <li><strong>Scored</strong>every study found, for how closely it addresses the claim</li>
+          <li><strong>Quoted</strong>the passages that support or contradict it, from the full text where it can be read</li>
+          <li><strong>Checked</strong>each paper for retractions, funding and conflicts of interest</li>
+          <li class="verdict"><strong>Verdict</strong>a written report weighing the evidence for and against</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="how" class="prose" aria-labelledby="how-title">
+      <h2 id="how-title">How a claim is checked</h2>
+      <ol class="steps">
+        <li><strong>Search.</strong> Your claim becomes literature searches in PubMed and Europe PMC.</li>
+        <li><strong>Score.</strong> An AI model rates each study for how directly it bears on your claim, so the weak matches drop out.</li>
+        <li><strong>Read.</strong> The app fetches the full text of the studies from open-access sources wherever it can, or reads a PDF you upload.</li>
+        <li><strong>Cite.</strong> It pulls out the exact passages that support or contradict the claim, each linked to its paper.</li>
+        <li><strong>Report.</strong> You get a verdict with the reasoning, the citations and the studies behind it, ready to export as a PDF.</li>
+      </ol>
+    </section>
+
+    <section aria-labelledby="trust-title">
+      <h2 id="trust-title">Evidence you can look behind</h2>
+      <div class="features">
+        <div>
+          <h3>Retracted papers flagged</h3>
+          <p>Every study is checked against Crossref and the Retraction Watch database before it can count towards a verdict.</p>
+        </div>
+        <div>
+          <h3>Funding and conflicts shown</h3>
+          <p>Each paper gets a transparency rating from its funding, conflict-of-interest, data-availability and trial-registration statements.</p>
+        </div>
+        <div>
+          <h3>Your choice of AI</h3>
+          <p>Use your own key for Anthropic, OpenAI, DeepSeek, Groq or Mistral, or run models on your own computer with Ollama.</p>
+        </div>
+        <div>
+          <h3>No account, no servers</h3>
+          <p>Your claims and reports stay on your device. There is nothing to sign up for and nothing we collect.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="get" aria-labelledby="get-title">
+      <h2 id="get-title">Get Medical Fact Checker</h2>
+      <div class="prose">
+        <p class="platforms">For iPhone and iPad, Mac, and Android.</p>
+        <!-- Store links go here once the listings are live: App Store, Mac App Store, Google Play. -->
+        <p>You will need an API key from one of the supported AI providers, or an Ollama server you run yourself. An optional free NCBI API key speeds up PubMed searches.</p>
+        <p>Medical Fact Checker is free software under the GNU Affero General Public License. The source code is on <a href="https://github.com/hherb/bmlibrarian_lite">GitHub</a>.</p>
+      </div>
+    </section>
+
+    <section id="privacy" aria-labelledby="privacy-title">
+      <h2 id="privacy-title">Your data stays with you</h2>
+      <div class="privacy-pull">
+        <p>The app has no analytics, no trackers and no account. Searches go to the public research databases, and the articles' text goes to the AI provider you choose, under your own key. Everything else stays on your device unless you turn on sync.</p>
+        <p><a href="/privacy">Read the full privacy policy</a></p>
+      </div>
+    </section>
+
+    <section id="support" class="prose" aria-labelledby="support-title">
+      <h2 id="support-title">Support</h2>
+      <p>The app's built-in Help explains each setting and every part of a report.</p>
+      <p>To report a problem, ask a question or suggest a feature, <a href="https://github.com/hherb/bmlibrarian_lite/issues">open an issue on GitHub</a>. Please include the app version (shown in Settings) and your device.</p>
+    </section>
+  </main>
+
+  <footer class="site-foot">
+    <p>Medical Fact Checker summarises published research. It is not medical advice and does not replace a doctor or other qualified health professional.</p>
+    <p>&copy; 2024&ndash;2026 Dr Horst Herb. <a href="/privacy">Privacy policy</a>. <a href="https://github.com/hherb/bmlibrarian_lite">Source code</a>.</p>
+  </footer>
+</div>
+</body>
+</html>

@@ -54,6 +54,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -231,6 +232,16 @@ fun SettingsScreen(
             if (currentModels.isNotEmpty()) {
                 SettingsSection(title = "Model Pricing") {
                     ModelPricingTable(models = currentModels)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(Constants.UI_SECTION_SPACING.dp))
+
+            // Google Play requires the privacy policy to be reachable inside the app.
+            val uriHandler = LocalUriHandler.current
+            SettingsSection(title = "About") {
+                TextButton(onClick = { uriHandler.openUri(Constants.PRIVACY_POLICY_URL) }) {
+                    Text("Privacy Policy")
                 }
             }
 

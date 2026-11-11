@@ -14,27 +14,39 @@ Secondary: Reference
 
 ## App Description (4000 characters max)
 
-Medical Fact Checker helps you evaluate medical claims using peer-reviewed scientific literature. Enter any health-related statement or question, and the app searches PubMed's database of over 36 million biomedical articles to find relevant evidence and generate a comprehensive report.
+Medical Fact Checker helps you evaluate medical claims against peer-reviewed scientific literature. Enter any health-related statement or question, and the app searches PubMed's more than 36 million biomedical articles, and Europe PMC, for the relevant evidence, checks it, and writes an evidence report with a verdict and references.
+
+**New in Version 1.9**
+
+- Retraction checking: every paper is checked against Retraction Watch and Crossref before it is scored. Retracted papers are left out and named in the report; papers under an expression of concern are flagged, never silently dropped
+- More full text: articles are now also fetched from PubMed Central's open-access collection, OpenAlex, CORE and Elsevier, and you can upload a paper's full text yourself
+- Long articles are read in full, never cut short, and a downloaded PDF that turns out to be a different article is refused
+- New tools on saved reports: Find More Evidence, Fetch Full Text for Top Papers, and Retry Full Text
+- Cancel works on every run, and the Mac app now runs in Apple's app sandbox
 
 **How It Works**
 
 1. Enter a medical claim like "Vitamin D supplementation reduces risk of respiratory infections"
-2. The app converts your query into an optimized PubMed search
-3. Relevant research papers are retrieved and scored for relevance
-4. Key passages are extracted as citations
-5. An evidence report is generated with a verdict and supporting references
+2. The app converts your claim into optimized PubMed and Europe PMC searches
+3. Every paper found is checked for retractions
+4. The remaining papers are scored for relevance, and their full text is fetched where it is freely available
+5. Key passages are extracted as citations, and each study's transparency is assessed
+6. An evidence report is generated with a verdict and supporting references
 
 **Key Features**
 
-- Direct PubMed Integration: Searches the world's largest biomedical literature database
-- AI-Powered Analysis: Uses advanced language models to evaluate document relevance and synthesize findings
-- Multiple AI Providers: Choose from Anthropic (Claude), OpenAI, DeepSeek, Groq, Mistral, or run locally with Ollama
-- Dual Scoring System: Combines AI scoring with on-device semantic similarity for improved accuracy
-- Clickable References: Tap any citation to view the original PubMed article
-- PDF Export: Save reports with full citations for sharing or printing
-- Cost Controls: Set per-run and monthly spending limits
-- Complete History: Browse and re-share all your past fact-checks
-- Privacy First: API keys stored securely in Keychain
+- PubMed and Europe PMC: searches the world's largest biomedical literature databases
+- Retraction Checking: retracted papers never count as evidence, and the report says which were left out
+- Full-Text Retrieval: open-access articles from PubMed Central, Europe PMC, Unpaywall, OpenAlex and more, read in full
+- Study Transparency: ratings for funding, conflicts of interest, data availability and trial registration
+- AI-Powered Analysis: language models evaluate each paper's relevance and synthesize the findings
+- Multiple AI Providers: choose Anthropic (Claude), OpenAI, DeepSeek, Groq, Mistral, any OpenAI-compatible endpoint, or run models locally with Ollama
+- Dual Scoring System: combines AI scoring with on-device semantic similarity for improved accuracy
+- Clickable References: tap any citation to view the original article
+- PDF Export: save reports with full citations for sharing or printing
+- Cost Controls: set per-run and monthly spending limits
+- Complete History: browse and re-share all your past fact-checks, with optional iCloud sync across your devices
+- Privacy First: no accounts, no tracking, and API keys stored securely in Keychain
 
 **Who Is This For?**
 
@@ -49,7 +61,7 @@ This app is a research tool, not a substitute for professional medical advice. A
 
 **Requirements**
 
-You'll need an API key from one of the supported AI providers (Anthropic, OpenAI, DeepSeek, Groq, or Mistral). Alternatively, use Ollama to run AI models locally on your Mac at no cost.
+You'll need an API key from one of the supported AI providers (Anthropic, OpenAI, DeepSeek, Groq, or Mistral). Alternatively, use Ollama to run AI models locally on your Mac at no cost. Full text from CORE needs a free CORE API key; full text from Elsevier needs an Elsevier API key and an institutional network.
 
 ---
 
@@ -148,10 +160,15 @@ Fact-check medical claims against PubMed research with the AI of your choice: Cl
 ---
 
 ## Support URL
-https://github.com/hherb/bmlibrarian_lite/issues
+https://medfactcheck.org/#support
+
+## Marketing URL
+https://medfactcheck.org/
 
 ## Privacy Policy URL
-[Your privacy policy URL]
+https://medfactcheck.org/privacy
+
+The same URL goes in Google Play Console (App content > Privacy policy). The page is generated from PRIVACY.md by website/build_privacy.py; see website/wrangler.jsonc to deploy.
 
 ## App Store Screenshots Descriptions
 

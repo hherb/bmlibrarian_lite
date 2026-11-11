@@ -688,6 +688,9 @@ object Constants {
      */
     const val UNPAYWALL_DEFAULT_EMAIL = "bmlibrarian@example.com"
 
+    /** The published privacy policy, linked from Settings > About. */
+    const val PRIVACY_POLICY_URL = "https://medfactcheck.org/privacy"
+
     // ==================== Open-Access Landing Pages (#464) ====================
     // Python's constants of the same names, but for HTTP_ACCEPT_HEADER; the
     // parsing rules are pinned by
