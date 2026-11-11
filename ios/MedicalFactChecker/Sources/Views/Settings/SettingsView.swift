@@ -531,6 +531,9 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
 
+                    // App Store guideline 5.1.1(i): the policy must be reachable inside the app.
+                    Link("Privacy Policy", destination: URL(string: "https://medfactcheck.org/privacy")!)
+
                     Button("Reset All Settings", role: .destructive) {
                         settings.resetToDefaults()
                         apiKey = ""

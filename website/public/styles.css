@@ -1,0 +1,148 @@
+/* medfactcheck.org: one stylesheet for every page. System fonts only: no font CDN sees our visitors. */
+:root {
+  --paper: #f4f7f8;
+  --ink: #1c2733;
+  --navy: #1a3a6e;
+  --link: #2d5ba8;
+  --muted: #5a6672;
+  --rule: #d3dce2;
+  --verdict: #2e7d32;
+  --highlight: #fbe38e;
+  --highlight-ink: #1c2733;
+  --panel: #ffffff;
+  --serif: Charter, "Bitstream Charter", "Iowan Old Style", "Sitka Text", Cambria, Georgia, serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --measure: 40rem;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #10171d;
+    --ink: #e3e9ee;
+    --navy: #a9c3ee;
+    --link: #8fb4f2;
+    --muted: #9aa7b3;
+    --rule: #2a3742;
+    --verdict: #7fc883;
+    --highlight: #6b5a12;
+    --highlight-ink: #fff6cf;
+    --panel: #172129;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 1.125rem/1.6 var(--serif);
+  padding-inline: 1.25rem;
+  overflow-wrap: break-word;
+}
+a { color: var(--link); text-underline-offset: 0.18em; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 3px solid var(--link); outline-offset: 2px; border-radius: 2px; }
+img, svg { max-width: 100%; }
+
+.wrap { max-width: 64rem; margin-inline: auto; }
+.prose { max-width: var(--measure); }
+
+/* Header and footer */
+.site-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  flex-wrap: wrap; padding-block: 1.25rem;
+  font-family: var(--sans); font-size: 0.95rem;
+}
+.brand { display: flex; align-items: center; gap: 0.6rem; color: var(--ink); text-decoration: none; font-weight: 650; }
+.brand img { width: 2rem; height: 2rem; }
+.site-head nav { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+.site-head nav a { color: var(--muted); text-decoration: none; }
+.site-head nav a:hover, .site-head nav a[aria-current] { color: var(--ink); }
+
+.site-foot {
+  border-top: 1px solid var(--rule); margin-top: 5rem; padding-block: 2rem 3rem;
+  font: 0.9rem/1.55 var(--sans); color: var(--muted);
+}
+.site-foot p { max-width: var(--measure); margin: 0 0 0.75rem; }
+
+/* Headings */
+h1, h2, h3 { color: var(--navy); line-height: 1.2; font-weight: 600; }
+h2 { font-size: 1.6rem; margin: 4rem 0 1rem; }
+h3 { font-size: 1.15rem; margin: 2rem 0 0.5rem; }
+
+/* Hero: a claim under review, annotated in the margin */
+.hero { padding-block: 3rem 1rem; }
+.hero-lede { font: 400 1.25rem/1.5 var(--serif); color: var(--ink); margin: 2.5rem 0 0; max-width: 34rem; }
+.claim-sheet {
+  display: grid; grid-template-columns: minmax(0, 1fr) 17rem; gap: 2.5rem;
+  align-items: start;
+}
+.claim {
+  margin: 0; font-size: clamp(2rem, 1.2rem + 3.6vw, 3.6rem); line-height: 1.12;
+  color: var(--ink); font-weight: 500; letter-spacing: -0.01em;
+}
+.claim mark {
+  background: linear-gradient(to bottom, transparent 8%, var(--highlight) 8%, var(--highlight) 92%, transparent 92%);
+  color: var(--highlight-ink); padding-inline: 0.08em;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+  background-size: 0 100%; background-repeat: no-repeat;
+  animation: highlight 900ms 250ms cubic-bezier(.4,.1,.2,1) forwards;
+}
+@keyframes highlight { to { background-size: 100% 100%; } }
+@media (prefers-reduced-motion: reduce) { .claim mark { animation: none; background-size: 100% 100%; } }
+
+.margin-notes {
+  list-style: none; margin: 0; padding: 0 0 0 1.25rem;
+  border-left: 2px solid var(--highlight); margin-top: 0.6rem;
+  font: 0.95rem/1.45 var(--sans); color: var(--muted);
+}
+.margin-notes li + li { margin-top: 0.9rem; }
+.margin-notes strong { display: block; color: var(--ink); font-weight: 600; }
+.margin-notes .verdict strong { color: var(--verdict); }
+.example-note { font: 0.85rem/1.4 var(--sans); color: var(--muted); margin: 1rem 0 0; }
+
+.actions { display: flex; gap: 0.75rem 1.5rem; flex-wrap: wrap; align-items: center; margin-top: 2rem; font-family: var(--sans); }
+.button {
+  display: inline-block; background: var(--navy); color: var(--paper); text-decoration: none;
+  padding: 0.7rem 1.2rem; border-radius: 0.4rem; font-weight: 600; font-size: 1rem;
+}
+.button:hover { filter: brightness(1.12); }
+
+/* Pipeline: a real sequence, so numbered */
+.steps { list-style: none; counter-reset: step; padding: 0; margin: 0; max-width: var(--measure); }
+.steps li { counter-increment: step; position: relative; padding-left: 3rem; margin-bottom: 1.25rem; }
+.steps li::before {
+  content: counter(step); position: absolute; left: 0; top: 0.1rem;
+  width: 2rem; height: 2rem; border-radius: 50%; border: 1.5px solid var(--navy);
+  color: var(--navy); font: 600 0.95rem/1.85rem var(--sans); text-align: center;
+}
+.steps strong { color: var(--ink); }
+
+.features { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 0.5rem 3rem; max-width: 50rem; }
+.features h3 { margin-top: 1.25rem; }
+.features p { margin: 0; }
+
+.platforms { font-family: var(--sans); font-size: 1rem; }
+.privacy-pull {
+  background: var(--panel); border: 1px solid var(--rule); border-radius: 0.5rem;
+  padding: 1.25rem 1.5rem; max-width: var(--measure);
+}
+.privacy-pull p:first-child { margin-top: 0; }
+.privacy-pull p:last-child { margin-bottom: 0; }
+
+/* Policy page */
+.policy h1 { font-size: clamp(2rem, 1.5rem + 2vw, 2.8rem); margin: 2.5rem 0 0.25rem; }
+.policy h1 + p { font:0.95rem/1.5 var(--sans); color: var(--muted); margin: 0 0 2rem; }
+.policy h2 { font-size: 1.4rem; margin-top: 3rem; }
+.policy li { margin-bottom: 0.35rem; }
+.table-scroll { overflow-x: auto; margin: 1rem 0 1.5rem; }
+table { border-collapse: collapse; width: 100%; font: 0.92rem/1.45 var(--sans); }
+th, td { text-align: left; vertical-align: top; padding: 0.55rem 0.75rem 0.55rem 0; border-bottom: 1px solid var(--rule); }
+th { color: var(--muted); font-weight: 600; }
+.callout { border-left: 3px solid var(--highlight); padding-left: 1rem; }
+
+@media (max-width: 52rem) {
+  .claim-sheet { grid-template-columns: 1fr; gap: 1.75rem; }
+}

@@ -1,0 +1,20 @@
+// medfactcheck.org: a static-assets-only Worker (free plan). Deploy from this folder:
+//   npx wrangler login     (once)
+//   npx wrangler deploy
+// Edit the policy in ios/MedicalFactChecker/PRIVACY.md, then run python website/build_privacy.py.
+{
+  "$schema": "https://unpkg.com/wrangler@4/config-schema.json",
+  "name": "medfactcheck",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./public",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  // Cloudflare creates the DNS records and certificates for these on deploy.
+  "routes": [
+    { "pattern": "medfactcheck.org", "custom_domain": true },
+    { "pattern": "www.medfactcheck.org", "custom_domain": true }
+  ],
+  "workers_dev": false
+}
