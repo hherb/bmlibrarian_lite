@@ -29,7 +29,7 @@ Usage:
     result = runner.run_quick_benchmark(
         question="What is the effect of X on Y?",
         documents=docs,
-        models=["anthropic:claude-sonnet-4-20250514", "anthropic:claude-3-5-haiku-20241022"],
+        models=["anthropic:claude-sonnet-5-5", "anthropic:claude-haiku-5-5"],
         checkpoint_id=checkpoint_id,
     )
 
@@ -50,7 +50,7 @@ Usage:
     quality_result = quality_runner.run_quick_benchmark(
         question="What is the effect of X on Y?",
         documents=docs,
-        models=["anthropic:claude-sonnet-4-20250514", "anthropic:claude-3-5-haiku-20241022"],
+        models=["anthropic:claude-sonnet-5-5", "anthropic:claude-haiku-5-5"],
         task_type="study_classification",
     )
 """

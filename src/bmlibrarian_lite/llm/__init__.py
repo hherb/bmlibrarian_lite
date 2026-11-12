@@ -27,7 +27,7 @@ Usage:
     client = get_llm_client()
     response = client.chat(
         messages=[LLMMessage(role="user", content="Hello")],
-        model="anthropic:claude-sonnet-4-20250514",
+        model="anthropic:claude-sonnet-5-5",
     )
     print(response.content)
 """

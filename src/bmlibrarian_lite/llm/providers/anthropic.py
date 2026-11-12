@@ -34,7 +34,11 @@ from .base import (
     ProviderCapabilities,
     describe_request_failure,
 )
-from ...constants import ANTHROPIC_MODELS_PAGE_LIMIT, anthropic_model_pricing
+from ...constants import (
+    ANTHROPIC_MODELS_PAGE_LIMIT,
+    ANTHROPIC_RETIRED_MODEL_SUCCESSORS,
+    anthropic_model_pricing,
+)
 from ..data_types import (
     STOP_REASON_MAX_TOKENS,
     STOP_REASON_REFUSAL,
@@ -80,6 +84,23 @@ def anthropic_stop_reason(stop_reason: str | None, output_tokens: object, max_to
     if isinstance(output_tokens, int) and max_tokens > 0 and output_tokens >= max_tokens:
         return STOP_REASON_MAX_TOKENS
     return stop_reason
+
+
+def current_anthropic_model(model: str) -> str:
+    """Return the model to request for ``model``: itself, or a retired ID's successor.
+
+    Args:
+        model: A Claude model ID, as configured.
+
+    Returns:
+        ``model``, or the live successor
+        ``ANTHROPIC_RETIRED_MODEL_SUCCESSORS`` names for it (logged).
+    """
+    successor = ANTHROPIC_RETIRED_MODEL_SUCCESSORS.get(model)
+    if successor is None:
+        return model
+    logger.warning("Claude model %s is retired; requesting %s instead", model, successor)
+    return successor
 
 
 class AnthropicProvider(BaseProvider):
@@ -160,7 +181,7 @@ class AnthropicProvider(BaseProvider):
     @property
     def default_model(self) -> str:
         """Default Claude model."""
-        return "claude-sonnet-4-20250514"
+        return "claude-sonnet-5-5"
 
     def _get_client(self) -> object:
         """Get or create Anthropic client (lazy initialization).
@@ -203,19 +224,24 @@ class AnthropicProvider(BaseProvider):
 
         Args:
             messages: List of conversation messages.
-            model: Model ID to use. Defaults to claude-sonnet-4.
-            temperature: Sampling temperature (0.0 to 1.0).
+            model: Model ID to use. Defaults to ``default_model``. A retired
+                ID this app shipped is sent as its successor
+                (``ANTHROPIC_RETIRED_MODEL_SUCCESSORS``).
+            temperature: Not sent. anthropic 1.x and 2.x take no
+                ``temperature`` (a ``TypeError`` before any request) and
+                Claude Opus 4.7 and later refuse it, so Claude samples at the
+                API's defaults (#758, bmlib#705). Kept for the shared
+                provider signature.
             max_tokens: Maximum tokens in the response.
-            **kwargs: Additional parameters (top_p, json_mode).
+            **kwargs: Additional parameters: ``json_mode``; ``top_p`` is not
+                sent, for the reason ``temperature`` is not.
 
         Returns:
             LLMResponse with Claude's response.
         """
-        model = model or self.default_model
+        model = current_anthropic_model(model or self.default_model)
         client = self._get_client()
 
-        # Extract optional parameters
-        top_p: Optional[float] = kwargs.get("top_p")  # type: ignore
         json_mode: bool = kwargs.get("json_mode", False)  # type: ignore
 
         # Separate system message (Anthropic API requirement)
@@ -232,14 +258,10 @@ class AnthropicProvider(BaseProvider):
             "model": model,
             "messages": chat_messages,
             "max_tokens": max_tokens,
-            "temperature": temperature,
         }
 
         if system_content:
             request_kwargs["system"] = system_content
-
-        if top_p is not None:
-            request_kwargs["top_p"] = top_p
 
         # Make API call
         response = client.messages.create(**request_kwargs)

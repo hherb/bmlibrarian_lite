@@ -279,7 +279,7 @@ class ModelsConfig:
 
     Example:
         config.models.default_provider = "anthropic"
-        config.models.default_model = "claude-sonnet-4-20250514"
+        config.models.default_model = "claude-sonnet-5-5"
 
         # Use Ollama for simple tasks
         config.models.tasks["query_conversion"] = TaskModelConfig(
@@ -680,12 +680,12 @@ class BenchmarkConfig:
             self.models = [
                 BenchmarkModelConfig(
                     provider="anthropic",
-                    model="claude-sonnet-4-20250514",
+                    model="claude-sonnet-5-5",
                     is_baseline=True,
                 ),
                 BenchmarkModelConfig(
                     provider="anthropic",
-                    model="claude-3-5-haiku-20241022",
+                    model="claude-haiku-5-5",
                 ),
             ]
 
@@ -755,7 +755,7 @@ class LiteConfig:
         config = LiteConfig()
 
         # Modify and save
-        config.models.default_model = "claude-3-haiku-20240307"
+        config.models.default_model = "claude-haiku-5-5"
         config.save()
 
     Validation Caching:

@@ -173,13 +173,18 @@ def test_a_scored_preloaded_document_survives_a_reopen(
         document=d, score=5, explanation="Relevant."
     )
     monkeypatch.setattr(systematic_review_tab, "LiteScoringAgent", lambda **_: scoring_agent)
+    # Nothing scores relevant, so the review would run a live smart-search
+    # round (a real LLM call and PubMed search wherever a key is set).
+    monkeypatch.setattr(
+        WorkflowWorker, "_smart_search", lambda self, metadata, ids, relevant, cid, meta: ([], meta)
+    )
     config = LiteConfig()
     monkeypatch.setattr(config.parallel, "get_scoring_workers", lambda provider: 1)
     worker = WorkflowWorker(
         question=QUESTION,
         config=config,
         storage=storage,
-        min_score=6,  # above the score: the review ends before any LLM call
+        min_score=6,  # above the score: nothing is relevant
         preloaded_documents=[doc],
     )
 

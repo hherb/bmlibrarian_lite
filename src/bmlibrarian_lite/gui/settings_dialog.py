@@ -113,11 +113,9 @@ QUALITY_TIER_OPTIONS = [
 
 # Fallback Claude models (used if API fetch fails)
 FALLBACK_CLAUDE_MODELS = [
-    "claude-sonnet-4-20250514",
-    "claude-3-5-sonnet-20241022",
-    "claude-3-5-haiku-20241022",
-    "claude-3-haiku-20240307",
-    "claude-3-opus-20240229",
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
+    "claude-haiku-5-5",
 ]
 
 

@@ -116,7 +116,7 @@ class LiteBaseAgent:
         Get the configured model string for a task.
 
         Combines provider and model name into the format expected
-        by LLMClient (e.g., "anthropic:claude-3-haiku-20240307").
+        by LLMClient (e.g., "anthropic:claude-haiku-5-5").
 
         Args:
             task_id: Task identifier (uses class TASK_ID if not specified)

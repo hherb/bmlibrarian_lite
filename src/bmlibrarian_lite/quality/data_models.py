@@ -470,7 +470,7 @@ def llm_extraction_method(model_string: str) -> str:
         model_string: The model, as "provider:model".
 
     Returns:
-        e.g. "llm:anthropic:claude-3-5-haiku-20241022". Naming the model
+        e.g. "llm:anthropic:claude-haiku-5-5". Naming the model
         lets the quality benchmark reuse the answer as that model's alone.
     """
     return f"llm:{model_string}"
@@ -703,7 +703,7 @@ class QualityAssessment:
         Args:
             classification: StudyClassification from LLM
             model_name: The model that performed the classification
-                (e.g. "ollama:medgemma4B_it_q8" or "anthropic:claude-3-5-haiku-20241022")
+                (e.g. "ollama:medgemma4B_it_q8" or "anthropic:claude-haiku-5-5")
 
         Returns:
             QualityAssessment from classification

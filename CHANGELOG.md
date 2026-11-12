@@ -11,6 +11,22 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Claude works again on a fresh install (#758).** Claude is sent no
+  `temperature` or `top_p`. anthropic 1.x and 2.x (2.x is what a fresh
+  `pip install` resolves) have no such parameters, so every Claude call
+  failed before a request left. Claude Opus 4.7 and later refuse them on the
+  API too. Claude now samples at the API's defaults, so a lower temperature
+  set for a task no longer takes effect on Claude. Other providers still get
+  it.
+- **The default Claude models are ones that still answer (#759).** Every
+  Claude ID the app shipped or offered (`claude-sonnet-4-20250514`,
+  `claude-3-5-haiku-20241022`, `claude-opus-4-20250514`, and older) now
+  answers 404. The defaults are `claude-sonnet-5-5` and `claude-haiku-5-5`.
+  A saved setting that names a retired ID is sent to its successor in the
+  same family, and the log says so.
+
 ## [0.6.0] - 2026-11-10
 
 ### Added

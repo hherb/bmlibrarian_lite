@@ -117,7 +117,19 @@ DEFAULT_MAX_RESULTS = 20
 DEFAULT_LLM_PROVIDER = "anthropic"
 
 # Default LLM model
-DEFAULT_LLM_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_LLM_MODEL = "claude-sonnet-5-5"
+
+# Claude IDs this app has shipped as a default or offered, now retired (each
+# answered 404 on 2026-11-12), and the live model of the same family a request
+# naming one is sent to instead, so a stored config keeps working (#759).
+ANTHROPIC_RETIRED_MODEL_SUCCESSORS: dict[str, str] = {
+    "claude-sonnet-4-20250514": "claude-sonnet-5-5",
+    "claude-3-5-sonnet-20241022": "claude-sonnet-5-5",
+    "claude-opus-4-20250514": "claude-opus-5-5",
+    "claude-3-opus-20240229": "claude-opus-5-5",
+    "claude-3-5-haiku-20241022": "claude-haiku-5-5",
+    "claude-3-haiku-20240307": "claude-haiku-5-5",
+}
 
 # Default temperature for LLM requests
 DEFAULT_LLM_TEMPERATURE = 0.3
@@ -155,7 +167,7 @@ LLM_TASK_TYPES = {
         "default_temperature": 0.1,
         "default_max_tokens": 512,
         "complexity": "low",
-        "recommended_models": ["claude-3-5-haiku-20241022", "llama3.2", "mistral"],
+        "recommended_models": ["claude-haiku-5-5", "llama3.2", "mistral"],
     },
     "document_scoring": {
         "name": "Document Scoring",
@@ -164,7 +176,7 @@ LLM_TASK_TYPES = {
         "default_temperature": 0.1,
         "default_max_tokens": 512,
         "complexity": "medium",
-        "recommended_models": ["claude-3-5-haiku-20241022", "claude-sonnet-4-20250514"],
+        "recommended_models": ["claude-haiku-5-5", "claude-sonnet-5-5"],
     },
     "citation_extraction": {
         "name": "Citation Extraction",
@@ -173,7 +185,7 @@ LLM_TASK_TYPES = {
         "default_temperature": 0.1,
         "default_max_tokens": 512,
         "complexity": "medium",
-        "recommended_models": ["claude-3-5-haiku-20241022", "claude-sonnet-4-20250514"],
+        "recommended_models": ["claude-haiku-5-5", "claude-sonnet-5-5"],
     },
     "report_generation": {
         "name": "Report Generation",
@@ -182,7 +194,7 @@ LLM_TASK_TYPES = {
         "default_temperature": 0.3,
         "default_max_tokens": 4096,
         "complexity": "high",
-        "recommended_models": ["claude-sonnet-4-20250514", "claude-opus-4-20250514"],
+        "recommended_models": ["claude-sonnet-5-5", "claude-opus-5-5"],
     },
     "query_expansion": {
         "name": "Query Expansion",
@@ -191,7 +203,7 @@ LLM_TASK_TYPES = {
         "default_temperature": 0.3,
         "default_max_tokens": 200,
         "complexity": "low",
-        "recommended_models": ["claude-3-5-haiku-20241022", "llama3.2", "mistral"],
+        "recommended_models": ["claude-haiku-5-5", "llama3.2", "mistral"],
     },
     "document_qa": {
         "name": "Document Q&A",
@@ -200,7 +212,7 @@ LLM_TASK_TYPES = {
         "default_temperature": 0.2,
         "default_max_tokens": 2048,
         "complexity": "high",
-        "recommended_models": ["claude-sonnet-4-20250514", "llama3.2:70b"],
+        "recommended_models": ["claude-sonnet-5-5", "llama3.2:70b"],
     },
     "document_summary": {
         "name": "Document Summary",
@@ -209,7 +221,7 @@ LLM_TASK_TYPES = {
         "default_temperature": 0.2,
         "default_max_tokens": 500,
         "complexity": "medium",
-        "recommended_models": ["claude-3-5-haiku-20241022", "claude-sonnet-4-20250514"],
+        "recommended_models": ["claude-haiku-5-5", "claude-sonnet-5-5"],
     },
     "study_classification": {
         "name": "Study Classification",
@@ -218,7 +230,7 @@ LLM_TASK_TYPES = {
         "default_temperature": 0.1,
         "default_max_tokens": 256,
         "complexity": "low",
-        "recommended_models": ["claude-3-5-haiku-20241022", "llama3.2"],
+        "recommended_models": ["claude-haiku-5-5", "llama3.2"],
     },
     "quality_assessment": {
         "name": "Quality Assessment",
@@ -227,7 +239,7 @@ LLM_TASK_TYPES = {
         "default_temperature": 0.1,
         "default_max_tokens": 1024,
         "complexity": "high",
-        "recommended_models": ["claude-sonnet-4-20250514"],
+        "recommended_models": ["claude-sonnet-5-5"],
     },
 }
 
@@ -304,7 +316,7 @@ def _get_llm_providers() -> dict[str, dict]:
             "description": "Claude models via Anthropic API",
             "api_key_env_var": "ANTHROPIC_API_KEY",
             "default_base_url": "https://api.anthropic.com",
-            "default_model": "claude-sonnet-4-20250514",
+            "default_model": "claude-sonnet-5-5",
             "requires_api_key": True,
             "website_url": "https://console.anthropic.com",
             "setup_instructions": """1. Create an account at https://console.anthropic.com
@@ -462,11 +474,11 @@ DEFAULT_QUALITY_CONFIDENCE_THRESHOLD = 0.7
 
 # Model for quick study design classification (Tier 2)
 # Claude Haiku: Fast, cheap (~$0.00025/doc)
-QUALITY_CLASSIFIER_MODEL = "claude-3-5-haiku-20241022"
+QUALITY_CLASSIFIER_MODEL = "claude-haiku-5-5"
 
 # Model for detailed quality assessment (Tier 3)
 # Claude Sonnet: More thorough, higher cost (~$0.003/doc)
-QUALITY_ASSESSOR_MODEL = "claude-sonnet-4-20250514"
+QUALITY_ASSESSOR_MODEL = "claude-sonnet-5-5"
 
 # Temperature for quality classification (lower = more deterministic)
 QUALITY_LLM_TEMPERATURE = 0.1

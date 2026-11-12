@@ -30,7 +30,7 @@ Usage:
     client = LLMClient()
     response = client.chat(
         messages=[LLMMessage(role="user", content="Hello")],
-        model="anthropic:claude-sonnet-4-20250514",
+        model="anthropic:claude-sonnet-5-5",
     )
 
     # Using Ollama
