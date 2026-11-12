@@ -161,6 +161,32 @@ struct ThinkingModeTests {
         }
     }
 
+    /// #758: Claude Opus 4.7 and later answer 400 to `temperature`.
+    @Test func anthropicIsSentNoTemperature() async throws {
+        let claude = LLMService(baseURL: url, apiKey: "k", model: "claude-opus-5-5", provider: .anthropic)
+        let temperature = await claude.requestTemperature(0.1)
+        #expect(temperature == nil)
+
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let body = ChatCompletionRequest(
+            model: "claude-opus-5-5",
+            messages: [LLMService.userMessage("hi")],
+            temperature: temperature,
+            maxTokens: 10,
+            responseFormat: nil,
+            thinking: nil
+        )
+        let json = String(decoding: try encoder.encode(body), as: UTF8.self)
+        #expect(!json.contains("temperature"), "\(json)")
+
+        // control: every other provider keeps the caller's temperature
+        for provider in [LLMProvider.openai, .deepseek, .groq, .mistral, .ollama, .custom] {
+            let service = LLMService(baseURL: url, apiKey: "k", model: "m", provider: provider)
+            #expect(await service.requestTemperature(0.1) == 0.1)
+        }
+    }
+
     @Test func nilThinkingIsOmittedFromTheRequestBody() throws {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase

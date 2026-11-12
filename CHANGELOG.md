@@ -26,6 +26,11 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
   answers 404. The defaults are `claude-sonnet-5-5` and `claude-haiku-5-5`.
   A saved setting that names a retired ID is sent to its successor in the
   same family, and the log says so.
+- **Apps: Claude Opus 4.7 and later answer again (#758).** The iOS/macOS
+  and Android apps send Claude no `temperature`, which those models refuse
+  with a 400 on both the Messages and the OpenAI-compatible endpoint. The
+  apps' offline model lists no longer offer `claude-sonnet-4-20250514` or
+  `claude-3-7-sonnet-20250219`, which answer 404.
 
 ## [0.6.0] - 2026-11-10
 

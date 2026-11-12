@@ -45,7 +45,7 @@ class CostCalculatorTest {
 
     @Test
     fun `calculateCost computes correct cost for Claude Sonnet`() {
-        val sonnet = LLMProvider.ANTHROPIC.getModel("claude-sonnet-4-20250514")!!
+        val sonnet = LLMProvider.ANTHROPIC.getModel("claude-sonnet-4-5-20250929")!!
         // Claude Sonnet: $3.00/1M input, $15.00/1M output
 
         val cost = CostCalculator.calculateCost(sonnet, inputTokens = 10000, outputTokens = 2000)

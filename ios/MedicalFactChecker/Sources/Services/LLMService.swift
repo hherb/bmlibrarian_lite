@@ -186,7 +186,7 @@ actor LLMService {
         let body = ChatCompletionRequest(
             model: model,
             messages: messages,
-            temperature: temperature,
+            temperature: requestTemperature(temperature),
             maxTokens: maxTokens,
             responseFormat: nil,
             thinking: thinkingConfig
@@ -321,6 +321,18 @@ actor LLMService {
     /// field and may reject it, so they are sent nothing.
     var thinkingConfig: ThinkingConfig? {
         provider == .deepseek ? .disabled : nil
+    }
+
+    /// The temperature to send for the configured provider, if any.
+    ///
+    /// Claude Opus 4.7 and later answer 400 to `temperature`, on Anthropic's
+    /// OpenAI-compatible endpoint too (#758), so Claude is sent none and samples at
+    /// the API default. A nil temperature is left out of the request body.
+    ///
+    /// - Parameter temperature: The temperature the caller asked for.
+    /// - Returns: `temperature`, or nil for Anthropic.
+    func requestTemperature(_ temperature: Double) -> Double? {
+        provider == .anthropic ? nil : temperature
     }
 
     /// Calculate backoff delay with exponential increase and jitter.

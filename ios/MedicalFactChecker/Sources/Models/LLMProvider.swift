@@ -92,21 +92,6 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
                     inputPrice: 5.00,
                     outputPrice: 25.00
                 ),
-                // Legacy models still available
-                LLMModel(
-                    id: "claude-sonnet-4-20250514",
-                    displayName: "Claude Sonnet 4",
-                    description: "Previous generation Sonnet",
-                    inputPrice: 3.00,
-                    outputPrice: 15.00
-                ),
-                LLMModel(
-                    id: "claude-3-7-sonnet-20250219",
-                    displayName: "Claude 3.7 Sonnet",
-                    description: "Older Sonnet model",
-                    inputPrice: 3.00,
-                    outputPrice: 15.00
-                ),
             ]
 
         case .openai:

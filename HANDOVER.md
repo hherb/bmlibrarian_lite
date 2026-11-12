@@ -234,11 +234,10 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **From the bmlib sync (PR #757)**, most urgent first: **#758** Claude is
-  sent `temperature`/`top_p` (a fresh desktop install resolves anthropic
-  2.8.0, which raises `TypeError` on every call; Opus 4.7+ refuse it on the
-  API; apps too) and **#759** the desktop's default `claude-sonnet-4-20250514`
-  answers 404: PR #765 fixes the desktop (a 0.6.1, unreleased). Then **#760**
+- **From the bmlib sync (PR #757)**: **#758**/**#759** fixed, unreleased (desktop
+  PR #765, a 0.6.1 is the maintainer's call; apps in #758's PR): no platform
+  sends Claude `temperature`/`top_p` (Opus 4.7+ answer 400 on both
+  endpoints, probed 2026-11-13). Then **#760**
   the apps' Ollama over `/v1` takes no `num_ctx`; **#761** `NaN`/`Infinity`
   in model JSON, retries re-send unchanged; **#762** desktop PDF extraction
   (fault side, MuPDF's read-past messages, no cancel); **#763** Android HTML

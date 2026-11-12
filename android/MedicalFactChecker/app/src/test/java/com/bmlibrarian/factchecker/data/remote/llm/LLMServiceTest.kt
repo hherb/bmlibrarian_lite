@@ -18,12 +18,14 @@
 
 package com.bmlibrarian.factchecker.data.remote.llm
 
+import com.bmlibrarian.factchecker.di.AppModule
 import com.bmlibrarian.factchecker.domain.model.LLMError
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.StructuredQuery
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.test.runTest
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
@@ -126,7 +128,7 @@ class LLMServiceTest {
         val result = service.chat(
             provider = provider,
             apiKey = "test-key",
-            model = "claude-sonnet-4-20250514",
+            model = "claude-sonnet-4-5-20250929",
             systemPrompt = "You are a helper",
             userPrompt = "Hello"
         )
@@ -600,7 +602,7 @@ class LLMServiceTest {
         service.chat(
             provider = LLMProvider.ANTHROPIC,
             apiKey = "test-key",
-            model = "claude-sonnet-4-20250514",
+            model = "claude-sonnet-4-5-20250929",
             systemPrompt = "Test",
             userPrompt = "Test"
         )
@@ -614,6 +616,38 @@ class LLMServiceTest {
                 request = any()
             )
         }
+    }
+
+    /**
+     * #758: Claude Opus 4.7 and later answer 400 to `temperature`, so a Claude
+     * request carries none, even for a call that asks for one. Encoded with the
+     * app's own Json (`encodeDefaults = true`), as Retrofit sends it.
+     */
+    @Test
+    fun `Anthropic request carries no temperature`() = runTest {
+        val sent = slot<AnthropicMessagesRequest>()
+        coEvery {
+            anthropicApi.createMessage(any(), any(), any(), capture(sent))
+        } returns Response.success(
+            AnthropicMessagesResponse(
+                id = "msg-123",
+                content = listOf(AnthropicContentBlock(type = "text", text = "Response")),
+                usage = AnthropicUsage(inputTokens = 100, outputTokens = 50)
+            )
+        )
+
+        service.chat(
+            provider = LLMProvider.ANTHROPIC,
+            apiKey = "test-key",
+            model = "claude-opus-5-5",
+            systemPrompt = "Test",
+            userPrompt = "Test",
+            temperature = 0.1
+        )
+
+        val body = AppModule.provideJson().encodeToString(AnthropicMessagesRequest.serializer(), sent.captured)
+        assertFalse(body, body.contains("temperature"))
+        assertTrue("control: the body is the request", body.contains("\"model\":\"claude-opus-5-5\""))
     }
 
     @Test

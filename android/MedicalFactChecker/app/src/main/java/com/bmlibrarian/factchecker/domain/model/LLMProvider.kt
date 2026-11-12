@@ -65,10 +65,7 @@ data class LLMProvider(
                 // Claude 4.5 Series (Latest - January 2026)
                 ModelInfo("claude-sonnet-4-5-20250929", "Claude Sonnet 4.5", 3.00, 15.00),
                 ModelInfo("claude-haiku-4-5-20251001", "Claude Haiku 4.5", 1.00, 5.00),
-                ModelInfo("claude-opus-4-5-20251101", "Claude Opus 4.5", 5.00, 25.00),
-                // Legacy models still available
-                ModelInfo("claude-sonnet-4-20250514", "Claude Sonnet 4", 3.00, 15.00),
-                ModelInfo("claude-3-7-sonnet-20250219", "Claude 3.7 Sonnet", 3.00, 15.00)
+                ModelInfo("claude-opus-4-5-20251101", "Claude Opus 4.5", 5.00, 25.00)
             ),
             supportsModelFetching = true,
             usesAnthropicFormat = true
