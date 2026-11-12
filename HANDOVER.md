@@ -235,7 +235,7 @@ Open issues by family; each issue carries the detail. None blocks another.
 ### Next up
 
 - **From the bmlib sync (PR #757)**: **#758**/**#759** fixed, unreleased (desktop
-  PR #765, a 0.6.1 is the maintainer's call; apps in #758's PR): no platform
+  PR #765, a 0.6.1 is the maintainer's call; apps PR #766): no platform
   sends Claude `temperature`/`top_p` (Opus 4.7+ answer 400 on both
   endpoints, probed 2026-11-13). Then **#760**
   the apps' Ollama over `/v1` takes no `num_ctx`; **#761** `NaN`/`Infinity`
