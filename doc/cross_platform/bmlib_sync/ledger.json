@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "bmlib_commit": "83cd2b3b229d7a487fa9fc66054730cab9ae26ed",
+  "bmlib_commit": "d3b10b5b412434ccdffc2915d9da84bb84d8de19",
   "from_bmlib": [
     {
       "id": "lite:pubmed-articleid-reference-list",
@@ -2044,6 +2044,1050 @@
       "android": "ported",
       "issue": null,
       "note": "The desktop takes it by import (bmlib pin `8845ba8`); its rebuilt copy holds ~4% fewer notices (the October export's 2,913 sentinel-only rows), inside its 5% shrink guard. The apps' retraction plans consume bmlib's Rust through the FFI; its pin (`83cd2b3`, PR #646) carries this. Swift: ported in PR 4a (iOS/macOS retraction checking), which calls bmlib's Rust through the FFI. Kotlin: ported in PR 5a (Android retraction checking), which calls bmlib's Rust through the FFI."
+    },
+    {
+      "id": "bmlib:unreleased-short-wrong-shape-reply-quoted",
+      "title": "A short reply of the wrong JSON shape is quoted, with the likely cause",
+      "python": "equivalent",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "The desktop has no `chat_json`; a reply of the wrong JSON shape is a `JSONParseError` that keeps the whole reply as `raw_response` (quality/quality_agent.py, quality/study_classifier.py). The apps ask for no server JSON mode (LLMService.swift sends no `response_format`)."
+    },
+    {
+      "id": "bmlib:0.13.0-default-models-move",
+      "title": "The default models move",
+      "python": "owed",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": "#759",
+      "note": "The desktop's default Claude model is `claude-sonnet-4-20250514` (constants.py `DEFAULT_LLM_MODEL`, `QUALITY_ASSESSOR_MODEL`, the task presets, `AnthropicProvider.default_model`), which bmlib's live probe found answering 404. The apps default to `claude-sonnet-4-5-20250929` and replace a stored model a live listing no longer names (Android SettingsViewModel.dropRetiredModelSelection, Swift LLMProvider.swift)."
+    },
+    {
+      "id": "bmlib#705",
+      "title": "Anthropic is sent no `temperature` or `top_p`",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#758",
+      "note": "Every platform sends Claude a temperature: the desktop's AnthropicProvider.chat passes `temperature` (default 0.7) and `top_p` to `messages.create` with `anthropic>=0.34.0` uncapped, so a fresh 1.x/2.x install raises TypeError on every call and Opus 4.7+ refuse it on 0.x; Android's AnthropicMessagesRequest sends `temperature` on `2023-06-01`; Swift sends it to Anthropic's OpenAI-compatible endpoint (that endpoint's refusal on Opus 4.7+ is inferred, not probed)."
+    },
+    {
+      "id": "bmlib#707",
+      "title": "Anthropic `think=` follows the model's reported thinking types",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite sends Claude no `thinking` parameter on any platform (desktop llm/providers/anthropic.py; the apps' only thinking setting is DeepSeek's opt-out)."
+    },
+    {
+      "id": "bmlib#572",
+      "title": "A reply carrying `NaN`, `Infinity`, `1e999` or an integer past binary64 is unparseable",
+      "python": "owed",
+      "swift": "equivalent",
+      "android": "owed",
+      "issue": "#761",
+      "note": "The desktop decodes every reply with Python's `json.loads` (agents/scoring_agent.py, citation_agent.py, quality/*), which reads `NaN`, `Infinity` and `1e999` and answers with the fields beside them; Android's lenient kotlinx `parseToJsonElement` (util/ResponseParser.kt) likewise reads the score beside an unquoted `NaN`. Swift's JSONSerialization refuses `NaN`, `Infinity`, `1e999` and an integer past binary64 as a whole reply (probed), bmlib's rule."
+    },
+    {
+      "id": "bmlib#697",
+      "title": "Ollama's `embed` / `embed_batch` raise `ConnectionError` only for a transport failure",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Ollama embeddings are not used: the desktop embeds with FastEmbed, the apps with NLEmbedding."
+    },
+    {
+      "id": "bmlib#617",
+      "title": "The `ollama` extra requires `ollama>=0.5`",
+      "python": "equivalent",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": null,
+      "note": "No platform crashes on an error-shaped 200: the desktop has no OpenAI-compatible provider, and its OllamaProvider's SDK TypeError on a non-object 200 is caught by every agent and recorded as a failed document (utils.classify_llm_exception); Swift throws `emptyResponse` or a DecodingError (LLMService.swift), Android `EmptyResponseError` (LLMResult.fromOpenAI). None quotes the server's own `error.message`. The ollama/psutil extras are bmlib packaging."
+    },
+    {
+      "id": "bmlib#616",
+      "title": "The last level decides a run's status",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite has no condenser: the desktop reads each analysis window and reduces the answers by vote (quality/window_reduce.py), and a window's failure fails the document with its own exception."
+    },
+    {
+      "id": "bmlib#673",
+      "title": "`ProgressInfo.current_item` counts items, not pieces",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite has no condenser; its progress counts documents (agents/citation_agent.py `progress_callback`)."
+    },
+    {
+      "id": "bmlib#633",
+      "title": "A download body ending short of its `Content-Length` is a `ModelTransportError`",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's `download_model`; the desktop's embedding model is downloaded by FastEmbed, and the apps use NLEmbedding."
+    },
+    {
+      "id": "bmlib:0.13.0-model-output-limit",
+      "title": "A model's output limit beside its window",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite reads no model's output limit: `max_tokens` comes from each task's config (desktop) or fixed per call (apps)."
+    },
+    {
+      "id": "bmlib#680",
+      "title": "Rust lists a provider's models",
+      "python": "equivalent",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": null,
+      "note": "Rust's `list_models` does not reach the apps. Each platform lists models itself and raises a failure rather than answering an empty list: desktop AnthropicProvider/OllamaProvider.list_models, Swift ModelFetchService.swift, Android ModelFetchService.kt (Anthropic at `limit=1000`)."
+    },
+    {
+      "id": "bmlib#609",
+      "title": "A long text's condensation reports its progress",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite has no map-reduce condensation (no PICO or Cochrane agent); the desktop's windowed reads report progress per document."
+    },
+    {
+      "id": "bmlib#664",
+      "title": "A failed context-window lookup carries the HTTP status",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite looks up no model's context window: the desktop's Ollama `num_ctx` comes from a task's configured `context_window` (config.py, agents/base.py); OllamaProvider._get_model_info's window (8192 on any `show()` failure) is read by nothing outside the providers."
+    },
+    {
+      "id": "bmlib#635",
+      "title": "A streamed chat can be cancelled while it waits",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite has no streamed chat on any platform."
+    },
+    {
+      "id": "bmlib#641",
+      "title": "`LLMChunkProcessor` retries a failed model request with backoff",
+      "python": "equivalent",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": null,
+      "note": "Lite has no condenser, but each window's model call is retried with backoff: desktop `utils.llm_retry` (quality_agent, citation_agent), Swift LLMService (429, 500, 502-504, transport faults), Android NetworkRetry (408 included). Neither app retries 529."
+    },
+    {
+      "id": "bmlib:0.13.0-default-models-still-answer",
+      "title": "The Anthropic and Gemini default models are ones that still answer",
+      "python": "owed",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": "#759",
+      "note": "Same as the default-models row: the desktop's default `claude-sonnet-4-20250514` (constants.py, config.py, llm/providers/anthropic.py) is the model bmlib found retired; the apps default to Sonnet 4.5 and drop a selection their live model listing no longer names. Lite has no Gemini provider."
+    },
+    {
+      "id": "bmlib#708",
+      "title": "`chat_json` retries at temperature 0 where the model is sent no temperature",
+      "python": "equivalent",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": null,
+      "note": "Lite never skipped a retry at temperature 0: the desktop retries an unparseable or wrong-shape reply at any temperature (`utils.llm_retry(retry_on_json_error=True)`) and never retries a truncated one by design (agents/base.py); the apps retry a parse failure up to 3 times (ParallelScoringService)."
+    },
+    {
+      "id": "bmlib#717",
+      "title": "An unparseable reply is retried with a correction, not re-sent",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#761",
+      "note": "Every platform re-sends the identical request after an unparseable reply: desktop `utils.llm_retry` around `_score_with_retry`/`_assess_with_retry`/`_extract_with_retry`, Swift and Android ParallelScoringService's parse-retry loop. None adds a correction note or asks for null, never NaN, in its prompts."
+    },
+    {
+      "id": "bmlib#710",
+      "title": "Anthropic adaptive thinking asks for the summarized trace",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite requests no Anthropic thinking on any platform."
+    },
+    {
+      "id": "bmlib#702",
+      "title": "A non-streamed chat waits for its answer as a stream does",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Rust's `UreqClient`; the apps link only bmlib's JATS and retraction code."
+    },
+    {
+      "id": "bmlib#649",
+      "title": "A cancelled stream gives its request up at the socket",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite has no streamed chat on any platform."
+    },
+    {
+      "id": "bmlib#652",
+      "title": "A cancelled stream gives its request up at the socket",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite has no streamed chat on any platform."
+    },
+    {
+      "id": "bmlib#698",
+      "title": "A 200 nested too deeply to decode is a `ValueError` on every LLM provider, not a bare `RecursionError`",
+      "python": "equivalent",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": null,
+      "note": "A too-deep body is no crash anywhere: the desktop's agents catch any exception from a chat or a reply decode and record the document failed (utils.classify_llm_exception); Swift's JSONSerialization/JSONDecoder and Android's kotlinx decoder throw a decoding error."
+    },
+    {
+      "id": "bmlib#667",
+      "title": "Ollama's plain-text `404 page not found` is a wrong address, not a missing model",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite reads no context window from Ollama's `/api/show` as a missing-model test; the desktop's `_get_model_info` swallows any failure and its window is unused."
+    },
+    {
+      "id": "bmlib#576",
+      "title": "A failed condensation batch's cause reaches the caller",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite has no condensation batches; a desktop window's failure reaches the caller as its own exception."
+    },
+    {
+      "id": "bmlib#658",
+      "title": "A failed condensation batch's cause reaches the caller",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite has no condensation batches; a desktop window's failure reaches the caller as its own exception."
+    },
+    {
+      "id": "bmlib#574",
+      "title": "`chat_json(max_retries=0)` makes one attempt",
+      "python": "equivalent",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "The desktop's `utils.llm_retry` stops after `max_retries + 1` attempts, so 0 is one attempt; the apps' parse retries are a fixed 3."
+    },
+    {
+      "id": "bmlib:0.12.0-anthropic-extra-0-41",
+      "title": "The `anthropic` extra requires `anthropic>=0.41`",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "The floor is for `models.retrieve`, which lite never calls; the desktop pins `anthropic>=0.34.0` (its missing upper cap is the bmlib#705 row's problem)."
+    },
+    {
+      "id": "bmlib:0.12.0-map-reduce-reply-cut-fails-batch",
+      "title": "A map or reduce reply cut at `max_tokens` fails its batch",
+      "python": "equivalent",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "The desktop has no condenser, and a window's reply cut at its token limit is already refused: agents/base.py `_chat` raises TruncatedResponseError. The apps condense nothing."
+    },
+    {
+      "id": "bmlib:0.12.0-chat-json-failure-types",
+      "title": "`chat_json()` says which failure it was",
+      "python": "equivalent",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "The desktop tells the causes apart its own way: JSONParseError, TruncatedResponseError and RefusedResponseError, mapped to EvaluationErrorCode by utils.classify_llm_exception. The apps have no `chat_json`."
+    },
+    {
+      "id": "bmlib:0.12.0-as-float-refuses-huge-integer",
+      "title": "`_json_fields.as_float` refuses an integer past the double range",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": "#761",
+      "note": "The desktop's port, quality/json_fields.py `as_float`, still calls `float()` on any int, so an integer past 1.8e308 raises OverflowError, which quality_agent's catch-all turns into an unclassified assessment rather than an unstated confidence. The apps have no quality readers."
+    },
+    {
+      "id": "bmlib:0.12.0-condensation-takes-any-prompts",
+      "title": "Condensation takes any prompts",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's private condenser; lite has none."
+    },
+    {
+      "id": "bmlib:0.12.0-streamed-chat",
+      "title": "Streamed chat",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite has no streamed chat on any platform."
+    },
+    {
+      "id": "bmlib:0.12.0-context-windows-num-ctx",
+      "title": "Context windows, and Ollama's `num_ctx`",
+      "python": "equivalent",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#760",
+      "note": "The desktop sends Ollama `num_ctx` from a task's configured `context_window` over `/api/chat` (llm/providers/ollama.py) and looks up no window. The apps talk to Ollama's OpenAI-compatible `/v1` (Swift LLMProvider.swift, Android LLMProvider.kt), which takes no `num_ctx`, so a 16k-character window plus prompt can be cut silently at the server's default context."
+    },
+    {
+      "id": "bmlib:0.12.0-condensation-pass-cut-fails-batch",
+      "title": "A condensation pass cut at `max_tokens` fails its batch",
+      "python": "equivalent",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "The desktop condenses nothing, and every window read refuses a reply cut at its token limit (agents/base.py `_chat`, TruncatedResponseError). The apps condense nothing."
+    },
+    {
+      "id": "bmlib:0.12.0-rust-ollama-api-chat",
+      "title": "Breaking: Rust's Ollama uses `/api/chat` and Python's `anthropic` floor is 0.41",
+      "python": "equivalent",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#760",
+      "note": "The desktop is already on `/api/chat` with `options` (ollama SDK, llm/providers/ollama.py). The apps use Ollama's `/v1/chat/completions`, which cannot carry `num_ctx`; same gap as the context-windows row. The Rust API breaks themselves do not reach the apps."
+    },
+    {
+      "id": "bmlib:0.12.0-rust-chaterror-non-exhaustive",
+      "title": "Rust: `ChatError` is `#[non_exhaustive]`",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Rust API change; the apps link only bmlib's JATS and retraction code."
+    },
+    {
+      "id": "bmlib:0.12.0-rust-thinking-drops-temperature",
+      "title": "Rust: Anthropic's extended thinking drops `temperature` and `top_p`",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Rust's Anthropic body; lite requests no Anthropic thinking (its temperature problem is the bmlib#705 row)."
+    },
+    {
+      "id": "bmlib:0.12.0-rust-thinking-blocks-kept",
+      "title": "Rust: every Anthropic thinking block is kept",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Rust's Anthropic parser; lite requests no thinking blocks."
+    },
+    {
+      "id": "bmlib#665",
+      "title": "A bmlib defect in one batch of a condensation refuses the digest",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "A defect in one condensation batch now refuses the PICO/Cochrane digest. Lite has neither agent nor bmlib's condenser; its own window map-reduce (`quality/quality_agent.py`, `quality/window_reduce.py`) never finishes partial, since any window's failure fails the whole assessment."
+    },
+    {
+      "id": "bmlib:unreleased-rob2-d5-from-facts",
+      "title": "RoB 2's D5 from facts",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's StudyAnalyzer evidence-weight work (full-text design, outcome and RoB 2 agents, ladder); lite has none. The desktop's `quality/quality_agent.py` asks for five RoB 1-style bias domains (`BiasRisk`, low/unclear/high) from the abstract, a different tool with no signalling questions, and the apps classify no study quality."
+    },
+    {
+      "id": "bmlib:unreleased-unattended-evidence-weight",
+      "title": "The unattended evidence-weight pipeline",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's StudyAnalyzer evidence-weight work (full-text design, outcome and RoB 2 agents, ladder); lite has none. The desktop's `quality/quality_agent.py` asks for five RoB 1-style bias domains (`BiasRisk`, low/unclear/high) from the abstract, a different tool with no signalling questions, and the apps classify no study quality."
+    },
+    {
+      "id": "bmlib:unreleased-rob2-assessor",
+      "title": "The RoB 2 assessor",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's StudyAnalyzer evidence-weight work (full-text design, outcome and RoB 2 agents, ladder); lite has none. The desktop's `quality/quality_agent.py` asks for five RoB 1-style bias domains (`BiasRisk`, low/unclear/high) from the abstract, a different tool with no signalling questions, and the apps classify no study quality."
+    },
+    {
+      "id": "bmlib:unreleased-primary-outcomes",
+      "title": "Primary outcomes and their results",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's StudyAnalyzer evidence-weight work (full-text design, outcome and RoB 2 agents, ladder); lite has none. The desktop's `quality/quality_agent.py` asks for five RoB 1-style bias domains (`BiasRisk`, low/unclear/high) from the abstract, a different tool with no signalling questions, and the apps classify no study quality."
+    },
+    {
+      "id": "bmlib:unreleased-trial-layout-design-proposal",
+      "title": "Trial layout and the design proposal",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's StudyAnalyzer evidence-weight work (full-text design, outcome and RoB 2 agents, ladder); lite has none. The desktop's `quality/quality_agent.py` asks for five RoB 1-style bias domains (`BiasRisk`, low/unclear/high) from the abstract, a different tool with no signalling questions, and the apps classify no study quality."
+    },
+    {
+      "id": "bmlib:unreleased-evidence-ladder",
+      "title": "Evidence ladder and the number",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's StudyAnalyzer evidence-weight work (full-text design, outcome and RoB 2 agents, ladder); lite has none. The desktop's `quality/quality_agent.py` asks for five RoB 1-style bias domains (`BiasRisk`, low/unclear/high) from the abstract, a different tool with no signalling questions, and the apps classify no study quality."
+    },
+    {
+      "id": "bmlib:unreleased-rob2-decision-rules",
+      "title": "RoB 2 decision rules",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's StudyAnalyzer evidence-weight work (full-text design, outcome and RoB 2 agents, ladder); lite has none. The desktop's `quality/quality_agent.py` asks for five RoB 1-style bias domains (`BiasRisk`, low/unclear/high) from the abstract, a different tool with no signalling questions, and the apps classify no study quality."
+    },
+    {
+      "id": "bmlib:0.13.0-stored-pico-extraction",
+      "title": "A stored PICO extraction reads as before",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's PICO agent (`bmlib.quality.PicoAgent`); lite has no PICO extraction on any platform (the desktop's `pubmed/data_types.py` only tags query concepts with a PICO role), so nothing to port."
+    },
+    {
+      "id": "bmlib#573",
+      "title": "`PicoAgent` raises what no retry cures",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's PICO agent (`bmlib.quality.PicoAgent`); lite has no PICO extraction on any platform (the desktop's `pubmed/data_types.py` only tags query concepts with a PICO role), so nothing to port. Lite's own quality agents catch a broad `Exception` per document and return unclassified, a lite-side pattern rather than this change."
+    },
+    {
+      "id": "bmlib#642",
+      "title": "`PicoPartState.CONTRADICTED` and `PicoErrorKind.STOPPED` are new members",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's PICO agent (`bmlib.quality.PicoAgent`); lite has no PICO extraction on any platform (the desktop's `pubmed/data_types.py` only tags query concepts with a PICO role), so nothing to port."
+    },
+    {
+      "id": "bmlib#647",
+      "title": "`PicoPartState.CONTRADICTED` and `PicoErrorKind.STOPPED` are new members",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's PICO agent (`bmlib.quality.PicoAgent`); lite has no PICO extraction on any platform (the desktop's `pubmed/data_types.py` only tags query concepts with a PICO role), so nothing to port. The desktop's only `find_passage` use (citation highlight) is tracked on its own row."
+    },
+    {
+      "id": "bmlib#659",
+      "title": "`PicoError` refuses a `retryable` or `status` for any kind but `REQUEST_FAILED`",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's PICO agent (`bmlib.quality.PicoAgent`); lite has no PICO extraction on any platform (the desktop's `pubmed/data_types.py` only tags query concepts with a PICO role), so nothing to port."
+    },
+    {
+      "id": "bmlib#662",
+      "title": "`PicoError` refuses a `retryable` or `status` for any kind but `REQUEST_FAILED`",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's PICO agent (`bmlib.quality.PicoAgent`); lite has no PICO extraction on any platform (the desktop's `pubmed/data_types.py` only tags query concepts with a PICO role), so nothing to port."
+    },
+    {
+      "id": "bmlib#640",
+      "title": "The PICO agent sends `num_ctx` and can be stopped",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's PICO agent (`bmlib.quality.PicoAgent`); lite has no PICO extraction on any platform (the desktop's `pubmed/data_types.py` only tags query concepts with a PICO role), so nothing to port. The desktop's Ollama provider (`llm/providers/ollama.py`) sets its own `num_ctx`."
+    },
+    {
+      "id": "bmlib#638",
+      "title": "`PicoAgent.prepare` condenses a long paper once for both PICO calls",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's PICO agent (`bmlib.quality.PicoAgent`); lite has no PICO extraction on any platform (the desktop's `pubmed/data_types.py` only tags query concepts with a PICO role), so nothing to port."
+    },
+    {
+      "id": "bmlib#577",
+      "title": "A PICO part loses no quote the model gave, and a part the paper omits may have no description",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's PICO agent (`bmlib.quality.PicoAgent`); lite has no PICO extraction on any platform (the desktop's `pubmed/data_types.py` only tags query concepts with a PICO role), so nothing to port."
+    },
+    {
+      "id": "bmlib#618",
+      "title": "A PICO part loses no quote the model gave, and a part the paper omits may have no description",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's PICO agent (`bmlib.quality.PicoAgent`); lite has no PICO extraction on any platform (the desktop's `pubmed/data_types.py` only tags query concepts with a PICO role), so nothing to port."
+    },
+    {
+      "id": "bmlib#646",
+      "title": "A PICO request failure says whether a retry may cure it",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's PICO agent (`bmlib.quality.PicoAgent`); lite has no PICO extraction on any platform (the desktop's `pubmed/data_types.py` only tags query concepts with a PICO role), so nothing to port."
+    },
+    {
+      "id": "bmlib#578",
+      "title": "An integer `sample_size` in a PICO extraction reply is kept",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's PICO agent (`bmlib.quality.PicoAgent`); lite has no PICO extraction on any platform (the desktop's `pubmed/data_types.py` only tags query concepts with a PICO role), so nothing to port. The desktop's classifier asks for a numeric `sample_size` and reads an integer (`quality/study_classifier._parse_sample_size`)."
+    },
+    {
+      "id": "bmlib#570",
+      "title": "A structured extraction whose `extracted_content` is not text is no content",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's `LLMChunkProcessor` (`bmlib/context_processor`); lite has no structured chunk extraction. Its quality agents read LLM fields through `quality/json_fields.as_text`, which already refuses a non-string rather than stringifying it."
+    },
+    {
+      "id": "bmlib:0.12.0-extract-study-type-moves",
+      "title": "`extract_study_type` moves",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Upgrade note for bmlib#453 (see its row): bmlib's rule-based extractor; lite has none (the desktop classifies by LLM, the apps not at all)."
+    },
+    {
+      "id": "bmlib:0.12.0-pico-agent",
+      "title": "The PICO agent, with verified quotes",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's PICO agent (`bmlib.quality.PicoAgent`); lite has no PICO extraction on any platform (the desktop's `pubmed/data_types.py` only tags query concepts with a PICO role), so nothing to port."
+    },
+    {
+      "id": "bmlib#656",
+      "title": "`canonical_from_html` caps a page's `<` count, not its length",
+      "python": "equivalent",
+      "swift": "n/a",
+      "android": "owed",
+      "issue": "#763",
+      "note": "The desktop's only HTML-to-text reader is the upload's `full_text_upload.html_to_text`, the stdlib's streaming `html.parser` building no tree, so html5ever's depth and formatting-element costs cannot arise; its bound is the upload's 100 MB byte cap (`MAX_PDF_SIZE`). Swift's upload (`ios/.../Utilities/FullTextUpload.swift`) keeps HTML as markup unparsed, and nothing in Swift reduces a page to text. Android refuses an HTML upload over `MAX_STORED_TEXT_BYTES` (1 MB, the cap meant for the stored text) before reducing it, so a page saved with its images inline, the case #656 measured (median 94% `data:`), is refused though its text would fit. The Rust element budget and `scripts/sample_html_pages.py --saved-dir` reach no platform."
+    },
+    {
+      "id": "bmlib#744",
+      "title": "The PDF sought beside JATS is retried, sought again on a later hit, and a failed search for it is said",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "No platform seeks a PDF beside JATS: the desktop's `fulltext_discovery`, Swift's and Android's `FullTextService` all stop at the first JATS found, so there is no PDF-beside-JATS download to retry or seek again."
+    },
+    {
+      "id": "bmlib#739",
+      "title": "A caller's `pdf` source no longer ends the full-text chain, and a JATS result carries it",
+      "python": "equivalent",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": null,
+      "note": "No platform takes a caller's `pdf` source ahead of the chain: the desktop's `fulltext_discovery._discover_fulltext`, Swift's and Android's `FullTextService` ask Europe PMC's JATS (then PMC's bucket) before any PDF, so a PDF never hides JATS; no result carries a PDF beside JATS (`fetch_pdf_with_jats`, n/a)."
+    },
+    {
+      "id": "bmlib:unreleased-fetch-pdf-with-jats",
+      "title": "`FullTextService(fetch_pdf_with_jats=True)`",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "No platform seeks a PDF once JATS is found; the desktop's `fulltext_discovery` and both apps' `FullTextService` end at JATS."
+    },
+    {
+      "id": "bmlib#726",
+      "title": "`scripts/sample_html_pages.py`, the first measurement of `canonical_from_html`'s limits on real pages",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's sampler script and its corpus; no platform runs it (the desktop's HTML reader is the upload's stdlib `html.parser` one)."
+    },
+    {
+      "id": "bmlib:0.13.0-cached-full-text-no-rerender",
+      "title": "Cached full text does not re-render",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's own cache's `RENDERER_VERSION`; the desktop versions its cache by `JATS_MARKDOWN_CONVERTER_VERSION` and the apps by their own renderers."
+    },
+    {
+      "id": "bmlib:0.13.0-stored-pdf-canonical-stale",
+      "title": "A stored PDF canonical text is stale",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Upgrade notes (0.13.0 and 0.12.0) on `PDF_CANONICAL_VERSION` and `bmlib.embed.store`; no platform stores bmlib's canonical text."
+    },
+    {
+      "id": "bmlib:0.13.0-stored-markdown-canonical-stale",
+      "title": "A stored Markdown canonical text is stale",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "`MARKDOWN_VERSION` of bmlib's canonical text; no platform stores it."
+    },
+    {
+      "id": "bmlib#723",
+      "title": "`canonical_from_html` parses in a child process",
+      "python": "equivalent",
+      "swift": "n/a",
+      "android": "equivalent",
+      "issue": null,
+      "note": "The desktop's only HTML-to-text reader is the upload's `full_text_upload.html_to_text`, the stdlib's streaming `html.parser` building no tree, so html5ever's depth and formatting-element costs cannot arise; its bound is the upload's 100 MB byte cap (`MAX_PDF_SIZE`). Nothing is parsed in a child process, and none is needed for a reader that holds no tree. Swift's upload (`ios/.../Utilities/FullTextUpload.swift`) keeps HTML as markup unparsed, and nothing in Swift reduces a page to text. Android's `FullTextUpload.htmlToText` is a regex reading building no tree, its input capped at `MAX_STORED_TEXT_BYTES` (1 MB). The Rust change is not in the FFI's `parse_jats` path."
+    },
+    {
+      "id": "bmlib#628",
+      "title": "`SectionType.OTHER` is a new member",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "No platform here segments a PDF into sections: the desktop's `statement_headings.segment_unmarked_end_matter` is a stub (#430) and the apps read PDFKit's/iText's page text whole; the segmenter itself is the owed row `bmlib:0.8.0-pdf-section-segmentation`, and a port takes this with it. `SectionType` is not exposed by the apps' FFI, so `OTHER` reaches no platform; the face-name and heading-face rules are segmenter-only too."
+    },
+    {
+      "id": "bmlib#565",
+      "title": "An exhausted chain raises `FullTextExhaustedError`",
+      "python": "equivalent",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": null,
+      "note": "Each platform already tells a chain that failed from one that found nothing: the desktop's `FulltextResult.lookups` (`SourceLookupFailure` vs absences, `absence_established`), Swift's degradation/unreachable outcomes and Android's `*Fetch.Unreachable` / `OpenAccessShortfall` in `FullTextService`."
+    },
+    {
+      "id": "bmlib#603",
+      "title": "An exhausted chain raises `FullTextExhaustedError`",
+      "python": "equivalent",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": null,
+      "note": "Every platform records the faults a chain met on whatever it returns: the desktop merges each tier's `SourceLookupFailure` into `FulltextResult.lookups` (`fulltext_discovery.py`), Swift and Android carry unreachable sources into the result's shortfall, so a PDF returned during a JATS outage is not read as the best a retry could do."
+    },
+    {
+      "id": "bmlib:0.13.0-pdfblocks-metadata-title",
+      "title": "`PDFBlocks.metadata_title` is the PDF's own `/Title`",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "No platform here segments a PDF into sections: the desktop's `statement_headings.segment_unmarked_end_matter` is a stub (#430) and the apps read PDFKit's/iText's page text whole; the segmenter itself is the owed row `bmlib:0.8.0-pdf-section-segmentation`, and a port takes this with it. The desktop's `pdf_title_check` reads the first page, not `/Title`."
+    },
+    {
+      "id": "bmlib#604",
+      "title": "`FullTextResult.pdf_extraction_failure` says which side a failed PDF extraction is on",
+      "python": "owed",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": "#762",
+      "note": "The desktop's chain records any exception from `pdf_utils.extract_pdf_text` (a `MemoryError` included) as the retrieved PDF's `MALFORMED_RESPONSE` (`_unreadable_pdf_record`), so a damaged file and an engine fault read alike. Swift's `PDFKitTextExtractor` result carries its `errorMessage` (locked vs unopenable; PDFKit reports no engine fault); Android's `extractedPdfText` logs file faults apart from code faults and tells the reader a neutral sentence."
+    },
+    {
+      "id": "bmlib#21",
+      "title": "What MuPDF reads past is reported",
+      "python": "owed",
+      "swift": "equivalent",
+      "android": "owed",
+      "issue": "#762, #764",
+      "note": "The checker reads hherb/StudyAnalyzer#21 in three titles (#598, #599, #600). Desktop: `pdf_utils.extract_pdf_text` is a bare PyMuPDF `get_text()` loop that reads none of MuPDF's messages, has no cancel or deadline, and its upload calls every failure \"could not be opened\". Swift: `PDFKitTextExtractor` tells a locked PDF from an unopenable one and stops on `Task.isCancelled` per page; PDFKit has no repair messages. Android: `PdfText.extractedPdfText`'s page loop never checks cancellation."
+    },
+    {
+      "id": "bmlib#599",
+      "title": "What MuPDF reads past is reported",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": "#762",
+      "note": "The desktop extracts with the same engine (PyMuPDF, `pdf_utils.extract_pdf_text`) and never reads `fitz.TOOLS.mupdf_warnings()`, so a PDF MuPDF repaired or read past converts with text missing and nothing said. MuPDF's messages have no PDFKit counterpart; iText's nearest is `PdfReader.hasRebuiltXref()`, which Android does not read."
+    },
+    {
+      "id": "bmlib#548",
+      "title": "A fence inside a blockquote closes, a backtick in a backtick fence's info string opens none, and no unclosed opener costs quadratic time",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "No platform parses Markdown into canonical text: an uploaded Markdown file is kept as plain text (`full_text_upload.read_upload`, Android's and Swift's `FullTextUpload`), and fences are never read."
+    },
+    {
+      "id": "bmlib#549",
+      "title": "A fence inside a blockquote closes, a backtick in a backtick fence's info string opens none, and no unclosed opener costs quadratic time",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "No platform parses Markdown into canonical text: an uploaded Markdown file is kept as plain text (`full_text_upload.read_upload`, Android's and Swift's `FullTextUpload`), and fences are never read."
+    },
+    {
+      "id": "bmlib#624",
+      "title": "`FullTextSourceEntry`'s JSON is a shared contract",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's `FullTextSourceEntry` wire contract; no platform here reads or writes those entries."
+    },
+    {
+      "id": "bmlib#636",
+      "title": "\"Method\", \"Result\", \"Discussions\" and \"Experimental\" are section headings",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "No platform here segments a PDF into sections: the desktop's `statement_headings.segment_unmarked_end_matter` is a stub (#430) and the apps read PDFKit's/iText's page text whole; the segmenter itself is the owed row `bmlib:0.8.0-pdf-section-segmentation`, and a port takes this with it."
+    },
+    {
+      "id": "bmlib#619",
+      "title": "What MuPDF said is kept apart, and a failed read keeps it",
+      "python": "owed",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": "#762",
+      "note": "The desktop's `pdf_utils.extract_pdf_text` keeps no MuPDF messages at all, failed read or not (see bmlib#599). PDFKit and iText report no such messages to keep apart."
+    },
+    {
+      "id": "bmlib#654",
+      "title": "`canonical_from_html` refuses a page longer than `HTML_MAX_CHARS` (2,000,000 code points) unparsed",
+      "python": "equivalent",
+      "swift": "n/a",
+      "android": "equivalent",
+      "issue": null,
+      "note": "The desktop's only HTML-to-text reader is the upload's `full_text_upload.html_to_text`, the stdlib's streaming `html.parser` building no tree, so html5ever's depth and formatting-element costs cannot arise; its bound is the upload's 100 MB byte cap (`MAX_PDF_SIZE`). Swift's upload (`ios/.../Utilities/FullTextUpload.swift`) keeps HTML as markup unparsed, and nothing in Swift reduces a page to text. Android's `FullTextUpload.htmlToText` is a regex reading building no tree, its input capped at `MAX_STORED_TEXT_BYTES` (1 MB)."
+    },
+    {
+      "id": "bmlib#563",
+      "title": "`canonical_from_html` refuses a page it cannot parse in time",
+      "python": "equivalent",
+      "swift": "n/a",
+      "android": "owed",
+      "issue": "#763",
+      "note": "The desktop's only HTML-to-text reader is the upload's `full_text_upload.html_to_text`, the stdlib's streaming `html.parser` building no tree, so html5ever's depth and formatting-element costs cannot arise; its bound is the upload's 100 MB byte cap (`MAX_PDF_SIZE`). Swift's upload (`ios/.../Utilities/FullTextUpload.swift`) keeps HTML as markup unparsed, and nothing in Swift reduces a page to text. Android's regex reading has no time bound and is quadratic on an unclosed `<script`/`<style`/`<head` (`(?is)<(script|style|head)\\b.*?</\\1\\s*>` scans to the end from each one: 400 KB of `<script ` took 35 s, so about 4 minutes at its 1 MB cap)."
+    },
+    {
+      "id": "bmlib:0.13.0-small-table-body-size",
+      "title": "A long table set small no longer makes every body line a heading",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "No platform here segments a PDF into sections: the desktop's `statement_headings.segment_unmarked_end_matter` is a stub (#430) and the apps read PDFKit's/iText's page text whole; the segmenter itself is the owed row `bmlib:0.8.0-pdf-section-segmentation`, and a port takes this with it."
+    },
+    {
+      "id": "bmlib:0.13.0-elsevier-layout-segments",
+      "title": "A PDF set the way Elsevier sets it segments",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "No platform here segments a PDF into sections: the desktop's `statement_headings.segment_unmarked_end_matter` is a stub (#430) and the apps read PDFKit's/iText's page text whole; the segmenter itself is the owed row `bmlib:0.8.0-pdf-section-segmentation`, and a port takes this with it."
+    },
+    {
+      "id": "bmlib:0.12.0-cached-full-text-rerenders",
+      "title": "Cached full text re-renders by itself",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's own cache's `RENDERER_VERSION`; the desktop versions its cache by `JATS_MARKDOWN_CONVERTER_VERSION` and the apps by their own renderers."
+    },
+    {
+      "id": "bmlib#598",
+      "title": "A PDF extraction error's message moves",
+      "python": "owed",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": "#762",
+      "note": "The desktop uses bmlib's engine and can place a failure the same way, but `full_text_upload._pdf_text` catches every `Exception` (an out-of-memory included) as \"This PDF could not be opened\", the case #598 fixed. Swift's `PDFKitTextExtractor` tells a password-protected PDF from one that will not open; Android's `extractedPdfText` logs the file's faults apart from the code's."
+    },
+    {
+      "id": "bmlib#579",
+      "title": "A caller's `html` source no longer ends `FullTextService`'s chain",
+      "python": "equivalent",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": null,
+      "note": "No platform lets a caller's HTML link end the chain: the desktop's `fulltext_discovery`, Swift's and Android's `FullTextService` try every text tier first and fall back to the DOI link last."
+    },
+    {
+      "id": "bmlib#591",
+      "title": "Segmented PDF sections no longer carry page furniture",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "No platform here segments a PDF into sections: the desktop's `statement_headings.segment_unmarked_end_matter` is a stub (#430) and the apps read PDFKit's/iText's page text whole; the segmenter itself is the owed row `bmlib:0.8.0-pdf-section-segmentation`, and a port takes this with it."
+    },
+    {
+      "id": "bmlib#600",
+      "title": "A PDF extraction can be cancelled or bounded in time",
+      "python": "owed",
+      "swift": "equivalent",
+      "android": "owed",
+      "issue": "#762, #764",
+      "note": "The desktop's `pdf_utils.extract_pdf_text` cannot be stopped: `FulltextDiscoverer.cancel()` is checked only between steps and the upload reads a PDF whole. Swift's `PDFKitTextExtractor` checks `Task.isCancelled` before each page. Android's `PdfText.extractedPdfText` joins every page in `withContext(Dispatchers.IO)` with no `ensureActive`, so a cancelled read runs on."
+    },
+    {
+      "id": "bmlib#590",
+      "title": "A PDF-extraction contract from a PDF's bytes",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "The extraction contract and `join_soft_hyphens` belong to bmlib's segmented canonical text, which no platform has (row `bmlib:unreleased-canonical-from-segmented-pdf`). The desktop's own PDF text (`pdf_utils.extract_pdf_text`) joins no line-end hyphen of either kind; only `pdf_title_check` drops U+00AD."
+    },
+    {
+      "id": "bmlib#594",
+      "title": "A failed PDF download says why",
+      "python": "equivalent",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": null,
+      "note": "Every platform's failed PDF download carries a typed cause: the desktop's `pdf_discovery` records a `RequestFailure` (`refused_download_failure`) per attempt, Swift throws `FullTextError.pdfDownloadFailed(...)`, Android returns `PdfDownload.Failed(RequestFailure)`."
+    },
+    {
+      "id": "bmlib#592",
+      "title": "A fresh Rust cache saves its PDFs and HTML",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's Rust `FullTextCache`; the FFI exposes no cache, and each platform keeps its own."
+    },
+    {
+      "id": "bmlib:unreleased-ellipsis-quote-pieces",
+      "title": "A quote cut with an ellipsis is located piece by piece",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "The change is in `verify_quotes` (PicoAgent and bmlib's full-text agents), which lite does not use. The desktop's citation highlight calls `find_passage` alone (`gui/text_highlighting.find_passage_in_abstract`), so a passage cut with an ellipsis is shown above the abstract unhighlighted, as before; `split_at_ellipses` could be adopted there once released, a nicety rather than a defect. The apps locate no passage."
+    },
+    {
+      "id": "bmlib:0.13.0-unchanged",
+      "title": "Unchanged",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "A statement that nothing moved (canonical text versions, chunker, `ensure_schema()`, stored values); nothing to port. The desktop's `ensure_schema()` call (`retraction_export.py`) and its stored retraction copy are unaffected."
+    },
+    {
+      "id": "bmlib#632",
+      "title": "A fuzzy `find_passage` match that changes a number, a negation or a direction is rejected",
+      "python": "ported",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "The desktop takes the guard by import: `pyproject.toml` requires `bmlib>=0.13.0`, the first release with it, and `gui/text_highlighting.find_passage_in_abstract` reads `match.matched` (not the similarity), so a near match that changes a number, a negation or a direction is no longer highlighted. Both changelog entries (0.13.0 Changed — breaking, and Fixed) are this one change. The apps locate no passage."
+    },
+    {
+      "id": "bmlib#634",
+      "title": "API keys in the OS keychain, in both languages",
+      "python": "n/a",
+      "swift": "equivalent",
+      "android": "equivalent",
+      "issue": null,
+      "note": "bmlib's `secrets` module is not used by lite. The desktop keeps its keys in `~/.bmlibrarian_lite/config.json` (written 0600, `config.py`) or environment variables, with no keychain; the iOS/macOS app keeps each key as its own Keychain item (service = bundle id, `ios/MedicalFactChecker/Sources/Utilities/KeychainHelper.swift`), and Android keeps them in EncryptedSharedPreferences (`data/repository/SettingsRepository.kt`), each meeting the need its own way."
+    },
+    {
+      "id": "bmlib#685",
+      "title": "The Rust crate logs through the `log` facade",
+      "python": "n/a",
+      "swift": "ported",
+      "android": "ported",
+      "issue": null,
+      "note": "Rust only; the desktop's Python bmlib already logs through `logging`. The apps get it by the FFI, pin d3b10b5b: the JATS audit lines and the retraction \"unrecognised relation type\" warning, written by `eprintln!` at aa47a57, now go through `log::` macros, a no-op since neither app installs a Rust logger. Nothing the apps relied on is lost: they parse JATS with their own parsers in production (Swift's `BmlibJATSAdapter` is a spike calling `parseJats`, Android's `FullTextService.parseJats` uses its Kotlin `JATSXMLParser`), neither calls `parseJatsAudited`, and a retraction verdict carries the source's `rawKind`, which both checkers keep. (bmlib-ffi's `parse_jats_audited` doc still says the audit is \"written to stderr\".)"
+    },
+    {
+      "id": "bmlib#688",
+      "title": "The Rust crate logs through the `log` facade",
+      "python": "n/a",
+      "swift": "ported",
+      "android": "ported",
+      "issue": null,
+      "note": "Same change as bmlib#685 (Rust crate logs through the `log` facade), by the FFI, pin d3b10b5b; see that row: no Rust logger is installed in either app, and nothing they read came from stderr."
+    },
+    {
+      "id": "bmlib#606",
+      "title": "ClinicalTrials.gov no longer refuses a `User-Agent` without `python-httpx`, and the docs say so",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "No behaviour moves (bmlib's header is unchanged; only its documentation). Lite's trial lookups send their HTTP library's default User-Agent, none with a `python-httpx` token: the desktop's `ClinicalTrialsClient` a `requests.Session` (`python-requests/…`, `study_transparency_analyzer.py`), Swift's `ClinicalTrialsService` URLSession's default, Android's `ClinicalTrialsService` OkHttp's default; bmlib's 2026-11-07 re-measure found all of these served."
+    },
+    {
+      "id": "bmlib#583",
+      "title": "Two words at one position of an OpenAlex abstract are ordered by the word, in both languages",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite reads no OpenAlex abstract: the desktop's `openalex.py` and the apps' `OpenAlex.swift` / `OpenAlex.kt` read only `locations[].pdf_url` by DOI."
+    },
+    {
+      "id": "bmlib:0.13.0-retraction-csv-linear-time",
+      "title": "The Rust port reads the Retraction Watch export in linear time, and names a skipped row's last line as Python does",
+      "python": "n/a",
+      "swift": "ported",
+      "android": "ported",
+      "issue": null,
+      "note": "Rust only; the desktop imports Python's `bmlib.publications.retractions`, whose `line_num` is the reference. The apps build their index on the device through the FFI's `buildRetractionIndex` (`RetractionIndexStore.swift`, `RetractionIndexStore.kt`) and take it by the FFI, pin d3b10b5b; `rust/bmlib/src/publications/csv.rs` at the old pin aa47a57 already counted on from the last record, and d3b10b5b adds the skipped row's line-number fix."
+    },
+    {
+      "id": "bmlib:0.12.0-openalex-sync-pmcid",
+      "title": "An OpenAlex sync now stores `pmcid`",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's publications sync; lite has none. Its OpenAlex clients (`openalex.py`, `OpenAlex.swift`, `OpenAlex.kt`) read only PDF locations by DOI."
+    },
+    {
+      "id": "bmlib:0.12.0-retraction-reimport",
+      "title": "Re-import the Retraction Watch export",
+      "python": "ported",
+      "swift": "ported",
+      "android": "ported",
+      "issue": null,
+      "note": "The #523 rule itself is ported (see bmlib#523). Each platform rebuilds its copy whole from a fresh download rather than keeping rows: the desktop on every refresh (`retraction_export.refresh_export`, an atomic swap, at most 35 days old), the apps through `buildRetractionIndex` on each refresh, so a copy built before #523 does not outlive its next refresh."
+    },
+    {
+      "id": "bmlib:0.12.0-ensure-schema-unchanged",
+      "title": "`ensure_schema()` is unchanged",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Nothing to port: the desktop's `ensure_schema()` call (`retraction_export.py`) is unaffected, and `bmlib.embed.store`'s tables are not used by lite."
+    },
+    {
+      "id": "bmlib:0.12.0-openalex-type-checked",
+      "title": "The OpenAlex normaliser reads every field type-checked",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's OpenAlex record normaliser; lite reads no `publication_date` or `is_oa`. Its OpenAlex clients read only `locations[].pdf_url`, type-checked already (`openalex.py`, `OpenAlex.swift`, `OpenAlex.kt`)."
+    },
+    {
+      "id": "bmlib:0.12.0-chunk-store",
+      "title": "A paper's chunks, stored and searched",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's chunk store (`bmlib.embed.store`); lite does not use it. The desktop has its own sqlite-vec store with FastEmbed (`storage.py`), the apps NLEmbedding."
+    },
+    {
+      "id": "bmlib:0.12.0-lookup-record",
+      "title": "One paper's record by identifier",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's `lookup_record` (StudyAnalyzer); lite does not use it. Lite fetches records with its own clients (`pubmed/record_ids.py`, `europepmc.py`, the apps' services)."
+    },
+    {
+      "id": "bmlib:0.12.0-package-all-resolves",
+      "title": "Every package's `__all__` resolves",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's own export test; the desktop imports named members only, no `*` import."
+    },
+    {
+      "id": "bmlib:0.12.0-openalex-pmcid-normaliser",
+      "title": "The OpenAlex normaliser reads the PMC ID, and a wrong-typed field costs only that field",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's OpenAlex normaliser and sync; lite reads neither `ids.pmcid` nor any nested record field. Its OpenAlex clients read only `locations[].pdf_url` by DOI, type-checked already (`openalex.py`, `OpenAlex.swift`, `OpenAlex.kt`)."
+    },
+    {
+      "id": "bmlib#587",
+      "title": "A stored span is the chunker's, or the set is corrupt",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's chunk store (`bmlib.embed.store`); lite does not use it."
+    },
+    {
+      "id": "bmlib#588",
+      "title": "Rust's chunk-store tests run on PostgreSQL too",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib's chunk-store tests; lite does not use the store."
+    },
+    {
+      "id": "bmlib:0.12.0-rust-manual",
+      "title": "The Rust manual covers every module",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bmlib documentation. The two Rust defects it found (`sync()`'s timestamp, `atomic_write`'s temporary file) are in modules the FFI does not expose."
     }
   ],
   "to_bmlib": [
