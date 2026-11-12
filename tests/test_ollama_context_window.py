@@ -132,13 +132,13 @@ def test_anthropic_request_does_not_receive_ollama_context_option(
     client._providers["anthropic"] = provider
     config = LiteConfig()
     config.models.tasks["default"] = TaskModelConfig(
-        provider="anthropic", model="claude-sonnet-4-20250514", context_window=context_window,
+        provider="anthropic", model="claude-sonnet-5-5", context_window=context_window,
     )
 
     assert LiteBaseAgent(config=config, llm_client=client)._chat(
         [LLMMessage(role="user", content="evidence")],
     ) == "answer"
-    assert set(sdk.messages.create.call_args.kwargs) == {"model", "messages", "max_tokens", "temperature"}
+    assert set(sdk.messages.create.call_args.kwargs) == {"model", "messages", "max_tokens"}
 
 
 @pytest.mark.parametrize(("done_reason", "stop_reason"), [
