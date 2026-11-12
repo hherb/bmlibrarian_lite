@@ -396,14 +396,42 @@ final class FactCheckSession {
     // MARK: - Retraction Snapshot Methods
 
     /// The snapshot's entries as written, keyed by `Document.id`; empty when
-    /// never checked or when the whole snapshot is unreadable (logged).
+    /// never checked or when the whole snapshot is unreadable.
     private func retractionSnapshotEntries() -> [String: Any] {
-        guard let data = retractionSnapshotJSON?.data(using: .utf8) else { return [:] }
-        guard let entries = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+        retractionSnapshotJSON.flatMap(Self.snapshotEntries) ?? [:]
+    }
+
+    /// `json`'s entries; `nil` when it does not parse as an object.
+    private static func snapshotEntries(_ json: String) -> [String: Any]? {
+        json.data(using: .utf8).flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
+    }
+
+    /// The snapshot read, once per text while it is kept, however often a view
+    /// asks (#647); its unreadable entries are therefore logged once, not per redraw.
+    private var retractionSnapshotReading: RetractionSnapshotReading? {
+        retractionSnapshotJSON.map { snapshotReadings.value(for: $0, decode: Self.readSnapshot) }
+    }
+
+    /// `json` read: each entry this build can read, and the ids of those it cannot (logged).
+    private static func readSnapshot(_ json: String) -> RetractionSnapshotReading {
+        guard let entries = snapshotEntries(json) else {
             sessionLog.error("Retraction snapshot unreadable; no run's check can be shown")
-            return [:]
+            return RetractionSnapshotReading(parses: false, checks: [:], unreadIDs: [])
         }
-        return entries
+        var checks: [String: PaperRetractionCheck] = [:]
+        var unread: Set<String> = []
+        for (id, value) in entries {
+            guard let data = try? JSONSerialization.data(withJSONObject: value, options: .fragmentsAllowed),
+                  let check = try? JSONDecoder().decode(PaperRetractionCheck.self, from: data),
+                  check.hasKnownStatus
+            else {
+                sessionLog.error("Retraction snapshot entry unreadable; left out")
+                unread.insert(id)
+                continue
+            }
+            checks[id] = check
+        }
+        return RetractionSnapshotReading(parses: true, checks: checks, unreadIDs: unread)
     }
 
     /// The check each document's run used, keyed by `Document.id`; empty
@@ -412,16 +440,7 @@ final class FactCheckSession {
     /// does not decode, or names a status this build does not know, #737) is left out (logged), never
     /// the whole snapshot (#647).
     func retractionSnapshot() -> [String: PaperRetractionCheck] {
-        retractionSnapshotEntries().reduce(into: [:]) { checks, entry in
-            guard let data = try? JSONSerialization.data(withJSONObject: entry.value, options: .fragmentsAllowed),
-                  let check = try? JSONDecoder().decode(PaperRetractionCheck.self, from: data),
-                  check.hasKnownStatus
-            else {
-                sessionLog.error("Retraction snapshot entry unreadable; left out")
-                return
-            }
-            checks[entry.key] = check
-        }
+        retractionSnapshotReading?.checks ?? [:]
     }
 
     /// The documents whose snapshot entries this build cannot read, in a
@@ -431,8 +450,7 @@ final class FactCheckSession {
     /// every entry's id when none reads (which `retractionSnapshotUnread()`
     /// calls unread as a whole).
     func retractionSnapshotUnreadIDs() -> Set<String> {
-        let read = retractionSnapshot()
-        return Set(retractionSnapshotEntries().keys.filter { read[$0] == nil })
+        retractionSnapshotReading?.unreadIDs ?? []
     }
 
     /// Whether the run recorded a snapshot this build cannot read: the whole
@@ -441,11 +459,10 @@ final class FactCheckSession {
     ///
     /// - Parameter documentID: The document whose entry to ask about; `nil` for any.
     func retractionSnapshotUnread(for documentID: String? = nil) -> Bool {
-        guard let data = retractionSnapshotJSON?.data(using: .utf8) else { return false }
-        guard let entries = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return true }
-        let read = retractionSnapshot()
-        guard let documentID else { return entries.keys.contains { read[$0] == nil } }
-        return entries[documentID] != nil && read[documentID] == nil
+        guard let reading = retractionSnapshotReading else { return false }
+        guard reading.parses else { return true }
+        guard let documentID else { return !reading.unreadIDs.isEmpty }
+        return reading.unreadIDs.contains(documentID)
     }
 
     /// The check each document is shown and counted by, keyed by `Document.id`:
@@ -482,8 +499,7 @@ final class FactCheckSession {
     ///   when every check was stored.
     func recordRetractionSnapshot(_ checks: [String: PaperRetractionCheck]) -> Bool {
         guard !checks.isEmpty else { return true }
-        if let data = retractionSnapshotJSON?.data(using: .utf8),
-           !((try? JSONSerialization.jsonObject(with: data)) is [String: Any]) {
+        if retractionSnapshotReading?.parses == false {
             sessionLog.error("Retraction snapshot unreadable as a whole; not written over")
             return false
         }
@@ -521,3 +537,18 @@ final class FactCheckSession {
         updatedAt = Date()
     }
 }
+
+/// A run snapshot read once (``FactCheckSession/retractionSnapshot()``, #647).
+struct RetractionSnapshotReading: Sendable {
+    /// Whether the snapshot parses as a whole.
+    let parses: Bool
+    /// The entries this build can read, keyed by `Document.id`.
+    let checks: [String: PaperRetractionCheck]
+    /// The ids of the entries it cannot read.
+    let unreadIDs: Set<String>
+}
+
+/// Run snapshots read, by their JSON.
+private let snapshotReadings = DecodeMemo<RetractionSnapshotReading>(
+    limit: WorkflowConstants.decodedRetractionSnapshotCacheLimit
+)

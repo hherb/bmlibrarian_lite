@@ -115,12 +115,14 @@ public actor RetractionCrossrefLookup {
         return Dictionary(uniqueKeysWithValues: batch.dois.map { ($0, answer) })
     }
 
-    /// Keep Crossref's polite-pool pacing between batches.
+    /// Keep Crossref's polite-pool pacing between batches, whoever sends them.
     private func enforceRateLimit() async {
-        let wait = TransparencyConstants.minimumRequestInterval - Date().timeIntervalSince(lastRequestTime)
+        // reserve the slot before sleeping: a caller let into the actor meanwhile queues behind it (#647)
+        let sendAt = max(Date(), lastRequestTime.addingTimeInterval(TransparencyConstants.minimumRequestInterval))
+        lastRequestTime = sendAt
+        let wait = sendAt.timeIntervalSinceNow
         // A cancel ends the sleep early; harmless, as the next request then throws it.
         if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
-        lastRequestTime = Date()
     }
 
     /// A status worth another attempt; kept only to be retried, never shown.

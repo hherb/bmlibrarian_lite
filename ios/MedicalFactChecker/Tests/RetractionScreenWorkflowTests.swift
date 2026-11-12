@@ -1066,4 +1066,26 @@ final class RetractionScreenWorkflowTests: XCTestCase {
         XCTAssertNil(documents[0].retractionCheckJSON)
         XCTAssertNil(documents[0].scoredAt)
     }
+
+    /// #647: one Crossref lookup per contact address for the process, so its
+    /// pacing is not reset by each screen of a run.
+    func testOneCrossrefLookupServesEveryScreenForAnAddress() {
+        let first = FactCheckWorkflow.crossrefLookup(email: "a@example.org")
+        XCTAssertTrue(first === FactCheckWorkflow.crossrefLookup(email: "a@example.org"))
+        XCTAssertFalse(first === FactCheckWorkflow.crossrefLookup(email: "b@example.org"), "control: another address")
+    }
+
+    /// #647: a stored check or snapshot is decoded once per text, not on every
+    /// redraw; another text is decoded afresh.
+    func testADecodeMemoDecodesEachTextOnce() {
+        let memo = DecodeMemo<Int>(limit: 10)
+        var decodes = 0
+        let decode: (String) -> Int = { decodes += 1; return $0.count }
+
+        XCTAssertEqual(memo.value(for: "abc", decode: decode), 3)
+        XCTAssertEqual(memo.value(for: "abc", decode: decode), 3)
+        XCTAssertEqual(decodes, 1)
+        XCTAssertEqual(memo.value(for: "abcd", decode: decode), 4)
+        XCTAssertEqual(decodes, 2, "control: a new text is decoded")
+    }
 }

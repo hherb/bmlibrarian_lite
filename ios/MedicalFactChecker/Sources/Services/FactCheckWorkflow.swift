@@ -4097,14 +4097,27 @@ final class FactCheckWorkflow {
     /// contact address `CrossRefService` sends.
     private func productionRetractionCheck() -> RetractionCheck {
         let email = settings.ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : settings.ncbiEmail
+        let crossref = Self.crossrefLookup(email: email)
         return { papers in
             let now = Date()
             let index = await RetractionIndexStore.app.currentIndex(now: now)
             // a failed or aged-out refresh is tried again, for the next run
             if index == nil { RetractionIndexStore.refreshAppCopyInBackground() }
-            return try await RetractionChecker(index: index, crossref: RetractionCrossrefLookup(email: email))
+            return try await RetractionChecker(index: index, crossref: crossref)
                 .check(papers, now: now)
         }
+    }
+
+    /// One Crossref lookup per contact address for the process, so its pacing
+    /// holds across a run's screens and every workflow's (#647).
+    private static var crossrefLookups: [String: RetractionCrossrefLookup] = [:]
+
+    /// The process's Crossref lookup for `email`, made on first use.
+    static func crossrefLookup(email: String) -> RetractionCrossrefLookup {
+        if let lookup = crossrefLookups[email] { return lookup }
+        let lookup = RetractionCrossrefLookup(email: email)
+        crossrefLookups[email] = lookup
+        return lookup
     }
 
     private func updateProgress(_ step: WorkflowStep, _ message: String) {

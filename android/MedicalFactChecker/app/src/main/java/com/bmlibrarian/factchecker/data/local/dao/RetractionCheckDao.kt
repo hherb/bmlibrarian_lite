@@ -22,6 +22,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import com.bmlibrarian.factchecker.data.local.entity.RetractionCheckEntity
 
 /** Each paper's latest retraction check ([RetractionCheckEntity]). */
@@ -45,4 +46,26 @@ interface RetractionCheckDao {
      */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(checks: List<RetractionCheckEntity>)
+
+    /**
+     * Store these checks where a paper has no row, leaving any row, readable
+     * or not, in place (the desktop's `keep_existing`).
+     *
+     * @param checks The rows to write
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(checks: List<RetractionCheckEntity>)
+
+    /**
+     * Store both sets in one transaction, so a failure stores neither and
+     * "not saved" stays true of every row.
+     *
+     * @param replacing Rows written over each paper's row ([upsert])
+     * @param keepingExisting Rows written only where a paper has none ([insertIfAbsent])
+     */
+    @Transaction
+    suspend fun store(replacing: List<RetractionCheckEntity>, keepingExisting: List<RetractionCheckEntity>) {
+        upsert(replacing)
+        insertIfAbsent(keepingExisting)
+    }
 }

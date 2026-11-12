@@ -39,6 +39,8 @@ class RetractionServiceStoredChecksTest {
         }
 
         override suspend fun upsert(checks: List<RetractionCheckEntity>) = Unit
+
+        override suspend fun insertIfAbsent(checks: List<RetractionCheckEntity>) = Unit
     }
 
     @Test

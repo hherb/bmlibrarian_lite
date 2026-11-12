@@ -1100,7 +1100,7 @@ class FactCheckWorkflow @Inject constructor(
         }
         var papers: Map<String, RetractionPaper> = emptyMap()
         var fresh: Map<String, PaperRetractionCheck> = emptyMap()
-        var rowsRead = true
+        var stored: Map<String, String>? = null
         val taken = try {
             val documents = documentRepository.getDocumentsBySessionSync(sessionId)
             papers = documents.associate { it.id to it.retractionPaper }
@@ -1109,8 +1109,7 @@ class FactCheckWorkflow @Inject constructor(
             val keys = papers.mapValues { it.value.paperKey }
             val checks = retractionService.check(papers.values.distinct())
             fresh = documents.mapNotNull { document -> checks[papers.getValue(document.id)]?.let { document.id to it } }.toMap()
-            val stored = readStoredChecks(keys.values.filterNotNull().toSet())
-            rowsRead = stored != null
+            stored = readStoredChecks(keys.values.filterNotNull().toSet())
             takeRetractionChecks(documents.filter { it.id in fresh }, keys, stored.orEmpty(), fresh)
         } catch (e: CancellationException) {
             throw e
@@ -1131,7 +1130,8 @@ class FactCheckWorkflow @Inject constructor(
         currentCoroutineContext().ensureActive()
         // the answers are in: a cancel now would call the rows they change the run's record
         withContext(NonCancellable) {
-            val saved = rowsRead && storeRetractionChecks(taken.rows)
+            val read = stored
+            val saved = read != null && storeRetractionChecks(taken.rows, read)
             val unsaved = if (saved) {
                 ""
             } else {
@@ -2199,7 +2199,7 @@ class FactCheckWorkflow @Inject constructor(
             document.id to (checks[paper] ?: PaperRetractionCheck.failedFor(paper, now).also { retractionRun.failed += paper })
         }
         val taken = takeRetractionChecks(due, keys, stored.orEmpty(), fresh)
-        if (stored != null) storeRetractionChecks(taken.rows)
+        if (stored != null) storeRetractionChecks(taken.rows, stored)
         return used + taken.use
     }
 
@@ -2246,10 +2246,20 @@ class FactCheckWorkflow @Inject constructor(
     /**
      * Store these rows; a failure is logged, never thrown.
      *
-     * @return Whether they were stored
+     * A check resting on a failure, for a paper that had no row when read,
+     * fills only a row still missing (the desktop's `keep_existing`): a row
+     * another writer stored meanwhile may hold a retraction an outage must
+     * not erase. A retraction is stored whatever was down, as it erases
+     * nothing that warns more (#669). Every row is written in one
+     * transaction, so a failure stores none.
+     *
+     * @param rows The rows to write, by paper key
+     * @param stored The rows read before deciding, by paper key
+     * @return Whether they were stored (all of them; none when false)
      */
-    private suspend fun storeRetractionChecks(rows: Map<String, PaperRetractionCheck>): Boolean = try {
-        retractionService.store(rows)
+    private suspend fun storeRetractionChecks(rows: Map<String, PaperRetractionCheck>, stored: Map<String, String>): Boolean = try {
+        val failing = rows.filter { (key, check) -> check.unanswered.isNotEmpty() && !check.isRetracted && key !in stored }
+        retractionService.store(rows - failing.keys, keepingExisting = failing)
         true
     } catch (e: CancellationException) {
         throw e

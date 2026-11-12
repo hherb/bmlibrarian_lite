@@ -137,26 +137,20 @@ contract `doc/cross_platform/retraction_parity/`). bmlib comes from PyPI (`>=0.1
 ## Recently landed (context)
 
 - **Apple** (PRs #676, #678–#680, #682): the Mac app is sandboxed; **a run
-  never waits for the Retraction Watch refresh** (#681); **apps 1.8.0** (PR
-  #709, `ios/MedicalFactChecker/APP_STORE.md`) went out only as a macOS DMG.
-  **Owed by the maintainer before the App Store**: the latest Program License Agreement (if not yet accepted), deploy the CloudKit
-  schema to Production (`RetractionCheckRecord`, new `Document` fields), App
-  Privacy answers per `PRIVACY.md`, archive and Validate on both platforms
-  (first release bundling `BmlibFFI`). **Never pass an `@Observable`
-  property `inout`** (#697; pass a `ReferenceWritableKeyPath`).
-
+  never waits for the Retraction Watch refresh** (#681). **Owed by the
+  maintainer before the App Store**: the latest Program License Agreement,
+  the CloudKit schema deployed to Production (`RetractionCheckRecord`, new
+  `Document` fields), App Privacy answers per `PRIVACY.md`. **Never pass an
+  `@Observable` property `inout`** (#697; pass a `ReferenceWritableKeyPath`).
 - **Cut-off, refused, unknown-stop answers** (#629, #631, #637; PRs #630, #632, #636, #638): `TruncatedResponseError` (`.content` kept; smart search searches its complete queries, `smart_search_notice`), `RefusedResponseError` (never retried); an unknown stop reason is read as finished unless the whole token limit was generated. **A test stubbing the reporting or interrogation answer patches `_chat_prose`.**
 - **Desktop: Find More Evidence** (PR #628) scores **into the reviewed run's
-  checkpoint**; smart search is told every query already run. **Citations
-  from full text, Retry Full Text** (PR #622; *Settings → Full Text*, off by
-  default, from score 4). **Every LLM text path map-reduces over
-  `chunking.analysis_windows`** (16,000-character windows overlapping by 250,
-  no reference list, **one window failing fails the paper**, never
-  `text[:N]`; contract `text_windows.json`). **`citation_reads`** records what
-  each paper's last extraction read (no row = unread). Retry Full Text
-  replaces citations in one transaction only when the text yields passages,
-  and writes the report again only when a text was read; runs from before
-  PR #622 cannot be retried.
+  checkpoint**; smart search is told every query already run. **Retry Full
+  Text** (PR #622; *Settings → Full Text*, off by default, from score 4)
+  replaces citations only when the text yields passages; **`citation_reads`**
+  records what each paper's last extraction read (no row = unread). **Every
+  LLM text path map-reduces over `chunking.analysis_windows`** (16,000-char
+  windows, 250 overlap, no reference list, **one window failing fails the
+  paper**, never `text[:N]`; contract `text_windows.json`).
 - **bmlib: the FFI pin and the port set** (#583; PRs #564–#570, #572). The
   pin names bmlib `main` (`aa47a57`, PR #680: bmlib#621's linear CSV parse); `android-tests.yml` builds
   bmlib there and fails if an FFI test skips or the contract copy drifts; **the committed xcframework is
@@ -253,8 +247,10 @@ Open issues by family; each issue carries the detail. None blocks another.
   #737–#739 landed; **their rules, the unreadable-snapshot ones above all,
   are in `doc/developer/retraction_checking.md`**: read it before touching
   a snapshot, a stored check or a *Check again* line).
-  Apple **#647** (left: a shared Crossref lookup, per-access check decoding, a
-  fail-under-XCTest default, an unreadable index file logged), **#649**
+  Apple **#647** (left: a fail-under-XCTest default; the shared Crossref
+  lookup (its pacing reserved before the sleep, so concurrent callers queue),
+  decoding once per JSON text (`DecodeMemo`) and the unreadable-index log
+  landed in PR #756), **#649**
   (test gaps mostly closed; `RetractionRun` lives in its own file; left: the
   cited report's wiring, *Check again*'s failed save and `smartSearchNotice`'s
   reset, each needing a seam (for the last: `SearchServiceFactory.search`
@@ -265,13 +261,14 @@ Open issues by family; each issue carries the detail. None blocks another.
   `RetractionCrossrefLookup` now takes a `retry:` for tests),
   **#653**, **#654** items 3 and 4 (the not-saved note said once, a failed
   check recomputing the warning; items 1 and 2 done), **#658** (Android;
-  left: the at-most-once-per-run test; the type items (the
-  `PaperRetractionCheck` and `CrossrefAnswer` invariants, a cross-platform
-  decision; `publicationTypes` nullable; `paperKey` a function); the IGNORE
-  insert, owed before a second writer lands; whether a full disk's `Refused`
-  should wait a day). **A failed stored read asks every paper afresh and
-  stores nothing** (#720, all three). **The stored-check read binds at most
-  999 keys** (SQLite before API 31): read through
+  left: the type items (the `PaperRetractionCheck` and `CrossrefAnswer`
+  invariants, a cross-platform decision; `publicationTypes` nullable;
+  `paperKey` a function); whether a full disk's `Refused` should wait a
+  day). **A failed stored read asks every paper afresh and stores nothing**
+  (#720, all three). **A failed check for a paper with no row fills only a
+  row still missing** (Android's `insertIfAbsent`, in one transaction with
+  the REPLACE rows; the desktop's `keep_existing`). **The stored-check read
+  binds at most 999 keys** (SQLite before API 31): read through
   `RetractionService.storedChecks`, never `RetractionCheckDao.get` direct.
   **A view that replaces its workflow or whose window closes calls the
   outgoing one's `cancelCheckAgain()`** (#708, #711; keep it at any new such site).
