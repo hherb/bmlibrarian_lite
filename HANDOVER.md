@@ -17,13 +17,9 @@ its slice has landed; add a new section when handing off new work.
   `packaging>=26`. **mypy is out of the next DMG** (#750: pydantic's mypy
   plugins pulled it in; the spec now excludes them, checked by a PyInstaller
   analysis, not yet by a full build: `ls "dist/BMLibrarian Lite.app/Contents/Frameworks"`).
-- **Store listings and medfactcheck.org** (PR #753): `website/` is the
-  static site (Cloudflare assets-only Worker, `website/wrangler.jsonc`);
-  `privacy.html` is generated from `ios/MedicalFactChecker/PRIVACY.md` by
-  `website/build_privacy.py` (`tests/test_website_privacy.py` keeps them in
-  step: edit the policy, re-run the script). Both apps' Settings link to
-  https://medfactcheck.org/privacy; `PLAY_STORE.md` and `APP_STORE.md`
-  carry the 1.9.0 text (App Store Connect is plain text: strip `**`).
+- **medfactcheck.org** (PR #753): `website/`; `privacy.html` is generated
+  from `ios/MedicalFactChecker/PRIVACY.md` by `website/build_privacy.py`
+  (edit the policy, re-run it). Store text: `PLAY_STORE.md`, `APP_STORE.md`.
 - **Task 11, apps: the maintainer's.** Apple: **the 1.6 → 1.9.0 upgrade
   passed on an iPhone 13 Pro Max (2026-11-11)**: a Debug build from
   `0641e80c` installed over 1.6 kept every session and report, they open,
@@ -31,25 +27,21 @@ its slice has landed; add a new section when handing off new work.
   for the A" warning is `BmlibFFI` (built stripped, #752): expected for
   1.9.0, not blocking. Left: archive both schemes, upload, tags
   `appstore_1.9` / `macos_1.9.0`. Android 1.9.0 (debug variant, from
-  `0641e80c`) runs on the maintainer's phone over 1.6.0, "better than 1.6". Android: an **unsigned** release AAB
-  built at `0641e80c` (R8, `libbmlib_ffi.so` for arm64-v8a and x86_64);
-  no upload key is on this machine, so sign it (Android Studio → *Generate
-  Signed App Bundle*, or `keystore.properties` + `./gradlew bundleRelease`;
-  build with `JAVA_HOME` = Android Studio's `jbr` and `BMLIB_DIR` = a bmlib
-  worktree at `aa47a57`), internal track, smoke test, tag `android_1.9.0`.
-  The release body already holds the Apple and Android notes.
+  `0641e80c`) runs on the maintainer's phone over 1.6.0. Left: sign a release
+  AAB built at `0641e80c` (`JAVA_HOME` = Android Studio's `jbr`, `BMLIB_DIR`
+  = a bmlib worktree at **`aa47a57`**, 1.9.0's pin), internal track, smoke
+  test, tag `android_1.9.0`.
 
-**BmlibFFI dSYMs (#752): fixed in bmlib, ships at the next re-pin.** bmlib
-PR hherb/bmlib#742 (`44c0a821`) makes `build-xcframework.sh` put a
-line-tables dSYM in each slice (`<slice>/dSYMs`, `-debug-symbols`), linked
-with `-oso_prefix .` so the UUIDs stay path-independent (hherb/bmlib#490).
-This repo's `.gitignore` now re-includes
-`BmlibFFI.xcframework/*/dSYMs/*.dSYM`. Checked locally: UUIDs match, `atos`
-gives file:line, two checkouts give one tree hash, a macOS archive lists
-`BmlibFFI.framework.dSYM`. **The re-pin is a full bmlib sync** (`main` was
-281 commits past `aa47a57` on 2026-11-11: ledger triage, bindings, the Kotlin
-`.kt`); the xcframework grows from ~4 MB to 30 MB (≈6.5 MB per re-pin in
-git). After it, validate an archive and close #752.
+**bmlib re-pinned to `d3b10b5b`** (PR #757, 2026-11-12): the FFI pin and
+the sync ledger both name bmlib `main` `d3b10b5b`. The xcframework is that
+PR's `bmlib-xcframework` artifact and now carries each slice's dSYM (#752,
+closed; bmlib#742), 30 MB instead of ~4 MB. The bindings changed only in the
+crate version (`0.4.0`). What the apps call changed in two ways only: the
+CSV reader names a skipped row's line correctly, and diagnostics go through
+Rust's `log` facade, which the apps give no logger (they read none; the audit
+stays in `parse_jats_audited`'s report). The ledger triage (116 rows) lodged
+**#758–#764**, see *Next up*. **Left:** an Apple archive from master lists
+`BmlibFFI.framework.dSYM` with no warning (one from `0641e80c` keeps 1.9.0's pin).
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
@@ -79,7 +71,7 @@ warning merges the readable checks the same way (`RetractionCheckRecord.merged`,
 **A missing native library** leaves papers unchecked, but stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
 FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C
-~/src/bmlib worktree add --detach <dir> aa47a57`); without it they skip
+~/src/bmlib worktree add --detach <dir> d3b10b5b`); without it they skip
 locally, and CI fails if they skip. **A ViewModel test mocks the workflow:
 every new workflow `StateFlow` must be stubbed in the three
 `FactCheckViewModel*Test`s**, or the unstubbed `collect` leaks a
@@ -152,7 +144,7 @@ contract `doc/cross_platform/retraction_parity/`). bmlib comes from PyPI (`>=0.1
   windows, 250 overlap, no reference list, **one window failing fails the
   paper**, never `text[:N]`; contract `text_windows.json`).
 - **bmlib: the FFI pin and the port set** (#583; PRs #564–#570, #572). The
-  pin names bmlib `main` (`aa47a57`, PR #680: bmlib#621's linear CSV parse); `android-tests.yml` builds
+  pin names bmlib `main` (`d3b10b5b`, PR #757); `android-tests.yml` builds
   bmlib there and fails if an FFI test skips or the contract copy drifts; **the committed xcframework is
   `bmlib-xcframework.yml`'s own build** (re-pin from its artifact as its
   header says). **`doc/cross_platform/bmlib_sync/ledger.json` records every
@@ -189,7 +181,8 @@ contract `doc/cross_platform/retraction_parity/`). bmlib comes from PyPI (`>=0.1
   **Unreachable is provisional.** A row **strictly newer** than this build is
   never overwritten; **bump `TRANSPARENCY_ANALYZER_VERSION`** whenever a score
   could move. **A skip is a third state** (`SourceLookupSkipped`). Never
-  `findtext` a mixed-content element. Funders: `sponsor_patterns.json` schema 4.
+  `findtext` a mixed-content element. Funders: `sponsor_patterns.json` (schema
+  4) is the contract, never `INDUSTRY_KEYWORDS`; `NONPROFIT` = not recognised.
 - **Older rounds: the rules that still bind** (detail in git history and
   the `doc/cross_platform/` READMEs).
   - **A source we could not reach is not a finding** (#346, #347, #344,
@@ -224,8 +217,6 @@ contract `doc/cross_platform/retraction_parity/`). bmlib comes from PyPI (`>=0.1
     **bmlib is ahead of Swift — port from it** (#165).
   - **Real PMC JATS corpus** (#146): read `doc/cross_platform/jats_corpus/README.md`
     first; the fixture walk stops at the checkout root.
-  - **Funders** (#143/#147/#152): `sponsor_patterns.json` is the contract;
-    never merge into `INDUSTRY_KEYWORDS`; `NONPROFIT` means "not recognised".
   - **CI on all three platforms** (#129). **No job may gain a `paths:`
     filter.** **The Qt preflight (`.github/scripts/qt_preflight.py`, QtWebEngine
     included) runs before pytest.** No test starts a settings-dialog thread.
@@ -243,6 +234,16 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
+- **From the bmlib sync (PR #757)**, most urgent first: **#758** Claude is
+  sent `temperature`/`top_p` (a fresh desktop install resolves anthropic
+  2.8.0, which raises `TypeError` on every call; Opus 4.7+ refuse it on the
+  API; apps too) and **#759** the desktop's default `claude-sonnet-4-20250514`
+  answers 404; the desktop halves are the next PR (a 0.6.1). Then **#760**
+  the apps' Ollama over `/v1` takes no `num_ctx`; **#761** `NaN`/`Infinity`
+  in model JSON, retries re-send unchanged; **#762** desktop PDF extraction
+  (fault side, MuPDF's read-past messages, no cancel); **#763** Android HTML
+  upload (markup capped as text, quadratic regex); **#764** Android PDF
+  extraction ignores cancel.
 - **Retraction checking** follow-ups (#662, #726–#728, #730, #731 and
   #737–#739 landed; **their rules, the unreadable-snapshot ones above all,
   are in `doc/developer/retraction_checking.md`**: read it before touching
@@ -496,6 +497,5 @@ page. Also **#244** (`bmll -v`), **#245** (`--api-key` only).
 
 ### Xcode Cloud contract (macOS ships from the multiplatform project)
 
-Xcode Cloud archives scheme `MedicalFactChecker` from a **fresh clone**; `xcode-project-guards.yml`
-keeps package references in-repo and the scheme shared. Reproduce: clone to `/tmp/x`, then in its
-`ios/MedicalFactChecker` `xcodebuild -scheme MedicalFactChecker -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO archive`.
+Archived from a **fresh clone** (`xcode-project-guards.yml` keeps package references in-repo, the
+scheme shared): clone, then `xcodebuild … 'platform=macOS' CODE_SIGNING_ALLOWED=NO archive`.
