@@ -236,7 +236,7 @@ Open issues by family; each issue carries the detail. None blocks another.
   desktop reads every PDF through bmlib's `PyMuPDFConverter`
   (`pdf_utils.read_pdf_text`, one read at a time), a typed
   `PDFExtractionError`; `pdf_title_check` still uses `fitz`; deferred #773.
-  **#763/#764** (Android, this branch's PR): an HTML upload is read up to
+  **#763/#764** (Android, PR #775): an HTML upload is read up to
   100 MB and only its text held to a row's 1 MB; `htmlToText` is linear;
   `extractedPdfText` checks a cancel before each page and throws it; an
   upload reads a PDF's text before replacing an earlier one. **bmlib `main`
