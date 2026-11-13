@@ -24,7 +24,10 @@ import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.StructuredQuery
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
+import com.bmlibrarian.factchecker.util.OllamaContext
 import com.bmlibrarian.factchecker.util.ResponseParser
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
 import retrofit2.Response
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -41,7 +44,8 @@ import javax.inject.Singleton
 @Singleton
 class LLMService @Inject constructor(
     private val openAIApi: OpenAIApi,
-    private val anthropicApi: AnthropicApi
+    private val anthropicApi: AnthropicApi,
+    private val ollamaApi: OllamaApi
 ) {
 
     /**
@@ -74,6 +78,8 @@ class LLMService @Inject constructor(
             ) {
                 if (provider.usesAnthropicFormat) {
                     chatAnthropic(provider, apiKey, model, systemPrompt, userPrompt, maxTokens)
+                } else if (provider.id == LLMProvider.OLLAMA.id) {
+                    chatOllama(provider, model, systemPrompt, userPrompt, maxTokens, temperature)
                 } else {
                     chatOpenAI(provider, apiKey, model, systemPrompt, userPrompt, maxTokens, temperature)
                 }
@@ -493,6 +499,48 @@ class LLMService @Inject constructor(
         return handleOpenAIResponse(response)
     }
 
+    /**
+     * Send a chat request to Ollama's native `/api/chat` (#760).
+     *
+     * The OpenAI-compatible `/v1` endpoint takes no `num_ctx`, so a long prompt was
+     * cut to the server's default context without a word. Here the context is sized
+     * to hold the request ([OllamaContext.numCtx]), and `truncate`/`shift` are off,
+     * so a prompt that still does not fit is a 400 naming both sizes.
+     */
+    private suspend fun chatOllama(
+        provider: LLMProvider,
+        model: String,
+        systemPrompt: String,
+        userPrompt: String,
+        maxTokens: Int,
+        temperature: Double
+    ): Result<LLMResult> {
+        val request = OllamaChatRequest(
+            model = model,
+            messages = listOf(
+                OpenAIChatMessage(role = "system", content = systemPrompt),
+                OpenAIChatMessage(role = "user", content = userPrompt)
+            ),
+            options = OllamaOptions(
+                temperature = temperature,
+                numPredict = maxTokens,
+                numCtx = OllamaContext.numCtx(listOf(systemPrompt, userPrompt), maxTokens)
+            ),
+            stream = false,
+            truncate = false,
+            shift = false
+        )
+
+        val response = ollamaApi.chat("${OllamaContext.nativeRoot(provider.baseUrl)}/api/chat", request)
+        if (response.isSuccessful) {
+            val body = response.body() ?: throw LLMError.EmptyResponseError()
+            return Result.success(LLMResult.fromOllama(body) ?: throw LLMError.EmptyResponseError())
+        }
+        val errorBody = response.errorBody()?.string()
+        val reason = errorBody?.let { ollamaError(it) } ?: response.message()
+        throw LLMError.fromHttpError(response.code(), reason, errorBody)
+    }
+
     companion object {
         /** Log tag for this service. */
         private const val TAG = "LLMService"
@@ -582,6 +630,25 @@ class LLMService @Inject constructor(
         internal fun thinkingConfigFor(provider: LLMProvider): ThinkingConfig? {
             return if (provider.id == LLMProvider.DEEPSEEK.id) ThinkingConfig.DISABLED else null
         }
+
+        /**
+         * What an Ollama error body says, e.g. "request (3022 tokens) exceeds the
+         * available context size (1024 tokens), try increasing it".
+         *
+         * @param body The error reply's body
+         * @return Its `error` text, or null when the body is not Ollama's error shape
+         */
+        internal fun ollamaError(body: String): String? =
+            try {
+                errorJson.decodeFromString<OllamaErrorResponse>(body).error?.takeIf { it.isNotBlank() }
+            } catch (e: SerializationException) {
+                null
+            } catch (e: IllegalArgumentException) {
+                null
+            }
+
+        /** Lenient reader for provider error bodies. */
+        private val errorJson = Json { ignoreUnknownKeys = true }
     }
 
     /**

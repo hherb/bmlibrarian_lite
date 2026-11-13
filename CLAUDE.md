@@ -106,7 +106,7 @@ exceptions.py         # Custom exception hierarchy
 - domain: Models, WorkflowState, workflow/ (scoring, searching, reporting)
 - ui: Compose screens + ViewModels (factcheck, report, history, settings, fulltext, onboarding)
 - ui/components: DocumentCard (with transparency), FullTextSourceBadge, SortingControls, RetractionBadge (RETRACTED / CONCERN / NOT CHECKED)
-- util: JATSXMLParser, JATSModels, CostCalculator, ResponseParser, PdfExporter; retraction/ (Crossref lookups, Retraction Watch index, checker, sentences, RetractionService; checks per paper in Room `retraction_checks`)
+- util: JATSXMLParser, JATSModels, OllamaContext (`num_ctx` per request), CostCalculator, ResponseParser, PdfExporter; retraction/ (Crossref lookups, Retraction Watch index, checker, sentences, RetractionService; checks per paper in Room `retraction_checks`)
 - di: Hilt modules (App, Workflow, Network, Database)
 
 ## BioMedLit Swift Package (`Packages/BioMedLit/`)
@@ -124,7 +124,7 @@ Shared iOS/macOS components:
   - SessionEvictionManager, WorkspaceInitializer, StorageMonitor
   - ChangeLogReader/Writer, LWWMergeStrategy, IntegrityFunctions
 - `Retraction/`: RetractionCrossrefLookup, RetractionIndexStore (Retraction Watch index, Wi-Fi only), RetractionChecker, RetractionText, RetractionNames, RetractionReportSection
-- `Utilities/`: RetryHelper, CostCalculator, BudgetChecker, QueryTranslator, ResponseParser, SearchResultMerger, ParallelProcessingConstants, ConcurrencyDetector
+- `Utilities/`: RetryHelper, OllamaContext (`num_ctx` per request, native `/api/chat` root), CostCalculator, BudgetChecker, QueryTranslator, ResponseParser, SearchResultMerger, ParallelProcessingConstants, ConcurrencyDetector
 
 ## Code Style
 

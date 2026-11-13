@@ -148,12 +148,9 @@ actor ModelFetchService {
             root.removeLast()
         }
 
-        let versionSegment = "/v1"
         let path: String
         if provider == .ollama {
-            if root.hasSuffix(versionSegment) {
-                root.removeLast(versionSegment.count)
-            }
+            root = OllamaContext.nativeRoot(root)
             path = "api/tags"
         } else {
             path = "models"

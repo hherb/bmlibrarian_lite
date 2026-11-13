@@ -28,7 +28,7 @@ import org.junit.Test
 class ParallelScoringServiceTest {
 
     private fun llmAnswering(content: String): LLMService {
-        val llm = spyk(LLMService(mockk(relaxed = true), mockk(relaxed = true)))
+        val llm = spyk(LLMService(mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true)))
         coEvery { llm.chat(any(), any(), any(), any(), any(), any(), any()) } returns
             Result.success(LLMResult(content, 10, 10, "stop", "fake"))
         return llm

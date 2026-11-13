@@ -360,6 +360,75 @@ data class OllamaModelDetails(
     val quantizationLevel: String? = null
 )
 
+// ==================== Ollama Native Chat Models ====================
+
+/**
+ * Request body for Ollama's native `/api/chat` (#760).
+ *
+ * The OpenAI-compatible `/v1` endpoint takes no `num_ctx`, so a long prompt was cut
+ * to the server's default context without a word; this body sizes the context and
+ * turns the silent cut into a 400.
+ */
+@Serializable
+data class OllamaChatRequest(
+    /** Model name (e.g., "llama3.2"). */
+    val model: String,
+    /** Conversation messages in order. */
+    val messages: List<OpenAIChatMessage>,
+    /** Sampling and context options. */
+    val options: OllamaOptions,
+    /** Always false: the reply is read whole. */
+    val stream: Boolean,
+    /** Always false: no message is dropped to fit the context. */
+    val truncate: Boolean,
+    /** Always false: a prompt over `num_ctx` is a 400, never cut in the middle. */
+    val shift: Boolean
+)
+
+/**
+ * The `options` of an Ollama chat request.
+ */
+@Serializable
+data class OllamaOptions(
+    /** Sampling temperature. */
+    val temperature: Double,
+    /** Maximum tokens to generate. */
+    @SerialName("num_predict")
+    val numPredict: Int,
+    /** Context size, from [com.bmlibrarian.factchecker.util.OllamaContext.numCtx]. */
+    @SerialName("num_ctx")
+    val numCtx: Int
+)
+
+/**
+ * Reply from Ollama's native `/api/chat` (non-streamed).
+ */
+@Serializable
+data class OllamaChatResponse(
+    /** Model that answered. */
+    val model: String? = null,
+    /** The generated message. */
+    val message: OpenAIChatMessage? = null,
+    /** Tokens Ollama read from the prompt. */
+    @SerialName("prompt_eval_count")
+    val promptEvalCount: Int? = null,
+    /** Tokens generated. */
+    @SerialName("eval_count")
+    val evalCount: Int? = null,
+    /** Why generation stopped: "stop", "length", etc. */
+    @SerialName("done_reason")
+    val doneReason: String? = null
+)
+
+/**
+ * An Ollama error reply, `{"error": "..."}`, e.g. a prompt over `num_ctx`.
+ */
+@Serializable
+data class OllamaErrorResponse(
+    /** What Ollama says went wrong. */
+    val error: String? = null
+)
+
 // ==================== Unified Result ====================
 
 /**
@@ -392,6 +461,21 @@ data class LLMResult(
                 inputTokens = response.usage?.promptTokens ?: 0,
                 outputTokens = response.usage?.completionTokens ?: 0,
                 finishReason = choice.finishReason,
+                model = response.model
+            )
+        }
+
+        /**
+         * Create LLMResult from an Ollama native chat reply.
+         */
+        fun fromOllama(response: OllamaChatResponse): LLMResult? {
+            val content = response.message?.content ?: return null
+
+            return LLMResult(
+                content = content,
+                inputTokens = response.promptEvalCount ?: 0,
+                outputTokens = response.evalCount ?: 0,
+                finishReason = response.doneReason,
                 model = response.model
             )
         }

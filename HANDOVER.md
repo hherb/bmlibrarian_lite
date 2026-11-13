@@ -35,11 +35,8 @@ its slice has landed; add a new section when handing off new work.
 **bmlib re-pinned to `d3b10b5b`** (PR #757, 2026-11-12): the FFI pin and
 the sync ledger both name bmlib `main` `d3b10b5b`. The xcframework is that
 PR's `bmlib-xcframework` artifact and now carries each slice's dSYM (#752,
-closed; bmlib#742), 30 MB instead of ~4 MB. The bindings changed only in the
-crate version (`0.4.0`). What the apps call changed in two ways only: the
-CSV reader names a skipped row's line correctly, and diagnostics go through
-Rust's `log` facade, which the apps give no logger (they read none; the audit
-stays in `parse_jats_audited`'s report). The ledger triage (116 rows) lodged
+closed; bmlib#742), 30 MB instead of ~4 MB; what the apps call barely changed
+(detail in PR #757). The ledger triage (116 rows) lodged
 **#758–#764**, see *Next up*. **Left:** an Apple archive from master lists
 `BmlibFFI.framework.dSYM` with no warning (one from `0641e80c` keeps 1.9.0's pin).
 
@@ -234,11 +231,12 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **From the bmlib sync (PR #757)**: **#758**/**#759** fixed, unreleased (desktop
-  PR #765, a 0.6.1 is the maintainer's call; apps PR #766): no platform
-  sends Claude `temperature`/`top_p` (Opus 4.7+ answer 400 on both
-  endpoints, probed 2026-11-13). Then **#760**
-  the apps' Ollama over `/v1` takes no `num_ctx`; **#761** `NaN`/`Infinity`
+- **From the bmlib sync (PR #757)**: **#758**/**#759** (no Claude
+  `temperature`; PRs #765, #766) and **#760** fixed, unreleased (a 0.6.1 is
+  the maintainer's call). #760: the apps ask Ollama on `/api/chat` with a
+  per-request `num_ctx` (`llm_parity/ollama_context.json`), `truncate`/`shift`
+  off, so an overflow is a 400, not Ollama's silent middle cut (probed on
+  0.40.14). Android has no Ollama URL setting (`localhost` only). Then **#761** `NaN`/`Infinity`
   in model JSON, retries re-send unchanged; **#762** desktop PDF extraction
   (fault side, MuPDF's read-past messages, no cancel); **#763** Android HTML
   upload (markup capped as text, quadratic regex); **#764** Android PDF

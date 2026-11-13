@@ -2355,10 +2355,10 @@
       "id": "bmlib:0.12.0-context-windows-num-ctx",
       "title": "Context windows, and Ollama's `num_ctx`",
       "python": "equivalent",
-      "swift": "owed",
-      "android": "owed",
+      "swift": "ported",
+      "android": "ported",
       "issue": "#760",
-      "note": "The desktop sends Ollama `num_ctx` from a task's configured `context_window` over `/api/chat` (llm/providers/ollama.py) and looks up no window. The apps talk to Ollama's OpenAI-compatible `/v1` (Swift LLMProvider.swift, Android LLMProvider.kt), which takes no `num_ctx`, so a 16k-character window plus prompt can be cut silently at the server's default context."
+      "note": "The desktop sends Ollama `num_ctx` from a task's configured `context_window` over `/api/chat` (llm/providers/ollama.py) and looks up no window. The apps (#760) ask Ollama on its native `/api/chat` with a `num_ctx` sized to hold each request and `truncate`/`shift` off, so a prompt that still does not fit is a 400, never cut silently: contract `llm_parity/ollama_context.json` (Swift `OllamaContext`, Android `util/OllamaContext.kt`)."
     },
     {
       "id": "bmlib:0.12.0-condensation-pass-cut-fails-batch",
@@ -2373,10 +2373,10 @@
       "id": "bmlib:0.12.0-rust-ollama-api-chat",
       "title": "Breaking: Rust's Ollama uses `/api/chat` and Python's `anthropic` floor is 0.41",
       "python": "equivalent",
-      "swift": "owed",
-      "android": "owed",
+      "swift": "ported",
+      "android": "ported",
       "issue": "#760",
-      "note": "The desktop is already on `/api/chat` with `options` (ollama SDK, llm/providers/ollama.py). The apps use Ollama's `/v1/chat/completions`, which cannot carry `num_ctx`; same gap as the context-windows row. The Rust API breaks themselves do not reach the apps."
+      "note": "The desktop is already on `/api/chat` with `options` (ollama SDK, llm/providers/ollama.py). The apps moved from Ollama's `/v1/chat/completions` to `/api/chat` with `options.num_ctx` (#760; Swift `LLMService`, Android `LLMService.chatOllama`). The Rust API breaks themselves do not reach the apps."
     },
     {
       "id": "bmlib:0.12.0-rust-chaterror-non-exhaustive",

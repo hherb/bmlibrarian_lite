@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import BioMedLit
 import Foundation
 
 /// Service for interacting with OpenAI-compatible LLM APIs.
@@ -174,7 +175,7 @@ actor LLMService {
         temperature: Double,
         maxTokens: Int
     ) async throws -> (content: String, usage: LLMUsage) {
-        let endpoint = baseURL.appendingPathComponent("chat/completions")
+        let endpoint = chatEndpoint
 
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -206,6 +207,11 @@ actor LLMService {
                     print("[LLMService] API error \(httpResponse.statusCode): \(message)")
                     throw LLMError.apiError(statusCode: httpResponse.statusCode, message: message)
                 }
+                // Ollama format: {"error": "..."}, e.g. a prompt over num_ctx (#760)
+                if let message = errorBody["error"] as? String {
+                    print("[LLMService] API error \(httpResponse.statusCode): \(message)")
+                    throw LLMError.apiError(statusCode: httpResponse.statusCode, message: message)
+                }
                 // Alternative format: {"message": "..."}
                 if let message = errorBody["message"] as? String {
                     print("[LLMService] API error \(httpResponse.statusCode): \(message)")
@@ -219,26 +225,57 @@ actor LLMService {
             throw LLMError.httpError(statusCode: httpResponse.statusCode)
         }
 
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let result = try decoder.decode(ChatCompletionResponse.self, from: data)
-
-        guard let content = result.choices.first?.message.content else {
-            throw LLMError.emptyResponse
-        }
+        let reply = try decodeReply(data)
 
         // Create usage record
         let usage = LLMUsage(
             model: model,
             provider: provider,
-            inputTokens: result.usage?.promptTokens ?? 0,
-            outputTokens: result.usage?.completionTokens ?? 0
+            inputTokens: reply.inputTokens,
+            outputTokens: reply.outputTokens
         )
 
         // Notify callback
         onUsageRecorded?(usage)
 
-        return (content, usage)
+        return (reply.content, usage)
+    }
+
+    /// The URL chat requests are posted to.
+    ///
+    /// Ollama is asked on its native `/api/chat`, beside the configured `/v1` root:
+    /// the OpenAI-compatible endpoint takes no `num_ctx`, so a long prompt was cut
+    /// to the server's default context without a word (#760). Every other
+    /// provider is asked on `chat/completions`.
+    var chatEndpoint: URL {
+        guard provider == .ollama,
+              let root = URL(string: OllamaContext.nativeRoot(baseURL.absoluteString)) else {
+            return baseURL.appendingPathComponent("chat/completions")
+        }
+        return root.appendingPathComponent("api/chat")
+    }
+
+    /// A successful reply's text and token counts.
+    ///
+    /// - Parameter data: The 200 response's body.
+    /// - Returns: The reply's text and its input and output tokens (0 when unstated).
+    /// - Throws: `LLMError.emptyResponse` when the reply holds no message, or a
+    ///   `DecodingError` when the body is not the provider's reply shape.
+    func decodeReply(_ data: Data) throws -> (content: String, inputTokens: Int, outputTokens: Int) {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        if provider == .ollama {
+            let result = try decoder.decode(OllamaChatResponse.self, from: data)
+            guard let content = result.message?.content else {
+                throw LLMError.emptyResponse
+            }
+            return (content, result.promptEvalCount ?? 0, result.evalCount ?? 0)
+        }
+        let result = try decoder.decode(ChatCompletionResponse.self, from: data)
+        guard let content = result.choices.first?.message.content else {
+            throw LLMError.emptyResponse
+        }
+        return (content, result.usage?.promptTokens ?? 0, result.usage?.completionTokens ?? 0)
     }
 
     // MARK: - Retry Helpers
@@ -318,6 +355,11 @@ actor LLMService {
     /// is never sent: not every provider supports it (Anthropic doesn't), so prompts
     /// ask for JSON explicitly.
     ///
+    /// Ollama is sent its native `/api/chat` body instead: the temperature and
+    /// token limit as `options`, with a `num_ctx` sized to hold the request
+    /// (`OllamaContext`), and `truncate`/`shift` off so a prompt that still does
+    /// not fit is refused with a 400 rather than cut in the middle (#760).
+    ///
     /// - Parameters:
     ///   - messages: The conversation to send.
     ///   - temperature: The temperature the caller asked for.
@@ -325,6 +367,18 @@ actor LLMService {
     /// - Returns: The JSON body, snake-cased.
     /// - Throws: An `EncodingError` if the body cannot be encoded.
     func requestBody(messages: [ChatMessage], temperature: Double, maxTokens: Int) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        if provider == .ollama {
+            let options = OllamaOptions(
+                temperature: temperature,
+                numPredict: maxTokens,
+                numCtx: OllamaContext.numCtx(contents: messages.map(\.content), maxTokens: maxTokens)
+            )
+            return try encoder.encode(
+                OllamaChatRequest(model: model, messages: messages, stream: false, truncate: false, shift: false, options: options)
+            )
+        }
         let body = ChatCompletionRequest(
             model: model,
             messages: messages,
@@ -333,8 +387,6 @@ actor LLMService {
             responseFormat: nil,
             thinking: thinkingConfig
         )
-        let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
         return try encoder.encode(body)
     }
 
@@ -486,6 +538,54 @@ struct Choice: Codable {
 
     /// Reason the generation stopped: "stop", "length", etc.
     let finishReason: String?
+}
+
+/// Request body for Ollama's native `/api/chat` (#760).
+struct OllamaChatRequest: Codable {
+    /// Model name (e.g., "llama3.2").
+    let model: String
+
+    /// Conversation messages in order.
+    let messages: [ChatMessage]
+
+    /// Always false: the reply is read whole.
+    let stream: Bool
+
+    /// Always false: no message is dropped to fit the context.
+    let truncate: Bool
+
+    /// Always false: a prompt over `num_ctx` is a 400, never cut in the middle.
+    let shift: Bool
+
+    /// Sampling and context options.
+    let options: OllamaOptions
+}
+
+/// The `options` of an Ollama chat request.
+struct OllamaOptions: Codable {
+    /// Sampling temperature.
+    let temperature: Double
+
+    /// Maximum tokens to generate.
+    let numPredict: Int
+
+    /// Context size, from `OllamaContext.numCtx`.
+    let numCtx: Int
+}
+
+/// Reply from Ollama's native `/api/chat` (non-streamed).
+struct OllamaChatResponse: Codable {
+    /// The generated message.
+    let message: ChatMessage?
+
+    /// Tokens Ollama read from the prompt.
+    let promptEvalCount: Int?
+
+    /// Tokens generated.
+    let evalCount: Int?
+
+    /// Why generation stopped: "stop", "length", etc.
+    let doneReason: String?
 }
 
 /// Token usage statistics from the API.

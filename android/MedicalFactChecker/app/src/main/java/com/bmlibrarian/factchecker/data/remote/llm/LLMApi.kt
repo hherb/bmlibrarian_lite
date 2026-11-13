@@ -116,6 +116,19 @@ interface AnthropicApi {
 interface OllamaApi {
 
     /**
+     * Send a chat request to Ollama's native API (#760).
+     *
+     * @param url Full URL for the chat endpoint (e.g., http://localhost:11434/api/chat)
+     * @param request Chat request body, with its `num_ctx`
+     * @return Chat reply
+     */
+    @POST
+    suspend fun chat(
+        @Url url: String,
+        @Body request: OllamaChatRequest
+    ): Response<OllamaChatResponse>
+
+    /**
      * List locally installed models.
      *
      * @param url Full URL for tags endpoint (e.g., http://localhost:11434/api/tags)

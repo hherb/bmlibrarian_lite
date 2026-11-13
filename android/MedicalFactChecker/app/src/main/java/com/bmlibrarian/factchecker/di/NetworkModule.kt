@@ -209,15 +209,17 @@ object NetworkModule {
      *
      * @param openAIApi OpenAI-compatible API interface
      * @param anthropicApi Anthropic API interface
+     * @param ollamaApi Ollama native API interface
      * @return LLM service instance
      */
     @Provides
     @Singleton
     fun provideLLMService(
         openAIApi: OpenAIApi,
-        anthropicApi: AnthropicApi
+        anthropicApi: AnthropicApi,
+        ollamaApi: OllamaApi
     ): LLMService {
-        return LLMService(openAIApi, anthropicApi)
+        return LLMService(openAIApi, anthropicApi, ollamaApi)
     }
 
     /**

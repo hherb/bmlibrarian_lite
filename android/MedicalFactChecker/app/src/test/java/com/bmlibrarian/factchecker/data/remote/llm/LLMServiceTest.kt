@@ -51,13 +51,15 @@ class LLMServiceTest {
 
     private lateinit var openAIApi: OpenAIApi
     private lateinit var anthropicApi: AnthropicApi
+    private lateinit var ollamaApi: OllamaApi
     private lateinit var service: LLMService
 
     @Before
     fun setup() {
         openAIApi = mockk()
         anthropicApi = mockk()
-        service = LLMService(openAIApi, anthropicApi)
+        ollamaApi = mockk()
+        service = LLMService(openAIApi, anthropicApi, ollamaApi)
     }
 
     // ==================== OpenAI Chat Tests ====================
@@ -693,45 +695,58 @@ class LLMServiceTest {
     }
 
     @Test
-    fun `chat uses correct URL for Ollama provider`() = runTest {
-        // Arrange
-        coEvery {
-            openAIApi.chatCompletion(
-                url = eq("http://localhost:11434/v1/chat/completions"),
-                authorization = any(),
-                request = any()
-            )
-        } returns Response.success(
-            OpenAIChatResponse(
-                id = "test-id",
-                choices = listOf(
-                    OpenAIChatChoice(
-                        index = 0,
-                        message = OpenAIChatMessage("assistant", "Response"),
-                        finishReason = "stop"
-                    )
-                ),
-                usage = null
+    fun `Ollama is asked on its native chat endpoint with a context that holds the request`() = runTest {
+        // #760: the OpenAI-compatible /v1 takes no num_ctx, so a long prompt was cut silently
+        val request = slot<OllamaChatRequest>()
+        coEvery { ollamaApi.chat(any(), capture(request)) } returns Response.success(
+            OllamaChatResponse(
+                model = "llama3.2",
+                message = OpenAIChatMessage("assistant", "Response"),
+                promptEvalCount = 6000,
+                evalCount = 3,
+                doneReason = "stop"
             )
         )
 
-        // Act
-        service.chat(
+        val result = service.chat(
             provider = LLMProvider.OLLAMA,
             apiKey = "", // Ollama doesn't require API key
             model = "llama3.2",
+            systemPrompt = "Cite.",
+            userPrompt = "a".repeat(20_000),
+            maxTokens = 4096
+        ).getOrThrow()
+
+        coVerify { ollamaApi.chat(url = "http://localhost:11434/api/chat", request = any()) }
+        coVerify(exactly = 0) { openAIApi.chatCompletion(any(), any(), any()) }
+        assertEquals(16384, request.captured.options.numCtx)
+        assertEquals(4096, request.captured.options.numPredict)
+        assertFalse(request.captured.stream)
+        assertFalse(request.captured.truncate)
+        assertFalse(request.captured.shift)
+        assertEquals("Response", result.content)
+        assertEquals(6000, result.inputTokens)
+        assertEquals(3, result.outputTokens)
+    }
+
+    @Test
+    fun `an Ollama prompt over its context is refused with Ollama's own reason, not retried`() = runTest {
+        val reason = "request (3022 tokens) exceeds the available context size (1024 tokens), try increasing it"
+        coEvery { ollamaApi.chat(any(), any()) } returns
+            Response.error(400, """{"error":"$reason"}""".toResponseBody(null))
+
+        val error = service.chat(
+            provider = LLMProvider.OLLAMA,
+            apiKey = "",
+            model = "llama3.2",
             systemPrompt = "Test",
             userPrompt = "Test"
-        )
+        ).exceptionOrNull()
 
-        // Assert
-        coVerify {
-            openAIApi.chatCompletion(
-                url = "http://localhost:11434/v1/chat/completions",
-                authorization = "Bearer ",
-                request = any()
-            )
-        }
+        assertTrue(error is LLMError.InvalidRequestError)
+        val message = error?.message.orEmpty()
+        assertTrue(message, message.contains(reason))
+        coVerify(exactly = 1) { ollamaApi.chat(any(), any()) }
     }
 
     // ==================== Alternative Query Tests ====================
