@@ -86,7 +86,7 @@ class ModelFetchService @Inject constructor(
         private const val RECOMMENDED_ANTHROPIC_FAMILY = "sonnet"
 
         /**
-         * Pick the Anthropic model to recommend as the default.
+         * Pick the Anthropic model that replaces a retired selection.
          *
          * Mirrors the iOS `ModelFetchService.recommendedAnthropicModelID`. Keyed off
          * the family rather than an exact ID: Anthropic has no version-less alias

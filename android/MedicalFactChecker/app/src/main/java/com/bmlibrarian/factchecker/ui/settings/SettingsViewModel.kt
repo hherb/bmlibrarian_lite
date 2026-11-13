@@ -817,9 +817,9 @@ class SettingsViewModel @Inject constructor(
 
     companion object {
         /**
-         * The model that replaces a retired selection, as on iOS: for Anthropic the
-         * newest Sonnet in the live list, else the provider's default if listed, else
-         * the first model.
+         * The model that replaces a retired selection: for Anthropic the newest Sonnet
+         * in the live list, as on iOS; else the provider's default if listed (Android's
+         * own step), else the first model.
          *
          * @param provider The provider whose models were fetched
          * @param models The provider's live list, not empty

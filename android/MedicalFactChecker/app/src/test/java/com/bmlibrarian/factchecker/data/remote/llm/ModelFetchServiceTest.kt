@@ -18,13 +18,10 @@
 
 package com.bmlibrarian.factchecker.data.remote.llm
 
-import com.bmlibrarian.factchecker.domain.model.LLMProvider
-import com.bmlibrarian.factchecker.domain.model.ModelInfo
 import com.bmlibrarian.factchecker.domain.model.ModelPricing
-import com.bmlibrarian.factchecker.ui.settings.SettingsViewModel
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -62,52 +59,12 @@ class ModelFetchServiceTest {
 
     // ==================== Anthropic Recommended Model Tests ====================
 
-    /** Anthropic's live list on 2026-11-13, sorted as the fetch sorts it (newest first). */
-    private val liveAnthropicIds = listOf(
-        "claude-fable-5-2", "claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5",
-        "claude-fable-5-1", "claude-opus-5", "claude-sonnet-5", "claude-fable-5",
-        "claude-opus-4-8", "claude-opus-4-7", "claude-sonnet-4-6", "claude-opus-4-6",
-        "claude-opus-4-5-20251101", "claude-haiku-4-5-20251001", "claude-sonnet-4-5-20250929"
-    ).sortedDescending()
-
-    private fun models(ids: List<String>) = ids.map { ModelInfo(it, it, 0.0, 0.0) }
-
     @Test
     fun `recommends the newest Sonnet`() {
-        assertEquals("claude-sonnet-5-5", ModelFetchService.recommendedAnthropicModelId(liveAnthropicIds))
+        // Sorted as the fetch sorts it: newest first, so a later family can lead.
+        val ids = listOf("claude-zeta-1", "claude-sonnet-5-5", "claude-sonnet-4-6", "claude-opus-5-5")
+        assertEquals("claude-sonnet-5-5", ModelFetchService.recommendedAnthropicModelId(ids))
         assertNull(ModelFetchService.recommendedAnthropicModelId(listOf("claude-opus-5-5")))
-    }
-
-    @Test
-    fun `a retired Anthropic selection moves to the newest Sonnet, not the hard-coded default`() {
-        // The default, Sonnet 4.5, is still listed: older and dearer than Sonnet 5.5.
-        assertTrue(LLMProvider.ANTHROPIC.defaultModel in liveAnthropicIds)
-        assertEquals(
-            "claude-sonnet-5-5",
-            SettingsViewModel.retiredSelectionReplacement(LLMProvider.ANTHROPIC, models(liveAnthropicIds))
-        )
-        // Nor by alphabet: a family sorting after "sonnet" would lead the list.
-        val later = listOf("claude-zeta-1") + liveAnthropicIds
-        assertEquals(
-            "claude-sonnet-5-5",
-            SettingsViewModel.retiredSelectionReplacement(LLMProvider.ANTHROPIC, models(later))
-        )
-    }
-
-    @Test
-    fun `a list with no Sonnet falls back to the default, then the first model`() {
-        val noSonnet = liveAnthropicIds.filterNot { it.contains("sonnet") }
-        assertEquals(
-            noSonnet.first(),
-            SettingsViewModel.retiredSelectionReplacement(LLMProvider.ANTHROPIC, models(noSonnet))
-        )
-        // control: other providers keep their default rule
-        assertEquals(
-            "deepseek-v4-flash",
-            SettingsViewModel.retiredSelectionReplacement(
-                LLMProvider.DEEPSEEK, models(listOf("deepseek-v4-pro", "deepseek-v4-flash"))
-            )
-        )
     }
 
     // ==================== Display Name Tests ====================

@@ -64,12 +64,12 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
     ///
     /// These are hardcoded models that serve as fallbacks when dynamic
     /// model fetching is not available or fails.
-    /// Last updated: January 2026
+    /// Last updated: 2026-11-13 (retired Claude IDs removed).
     var fallbackModels: [LLMModel] {
         switch self {
         case .anthropic:
             return [
-                // Claude 4.5 Series (Latest - January 2026)
+                // Claude 4.5 series (the live list names newer models)
                 LLMModel(
                     id: "claude-sonnet-4-5-20250929",
                     displayName: "Claude Sonnet 4.5",

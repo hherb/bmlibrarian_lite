@@ -300,8 +300,7 @@ messages = [
 
 response = client.chat(
     messages=messages,
-    model="anthropic:claude-sonnet-4-20250514",
-    temperature=0.7,
+    model="anthropic:claude-sonnet-5-5",
     max_tokens=1024
 )
 

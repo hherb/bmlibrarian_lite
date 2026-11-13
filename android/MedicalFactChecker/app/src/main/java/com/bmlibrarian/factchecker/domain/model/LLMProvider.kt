@@ -54,7 +54,7 @@ data class LLMProvider(
         /**
          * Anthropic Claude API provider.
          * Uses native Anthropic API format with x-api-key authentication.
-         * Updated: January 2026 - Claude 4.5 series
+         * Offline fallback list: the Claude 4.5 series, all still live on 2026-11-13.
          */
         val ANTHROPIC = LLMProvider(
             id = "anthropic",
@@ -62,7 +62,7 @@ data class LLMProvider(
             baseUrl = "https://api.anthropic.com/v1",
             defaultModel = "claude-sonnet-4-5-20250929",
             models = listOf(
-                // Claude 4.5 Series (Latest - January 2026)
+                // Claude 4.5 series (the live list names newer models)
                 ModelInfo("claude-sonnet-4-5-20250929", "Claude Sonnet 4.5", 3.00, 15.00),
                 ModelInfo("claude-haiku-4-5-20251001", "Claude Haiku 4.5", 1.00, 5.00),
                 ModelInfo("claude-opus-4-5-20251101", "Claude Opus 4.5", 5.00, 25.00)

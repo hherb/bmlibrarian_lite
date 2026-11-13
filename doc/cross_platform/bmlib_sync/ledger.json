@@ -2057,20 +2057,20 @@
     {
       "id": "bmlib:0.13.0-default-models-move",
       "title": "The default models move",
-      "python": "owed",
+      "python": "ported",
       "swift": "equivalent",
       "android": "equivalent",
       "issue": "#759",
-      "note": "The desktop's default Claude model is `claude-sonnet-4-20250514` (constants.py `DEFAULT_LLM_MODEL`, `QUALITY_ASSESSOR_MODEL`, the task presets, `AnthropicProvider.default_model`), which bmlib's live probe found answering 404. The apps default to `claude-sonnet-4-5-20250929` and replace a stored model a live listing no longer names (Android SettingsViewModel.dropRetiredModelSelection, Swift LLMProvider.swift)."
+      "note": "The desktop's default Claude model was `claude-sonnet-4-20250514`, which bmlib's live probe found answering 404; PR #765 moved it to `claude-sonnet-5-5` (constants.py `DEFAULT_LLM_MODEL`, `QUALITY_ASSESSOR_MODEL`) and maps the retired ID onto it. The apps default to `claude-sonnet-4-5-20250929` and replace a stored model a live listing no longer names (Android SettingsViewModel.dropRetiredModelSelection, Swift LLMProvider.swift)."
     },
     {
       "id": "bmlib#705",
       "title": "Anthropic is sent no `temperature` or `top_p`",
-      "python": "owed",
-      "swift": "owed",
-      "android": "owed",
+      "python": "ported",
+      "swift": "ported",
+      "android": "ported",
       "issue": "#758",
-      "note": "Every platform sends Claude a temperature: the desktop's AnthropicProvider.chat passes `temperature` (default 0.7) and `top_p` to `messages.create` with `anthropic>=0.34.0` uncapped, so a fresh 1.x/2.x install raises TypeError on every call and Opus 4.7+ refuse it on 0.x; Android's AnthropicMessagesRequest sends `temperature` on `2023-06-01`; Swift sends it to Anthropic's OpenAI-compatible endpoint (that endpoint's refusal on Opus 4.7+ is inferred, not probed)."
+      "note": "No platform sends Claude `temperature` or `top_p`; Opus 4.7+ answer 400 to it on both endpoints (probed 2026-11-13). The desktop's AnthropicProvider.chat sends neither (PR #765); Android's AnthropicMessagesRequest has no `temperature` field (PR #766); Swift's LLMService.requestBody leaves it out for `.anthropic` on Anthropic's OpenAI-compatible endpoint (PR #766)."
     },
     {
       "id": "bmlib#707",
