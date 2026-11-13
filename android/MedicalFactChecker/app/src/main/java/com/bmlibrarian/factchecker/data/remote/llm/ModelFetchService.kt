@@ -82,6 +82,23 @@ class ModelFetchService @Inject constructor(
         /** Page size requested from Anthropic's model list (the API maximum). */
         private const val ANTHROPIC_MODEL_PAGE_LIMIT = 1000
 
+        /** Model family recommended as the Anthropic default. */
+        private const val RECOMMENDED_ANTHROPIC_FAMILY = "sonnet"
+
+        /**
+         * Pick the Anthropic model to recommend as the default.
+         *
+         * Mirrors the iOS `ModelFetchService.recommendedAnthropicModelID`. Keyed off
+         * the family rather than an exact ID: Anthropic has no version-less alias
+         * (`claude-sonnet`, `claude-sonnet-latest` answer 404), a pinned ID ages and
+         * retires, and the list's first ID is Sonnet only by alphabetical order.
+         *
+         * @param ids Model IDs, newest version first within each family
+         * @return The newest Sonnet, or null if the list has none
+         */
+        internal fun recommendedAnthropicModelId(ids: List<String>): String? =
+            ids.firstOrNull { it.lowercase().contains(RECOMMENDED_ANTHROPIC_FAMILY) }
+
         /** DeepSeek vendor prefix stripped before building a display name. */
         private const val DEEPSEEK_PREFIX = "deepseek-"
 

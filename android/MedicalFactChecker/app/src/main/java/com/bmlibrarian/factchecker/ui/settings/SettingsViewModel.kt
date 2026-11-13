@@ -306,8 +306,7 @@ class SettingsViewModel @Inject constructor(
         if (provider.allowsManualModelEntry) return
         if (models.any { it.id == settings.value.modelId }) return
 
-        val replacement = models.firstOrNull { it.id == provider.defaultModel } ?: models.first()
-        setModel(replacement.id)
+        setModel(retiredSelectionReplacement(provider, models))
     }
 
     /**
@@ -817,6 +816,25 @@ class SettingsViewModel @Inject constructor(
     }
 
     companion object {
+        /**
+         * The model that replaces a retired selection, as on iOS: for Anthropic the
+         * newest Sonnet in the live list, else the provider's default if listed, else
+         * the first model.
+         *
+         * @param provider The provider whose models were fetched
+         * @param models The provider's live list, not empty
+         * @return The ID to select
+         */
+        internal fun retiredSelectionReplacement(provider: LLMProvider, models: List<ModelInfo>): String {
+            val ids = models.map { it.id }
+            val recommended = if (provider.id == LLMProvider.ANTHROPIC.id) {
+                ModelFetchService.recommendedAnthropicModelId(ids)
+            } else {
+                null
+            }
+            return recommended ?: ids.firstOrNull { it == provider.defaultModel } ?: ids.first()
+        }
+
         /** Timeout for StateFlow sharing. */
         private const val FLOW_TIMEOUT_MS = 5000L
     }
