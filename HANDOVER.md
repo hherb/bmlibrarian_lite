@@ -232,7 +232,7 @@ Open issues by family; each issue carries the detail. None blocks another.
   per-request `num_ctx`, overflow is a 400; Android has no Ollama URL
   setting; deferred #768, #769), **#761** (PR #771: a reply holding `NaN`,
   `Infinity`, `1e999` or a lone surrogate is unreadable whole; retries carry
-  `JSON_CORRECTION_NOTE`; deferred #770). **#762** (PR, this branch): the desktop
+  `JSON_CORRECTION_NOTE`; deferred #770). **#762** (PR #774): the desktop
   reads every PDF through bmlib's `PyMuPDFConverter` (`pdf_utils.read_pdf_text`):
   a typed `PDFExtractionError` (encrypted / unreadable / engine / cancelled),
   a page that failed fails the read, MuPDF's messages kept; the upload names
