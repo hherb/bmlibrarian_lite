@@ -29,6 +29,15 @@ final class ScoreParityTests: XCTestCase {
         return try XCTUnwrap(contract["cases"] as? [[String: Any]])
     }
 
+    func testTheCorrectionNoteIsTheContracts() throws {
+        let file = try XCTUnwrap(Self.contractFile, "score_values.json not found")
+            .deletingLastPathComponent().appendingPathComponent("json_correction.json")
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: file))
+        let note = try XCTUnwrap((object as? [String: Any])?["note"] as? String)
+        XCTAssertEqual(ResponseParser.jsonCorrectionNote, note)
+        XCTAssertEqual(ResponseParser.withJSONCorrection("task"), "task\n\n\(note)")
+    }
+
     func testEachCase() throws {
         let rows = try cases()
         XCTAssertGreaterThanOrEqual(rows.count, 18)

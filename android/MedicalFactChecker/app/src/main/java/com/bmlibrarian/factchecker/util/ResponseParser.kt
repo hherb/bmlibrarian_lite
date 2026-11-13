@@ -19,6 +19,7 @@
 package com.bmlibrarian.factchecker.util
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -99,7 +100,8 @@ object ResponseParser {
      * The object read is the first balanced `{...}` in the reply, so prose or a
      * markdown fence around it does not hide it, as on the desktop and iOS. A
      * `score` that is missing, null, not a number or off the scale makes the
-     * reply unreadable. The contract is
+     * reply unreadable, and so does a value JSON does not define anywhere in it
+     * ([holdsRefusedValue]), with no regex read around it. The contract is
      * `doc/cross_platform/llm_parity/score_values.json`.
      *
      * @param response Raw LLM response text
@@ -116,6 +118,9 @@ object ResponseParser {
             // exact `"score": N` is read from the text
             return parseScoreWithRegex(cleanJson)
         }
+        if (holdsRefusedValue(jsonObject)) {
+            return ScoreResult(null, REFUSED_VALUE_REASON, parseFailed = true)
+        }
 
         val score = scoreOnScale(jsonObject["score"])
             ?: return ScoreResult(null, UNREADABLE_SCORE_REASON, parseFailed = true)
@@ -123,6 +128,27 @@ object ResponseParser {
             .firstNotNullOfOrNull { key -> textOf(jsonObject[key]) }
             ?: NO_RATIONALE
         return ScoreResult(score, rationale, parseFailed = false)
+    }
+
+    /**
+     * Whether a parsed reply holds a value JSON does not define (#761).
+     *
+     * The lenient parser keeps `NaN`, `Infinity`, `-Infinity`, a number that
+     * overflows binary64 (`1e999`) and an integer past it as bare tokens. bmlib,
+     * the desktop and iOS refuse the whole reply over one (bmlib#572), never
+     * reading the fields beside it. Any other bare word stays the lenient
+     * parse's business.
+     *
+     * @param element The parsed reply
+     * @return True when some number in it is not a finite JSON number
+     */
+    internal fun holdsRefusedValue(element: JsonElement): Boolean = when (element) {
+        is JsonObject -> element.values.any(::holdsRefusedValue)
+        is JsonArray -> element.any(::holdsRefusedValue)
+        is JsonPrimitive -> !element.isString && (
+            element.content in NON_FINITE_TOKENS ||
+                (JSON_NUMBER.matches(element.content) && !element.content.toDouble().isFinite())
+            )
     }
 
     /**
@@ -213,6 +239,8 @@ object ResponseParser {
 
         return try {
             val jsonObject = json.parseToJsonElement(cleanJson).jsonObject
+            // No passage is read around a value JSON does not define (#761)
+            if (holdsRefusedValue(jsonObject)) return emptyList()
             val citations = jsonObject["citations"]?.jsonArray ?: return emptyList()
 
             citations.mapNotNull { element ->
@@ -452,6 +480,10 @@ object ResponseParser {
 
     /** A string score: one or more of the ASCII digits 0-9, as on every platform. */
     private val ASCII_DIGITS = Regex("[0-9]+")
+
+    /** The bare tokens the lenient parser keeps that JSON does not define (#761). */
+    private val NON_FINITE_TOKENS = setOf("NaN", "Infinity", "-Infinity")
+    private const val REFUSED_VALUE_REASON = "parse: the reply holds NaN, Infinity or a number past binary64"
 
     /** A JSON number as RFC 8259 writes it. */
     private val JSON_NUMBER = Regex("""-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?""")

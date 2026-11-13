@@ -231,6 +231,17 @@ class ResponseParserTest {
     }
 
     @Test
+    fun `parseCitationResponse reads no passage beside a value JSON does not define`() {
+        for (value in listOf("NaN", "Infinity", "-Infinity", "1e999", "1" + "0".repeat(400))) {
+            val reply = """{"citations": [{"passage": "Aspirin reduced stroke.", "relevance": "x", "n": $value}]}"""
+            assertEquals(value, emptyList<ResponseParser.CitationResult>(), ResponseParser.parseCitationResponse(reply))
+        }
+        // Control: a finite number beside it does not refuse the reply
+        val reply = """{"citations": [{"passage": "Aspirin reduced stroke.", "relevance": "x", "n": 1e300}]}"""
+        assertEquals(1, ResponseParser.parseCitationResponse(reply).size)
+    }
+
+    @Test
     fun `parseCitationResponse returns empty list for invalid JSON`() {
         val invalidJson = "no citations here"
 

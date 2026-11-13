@@ -231,19 +231,18 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **From the bmlib sync (PR #757)**: **#758**/**#759** (no Claude
-  `temperature`; PRs #765, #766) and **#760** (PR #767) fixed, unreleased (a 0.6.1 is
-  the maintainer's call). #760: the apps ask Ollama on `/api/chat` with a
-  per-request `num_ctx` (`llm_parity/ollama_context.json`), `truncate`/`shift`
-  off, so an overflow is a 400, not Ollama's silent middle cut (probed on
-  0.40.14). Android has no Ollama URL setting (`localhost` only). Deferred from
-  its review: #768 (an Ollama too old for `truncate`/`shift` still cuts
-  silently), #769 (whole prompts can now time out on a slow local model).
-  Then **#761** `NaN`/`Infinity`
-  in model JSON, retries re-send unchanged; **#762** desktop PDF extraction
-  (fault side, MuPDF's read-past messages, no cancel); **#763** Android HTML
-  upload (markup capped as text, quadratic regex); **#764** Android PDF
-  extraction ignores cancel.
+- **From the bmlib sync (PR #757)**, fixed, unreleased (a 0.6.1 is the
+  maintainer's call): **#758**/**#759** (no Claude `temperature`), **#760**
+  (apps ask Ollama on `/api/chat` with a per-request `num_ctx`, overflow is a
+  400; Android has no Ollama URL setting; deferred #768, #769) and **#761**
+  (`fix/761-strict-model-json`): `NaN`, `Infinity`, `1e999` or an integer past
+  binary64 makes a reply unreadable as a whole, no fallback read around it,
+  and every retry after an unreadable reply carries bmlib's
+  `JSON_CORRECTION_NOTE` (`llm_parity/json_correction.json`; the prompts
+  asking for null up front is #770). Next: **#762**
+  desktop PDF extraction (fault side, MuPDF's read-past messages, no cancel);
+  **#763** Android HTML upload (markup capped as text, quadratic regex);
+  **#764** Android PDF extraction ignores cancel.
 - **Retraction checking** follow-ups (#662, #726–#728, #730, #731 and
   #737–#739 landed; **their rules, the unreadable-snapshot ones above all,
   are in `doc/developer/retraction_checking.md`**: read it before touching

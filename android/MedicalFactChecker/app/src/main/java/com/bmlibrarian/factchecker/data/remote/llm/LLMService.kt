@@ -224,6 +224,8 @@ class LLMService @Inject constructor(
      * @param claim The medical claim being evaluated
      * @param title Document title
      * @param abstractText Document abstract (may be null)
+     * @param correctJson Whether this asks again after an unreadable reply: the
+     *   user turn then carries [JSON_CORRECTION_NOTE] (#761)
      * @return Result containing score (1-5) and rationale. A reply that holds no
      *   score on the scale is a failure with [LLMError.ParseError], carrying the
      *   whole reply as `rawResponse` (and logged), never a default score: the
@@ -236,7 +238,8 @@ class LLMService @Inject constructor(
         model: String,
         claim: String,
         title: String,
-        abstractText: String?
+        abstractText: String?,
+        correctJson: Boolean = false
     ): Result<Pair<Int, String>> {
         val systemPrompt = """
             You are evaluating medical literature for relevance to a specific claim.
@@ -257,7 +260,7 @@ class LLMService @Inject constructor(
 
             Document Title: $title
             Abstract: ${abstractText ?: "No abstract available"}
-        """.trimIndent()
+        """.trimIndent().let { if (correctJson) withJsonCorrection(it) else it }
 
         return chat(
             provider = provider,
@@ -545,6 +548,25 @@ class LLMService @Inject constructor(
     companion object {
         /** Log tag for this service. */
         private const val TAG = "LLMService"
+
+        /**
+         * What a retry after an unreadable reply adds to its request (#761),
+         * byte-identical with bmlib's `JSON_CORRECTION_NOTE`
+         * (`doc/cross_platform/llm_parity/json_correction.json`).
+         */
+        const val JSON_CORRECTION_NOTE =
+            "Your previous reply could not be read as JSON. Reply again with the JSON " +
+                "alone: nothing before or after it, and null, never NaN or Infinity, for a " +
+                "number you cannot give."
+
+        /**
+         * A user turn with [JSON_CORRECTION_NOTE] after a blank line, so a retry
+         * never re-sends the identical request; the unreadable reply is not sent back.
+         *
+         * @param userPrompt The request's user turn
+         * @return The turn to send instead
+         */
+        fun withJsonCorrection(userPrompt: String): String = "$userPrompt\n\n$JSON_CORRECTION_NOTE"
 
         /**
          * The prompt asking for alternative structured queries.

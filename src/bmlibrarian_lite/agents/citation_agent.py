@@ -32,6 +32,8 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional, Callable
 
+from bmlib.llm.utils import strict_json_loads
+
 from ..chunking import analysis_windows
 from ..data_models import (
     Citation,
@@ -42,7 +44,7 @@ from ..data_models import (
 )
 from ..exceptions import JSONParseError, RetryExhaustedError
 from ..utils import llm_retry, classify_llm_exception, classify_exhausted_retries
-from .base import LiteBaseAgent
+from .base import LiteBaseAgent, refuses_json_value
 
 logger = logging.getLogger(__name__)
 
@@ -489,10 +491,16 @@ Relevance Score: {scored_doc.score}/5
             # Remove closing fence
             cleaned = re.sub(r"\n?```\s*$", "", cleaned)
 
+        if refuses_json_value(cleaned):
+            # NaN, Infinity or a number past binary64: no span around it is
+            # read as the answer (#761)
+            logger.warning(f"Refused a value JSON does not define in: {response}")
+            return None
+
         try:
             # Try parsing the entire cleaned response as JSON first
             # This is the most reliable method
-            passages = readable_passages(json.loads(cleaned))
+            passages = readable_passages(strict_json_loads(cleaned))
             if passages is not None:
                 return passages
 
@@ -515,7 +523,7 @@ Relevance Score: {scored_doc.score}/5
                             # Found matching closing brace
                             json_str = response[start_idx:i + 1]
                             try:
-                                passages = readable_passages(json.loads(json_str))
+                                passages = readable_passages(strict_json_loads(json_str))
                                 if passages is not None:
                                     return passages
                             except json.JSONDecodeError:

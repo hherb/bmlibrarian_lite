@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "description": "What a retry after an unreadable model reply asks (#761, bmlib#717): never the identical request again. The note is appended to the last user turn after a blank line (or sent as a user turn of its own when the last turn is not the user's); the unreadable reply is not sent back. Once added it stays on every later attempt of that call. Byte-identical with bmlib's JSON_CORRECTION_NOTE. Read by tests/test_json_correction.py, Packages/BioMedLit JSONCorrectionTests and Android JsonCorrectionTest.",
+  "note": "Your previous reply could not be read as JSON. Reply again with the JSON alone: nothing before or after it, and null, never NaN or Infinity, for a number you cannot give."
+}

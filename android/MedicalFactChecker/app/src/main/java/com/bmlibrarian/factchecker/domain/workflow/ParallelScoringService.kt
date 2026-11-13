@@ -328,7 +328,10 @@ class ParallelScoringService @Inject constructor(
                 model = model,
                 claim = claim,
                 title = input.title,
-                abstractText = input.abstract.ifEmpty { null }
+                abstractText = input.abstract.ifEmpty { null },
+                // Only a parse error is retried, so each later attempt follows
+                // an unreadable reply and asks with the note (#761)
+                correctJson = attempt > 0
             )
 
             // Estimate tokens and cost using companion object function
