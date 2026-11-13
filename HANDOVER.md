@@ -232,7 +232,7 @@ Open issues by family; each issue carries the detail. None blocks another.
 ### Next up
 
 - **From the bmlib sync (PR #757)**: **#758**/**#759** (no Claude
-  `temperature`; PRs #765, #766) and **#760** fixed, unreleased (a 0.6.1 is
+  `temperature`; PRs #765, #766) and **#760** (PR #767) fixed, unreleased (a 0.6.1 is
   the maintainer's call). #760: the apps ask Ollama on `/api/chat` with a
   per-request `num_ctx` (`llm_parity/ollama_context.json`), `truncate`/`shift`
   off, so an overflow is a 400, not Ollama's silent middle cut (probed on
