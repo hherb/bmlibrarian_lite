@@ -2084,11 +2084,11 @@
     {
       "id": "bmlib#572",
       "title": "A reply carrying `NaN`, `Infinity`, `1e999` or an integer past binary64 is unparseable",
-      "python": "owed",
+      "python": "ported",
       "swift": "equivalent",
-      "android": "owed",
+      "android": "ported",
       "issue": "#761",
-      "note": "The desktop decodes every reply with Python's `json.loads` (agents/scoring_agent.py, citation_agent.py, quality/*), which reads `NaN`, `Infinity` and `1e999` and answers with the fields beside them; Android's lenient kotlinx `parseToJsonElement` (util/ResponseParser.kt) likewise reads the score beside an unquoted `NaN`. Swift's JSONSerialization refuses `NaN`, `Infinity`, `1e999` and an integer past binary64 as a whole reply (probed), bmlib's rule."
+      "note": "Ported in #761: the desktop's scoring, citation and quality readers, and the quality benchmark's, decode with bmlib's `strict_json_loads`, and `agents.base.refuses_json_value` keeps the prose and brace-span fallbacks off a refused reply (an integer past `sys.get_int_max_str_digits()` included); Android's `ResponseParser.holdsRefusedValue` refuses the score and citation replies the lenient parse kept (a lone surrogate included), and `holdsRefusedToken` the ones it could not parse, before any regex read; a refused citation reply is a `ParseError`, never an empty list. Swift's JSONSerialization refuses all four as a whole reply (probed), bmlib's rule. Contract rows in `llm_parity/score_values.json`. Android's report parse is not checked: a report reply carries no numbers."
     },
     {
       "id": "bmlib#697",
@@ -2210,11 +2210,11 @@
     {
       "id": "bmlib#717",
       "title": "An unparseable reply is retried with a correction, not re-sent",
-      "python": "owed",
-      "swift": "owed",
-      "android": "owed",
+      "python": "ported",
+      "swift": "ported",
+      "android": "ported",
       "issue": "#761",
-      "note": "Every platform re-sends the identical request after an unparseable reply: desktop `utils.llm_retry` around `_score_with_retry`/`_assess_with_retry`/`_extract_with_retry`, Swift and Android ParallelScoringService's parse-retry loop. None adds a correction note or asks for null, never NaN, in its prompts."
+      "note": "Ported in #761: `JSON_CORRECTION_NOTE` (contract `llm_parity/json_correction.json`) on the last user turn of every attempt after an unreadable reply. Desktop: `utils.llm_retry(retry_on_json_error=True)` marks the call (`json_correction_due`) and `LiteBaseAgent._chat` adds the note; Swift and Android ParallelScoringService add it from the second attempt, since only a parse failure is retried. The prompts themselves do not yet ask for null, never NaN (#770)."
     },
     {
       "id": "bmlib#710",
@@ -2327,11 +2327,11 @@
     {
       "id": "bmlib:0.12.0-as-float-refuses-huge-integer",
       "title": "`_json_fields.as_float` refuses an integer past the double range",
-      "python": "owed",
+      "python": "ported",
       "swift": "n/a",
       "android": "n/a",
       "issue": "#761",
-      "note": "The desktop's port, quality/json_fields.py `as_float`, still calls `float()` on any int, so an integer past 1.8e308 raises OverflowError, which quality_agent's catch-all turns into an unclassified assessment rather than an unstated confidence. The apps have no quality readers."
+      "note": "Ported in #761: quality/json_fields.py `as_float` refuses an integer past the double range instead of raising OverflowError. The apps have no quality readers."
     },
     {
       "id": "bmlib:0.12.0-condensation-takes-any-prompts",

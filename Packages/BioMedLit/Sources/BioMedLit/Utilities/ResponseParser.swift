@@ -21,6 +21,25 @@ import Foundation
 /// All functions are pure, stateless, and easily testable.
 public enum ResponseParser {
 
+    // MARK: - Asking Again
+
+    /// What a retry after an unreadable reply adds to its request (#761), so
+    /// it never re-sends the identical request. Byte-identical with bmlib's
+    /// `JSON_CORRECTION_NOTE` (`doc/cross_platform/llm_parity/json_correction.json`).
+    public static let jsonCorrectionNote =
+        "Your previous reply could not be read as JSON. Reply again with the JSON "
+        + "alone: nothing before or after it, and null, never NaN or Infinity, for a "
+        + "number you cannot give."
+
+    /// A user turn with ``jsonCorrectionNote`` after a blank line; the
+    /// unreadable reply is not sent back.
+    ///
+    /// - Parameter prompt: The request's user turn.
+    /// - Returns: The turn to send instead.
+    public static func withJSONCorrection(_ prompt: String) -> String {
+        "\(prompt)\n\n\(jsonCorrectionNote)"
+    }
+
     // MARK: - Score Parsing
 
     /// Result of parsing a score response.

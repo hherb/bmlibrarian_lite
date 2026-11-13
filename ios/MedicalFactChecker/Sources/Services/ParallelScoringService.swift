@@ -349,7 +349,6 @@ actor ParallelScoringService {
         claim: String
     ) async -> ScoringResult? {
         let prompt = buildScoringPrompt(input: input, claim: claim)
-        let messages = [LLMService.userMessage(prompt)]
 
         var lastParseError = ""
         var accumulatedUsage: LLMUsage?
@@ -358,7 +357,7 @@ actor ParallelScoringService {
         for attempt in 0..<Self.maxParseRetries {
             do {
                 let (response, usage) = try await llmService.chat(
-                    messages: messages,
+                    messages: Self.scoringMessages(prompt, attempt: attempt),
                     temperature: 0.1,
                     maxTokens: 512,
                     jsonMode: true
@@ -412,6 +411,20 @@ actor ParallelScoringService {
             message: lastParseError,
             usage: accumulatedUsage
         )
+    }
+
+    /// The turns one scoring attempt sends.
+    ///
+    /// Only a parse failure is retried, so every attempt after the first
+    /// follows an unreadable reply and asks with
+    /// `ResponseParser.jsonCorrectionNote`, never the identical request (#761).
+    ///
+    /// - Parameters:
+    ///   - prompt: The scoring prompt.
+    ///   - attempt: The attempt's index, from 0.
+    /// - Returns: The messages to send.
+    static func scoringMessages(_ prompt: String, attempt: Int) -> [ChatMessage] {
+        [LLMService.userMessage(attempt == 0 ? prompt : ResponseParser.withJSONCorrection(prompt))]
     }
 
     /// Build the scoring prompt for a document.

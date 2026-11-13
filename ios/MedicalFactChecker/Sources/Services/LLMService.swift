@@ -63,7 +63,12 @@ actor LLMService {
 
     // MARK: - Initialization
 
-    init(baseURL: URL, apiKey: String, model: String, provider: LLMProvider? = nil) {
+    /// - Parameter session: The session requests go through; a test passes one
+    ///   with a stub protocol. Nil builds one with the provider's timeouts.
+    init(
+        baseURL: URL, apiKey: String, model: String, provider: LLMProvider? = nil,
+        session: URLSession? = nil
+    ) {
         self.baseURL = baseURL
         self.apiKey = apiKey
         self.model = model
@@ -78,7 +83,7 @@ actor LLMService {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = requestTimeout
         config.timeoutIntervalForResource = resourceTimeout
-        self.session = URLSession(configuration: config)
+        self.session = session ?? URLSession(configuration: config)
     }
 
     /// Create service from current app settings.

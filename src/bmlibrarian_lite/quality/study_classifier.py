@@ -28,13 +28,14 @@ literature review sections.
 Includes robust retry logic using tenacity for handling API failures and timeouts.
 """
 
-import json
 import logging
 import re
 import time
 import warnings
 from dataclasses import replace
 from typing import Optional, Callable
+
+from bmlib.llm.utils import strict_json_loads
 
 from ..agents.base import LiteBaseAgent
 from ..data_models import LiteDocument
@@ -388,10 +389,11 @@ Note: This is part {i + 1} of {len(windows)} sections from a long abstract."""
             )
 
         try:
-            data = json.loads(cleaned)
+            data = strict_json_loads(cleaned)
         except ValueError as e:
-            # A JSONDecodeError, or the plain ValueError json.loads raises
-            # for an integer longer than sys.get_int_max_str_digits()
+            # strict_json_loads raises every refusal as a JSONDecodeError:
+            # NaN, Infinity, a number past binary64 (#761) and an integer
+            # longer than sys.get_int_max_str_digits() alike
             logger.warning(
                 f"Document {doc_id}: Failed to parse JSON response: {e}"
             )

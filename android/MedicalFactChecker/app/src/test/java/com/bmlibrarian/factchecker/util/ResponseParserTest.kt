@@ -26,6 +26,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -204,7 +205,7 @@ class ResponseParserTest {
     fun `parseCitationResponse extracts single citation`() {
         val json = """{"citations": [{"passage": "This is a key finding.", "relevance": "Supports the claim"}]}"""
 
-        val result = ResponseParser.parseCitationResponse(json)
+        val result = ResponseParser.parseCitationResponse(json)!!
 
         assertEquals(1, result.size)
         assertEquals("This is a key finding.", result[0].passage)
@@ -223,11 +224,40 @@ class ResponseParserTest {
         }
         """
 
-        val result = ResponseParser.parseCitationResponse(json)
+        val result = ResponseParser.parseCitationResponse(json)!!
 
         assertEquals(3, result.size)
         assertEquals("First finding.", result[0].passage)
         assertEquals("Third finding.", result[2].passage)
+    }
+
+    @Test
+    fun `parseCitationResponse refuses a reply holding a value JSON does not define`() {
+        for (value in listOf("NaN", "Infinity", "-Infinity", "1e999", "1" + "0".repeat(400), "\"x \\ud800 y\"")) {
+            val reply = """{"citations": [{"passage": "Aspirin reduced stroke.", "relevance": "x", "n": $value}]}"""
+            assertNull(value, ResponseParser.parseCitationResponse(reply))
+            // Nor read by the regex once the lenient parse fails on a trailing comma
+            assertNull(value, ResponseParser.parseCitationResponse(reply.replace("]}", "],}")))
+        }
+        // Control: a finite number or a quoted word beside it does not refuse the reply
+        for (value in listOf("1e300", "\"NaN\"")) {
+            val reply = """{"citations": [{"passage": "Aspirin reduced stroke.", "relevance": "x", "n": $value}]}"""
+            assertEquals(value, 1, ResponseParser.parseCitationResponse(reply)!!.size)
+            assertEquals(value, 1, ResponseParser.parseCitationResponse(reply.replace("]}", "],}"))!!.size)
+        }
+    }
+
+    @Test
+    fun `holdsRefusedToken sets strings aside, a string cut off included`() {
+        assertTrue(ResponseParser.holdsRefusedToken("""{"score": 4, "n": NaN,"""))
+        assertTrue(ResponseParser.holdsRefusedToken("""{"score": 4, "n": -1.5e999"""))
+        assertFalse(ResponseParser.holdsRefusedToken("""{"score": 4, "explanation": "NaN \" Infinity","""))
+        assertFalse(ResponseParser.holdsRefusedToken("""{"score": 4, "explanation": "cut off at NaN"""))
+        assertFalse(ResponseParser.holdsRefusedToken("""{"score": 4, "n": 1e300,"""))
+        assertTrue(ResponseParser.holdsRefusedToken("""{"score": 4, "e": "x \ud800 y","""))
+        assertTrue(ResponseParser.holdsRefusedToken("""{"score": 4, "e": "x \udc00 y","""))
+        // A paired escape is one character, as JSON means it
+        assertFalse(ResponseParser.holdsRefusedToken("""{"score": 4, "e": "x \ud83d\ude00 y","""))
     }
 
     @Test
@@ -236,7 +266,7 @@ class ResponseParserTest {
 
         val result = ResponseParser.parseCitationResponse(invalidJson)
 
-        assertTrue(result.isEmpty())
+        assertEquals(emptyList<ResponseParser.CitationResult>(), result)
     }
 
     @Test
@@ -245,7 +275,7 @@ class ResponseParserTest {
 
         val result = ResponseParser.parseCitationResponse(json)
 
-        assertTrue(result.isEmpty())
+        assertEquals(emptyList<ResponseParser.CitationResult>(), result)
     }
 
     // ==================== Report Response Tests ====================

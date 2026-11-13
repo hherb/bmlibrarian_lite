@@ -501,22 +501,23 @@ class TestAFailureIsRecordedAsOne:
         evaluation = classify_once(ScriptedClient(answer))
         assert evaluation.failure is EvaluationErrorCode.JSON_PARSE_ERROR
 
-    def test_an_infinite_sample_size_is_no_sample_size(self) -> None:
-        """JSON reads 1e999 as infinity, which int() cannot take."""
+    def test_an_infinite_sample_size_makes_the_answer_unreadable(self) -> None:
+        """``json.dumps`` writes 1e999 as ``Infinity``, no JSON value (#761).
+
+        The design beside it is not read, as the review does not read it.
+        """
         evaluation = classify_once(
             ScriptedClient(json.dumps({"study_design": "rct", "sample_size": 1e999}))
         )
-        assert evaluation.study_design is StudyDesign.RCT
-        assert evaluation.assessment is not None
-        assert evaluation.assessment.sample_size is None
+        assert evaluation.failure is EvaluationErrorCode.JSON_PARSE_ERROR
+        assert evaluation.assessment is None
 
     def test_a_nan_is_not_read_as_the_top_of_the_scale(self) -> None:
-        """Clamped, NaN became full confidence and a perfect score."""
+        """Clamped, NaN became full confidence and a perfect score; now unreadable (#761)."""
         answer = '{"study_design": "rct", "confidence": NaN, "quality_score": NaN}'
         evaluation = assess_once(ScriptedClient(answer))
-        assert evaluation.assessment is not None
-        assert evaluation.assessment.confidence != 1.0
-        assert evaluation.assessment.quality_score == 0.0
+        assert evaluation.failure is EvaluationErrorCode.JSON_PARSE_ERROR
+        assert evaluation.assessment is None
 
     def test_an_answer_the_parser_did_not_foresee_does_not_end_the_run(
         self, storage: LiteStorage, monkeypatch: pytest.MonkeyPatch

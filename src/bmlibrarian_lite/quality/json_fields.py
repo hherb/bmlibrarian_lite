@@ -133,7 +133,8 @@ def as_float(value: object, field: str | None = None) -> float | None:
     """Return *value* as a finite ``float``, or ``None``.
 
     A numeric string is parsed; a ``bool`` and anything non-finite are
-    refused.
+    refused, an ``int`` past the double range included, which ``float()``
+    refuses with ``OverflowError`` rather than returning infinity (#761).
 
     Args:
         value: The decoded JSON value.
@@ -146,7 +147,10 @@ def as_float(value: object, field: str | None = None) -> float | None:
     if isinstance(value, bool):
         result = None
     elif isinstance(value, (int, float)):
-        result = float(value)
+        try:
+            result = float(value)
+        except OverflowError:
+            result = None
     elif isinstance(value, str):
         try:
             result = float(value)

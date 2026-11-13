@@ -26,9 +26,10 @@ Includes robust retry logic using tenacity for handling API failures and timeout
 Cost: ~$0.003 per document
 """
 
-import json
 import logging
 from typing import Optional
+
+from bmlib.llm.utils import strict_json_loads
 
 from ..agents.base import LiteBaseAgent
 from ..chunking import analysis_windows
@@ -247,10 +248,11 @@ Focus on THIS study's methodology, not studies it references."""
             )
 
         try:
-            data = json.loads(cleaned)
+            data = strict_json_loads(cleaned)
         except ValueError as e:
-            # A JSONDecodeError, or the plain ValueError json.loads raises
-            # for an integer longer than sys.get_int_max_str_digits()
+            # strict_json_loads raises every refusal as a JSONDecodeError:
+            # NaN, Infinity, a number past binary64 (#761) and an integer
+            # longer than sys.get_int_max_str_digits() alike
             logger.warning(f"Failed to parse JSON response: {e}")
             raise JSONParseError(
                 f"Failed to parse JSON response: {e}",

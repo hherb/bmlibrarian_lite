@@ -115,6 +115,7 @@ class TestTheHelpers:
             (float("inf"), None),
             (None, None),
             ({}, None),
+            (10**400, None),
         ],
     )
     def test_as_float(self, value: object, expected: float | None) -> None:
@@ -296,16 +297,13 @@ class TestTierThreeNarrowsEveryValue:
 
         assert any("Negative sample size" in m for m in caplog.messages)
 
-    def test_an_infinite_sample_size_does_not_take_the_assessment_down(self) -> None:
-        """An infinite sample size is unstated.
+    def test_an_infinite_sample_size_makes_the_reply_unreadable(self) -> None:
+        """``Infinity`` is no JSON value: the reply is a parse failure, retried (#761).
 
-        ``json.loads`` accepts ``Infinity``; ``int(inf)`` raised
-        ``OverflowError`` past the old reader's ``except``.
+        The design beside it is not read as the answer (bmlib#572).
         """
-        result = _tier3_text('{"study_design": "rct", "sample_size": Infinity}')
-
-        assert result.sample_size is None
-        assert result.study_design is StudyDesign.RCT
+        with pytest.raises(JSONParseError):
+            _tier3_text('{"study_design": "rct", "sample_size": Infinity}')
 
     def test_a_string_is_not_a_list_of_strengths(self) -> None:
         """A string is not a list of strengths."""
@@ -370,25 +368,14 @@ class TestTierThreeNarrowsEveryValue:
         """
         assert _tier3(confidence=True).confidence == CONFIDENCE_PARSE_FAILURE_DEFAULT
 
-    def test_a_nan_confidence_takes_the_default(self) -> None:
-        """A NaN confidence takes the default, never 1.0.
+    @pytest.mark.parametrize("value", ["NaN", "Infinity"])
+    def test_a_non_finite_confidence_makes_the_reply_unreadable(self, value: str) -> None:
+        """Never 1.0 (``max(0, min(1, nan))``), and never the design beside it (#761).
 
-        ``json.loads`` accepts ``NaN``, and ``max(0, min(1, nan))`` is 1.0.
         The raw reply text goes through the parser, not a pre-parsed dict.
         """
-        result = _tier3_text(
-            '{"study_design": "rct", "quality_score": NaN, "confidence": NaN}'
-        )
-
-        assert result.confidence == CONFIDENCE_PARSE_FAILURE_DEFAULT
-        assert result.quality_score == 0.0
-        assert result.study_design is StudyDesign.RCT
-
-    def test_an_infinite_confidence_takes_the_default(self) -> None:
-        """An infinite confidence takes the default."""
-        result = _tier3_text('{"study_design": "rct", "confidence": Infinity}')
-
-        assert result.confidence == CONFIDENCE_PARSE_FAILURE_DEFAULT
+        with pytest.raises(JSONParseError):
+            _tier3_text(f'{{"study_design": "rct", "quality_score": 7, "confidence": {value}}}')
 
     def test_a_refused_confidence_is_warned_of_and_a_null_is_not(
         self, caplog: pytest.LogCaptureFixture
@@ -451,12 +438,12 @@ class TestTierTwoNarrowsEveryValue:
         """A boolean sample size is not a count."""
         assert _tier2(sample_size=True).sample_size is None
 
-    def test_an_infinite_sample_size_does_not_take_the_classification_down(self) -> None:
-        """An infinite sample size does not take the classification down."""
+    def test_an_infinite_sample_size_makes_the_classification_unknown(self) -> None:
+        """``Infinity`` is no JSON value: the design beside it is not read (#761)."""
         result = _tier2_text('{"study_design": "rct", "confidence": 0.9, "sample_size": Infinity}')
 
         assert result.sample_size is None
-        assert result.study_design is StudyDesign.RCT
+        assert result.study_design is StudyDesign.UNKNOWN
 
     @pytest.mark.parametrize("answer", ["yes", "no", "unclear"])
     def test_a_string_flag_is_not_a_boolean(self, answer: str) -> None:

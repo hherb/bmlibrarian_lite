@@ -14,11 +14,15 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.spyk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /**
  * An unreadable relevance score is a parse failure the scorer retries, never a
@@ -88,6 +92,42 @@ class ParallelScoringServiceTest {
         assertTrue(ParallelScoringService.isParseError(LLMError.ParseError("no score")))
         // Control: an error of another type is still judged by its message
         assertFalse(ParallelScoringService.isParseError(IllegalStateException("no score")))
+    }
+
+    @Test
+    fun `the retries after an unreadable reply carry the correction note`() = runTest {
+        val llm = spyk(LLMService(mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true)))
+        val prompts = mutableListOf<String>()
+        val replies = ArrayDeque(listOf("""{"score": 4, "confidence": NaN}""", "no score", """{"score": 3}"""))
+        coEvery { llm.chat(any(), any(), any(), any(), capture(prompts), any(), any()) } answers {
+            Result.success(LLMResult(replies.removeFirst(), 10, 10, "stop", "fake"))
+        }
+
+        val success = ParallelScoringService(llm).scoreDocuments(
+            documents = listOf(input),
+            claim = "A claim",
+            provider = LLMProvider.OPENAI,
+            apiKey = "key",
+            model = "model"
+        ).single() as ScoringResult.Success
+
+        assertEquals(3, success.score)
+        val (first, second, third) = prompts
+        assertFalse(first.contains(LLMService.JSON_CORRECTION_NOTE))
+        // Appended to the user turn after a blank line, and kept on every later attempt
+        assertEquals("$first\n\n${LLMService.JSON_CORRECTION_NOTE}", second)
+        assertEquals(second, third)
+    }
+
+    @Test
+    fun `the correction note is bmlib's, through the shared contract`() {
+        val relative = "doc/cross_platform/llm_parity/json_correction.json"
+        val file = generateSequence(File("").absoluteFile) { it.parentFile }
+            .map { File(it, relative) }
+            .firstOrNull { it.isFile }
+            ?: error("could not locate $relative above ${File("").absolutePath}")
+        val note = Json.parseToJsonElement(file.readText()).jsonObject["note"]!!.jsonPrimitive.content
+        assertEquals(note, LLMService.JSON_CORRECTION_NOTE)
     }
 
     @Test

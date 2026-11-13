@@ -50,6 +50,7 @@ import threading
 import time
 from collections import defaultdict
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from http import HTTPStatus
@@ -89,6 +90,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+#: Set by :func:`llm_retry` for the attempts after an unreadable reply, so the
+#: agent's chat adds bmlib's ``JSON_CORRECTION_NOTE`` instead of re-sending the
+#: identical request (#761). Per thread, so parallel workers do not share it.
+_JSON_CORRECTION_DUE: ContextVar[bool] = ContextVar("json_correction_due", default=False)
+
+
+def json_correction_due() -> bool:
+    """Whether the current :func:`llm_retry` attempt follows an unreadable reply.
+
+    Returns:
+        True once an attempt of the enclosing call raised ``JSONParseError``
+        under ``retry_on_json_error``; it stays true for the call's later
+        attempts, whatever they answer.
+    """
+    return _JSON_CORRECTION_DUE.get()
 
 
 # =============================================================================
@@ -343,7 +360,10 @@ def llm_retry(
         initial_delay: Initial delay in seconds (default: 1.0)
         max_delay: Maximum delay between retries (default: 10.0)
         jitter: Jitter in seconds to add randomness (default: 1.0)
-        retry_on_json_error: Whether to retry on JSON parse errors (default: False)
+        retry_on_json_error: Whether to retry on JSON parse errors (default:
+            False). The attempts after one ask with bmlib's
+            ``JSON_CORRECTION_NOTE`` (:func:`json_correction_due`), never the
+            identical request again (#761).
 
     Returns:
         Decorated function with retry logic
@@ -383,11 +403,18 @@ def llm_retry(
         )
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> T:
-            return func(*args, **kwargs)
+            try:
+                return func(*args, **kwargs)
+            except JSONParseError:
+                # Read only by a later attempt, which only retry_on_json_error makes
+                _JSON_CORRECTION_DUE.set(True)
+                raise
 
         # Add a wrapper to convert RetryError to our custom exception
         @functools.wraps(func)
         def outer_wrapper(*args: Any, **kwargs: Any) -> T:
+            # Each call starts uncorrected; a nested call's flag ends with it
+            token = _JSON_CORRECTION_DUE.set(False)
             try:
                 return wrapper(*args, **kwargs)
             except RetryError as e:
@@ -398,6 +425,8 @@ def llm_retry(
                     attempts=max_retries + 1,
                     last_error=last_exception,
                 ) from e
+            finally:
+                _JSON_CORRECTION_DUE.reset(token)
 
         return outer_wrapper
 

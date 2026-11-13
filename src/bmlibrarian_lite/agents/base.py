@@ -22,12 +22,18 @@ All Lite agents inherit from this base class to share the unified LLM client
 interface and configuration management.
 """
 
+import dataclasses
+import json
 import logging
 from typing import Optional
+
+from bmlib.agents import JSON_CORRECTION_NOTE
+from bmlib.llm.utils import strict_json_loads
 
 from bmlibrarian_lite.llm import LLMClient, LLMMessage, LLMResponse
 from ..config import LiteConfig, TaskModelConfig
 from ..exceptions import RefusedResponseError, TruncatedResponseError
+from ..utils import json_correction_due
 from ..llm.data_types import (
     STOP_REASON_MAX_TOKENS,
     STOP_REASON_REFUSAL,
@@ -35,6 +41,60 @@ from ..llm.data_types import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def refuses_json_value(text: str) -> bool:
+    """Whether *text* is JSON only to a reader that takes what JSON does not define.
+
+    ``json.loads`` reads ``NaN``, ``Infinity``, ``1e999`` and an integer past
+    binary64; bmlib's ``strict_json_loads`` refuses them, and with them the
+    whole reply (#761, bmlib#572). An integer longer than
+    ``sys.get_int_max_str_digits()`` is refused by both, and is a refusal too;
+    so are a lone surrogate escape and nesting past bmlib's depth limit, which
+    only ``strict_json_loads`` refuses. A reader that falls back to another
+    span or to prose after a failed decode asks this first, so nothing is read
+    around a refused value. A syntax error is not a refusal.
+
+    Args:
+        text: The span about to be decoded.
+
+    Returns:
+        True when ``strict_json_loads`` refuses the text for anything but its
+        syntax.
+    """
+    try:
+        strict_json_loads(text)
+    except ValueError:
+        try:
+            json.loads(text)
+        except json.JSONDecodeError:
+            return False
+        except ValueError:
+            # An integer longer than sys.get_int_max_str_digits(): a number
+            # JSON's grammar reads, refused for its size, not a syntax error
+            return True
+        return True
+    return False
+
+
+def with_json_correction(messages: list[LLMMessage]) -> list[LLMMessage]:
+    """*messages* with bmlib's ``JSON_CORRECTION_NOTE`` on the last user turn.
+
+    Appended after a blank line, or sent as a user turn of its own when the
+    last turn is not the user's, as bmlib's ``with_json_correction`` does
+    (#761). The unreadable reply is not sent back. *messages* is not changed.
+
+    Args:
+        messages: The request's turns.
+
+    Returns:
+        The turns to send instead.
+    """
+    if messages and messages[-1].role == "user":
+        last = messages[-1]
+        note = f"{last.content}\n\n{JSON_CORRECTION_NOTE}"
+        return [*messages[:-1], dataclasses.replace(last, content=note)]
+    return [*messages, LLMMessage(role="user", content=JSON_CORRECTION_NOTE)]
 
 #: What follows a prose answer the model stopped at its token limit, so the
 #: reader never takes the part for the whole (#631)
@@ -140,6 +200,8 @@ class LiteBaseAgent:
 
         Uses task-specific configuration if available, otherwise falls back
         to defaults. Temperature and max_tokens can be overridden per-call.
+        Inside an ``llm_retry`` attempt after an unreadable reply, the last
+        user turn carries ``JSON_CORRECTION_NOTE`` (#761).
 
         Args:
             messages: List of conversation messages
@@ -159,6 +221,8 @@ class LiteBaseAgent:
             RefusedResponseError: The model declined to answer; never retried
                 either.
         """
+        if json_correction_due():
+            messages = with_json_correction(messages)
         response = self._chat_response(messages, task_id, temperature, max_tokens, json_mode)
         _raise_if_refused(response)
         if response.stop_reason == STOP_REASON_MAX_TOKENS:

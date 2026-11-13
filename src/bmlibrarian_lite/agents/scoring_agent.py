@@ -32,6 +32,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Callable
 
+from bmlib.llm.utils import strict_json_loads
+
 from ..constants import SCORE_MAX, SCORE_MIN
 from ..data_models import (
     LiteDocument,
@@ -40,7 +42,7 @@ from ..data_models import (
 )
 from ..exceptions import AnalysisFailedError, JSONParseError, APIError, RetryExhaustedError
 from ..utils import llm_retry, classify_llm_exception, classify_exhausted_retries
-from .base import LiteBaseAgent
+from .base import LiteBaseAgent, refuses_json_value
 
 logger = logging.getLogger(__name__)
 
@@ -196,8 +198,13 @@ def parse_score_response(response: str) -> tuple[int, str] | None:
     """
     json_str = _first_json_object(response)
     if json_str is not None:
+        if refuses_json_value(json_str):
+            # NaN, Infinity or a number past binary64: the reply is unreadable
+            # as a whole, never scored by its other fields or its prose (#761)
+            logger.warning(f"Refused a value JSON does not define in: {response}")
+            return None
         try:
-            data = json.loads(json_str)
+            data = strict_json_loads(json_str)
         except json.JSONDecodeError:
             data = None
         if isinstance(data, dict):
