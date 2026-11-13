@@ -515,6 +515,27 @@ class TestUploadFullText:
         assert "Retry Full Text" in box.information.call_args.args[2]
         box.warning.assert_not_called()
 
+    @pytest.mark.parametrize("messages", [("trying to repair broken xref",), ()])
+    def test_a_pdf_mupdf_read_past_damage_in_is_kept_with_a_warning(
+        self, qapp, mock_config, mock_storage, sample_document, tmp_path, messages
+    ) -> None:
+        """The confirmation says text may be missing, and only then (#762)."""
+        from bmlibrarian_lite.full_text_upload import UploadedFullText
+        from bmlibrarian_lite.pdf_utils import PDF_READ_PAST_NOTE
+
+        tab = AuditTrailTab(config=mock_config, storage=mock_storage)
+        upload = UploadedFullText(
+            text="# Methods\n\nWe did.", kind="pdf", file_name="p.pdf",
+            engine_messages=messages,
+        )
+        with patch("bmlibrarian_lite.gui.audit_trail_tab.QFileDialog.getOpenFileName",
+                   return_value=(str(tmp_path / "p.pdf"), "")), \
+                patch("bmlibrarian_lite.gui.audit_trail_tab.read_upload", return_value=upload), \
+                patch("bmlibrarian_lite.gui.audit_trail_tab.QMessageBox") as box:
+            tab._on_upload_full_text(sample_document.id)
+
+        assert (PDF_READ_PAST_NOTE in box.information.call_args.args[2]) is bool(messages)
+
     def test_a_refused_file_is_said_and_nothing_kept(
         self, qapp, mock_config, mock_storage, sample_document, tmp_path
     ) -> None:

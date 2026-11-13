@@ -66,6 +66,7 @@ Usage:
 
 import logging
 import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -702,6 +703,12 @@ class PdfText:
     engine_messages: tuple[str, ...] = ()
 
 
+#: One read at a time: MuPDF's message store is one per process, so two reads
+#: at once would each take the other's messages, or lose their own, and a
+#: clean PDF would carry another's warning to the reader (#762).
+_PDF_READ_LOCK = threading.Lock()
+
+
 def read_pdf_text(pdf_path: Path, *, limit: PDFLimit | None = None) -> PdfText:
     """Read a PDF's text through bmlib, saying whose fault a failure is.
 
@@ -716,13 +723,18 @@ def read_pdf_text(pdf_path: Path, *, limit: PDFLimit | None = None) -> PdfText:
         The text and MuPDF's messages.
 
     Raises:
+        ImportError: If PyMuPDF is not installed.
         FileNotFoundError: If the file does not exist.
-        ValueError: If the path is not a ``.pdf`` file.
+        ValueError: If the path is not a file, or not a ``.pdf`` one.
         PDFExtractionError: If the file is encrypted or unreadable, the engine
             failed, or ``limit`` was reached; its ``kind`` says which, and
-            its message is safe to show (it never names the path).
+            its message is safe to show (bmlib replaces the path, unless
+            MuPDF cut a message inside a very long one).
     """
-    result = PyMuPDFConverter().convert(pdf_path, limit=limit)
+    # shortcut: a PyMuPDF read outside this function (pdf_title_check's first
+    # pages) can still add messages to a read here; route it through bmlib if that bites.
+    with _PDF_READ_LOCK:
+        result = PyMuPDFConverter().convert(pdf_path, limit=limit)
     if not result.success:
         raise PDFExtractionError(
             result.error_kind or PDFErrorKind.ENGINE,
@@ -730,6 +742,8 @@ def read_pdf_text(pdf_path: Path, *, limit: PDFLimit | None = None) -> PdfText:
             result.engine_messages,
         )
     if result.converted_pages < result.page_count:
+        # shortcut: bmlib skips a page on any non-engine exception, a defect
+        # of ours included, and this calls every such page the file's fault
         failed = "; ".join(w for w in result.warnings if "Extraction failed" in w)
         raise PDFExtractionError(
             PDFErrorKind.UNREADABLE,

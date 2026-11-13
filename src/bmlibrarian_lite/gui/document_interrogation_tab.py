@@ -545,7 +545,18 @@ class DocumentInterrogationTab(QWidget):
             # A local file names no paper: the previous one's status is not its
             self._retraction_doc_id = None
             self.show_retraction_check(None)
-            text = self.document_view.load_file(file_path)
+            read_past = False
+            if path.suffix.lower() == ".pdf":
+                # bmlib's read, as a discovered PDF's: a typed failure, MuPDF's messages (#762)
+                read = read_pdf_text(path)
+                text, read_past = read.text, bool(read.engine_messages)
+                self.document_view.set_text(text, path.name)
+                if self.document_view.pdf_tab.load_pdf(file_path):
+                    self.document_view.show_pdf_tab()
+                else:
+                    self.document_view.show_fulltext_tab()
+            else:
+                text = self.document_view.load_file(file_path)
             if not text.strip():
                 self.doc_label.setText("Error: Document is empty")
                 self.progress_label.setVisible(False)
@@ -555,6 +566,8 @@ class DocumentInterrogationTab(QWidget):
             self._set_document_loaded(path.name)
             self.show_retraction_check(unchecked_check())
             self._add_chat_bubble(f"Document loaded: **{path.name}**\n\nYou can now ask questions about this document.", is_user=False)
+            if read_past:
+                self._add_chat_bubble(PDF_READ_PAST_NOTE, is_user=False)
             self.status_message.emit(f"Loaded document: {path.name}")
         except Exception as e:
             logger.exception("Failed to load document")

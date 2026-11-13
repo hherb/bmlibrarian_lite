@@ -50,8 +50,8 @@ dependencies = [
     # (one kept alive by a self-capturing lambda); see #516 for the repro and
     # for when to lift the cap.
     "PySide6>=6.6.0,<6.12",
-    # PDF processing
-    "PyMuPDF>=1.23.0",
+    # PDF processing; bmlib's PDF reader is tested from 1.28.2 (its `pdf` extra, #762)
+    "PyMuPDF>=1.28.2",
     # Text processing
     "pysbd>=0.3.4",
     "tokenizers>=0.19.0",

@@ -20,6 +20,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from bmlib.fulltext.pdf_converter import PDFErrorKind, PDFExtractionError, PDFLimit
 
 from bmlibrarian_lite.analysis_failures import (
     configuration_nudge,
@@ -714,7 +715,8 @@ def _try_with_downloaded_pdf(
     Args:
         core: The CORE client, or ``None`` for no key.
         tmp_path: Where the PDF stands.
-        extracted: What ``extract_pdf_text`` returns, or the exception it raises.
+        extracted: What ``extract_pdf_text`` returns, the exception it raises,
+            or a function standing in for it.
         doi: The DOI as the caller holds it.
 
     Returns:
@@ -730,7 +732,7 @@ def _try_with_downloaded_pdf(
     discoverer = FulltextDiscoverer(core=core)
     extractor: dict[str, Any] = (
         {"side_effect": extracted}
-        if isinstance(extracted, Exception)
+        if isinstance(extracted, Exception) or callable(extracted)
         else {"return_value": extracted}
     )
     with patch.dict("os.environ", {PDF_BASE_DIR_ENV_VAR: str(tmp_path / "pdf")}), \
@@ -792,6 +794,32 @@ def test_a_pdf_with_text_means_core_is_never_asked(tmp_path: Path) -> None:
     result = _try_with_downloaded_pdf(core, tmp_path, "The PDF's own text.")
     assert result.source_type is FulltextSourceType.DOWNLOADED_PDF
     assert core.asked == []
+
+
+def test_a_cancel_during_the_downloaded_pdfs_read_is_a_cancel(tmp_path: Path) -> None:
+    """Not an unreadable PDF, and CORE is not asked after the reader cancelled (#762)."""
+    core = _Core(CoreFetch.served(TEXT))
+
+    def cancelled(_path: Path, *, limit: PDFLimit) -> str:
+        limit.cancel.set()  # type: ignore[union-attr]
+        stop = limit.reached()
+        assert stop is not None
+        raise stop
+
+    result = _try_with_downloaded_pdf(core, tmp_path, cancelled)
+    assert result.error == "Cancelled"
+    assert result.lookups.failures == ()
+    assert core.asked == []
+
+
+def test_a_downloaded_pdf_the_file_fails_still_asks_core(tmp_path: Path) -> None:
+    """Control: a typed failure that is no cancel is an unreadable copy (#762)."""
+    core = _Core(CoreFetch.served(TEXT))
+    result = _try_with_downloaded_pdf(
+        core, tmp_path, PDFExtractionError(PDFErrorKind.UNREADABLE, "bad")
+    )
+    assert result.source_type is FulltextSourceType.CORE_TEXT
+    assert core.asked == [DOI]
 
 
 def test_an_extraction_that_raises_is_unreadable_and_asks_core(tmp_path: Path) -> None:

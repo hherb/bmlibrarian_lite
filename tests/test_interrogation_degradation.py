@@ -23,6 +23,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from bmlib.fulltext.pdf_converter import PDFExtractionError  # noqa: E402
 from PySide6.QtCore import QObject, Signal  # noqa: E402
 
 from bmlibrarian_lite.config import LiteConfig  # noqa: E402
@@ -354,6 +355,70 @@ class TestEveryFallbackSaysSo:
         tab._load_citation_pdf(tmp_path / "a.pdf", make_citation(), "Full Text (PDF)")
 
         assert (PDF_READ_PAST_NOTE in tab._bubbles.last) is said
+
+
+class TestALocalPdfIsReadThroughBmlib:
+    """Load Document and a discovered PDF read as citations do: typed, with the warning (#762)."""
+
+    @pytest.mark.parametrize("messages, said", [
+        (("trying to repair broken xref",), True),
+        ((), False),
+    ])
+    def test_a_discovered_pdf_mupdf_read_past_says_text_may_be_missing(
+        self, tab: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any,
+        messages: tuple[str, ...], said: bool,
+    ) -> None:
+        """The PDF Discovery load warns as the citation load does."""
+        path = tmp_path / "a.pdf"
+        path.write_bytes(b"%PDF-1.4")
+        monkeypatch.setattr(
+            tab_module, "read_pdf_text", lambda _path: PdfText("The trial.", messages)
+        )
+
+        tab._load_pdf_file(path, "Paper")
+
+        assert (PDF_READ_PAST_NOTE in tab._bubbles.last) is said
+
+    @pytest.mark.parametrize("messages, said", [
+        (("trying to repair broken xref",), True),
+        ((), False),
+    ])
+    def test_a_loaded_pdf_mupdf_read_past_says_text_may_be_missing(
+        self, tab: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any,
+        messages: tuple[str, ...], said: bool,
+    ) -> None:
+        """Load Document hands the agent bmlib's text, and warns."""
+        path = tmp_path / "a.pdf"
+        monkeypatch.setattr(
+            tab_module.QFileDialog, "getOpenFileName", lambda *_a, **_k: (str(path), "")
+        )
+        monkeypatch.setattr(
+            tab_module, "read_pdf_text", lambda _path: PdfText("The trial.", messages)
+        )
+
+        tab._load_document()
+
+        tab._agent.load_document.assert_called_once_with("The trial.", title="a.pdf")
+        assert (PDF_READ_PAST_NOTE in tab._bubbles.last) is said
+
+    def test_a_loaded_pdf_that_needs_a_password_says_so(
+        self, tab: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+    ) -> None:
+        """Not 'Document is empty': the reader is told why."""
+        path = tmp_path / "a.pdf"
+        monkeypatch.setattr(
+            tab_module.QFileDialog, "getOpenFileName", lambda *_a, **_k: (str(path), "")
+        )
+
+        def locked(_path: Any) -> PdfText:
+            raise PDFExtractionError.encrypted()
+
+        monkeypatch.setattr(tab_module, "read_pdf_text", locked)
+
+        tab._load_document()
+
+        assert "password" in tab.doc_label.text()
+        tab._agent.load_document.assert_not_called()
 
 
 class TestWhatIsNotSaid:

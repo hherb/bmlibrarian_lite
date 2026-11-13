@@ -51,7 +51,10 @@ NO_PDF_TEXT = (
     "No text could be read from this PDF, so it was not used. A scanned PDF "
     "holds pictures of its pages, not their text."
 )
-UNREADABLE_PDF_TEXT = "This PDF could not be opened, so it was not used."
+UNREADABLE_PDF_TEXT = (
+    "This PDF could not be read (it may be damaged), so it was not used. "
+    "Try another copy."
+)
 ENCRYPTED_PDF_TEXT = (
     "This PDF is password-protected, so it was not used. Remove the password "
     "and upload it again."
@@ -94,8 +97,9 @@ class UploadedFullText:
         file_name: The uploaded file's name, without its folder.
         uploaded_at: When it was stored, in UTC; ``None`` before it is.
         engine_messages: What MuPDF reported reading a PDF (damage it read
-            past, so text may be missing); empty otherwise. Not stored: it
-            is shown when the file is uploaded.
+            past, so text may be missing); empty otherwise. Not stored: when
+            there are any, the upload's confirmation warns that text may be
+            missing.
 
     Raises:
         ValueError: If the text is blank, the kind is not one of those, or

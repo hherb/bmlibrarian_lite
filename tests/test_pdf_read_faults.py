@@ -40,7 +40,11 @@ from bmlibrarian_lite.full_text_upload import (
     UploadRefused,
     read_upload,
 )
-from bmlibrarian_lite.fulltext_discovery import FulltextDiscoverer
+from bmlibrarian_lite.fulltext_discovery import (
+    FulltextDiscoverer,
+    FulltextResult,
+    FulltextSourceType,
+)
 from bmlibrarian_lite.pdf_utils import PdfText, read_pdf_text
 
 WORDS = "Randomised trial of aspirin in adults"
@@ -95,6 +99,16 @@ class TestReadPdfText:
         assert WORDS in read.text
         assert any("repair" in message for message in read.engine_messages)
         assert not any(str(path) in message for message in read.engine_messages)
+
+    def test_a_blank_page_does_not_fail_the_read(self, tmp_path: Path) -> None:
+        """A figure-only or blank page is read, with nothing on it: not a failed page."""
+        document = pymupdf.open()
+        document.new_page().insert_text((72, 72), WORDS)
+        document.new_page()
+        path = tmp_path / "blank.pdf"
+        document.save(str(path))
+        document.close()
+        assert WORDS in read_pdf_text(path).text
 
     def test_an_encrypted_pdf_is_the_files_fault(self, tmp_path: Path) -> None:
         """Encrypted, not 'could not be opened' like a damaged file."""
@@ -217,6 +231,29 @@ class TestDiscoveryStopsAReadOnCancel:
 
         assert result.error == "Cancelled"
         assert result.lookups.failures == ()
+
+    def test_a_cached_pdf_that_will_not_read_is_recorded_not_cancelled(
+        self, tmp_path: Path
+    ) -> None:
+        """Control: the file's failure is no cancel; the PDF is held and unread."""
+        discoverer = self._discoverer()
+        pdf = _written(tmp_path / "cached.pdf", _pdf_bytes())
+
+        def unread(_path: Path, *, limit: PDFLimit) -> str:
+            raise PDFExtractionError(PDFErrorKind.UNREADABLE, "bad")
+
+        discoverer._europepmc.fetch_article_info.return_value = ArticleInfoFetch.absent()
+        discoverer._try_pdf_download = lambda *_a, **_k: FulltextResult(  # type: ignore[method-assign]
+            success=False, source_type=FulltextSourceType.NOT_FOUND
+        )
+        with patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext", return_value=None), \
+             patch("bmlibrarian_lite.fulltext_discovery.find_existing_pdf", return_value=pdf), \
+             patch("bmlibrarian_lite.fulltext_discovery.extract_pdf_text", unread):
+            result = discoverer.discover_fulltext(doi="10.1/abc")
+
+        assert result.error != "Cancelled"
+        assert result.lookups.anything_unsettled
+        assert not result.absence_established
 
     def test_a_new_discovery_is_not_born_cancelled(self) -> None:
         """The event is cleared with the flag, so one cancel does not stop the next run."""

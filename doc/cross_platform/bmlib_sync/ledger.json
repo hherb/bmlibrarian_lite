@@ -2754,7 +2754,7 @@
       "swift": "n/a",
       "android": "n/a",
       "issue": "#762, #773",
-      "note": "Ported in #762: `pdf_utils.read_pdf_text` returns MuPDF's messages (`PdfText.engine_messages`; bmlib logs them at WARNING), and Upload Full Text and the Interrogation tab tell the reader text may be missing (`PDF_READ_PAST_NOTE`). Full-text discovery uses such text with no caveat in the report yet (#773). MuPDF's messages have no PDFKit counterpart; iText's nearest is `PdfReader.hasRebuiltXref()`, which Android does not read."
+      "note": "Ported in #762: `pdf_utils.read_pdf_text` returns MuPDF's messages (`PdfText.engine_messages`; bmlib logs them at WARNING), and Upload Full Text and the Interrogation tab's three PDF loads tell the reader text may be missing (`PDF_READ_PAST_NOTE`). Full-text discovery uses such text with no caveat in the report yet (#773). MuPDF's messages have no PDFKit counterpart; iText's nearest is `PdfReader.hasRebuiltXref()`, which Android does not read."
     },
     {
       "id": "bmlib#548",
@@ -2799,7 +2799,7 @@
       "swift": "n/a",
       "android": "n/a",
       "issue": "#762",
-      "note": "Ported in #762: `PdfText.engine_messages` holds what MuPDF said on a read that succeeded, and a failed read's `PDFExtractionError.engine_messages` what it said before failing; bmlib's own notes stay apart. PDFKit and iText report no such messages to keep apart."
+      "note": "Ported in #762: `PdfText.engine_messages` holds what MuPDF said on a read that succeeded, and a failed read's `PDFExtractionError.engine_messages` what it said before failing (the whole read's, for a page lite refuses after bmlib read on); bmlib's own notes stay apart. PDFKit and iText report no such messages to keep apart."
     },
     {
       "id": "bmlib#654",
@@ -2853,7 +2853,7 @@
       "swift": "equivalent",
       "android": "equivalent",
       "issue": "#762",
-      "note": "Ported in #762: `full_text_upload._pdf_text` refuses an encrypted PDF, an unreadable one and an engine fault (an out-of-memory included) in three sentences, by `PDFExtractionError.kind`; the Interrogation tab shows bmlib's message, which names no path. Swift's `PDFKitTextExtractor` tells a password-protected PDF from one that will not open; Android's `extractedPdfText` logs the file's faults apart from the code's."
+      "note": "Ported in #762: `full_text_upload._pdf_text` refuses an encrypted PDF, an unreadable one and an engine fault (an out-of-memory included) in three sentences, by `PDFExtractionError.kind`; the Interrogation tab's Load Document and PDF Discovery loads show bmlib's message, which names no path (a citation's PDF falls back to its abstract, saying the PDF could not be read). Swift's `PDFKitTextExtractor` tells a password-protected PDF from one that will not open; Android's `extractedPdfText` logs the file's faults apart from the code's."
     },
     {
       "id": "bmlib#579",
