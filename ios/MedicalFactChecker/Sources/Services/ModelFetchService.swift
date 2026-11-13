@@ -134,7 +134,8 @@ actor ModelFetchService {
     /// Refresh button could never succeed however valid the key.
     ///
     /// Ollama is the exception: its model list is on the native API (`/api/tags`),
-    /// outside the OpenAI-compatible `/v1` root, so that segment is stripped.
+    /// outside the OpenAI-compatible `/v1` root, so that segment is stripped (its
+    /// chat is native too: `api/chat`, see `LLMService.chatEndpoint`).
     ///
     /// - Parameters:
     ///   - provider: The LLM provider.
@@ -148,12 +149,9 @@ actor ModelFetchService {
             root.removeLast()
         }
 
-        let versionSegment = "/v1"
         let path: String
         if provider == .ollama {
-            if root.hasSuffix(versionSegment) {
-                root.removeLast(versionSegment.count)
-            }
+            root = OllamaContext.nativeRoot(root)
             path = "api/tags"
         } else {
             path = "models"

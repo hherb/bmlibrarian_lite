@@ -22,6 +22,7 @@ import android.util.Log
 import com.bmlibrarian.factchecker.domain.model.LLMProvider
 import com.bmlibrarian.factchecker.domain.model.ModelInfo
 import com.bmlibrarian.factchecker.domain.model.ModelPricing
+import com.bmlibrarian.factchecker.util.OllamaContext
 import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -578,11 +579,7 @@ class ModelFetchService @Inject constructor(
         customBaseUrl: String?
     ): List<ModelInfo> {
         // Ollama's native API is at /api/tags, not the OpenAI-compatible /v1 endpoint
-        var ollamaBaseUrl = customBaseUrl ?: "http://localhost:11434"
-        if (ollamaBaseUrl.endsWith("/v1")) {
-            ollamaBaseUrl = ollamaBaseUrl.dropLast(3)
-        }
-        val url = "$ollamaBaseUrl/api/tags"
+        val url = "${OllamaContext.nativeRoot(customBaseUrl ?: "http://localhost:11434")}/api/tags"
 
         val response = ollamaApi.listModels(url)
 

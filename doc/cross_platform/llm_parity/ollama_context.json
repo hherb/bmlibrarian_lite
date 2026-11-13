@@ -1,0 +1,16 @@
+{
+  "description": "The apps talk to Ollama on its native /api/chat (never the OpenAI-compatible /v1, which takes no num_ctx), and send each request a num_ctx sized to hold it: ceil(prompt code points / chars_per_token) + max_tokens + template_tokens, rounded up to a power of two (each new num_ctx reloads the model, so few sizes are used), at least min_num_ctx and at most max_num_ctx. chars_per_token is a low guess, so the estimate errs large. Every request also sends truncate:false and shift:false: a prompt that still does not fit is a 400 naming both sizes, never cut in the middle without a word (Ollama's default, measured on Ollama 0.40.14: 514 of 3022 prompt tokens read, HTTP 200). The desktop sends a task's configured context_window instead (llm/providers/ollama.py). Issue #760.",
+  "chars_per_token": 3,
+  "template_tokens": 256,
+  "min_num_ctx": 8192,
+  "max_num_ctx": 1048576,
+  "cases": [
+    {"name": "an empty prompt gets the floor", "prompt_code_points": 0, "max_tokens": 0, "num_ctx": 8192},
+    {"name": "a scoring window and its prompt", "prompt_code_points": 18000, "max_tokens": 512, "num_ctx": 8192},
+    {"name": "exactly the floor", "prompt_code_points": 23808, "max_tokens": 0, "num_ctx": 8192},
+    {"name": "one code point over the floor rounds up a whole size", "prompt_code_points": 23809, "max_tokens": 0, "num_ctx": 16384},
+    {"name": "a citation window with a long answer", "prompt_code_points": 20000, "max_tokens": 4096, "num_ctx": 16384},
+    {"name": "a report over many citations", "prompt_code_points": 300000, "max_tokens": 8192, "num_ctx": 131072},
+    {"name": "past the largest size is capped; Ollama then refuses it", "prompt_code_points": 10000000, "max_tokens": 0, "num_ctx": 1048576}
+  ]
+}

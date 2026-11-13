@@ -852,6 +852,19 @@ public enum BioMedLitConstants {
     /// window's end is read whole in the next. Python's `TEXT_WINDOW_OVERLAP_CHARS`.
     public static let textWindowOverlapChars = 250
 
+    // MARK: - Ollama context
+
+    /// A low guess at the code points one token holds, so ``OllamaContext``'s
+    /// estimate of a prompt's tokens errs large. Contract:
+    /// `doc/cross_platform/llm_parity/ollama_context.json`.
+    public static let ollamaCharsPerToken = 3
+    /// Tokens allowed for the chat template Ollama wraps the messages in.
+    public static let ollamaTemplateTokens = 256
+    /// The smallest `num_ctx` sent, and the first of its power-of-two sizes.
+    public static let ollamaMinNumCtx = 8192
+    /// The largest `num_ctx` sent (2^20); a request needing more is sent this and refused.
+    public static let ollamaMaxNumCtx = 1_048_576
+
     // MARK: - Scoring Constants
 
     /// Minimum valid relevance score.

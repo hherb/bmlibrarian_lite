@@ -641,6 +641,22 @@ object Constants {
     const val TEXT_WINDOW_OVERLAP_CHARS = 250
 
     /**
+     * A low guess at the code points one token holds, so [OllamaContext]'s estimate
+     * of a prompt's tokens errs large. The shared contract's `chars_per_token`
+     * (`doc/cross_platform/llm_parity/ollama_context.json`).
+     */
+    const val OLLAMA_CHARS_PER_TOKEN = 3
+
+    /** Tokens allowed for the chat template Ollama wraps the messages in (`template_tokens`). */
+    const val OLLAMA_TEMPLATE_TOKENS = 256
+
+    /** The smallest `num_ctx` sent, and the first of its power-of-two sizes (`min_num_ctx`). */
+    const val OLLAMA_MIN_NUM_CTX = 8192
+
+    /** The largest `num_ctx` sent, 2^20 (`max_num_ctx`); a request needing more is sent this and refused. */
+    const val OLLAMA_MAX_NUM_CTX = 1_048_576
+
+    /**
      * Folder in the app's files directory, not the cache directory that holds
      * retrieved PDFs, holding the PDFs the reader uploaded: neither the system
      * emptying its cache nor clearing the PDF cache deletes a copy no source
