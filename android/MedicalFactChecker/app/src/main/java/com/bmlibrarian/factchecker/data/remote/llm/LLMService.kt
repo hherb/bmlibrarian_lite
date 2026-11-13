@@ -295,7 +295,8 @@ class LLMService @Inject constructor(
      * @param content One window of the document's content (abstract or full text)
      * @param part Which window this is, from 1
      * @param parts How many windows the content was read in
-     * @return Result containing list of citation extractions
+     * @return Result containing list of citation extractions, or a failure with
+     *   [LLMError.ParseError] when the reply holds a value JSON does not define (#761)
      */
     suspend fun extractCitations(
         provider: LLMProvider,
@@ -332,7 +333,19 @@ class LLMService @Inject constructor(
             userPrompt = userPrompt,
             maxTokens = Constants.LLM_CITATION_MAX_TOKENS
         ).map { result ->
-            ResponseParser.parseCitationResponse(result.content).map { parsed ->
+            val citations = ResponseParser.parseCitationResponse(result.content)
+                ?: run {
+                    // Unreadable, never "no passages" (#761): the document is
+                    // recorded as failed, as on the desktop
+                    Log.w(TAG, "Refused a value JSON does not define in: ${result.content}")
+                    return Result.failure(
+                        LLMError.ParseError(
+                            message = "parse: the reply holds a value JSON does not define",
+                            rawResponse = result.content
+                        )
+                    )
+                }
+            citations.map { parsed ->
                 CitationExtraction(
                     passage = parsed.passage,
                     relevance = parsed.relevance

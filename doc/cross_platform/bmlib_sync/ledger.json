@@ -2088,7 +2088,7 @@
       "swift": "equivalent",
       "android": "ported",
       "issue": "#761",
-      "note": "Ported in #761: the desktop's scoring, citation and quality readers decode with bmlib's `strict_json_loads`, and `agents.base.refuses_json_value` keeps the prose and brace-span fallbacks off a refused reply; Android's `ResponseParser.holdsRefusedValue` refuses the score and citation replies the lenient parse kept, with no regex read after. Swift's JSONSerialization refuses all four as a whole reply (probed), bmlib's rule. Contract rows in `llm_parity/score_values.json`. Android's report parse is not checked: a report reply carries no numbers."
+      "note": "Ported in #761: the desktop's scoring, citation and quality readers, and the quality benchmark's, decode with bmlib's `strict_json_loads`, and `agents.base.refuses_json_value` keeps the prose and brace-span fallbacks off a refused reply (an integer past `sys.get_int_max_str_digits()` included); Android's `ResponseParser.holdsRefusedValue` refuses the score and citation replies the lenient parse kept (a lone surrogate included), and `holdsRefusedToken` the ones it could not parse, before any regex read; a refused citation reply is a `ParseError`, never an empty list. Swift's JSONSerialization refuses all four as a whole reply (probed), bmlib's rule. Contract rows in `llm_parity/score_values.json`. Android's report parse is not checked: a report reply carries no numbers."
     },
     {
       "id": "bmlib#697",

@@ -22,13 +22,14 @@ with reuse of the review's own assessments and progress tracking. Supports
 both study classification (Tier 2) and detailed quality assessment (Tier 3).
 """
 
-import json
 import logging
 import re
 import time
 from dataclasses import replace
 from datetime import datetime
 from typing import Any, Callable, Optional
+
+from bmlib.llm.utils import strict_json_loads
 
 from ..chunking import analysis_windows
 from ..config import LiteConfig
@@ -873,10 +874,10 @@ Focus on THIS study's methodology, not studies it references."""
         if not cleaned:
             return EvaluationErrorCode.JSON_PARSE_ERROR
         try:
-            data = json.loads(cleaned)
+            # As the review reads it, so the benchmark predicts it: NaN,
+            # Infinity or a number past binary64 is unreadable as a whole (#761)
+            data = strict_json_loads(cleaned)
         except ValueError as e:
-            # A JSONDecodeError, or the plain ValueError json.loads raises
-            # for an integer longer than sys.get_int_max_str_digits()
             logger.warning(f"Failed to parse benchmark answer as JSON: {e}")
             return EvaluationErrorCode.JSON_PARSE_ERROR
         study_design = parse_study_design(data)

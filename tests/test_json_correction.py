@@ -17,6 +17,7 @@ from bmlib.agents import JSON_CORRECTION_NOTE
 from bmlibrarian_lite.agents.base import with_json_correction
 from bmlibrarian_lite.agents.citation_agent import LiteCitationAgent
 from bmlibrarian_lite.agents.scoring_agent import LiteScoringAgent, parse_score_response
+from bmlibrarian_lite.benchmarking.quality_runner import QualityBenchmarkRunner
 from bmlibrarian_lite.config import LiteConfig
 from bmlibrarian_lite.data_models import DocumentSource, EvaluationErrorCode, LiteDocument
 from bmlibrarian_lite.exceptions import JSONParseError
@@ -31,7 +32,10 @@ CONTRACT = (
     / "doc" / "cross_platform" / "llm_parity" / "json_correction.json"
 )
 QUESTION = "Does aspirin prevent stroke?"
-REFUSED = ["NaN", "Infinity", "-Infinity", "1e999", "1" + "0" * 400]
+#: The last is longer than ``sys.get_int_max_str_digits()``: ``json.loads``
+#: refuses it too, with a plain ``ValueError`` rather than a syntax error
+REFUSED = ["NaN", "Infinity", "-Infinity", "1e999", "1" + "0" * 400, "1" + "0" * 5000]
+REFUSED_IDS = [value if len(value) < 20 else f"{len(value)}-digit integer" for value in REFUSED]
 
 
 def make_document() -> LiteDocument:
@@ -70,20 +74,21 @@ def test_the_note_is_the_contracts_and_bmlibs() -> None:
 class TestRefusedValues:
     """A value JSON does not define makes the reply unreadable as a whole."""
 
-    @pytest.mark.parametrize("value", REFUSED)
+    @pytest.mark.parametrize("value", REFUSED, ids=REFUSED_IDS)
     def test_a_score_beside_a_refused_value_is_no_score(self, value: str) -> None:
         """The fields beside it are not read."""
         assert parse_score_response(f'{{"score": 4, "confidence": {value}}}') is None
 
-    def test_no_prose_score_is_read_around_a_refused_value(self) -> None:
+    @pytest.mark.parametrize("value", REFUSED, ids=REFUSED_IDS)
+    def test_no_prose_score_is_read_around_a_refused_value(self, value: str) -> None:
         """The desktop's prose fallback is not asked once the object was refused."""
-        assert parse_score_response('Score: 4/5 {"score": 4, "confidence": NaN}') is None
+        assert parse_score_response(f'Score: 4/5 {{"score": "x", "confidence": {value}}}') is None
 
     def test_a_syntax_error_still_reaches_the_prose_fallback(self) -> None:
         """Control: only a refusal skips it."""
         assert parse_score_response('Score: 4/5 {"score": 4,, }') is not None
 
-    @pytest.mark.parametrize("value", REFUSED)
+    @pytest.mark.parametrize("value", REFUSED, ids=REFUSED_IDS)
     def test_no_passages_are_read_around_a_refused_value(self, value: str) -> None:
         """Neither the whole reply nor the brace span inside it."""
         agent = LiteCitationAgent()
@@ -105,7 +110,7 @@ class TestRefusedValues:
 
         assert agent._parse_citation_response(reply)
 
-    @pytest.mark.parametrize("value", REFUSED)
+    @pytest.mark.parametrize("value", REFUSED, ids=REFUSED_IDS)
     def test_a_quality_assessment_beside_a_refused_value_is_unreadable(self, value: str) -> None:
         """Raised as a parse failure, which the retry then corrects."""
         reply = f'{{"study_design": "randomized_controlled_trial", "confidence": {value}}}'
@@ -113,7 +118,15 @@ class TestRefusedValues:
         with pytest.raises(JSONParseError):
             LiteQualityAgent(config=LiteConfig())._parse_response(reply)
 
-    @pytest.mark.parametrize("value", REFUSED)
+    @pytest.mark.parametrize("value", REFUSED, ids=REFUSED_IDS)
+    def test_a_benchmark_answer_beside_a_refused_value_is_unreadable(self, value: str) -> None:
+        """The quality benchmark reads a reply as the review does, so it predicts it."""
+        reply = f'{{"study_design": "randomized_controlled_trial", "confidence": {value}}}'
+        runner = QualityBenchmarkRunner(config=LiteConfig(), storage=object())  # type: ignore[arg-type]
+
+        assert runner._read_answer(reply) == EvaluationErrorCode.JSON_PARSE_ERROR
+
+    @pytest.mark.parametrize("value", REFUSED, ids=REFUSED_IDS)
     def test_a_classification_beside_a_refused_value_is_unknown(self, value: str) -> None:
         """Never the design the fields beside it name."""
         reply = f'{{"study_design": "randomized_controlled_trial", "confidence": {value}}}'

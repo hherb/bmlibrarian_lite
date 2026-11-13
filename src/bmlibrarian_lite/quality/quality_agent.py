@@ -250,9 +250,9 @@ Focus on THIS study's methodology, not studies it references."""
         try:
             data = strict_json_loads(cleaned)
         except ValueError as e:
-            # A JSONDecodeError (NaN, Infinity and a number past binary64
-            # included, #761), or the plain ValueError int() raises for an
-            # integer longer than sys.get_int_max_str_digits()
+            # strict_json_loads raises every refusal as a JSONDecodeError:
+            # NaN, Infinity, a number past binary64 (#761) and an integer
+            # longer than sys.get_int_max_str_digits() alike
             logger.warning(f"Failed to parse JSON response: {e}")
             raise JSONParseError(
                 f"Failed to parse JSON response: {e}",

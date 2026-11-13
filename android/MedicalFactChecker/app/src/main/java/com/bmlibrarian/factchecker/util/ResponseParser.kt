@@ -115,7 +115,11 @@ object ResponseParser {
             json.parseToJsonElement(candidate).jsonObject
         } catch (e: Exception) {
             // Not a JSON object (a trailing comma, a reply cut short): only an
-            // exact `"score": N` is read from the text
+            // exact `"score": N` is read from the text, and none beside a
+            // value JSON does not define (#761)
+            if (holdsRefusedToken(cleanJson)) {
+                return ScoreResult(null, REFUSED_VALUE_REASON, parseFailed = true)
+            }
             return parseScoreWithRegex(cleanJson)
         }
         if (holdsRefusedValue(jsonObject)) {
@@ -134,21 +138,56 @@ object ResponseParser {
      * Whether a parsed reply holds a value JSON does not define (#761).
      *
      * The lenient parser keeps `NaN`, `Infinity`, `-Infinity`, a number that
-     * overflows binary64 (`1e999`) and an integer past it as bare tokens. bmlib,
-     * the desktop and iOS refuse the whole reply over one (bmlib#572), never
+     * overflows binary64 (`1e999`) and an integer past it as bare tokens, and
+     * decodes a lone surrogate escape (`"\ud800"`) into a string. bmlib, the
+     * desktop and iOS refuse the whole reply over one (bmlib#572), never
      * reading the fields beside it. Any other bare word stays the lenient
      * parse's business.
      *
      * @param element The parsed reply
-     * @return True when some number in it is not a finite JSON number
+     * @return True when some number in it is not a finite JSON number, or some
+     *   key or string holds a lone surrogate
      */
     internal fun holdsRefusedValue(element: JsonElement): Boolean = when (element) {
-        is JsonObject -> element.values.any(::holdsRefusedValue)
+        is JsonObject -> element.keys.any(::holdsLoneSurrogate) || element.values.any(::holdsRefusedValue)
         is JsonArray -> element.any(::holdsRefusedValue)
-        is JsonPrimitive -> !element.isString && (
-            element.content in NON_FINITE_TOKENS ||
-                (JSON_NUMBER.matches(element.content) && !element.content.toDouble().isFinite())
-            )
+        is JsonPrimitive ->
+            if (element.isString) holdsLoneSurrogate(element.content) else isRefusedToken(element.content)
+    }
+
+    /**
+     * Whether reply text the lenient parse could not read holds a value JSON
+     * does not define (#761), so no regex reads a field beside it.
+     *
+     * String literals, a string cut off at the end of the reply included, are
+     * set aside before bare tokens are read: a quoted `"NaN"` is text. A lone
+     * surrogate, raw or as a `\u` escape, is refused wherever it stands.
+     *
+     * @param text The reply, markdown fences removed
+     * @return True when a bare token outside every string is refused, or the
+     *   text holds a lone surrogate
+     */
+    internal fun holdsRefusedToken(text: String): Boolean =
+        holdsLoneSurrogate(text) || LONE_SURROGATE_ESCAPE.containsMatchIn(text) ||
+            BARE_TOKEN.findAll(STRING_LITERAL.replace(text, "\"\"")).any { isRefusedToken(it.value) }
+
+    /** `NaN`, `Infinity`, `-Infinity`, or a JSON number that is not finite in binary64. */
+    private fun isRefusedToken(token: String): Boolean =
+        token in NON_FINITE_TOKENS || (JSON_NUMBER.matches(token) && !token.toDouble().isFinite())
+
+    /** Whether [text] holds a surrogate not paired as a UTF-16 high-low pair. */
+    private fun holdsLoneSurrogate(text: String): Boolean {
+        var index = 0
+        while (index < text.length) {
+            val char = text[index]
+            if (char.isHighSurrogate() && index + 1 < text.length && text[index + 1].isLowSurrogate()) {
+                index += 2
+                continue
+            }
+            if (char.isSurrogate()) return true
+            index++
+        }
+        return false
     }
 
     /**
@@ -231,16 +270,21 @@ object ResponseParser {
      * {"citations": [{"passage": "...", "relevance": "..."}]}
      * ```
      *
+     * A reply holding a value JSON does not define ([holdsRefusedValue],
+     * [holdsRefusedToken]) is unreadable, not a reply with no passages: no
+     * passage beside it is read (#761).
+     *
      * @param response Raw LLM response text
-     * @return List of parsed citations, or empty list if parsing fails
+     * @return List of parsed citations, or empty list if none is found; null
+     *   when the reply holds a value JSON does not define
      */
-    fun parseCitationResponse(response: String): List<CitationResult> {
+    fun parseCitationResponse(response: String): List<CitationResult>? {
         val cleanJson = cleanJsonResponse(response)
 
         return try {
             val jsonObject = json.parseToJsonElement(cleanJson).jsonObject
             // No passage is read around a value JSON does not define (#761)
-            if (holdsRefusedValue(jsonObject)) return emptyList()
+            if (holdsRefusedValue(jsonObject)) return null
             val citations = jsonObject["citations"]?.jsonArray ?: return emptyList()
 
             citations.mapNotNull { element ->
@@ -254,8 +298,8 @@ object ResponseParser {
                 }
             }
         } catch (e: Exception) {
-            // Fall back to regex parsing
-            parseCitationsWithRegex(cleanJson)
+            // Fall back to regex parsing, never beside a refused value (#761)
+            if (holdsRefusedToken(cleanJson)) null else parseCitationsWithRegex(cleanJson)
         }
     }
 
@@ -483,7 +527,25 @@ object ResponseParser {
 
     /** The bare tokens the lenient parser keeps that JSON does not define (#761). */
     private val NON_FINITE_TOKENS = setOf("NaN", "Infinity", "-Infinity")
-    private const val REFUSED_VALUE_REASON = "parse: the reply holds NaN, Infinity or a number past binary64"
+    private const val REFUSED_VALUE_REASON =
+        "parse: the reply holds NaN, Infinity, a number past binary64 or a lone surrogate"
+
+    /** A JSON string literal, or one cut off at the end of the reply. */
+    private val STRING_LITERAL = Regex(""""(?:[^"\\]|\\[\s\S])*(?:"|$)""")
+
+    /** A run of the characters a bare JSON number or word is written in. */
+    private val BARE_TOKEN = Regex("""[-+.0-9A-Za-z_]+""")
+
+    /**
+     * A high-surrogate escape with no low one after it, or a low one with no
+     * high one before it. shortcut: an escaped backslash before `u` (`\\ud800`,
+     * text) is read as an escape too; parse the string literals if a model
+     * ever writes one.
+     */
+    private val LONE_SURROGATE_ESCAPE = Regex(
+        """\\u[dD][89abAB][0-9a-fA-F]{2}(?!\\u[dD][c-fC-F][0-9a-fA-F]{2})""" +
+            """|(?<!\\u[dD][89abAB][0-9a-fA-F]{2})\\u[dD][c-fC-F][0-9a-fA-F]{2}"""
+    )
 
     /** A JSON number as RFC 8259 writes it. */
     private val JSON_NUMBER = Regex("""-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?""")

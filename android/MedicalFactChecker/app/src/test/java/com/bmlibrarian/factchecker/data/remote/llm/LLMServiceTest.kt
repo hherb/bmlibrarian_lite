@@ -495,6 +495,39 @@ class LLMServiceTest {
         assertEquals("Supports the claim", citations[0].relevance)
     }
 
+    @Test
+    fun `extractCitations fails on a reply holding a value JSON does not define`() = runTest {
+        // Unreadable, never "no passages": the document is recorded as failed (#761)
+        val jsonResponse = """{"citations": [{"passage": "Aspirin reduced stroke.", "relevance": "x", "confidence": NaN}]}"""
+        coEvery {
+            openAIApi.chatCompletion(any(), any(), any())
+        } returns Response.success(
+            OpenAIChatResponse(
+                id = "test-id",
+                choices = listOf(
+                    OpenAIChatChoice(
+                        index = 0,
+                        message = OpenAIChatMessage("assistant", jsonResponse),
+                        finishReason = "stop"
+                    )
+                ),
+                usage = null
+            )
+        )
+
+        val result = service.extractCitations(
+            provider = LLMProvider.OPENAI,
+            apiKey = "test-key",
+            model = "gpt-4o",
+            claim = "Test claim",
+            title = "Test Document",
+            content = "Full document content here"
+        )
+
+        val error = result.exceptionOrNull() as LLMError.ParseError
+        assertEquals(jsonResponse, error.rawResponse)
+    }
+
     // ==================== Report Generation Tests ====================
 
     @Test

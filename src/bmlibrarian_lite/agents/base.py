@@ -48,23 +48,31 @@ def refuses_json_value(text: str) -> bool:
 
     ``json.loads`` reads ``NaN``, ``Infinity``, ``1e999`` and an integer past
     binary64; bmlib's ``strict_json_loads`` refuses them, and with them the
-    whole reply (#761, bmlib#572). A reader that falls back to another span
-    or to prose after a failed decode asks this first, so nothing is read
+    whole reply (#761, bmlib#572). An integer longer than
+    ``sys.get_int_max_str_digits()`` is refused by both, and is a refusal too;
+    so are a lone surrogate escape and nesting past bmlib's depth limit, which
+    only ``strict_json_loads`` refuses. A reader that falls back to another
+    span or to prose after a failed decode asks this first, so nothing is read
     around a refused value. A syntax error is not a refusal.
 
     Args:
         text: The span about to be decoded.
 
     Returns:
-        True when ``json.loads`` reads the text and ``strict_json_loads`` does not.
+        True when ``strict_json_loads`` refuses the text for anything but its
+        syntax.
     """
     try:
         strict_json_loads(text)
     except ValueError:
         try:
             json.loads(text)
-        except ValueError:
+        except json.JSONDecodeError:
             return False
+        except ValueError:
+            # An integer longer than sys.get_int_max_str_digits(): a number
+            # JSON's grammar reads, refused for its size, not a syntax error
+            return True
         return True
     return False
 
@@ -192,15 +200,15 @@ class LiteBaseAgent:
 
         Uses task-specific configuration if available, otherwise falls back
         to defaults. Temperature and max_tokens can be overridden per-call.
+        Inside an ``llm_retry`` attempt after an unreadable reply, the last
+        user turn carries ``JSON_CORRECTION_NOTE`` (#761).
 
         Args:
             messages: List of conversation messages
             task_id: Task identifier for config lookup (uses class TASK_ID if None)
             temperature: Optional temperature override
             max_tokens: Optional max tokens override
-            json_mode: Request JSON-formatted output. Inside an
-                ``llm_retry`` attempt after an unreadable reply, the last user
-                turn carries ``JSON_CORRECTION_NOTE`` (#761).
+            json_mode: Request JSON-formatted output
 
         Returns:
             Response text from the LLM

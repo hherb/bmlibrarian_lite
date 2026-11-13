@@ -232,11 +232,14 @@ Open issues by family; each issue carries the detail. None blocks another.
 ### Next up
 
 - **From the bmlib sync (PR #757)**, fixed, unreleased (a 0.6.1 is the
-  maintainer's call): **#758**/**#759** (no Claude `temperature`), **#760**
-  (apps ask Ollama on `/api/chat` with a per-request `num_ctx`, overflow is a
-  400; Android has no Ollama URL setting; deferred #768, #769) and **#761**
-  (`fix/761-strict-model-json`): `NaN`, `Infinity`, `1e999` or an integer past
-  binary64 makes a reply unreadable as a whole, no fallback read around it,
+  maintainer's call): **#758**/**#759** (no Claude `temperature`; PRs #765,
+  #766), **#760** (PR #767: apps ask Ollama on `/api/chat` with a
+  per-request `num_ctx`, overflow is a 400; Android has no Ollama URL
+  setting; deferred #768, #769) and **#761** (PR #771): `NaN`, `Infinity`,
+  `1e999`, an integer past binary64 or a lone surrogate escape makes a reply
+  unreadable as a whole, no fallback read around it (a trailing comma or a
+  cut-off reply included), the quality benchmark reads as the review does,
+  an Android citation reply holding one is a failure, never "no passages",
   and every retry after an unreadable reply carries bmlib's
   `JSON_CORRECTION_NOTE` (`llm_parity/json_correction.json`; the prompts
   asking for null up front is #770). Next: **#762**
