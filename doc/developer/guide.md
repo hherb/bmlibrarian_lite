@@ -142,7 +142,7 @@ bmlibrarian_lite/
 │   ├── pdf_download.py      # Download helpers: .part, .unchecked and .held files
 │   ├── pdf_title_check.py   # Is a PDF the article? (its first page vs the title)
 │   ├── pdf_library_check.py # .mismatch set-aside, .kept marker, bmll keep-pdf
-│   ├── pdf_utils.py         # PDF text extraction; full-text and PDF paths
+│   ├── pdf_utils.py         # PDF text extraction through bmlib (a typed failure, MuPDF's messages, a cancel); full-text and PDF paths
 │   ├── bot_walls.py         # Bot-wall challenge pages recognised from an answer
 │   ├── browser_rescue.py    # Walled PDFs queued for the embedded browser: states, verdicts
 │   ├── browser_rescue_text.py # What the reader reads about the rescue queue

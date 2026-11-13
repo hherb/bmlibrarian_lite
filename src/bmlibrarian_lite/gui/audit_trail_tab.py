@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 
 from ..config import LiteConfig
 from ..full_text_upload import UPLOAD_FILE_FILTER, UploadRefused, read_upload
+from ..pdf_utils import PDF_READ_PAST_NOTE
 from ..storage import LiteStorage
 from ..analysis_failures import transparency_failure_text
 from ..data_models import (
@@ -221,7 +222,8 @@ class AuditTrailTab(QWidget):
             f"The full text of \u201c{title}\u201d is kept ({upload.file_name}). "
             "When the paper scored at or above the review's threshold, Retry "
             "Full Text on the Research Questions tab reads it and writes the "
-            "report again, and a review run from now on reads it too.",
+            "report again, and a review run from now on reads it too."
+            + (f" {PDF_READ_PAST_NOTE}" if upload.engine_messages else ""),
         )
 
     # =========================================================================

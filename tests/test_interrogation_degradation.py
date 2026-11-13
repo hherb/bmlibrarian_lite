@@ -46,7 +46,11 @@ from bmlibrarian_lite.gui.document_interrogation_tab import (  # noqa: E402
     STALE_CACHED_FULLTEXT_LABEL,
     DocumentInterrogationTab,
 )
-from bmlibrarian_lite.pdf_utils import fulltext_cache_stamp  # noqa: E402
+from bmlibrarian_lite.pdf_utils import (  # noqa: E402
+    PDF_READ_PAST_NOTE,
+    PdfText,
+    fulltext_cache_stamp,
+)
 
 #: What a provider's error text can carry on this path: the Unpaywall request
 #: URL holds the user's email address, and a URL is what error text prints.
@@ -314,7 +318,7 @@ class TestEveryFallbackSaysSo:
         self, tab: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any
     ) -> None:
         """A scanned deposit yields nothing, and the reader must know."""
-        monkeypatch.setattr(tab_module, "extract_pdf_text", lambda _path: "")
+        monkeypatch.setattr(tab_module, "read_pdf_text", lambda _path: PdfText(""))
 
         tab._load_citation_pdf(tmp_path / "a.pdf", make_citation(), "Full Text (PDF)")
 
@@ -325,14 +329,31 @@ class TestEveryFallbackSaysSo:
     ) -> None:
         """Extraction raising is not an article without a full text."""
 
-        def explode(_path: Any) -> str:
+        def explode(_path: Any) -> PdfText:
             raise RuntimeError("boom")
 
-        monkeypatch.setattr(tab_module, "extract_pdf_text", explode)
+        monkeypatch.setattr(tab_module, "read_pdf_text", explode)
 
         tab._load_citation_pdf(tmp_path / "a.pdf", make_citation(), "Full Text (PDF)")
 
         assert PDF_UNREADABLE in tab._bubbles.last
+
+    @pytest.mark.parametrize("messages, said", [
+        (("trying to repair broken xref",), True),
+        ((), False),
+    ])
+    def test_a_pdf_mupdf_read_past_damage_in_says_text_may_be_missing(
+        self, tab: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Any,
+        messages: tuple[str, ...], said: bool,
+    ) -> None:
+        """The text is used, and the reader is told it may be incomplete (#762)."""
+        monkeypatch.setattr(
+            tab_module, "read_pdf_text", lambda _path: PdfText("The trial.", messages)
+        )
+
+        tab._load_citation_pdf(tmp_path / "a.pdf", make_citation(), "Full Text (PDF)")
+
+        assert (PDF_READ_PAST_NOTE in tab._bubbles.last) is said
 
 
 class TestWhatIsNotSaid:

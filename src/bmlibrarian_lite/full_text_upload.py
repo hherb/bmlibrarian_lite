@@ -23,9 +23,11 @@ from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
 
+from bmlib.fulltext.pdf_converter import PDFErrorKind, PDFExtractionError
+
 from .chunking import analysis_windows
 from .constants import MAX_PDF_SIZE
-from .pdf_utils import extract_pdf_text
+from .pdf_utils import read_pdf_text
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,16 @@ NO_PDF_TEXT = (
     "holds pictures of its pages, not their text."
 )
 UNREADABLE_PDF_TEXT = "This PDF could not be opened, so it was not used."
+ENCRYPTED_PDF_TEXT = (
+    "This PDF is password-protected, so it was not used. Remove the password "
+    "and upload it again."
+)
+#: The engine failed, not the file: the same file may read on another try.
+PDF_ENGINE_FAILED_TEXT = (
+    "The PDF reader failed on this file (it may have run out of memory), so "
+    "it was not used. The file itself may be fine: try again, or upload "
+    "another copy."
+)
 UNREADABLE_FILE_TEXT = "The file could not be read, so it was not used."
 ONLY_REFERENCES_TEXT = (
     "The file holds nothing before its reference list, so it was not used."
@@ -81,6 +93,9 @@ class UploadedFullText:
         kind: ``"pdf"``, ``"html"`` or ``"text"`` (Markdown or plain text).
         file_name: The uploaded file's name, without its folder.
         uploaded_at: When it was stored, in UTC; ``None`` before it is.
+        engine_messages: What MuPDF reported reading a PDF (damage it read
+            past, so text may be missing); empty otherwise. Not stored: it
+            is shown when the file is uploaded.
 
     Raises:
         ValueError: If the text is blank, the kind is not one of those, or
@@ -91,6 +106,7 @@ class UploadedFullText:
     kind: str
     file_name: str
     uploaded_at: datetime | None = None
+    engine_messages: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Refuse an upload the analysis could not read."""
@@ -224,8 +240,9 @@ def read_upload(path: Path) -> UploadedFullText:
     try:
         if path.stat().st_size > MAX_PDF_SIZE:
             raise UploadRefused(TOO_LARGE_TEXT)
+        engine_messages: tuple[str, ...] = ()
         if suffix in PDF_SUFFIXES:
-            kind, text = "pdf", _pdf_text(path)
+            kind, (text, engine_messages) = "pdf", _pdf_text(path)
         else:
             raw = decoded_utf8(path.read_bytes())
             kind, text = ("html", html_to_text(raw)) if suffix in HTML_SUFFIXES else ("text", raw)
@@ -237,26 +254,33 @@ def read_upload(path: Path) -> UploadedFullText:
     # The analysis reads only what comes before the references
     if not analysis_windows(text):
         raise UploadRefused(ONLY_REFERENCES_TEXT)
-    return UploadedFullText(text=text, kind=kind, file_name=path.name)
+    return UploadedFullText(
+        text=text, kind=kind, file_name=path.name, engine_messages=engine_messages
+    )
 
 
-def _pdf_text(path: Path) -> str:
-    """A PDF's text.
+def _pdf_text(path: Path) -> tuple[str, tuple[str, ...]]:
+    """A PDF's text, and what MuPDF reported reading it.
 
     Args:
         path: The PDF.
 
     Returns:
-        Its pages' text, in order.
+        Its pages' text, in order, and MuPDF's messages.
 
     Raises:
-        UploadRefused: The PDF cannot be opened or read.
+        UploadRefused: The PDF is encrypted or cannot be read, or the PDF
+            engine failed on it; the message says which (#762).
     """
     try:
-        return extract_pdf_text(path)
+        read = read_pdf_text(path)
     except ImportError:
         raise  # a broken install, not a bad PDF
-    except Exception:
-        # PyMuPDF raises its own types for a damaged or encrypted file
-        logger.exception("The uploaded PDF %s could not be read", path.name)
-        raise UploadRefused(UNREADABLE_PDF_TEXT) from None
+    except PDFExtractionError as e:
+        logger.error("The uploaded PDF %s could not be read: %s", path.name, e)
+        if e.kind is PDFErrorKind.ENCRYPTED:
+            raise UploadRefused(ENCRYPTED_PDF_TEXT) from None
+        if e.kind.is_the_files:
+            raise UploadRefused(UNREADABLE_PDF_TEXT) from None
+        raise UploadRefused(PDF_ENGINE_FAILED_TEXT) from None
+    return read.text, read.engine_messages

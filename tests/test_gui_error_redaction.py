@@ -16,6 +16,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from bmlibrarian_lite.gui import workers  # noqa: E402
+from bmlibrarian_lite.pdf_utils import PdfText  # noqa: E402
 
 SECRET = "SECRET123"
 LEAKY = f"Client error for url 'https://h/p?key={SECRET}'"
@@ -317,7 +318,7 @@ def test_a_discovered_pdf_load_error_redacts(
     tab, tab_module = interrogation_tab
     path = tmp_path / "paper.pdf"
     path.write_bytes(b"%PDF-1.4")
-    monkeypatch.setattr(tab_module, "extract_pdf_text", lambda _p: "Some text.")
+    monkeypatch.setattr(tab_module, "read_pdf_text", lambda _p: PdfText("Some text."))
 
     tab._load_pdf_file(path, "Paper")
 

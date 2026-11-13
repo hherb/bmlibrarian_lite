@@ -90,7 +90,8 @@ from ..pdf_utils import (
     find_existing_fulltext,
     read_cached_fulltext,
     read_stale_cached_fulltext,
-    extract_pdf_text,
+    PDF_READ_PAST_NOTE,
+    read_pdf_text,
     get_progress_stage_message,
 )
 from ..conversation_export import (
@@ -1000,7 +1001,8 @@ class DocumentInterrogationTab(QWidget):
             QMessageBox.warning(self, "File Not Found", f"PDF not found:\n{pdf_path}")
             return
         try:
-            text = extract_pdf_text(pdf_path)
+            read = read_pdf_text(pdf_path)
+            text = read.text
             if not text.strip():
                 QMessageBox.warning(self, "Empty PDF", "PDF contained no extractable text.")
                 return
@@ -1014,6 +1016,8 @@ class DocumentInterrogationTab(QWidget):
             self._agent.load_document(text, title=title)
             self._set_document_loaded(title, "PDF", show_wrong_pdf=True)
             self._add_chat_bubble(f"Document loaded: **{title}**\n\nSource: PDF Discovery\n\nYou can now ask questions.", is_user=False)
+            if read.engine_messages:
+                self._add_chat_bubble(PDF_READ_PAST_NOTE, is_user=False)
             self.status_message.emit(f"Loaded: {title}")
         except Exception as e:
             logger.exception("Failed to load PDF")
@@ -1342,7 +1346,8 @@ class DocumentInterrogationTab(QWidget):
         """Load PDF for citation."""
         title = get_document_title(citation)
         try:
-            text = extract_pdf_text(pdf_path)
+            read = read_pdf_text(pdf_path)
+            text = read.text
             if not text.strip():
                 logger.warning(f"No text could be extracted from {pdf_path}")
                 self._load_citation_abstract(citation, PDF_NO_TEXT)
@@ -1356,6 +1361,8 @@ class DocumentInterrogationTab(QWidget):
             else:
                 self.document_view.show_fulltext_tab()
             self._finalize_citation_load(citation, source_type, show_wrong_pdf=True)
+            if read.engine_messages:
+                self._add_chat_bubble(PDF_READ_PAST_NOTE, is_user=False)
         except Exception:
             logger.exception("Failed to load PDF")
             self._load_citation_abstract(citation, PDF_UNREADABLE)

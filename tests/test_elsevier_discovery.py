@@ -568,7 +568,7 @@ def _discover_fulltext_with(
         stack.enter_context(
             patch(
                 "bmlibrarian_lite.fulltext_discovery.extract_pdf_text",
-                lambda _p: extracted,
+                lambda _p, **_k: extracted,
             )
         )
         stack.enter_context(

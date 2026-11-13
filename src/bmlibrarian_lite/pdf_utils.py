@@ -32,6 +32,7 @@ Pure functions for PDF/full-text file path management and document formatting:
 - save_core_text(): Cache CORE's extracted text, stamped with its DOI
 - read_cached_core_text(): Read CORE's cached text for a DOI, or None if there is none to trust
 - format_abstract_as_document(): Format abstract and citation as readable document
+- read_pdf_text(): A PDF's text and MuPDF's messages, a failure typed by whose fault it is
 - extract_pdf_text(): Extract text from a PDF file
 
 These functions are stateless and can be reused across different modules.
@@ -65,8 +66,16 @@ Usage:
 
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+from bmlib.fulltext.pdf_converter import (
+    PDFErrorKind,
+    PDFExtractionError,
+    PDFLimit,
+    PyMuPDFConverter,
+)
 
 from .constants import (
     CORE_MIN_FULLTEXT_CHARS,
@@ -670,41 +679,86 @@ def format_abstract_as_document(
     return "\n".join(parts)
 
 
-def extract_pdf_text(pdf_path: Path) -> str:
-    """
-    Extract text from a PDF file.
+#: What the reader is told when MuPDF read past damage in a PDF (#762).
+PDF_READ_PAST_NOTE = (
+    "The PDF reader reported damage in this file while reading it, so some "
+    "of its text may be missing."
+)
 
-    Uses PyMuPDF (fitz) to extract text from all pages.
+
+@dataclass(frozen=True)
+class PdfText:
+    """A PDF's text, with what MuPDF reported while reading it.
+
+    Attributes:
+        text: Every page's text that yielded any, in order.
+        engine_messages: MuPDF's repair and read-past messages (a broken xref
+            rebuilt, a page cut short after syntax errors), the path replaced
+            by "the file"; empty when it said nothing. Text may be missing
+            when there are any (:data:`PDF_READ_PAST_NOTE`).
+    """
+
+    text: str
+    engine_messages: tuple[str, ...] = ()
+
+
+def read_pdf_text(pdf_path: Path, *, limit: PDFLimit | None = None) -> PdfText:
+    """Read a PDF's text through bmlib, saying whose fault a failure is.
+
+    A page that fails to read fails the whole read: a partial text is not
+    passed on as the paper's (golden rule 13).
+
+    Args:
+        pdf_path: Path to the PDF file.
+        limit: When to stop, checked before each page (a cancel or deadline).
+
+    Returns:
+        The text and MuPDF's messages.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        ValueError: If the path is not a ``.pdf`` file.
+        PDFExtractionError: If the file is encrypted or unreadable, the engine
+            failed, or ``limit`` was reached; its ``kind`` says which, and
+            its message is safe to show (it never names the path).
+    """
+    result = PyMuPDFConverter().convert(pdf_path, limit=limit)
+    if not result.success:
+        raise PDFExtractionError(
+            result.error_kind or PDFErrorKind.ENGINE,
+            result.error_message or "the PDF engine failed",
+            result.engine_messages,
+        )
+    if result.converted_pages < result.page_count:
+        failed = "; ".join(w for w in result.warnings if "Extraction failed" in w)
+        raise PDFExtractionError(
+            PDFErrorKind.UNREADABLE,
+            f"the PDF could not be read: {failed.replace(str(pdf_path), 'the file')}",
+            result.engine_messages,
+        )
+    return PdfText(result.text, tuple(result.engine_messages))
+
+
+def extract_pdf_text(pdf_path: Path, *, limit: PDFLimit | None = None) -> str:
+    """Extract text from a PDF file: :func:`read_pdf_text`'s text alone.
+
+    MuPDF's messages are logged (at WARNING, by bmlib) and not returned.
 
     Args:
         pdf_path: Path to PDF file
+        limit: When to stop, checked before each page.
 
     Returns:
-        Extracted text from all pages, joined by double newlines
+        The text of every page that yielded any, joined by double newlines
 
     Raises:
-        FileNotFoundError: If PDF file doesn't exist
-        Exception: If PDF cannot be opened or read
+        As :func:`read_pdf_text`.
 
     Example:
         text = extract_pdf_text(Path("/path/to/paper.pdf"))
         print(f"Extracted {len(text)} characters")
     """
-    import fitz
-
-    if not pdf_path.exists():
-        raise FileNotFoundError(f"PDF file not found: {pdf_path}")
-
-    pdf_doc = fitz.open(str(pdf_path))
-    text_parts = []
-
-    try:
-        for page in pdf_doc:
-            text_parts.append(page.get_text())
-    finally:
-        pdf_doc.close()
-
-    return "\n\n".join(text_parts)
+    return read_pdf_text(pdf_path, limit=limit).text
 
 
 def get_progress_stage_message(stage: str, status: str) -> str:
