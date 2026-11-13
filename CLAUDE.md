@@ -87,7 +87,7 @@ rate_limit.py         # Host-keyed, thread-safe pacing for outbound requests
 polite_session.py     # PoliteAdapter + mount_politely for requests.Session
 embeddings.py         # LiteEmbedder (FastEmbed)
 chunking.py           # Text chunking; analysis_windows (every LLM text path: no references, 16k windows, 250 overlap)
-pdf_utils.py          # PDF text extraction
+pdf_utils.py          # PDF text extraction (bmlib PyMuPDFConverter: fault side, MuPDF messages, cancel)
 constants.py          # Application constants
 exceptions.py         # Custom exception hierarchy
 ```

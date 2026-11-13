@@ -301,7 +301,7 @@ def opening_text(pdf_path: Path, pages: int = PDF_TITLE_PAGES_READ) -> str | Non
             ``FzErrorBase`` (an ``Exception``) for damage. The set is not
             documented (``_unreadable_file_errors``).
     """
-    import fitz  # type: ignore[import-untyped]  # PyMuPDF, imported here as pdf_utils does
+    import fitz  # type: ignore[import-untyped]  # PyMuPDF, imported where it is used
 
     with fitz.open(str(pdf_path)) as document:
         if document.page_count == 0:

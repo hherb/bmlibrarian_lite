@@ -12,20 +12,16 @@ its slice has landed; add a new section when handing off new work.
 `docs/superpowers/plans/2026-11-08-release-0.6.0-and-1.9.0.md`).
 - **Tasks 1–10 done** (PRs #743, #745, #746, #748, #749; merge `0641e80c`,
   all CI green). Deferred: #744, #527 (signed build from a second account).
-- **Task 11, desktop: published 2026-11-10** from `0641e80c` (PyPI 0.6.0,
-  tag `0.6.0`, GitHub release with the signed, notarized DMG). `twine` needs
-  `packaging>=26`. **mypy is out of the next DMG** (#750: pydantic's mypy
-  plugins pulled it in; the spec now excludes them, checked by a PyInstaller
-  analysis, not yet by a full build: `ls "dist/BMLibrarian Lite.app/Contents/Frameworks"`).
+- **Task 11, desktop: published 2026-11-10** from `0641e80c` (PyPI, tag
+  `0.6.0`, signed DMG; `twine` needs `packaging>=26`). **mypy is out of the
+  next DMG** (#750), checked by a PyInstaller analysis, not yet a full build.
 - **medfactcheck.org** (PR #753): `website/`; `privacy.html` is generated
   from `ios/MedicalFactChecker/PRIVACY.md` by `website/build_privacy.py`
   (edit the policy, re-run it). Store text: `PLAY_STORE.md`, `APP_STORE.md`.
 - **Task 11, apps: the maintainer's.** Apple: **the 1.6 → 1.9.0 upgrade
   passed on an iPhone 13 Pro Max (2026-11-11)**: a Debug build from
-  `0641e80c` installed over 1.6 kept every session and report, they open,
-  and a new fact check ran well (#289's risk did not show). Validation's "no dSYM
-  for the A" warning is `BmlibFFI` (built stripped, #752): expected for
-  1.9.0, not blocking. Left: archive both schemes, upload, tags
+  `0641e80c` kept every session and report (#289's risk did not show);
+  the "no dSYM" warning is `BmlibFFI` (#752), expected for 1.9.0. Left: archive both schemes, upload, tags
   `appstore_1.9` / `macos_1.9.0`. Android 1.9.0 (debug variant, from
   `0641e80c`) runs on the maintainer's phone over 1.6.0. Left: sign a release
   AAB built at `0641e80c` (`JAVA_HOME` = Android Studio's `jbr`, `BMLIB_DIR`
@@ -152,8 +148,7 @@ contract `doc/cross_platform/retraction_parity/`). bmlib comes from PyPI (`>=0.1
   `europepmc_free_pdf.json`; converter **6**, analyser **2.7**. **Phase 4
   consumes bmlib's Rust through UniFFI** (no production caller yet). Open:
   #573–#581, #585, #587.
-- **Wrong-article PDFs** (PRs #542, #548, #559): `.mismatch`, never read;
-  `wrong_article` is a skip, never an absence. Open: #543, #545, #547, #556–#558.
+- **Wrong-article PDFs** (PRs #542, #548, #559): `.mismatch`, never read; `wrong_article` is a skip, never an absence.
 - **Bot-walled PDFs: the desktop browser rescue** (#480; PRs #521, #529,
   #536; spec `docs/superpowers/specs/2026-10-12-browser-rescue-design.md`, doc
   `doc/developer/browser_rescue.md`, which holds the binding rules): **one
@@ -235,17 +230,23 @@ Open issues by family; each issue carries the detail. None blocks another.
   maintainer's call): **#758**/**#759** (no Claude `temperature`; PRs #765,
   #766), **#760** (PR #767: apps ask Ollama on `/api/chat` with a
   per-request `num_ctx`, overflow is a 400; Android has no Ollama URL
-  setting; deferred #768, #769) and **#761** (PR #771): `NaN`, `Infinity`,
-  `1e999`, an integer past binary64 or a lone surrogate escape makes a reply
-  unreadable as a whole, no fallback read around it (a trailing comma or a
-  cut-off reply included), the quality benchmark reads as the review does,
-  an Android citation reply holding one is a failure, never "no passages",
-  and every retry after an unreadable reply carries bmlib's
-  `JSON_CORRECTION_NOTE` (`llm_parity/json_correction.json`; the prompts
-  asking for null up front is #770). Next: **#762**
-  desktop PDF extraction (fault side, MuPDF's read-past messages, no cancel);
+  setting; deferred #768, #769), **#761** (PR #771: a reply holding `NaN`,
+  `Infinity`, `1e999` or a lone surrogate is unreadable whole; retries carry
+  `JSON_CORRECTION_NOTE`; deferred #770). **#762** (PR #774): the desktop
+  reads every PDF it analyses through bmlib's `PyMuPDFConverter`
+  (`pdf_utils.read_pdf_text`, one read at a time: MuPDF's message store is
+  per process): a typed `PDFExtractionError` (encrypted / unreadable /
+  engine / cancelled), a page that failed fails the read, MuPDF's messages
+  kept; the upload names the cause, upload and all three Interrogation loads
+  warn text may be missing, discovery's `cancel()` stops a read before its
+  next page; PyMuPDF floor 1.28.2 (bmlib's). `pdf_title_check` still reads
+  first pages with `fitz`. Deferred: #773 (discovery's record and the
+  report, and a stored upload's later reports, carry neither). Next:
   **#763** Android HTML upload (markup capped as text, quadratic regex);
-  **#764** Android PDF extraction ignores cancel.
+  **#764** Android PDF extraction ignores cancel. **bmlib `main`
+  (`644bb0db`) has moved past the pin**: `check_bmlib_ledger.py` against it
+  fails on the entries made since (`bmlib.library`, a shared folder of
+  papers, and bmlib#746–#753 among them) until the next sync triages them.
 - **Retraction checking** follow-ups (#662, #726–#728, #730, #731 and
   #737–#739 landed; **their rules, the unreadable-snapshot ones above all,
   are in `doc/developer/retraction_checking.md`**: read it before touching
@@ -287,7 +288,7 @@ Open issues by family; each issue carries the detail. None blocks another.
   the Rust parser). bmlib audit leftovers: **#571**, **#573**–**#581**,
   **#585**.
 - **#545** sweep the PDF library for other articles' PDFs (CLI, maintainer's
-  call); **#547** keep a set-aside PDF from the GUI; **#563** (PR #562's, checked downloads); **#556**–**#558** (#546's).
+  call); **#547** keep a set-aside PDF from the GUI; **#563** (PR #562's, checked downloads); **#543**, **#556**–**#558** (#546's).
 - **C2's probe and acceptance, and C1's replay** (maintainer); the **embedded
   browser rescue's follow-ups**: **#524**, **#525**, **#527**, **#528**, **#530**, **#531**, **#533** (stage 2 follow-ups), **#534**, **#535**, **#537**–**#540**, **#544** (stage 3); **#481** follows it; **#485**, **#488**, **#489**, **#490** (stage A follow-ups);
   **#492**, **#493** (stage B follow-ups); **#500**, **#502**–**#505** (C1 follow-ups); **#506**, **#508**–**#513** (C2); **#516** (PySide6 cap, leaked widgets), **#517** (GC on worker threads); **#467**, **#468** / **#470**, **#476**; **#744** (redaction: its tests landed; left are two decisions, keep a URL's non-credential query parameters, and `api_key=None` reading as a hidden key).

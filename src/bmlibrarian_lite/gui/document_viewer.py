@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from bmlibrarian_lite.pdf_utils import extract_pdf_text
 from bmlibrarian_lite.resources.styles.dpi_scale import get_font_scale, scaled
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,6 @@ class PDFViewerTab(QWidget):
         super().__init__(parent)
         self.scale = get_font_scale()
         self._pdf_path: Optional[str] = None
-        self._pdf_text: str = ""
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -240,43 +240,11 @@ class PDFViewerTab(QWidget):
             self._pdf_path = pdf_path
             self._update_page_controls()
 
-            # Also extract text for the Full Text tab
-            self._extract_text(pdf_path)
-
             return True
 
         except Exception as e:
             logger.error(f"Failed to load PDF: {e}")
             return False
-
-    def _extract_text(self, pdf_path: str) -> None:
-        """Extract text from PDF for the Full Text tab."""
-        try:
-            import fitz  # PyMuPDF
-
-            doc = fitz.open(pdf_path)
-            text_parts = []
-            for page_num, page in enumerate(doc, 1):
-                text_parts.append(f"--- Page {page_num} ---\n")
-                text_parts.append(page.get_text())
-            doc.close()
-            self._pdf_text = "\n".join(text_parts)
-
-        except ImportError:
-            logger.warning("PyMuPDF not available for text extraction")
-            self._pdf_text = ""
-        except Exception as e:
-            logger.warning(f"Failed to extract PDF text: {e}")
-            self._pdf_text = ""
-
-    def get_text(self) -> str:
-        """
-        Get all text from the loaded PDF.
-
-        Returns:
-            Extracted text or empty string
-        """
-        return self._pdf_text
 
     def get_pdf_path(self) -> Optional[str]:
         """
@@ -290,7 +258,6 @@ class PDFViewerTab(QWidget):
     def clear(self) -> None:
         """Clear the PDF viewer."""
         self._pdf_path = None
-        self._pdf_text = ""
         self.pdf_document.close()
         self.page_label.setText("Page: 0 / 0")
         self.zoom_spinbox.setValue(self.ZOOM_DEFAULT)
@@ -454,33 +421,17 @@ class LiteDocumentViewWidget(QWidget):
 
         Returns:
             Extracted text content
+
+        Raises:
+            PDFExtractionError: If the PDF cannot be read; its kind says
+                whose fault it is (#762).
         """
-        # Load into PDF tab
-        if self.pdf_tab.load_pdf(file_path):
-            text = self.pdf_tab.get_text()
-            self._current_text = text
-            # Also show in full text tab
-            self.fulltext_tab.set_content(text)
-            # Switch to PDF tab
-            self.tab_widget.setCurrentIndex(0)
-            return text
-        else:
-            # PDF loading failed, try extracting text manually
-            try:
-                import fitz
-                doc = fitz.open(file_path)
-                text = ""
-                for page in doc:
-                    text += page.get_text()
-                doc.close()
-                self._current_text = text
-                self.fulltext_tab.set_content(text)
-                # Switch to full text tab since PDF view failed
-                self.tab_widget.setCurrentIndex(1)
-                return text
-            except Exception as e:
-                logger.error(f"Failed to extract PDF text: {e}")
-                return ""
+        text = extract_pdf_text(Path(file_path))
+        self._current_text = text
+        self.fulltext_tab.set_content(text)
+        # The PDF tab when it renders, else the text alone
+        self.tab_widget.setCurrentIndex(0 if self.pdf_tab.load_pdf(file_path) else 1)
+        return text
 
     def _load_text(self, file_path: str) -> str:
         """

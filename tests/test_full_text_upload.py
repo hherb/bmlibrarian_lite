@@ -150,9 +150,9 @@ class TestReading:
     ) -> None:
         """PyMuPDF missing raises, rather than blaming the reader's file."""
         def missing(path: Path) -> str:
-            raise ImportError("No module named 'fitz'")
+            raise ImportError("No module named 'pymupdf'")
 
-        monkeypatch.setattr(full_text_upload, "extract_pdf_text", missing)
+        monkeypatch.setattr(full_text_upload, "read_pdf_text", missing)
         with pytest.raises(ImportError):
             read_upload(written(tmp_path, "paper.pdf", b"%PDF-1.4"))
 

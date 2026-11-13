@@ -433,6 +433,10 @@ Displays document cards for all retrieved articles.
     paper, for one no source had). Its text is kept with the paper. HTML,
     Markdown and text files must be UTF-8, and a file over 100 MB, holding
     no text (a scanned PDF) or nothing before its reference list is refused.
+    A refused PDF says why: password-protected (remove the password), damaged
+    (find another copy), or the PDF reader failed on it (try again). A PDF
+    the reader had to repair is kept, with a warning that some of its text
+    may be missing; Document Interrogation gives the same warning.
     When the paper scored at or above the review's threshold, **Retry Full
     Text** on the Research Questions tab reads it and writes the report
     again, and every review run from then on reads it in place of fetching

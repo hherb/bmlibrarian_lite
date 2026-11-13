@@ -45,8 +45,10 @@ Usage:
 """
 
 import logging
+import threading
 
 import requests
+from bmlib.fulltext.pdf_converter import PDFErrorKind, PDFExtractionError, PDFLimit
 
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -333,6 +335,9 @@ class FulltextDiscoverer:
             else elsevier_api.elsevier_client_for(elsevier_credentials)
         )
         self._cancelled = False
+        # Checked before each PDF page, so a cancel stops a long read (#762)
+        self._cancel_event = threading.Event()
+        self._pdf_limit = PDFLimit(cancel=self._cancel_event)
 
     def _emit_progress(self, stage: str, status: str) -> None:
         """Emit progress update."""
@@ -342,6 +347,7 @@ class FulltextDiscoverer:
     def cancel(self) -> None:
         """Cancel the current operation."""
         self._cancelled = True
+        self._cancel_event.set()
 
     def discover_fulltext(
         self,
@@ -442,6 +448,7 @@ class FulltextDiscoverer:
             FulltextResult with content and source information
         """
         self._cancelled = False
+        self._cancel_event.clear()
 
         # Build doc_dict from individual params if not provided
         if doc_dict is None:
@@ -563,7 +570,7 @@ class FulltextDiscoverer:
         if cached_pdf:
             logger.info(f"Found cached PDF: {cached_pdf}")
             try:
-                text = extract_pdf_text(cached_pdf)
+                text = extract_pdf_text(cached_pdf, limit=self._pdf_limit)
                 if text.strip():
                     return FulltextResult(
                         success=True,
@@ -576,6 +583,10 @@ class FulltextDiscoverer:
                     "No text could be extracted from the cached PDF for this "
                     "article."
                 )
+            except PDFExtractionError as e:
+                if e.kind is PDFErrorKind.CANCELLED:
+                    return self._cancelled_result(lookups)
+                logger.warning("The cached PDF could not be read (%s): %s", e.kind, e)
             except Exception as e:
                 logger.warning(f"Failed to extract text from cached PDF: {e}")
             # We hold this article's PDF and cannot read it. Recorded, not
@@ -1014,7 +1025,7 @@ class FulltextDiscoverer:
                 discard_partial_download(staged)
 
             # Extract text from PDF
-            text = extract_pdf_text(pdf_path)
+            text = extract_pdf_text(pdf_path, limit=self._pdf_limit)
             if text.strip():
                 return FulltextResult(
                     success=True,
@@ -1031,6 +1042,17 @@ class FulltextDiscoverer:
                 RequestFailureKind.MALFORMED_RESPONSE,
             )
 
+        except PDFExtractionError as e:
+            if e.kind is PDFErrorKind.CANCELLED:
+                return self._cancelled_result()
+            # The PDF came and our reader could not read it: Europe PMC
+            # answered, so this is not a request that failed
+            logger.warning("Europe PMC's PDF could not be read (%s): %s", e.kind, e)
+            return _europepmc_pdf_unassessed(
+                article_info,
+                "Europe PMC's PDF could not be read for this article.",
+                RequestFailureKind.MALFORMED_RESPONSE,
+            )
         except Exception as e:
             # See _try_europepmc_xml: the body does more than request.
             failure = _classify(e)
@@ -1270,7 +1292,7 @@ class FulltextDiscoverer:
         if pdf_result.success and pdf_result.file_path:
             # Extract text from downloaded PDF
             try:
-                text = extract_pdf_text(pdf_result.file_path)
+                text = extract_pdf_text(pdf_result.file_path, limit=self._pdf_limit)
                 if text.strip():
                     return FulltextResult(
                         success=True,
@@ -1284,6 +1306,10 @@ class FulltextDiscoverer:
                     "for this article, so whether it holds a full text "
                     "is not assessed."
                 )
+            except PDFExtractionError as e:
+                if e.kind is PDFErrorKind.CANCELLED:
+                    return self._cancelled_result(pdf_result.lookups)
+                logger.warning("The downloaded PDF could not be read (%s): %s", e.kind, e)
             except Exception as e:
                 logger.warning(f"Failed to extract text from downloaded PDF: {e}")
             # The sources answered and one of them served the document.

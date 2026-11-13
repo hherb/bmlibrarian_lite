@@ -2735,26 +2735,26 @@
       "python": "owed",
       "swift": "equivalent",
       "android": "equivalent",
-      "issue": "#762",
-      "note": "The desktop's chain records any exception from `pdf_utils.extract_pdf_text` (a `MemoryError` included) as the retrieved PDF's `MALFORMED_RESPONSE` (`_unreadable_pdf_record`), so a damaged file and an engine fault read alike. Swift's `PDFKitTextExtractor` result carries its `errorMessage` (locked vs unopenable; PDFKit reports no engine fault); Android's `extractedPdfText` logs file faults apart from code faults and tells the reader a neutral sentence."
+      "issue": "#762, #773",
+      "note": "The desktop reads through bmlib since #762 (`pdf_utils.read_pdf_text`, a `PDFExtractionError` with its kind), but the chain still records any unread PDF as the retrieved PDF's `MALFORMED_RESPONSE` (`_unreadable_pdf_record`; Europe PMC's PDF as Europe PMC's, no longer `REQUEST_FAILED`), the kind only logged; carrying it is #773. Swift's `PDFKitTextExtractor` result carries its `errorMessage` (locked vs unopenable; PDFKit reports no engine fault); Android's `extractedPdfText` logs file faults apart from code faults and tells the reader a neutral sentence."
     },
     {
       "id": "bmlib#21",
       "title": "What MuPDF reads past is reported",
-      "python": "owed",
+      "python": "ported",
       "swift": "equivalent",
       "android": "owed",
       "issue": "#762, #764",
-      "note": "The checker reads hherb/StudyAnalyzer#21 in three titles (#598, #599, #600). Desktop: `pdf_utils.extract_pdf_text` is a bare PyMuPDF `get_text()` loop that reads none of MuPDF's messages, has no cancel or deadline, and its upload calls every failure \"could not be opened\". Swift: `PDFKitTextExtractor` tells a locked PDF from an unopenable one and stops on `Task.isCancelled` per page; PDFKit has no repair messages. Android: `PdfText.extractedPdfText`'s page loop never checks cancellation."
+      "note": "The checker reads hherb/StudyAnalyzer#21 in three titles (#598, #599, #600). Desktop, ported in #762: `pdf_utils.read_pdf_text` reads through bmlib's `PyMuPDFConverter` with a `PDFLimit` (discovery's cancel), keeps MuPDF's messages, and the upload names the cause (encrypted, unreadable, engine). Swift: `PDFKitTextExtractor` tells a locked PDF from an unopenable one and stops on `Task.isCancelled` per page; PDFKit has no repair messages. Android: `PdfText.extractedPdfText`'s page loop never checks cancellation."
     },
     {
       "id": "bmlib#599",
       "title": "What MuPDF reads past is reported",
-      "python": "owed",
+      "python": "ported",
       "swift": "n/a",
       "android": "n/a",
-      "issue": "#762",
-      "note": "The desktop extracts with the same engine (PyMuPDF, `pdf_utils.extract_pdf_text`) and never reads `fitz.TOOLS.mupdf_warnings()`, so a PDF MuPDF repaired or read past converts with text missing and nothing said. MuPDF's messages have no PDFKit counterpart; iText's nearest is `PdfReader.hasRebuiltXref()`, which Android does not read."
+      "issue": "#762, #773",
+      "note": "Ported in #762: `pdf_utils.read_pdf_text` returns MuPDF's messages (`PdfText.engine_messages`; bmlib logs them at WARNING), and Upload Full Text and the Interrogation tab's three PDF loads tell the reader text may be missing (`PDF_READ_PAST_NOTE`). Full-text discovery uses such text with no caveat in the report yet (#773). MuPDF's messages have no PDFKit counterpart; iText's nearest is `PdfReader.hasRebuiltXref()`, which Android does not read."
     },
     {
       "id": "bmlib#548",
@@ -2795,11 +2795,11 @@
     {
       "id": "bmlib#619",
       "title": "What MuPDF said is kept apart, and a failed read keeps it",
-      "python": "owed",
+      "python": "ported",
       "swift": "n/a",
       "android": "n/a",
       "issue": "#762",
-      "note": "The desktop's `pdf_utils.extract_pdf_text` keeps no MuPDF messages at all, failed read or not (see bmlib#599). PDFKit and iText report no such messages to keep apart."
+      "note": "Ported in #762: `PdfText.engine_messages` holds what MuPDF said on a read that succeeded, and a failed read's `PDFExtractionError.engine_messages` what it said before failing (the whole read's, for a page lite refuses after bmlib read on); bmlib's own notes stay apart. PDFKit and iText report no such messages to keep apart."
     },
     {
       "id": "bmlib#654",
@@ -2849,11 +2849,11 @@
     {
       "id": "bmlib#598",
       "title": "A PDF extraction error's message moves",
-      "python": "owed",
+      "python": "ported",
       "swift": "equivalent",
       "android": "equivalent",
       "issue": "#762",
-      "note": "The desktop uses bmlib's engine and can place a failure the same way, but `full_text_upload._pdf_text` catches every `Exception` (an out-of-memory included) as \"This PDF could not be opened\", the case #598 fixed. Swift's `PDFKitTextExtractor` tells a password-protected PDF from one that will not open; Android's `extractedPdfText` logs the file's faults apart from the code's."
+      "note": "Ported in #762: `full_text_upload._pdf_text` refuses an encrypted PDF, an unreadable one and an engine fault (an out-of-memory included) in three sentences, by `PDFExtractionError.kind`; the Interrogation tab's Load Document and PDF Discovery loads show bmlib's message, which names no path (a citation's PDF falls back to its abstract, saying the PDF could not be read). Swift's `PDFKitTextExtractor` tells a password-protected PDF from one that will not open; Android's `extractedPdfText` logs the file's faults apart from the code's."
     },
     {
       "id": "bmlib#579",
@@ -2876,11 +2876,11 @@
     {
       "id": "bmlib#600",
       "title": "A PDF extraction can be cancelled or bounded in time",
-      "python": "owed",
+      "python": "ported",
       "swift": "equivalent",
       "android": "owed",
       "issue": "#762, #764",
-      "note": "The desktop's `pdf_utils.extract_pdf_text` cannot be stopped: `FulltextDiscoverer.cancel()` is checked only between steps and the upload reads a PDF whole. Swift's `PDFKitTextExtractor` checks `Task.isCancelled` before each page. Android's `PdfText.extractedPdfText` joins every page in `withContext(Dispatchers.IO)` with no `ensureActive`, so a cancelled read runs on."
+      "note": "Ported in #762 for the desktop: `FulltextDiscoverer.cancel()` sets the event of the `PDFLimit` its three PDF reads pass, checked before each page, and a cancelled read is a cancelled discovery, never an unreadable PDF; the upload has no cancel (it reads on the GUI thread). Swift's `PDFKitTextExtractor` checks `Task.isCancelled` before each page. Android's `PdfText.extractedPdfText` joins every page in `withContext(Dispatchers.IO)` with no `ensureActive`, so a cancelled read runs on."
     },
     {
       "id": "bmlib#590",
