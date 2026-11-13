@@ -25,7 +25,8 @@ public enum OllamaContext {
     /// - Returns: The smallest power-of-two size, from
     ///   ``BioMedLitConstants/ollamaMinNumCtx`` up to
     ///   ``BioMedLitConstants/ollamaMaxNumCtx``, that holds the estimated
-    ///   prompt tokens, the template allowance and `maxTokens`.
+    ///   prompt tokens, the template allowance and `maxTokens`; or the
+    ///   maximum when none does (Ollama then refuses the request).
     public static func numCtx(promptCodePoints: Int, maxTokens: Int) -> Int {
         let perToken = BioMedLitConstants.ollamaCharsPerToken
         let promptTokens = (max(0, promptCodePoints) + perToken - 1) / perToken

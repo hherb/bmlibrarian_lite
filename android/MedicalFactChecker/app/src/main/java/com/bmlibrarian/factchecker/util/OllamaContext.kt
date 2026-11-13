@@ -41,7 +41,8 @@ object OllamaContext {
      * @param maxTokens The most tokens the answer may take
      * @return The smallest power-of-two size, from [Constants.OLLAMA_MIN_NUM_CTX]
      *   up to [Constants.OLLAMA_MAX_NUM_CTX], that holds the estimated prompt
-     *   tokens, the template allowance and [maxTokens]
+     *   tokens, the template allowance and [maxTokens]; or the maximum when
+     *   none does (Ollama then refuses the request)
      */
     fun numCtx(promptCodePoints: Int, maxTokens: Int): Int {
         val perToken = Constants.OLLAMA_CHARS_PER_TOKEN

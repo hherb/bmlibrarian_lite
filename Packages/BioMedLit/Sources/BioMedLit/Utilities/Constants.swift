@@ -862,7 +862,7 @@ public enum BioMedLitConstants {
     public static let ollamaTemplateTokens = 256
     /// The smallest `num_ctx` sent, and the first of its power-of-two sizes.
     public static let ollamaMinNumCtx = 8192
-    /// The largest `num_ctx` sent (a power of two), beyond any model's context.
+    /// The largest `num_ctx` sent (2^20); a request needing more is sent this and refused.
     public static let ollamaMaxNumCtx = 1_048_576
 
     // MARK: - Scoring Constants

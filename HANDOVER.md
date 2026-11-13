@@ -236,7 +236,10 @@ Open issues by family; each issue carries the detail. None blocks another.
   the maintainer's call). #760: the apps ask Ollama on `/api/chat` with a
   per-request `num_ctx` (`llm_parity/ollama_context.json`), `truncate`/`shift`
   off, so an overflow is a 400, not Ollama's silent middle cut (probed on
-  0.40.14). Android has no Ollama URL setting (`localhost` only). Then **#761** `NaN`/`Infinity`
+  0.40.14). Android has no Ollama URL setting (`localhost` only). Deferred from
+  its review: #768 (an Ollama too old for `truncate`/`shift` still cuts
+  silently), #769 (whole prompts can now time out on a slow local model).
+  Then **#761** `NaN`/`Infinity`
   in model JSON, retries re-send unchanged; **#762** desktop PDF extraction
   (fault side, MuPDF's read-past messages, no cancel); **#763** Android HTML
   upload (markup capped as text, quadratic regex); **#764** Android PDF

@@ -51,6 +51,10 @@ final class OllamaContextContractTests: XCTestCase {
         let decomposed = String(repeating: "e\u{301}", count: 11_904)
         XCTAssertEqual(OllamaContext.numCtx(contents: [decomposed], maxTokens: 0), 8192)
         XCTAssertEqual(OllamaContext.numCtx(contents: [decomposed, "x"], maxTokens: 0), 16384)
+        // an emoji outside the BMP is one code point (two UTF-16 units)
+        let emoji = String(repeating: "\u{1F600}", count: 23_808)
+        XCTAssertEqual(OllamaContext.numCtx(contents: [emoji], maxTokens: 0), 8192)
+        XCTAssertEqual(OllamaContext.numCtx(contents: [emoji, "x"], maxTokens: 0), 16384)
     }
 
     func testTheNativeRootDropsTheOpenAIVersionSegment() {

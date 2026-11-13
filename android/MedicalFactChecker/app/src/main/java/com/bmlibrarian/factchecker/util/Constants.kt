@@ -653,7 +653,7 @@ object Constants {
     /** The smallest `num_ctx` sent, and the first of its power-of-two sizes (`min_num_ctx`). */
     const val OLLAMA_MIN_NUM_CTX = 8192
 
-    /** The largest `num_ctx` sent, a power of two beyond any model's context (`max_num_ctx`). */
+    /** The largest `num_ctx` sent, 2^20 (`max_num_ctx`); a request needing more is sent this and refused. */
     const val OLLAMA_MAX_NUM_CTX = 1_048_576
 
     /**

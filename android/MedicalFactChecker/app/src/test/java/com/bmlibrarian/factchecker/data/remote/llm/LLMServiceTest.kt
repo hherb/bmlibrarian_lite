@@ -712,8 +712,9 @@ class LLMServiceTest {
             provider = LLMProvider.OLLAMA,
             apiKey = "", // Ollama doesn't require API key
             model = "llama3.2",
-            systemPrompt = "Cite.",
-            userPrompt = "a".repeat(20_000),
+            // 6,000 code points each: either prompt alone fits 8192, both need 16384
+            systemPrompt = "a".repeat(6_000),
+            userPrompt = "a".repeat(6_000),
             maxTokens = 4096
         ).getOrThrow()
 
@@ -724,6 +725,11 @@ class LLMServiceTest {
         assertFalse(request.captured.stream)
         assertFalse(request.captured.truncate)
         assertFalse(request.captured.shift)
+        // the wire names Ollama reads; a misnamed option is ignored, so the default context returns
+        val body = AppModule.provideJson().encodeToString(OllamaChatRequest.serializer(), request.captured)
+        for (field in listOf("\"num_ctx\":16384", "\"num_predict\":4096", "\"truncate\":false", "\"shift\":false", "\"stream\":false")) {
+            assertTrue(body, body.contains(field))
+        }
         assertEquals("Response", result.content)
         assertEquals(6000, result.inputTokens)
         assertEquals(3, result.outputTokens)

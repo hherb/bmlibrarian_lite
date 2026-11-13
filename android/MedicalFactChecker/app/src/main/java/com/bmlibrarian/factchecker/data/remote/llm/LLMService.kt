@@ -36,7 +36,8 @@ import javax.inject.Singleton
  * Service for LLM API interactions.
  *
  * Supports multiple providers with automatic format detection:
- * - OpenAI-compatible APIs (OpenAI, DeepSeek, Groq, Mistral, Ollama)
+ * - OpenAI-compatible APIs (OpenAI, DeepSeek, Groq, Mistral)
+ * - Ollama native `/api/chat`, with a `num_ctx` that holds the request (#760)
  * - Anthropic native API
  *
  * Implements retry logic with exponential backoff for transient failures.
@@ -59,7 +60,7 @@ class LLMService @Inject constructor(
      * @param systemPrompt System instructions for the LLM
      * @param userPrompt User message content
      * @param maxTokens Maximum tokens to generate
-     * @param temperature Sampling temperature (0.0-2.0), for OpenAI-format providers; never sent to Claude (#758)
+     * @param temperature Sampling temperature (0.0-2.0), for OpenAI-format providers and Ollama's `options`; never sent to Claude (#758)
      * @return Result containing LLMResult on success, or LLMError on failure
      */
     suspend fun chat(

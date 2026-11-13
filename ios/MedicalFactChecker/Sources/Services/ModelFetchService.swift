@@ -134,7 +134,8 @@ actor ModelFetchService {
     /// Refresh button could never succeed however valid the key.
     ///
     /// Ollama is the exception: its model list is on the native API (`/api/tags`),
-    /// outside the OpenAI-compatible `/v1` root, so that segment is stripped.
+    /// outside the OpenAI-compatible `/v1` root, so that segment is stripped (its
+    /// chat is native too: `api/chat`, see `LLMService.chatEndpoint`).
     ///
     /// - Parameters:
     ///   - provider: The LLM provider.

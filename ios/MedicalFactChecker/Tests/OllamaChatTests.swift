@@ -11,20 +11,21 @@ import Testing
 struct OllamaChatTests {
     private let ollamaRoot = URL(string: "http://mac.local:11434/v1")!
 
-    @Test func ollamaIsAskedOnTheNativeChatEndpoint() async {
+    @Test func ollamaIsAskedOnTheNativeChatEndpoint() async throws {
         let ollama = LLMService(baseURL: ollamaRoot, apiKey: "", model: "llama3.2", provider: .ollama)
-        #expect(await ollama.chatEndpoint.absoluteString == "http://mac.local:11434/api/chat")
+        #expect(try await ollama.chatEndpoint.absoluteString == "http://mac.local:11434/api/chat")
 
         // control: other providers keep the OpenAI-compatible endpoint
         let openAI = LLMService(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "k", model: "m", provider: .openai)
-        #expect(await openAI.chatEndpoint.absoluteString == "https://api.openai.com/v1/chat/completions")
+        #expect(try await openAI.chatEndpoint.absoluteString == "https://api.openai.com/v1/chat/completions")
     }
 
     @Test func ollamaIsSentAContextThatHoldsTheRequest() async throws {
         let ollama = LLMService(baseURL: ollamaRoot, apiKey: "", model: "llama3.2", provider: .ollama)
-        let window = String(repeating: "a", count: 20_000)
+        // 6,000 code points each: either message alone fits 8192, both need 16384
+        let half = String(repeating: "a", count: 6_000)
         let body = try await ollama.requestBody(
-            messages: [LLMService.systemMessage("Cite."), LLMService.userMessage(window)],
+            messages: [LLMService.systemMessage(half), LLMService.userMessage(half)],
             temperature: 0.1,
             maxTokens: 4096
         )
@@ -62,5 +63,15 @@ struct OllamaChatTests {
         await #expect(throws: LLMError.self) {
             try await ollama.decodeReply(Data(#"{"done":true}"#.utf8))
         }
+    }
+
+    @Test func everyErrorBodyShapeGivesItsReason() {
+        let overflow = "request (3022 tokens) exceeds the available context size (1024 tokens), try increasing it"
+        #expect(LLMService.apiErrorMessage(from: Data(#"{"error":"\#(overflow)"}"#.utf8)) == overflow)
+        #expect(LLMService.apiErrorMessage(from: Data(#"{"error":{"message":"bad key","type":"x"}}"#.utf8)) == "bad key")
+        #expect(LLMService.apiErrorMessage(from: Data(#"{"message":"slow down"}"#.utf8)) == "slow down")
+        // control: a body without a reason gives none, so the status alone is raised
+        #expect(LLMService.apiErrorMessage(from: Data(#"{"detail":1}"#.utf8)) == nil)
+        #expect(LLMService.apiErrorMessage(from: Data("<html>502</html>".utf8)) == nil)
     }
 }

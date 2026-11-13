@@ -11,6 +11,6 @@
     {"name": "one code point over the floor rounds up a whole size", "prompt_code_points": 23809, "max_tokens": 0, "num_ctx": 16384},
     {"name": "a citation window with a long answer", "prompt_code_points": 20000, "max_tokens": 4096, "num_ctx": 16384},
     {"name": "a report over many citations", "prompt_code_points": 300000, "max_tokens": 8192, "num_ctx": 131072},
-    {"name": "beyond any model is capped; Ollama then refuses it", "prompt_code_points": 10000000, "max_tokens": 0, "num_ctx": 1048576}
+    {"name": "past the largest size is capped; Ollama then refuses it", "prompt_code_points": 10000000, "max_tokens": 0, "num_ctx": 1048576}
   ]
 }

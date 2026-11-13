@@ -17,7 +17,7 @@
 import BioMedLit
 import Foundation
 
-/// Service for interacting with OpenAI-compatible LLM APIs.
+/// Service for interacting with OpenAI-compatible LLM APIs, and Ollama's native `/api/chat`.
 ///
 /// Handles chat completions with automatic token tracking, cost calculation,
 /// and retry logic with exponential backoff for transient failures.
@@ -175,7 +175,7 @@ actor LLMService {
         temperature: Double,
         maxTokens: Int
     ) async throws -> (content: String, usage: LLMUsage) {
-        let endpoint = chatEndpoint
+        let endpoint = try chatEndpoint
 
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
@@ -199,27 +199,11 @@ actor LLMService {
         }
 
         guard httpResponse.statusCode == 200 else {
-            // Try to parse error message - support multiple error formats
-            if let errorBody = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                // OpenAI/Mistral format: {"error": {"message": "..."}}
-                if let error = errorBody["error"] as? [String: Any],
-                   let message = error["message"] as? String {
-                    print("[LLMService] API error \(httpResponse.statusCode): \(message)")
-                    throw LLMError.apiError(statusCode: httpResponse.statusCode, message: message)
-                }
-                // Ollama format: {"error": "..."}, e.g. a prompt over num_ctx (#760)
-                if let message = errorBody["error"] as? String {
-                    print("[LLMService] API error \(httpResponse.statusCode): \(message)")
-                    throw LLMError.apiError(statusCode: httpResponse.statusCode, message: message)
-                }
-                // Alternative format: {"message": "..."}
-                if let message = errorBody["message"] as? String {
-                    print("[LLMService] API error \(httpResponse.statusCode): \(message)")
-                    throw LLMError.apiError(statusCode: httpResponse.statusCode, message: message)
-                }
-                // Log the raw error body for debugging
-                print("[LLMService] API error \(httpResponse.statusCode), body: \(errorBody)")
-            } else if let rawBody = String(data: data, encoding: .utf8) {
+            if let message = Self.apiErrorMessage(from: data) {
+                print("[LLMService] API error \(httpResponse.statusCode): \(message)")
+                throw LLMError.apiError(statusCode: httpResponse.statusCode, message: message)
+            }
+            if let rawBody = String(data: data, encoding: .utf8) {
                 print("[LLMService] API error \(httpResponse.statusCode), raw: \(rawBody)")
             }
             throw LLMError.httpError(statusCode: httpResponse.statusCode)
@@ -247,12 +231,35 @@ actor LLMService {
     /// the OpenAI-compatible endpoint takes no `num_ctx`, so a long prompt was cut
     /// to the server's default context without a word (#760). Every other
     /// provider is asked on `chat/completions`.
+    ///
+    /// - Throws: `LLMError.invalidConfiguration` if Ollama's native root is not a
+    ///   URL; falling back to `/v1` would bring the silent cut back.
     var chatEndpoint: URL {
-        guard provider == .ollama,
-              let root = URL(string: OllamaContext.nativeRoot(baseURL.absoluteString)) else {
-            return baseURL.appendingPathComponent("chat/completions")
+        get throws {
+            guard provider == .ollama else {
+                return baseURL.appendingPathComponent("chat/completions")
+            }
+            guard let root = URL(string: OllamaContext.nativeRoot(baseURL.absoluteString)) else {
+                throw LLMError.invalidConfiguration("Ollama URL has no native API root: \(baseURL)")
+            }
+            return root.appendingPathComponent("api/chat")
         }
-        return root.appendingPathComponent("api/chat")
+    }
+
+    /// The reason an error response's body gives, in any shape a provider uses.
+    ///
+    /// - Parameter data: The non-200 response's body.
+    /// - Returns: `{"error": {"message": "..."}}` (OpenAI, Mistral), then
+    ///   `{"error": "..."}` (Ollama, e.g. a prompt over `num_ctx`, #760), then
+    ///   `{"message": "..."}`; nil when the body has none of them.
+    static func apiErrorMessage(from data: Data) -> String? {
+        guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        if let error = body["error"] as? [String: Any], let message = error["message"] as? String {
+            return message
+        }
+        return body["error"] as? String ?? body["message"] as? String
     }
 
     /// A successful reply's text and token counts.
@@ -347,7 +354,7 @@ actor LLMService {
         provider == .deepseek ? .disabled : nil
     }
 
-    /// The encoded chat-completions body this service sends.
+    /// The encoded chat body this service sends (chat-completions, or Ollama's native one).
     ///
     /// Claude Opus 4.7 and later answer 400 to `temperature`, on Anthropic's
     /// OpenAI-compatible endpoint too (#758), so Claude is sent none and samples at
