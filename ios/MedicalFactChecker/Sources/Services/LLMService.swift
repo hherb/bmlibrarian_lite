@@ -181,20 +181,7 @@ actor LLMService {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        // Note: jsonMode parameter is ignored - response_format is not universally supported
-        // (e.g., Anthropic API doesn't support it). Prompts should request JSON explicitly.
-        let body = ChatCompletionRequest(
-            model: model,
-            messages: messages,
-            temperature: temperature,
-            maxTokens: maxTokens,
-            responseFormat: nil,
-            thinking: thinkingConfig
-        )
-
-        let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
-        request.httpBody = try encoder.encode(body)
+        request.httpBody = try requestBody(messages: messages, temperature: temperature, maxTokens: maxTokens)
 
         // Debug: log the request body
         #if DEBUG
@@ -321,6 +308,34 @@ actor LLMService {
     /// field and may reject it, so they are sent nothing.
     var thinkingConfig: ThinkingConfig? {
         provider == .deepseek ? .disabled : nil
+    }
+
+    /// The encoded chat-completions body this service sends.
+    ///
+    /// Claude Opus 4.7 and later answer 400 to `temperature`, on Anthropic's
+    /// OpenAI-compatible endpoint too (#758), so Claude is sent none and samples at
+    /// the API default; a nil temperature is left out of the body. `response_format`
+    /// is never sent: not every provider supports it (Anthropic doesn't), so prompts
+    /// ask for JSON explicitly.
+    ///
+    /// - Parameters:
+    ///   - messages: The conversation to send.
+    ///   - temperature: The temperature the caller asked for.
+    ///   - maxTokens: Maximum tokens to generate.
+    /// - Returns: The JSON body, snake-cased.
+    /// - Throws: An `EncodingError` if the body cannot be encoded.
+    func requestBody(messages: [ChatMessage], temperature: Double, maxTokens: Int) throws -> Data {
+        let body = ChatCompletionRequest(
+            model: model,
+            messages: messages,
+            temperature: provider == .anthropic ? nil : temperature,
+            maxTokens: maxTokens,
+            responseFormat: nil,
+            thinking: thinkingConfig
+        )
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        return try encoder.encode(body)
     }
 
     /// Calculate backoff delay with exponential increase and jitter.

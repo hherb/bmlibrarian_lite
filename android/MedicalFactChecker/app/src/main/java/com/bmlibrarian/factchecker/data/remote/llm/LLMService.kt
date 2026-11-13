@@ -55,7 +55,7 @@ class LLMService @Inject constructor(
      * @param systemPrompt System instructions for the LLM
      * @param userPrompt User message content
      * @param maxTokens Maximum tokens to generate
-     * @param temperature Sampling temperature (0.0-1.0)
+     * @param temperature Sampling temperature (0.0-2.0), for OpenAI-format providers; never sent to Claude (#758)
      * @return Result containing LLMResult on success, or LLMError on failure
      */
     suspend fun chat(
@@ -73,7 +73,7 @@ class LLMService @Inject constructor(
                 shouldRetry = { e -> shouldRetryError(e) }
             ) {
                 if (provider.usesAnthropicFormat) {
-                    chatAnthropic(provider, apiKey, model, systemPrompt, userPrompt, maxTokens, temperature)
+                    chatAnthropic(provider, apiKey, model, systemPrompt, userPrompt, maxTokens)
                 } else {
                     chatOpenAI(provider, apiKey, model, systemPrompt, userPrompt, maxTokens, temperature)
                 }
@@ -585,7 +585,7 @@ class LLMService @Inject constructor(
     }
 
     /**
-     * Send a chat request using Anthropic API format.
+     * Send a chat request using Anthropic API format, with no temperature (#758).
      */
     private suspend fun chatAnthropic(
         provider: LLMProvider,
@@ -593,8 +593,7 @@ class LLMService @Inject constructor(
         model: String,
         systemPrompt: String,
         userPrompt: String,
-        maxTokens: Int,
-        temperature: Double
+        maxTokens: Int
     ): Result<LLMResult> {
         val url = provider.chatCompletionsUrl
 
@@ -604,8 +603,7 @@ class LLMService @Inject constructor(
             system = systemPrompt,
             messages = listOf(
                 AnthropicMessage(role = "user", content = userPrompt)
-            ),
-            temperature = temperature
+            )
         )
 
         val response = anthropicApi.createMessage(

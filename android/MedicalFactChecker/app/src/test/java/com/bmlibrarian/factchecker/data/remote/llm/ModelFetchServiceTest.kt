@@ -21,6 +21,7 @@ package com.bmlibrarian.factchecker.data.remote.llm
 import com.bmlibrarian.factchecker.domain.model.ModelPricing
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -54,6 +55,16 @@ class ModelFetchServiceTest {
         assertFalse(ModelFetchService.isUsableDeepSeekModel("deepseek-embedding"))
         assertFalse(ModelFetchService.isUsableDeepSeekModel("deepseek-reranker"))
         assertFalse(ModelFetchService.isUsableDeepSeekModel(""))
+    }
+
+    // ==================== Anthropic Recommended Model Tests ====================
+
+    @Test
+    fun `recommends the newest Sonnet`() {
+        // Sorted as the fetch sorts it: newest first, so a later family can lead.
+        val ids = listOf("claude-zeta-1", "claude-sonnet-5-5", "claude-sonnet-4-6", "claude-opus-5-5")
+        assertEquals("claude-sonnet-5-5", ModelFetchService.recommendedAnthropicModelId(ids))
+        assertNull(ModelFetchService.recommendedAnthropicModelId(listOf("claude-opus-5-5")))
     }
 
     // ==================== Display Name Tests ====================

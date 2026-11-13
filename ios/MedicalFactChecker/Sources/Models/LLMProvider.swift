@@ -64,12 +64,12 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
     ///
     /// These are hardcoded models that serve as fallbacks when dynamic
     /// model fetching is not available or fails.
-    /// Last updated: January 2026
+    /// Last updated: 2026-11-13 (retired Claude IDs removed).
     var fallbackModels: [LLMModel] {
         switch self {
         case .anthropic:
             return [
-                // Claude 4.5 Series (Latest - January 2026)
+                // Claude 4.5 series (the live list names newer models)
                 LLMModel(
                     id: "claude-sonnet-4-5-20250929",
                     displayName: "Claude Sonnet 4.5",
@@ -91,21 +91,6 @@ enum LLMProvider: String, CaseIterable, Identifiable, Codable {
                     description: "Maximum intelligence, premium model",
                     inputPrice: 5.00,
                     outputPrice: 25.00
-                ),
-                // Legacy models still available
-                LLMModel(
-                    id: "claude-sonnet-4-20250514",
-                    displayName: "Claude Sonnet 4",
-                    description: "Previous generation Sonnet",
-                    inputPrice: 3.00,
-                    outputPrice: 15.00
-                ),
-                LLMModel(
-                    id: "claude-3-7-sonnet-20250219",
-                    displayName: "Claude 3.7 Sonnet",
-                    description: "Older Sonnet model",
-                    inputPrice: 3.00,
-                    outputPrice: 15.00
                 ),
             ]
 

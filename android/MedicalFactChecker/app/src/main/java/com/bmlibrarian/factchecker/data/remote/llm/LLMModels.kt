@@ -152,7 +152,9 @@ data class OpenAIError(
 /**
  * Messages request for Anthropic Claude API.
  *
- * Anthropic uses a different format than OpenAI.
+ * Anthropic uses a different format than OpenAI. It carries no `temperature`:
+ * Claude Opus 4.7 and later answer 400 to it (#758), so Claude samples at the
+ * API default.
  */
 @Serializable
 data class AnthropicMessagesRequest(
@@ -164,9 +166,7 @@ data class AnthropicMessagesRequest(
     /** System prompt (separate from messages). */
     val system: String? = null,
     /** List of messages in the conversation. */
-    val messages: List<AnthropicMessage>,
-    /** Sampling temperature (0.0-1.0). */
-    val temperature: Double = 0.0
+    val messages: List<AnthropicMessage>
 )
 
 /**
