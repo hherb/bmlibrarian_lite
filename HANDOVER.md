@@ -232,18 +232,14 @@ Open issues by family; each issue carries the detail. None blocks another.
   per-request `num_ctx`, overflow is a 400; Android has no Ollama URL
   setting; deferred #768, #769), **#761** (PR #771: a reply holding `NaN`,
   `Infinity`, `1e999` or a lone surrogate is unreadable whole; retries carry
-  `JSON_CORRECTION_NOTE`; deferred #770). **#762** (PR #774): the desktop
-  reads every PDF it analyses through bmlib's `PyMuPDFConverter`
-  (`pdf_utils.read_pdf_text`, one read at a time: MuPDF's message store is
-  per process): a typed `PDFExtractionError` (encrypted / unreadable /
-  engine / cancelled), a page that failed fails the read, MuPDF's messages
-  kept; the upload names the cause, upload and all three Interrogation loads
-  warn text may be missing, discovery's `cancel()` stops a read before its
-  next page; PyMuPDF floor 1.28.2 (bmlib's). `pdf_title_check` still reads
-  first pages with `fitz`. Deferred: #773 (discovery's record and the
-  report, and a stored upload's later reports, carry neither). Next:
-  **#763** Android HTML upload (markup capped as text, quadratic regex);
-  **#764** Android PDF extraction ignores cancel. **bmlib `main`
+  `JSON_CORRECTION_NOTE`; deferred #770). **#762** (PR #774, merged): the
+  desktop reads every PDF through bmlib's `PyMuPDFConverter`
+  (`pdf_utils.read_pdf_text`, one read at a time), a typed
+  `PDFExtractionError`; `pdf_title_check` still uses `fitz`; deferred #773.
+  **#763/#764** (Android, this branch's PR): an HTML upload is read up to
+  100 MB and only its text held to a row's 1 MB; `htmlToText` is linear;
+  `extractedPdfText` checks a cancel before each page and throws it; an
+  upload reads a PDF's text before replacing an earlier one. **bmlib `main`
   (`644bb0db`) has moved past the pin**: `check_bmlib_ledger.py` against it
   fails on the entries made since (`bmlib.library`, a shared folder of
   papers, and bmlib#746–#753 among them) until the next sync triages them.

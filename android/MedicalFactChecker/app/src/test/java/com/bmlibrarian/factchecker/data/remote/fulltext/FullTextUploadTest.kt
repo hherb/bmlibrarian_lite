@@ -29,7 +29,11 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.util.Constants
 import io.mockk.every
+import com.itextpdf.kernel.pdf.canvas.parser.PdfTextExtractor
 import io.mockk.mockk
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -68,6 +72,21 @@ class FullTextUploadTest {
         )
 
         assertEquals("Methods\nWe randomised 40 patients & 2 sites.\nCafé", text)
+    }
+
+    @Test
+    fun `an unclosed script is kept as text, and the elements after it are still dropped`() {
+        assertEquals(
+            "B C E",
+            FullTextUpload.htmlToText("<script>a</script>B<script>C<STYLE>d</style >E<head>")
+        )
+    }
+
+    // Each was quadratic as a regex: 400 KB of `<script ` took 35 s (#763)
+    @Test(timeout = 10_000)
+    fun `unclosed openers and tags are read in linear time`() {
+        FullTextUpload.htmlToText("<script ".repeat(100_000))
+        FullTextUpload.htmlToText("<".repeat(1_000_000))
     }
 
     // ==================== What the document records ====================
@@ -165,6 +184,21 @@ class FullTextUploadTest {
     }
 
     @Test
+    fun `an HTML page is held to the row's limit by its text, not its markup`() = runTest {
+        val image = "<img src=\"data:image/png;base64,${"A".repeat(4_096)}\">"
+        val (page, uri) = upload("text/html", "<p>We randomised.</p>$image".toByteArray())
+        assertEquals(FullTextUploadContent.Text("We randomised."), page.read(uri, "d", maxTextBytes = 1_024))
+
+        val (long, longUri) = upload("text/html", "<p>${"a".repeat(2_048)}</p>".toByteArray())
+        val refused = runCatching { long.read(longUri, "d", maxTextBytes = 1_024) }.exceptionOrNull()
+        assertEquals(FullTextUpload.textTooLongMessage(1_024), refused?.message)
+
+        val (large, largeUri) = upload("text/html", image.toByteArray())
+        val tooLarge = runCatching { large.read(largeUri, "d", maxBytes = 1_024) }.exceptionOrNull()
+        assertEquals(FullTextUpload.tooLargeMessage(1_024), tooLarge?.message)
+    }
+
+    @Test
     fun `a text file that is not UTF-8 is refused, and a byte-order mark is dropped`() = runTest {
         val (utf16, uri) = upload("text/plain", "We randomised.".toByteArray(Charsets.UTF_16LE))
         assertEquals(FullTextUpload.NOT_UTF8_MESSAGE, runCatching { utf16.read(uri, "d") }.exceptionOrNull()?.message)
@@ -192,5 +226,22 @@ class FullTextUploadTest {
         val long = writeTitledPdf(folder.newFile("long.pdf"), "Methods first")
         assertNull(extractedPdfText(long.path, maxBytes = 4))
         assertEquals("Methods first", extractedPdfText(long.path, maxBytes = 1_024))
+    }
+
+    @Test
+    fun `a cancelled read stops before the next page`() = runTest {
+        val pdf = writeTitledPdf(folder.newFile("three.pdf"), "One", "Two", "Three")
+        var pagesRead = 0
+        lateinit var reading: Deferred<String?>
+        reading = async {
+            extractedPdfText(pdf.path, readPage = { page ->
+                pagesRead++
+                reading.cancel()
+                PdfTextExtractor.getTextFromPage(page)
+            })
+        }
+
+        assertTrue(runCatching { reading.await() }.exceptionOrNull() is CancellationException)
+        assertEquals(1, pagesRead)
     }
 }
