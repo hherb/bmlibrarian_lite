@@ -71,24 +71,30 @@ final class PMCOpenDataContractTests: XCTestCase {
         for row in rows {
             let name = row["name"] as? String ?? "?"
             let metadata = try JSONSerialization.data(withJSONObject: row["metadata"] as Any)
+            let stem = try XCTUnwrap(row["stem"] as? String, name)
             if let error = row["error"] {
                 XCTAssertEqual(error as? String, Self.malformed, name)
-                XCTAssertThrowsError(try PMCOpenDataRecord(metadata: metadata), name) {
+                XCTAssertThrowsError(try PMCOpenDataRecord(metadata: metadata, stem: stem), name) {
                     XCTAssertEqual($0 as? PMCOpenData.UnreadableAnswer, .unreadableXMLURL, name)
                 }
                 continue
             }
-            let record = try PMCOpenDataRecord(metadata: metadata)
+            let record = try PMCOpenDataRecord(metadata: metadata, stem: stem)
             XCTAssertEqual(record.xmlURL?.absoluteString, row["xml_url"] as? String, name)
+            XCTAssertEqual(record.xmlMD5, row["xml_md5"] as? String, name)
             XCTAssertEqual(record.isOpenAccess, row["is_open_access"] as? Bool, name)
             XCTAssertEqual(record.isManuscript, row["is_manuscript"] as? Bool, name)
             XCTAssertEqual(record.licenseCode, row["license_code"] as? String, name)
         }
     }
 
+    func testTheStemOfAMetadataKey() {
+        XCTAssertEqual(PMCOpenData.stem(ofMetadataKey: "metadata/PMC10358571.12.json"), "PMC10358571.12")
+    }
+
     func testARecordThatIsNotAnObjectIsRefused() {
         for body in ["[]", "not json"] {
-            XCTAssertThrowsError(try PMCOpenDataRecord(metadata: Data(body.utf8)), body) {
+            XCTAssertThrowsError(try PMCOpenDataRecord(metadata: Data(body.utf8), stem: "PMC7.1"), body) {
                 XCTAssertEqual($0 as? PMCOpenData.UnreadableAnswer, .notARecord, body)
             }
         }
@@ -98,7 +104,7 @@ final class PMCOpenDataContractTests: XCTestCase {
     /// read, not refused. The control for the contract's malformed rows.
     func testAMissingOrNullXMLURLNamesNoXML() throws {
         for body in [#"{"pmcid": "PMC7"}"#, #"{"pmcid": "PMC7", "xml_url": null}"#] {
-            XCTAssertNil(try PMCOpenDataRecord(metadata: Data(body.utf8)).xmlURL, body)
+            XCTAssertNil(try PMCOpenDataRecord(metadata: Data(body.utf8), stem: "PMC7.1").xmlURL, body)
         }
     }
 
@@ -132,7 +138,7 @@ final class PMCOpenDataContractTests: XCTestCase {
         var record = Data(#"{"license_code": ""#.utf8)
         record.append(Self.latin1Byte)
         record.append(Data(#"", "xml_url": "s3://pmc-oa-opendata/PMC1.1/PMC1.1.xml"}"#.utf8))
-        XCTAssertThrowsError(try PMCOpenDataRecord(metadata: record)) {
+        XCTAssertThrowsError(try PMCOpenDataRecord(metadata: record, stem: "PMC1.1")) {
             XCTAssertEqual($0 as? PMCOpenData.UnreadableAnswer, .notUTF8)
         }
     }

@@ -1262,8 +1262,9 @@ public actor FullTextService {
     ///   since S3 answers an article it does not hold with a 200 listing, and
     ///   a 404 after the listing named the record, the bucket disagreeing
     ///   with itself), a body that is not UTF-8 or does not parse, a listing
-    ///   naming only unreadable versions, or an `xml_url` that is not this
-    ///   bucket's (each ``RequestFailure/malformedResponse``), a blank XML
+    ///   naming only unreadable versions, an `xml_url` that is not this
+    ///   bucket's file of the listed version, or XML whose bytes do not match
+    ///   the record's md5 (each ``RequestFailure/malformedResponse``), a blank XML
     ///   (``RequestFailure/incompleteResponse``), or the transport's failure.
     /// - Throws: `CancellationError` if the caller cancelled, and nothing else.
     func fetchPMCOpenDataXML(pmcid: String) async throws -> PMCOpenDataFetch {
@@ -1303,7 +1304,8 @@ public actor FullTextService {
             }
             let record: PMCOpenDataRecord
             do {
-                record = try PMCOpenDataRecord(metadata: recordBody)
+                record = try PMCOpenDataRecord(
+                    metadata: recordBody, stem: PMCOpenData.stem(ofMetadataKey: key))
             } catch {
                 return .unreachable(.malformedResponse)
             }
@@ -1312,6 +1314,15 @@ public actor FullTextService {
             let (xmlStatus, xmlBody) = try await bucketGET(xmlURL)
             guard xmlStatus == BioMedLitConstants.httpStatusOK else {
                 return .unreachable(.httpStatus(xmlStatus))
+            }
+            // Damaged or stale bytes are not the article: a fault, never served (#780).
+            if let md5 = record.xmlMD5, PMCOpenData.md5Hex(xmlBody) != md5 {
+                BioMedLitLib.logger?.warning(
+                    "PMC's open-access collection's JATS for \(accession) does not match its "
+                        + "record's md5",
+                    category: .fullText
+                )
+                return .unreachable(.malformedResponse)
             }
             // Strictly UTF-8, as Python decodes it. Without this the parser
             // honours whatever encoding the XML declares and `ServedXML`'s

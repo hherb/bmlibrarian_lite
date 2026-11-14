@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "PMC's open-data bucket (pmc-oa-opendata) as a JATS source: which metadata key a listing names, how an s3:// URL becomes an https:// one, what a metadata record says, which statuses settle what, and the sentence an unreachable bucket earns in the apps. An article missing from the collection is a 200 listing that names no version of it; a listing 404 is S3's NoSuchBucket (or something in between), so it is unreachable. An answer that names something we cannot read (a version that is not ASCII digits, an xml_url that is not this bucket's s3:// URL) is malformed, never an absence. Read by tests/test_pmc_open_data.py, Packages/BioMedLit PMCOpenDataContractTests and FullTextServicePMCOpenDataTests (status rows), and Android PmcOpenDataContractTest and PmcOpenDataServiceTest (status rows). `source` is the value the apps store; `desktop_source_type` is the desktop's FulltextSourceType for the same source, spelled as it spells Europe PMC's europepmc_xml. The rules are in doc/cross_platform/fulltext_retrieval.md, 'PMC's open-data bucket'.",
+  "description": "PMC's open-data bucket (pmc-oa-opendata) as a JATS source: which metadata key a listing names, how an s3:// URL becomes an https:// one, what a metadata record says, which statuses settle what, and the sentence an unreachable bucket earns in the apps. An article missing from the collection is a 200 listing that names no version of it; a listing 404 is S3's NoSuchBucket (or something in between), so it is unreachable. An answer that names something we cannot read (a version that is not ASCII digits, an xml_url that is not this bucket's s3:// URL of the listed version's own <stem>/<stem>.xml, `stem` being the listed key's PMCID.version) is malformed, never an absence. The md5 is kept from xml_url's query only when it is exactly md5=<32 lowercase hex>; anything else is no md5, and nothing is checked. A JATS whose bytes do not match the md5 is malformed (xml_checksum rows, read by the service tests), never absent and never served (#780, bmlib#750/#751). Read by tests/test_pmc_open_data.py, Packages/BioMedLit PMCOpenDataContractTests and FullTextServicePMCOpenDataTests (status rows), and Android PmcOpenDataContractTest and PmcOpenDataServiceTest (status rows). `source` is the value the apps store; `desktop_source_type` is the desktop's FulltextSourceType for the same source, spelled as it spells Europe PMC's europepmc_xml. The rules are in doc/cross_platform/fulltext_retrieval.md, 'PMC's open-data bucket'.",
   "service_name": "PMC's open-access collection",
   "source": "pmc_open_data",
   "desktop_source_type": "pmc_open_data_xml",
@@ -83,65 +83,134 @@
   ],
   "record": [
     {
-      "name": "open access",
-      "metadata": {"pmcid": "PMC8593813", "version": 1, "is_pmc_openaccess": true, "is_manuscript": false, "license_code": "CC BY", "xml_url": "s3://pmc-oa-opendata/PMC8593813.1/PMC8593813.1.xml?md5=62ed", "pdf_url": "s3://pmc-oa-opendata/PMC8593813.1/PMC8593813.1.pdf?md5=7743"},
+      "name": "open access, its md5 kept",
+      "stem": "PMC8593813.1",
+      "metadata": {"pmcid": "PMC8593813", "version": 1, "is_pmc_openaccess": true, "is_manuscript": false, "license_code": "CC BY", "xml_url": "s3://pmc-oa-opendata/PMC8593813.1/PMC8593813.1.xml?md5=62ed7fe79a191f5a9c1e3b2d4f6a8c0e", "pdf_url": "s3://pmc-oa-opendata/PMC8593813.1/PMC8593813.1.pdf?md5=7743"},
       "xml_url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC8593813.1/PMC8593813.1.xml",
+      "xml_md5": "62ed7fe79a191f5a9c1e3b2d4f6a8c0e",
       "is_open_access": true,
       "is_manuscript": false,
       "license_code": "CC BY"
     },
     {
-      "name": "author manuscript",
+      "name": "author manuscript, an md5 too short is no md5",
+      "stem": "PMC10373475.1",
       "metadata": {"pmcid": "PMC10373475", "version": 1, "is_pmc_openaccess": false, "is_manuscript": true, "license_code": "TDM", "xml_url": "s3://pmc-oa-opendata/PMC10373475.1/PMC10373475.1.xml?md5=d332", "text_url": "s3://pmc-oa-opendata/PMC10373475.1/PMC10373475.1.txt?md5=e804"},
       "xml_url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC10373475.1/PMC10373475.1.xml",
+      "xml_md5": null,
       "is_open_access": false,
       "is_manuscript": true,
       "license_code": "TDM"
     },
     {
+      "name": "an md5 in capitals is no md5",
+      "stem": "PMC4.2",
+      "metadata": {"xml_url": "s3://pmc-oa-opendata/PMC4.2/PMC4.2.xml?md5=62ED7FE79A191F5A9C1E3B2D4F6A8C0E"},
+      "xml_url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC4.2/PMC4.2.xml",
+      "xml_md5": null,
+      "is_open_access": null,
+      "is_manuscript": null,
+      "license_code": null
+    },
+    {
+      "name": "an md5 with more after it is no md5",
+      "stem": "PMC4.2",
+      "metadata": {"xml_url": "s3://pmc-oa-opendata/PMC4.2/PMC4.2.xml?md5=62ed7fe79a191f5a9c1e3b2d4f6a8c0e&x=1"},
+      "xml_url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC4.2/PMC4.2.xml",
+      "xml_md5": null,
+      "is_open_access": null,
+      "is_manuscript": null,
+      "license_code": null
+    },
+    {
       "name": "no XML",
+      "stem": "PMC5.1",
       "metadata": {"pmcid": "PMC5", "version": 1, "is_pmc_openaccess": true, "pdf_url": "s3://pmc-oa-opendata/PMC5.1/PMC5.1.pdf"},
       "xml_url": null,
+      "xml_md5": null,
       "is_open_access": true,
       "is_manuscript": null,
       "license_code": null
     },
     {
       "name": "flags of the wrong type say nothing",
+      "stem": "PMC6.1",
       "metadata": {"is_pmc_openaccess": "yes", "is_manuscript": 1, "license_code": 7, "xml_url": "s3://pmc-oa-opendata/PMC6.1/PMC6.1.xml"},
       "xml_url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC6.1/PMC6.1.xml",
+      "xml_md5": null,
       "is_open_access": null,
       "is_manuscript": null,
       "license_code": null
     },
     {
       "name": "xml_url null: no XML named",
+      "stem": "PMC7.1",
       "metadata": {"pmcid": "PMC7", "version": 1, "xml_url": null},
       "xml_url": null,
+      "xml_md5": null,
       "is_open_access": null,
       "is_manuscript": null,
       "license_code": null
     },
     {
       "name": "xml_url of the wrong type: unreadable, not absent",
+      "stem": "PMC1.1",
       "metadata": {"xml_url": 42},
       "error": "malformed"
     },
     {
       "name": "xml_url in another bucket: unreadable, not absent",
+      "stem": "PMC1.1",
       "metadata": {"xml_url": "s3://some-other-bucket/PMC1.1/PMC1.1.xml"},
       "error": "malformed"
     },
     {
       "name": "xml_url already https: unreadable, not absent",
+      "stem": "PMC1.1",
       "metadata": {"xml_url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC1.1/PMC1.1.xml"},
       "error": "malformed"
     },
     {
       "name": "xml_url blank: unreadable, not absent",
+      "stem": "PMC1.1",
       "metadata": {"xml_url": ""},
       "error": "malformed"
+    },
+    {
+      "name": "another article's file: unreadable, never served as this one",
+      "stem": "PMC1.1",
+      "metadata": {"xml_url": "s3://pmc-oa-opendata/PMC2.1/PMC2.1.xml?md5=62ed7fe79a191f5a9c1e3b2d4f6a8c0e"},
+      "error": "malformed"
+    },
+    {
+      "name": "a longer PMC ID's file: another article",
+      "stem": "PMC1.1",
+      "metadata": {"xml_url": "s3://pmc-oa-opendata/PMC12.1/PMC12.1.xml"},
+      "error": "malformed"
+    },
+    {
+      "name": "another version's file: not the version listed",
+      "stem": "PMC1.2",
+      "metadata": {"xml_url": "s3://pmc-oa-opendata/PMC1.1/PMC1.1.xml"},
+      "error": "malformed"
+    },
+    {
+      "name": "this version's folder, another file",
+      "stem": "PMC1.1",
+      "metadata": {"xml_url": "s3://pmc-oa-opendata/PMC1.1/PMC1.1.pdf"},
+      "error": "malformed"
+    },
+    {
+      "name": "a path that leaves the version's folder",
+      "stem": "PMC1.1",
+      "metadata": {"xml_url": "s3://pmc-oa-opendata/PMC1.1/../PMC2.1/PMC2.1.xml"},
+      "error": "malformed"
     }
+  ],
+  "xml_checksum": [
+    {"name": "the bytes match the record's md5", "xml": "<article><body><p>Größe: 5 mm.</p></body></article>", "xml_md5": "3b0d5c130ffc82a1fc60308493ab8a90", "outcome": "served"},
+    {"name": "the bytes do not match: unreadable, never absent", "xml": "<article><body><p>Größe: 5 mm.</p></body></article>", "xml_md5": "9dd4e461268c8034f5c8564e155c67a6", "outcome": "malformed"},
+    {"name": "no md5 in the record: not checked", "xml": "<article><body><p>Größe: 5 mm.</p></body></article>", "xml_md5": null, "outcome": "served"}
   ],
   "status": [
     {"step": "listing", "status": 200, "outcome": "read"},

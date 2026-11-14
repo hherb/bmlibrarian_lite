@@ -3137,20 +3137,20 @@
     {
       "id": "bmlib#750",
       "title": "`FullTextService.pmc_open_data_record()` and `PmcOpenDataRecord`",
-      "python": "owed",
-      "swift": "owed",
-      "android": "owed",
+      "python": "ported",
+      "swift": "ported",
+      "android": "ported",
       "issue": "#780",
-      "note": "Lite reads the same record (`PmcOpenDataRecord.from_metadata`, Swift `PMCOpenData`, Android `PmcOpenData`) but leniently: a flag of the wrong type says nothing, the `xml_url` is followed as long as it is an object in the bucket, never checked to name this article's own version, and the desktop decodes the record with `json.loads`. bmlib refuses a record of another shape, another article's or version's file URL included, and decodes it strictly (#780). `is_retracted` is not wanted: it is read only when the bucket is consulted, so it is empty for most papers."
+      "note": "#780: all three read the record against the version the listing named (`PmcOpenDataRecord.from_metadata(obj, stem)`, Swift `PMCOpenDataRecord(metadata:stem:)`, Android `fromMetadata(json, stem)`): an `xml_url` naming any file but this bucket's `<stem>/<stem>.xml`, another article's or version's included, is a malformed answer, never fetched; the desktop decodes the record with `strict_json_loads`. Deliberately narrower than bmlib: the record's own `pmcid`/`version` fields and missing keys are not checked (the file URL is what is fetched), and a flag of the wrong type still says nothing (contract row). `is_retracted` is not wanted: it is read only when the bucket is consulted, so it is empty for most papers."
     },
     {
       "id": "bmlib#751",
       "title": "PMC Open Data's JATS after NCBI's",
-      "python": "owed",
-      "swift": "owed",
-      "android": "owed",
+      "python": "ported",
+      "swift": "ported",
+      "android": "ported",
       "issue": "#780",
-      "note": "Lite has had this tier since #480 (`lite:pmc-open-data`), after Europe PMC's `fullTextXML` (lite asks no NCBI efetch tier), and already reads the latest version the listing names, so the order and the version rule are equivalent. Owed: the JATS is never checked against the record's md5; all three ports drop the `?md5=` query (`https_url`, `httpsURL`, `httpsUrl`), so a damaged body is served as the article (#780)."
+      "note": "Lite has had this tier since #480 (`lite:pmc-open-data`), after Europe PMC's `fullTextXML` (lite asks no NCBI efetch tier), reading the latest version the listing names. #780: the record's `?md5=` is kept when it is exactly 32 lowercase hex digits, and a JATS whose bytes do not match it is `malformed_response`, never served or absent (contract `xml_checksum` rows)."
     },
     {
       "id": "bmlib#755",

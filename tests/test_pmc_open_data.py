@@ -80,11 +80,12 @@ def test_record(row: dict[str, Any]) -> None:
     """What a metadata record says; an unreadable xml_url is not "no XML"."""
     if "error" in row:
         with pytest.raises(ValueError):
-            PmcOpenDataRecord.from_metadata(row["metadata"])
+            PmcOpenDataRecord.from_metadata(row["metadata"], row["stem"])
         return
-    record = PmcOpenDataRecord.from_metadata(row["metadata"])
+    record = PmcOpenDataRecord.from_metadata(row["metadata"], row["stem"])
 
     assert record.xml_url == row["xml_url"]
+    assert record.xml_md5 == row["xml_md5"]
     assert record.is_open_access == row["is_open_access"]
     assert record.is_manuscript == row["is_manuscript"]
     assert record.license_code == row["license_code"]
@@ -94,7 +95,7 @@ def test_record(row: dict[str, Any]) -> None:
 def test_a_record_that_is_not_an_object_is_refused(value: object) -> None:
     """Unreadable, not empty: the caller records malformed_response."""
     with pytest.raises(ValueError):
-        PmcOpenDataRecord.from_metadata(value)
+        PmcOpenDataRecord.from_metadata(value, "PMC1.1")
 
 
 def test_the_pacing_ceiling_is_pinned_to_the_host() -> None:
@@ -273,6 +274,52 @@ class TestFetchXml:
         with running(
             {"/": [xml_answer(_LISTING)], _KEY_PATH: [xml_answer("<not-json/>")]}
         ) as server:
+            fetch = _client(server.url).fetch_xml(_PMCID)
+
+        assert fetch == PmcOpenDataFetch.unreachable(
+            RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+        )
+
+    @pytest.mark.parametrize(
+        "row", CONTRACT["xml_checksum"], ids=lambda row: row["name"]
+    )
+    def test_the_xml_is_checked_against_its_records_md5(
+        self, row: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bytes that do not match the record's md5 are a fault, never the article (#780)."""
+        query = "" if row["xml_md5"] is None else f"?md5={row['xml_md5']}"
+        record = json_answer({"xml_url": f"s3://pmc-oa-opendata{_XML_PATH}{query}"})
+        with running(
+            {"/": [xml_answer(_LISTING)], _KEY_PATH: [record], _XML_PATH: [xml_answer(row["xml"])]}
+        ) as server:
+            monkeypatch.setattr(
+                "bmlibrarian_lite.pmc_open_data.PMC_OPEN_DATA_BASE_URL", server.url
+            )
+            fetch = _client(server.url).fetch_xml(_PMCID)
+
+        expected = {
+            "served": PmcOpenDataFetch.served(row["xml"]),
+            "malformed": PmcOpenDataFetch.unreachable(
+                RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+            ),
+        }[row["outcome"]]
+        assert fetch == expected
+
+    def test_a_record_naming_another_articles_xml_is_malformed(self) -> None:
+        """Another article's file is never fetched as this one's (#780)."""
+        record = json_answer({"xml_url": "s3://pmc-oa-opendata/PMC2.1/PMC2.1.xml"})
+        with running({"/": [xml_answer(_LISTING)], _KEY_PATH: [record]}) as server:
+            fetch = _client(server.url).fetch_xml(_PMCID)
+
+        assert fetch == PmcOpenDataFetch.unreachable(
+            RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+        )
+
+    def test_a_record_holding_nan_is_malformed(self) -> None:
+        """Read strictly, as bmlib reads it: NaN is not JSON (#780)."""
+        body = f'{{"xml_url": "s3://pmc-oa-opendata{_XML_PATH}", "version": NaN}}'.encode()
+        answer = ScriptedAnswer(HTTPStatus.OK, body, "application/json")
+        with running({"/": [xml_answer(_LISTING)], _KEY_PATH: [answer]}) as server:
             fetch = _client(server.url).fetch_xml(_PMCID)
 
         assert fetch == PmcOpenDataFetch.unreachable(

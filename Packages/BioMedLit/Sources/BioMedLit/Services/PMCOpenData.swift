@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import CryptoKit
 import Foundation
 
 /// PMC's open-data bucket as a JATS full-text source (#480).
@@ -38,7 +39,7 @@ public enum PMCOpenData {
         /// The metadata record is not a JSON object.
         case notARecord
         /// The record's `xml_url` is present but not this bucket's `s3://`
-        /// URL of an object.
+        /// URL of the listed version's own `<stem>/<stem>.xml` (#780).
         case unreadableXMLURL
     }
 
@@ -126,6 +127,22 @@ public enum PMCOpenData {
         return URL(string: "\(BioMedLitConstants.pmcOpenDataBaseURL)/\(key)")
     }
 
+    /// The version a metadata key names, `PMC1.2` for `metadata/PMC1.2.json`.
+    ///
+    /// - Parameter key: A key ``latestMetadataKey(listing:pmcid:)`` returned.
+    /// - Returns: The key without its directory and suffix.
+    public static func stem(ofMetadataKey key: String) -> String {
+        var stem = Substring(key)
+        if stem.hasPrefix(metadataDirectory + "/") { stem = stem.dropFirst(metadataDirectory.count + 1) }
+        if stem.hasSuffix(metadataSuffix) { stem = stem.dropLast(metadataSuffix.count) }
+        return String(stem)
+    }
+
+    /// `body`'s md5 as lowercase hex: the bucket's checksum, not security.
+    public static func md5Hex(_ body: Data) -> String {
+        Insecure.MD5.hash(data: body).map { String(format: "%02x", $0) }.joined()
+    }
+
     /// The directory the bucket files metadata records in.
     private static let metadataDirectory = "metadata"
     /// What every metadata record's key ends with.
@@ -210,6 +227,9 @@ public enum PMCOpenData {
 public struct PMCOpenDataRecord: Equatable, Sendable {
     /// The JATS XML's HTTPS address, or `nil` when the record names none.
     public let xmlURL: URL?
+    /// The md5 the JATS's bytes must have, as lowercase hex, or `nil` when
+    /// the record gives none we can read (anything but `?md5=<32 hex>`).
+    public let xmlMD5: String?
     /// Whether PMC lists the article as open access; `nil` when not said.
     public let isOpenAccess: Bool?
     /// Whether it is an author manuscript; `nil` when not said.
@@ -219,41 +239,66 @@ public struct PMCOpenDataRecord: Equatable, Sendable {
 
     /// Read a metadata record the bucket served.
     ///
-    /// - Parameter metadata: The record's body, untrusted.
+    /// - Parameters:
+    ///   - metadata: The record's body, untrusted.
+    ///   - stem: The version the listing named, `PMC1.2`.
     /// - Throws: ``PMCOpenData/UnreadableAnswer/notUTF8`` for a body that is
     ///   not UTF-8, ``PMCOpenData/UnreadableAnswer/notARecord`` when it is
     ///   not a JSON object, and
     ///   ``PMCOpenData/UnreadableAnswer/unreadableXMLURL`` when `xml_url`
-    ///   names something we cannot read.
-    public init(metadata: Data) throws {
+    ///   names something we cannot read, or any file but this version's own
+    ///   `<stem>/<stem>.xml`: served, it would be another article's text.
+    public init(metadata: Data, stem: String) throws {
         guard PMCOpenData.strictUTF8(metadata) != nil else {
             throw PMCOpenData.UnreadableAnswer.notUTF8
         }
         guard let object = (try? JSONSerialization.jsonObject(with: metadata)) as? [String: Any]
         else { throw PMCOpenData.UnreadableAnswer.notARecord }
-        xmlURL = try Self.xmlURL(object["xml_url"])
+        (xmlURL, xmlMD5) = try Self.xml(object["xml_url"], stem: stem)
         isOpenAccess = Self.bool(object["is_pmc_openaccess"])
         isManuscript = Self.bool(object["is_manuscript"])
         licenseCode = object["license_code"] as? String
     }
 
-    /// The HTTPS address a record's `xml_url` names.
+    /// The HTTPS address and md5 a record's `xml_url` names.
     ///
     /// Missing or JSON `null` names no XML: the record's own answer that the
     /// version has none. Anything else must be this bucket's `s3://` URL of
-    /// an object; a value of another type, another bucket's URL, an `https`
-    /// URL or a blank is an answer we cannot read, never an absence, because
-    /// reading it as one would tell the reader the bucket holds no text.
+    /// `<stem>/<stem>.xml`; a value of another type, another bucket's URL, an
+    /// `https` URL, a blank, or another version's or article's file is an
+    /// answer we cannot read, never an absence, because reading it as one
+    /// would tell the reader the bucket holds no text.
     ///
-    /// - Parameter value: The decoded `xml_url`, untrusted.
-    /// - Returns: The address, or `nil` when the record names no XML.
+    /// - Parameters:
+    ///   - value: The decoded `xml_url`, untrusted.
+    ///   - stem: The version the listing named.
+    /// - Returns: The address, or `nil` when the record names no XML, and the
+    ///   md5 when the query is exactly `md5=<32 lowercase hex>`.
     /// - Throws: ``PMCOpenData/UnreadableAnswer/unreadableXMLURL``.
-    private static func xmlURL(_ value: Any?) throws -> URL? {
-        guard let value, !(value is NSNull) else { return nil }
-        guard let s3URL = value as? String, let url = PMCOpenData.httpsURL(s3URL) else {
+    private static func xml(_ value: Any?, stem: String) throws -> (URL?, String?) {
+        guard let value, !(value is NSNull) else { return (nil, nil) }
+        let own = "s3://\(BioMedLitConstants.pmcOpenDataBucket)/\(stem)/\(stem).xml"
+        guard let s3URL = value as? String,
+              s3URL.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+                .first.map(String.init) == own,
+              let url = PMCOpenData.httpsURL(s3URL) else {
             throw PMCOpenData.UnreadableAnswer.unreadableXMLURL
         }
-        return url
+        let query = s3URL.dropFirst(own.count + 1)
+        let md5 = query.hasPrefix(md5Query) ? query.dropFirst(md5Query.count) : nil
+        let isHex = md5.map { $0.utf8.count == md5Length && $0.utf8.allSatisfy(isLowerHex) } ?? false
+        return (url, isHex ? md5.map(String.init) : nil)
+    }
+
+    /// What precedes the md5 in an `xml_url`'s query.
+    private static let md5Query = "md5="
+    /// An md5's length in hex digits.
+    private static let md5Length = 32
+
+    /// Whether a UTF-8 code unit is `0`–`9` or `a`–`f`.
+    private static func isLowerHex(_ unit: UInt8) -> Bool {
+        (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(unit)
+            || (UInt8(ascii: "a")...UInt8(ascii: "f")).contains(unit)
     }
 
     /// A JSON boolean only: `JSONSerialization` bridges `1` to `true`, which

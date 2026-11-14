@@ -17,13 +17,14 @@ The pure functions here are pinned with the Swift and Kotlin ports by
 
 from __future__ import annotations
 
-import json
+import hashlib
 import logging
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
 import requests
+from bmlib.llm.utils import strict_json_loads
 from urllib3.util.retry import Retry
 
 from .constants import (
@@ -46,6 +47,11 @@ logger = logging.getLogger(__name__)
 _S3_NAMESPACE = "{http://s3.amazonaws.com/doc/2006-03-01/}"
 _LISTING_TAG = f"{_S3_NAMESPACE}ListBucketResult"
 _S3_SCHEME = "s3://"
+_METADATA_DIRECTORY = "metadata/"
+_METADATA_SUFFIX = ".json"
+_MD5_QUERY = "md5="
+# What the bucket writes after ``?md5=``; anything else is no md5.
+_MD5_HEX = re.compile("[0-9a-f]{32}")
 
 
 def latest_metadata_key(listing_xml: str, pmcid: str) -> str | None:
@@ -77,10 +83,10 @@ def latest_metadata_key(listing_xml: str, pmcid: str) -> str | None:
         raise ValueError("not an S3 listing") from error
     if root.tag != _LISTING_TAG:
         raise ValueError(f"not an S3 listing: root element {root.tag!r}")
-    prefix = f"metadata/{pmcid}."
+    prefix = f"{_METADATA_DIRECTORY}{pmcid}."
     # ``[0-9]``, not ``\d``: ``\d`` also matches other scripts' digits,
     # which the Swift and Kotlin ports do not read as a version.
-    pattern = re.compile(rf"{re.escape(prefix)}([0-9]+)\.json")
+    pattern = re.compile(rf"{re.escape(prefix)}([0-9]+){re.escape(_METADATA_SUFFIX)}")
     versions: list[tuple[int, str]] = []
     unreadable = False
     for key in root.iter(f"{_S3_NAMESPACE}Key"):
@@ -115,6 +121,11 @@ def https_url(s3_url: str) -> str | None:
     return f"{PMC_OPEN_DATA_BASE_URL}/{key}" if key else None
 
 
+def _md5_hex(content: bytes) -> str:
+    """``content``'s md5 as lowercase hex: the bucket's checksum, not security."""
+    return hashlib.md5(content, usedforsecurity=False).hexdigest()
+
+
 def _bool_or_none(value: object) -> bool | None:
     """A JSON boolean, or ``None`` for anything else."""
     return value if isinstance(value, bool) else None
@@ -127,6 +138,8 @@ class PmcOpenDataRecord:
     Attributes:
         xml_url: The JATS XML's HTTPS address, or ``None`` when the record
             names none.
+        xml_md5: The md5 the JATS's bytes must have, as lowercase hex, or
+            ``None`` when the record gives none we can read.
         is_open_access: Whether PMC lists it as open access; ``None`` when
             the record does not say.
         is_manuscript: Whether it is an author manuscript; ``None`` when the
@@ -135,20 +148,25 @@ class PmcOpenDataRecord:
     """
 
     xml_url: str | None
+    xml_md5: str | None
     is_open_access: bool | None
     is_manuscript: bool | None
     license_code: str | None
 
     @classmethod
-    def from_metadata(cls, obj: object) -> PmcOpenDataRecord:
+    def from_metadata(cls, obj: object, stem: str) -> PmcOpenDataRecord:
         """Read a decoded metadata record.
 
         A flag of the wrong type says nothing. An ``xml_url`` that is there
         but cannot be read is different: the record named XML and we do not
-        know where, so it is an unreadable answer, never "no XML" (#486).
+        know where, so it is an unreadable answer, never "no XML" (#486). So
+        is one naming any file but the listed version's own
+        ``<stem>/<stem>.xml``: served, it would be another article's text
+        given as this one's (#780).
 
         Args:
             obj: The decoded JSON, untrusted.
+            stem: The version the listing named, ``PMC1.2``.
 
         Returns:
             The record; ``xml_url`` is ``None`` only when the record names no
@@ -156,19 +174,24 @@ class PmcOpenDataRecord:
 
         Raises:
             ValueError: If ``obj`` is not a JSON object, or its ``xml_url``
-                is not an ``s3://`` URL of an object in this bucket.
+                is not this bucket's ``s3://`` URL of ``<stem>/<stem>.xml``.
         """
         if not isinstance(obj, dict):
             raise ValueError("a metadata record is a JSON object")
         xml = obj.get("xml_url")
-        xml_url = None
+        xml_url = xml_md5 = None
         if xml is not None:
-            xml_url = https_url(xml) if isinstance(xml, str) else None
-            if xml_url is None:
-                raise ValueError("the record's xml_url names nothing in this bucket")
+            own = f"{_S3_SCHEME}{PMC_OPEN_DATA_BUCKET}/{stem}/{stem}.xml"
+            if not isinstance(xml, str) or xml.split("?", 1)[0] != own:
+                raise ValueError("the record's xml_url does not name this version's JATS")
+            xml_url = https_url(xml)
+            query = xml.partition("?")[2]
+            md5 = query.removeprefix(_MD5_QUERY)
+            xml_md5 = md5 if md5 != query and _MD5_HEX.fullmatch(md5) else None
         licence = obj.get("license_code")
         return cls(
             xml_url=xml_url,
+            xml_md5=xml_md5,
             is_open_access=_bool_or_none(obj.get("is_pmc_openaccess")),
             is_manuscript=_bool_or_none(obj.get("is_manuscript")),
             license_code=licence if isinstance(licence, str) else None,
@@ -264,7 +287,9 @@ class PmcOpenDataClient:
 
         Returns:
             Served XML; absent (a listing naming no version of the article,
-            or a record naming no XML); or unreachable, of its real kind.
+            or a record naming no XML); or unreachable, of its real kind (a
+            record naming another version's or article's file, or XML whose
+            bytes do not match the record's md5, is malformed).
         """
         accession = pmc_accession(pmcid) if pmcid else None
         if accession is None:
@@ -290,6 +315,7 @@ class PmcOpenDataClient:
                 )
             if key is None:
                 return PmcOpenDataFetch.absent()
+            stem = key.removeprefix(_METADATA_DIRECTORY).removesuffix(_METADATA_SUFFIX)
 
             metadata = self._get(f"{self._base_url}/{key}")
             if metadata.status_code != HTTP_OK:
@@ -301,8 +327,11 @@ class PmcOpenDataClient:
             try:
                 # Decoded explicitly, as the listing and the XML are:
                 # ``.json()`` would guess at a charset S3 does not name.
+                # Strictly, as bmlib and serde_json read it (no NaN, no lone
+                # surrogate).
                 record = PmcOpenDataRecord.from_metadata(
-                    json.loads(metadata.content.decode(PMC_OPEN_DATA_ENCODING))
+                    strict_json_loads(metadata.content.decode(PMC_OPEN_DATA_ENCODING)),
+                    stem,
                 )
             except ValueError:  # includes UnicodeDecodeError, JSONDecodeError
                 return PmcOpenDataFetch.unreachable(
@@ -315,6 +344,15 @@ class PmcOpenDataClient:
             if article.status_code != HTTP_OK:
                 return PmcOpenDataFetch.unreachable(
                     RequestFailure(RequestFailureKind.HTTP_STATUS, article.status_code)
+                )
+            # Damaged or stale bytes are not the article: a fault, never served.
+            if record.xml_md5 is not None and _md5_hex(article.content) != record.xml_md5:
+                logger.warning(
+                    "PMC's open-access collection's JATS for %s does not match its record's md5.",
+                    stem,
+                )
+                return PmcOpenDataFetch.unreachable(
+                    RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
                 )
             # Decoded explicitly: S3 names no charset, so ``.text`` would guess.
             try:
