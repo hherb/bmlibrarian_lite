@@ -237,12 +237,15 @@ Open issues by family; each issue carries the detail. None blocks another.
   (`pdf_utils.read_pdf_text`, one read at a time), a typed
   `PDFExtractionError`; `pdf_title_check` still uses `fitz`; deferred #773.
   **#763/#764** (Android, PR #775): an HTML upload is read up to
-  100 MB and only its text held to a row's 1 MB; `htmlToText` is linear;
-  `extractedPdfText` checks a cancel before each page and throws it; an
-  upload reads a PDF's text before replacing an earlier one. **bmlib `main`
-  (`644bb0db`) has moved past the pin**: `check_bmlib_ledger.py` against it
-  fails on the entries made since (`bmlib.library`, a shared folder of
-  papers, and bmlib#746–#753 among them) until the next sync triages them.
+  16 MB (`MAX_UPLOAD_HTML_BYTES`; a heap too small is refused, never a
+  crash) and only its text held to a row's 1 MB; `htmlToText` is linear
+  (forward-only matchers); `extractedPdfText` checks a cancel before each
+  page and throws it; an upload's copy stops on cancel and reads a PDF's
+  text before replacing an earlier one. Deferred: #776, #777, #778.
+  **bmlib `main` (`644bb0db`) has moved past the pin**:
+  `check_bmlib_ledger.py` against it fails on the entries made since
+  (`bmlib.library`, a shared folder of papers, and bmlib#746–#753 among
+  them) until the next sync triages them.
 - **Retraction checking** follow-ups (#662, #726–#728, #730, #731 and
   #737–#739 landed; **their rules, the unreadable-snapshot ones above all,
   are in `doc/developer/retraction_checking.md`**: read it before touching

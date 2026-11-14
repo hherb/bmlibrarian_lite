@@ -85,10 +85,10 @@ suspend fun extractedPdfText(
         // and the app must not die of it
         Log.w(TAG, "${file.name} is nested too deeply to read for its text", e)
         return@withContext null
-    } catch (e: CancellationException) {
-        // A RuntimeException too: the caller's, never the file's
-        throw e
     } catch (e: RuntimeException) {
+        // A cancel (a RuntimeException too) is the caller's, thrown; one raised
+        // inside iText while nothing was cancelled is a fault like any other
+        ensureActive()
         // iText documents no closed set of errors: one that is not iText's is a
         // fault of the code or the install, and the file is still only unread
         Log.e(TAG, "Reading ${file.name} for its text failed in the code, not the file", e)
