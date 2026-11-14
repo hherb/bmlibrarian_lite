@@ -28,17 +28,20 @@ its slice has landed; add a new section when handing off new work.
   = a bmlib worktree at **`aa47a57`**, 1.9.0's pin), internal track, smoke
   test, tag `android_1.9.0`.
 
-**bmlib re-pinned to `8c8e689a`** (PR #779, 2026-11-14; the one before was
+**bmlib re-pinned to `110d906b`** (PR #779, 2026-11-14; the one before was
 `d3b10b5b`, PR #757): the FFI pin and the sync ledger both name bmlib `main`
-`8c8e689a`. The FFI's JATS and retraction code did not change between the
-pins; the bindings gain the shared paper library's objects (`Library`,
-`LibraryScan`), which no app calls. The ledger triage (12 rows) lodged
-**#780** (the bucket's md5 and record shape, all three) and **#781**
-(lenient service JSON, bmlib#753). **Left:** an Apple archive from master
-lists `BmlibFFI.framework.dSYM` with no warning (one from `0641e80c` keeps
-1.9.0's pin). **Decision for the maintainer:** whether lite keeps its
-papers in bmlib's shared paper library (`bmlib.library`); the ledger rows
-say n/a until then.
+`110d906b`. The FFI's JATS and retraction code did not change between the
+pins; the bindings gain the shared paper library's objects (`PaperLibrary`,
+`LibraryScan`), which no app calls. **At `8c8e689a` the object was
+`Library`, which every UniFFI Kotlin binding's `import com.sun.jna.Library`
+shadows, so Android did not compile**; bmlib PR #774 renamed it, and bmlib's
+`ffi` CI job now fails on a Kotlin binding that declares a name it imports.
+The ledger triage (15 rows) lodged **#780** (the bucket's md5 and record
+shape, all three) and **#781** (lenient service JSON, bmlib#753). **Left:**
+an Apple archive from master lists `BmlibFFI.framework.dSYM` with no
+warning (one from `0641e80c` keeps 1.9.0's pin). **Decision for the
+maintainer:** whether lite keeps its papers in bmlib's shared paper library
+(`bmlib.library`); the ledger rows say n/a until then.
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
@@ -68,7 +71,7 @@ warning merges the readable checks the same way (`RetractionCheckRecord.merged`,
 **A missing native library** leaves papers unchecked, but stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
 FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C
-~/src/bmlib worktree add --detach <dir> 8c8e689a`); without it they skip
+~/src/bmlib worktree add --detach <dir> 110d906b`); without it they skip
 locally, and CI fails if they skip. **A ViewModel test mocks the workflow:
 every new workflow `StateFlow` must be stubbed in the three
 `FactCheckViewModel*Test`s**, or the unstubbed `collect` leaks a
@@ -141,7 +144,7 @@ contract `doc/cross_platform/retraction_parity/`). bmlib comes from PyPI (`>=0.1
   windows, 250 overlap, no reference list, **one window failing fails the
   paper**, never `text[:N]`; contract `text_windows.json`).
 - **bmlib: the FFI pin and the port set** (#583; PRs #564–#570, #572). The
-  pin names bmlib `main` (`8c8e689a`, PR #779); `android-tests.yml` builds
+  pin names bmlib `main` (`110d906b`, PR #779); `android-tests.yml` builds
   bmlib there and fails if an FFI test skips or the contract copy drifts; **the committed xcframework is
   `bmlib-xcframework.yml`'s own build** (re-pin from its artifact as its
   header says). **`doc/cross_platform/bmlib_sync/ledger.json` records every

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "bmlib_commit": "8c8e689abd3e0c2496d86fa4863965cfe084ab4d",
+  "bmlib_commit": "110d906ba0d176a2e1a5c5edef53199fba0aa1b2",
   "from_bmlib": [
     {
       "id": "lite:pubmed-articleid-reference-list",
@@ -3196,6 +3196,33 @@
       "android": "n/a",
       "issue": null,
       "note": "Lite does not use bmlib's shared paper library: each platform keeps its own store (the desktop's SQLite and PDF folder, SwiftData, Room), and no lite code opens a `bmlib.library` folder. Adopting it is the maintainer's call."
+    },
+    {
+      "id": "bmlib#758",
+      "title": "JSON nested past Python's stack is a decode error",
+      "python": "equivalent",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Python only. The desktop calls bmlib's own `strict_json_loads` (#761), from PyPI with no upper bound, so the fix reaches it with bmlib's next release. Until then a model reply nested past the stack (measured at 100,000 levels) would raise `RecursionError`, but no reply within the agents' token limits can nest that deep, and the service bodies that could are still read leniently (#781)."
+    },
+    {
+      "id": "bmlib#769",
+      "title": "The shared paper library never downloads an evicted file to read it",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite does not use bmlib's shared paper library: each platform keeps its own store (the desktop's SQLite and PDF folder, SwiftData, Room), and no lite code opens a `bmlib.library` folder. Adopting it is the maintainer's call."
+    },
+    {
+      "id": "bmlib:unreleased-meca-s3",
+      "title": "`bmlib.fulltext.meca`: MECA bulk archives over requester-pays S3",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite reads no MECA archive: preprints come through Europe PMC (their `PPR` IDs), and no platform holds an AWS key. The FFI builds without the Rust `meca` feature, and its `HttpClient` change touches only the unshipped `http-sketch`."
     }
   ],
   "to_bmlib": [
