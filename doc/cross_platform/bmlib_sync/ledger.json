@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "bmlib_commit": "d3b10b5b412434ccdffc2915d9da84bb84d8de19",
+  "bmlib_commit": "110d906ba0d176a2e1a5c5edef53199fba0aa1b2",
   "from_bmlib": [
     {
       "id": "lite:pubmed-articleid-reference-list",
@@ -3088,6 +3088,141 @@
       "android": "n/a",
       "issue": null,
       "note": "bmlib documentation. The two Rust defects it found (`sync()`'s timestamp, `atomic_write`'s temporary file) are in modules the FFI does not expose."
+    },
+    {
+      "id": "bmlib:unreleased-rust-pdf-windows",
+      "title": "Rust `pdf` builds on Windows",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Rust only, and the FFI builds without bmlib's `pdf` feature (`default-features = false`), so neither app links `mupdf_backend`. The desktop reads PDFs through bmlib's Python `PyMuPDFConverter`, which this does not touch."
+    },
+    {
+      "id": "bmlib#341",
+      "title": "Every bioRxiv and medRxiv posting, through `/details`; `sync(sources=None)` includes them",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "bioRxiv/medRxiv source endpoints of bmlib's publications module and `sync`; lite reads preprints through Europe PMC and calls neither."
+    },
+    {
+      "id": "bmlib#753",
+      "title": "`FullTextService` reads its three remaining JSON bodies as the Rust port does",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#781",
+      "note": "Lite's own Europe PMC search, ID Converter and Unpaywall readers are not bmlib's `FullTextService`, but the rule (a body `serde_json` refuses is a fault) is theirs to match: the desktop decodes them with `requests`' `.json()`, which accepts a BOM, `NaN`, `Infinity` and a lone surrogate; Android's kotlinx.serialization and Swift's decoders are to be checked against the same list (#781)."
+    },
+    {
+      "id": "bmlib#746",
+      "title": "The PDF beside JATS reports the failure a later try may cure, and a 408 may pass",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "No platform seeks a PDF beside JATS (see bmlib#744): the desktop's `fulltext_discovery`, Swift's and Android's `FullTextService` stop at the first JATS found, so there is no PDF-beside-JATS failure to rank."
+    },
+    {
+      "id": "bmlib#748",
+      "title": "The PDF beside JATS from PMC's AWS Open Data bucket",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "No platform seeks a PDF beside JATS (see bmlib#744). Lite's bucket tier reads only the JATS (`lite:pmc-open-data`); a bucket PDF would matter only to a PDF-wanting caller, which lite is not."
+    },
+    {
+      "id": "bmlib#750",
+      "title": "`FullTextService.pmc_open_data_record()` and `PmcOpenDataRecord`",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#780",
+      "note": "Lite reads the same record (`PmcOpenDataRecord.from_metadata`, Swift `PMCOpenData`, Android `PmcOpenData`) but leniently: a flag of the wrong type says nothing, the `xml_url` is followed as long as it is an object in the bucket, never checked to name this article's own version, and the desktop decodes the record with `json.loads`. bmlib refuses a record of another shape, another article's or version's file URL included, and decodes it strictly (#780). `is_retracted` is not wanted: it is read only when the bucket is consulted, so it is empty for most papers."
+    },
+    {
+      "id": "bmlib#751",
+      "title": "PMC Open Data's JATS after NCBI's",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#780",
+      "note": "Lite has had this tier since #480 (`lite:pmc-open-data`), after Europe PMC's `fullTextXML` (lite asks no NCBI efetch tier), and already reads the latest version the listing names, so the order and the version rule are equivalent. Owed: the JATS is never checked against the record's md5; all three ports drop the `?md5=` query (`https_url`, `httpsURL`, `httpsUrl`), so a damaged body is served as the article (#780)."
+    },
+    {
+      "id": "bmlib#755",
+      "title": "`Library.save` keeps bytes once; `FullTextService` on a shared library",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite does not use bmlib's shared paper library: each platform keeps its own store (the desktop's SQLite and PDF folder, SwiftData, Room), and no lite code opens a `bmlib.library` folder. Adopting it is the maintainer's call."
+    },
+    {
+      "id": "bmlib#767",
+      "title": "The shared paper library: a file is found by its kind",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite does not use bmlib's shared paper library: each platform keeps its own store (the desktop's SQLite and PDF folder, SwiftData, Room), and no lite code opens a `bmlib.library` folder. Adopting it is the maintainer's call."
+    },
+    {
+      "id": "bmlib#768",
+      "title": "The shared paper library: a save is durable when it returns",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite does not use bmlib's shared paper library: each platform keeps its own store (the desktop's SQLite and PDF folder, SwiftData, Room), and no lite code opens a `bmlib.library` folder. Adopting it is the maintainer's call."
+    },
+    {
+      "id": "bmlib:unreleased-library-ffi",
+      "title": "The shared paper library through bmlib-ffi",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite does not use bmlib's shared paper library: each platform keeps its own store (the desktop's SQLite and PDF folder, SwiftData, Room), and no lite code opens a `bmlib.library` folder. Adopting it is the maintainer's call. The FFI pin puts its `PaperLibrary` and `LibraryScan` objects into both apps' bindings and binaries; no app calls them. At `8c8e689a` the object was `Library`, which JNA's import shadows, so the Kotlin binding did not compile; bmlib PR #774 renamed it."
+    },
+    {
+      "id": "bmlib:unreleased-library",
+      "title": "`bmlib.library` / `bmlib::library`: a shared folder of research papers",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite does not use bmlib's shared paper library: each platform keeps its own store (the desktop's SQLite and PDF folder, SwiftData, Room), and no lite code opens a `bmlib.library` folder. Adopting it is the maintainer's call."
+    },
+    {
+      "id": "bmlib#758",
+      "title": "JSON nested past Python's stack is a decode error",
+      "python": "equivalent",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Python only. The desktop calls bmlib's own `strict_json_loads` (#761), from PyPI with no upper bound, so the fix reaches it with bmlib's next release. Until then a model reply nested past the stack (measured at 100,000 levels) would raise `RecursionError`, but no reply within the agents' token limits can nest that deep, and the service bodies that could are still read leniently (#781)."
+    },
+    {
+      "id": "bmlib#769",
+      "title": "The shared paper library never downloads an evicted file to read it",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite does not use bmlib's shared paper library: each platform keeps its own store (the desktop's SQLite and PDF folder, SwiftData, Room), and no lite code opens a `bmlib.library` folder. Adopting it is the maintainer's call."
+    },
+    {
+      "id": "bmlib:unreleased-meca-s3",
+      "title": "`bmlib.fulltext.meca`: MECA bulk archives over requester-pays S3",
+      "python": "n/a",
+      "swift": "n/a",
+      "android": "n/a",
+      "issue": null,
+      "note": "Lite reads no MECA archive: preprints come through Europe PMC (their `PPR` IDs), and no platform holds an AWS key. The FFI builds without the Rust `meca` feature, and its `HttpClient` change touches only the unshipped `http-sketch`."
     }
   ],
   "to_bmlib": [
@@ -3122,9 +3257,9 @@
     {
       "id": "lite:pmc-open-data",
       "title": "PMC open-data bucket tier",
-      "bmlib": "owed",
+      "bmlib": "ported",
       "issue": null,
-      "note": "bmlib plan B5. Contract pmc_open_data.json; bmlib has the efetch tier only."
+      "note": "bmlib plan B5. Ported in bmlib#750/#751 (Tier 1c, after NCBI's efetch), with an md5 check and a strict record reader lite lacks (#780). Contract pmc_open_data.json."
     },
     {
       "id": "lite:openalex-pdf-locations",
