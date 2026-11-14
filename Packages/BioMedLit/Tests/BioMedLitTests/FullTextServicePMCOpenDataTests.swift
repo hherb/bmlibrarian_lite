@@ -471,7 +471,8 @@ final class FullTextServicePMCOpenDataTests: XCTestCase {
             routeBucket()
             StubURLProtocol.routes[metadataRoute] = (200, Data(
                 #"{"xml_url":"s3://pmc-oa-opendata/PMC10358571.1/PMC10358571.1.xml\#(query)"}"#.utf8))
-            StubURLProtocol.routes[xmlRoute] = (200, Data(xml.utf8))
+            let status = row["xml_status"] as? Int ?? 200
+            StubURLProtocol.routes[xmlRoute] = (status, Data(xml.utf8))
             let fetch = try await service().fetchPMCOpenDataXML(pmcid: pmcid)
             switch row["outcome"] as? String {
             case "served":
@@ -479,6 +480,8 @@ final class FullTextServicePMCOpenDataTests: XCTestCase {
                 XCTAssertEqual(served.data, Data(xml.utf8), name)
             case "malformed":
                 XCTAssertEqual(fetch, .unreachable(.malformedResponse), name)
+            case "http_status":
+                XCTAssertEqual(fetch, .unreachable(.httpStatus(status)), name)
             default:
                 XCTFail("unknown outcome in \(name)")
             }
@@ -491,6 +494,15 @@ final class FullTextServicePMCOpenDataTests: XCTestCase {
         let fetch = try await service().fetchPMCOpenDataXML(pmcid: pmcid)
         XCTAssertEqual(fetch, .absent)
         XCTAssertFalse(StubURLProtocol.requested(xmlRoute))
+    }
+
+    /// NaN is not JSON: refused, as the desktop's strict reader refuses it (#780).
+    func testARecordHoldingNaNIsMalformed() async throws {
+        routeBucket()
+        StubURLProtocol.routes[metadataRoute] = (200, Data(
+            #"{"xml_url":"s3://pmc-oa-opendata/PMC10358571.1/PMC10358571.1.xml","version":NaN}"#.utf8))
+        let fetch = try await service().fetchPMCOpenDataXML(pmcid: pmcid)
+        XCTAssertEqual(fetch, .unreachable(.malformedResponse))
     }
 
     func testARecordThatIsNotJSONIsMalformed() async throws {

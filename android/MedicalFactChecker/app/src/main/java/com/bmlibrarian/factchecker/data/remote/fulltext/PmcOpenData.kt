@@ -6,6 +6,7 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
+import com.bmlibrarian.factchecker.util.ResponseParser
 import com.bmlibrarian.factchecker.util.executeCancellably
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -122,12 +123,6 @@ object PmcOpenData {
             ?.second
     }
 
-    /**
-     * The public HTTPS address of an object in the bucket; the `?md5=` query is dropped.
-     *
-     * @param s3Url A metadata URL such as `s3://pmc-oa-opendata/PMC1.1/PMC1.1.xml?md5=...`
-     * @return The HTTPS address, or null for anything that is not an object in this bucket
-     */
     /** The version a metadata key names: `PMC1.2` for `metadata/PMC1.2.json`. */
     fun stem(metadataKey: String): String = metadataKey.removePrefix(METADATA_PREFIX).removeSuffix(METADATA_SUFFIX)
 
@@ -150,6 +145,12 @@ object PmcOpenData {
     fun md5Hex(bytes: ByteArray): String =
         MessageDigest.getInstance("MD5").digest(bytes).joinToString("") { "%02x".format(it) }
 
+    /**
+     * The public HTTPS address of an object in the bucket; the `?md5=` query is dropped.
+     *
+     * @param s3Url A metadata URL such as `s3://pmc-oa-opendata/PMC1.1/PMC1.1.xml?md5=...`
+     * @return The HTTPS address, or null for anything that is not an object in this bucket
+     */
     fun httpsUrl(s3Url: String): String? {
         val prefix = "$S3_SCHEME_PREFIX${Constants.PMC_OPEN_DATA_BUCKET}/"
         if (!s3Url.startsWith(prefix)) return null
@@ -192,12 +193,15 @@ data class PmcOpenDataRecord(
          * @param json The record, untrusted
          * @param stem The version the listing named, `PMC1.2`
          * @return The record
-         * @throws IllegalArgumentException when [json] is not a JSON object, or its
-         *   `xml_url` is there but does not name this version's JATS
+         * @throws IllegalArgumentException when [json] is not a JSON object, holds a value
+         *   JSON does not define (`NaN`, a lone surrogate: read strictly, as the desktop's
+         *   `strict_json_loads` does), or its `xml_url` is there but does not name this
+         *   version's JATS
          */
         fun fromMetadata(json: String, stem: String): PmcOpenDataRecord {
             val obj = runCatching { Json.parseToJsonElement(json) }.getOrNull() as? JsonObject
                 ?: throw IllegalArgumentException("a metadata record is a JSON object")
+            require(!ResponseParser.holdsRefusedValue(obj)) { "a metadata record holds a value JSON does not define" }
             fun string(name: String) = (obj[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
             fun bool(name: String) = (obj[name] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
             val xml = when (val named = obj[XML_URL_FIELD]) {

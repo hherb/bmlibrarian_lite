@@ -289,8 +289,13 @@ class TestFetchXml:
         """Bytes that do not match the record's md5 are a fault, never the article (#780)."""
         query = "" if row["xml_md5"] is None else f"?md5={row['xml_md5']}"
         record = json_answer({"xml_url": f"s3://pmc-oa-opendata{_XML_PATH}{query}"})
+        status = HTTPStatus(row.get("xml_status", HTTPStatus.OK))
         with running(
-            {"/": [xml_answer(_LISTING)], _KEY_PATH: [record], _XML_PATH: [xml_answer(row["xml"])]}
+            {
+                "/": [xml_answer(_LISTING)],
+                _KEY_PATH: [record],
+                _XML_PATH: [xml_answer(row["xml"], status)],
+            }
         ) as server:
             monkeypatch.setattr(
                 "bmlibrarian_lite.pmc_open_data.PMC_OPEN_DATA_BASE_URL", server.url
@@ -302,18 +307,31 @@ class TestFetchXml:
             "malformed": PmcOpenDataFetch.unreachable(
                 RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
             ),
+            "http_status": PmcOpenDataFetch.unreachable(
+                RequestFailure(RequestFailureKind.HTTP_STATUS, status)
+            ),
         }[row["outcome"]]
         assert fetch == expected
 
-    def test_a_record_naming_another_articles_xml_is_malformed(self) -> None:
+    def test_a_record_naming_another_articles_xml_is_malformed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Another article's file is never fetched as this one's (#780)."""
         record = json_answer({"xml_url": "s3://pmc-oa-opendata/PMC2.1/PMC2.1.xml"})
-        with running({"/": [xml_answer(_LISTING)], _KEY_PATH: [record]}) as server:
+        other = "/PMC2.1/PMC2.1.xml"
+        with running(
+            {"/": [xml_answer(_LISTING)], _KEY_PATH: [record], other: [xml_answer(_ARTICLE)]}
+        ) as server:
+            monkeypatch.setattr(
+                "bmlibrarian_lite.pmc_open_data.PMC_OPEN_DATA_BASE_URL", server.url
+            )
             fetch = _client(server.url).fetch_xml(_PMCID)
+            asked = server.requests_to(other)
 
         assert fetch == PmcOpenDataFetch.unreachable(
             RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
         )
+        assert asked == []
 
     def test_a_record_holding_nan_is_malformed(self) -> None:
         """Read strictly, as bmlib reads it: NaN is not JSON (#780)."""

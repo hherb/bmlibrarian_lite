@@ -416,14 +416,29 @@ class PmcOpenDataServiceTest {
             routes[badRecordRoute] = MockResponse().setBody(
                 """{"xml_url":"s3://pmc-oa-opendata/PMC10358571.1/PMC10358571.1.xml$query"}"""
             )
-            routes[articlePath] = MockResponse().setBody(Buffer().write(xml.toByteArray(Charsets.UTF_8)))
+            val status = row["xml_status"]?.jsonPrimitive?.int ?: 200
+            routes[articlePath] = MockResponse().setResponseCode(status)
+                .setBody(Buffer().write(xml.toByteArray(Charsets.UTF_8)))
             val fetch = service().fetchXml("PMC10358571")
             when (val outcome = row.getValue("outcome").jsonPrimitive.content) {
                 "served" -> assertEquals(name, PmcOpenDataFetch.Served(xml), fetch)
                 "malformed" -> assertEquals(name, malformed, fetch)
+                "http_status" -> assertEquals(
+                    name, PmcOpenDataFetch.Unreachable(RequestFailure.forHttpStatus(status)), fetch
+                )
                 else -> error("unknown outcome $outcome")
             }
         }
+    }
+
+    /** NaN is not JSON: refused, as Python's strict reader and Swift's JSONSerialization refuse it (#780). */
+    @Test
+    fun `a record holding NaN is malformed`() = runBlocking {
+        routeAll()
+        routes[badRecordRoute] = MockResponse().setBody(
+            """{"xml_url":"s3://pmc-oa-opendata/PMC10358571.1/PMC10358571.1.xml","version":NaN}"""
+        )
+        assertEquals(malformed, service().fetchXml("PMC10358571"))
     }
 
     @Test

@@ -185,6 +185,8 @@ class PmcOpenDataRecord:
             if not isinstance(xml, str) or xml.split("?", 1)[0] != own:
                 raise ValueError("the record's xml_url does not name this version's JATS")
             xml_url = https_url(xml)
+            if xml_url is None:  # never "no XML": the record named one
+                raise ValueError("the record's xml_url names nothing in this bucket")
             query = xml.partition("?")[2]
             md5 = query.removeprefix(_MD5_QUERY)
             xml_md5 = md5 if md5 != query and _MD5_HEX.fullmatch(md5) else None

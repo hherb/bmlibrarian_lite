@@ -33,11 +33,11 @@ ledger both name bmlib `main` `110d906b`; the bindings gain the shared paper
 library (`PaperLibrary`, `LibraryScan`), which no app calls (at `8c8e689a` it
 was `Library`, shadowed by Kotlin's `import com.sun.jna.Library`; bmlib#774
 renamed it and bmlib's `ffi` job now refuses such a name). Its triage lodged
-#780, **fixed on all three by this session's PR** (the bucket record is read
-against the listed stem, so another article's or version's `xml_url` is
-malformed and never fetched; a `?md5=` of 32 lowercase hex is checked against
-the JATS bytes; the desktop reads the record with `strict_json_loads`;
-contract `record`/`xml_checksum` rows; ledger bmlib#750/#751 ported), and
+#780, **fixed on all three by PR #782** (the bucket record is read against
+the listed stem, so another article's or version's `xml_url` is malformed and
+never fetched; a `?md5=` of 32 lowercase hex is checked against the JATS
+bytes, on a 200 answer only; the record is read strictly, no NaN or lone
+surrogate, on all three; contract `record`/`xml_checksum` rows; ledger bmlib#750/#751 ported), and
 **#781** (lenient service JSON). **Left:** an Apple archive from master lists
 `BmlibFFI.framework.dSYM` with no warning. **Decision for the maintainer:**
 whether lite keeps its papers in bmlib's shared paper library

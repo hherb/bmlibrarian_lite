@@ -120,11 +120,13 @@ public enum PMCOpenData {
     /// anything else. The `?md5=` query is dropped.
     public static func httpsURL(_ s3URL: String) -> URL? {
         let prefix = "s3://\(BioMedLitConstants.pmcOpenDataBucket)/"
-        guard s3URL.hasPrefix(prefix) else { return nil }
-        let key = s3URL.dropFirst(prefix.count).split(separator: "?", maxSplits: 1,
-                                                      omittingEmptySubsequences: false).first ?? ""
+        // Code point by code point, as Python and Kotlin cut it: a Character
+        // would join a combining mark to the `?` or `/` before it.
+        let scalars = s3URL.unicodeScalars
+        guard scalars.starts(with: prefix.unicodeScalars) else { return nil }
+        let key = scalars.dropFirst(prefix.unicodeScalars.count).prefix { $0 != "?" }
         guard !key.isEmpty else { return nil }
-        return URL(string: "\(BioMedLitConstants.pmcOpenDataBaseURL)/\(key)")
+        return URL(string: "\(BioMedLitConstants.pmcOpenDataBaseURL)/\(Substring(key))")
     }
 
     /// The version a metadata key names, `PMC1.2` for `metadata/PMC1.2.json`.
@@ -278,14 +280,15 @@ public struct PMCOpenDataRecord: Equatable, Sendable {
     private static func xml(_ value: Any?, stem: String) throws -> (URL?, String?) {
         guard let value, !(value is NSNull) else { return (nil, nil) }
         let own = "s3://\(BioMedLitConstants.pmcOpenDataBucket)/\(stem)/\(stem).xml"
+        // Code points, not Characters, as in ``PMCOpenData/httpsURL(_:)``.
         guard let s3URL = value as? String,
-              s3URL.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
-                .first.map(String.init) == own,
+              s3URL.unicodeScalars.prefix(while: { $0 != "?" }).elementsEqual(own.unicodeScalars),
               let url = PMCOpenData.httpsURL(s3URL) else {
             throw PMCOpenData.UnreadableAnswer.unreadableXMLURL
         }
-        let query = s3URL.dropFirst(own.count + 1)
-        let md5 = query.hasPrefix(md5Query) ? query.dropFirst(md5Query.count) : nil
+        let query = Substring(s3URL.unicodeScalars.dropFirst(own.unicodeScalars.count + 1))
+        let md5 = query.unicodeScalars.starts(with: md5Query.unicodeScalars)
+            ? Substring(query.unicodeScalars.dropFirst(md5Query.unicodeScalars.count)) : nil
         let isHex = md5.map { $0.utf8.count == md5Length && $0.utf8.allSatisfy(isLowerHex) } ?? false
         return (url, isHex ? md5.map(String.init) : nil)
     }

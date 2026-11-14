@@ -278,7 +278,7 @@ function fetch_pmc_open_data(pmcid) -> PmcOpenDataFetch:
     stem = key without "metadata/" and ".json"         # PMC1.2: the version listed
     record = GET {base}/{key}                          # 404 here: UNREACHABLE(404)
                                                        # not UTF-8, unparseable JSON (read strictly
-                                                       # on the desktop: no NaN, no lone surrogate)
+                                                       # everywhere: no NaN, no lone surrogate)
                                                        # or not an object:
                                                        # UNREACHABLE(malformed_response)
     if record.xml_url is missing or null: return ABSENT  # no XML named
@@ -287,9 +287,10 @@ function fetch_pmc_open_data(pmcid) -> PmcOpenDataFetch:
                                                        # or another article's or version's (#780)
     xml_url = https_url(record.xml_url)                # s3://pmc-oa-opendata/k?md5= -> https://…/k
     md5 = the query's 32 lowercase hex digits, when it is exactly md5=<them>; else null
-    xml = GET xml_url                                  # 404: UNREACHABLE(404); blank: incomplete_response
-    if md5 != null and md5(xml bytes) != md5:
+    xml = GET xml_url                                  # 404: UNREACHABLE(404)
+    if md5 != null and md5(xml bytes) != md5:          # on a 200 only, before decoding
         return UNREACHABLE(malformed_response)         # damaged or stale: never served (#780)
+    if xml is blank: return UNREACHABLE(incomplete_response)
     return SERVED(xml)
 ```
 
