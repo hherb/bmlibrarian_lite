@@ -683,6 +683,10 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_bmlib_ffi_checksum_func_parse_jats_audited(
     ): Int
+    external fun uniffi_bmlib_ffi_checksum_func_installation_new(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_func_paper_ids_canonical(
+    ): Int
     external fun uniffi_bmlib_ffi_checksum_func_build_retraction_index(
     ): Int
     external fun uniffi_bmlib_ffi_checksum_func_crossref_retraction_requests(
@@ -691,6 +695,34 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_bmlib_ffi_checksum_func_retraction_status(
     ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_libraryscan_find(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_libraryscan_find_digest(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_libraryscan_folders(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_libraryscan_group(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_libraryscan_problems(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_libraryscan_used_by(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_paperlibrary_read(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_paperlibrary_record_use(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_paperlibrary_release(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_paperlibrary_remove_file(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_paperlibrary_remove_folder(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_paperlibrary_root(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_paperlibrary_save(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_paperlibrary_scan(
+    ): Int
     external fun uniffi_bmlib_ffi_checksum_method_retractionindex_data_as_of(
     ): Int
     external fun uniffi_bmlib_ffi_checksum_method_retractionindex_lookup(
@@ -698,6 +730,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_bmlib_ffi_checksum_method_retractionindex_notice_count(
     ): Int
     external fun uniffi_bmlib_ffi_checksum_method_retractionindex_to_bytes(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_constructor_paperlibrary_open(
     ): Int
     external fun uniffi_bmlib_ffi_checksum_constructor_retractionindex_from_bytes(
     ): Int
@@ -721,6 +755,44 @@ internal object UniffiLib {
     }
 
     internal fun ensureInitialized() = Unit
+    external fun uniffi_bmlib_ffi_fn_clone_libraryscan(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_bmlib_ffi_fn_free_libraryscan(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_bmlib_ffi_fn_method_libraryscan_find(`ptr`: Long,`ids`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_bmlib_ffi_fn_method_libraryscan_find_digest(`ptr`: Long,`sha256`: RustBuffer.ByValue,`kind`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_bmlib_ffi_fn_method_libraryscan_folders(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_bmlib_ffi_fn_method_libraryscan_group(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_bmlib_ffi_fn_method_libraryscan_problems(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_bmlib_ffi_fn_method_libraryscan_used_by(`ptr`: Long,`folder`: RustBuffer.ByValue,`sha256`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_bmlib_ffi_fn_clone_paperlibrary(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_bmlib_ffi_fn_free_paperlibrary(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_bmlib_ffi_fn_constructor_paperlibrary_open(`root`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_bmlib_ffi_fn_method_paperlibrary_read(`ptr`: Long,`file`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_bmlib_ffi_fn_method_paperlibrary_record_use(`ptr`: Long,`who`: RustBuffer.ByValue,`paper`: RustBuffer.ByValue,`file`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_bmlib_ffi_fn_method_paperlibrary_release(`ptr`: Long,`who`: RustBuffer.ByValue,`file`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_bmlib_ffi_fn_method_paperlibrary_remove_file(`ptr`: Long,`file`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_bmlib_ffi_fn_method_paperlibrary_remove_folder(`ptr`: Long,`folder`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_bmlib_ffi_fn_method_paperlibrary_root(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_bmlib_ffi_fn_method_paperlibrary_save(`ptr`: Long,`who`: RustBuffer.ByValue,`paper`: RustBuffer.ByValue,`bytes`: RustBuffer.ByValue,`kind`: RustBuffer.ByValue,`origin`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_bmlib_ffi_fn_method_paperlibrary_scan(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
     external fun uniffi_bmlib_ffi_fn_clone_retractionindex(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     external fun uniffi_bmlib_ffi_fn_free_retractionindex(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -735,11 +807,17 @@ internal object UniffiLib {
     ): Long
     external fun uniffi_bmlib_ffi_fn_method_retractionindex_to_bytes(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_bmlib_ffi_fn_method_libraryerror_uniffi_trait_display(`ptr`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_bmlib_ffi_fn_func_bmlib_version(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_bmlib_ffi_fn_func_parse_jats(`xml`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_bmlib_ffi_fn_func_parse_jats_audited(`xml`: RustBuffer.ByValue,`knownPmcId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_bmlib_ffi_fn_func_installation_new(`app`: RustBuffer.ByValue,`id`: RustBuffer.ByValue,`label`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_bmlib_ffi_fn_func_paper_ids_canonical(`pmid`: RustBuffer.ByValue,`doi`: RustBuffer.ByValue,`pmcid`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_bmlib_ffi_fn_func_build_retraction_index(`csv`: RustBuffer.ByValue,`dataAsOf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -877,6 +955,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_bmlib_ffi_checksum_func_parse_jats_audited() and 0xFFFF) != 54867) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_bmlib_ffi_checksum_func_installation_new() and 0xFFFF) != 16010) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_func_paper_ids_canonical() and 0xFFFF) != 57621) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_bmlib_ffi_checksum_func_build_retraction_index() and 0xFFFF) != 50609) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -889,6 +973,48 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_bmlib_ffi_checksum_func_retraction_status() and 0xFFFF) != 39250) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_libraryscan_find() and 0xFFFF) != 35371) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_libraryscan_find_digest() and 0xFFFF) != 64843) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_libraryscan_folders() and 0xFFFF) != 6121) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_libraryscan_group() and 0xFFFF) != 28136) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_libraryscan_problems() and 0xFFFF) != 41033) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_libraryscan_used_by() and 0xFFFF) != 23413) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_read() and 0xFFFF) != 37147) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_record_use() and 0xFFFF) != 41641) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_release() and 0xFFFF) != 2624) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_remove_file() and 0xFFFF) != 9886) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_remove_folder() and 0xFFFF) != 18066) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_root() and 0xFFFF) != 2620) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_save() and 0xFFFF) != 59969) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_scan() and 0xFFFF) != 33102) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_bmlib_ffi_checksum_method_retractionindex_data_as_of() and 0xFFFF) != 7573) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -899,6 +1025,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_bmlib_ffi_checksum_method_retractionindex_to_bytes() and 0xFFFF) != 45359) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_constructor_paperlibrary_open() and 0xFFFF) != 25515) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_bmlib_ffi_checksum_constructor_retractionindex_from_bytes() and 0xFFFF) != 29137) {
@@ -1091,6 +1220,52 @@ public object FfiConverterUShort: FfiConverter<UShort, Short> {
 /**
  * @suppress
  */
+public object FfiConverterUInt: FfiConverter<UInt, Int> {
+    override fun lift(value: Int): UInt {
+        return value.toUInt()
+    }
+
+    override fun read(buf: ByteBuffer): UInt {
+        return lift(buf.getInt())
+    }
+
+    override fun lower(value: UInt): Int {
+        return value.toInt()
+    }
+
+    override fun allocationSize(value: UInt) = 4UL
+
+    override fun write(value: UInt, buf: ByteBuffer) {
+        buf.putInt(value.toInt())
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterInt: FfiConverter<Int, Int> {
+    override fun lift(value: Int): Int {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Int {
+        return buf.getInt()
+    }
+
+    override fun lower(value: Int): Int {
+        return value
+    }
+
+    override fun allocationSize(value: Int) = 4UL
+
+    override fun write(value: Int, buf: ByteBuffer) {
+        buf.putInt(value)
+    }
+}
+
+/**
+ * @suppress
+ */
 public object FfiConverterULong: FfiConverter<ULong, Long> {
     override fun lift(value: Long): ULong {
         return value.toULong()
@@ -1207,6 +1382,981 @@ public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
     override fun write(value: ByteArray, buf: ByteBuffer) {
         buf.putInt(value.size)
         buf.put(value)
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
+ * What [`PaperLibrary::scan`] found: a snapshot, unchanged by later saves.
+ */
+public interface LibraryScanInterface {
+    
+    /**
+     * Every folder of the paper(s) matching `ids`: a paper split across
+     * folders by its identifiers comes back whole.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` for an identifier that is not valid.
+     */
+    fun `find`(`ids`: PaperIds): List<PaperFolder>
+    
+    /**
+     * The file named for `sha256`, if any; with `kind`, only the file stored
+     * as that kind (the same bytes saved as two kinds are two files). Only
+     * the name is looked at; [`PaperLibrary::read`] checks the bytes.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` (field `"sha256"`) for a digest that is not 64
+     * lowercase hex digits, which bmlib would answer with "not found".
+     */
+    fun `findDigest`(`sha256`: kotlin.String, `kind`: SourceKind?): FileRef?
+    
+    /**
+     * Every paper folder, ordered by name.
+     */
+    fun `folders`(): List<PaperFolder>
+    
+    /**
+     * Every folder's index into [`LibraryScan::folders`], grouped into the
+     * folders that are one paper (a folder alone is a group of one); each
+     * group and the list sorted.
+     */
+    fun `group`(): List<List<kotlin.ULong>>
+    
+    /**
+     * Everything odd, in the order found.
+     */
+    fun `problems`(): List<LibraryProblem>
+    
+    /**
+     * The installations whose record in `folder` lists a file with this
+     * digest, and whether that list is complete; `None` for a folder the scan
+     * did not find.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` (field `"sha256"`) for a digest that is not 64
+     * lowercase hex digits, which would otherwise read as "nobody".
+     */
+    fun `usedBy`(`folder`: kotlin.String, `sha256`: kotlin.String): FileUsers?
+    
+    companion object
+}
+
+/**
+ * What [`PaperLibrary::scan`] found: a snapshot, unchanged by later saves.
+ */
+open class LibraryScan: Disposable, AutoCloseable, LibraryScanInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_bmlib_ffi_fn_free_libraryscan(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_bmlib_ffi_fn_clone_libraryscan(handle, status)
+        }
+    }
+
+    
+    /**
+     * Every folder of the paper(s) matching `ids`: a paper split across
+     * folders by its identifiers comes back whole.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` for an identifier that is not valid.
+     */
+    @Throws(LibraryException::class)override fun `find`(`ids`: PaperIds): List<PaperFolder> {
+            return FfiConverterSequenceTypePaperFolder.lift(
+    callWithHandle {
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_libraryscan_find(
+        it,
+        
+        FfiConverterTypePaperIds.lower(`ids`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The file named for `sha256`, if any; with `kind`, only the file stored
+     * as that kind (the same bytes saved as two kinds are two files). Only
+     * the name is looked at; [`PaperLibrary::read`] checks the bytes.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` (field `"sha256"`) for a digest that is not 64
+     * lowercase hex digits, which bmlib would answer with "not found".
+     */
+    @Throws(LibraryException::class)override fun `findDigest`(`sha256`: kotlin.String, `kind`: SourceKind?): FileRef? {
+            return FfiConverterOptionalTypeFileRef.lift(
+    callWithHandle {
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_libraryscan_find_digest(
+        it,
+        
+        FfiConverterString.lower(`sha256`),
+        FfiConverterOptionalTypeSourceKind.lower(`kind`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Every paper folder, ordered by name.
+     */override fun `folders`(): List<PaperFolder> {
+            return FfiConverterSequenceTypePaperFolder.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_libraryscan_folders(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Every folder's index into [`LibraryScan::folders`], grouped into the
+     * folders that are one paper (a folder alone is a group of one); each
+     * group and the list sorted.
+     */override fun `group`(): List<List<kotlin.ULong>> {
+            return FfiConverterSequenceSequenceULong.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_libraryscan_group(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Everything odd, in the order found.
+     */override fun `problems`(): List<LibraryProblem> {
+            return FfiConverterSequenceTypeLibraryProblem.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_libraryscan_problems(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The installations whose record in `folder` lists a file with this
+     * digest, and whether that list is complete; `None` for a folder the scan
+     * did not find.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` (field `"sha256"`) for a digest that is not 64
+     * lowercase hex digits, which would otherwise read as "nobody".
+     */
+    @Throws(LibraryException::class)override fun `usedBy`(`folder`: kotlin.String, `sha256`: kotlin.String): FileUsers? {
+            return FfiConverterOptionalTypeFileUsers.lift(
+    callWithHandle {
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_libraryscan_used_by(
+        it,
+        
+        FfiConverterString.lower(`folder`),
+        FfiConverterString.lower(`sha256`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLibraryScan: FfiConverter<LibraryScan, Long> {
+    override fun lower(value: LibraryScan): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): LibraryScan {
+        return LibraryScan(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): LibraryScan {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: LibraryScan) = 8UL
+
+    override fun write(value: LibraryScan, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
+ * A library folder, opened and checked.
+ *
+ * Not `Library`: every UniFFI Kotlin binding imports `com.sun.jna.Library`,
+ * which would shadow a class of that name and break the Android build.
+ */
+public interface PaperLibraryInterface {
+    
+    /**
+     * A file's bytes, checked against `file.sha256`.
+     *
+     * # Errors
+     *
+     * `BadName`, `NotDownloaded`, `Missing`, `DigestMismatch` or `Io`.
+     */
+    fun `read`(`file`: FileRef): kotlin.ByteArray
+    
+    /**
+     * Note in `who`'s record that it uses `file`, a file already in the
+     * library (one another app saved, say). The bytes are read and checked
+     * first.
+     *
+     * # Errors
+     *
+     * `BadInstallation`, `BadIdentifier`, `NewerRecord`, `ReadOnly` or `Io`
+     * as for [`PaperLibrary::save`]; `Missing`, `NotDownloaded` or
+     * `DigestMismatch` from reading the file (`NotDownloaded` also when
+     * `who`'s own record is only a placeholder), and `BadName` for a name that
+     * is not one path component or not the library's name for those bytes
+     * (nothing written).
+     */
+    fun `recordUse`(`who`: Installation, `paper`: PaperInfo, `file`: FileRef)
+    
+    /**
+     * Drop the file with `file.sha256` and `file.kind` from `who`'s record in
+     * `file.folder` (`file.name` need only be a plain name). The file and
+     * other records stay. A file the record does not list, or a folder `who`
+     * has no record in, is already released, so that is `Ok`.
+     *
+     * # Errors
+     *
+     * `BadInstallation`, `BadName`, `NewerRecord`, `NotDownloaded`,
+     * `ReadOnly` or `Io`; `BadIdentifier` (field `"sha256"`) for a digest
+     * that is not 64 lowercase hex digits, which would match nothing and so
+     * read as released (nothing written).
+     */
+    fun `release`(`who`: Installation, `file`: FileRef)
+    
+    /**
+     * Delete the source file `file.folder`/`file.name`: the user's manual
+     * clear, never automatic. `sha256` and `kind` are not checked.
+     *
+     * # Errors
+     *
+     * `BadName`, `Missing`, `ReadOnly` or `Io`.
+     */
+    fun `removeFile`(`file`: FileRef)
+    
+    /**
+     * Delete a paper's whole folder, records included: the user's manual
+     * clear, never automatic.
+     *
+     * # Errors
+     *
+     * `BadName`, `Missing`, `ReadOnly` or `Io`.
+     */
+    fun `removeFolder`(`folder`: kotlin.String)
+    
+    /**
+     * The library's folder, as given to [`PaperLibrary::open`].
+     */
+    fun `root`(): kotlin.String
+    
+    /**
+     * Save `bytes` for `paper` and note them in `who`'s record. Bytes already
+     * in the library are not written again: the use goes to the folder that
+     * holds them. Returns where the file is.
+     *
+     * # Errors
+     *
+     * `BadInstallation` or `BadIdentifier` (nothing written), `FileClash`
+     * (nothing overwritten), `NewerRecord`, `NotDownloaded`, `ReadOnly` or
+     * `Io`.
+     */
+    fun `save`(`who`: Installation, `paper`: PaperInfo, `bytes`: kotlin.ByteArray, `kind`: SourceKind, `origin`: kotlin.String): FileRef
+    
+    /**
+     * Read every paper folder. Never writes.
+     *
+     * # Errors
+     *
+     * `Io` when `papers/` cannot be listed; trouble inside a folder is a
+     * [`LibraryScan::problems`] entry instead.
+     */
+    fun `scan`(): LibraryScan
+    
+    companion object
+}
+
+/**
+ * A library folder, opened and checked.
+ *
+ * Not `Library`: every UniFFI Kotlin binding imports `com.sun.jna.Library`,
+ * which would shadow a class of that name and break the Android build.
+ */
+open class PaperLibrary: Disposable, AutoCloseable, PaperLibraryInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    /**
+     * Whether the current object has been destroyed and its reference is gone in the Rust side.
+     */
+    val uniffiIsDestroyed: Boolean get() = wasDestroyed.get()
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_bmlib_ffi_fn_free_paperlibrary(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_bmlib_ffi_fn_clone_paperlibrary(handle, status)
+        }
+    }
+
+    
+    /**
+     * A file's bytes, checked against `file.sha256`.
+     *
+     * # Errors
+     *
+     * `BadName`, `NotDownloaded`, `Missing`, `DigestMismatch` or `Io`.
+     */
+    @Throws(LibraryException::class)override fun `read`(`file`: FileRef): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    callWithHandle {
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_paperlibrary_read(
+        it,
+        
+        FfiConverterTypeFileRef.lower(`file`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Note in `who`'s record that it uses `file`, a file already in the
+     * library (one another app saved, say). The bytes are read and checked
+     * first.
+     *
+     * # Errors
+     *
+     * `BadInstallation`, `BadIdentifier`, `NewerRecord`, `ReadOnly` or `Io`
+     * as for [`PaperLibrary::save`]; `Missing`, `NotDownloaded` or
+     * `DigestMismatch` from reading the file (`NotDownloaded` also when
+     * `who`'s own record is only a placeholder), and `BadName` for a name that
+     * is not one path component or not the library's name for those bytes
+     * (nothing written).
+     */
+    @Throws(LibraryException::class)override fun `recordUse`(`who`: Installation, `paper`: PaperInfo, `file`: FileRef)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_paperlibrary_record_use(
+        it,
+        
+        FfiConverterTypeInstallation.lower(`who`),
+        FfiConverterTypePaperInfo.lower(`paper`),
+        FfiConverterTypeFileRef.lower(`file`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Drop the file with `file.sha256` and `file.kind` from `who`'s record in
+     * `file.folder` (`file.name` need only be a plain name). The file and
+     * other records stay. A file the record does not list, or a folder `who`
+     * has no record in, is already released, so that is `Ok`.
+     *
+     * # Errors
+     *
+     * `BadInstallation`, `BadName`, `NewerRecord`, `NotDownloaded`,
+     * `ReadOnly` or `Io`; `BadIdentifier` (field `"sha256"`) for a digest
+     * that is not 64 lowercase hex digits, which would match nothing and so
+     * read as released (nothing written).
+     */
+    @Throws(LibraryException::class)override fun `release`(`who`: Installation, `file`: FileRef)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_paperlibrary_release(
+        it,
+        
+        FfiConverterTypeInstallation.lower(`who`),
+        FfiConverterTypeFileRef.lower(`file`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Delete the source file `file.folder`/`file.name`: the user's manual
+     * clear, never automatic. `sha256` and `kind` are not checked.
+     *
+     * # Errors
+     *
+     * `BadName`, `Missing`, `ReadOnly` or `Io`.
+     */
+    @Throws(LibraryException::class)override fun `removeFile`(`file`: FileRef)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_paperlibrary_remove_file(
+        it,
+        
+        FfiConverterTypeFileRef.lower(`file`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Delete a paper's whole folder, records included: the user's manual
+     * clear, never automatic.
+     *
+     * # Errors
+     *
+     * `BadName`, `Missing`, `ReadOnly` or `Io`.
+     */
+    @Throws(LibraryException::class)override fun `removeFolder`(`folder`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_paperlibrary_remove_folder(
+        it,
+        
+        FfiConverterString.lower(`folder`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * The library's folder, as given to [`PaperLibrary::open`].
+     */override fun `root`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_paperlibrary_root(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Save `bytes` for `paper` and note them in `who`'s record. Bytes already
+     * in the library are not written again: the use goes to the folder that
+     * holds them. Returns where the file is.
+     *
+     * # Errors
+     *
+     * `BadInstallation` or `BadIdentifier` (nothing written), `FileClash`
+     * (nothing overwritten), `NewerRecord`, `NotDownloaded`, `ReadOnly` or
+     * `Io`.
+     */
+    @Throws(LibraryException::class)override fun `save`(`who`: Installation, `paper`: PaperInfo, `bytes`: kotlin.ByteArray, `kind`: SourceKind, `origin`: kotlin.String): FileRef {
+            return FfiConverterTypeFileRef.lift(
+    callWithHandle {
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_paperlibrary_save(
+        it,
+        
+        FfiConverterTypeInstallation.lower(`who`),
+        FfiConverterTypePaperInfo.lower(`paper`),
+        FfiConverterByteArray.lower(`bytes`),
+        FfiConverterTypeSourceKind.lower(`kind`),
+        FfiConverterString.lower(`origin`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Read every paper folder. Never writes.
+     *
+     * # Errors
+     *
+     * `Io` when `papers/` cannot be listed; trouble inside a folder is a
+     * [`LibraryScan::problems`] entry instead.
+     */
+    @Throws(LibraryException::class)override fun `scan`(): LibraryScan {
+            return FfiConverterTypeLibraryScan.lift(
+    callWithHandle {
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_paperlibrary_scan(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+
+    
+
+
+    
+    companion object {
+        
+    /**
+     * Open the library at `root`, creating it in an empty folder. On macOS and
+     * iOS, `root` is the path of the resolved security-scoped bookmark, whose
+     * access the app holds for as long as it uses the library.
+     *
+     * # Errors
+     *
+     * `Unreachable` (missing or not a folder), `NotALibrary` (holds other
+     * things), `NewerLibrary`, `ReadOnly` or `Io`.
+     */
+    @Throws(LibraryException::class) fun `open`(`root`: kotlin.String): PaperLibrary {
+            return FfiConverterTypePaperLibrary.lift(
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_constructor_paperlibrary_open(
+    
+        
+        FfiConverterString.lower(`root`),_status)
+}
+    )
+    }
+    
+
+        
+    }
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePaperLibrary: FfiConverter<PaperLibrary, Long> {
+    override fun lower(value: PaperLibrary): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): PaperLibrary {
+        return PaperLibrary(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): PaperLibrary {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: PaperLibrary) = 8UL
+
+    override fun write(value: PaperLibrary, buf: ByteBuffer) {
+        buf.putLong(lower(value))
     }
 }
 
@@ -1661,6 +2811,256 @@ public object FfiConverterTypeCrossrefRequests: FfiConverterRustBuffer<CrossrefR
     override fun write(value: CrossrefRequests, buf: ByteBuffer) {
             FfiConverterSequenceTypeCrossrefBatch.write(value.`batches`, buf)
             FfiConverterSequenceString.write(value.`unsendable`, buf)
+    }
+}
+
+
+
+/**
+ * One source file an installation's record lists.
+ */
+data class FileEntry (
+    /**
+     * The SHA-256 of the bytes, 64 lowercase hex digits.
+     */
+    val `sha256`: kotlin.String
+    , 
+    /**
+     * What the file is.
+     */
+    val `kind`: SourceKind
+    , 
+    /**
+     * Its name in the folder.
+     */
+    val `name`: kotlin.String
+    , 
+    /**
+     * Where the bytes came from, such as a repository's name; may be empty.
+     */
+    val `origin`: kotlin.String
+    , 
+    /**
+     * Its size in bytes.
+     */
+    val `size`: kotlin.ULong
+    , 
+    /**
+     * When it was saved, as the writer formatted it.
+     */
+    val `savedAt`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFileEntry: FfiConverterRustBuffer<FileEntry> {
+    override fun read(buf: ByteBuffer): FileEntry {
+        return FileEntry(
+            FfiConverterString.read(buf),
+            FfiConverterTypeSourceKind.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FileEntry) = (
+            FfiConverterString.allocationSize(value.`sha256`) +
+            FfiConverterTypeSourceKind.allocationSize(value.`kind`) +
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`origin`) +
+            FfiConverterULong.allocationSize(value.`size`) +
+            FfiConverterString.allocationSize(value.`savedAt`)
+    )
+
+    override fun write(value: FileEntry, buf: ByteBuffer) {
+            FfiConverterString.write(value.`sha256`, buf)
+            FfiConverterTypeSourceKind.write(value.`kind`, buf)
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`origin`, buf)
+            FfiConverterULong.write(value.`size`, buf)
+            FfiConverterString.write(value.`savedAt`, buf)
+    }
+}
+
+
+
+/**
+ * A source file in a paper's folder, with the digest it should have. An app
+ * stores `sha256` and `kind`, and finds the file again with
+ * [`LibraryScan::find_digest`] given both.
+ */
+data class FileRef (
+    /**
+     * The paper's folder, under `papers/`.
+     */
+    val `folder`: kotlin.String
+    , 
+    /**
+     * The file's name in the folder.
+     */
+    val `name`: kotlin.String
+    , 
+    /**
+     * The full SHA-256 the bytes must have, 64 lowercase hex digits.
+     */
+    val `sha256`: kotlin.String
+    , 
+    /**
+     * What the file is.
+     */
+    val `kind`: SourceKind
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFileRef: FfiConverterRustBuffer<FileRef> {
+    override fun read(buf: ByteBuffer): FileRef {
+        return FileRef(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterTypeSourceKind.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FileRef) = (
+            FfiConverterString.allocationSize(value.`folder`) +
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`sha256`) +
+            FfiConverterTypeSourceKind.allocationSize(value.`kind`)
+    )
+
+    override fun write(value: FileRef, buf: ByteBuffer) {
+            FfiConverterString.write(value.`folder`, buf)
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`sha256`, buf)
+            FfiConverterTypeSourceKind.write(value.`kind`, buf)
+    }
+}
+
+
+
+/**
+ * Who uses a file, from [`LibraryScan::used_by`].
+ */
+data class FileUsers (
+    /**
+     * The installations whose record in the folder lists the file.
+     */
+    val `installations`: List<Installation>
+    , 
+    /**
+     * `false` when the folder holds a record the scan could not count
+     * (unreadable, newer, misnamed, not downloaded, or a record write in
+     * flight; see [`LibraryScan::problems`]), so others may use the file too.
+     * Say so before offering to remove it.
+     */
+    val `complete`: kotlin.Boolean
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFileUsers: FfiConverterRustBuffer<FileUsers> {
+    override fun read(buf: ByteBuffer): FileUsers {
+        return FileUsers(
+            FfiConverterSequenceTypeInstallation.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FileUsers) = (
+            FfiConverterSequenceTypeInstallation.allocationSize(value.`installations`) +
+            FfiConverterBoolean.allocationSize(value.`complete`)
+    )
+
+    override fun write(value: FileUsers, buf: ByteBuffer) {
+            FfiConverterSequenceTypeInstallation.write(value.`installations`, buf)
+            FfiConverterBoolean.write(value.`complete`, buf)
+    }
+}
+
+
+
+/**
+ * One app on one machine, which writes its own record per paper.
+ */
+data class Installation (
+    /**
+     * The app, `[a-z0-9]{1,40}`.
+     */
+    val `app`: kotlin.String
+    , 
+    /**
+     * This installation, `[a-z0-9-]{1,64}`. Generate it once and keep it.
+     */
+    val `id`: kotlin.String
+    , 
+    /**
+     * A name a person recognises, such as the machine's: 1 to 200
+     * characters, no control or bidirectional control characters.
+     */
+    val `label`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeInstallation: FfiConverterRustBuffer<Installation> {
+    override fun read(buf: ByteBuffer): Installation {
+        return Installation(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: Installation) = (
+            FfiConverterString.allocationSize(value.`app`) +
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`label`)
+    )
+
+    override fun write(value: Installation, buf: ByteBuffer) {
+            FfiConverterString.write(value.`app`, buf)
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`label`, buf)
     }
 }
 
@@ -2544,6 +3944,244 @@ public object FfiConverterTypeJatsTable: FfiConverterRustBuffer<JatsTable> {
 
 
 /**
+ * One installation's account of a paper (bmlib's `Record`).
+ */
+data class LibraryRecord (
+    /**
+     * Who wrote the record.
+     */
+    val `installation`: Installation
+    , 
+    /**
+     * What it knows of the paper.
+     */
+    val `paper`: PaperInfo
+    , 
+    /**
+     * The files it uses.
+     */
+    val `files`: List<FileEntry>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLibraryRecord: FfiConverterRustBuffer<LibraryRecord> {
+    override fun read(buf: ByteBuffer): LibraryRecord {
+        return LibraryRecord(
+            FfiConverterTypeInstallation.read(buf),
+            FfiConverterTypePaperInfo.read(buf),
+            FfiConverterSequenceTypeFileEntry.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: LibraryRecord) = (
+            FfiConverterTypeInstallation.allocationSize(value.`installation`) +
+            FfiConverterTypePaperInfo.allocationSize(value.`paper`) +
+            FfiConverterSequenceTypeFileEntry.allocationSize(value.`files`)
+    )
+
+    override fun write(value: LibraryRecord, buf: ByteBuffer) {
+            FfiConverterTypeInstallation.write(value.`installation`, buf)
+            FfiConverterTypePaperInfo.write(value.`paper`, buf)
+            FfiConverterSequenceTypeFileEntry.write(value.`files`, buf)
+    }
+}
+
+
+
+/**
+ * One paper's folder as found on disk.
+ */
+data class PaperFolder (
+    /**
+     * The folder's name under `papers/`.
+     */
+    val `folder`: kotlin.String
+    , 
+    /**
+     * The union of the records' identifiers; the first record wins a
+     * conflict, which the scan reports as [`LibraryProblem::ConflictingIds`].
+     */
+    val `ids`: PaperIds
+    , 
+    /**
+     * The valid, correctly named records, by file name.
+     */
+    val `records`: List<LibraryRecord>
+    , 
+    /**
+     * The source files present, by name.
+     */
+    val `filesOnDisk`: List<kotlin.String>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePaperFolder: FfiConverterRustBuffer<PaperFolder> {
+    override fun read(buf: ByteBuffer): PaperFolder {
+        return PaperFolder(
+            FfiConverterString.read(buf),
+            FfiConverterTypePaperIds.read(buf),
+            FfiConverterSequenceTypeLibraryRecord.read(buf),
+            FfiConverterSequenceString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PaperFolder) = (
+            FfiConverterString.allocationSize(value.`folder`) +
+            FfiConverterTypePaperIds.allocationSize(value.`ids`) +
+            FfiConverterSequenceTypeLibraryRecord.allocationSize(value.`records`) +
+            FfiConverterSequenceString.allocationSize(value.`filesOnDisk`)
+    )
+
+    override fun write(value: PaperFolder, buf: ByteBuffer) {
+            FfiConverterString.write(value.`folder`, buf)
+            FfiConverterTypePaperIds.write(value.`ids`, buf)
+            FfiConverterSequenceTypeLibraryRecord.write(value.`records`, buf)
+            FfiConverterSequenceString.write(value.`filesOnDisk`, buf)
+    }
+}
+
+
+
+/**
+ * A paper's identifiers. Coming out of the library each is canonical or
+ * `None`; going in, raw values are canonicalised and blank ones dropped.
+ */
+data class PaperIds (
+    /**
+     * PubMed ID: digits without leading zeros, or `PPR` and digits.
+     */
+    val `pmid`: kotlin.String?
+    , 
+    /**
+     * DOI: lower-case, starting `10.` and holding a `/`.
+     */
+    val `doi`: kotlin.String?
+    , 
+    /**
+     * PubMed Central ID: `PMC` and digits without leading zeros.
+     */
+    val `pmcid`: kotlin.String?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePaperIds: FfiConverterRustBuffer<PaperIds> {
+    override fun read(buf: ByteBuffer): PaperIds {
+        return PaperIds(
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PaperIds) = (
+            FfiConverterOptionalString.allocationSize(value.`pmid`) +
+            FfiConverterOptionalString.allocationSize(value.`doi`) +
+            FfiConverterOptionalString.allocationSize(value.`pmcid`)
+    )
+
+    override fun write(value: PaperIds, buf: ByteBuffer) {
+            FfiConverterOptionalString.write(value.`pmid`, buf)
+            FfiConverterOptionalString.write(value.`doi`, buf)
+            FfiConverterOptionalString.write(value.`pmcid`, buf)
+    }
+}
+
+
+
+/**
+ * What an app knows of a paper: its identifiers and what names its folder.
+ */
+data class PaperInfo (
+    /**
+     * The paper's identifiers.
+     */
+    val `ids`: PaperIds
+    , 
+    /**
+     * Its title.
+     */
+    val `title`: kotlin.String?
+    , 
+    /**
+     * Its publication year.
+     */
+    val `year`: kotlin.Int?
+    , 
+    /**
+     * Its first author's name.
+     */
+    val `firstAuthor`: kotlin.String?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePaperInfo: FfiConverterRustBuffer<PaperInfo> {
+    override fun read(buf: ByteBuffer): PaperInfo {
+        return PaperInfo(
+            FfiConverterTypePaperIds.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalInt.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PaperInfo) = (
+            FfiConverterTypePaperIds.allocationSize(value.`ids`) +
+            FfiConverterOptionalString.allocationSize(value.`title`) +
+            FfiConverterOptionalInt.allocationSize(value.`year`) +
+            FfiConverterOptionalString.allocationSize(value.`firstAuthor`)
+    )
+
+    override fun write(value: PaperInfo, buf: ByteBuffer) {
+            FfiConverterTypePaperIds.write(value.`ids`, buf)
+            FfiConverterOptionalString.write(value.`title`, buf)
+            FfiConverterOptionalInt.write(value.`year`, buf)
+            FfiConverterOptionalString.write(value.`firstAuthor`, buf)
+    }
+}
+
+
+
+/**
  * One source's statement about one paper.
  */
 data class RetractionEvidence (
@@ -3021,6 +4659,910 @@ public object FfiConverterTypeJatsError : FfiConverterRustBuffer<JatsException> 
 
 
 /**
+ * Why a library call failed: bmlib's `LibraryError`, case for case. Paths are
+ * strings. Its exported `Display` is bmlib's own wording, fit to show the
+ * user: Kotlin's `toString()` (not `message`, which is UniFFI's field list),
+ * and Swift's `description`, which `errorDescription` reads once the app adds
+ * `extension LibraryError: CustomStringConvertible {}` (UniFFI 0.32.2 leaves
+ * the conformance out). No field is named `message`, which collides with
+ * Kotlin's `Throwable.message`.
+ */
+sealed class LibraryException: kotlin.Exception() {
+    
+    /**
+     * From [`PaperLibrary::open`] only: the library's folder is missing or not
+     * a folder (an unmounted drive, a revoked bookmark). The library may come
+     * back, so offer to try again rather than choosing another folder. Once
+     * open, a folder that vanishes reads as `Io` from `scan` and `save`,
+     * `Missing` from `read`, `record_use`, `remove_file` and `remove_folder`,
+     * and `release` succeeds (there is nothing to release).
+     */
+    class Unreachable(
+        
+        /**
+         * The folder.
+         */
+        val `path`: kotlin.String, 
+        
+        /**
+         * Why.
+         */
+        val `reason`: kotlin.String
+        ) : LibraryException() {
+        override val message
+            get() = "path=${ `path` }, reason=${ `reason` }"
+    }
+    
+    /**
+     * The folder holds something other than a library.
+     */
+    class NotALibrary(
+        
+        /**
+         * The folder.
+         */
+        val `path`: kotlin.String, 
+        
+        /**
+         * Why.
+         */
+        val `reason`: kotlin.String
+        ) : LibraryException() {
+        override val message
+            get() = "path=${ `path` }, reason=${ `reason` }"
+    }
+    
+    /**
+     * The library's layout is newer than this bmlib.
+     */
+    class NewerLibrary(
+        
+        /**
+         * Its layout version.
+         */
+        val `version`: kotlin.ULong
+        ) : LibraryException() {
+        override val message
+            get() = "version=${ `version` }"
+    }
+    
+    /**
+     * The library cannot be written.
+     */
+    class ReadOnly(
+        
+        /**
+         * What could not be written.
+         */
+        val `path`: kotlin.String
+        ) : LibraryException() {
+        override val message
+            get() = "path=${ `path` }"
+    }
+    
+    /**
+     * An identifier is not valid.
+     */
+    class BadIdentifier(
+        
+        /**
+         * `"pmid"`, `"doi"` or `"pmcid"`; `"sha256"` from
+         * [`LibraryScan::find_digest`].
+         */
+        val `field`: kotlin.String, 
+        
+        /**
+         * The value refused.
+         */
+        val `value`: kotlin.String
+        ) : LibraryException() {
+        override val message
+            get() = "field=${ `field` }, value=${ `value` }"
+    }
+    
+    /**
+     * An installation is not acceptable.
+     */
+    class BadInstallation(
+        
+        /**
+         * `"app"`, `"id"` or `"label"`.
+         */
+        val `field`: kotlin.String, 
+        
+        /**
+         * Why.
+         */
+        val `reason`: kotlin.String
+        ) : LibraryException() {
+        override val message
+            get() = "field=${ `field` }, reason=${ `reason` }"
+    }
+    
+    /**
+     * A folder or file name that is not one plain path component.
+     */
+    class BadName(
+        
+        /**
+         * The name.
+         */
+        val `name`: kotlin.String
+        ) : LibraryException() {
+        override val message
+            get() = "name=${ `name` }"
+    }
+    
+    /**
+     * The file is not there. From [`PaperLibrary::remove_folder`], `folder` is
+     * `papers` and `name` the paper's folder.
+     */
+    class Missing(
+        
+        /**
+         * The paper's folder.
+         */
+        val `folder`: kotlin.String, 
+        
+        /**
+         * The file.
+         */
+        val `name`: kotlin.String
+        ) : LibraryException() {
+        override val message
+            get() = "folder=${ `folder` }, name=${ `name` }"
+    }
+    
+    /**
+     * Only an iCloud placeholder is here, or the file is evicted (dataless):
+     * it is not downloaded yet.
+     */
+    class NotDownloaded(
+        
+        /**
+         * The paper's folder.
+         */
+        val `folder`: kotlin.String, 
+        
+        /**
+         * The file.
+         */
+        val `name`: kotlin.String
+        ) : LibraryException() {
+        override val message
+            get() = "folder=${ `folder` }, name=${ `name` }"
+    }
+    
+    /**
+     * The file's bytes are not the ones its digest names.
+     */
+    class DigestMismatch(
+        
+        /**
+         * The paper's folder.
+         */
+        val `folder`: kotlin.String, 
+        
+        /**
+         * The file.
+         */
+        val `name`: kotlin.String, 
+        
+        /**
+         * The digest asked for.
+         */
+        val `expected`: kotlin.String, 
+        
+        /**
+         * The digest of the bytes found.
+         */
+        val `found`: kotlin.String
+        ) : LibraryException() {
+        override val message
+            get() = "folder=${ `folder` }, name=${ `name` }, expected=${ `expected` }, found=${ `found` }"
+    }
+    
+    /**
+     * A different file of that name is already there; nothing was overwritten.
+     */
+    class FileClash(
+        
+        /**
+         * The full path of the folder holding it, unlike the bare name the
+         * other cases carry (bmlib does the same).
+         */
+        val `folder`: kotlin.String, 
+        
+        /**
+         * The file.
+         */
+        val `name`: kotlin.String
+        ) : LibraryException() {
+        override val message
+            get() = "folder=${ `folder` }, name=${ `name` }"
+    }
+    
+    /**
+     * A record from a newer layout is in the way.
+     */
+    class NewerRecord(
+        
+        /**
+         * The paper's folder.
+         */
+        val `folder`: kotlin.String, 
+        
+        /**
+         * The record file.
+         */
+        val `file`: kotlin.String, 
+        
+        /**
+         * Its version.
+         */
+        val `version`: kotlin.UInt
+        ) : LibraryException() {
+        override val message
+            get() = "folder=${ `folder` }, file=${ `file` }, version=${ `version` }"
+    }
+    
+    /**
+     * Any other failure: the file system's, or a record that cannot be read
+     * or written back, or no free folder name (the reason says which).
+     */
+    class Io(
+        
+        /**
+         * The path concerned.
+         */
+        val `path`: kotlin.String, 
+        
+        /**
+         * Why.
+         */
+        val `reason`: kotlin.String
+        ) : LibraryException() {
+        override val message
+            get() = "path=${ `path` }, reason=${ `reason` }"
+    }
+    
+
+    
+
+    // The local Rust `Display`/`Debug` implementation.
+    override fun toString(): String {
+        return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_libraryerror_uniffi_trait_display(FfiConverterTypeLibraryError.lower(this),
+        _status)
+}
+    )
+    }
+
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<LibraryException> {
+        override fun lift(error_buf: RustBuffer.ByValue): LibraryException = FfiConverterTypeLibraryError.lift(error_buf)
+    }
+
+    
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLibraryError : FfiConverterRustBuffer<LibraryException> {
+    override fun read(buf: ByteBuffer): LibraryException {
+        
+
+        return when(buf.getInt()) {
+            1 -> LibraryException.Unreachable(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            2 -> LibraryException.NotALibrary(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            3 -> LibraryException.NewerLibrary(
+                FfiConverterULong.read(buf),
+                )
+            4 -> LibraryException.ReadOnly(
+                FfiConverterString.read(buf),
+                )
+            5 -> LibraryException.BadIdentifier(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            6 -> LibraryException.BadInstallation(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            7 -> LibraryException.BadName(
+                FfiConverterString.read(buf),
+                )
+            8 -> LibraryException.Missing(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            9 -> LibraryException.NotDownloaded(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            10 -> LibraryException.DigestMismatch(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            11 -> LibraryException.FileClash(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            12 -> LibraryException.NewerRecord(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterUInt.read(buf),
+                )
+            13 -> LibraryException.Io(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: LibraryException): ULong {
+        return when(value) {
+            is LibraryException.Unreachable -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`path`)
+                + FfiConverterString.allocationSize(value.`reason`)
+            )
+            is LibraryException.NotALibrary -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`path`)
+                + FfiConverterString.allocationSize(value.`reason`)
+            )
+            is LibraryException.NewerLibrary -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterULong.allocationSize(value.`version`)
+            )
+            is LibraryException.ReadOnly -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`path`)
+            )
+            is LibraryException.BadIdentifier -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`field`)
+                + FfiConverterString.allocationSize(value.`value`)
+            )
+            is LibraryException.BadInstallation -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`field`)
+                + FfiConverterString.allocationSize(value.`reason`)
+            )
+            is LibraryException.BadName -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`name`)
+            )
+            is LibraryException.Missing -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`folder`)
+                + FfiConverterString.allocationSize(value.`name`)
+            )
+            is LibraryException.NotDownloaded -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`folder`)
+                + FfiConverterString.allocationSize(value.`name`)
+            )
+            is LibraryException.DigestMismatch -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`folder`)
+                + FfiConverterString.allocationSize(value.`name`)
+                + FfiConverterString.allocationSize(value.`expected`)
+                + FfiConverterString.allocationSize(value.`found`)
+            )
+            is LibraryException.FileClash -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`folder`)
+                + FfiConverterString.allocationSize(value.`name`)
+            )
+            is LibraryException.NewerRecord -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`folder`)
+                + FfiConverterString.allocationSize(value.`file`)
+                + FfiConverterUInt.allocationSize(value.`version`)
+            )
+            is LibraryException.Io -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`path`)
+                + FfiConverterString.allocationSize(value.`reason`)
+            )
+        }
+    }
+
+    override fun write(value: LibraryException, buf: ByteBuffer) {
+        when(value) {
+            is LibraryException.Unreachable -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`path`, buf)
+                FfiConverterString.write(value.`reason`, buf)
+                Unit
+            }
+            is LibraryException.NotALibrary -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`path`, buf)
+                FfiConverterString.write(value.`reason`, buf)
+                Unit
+            }
+            is LibraryException.NewerLibrary -> {
+                buf.putInt(3)
+                FfiConverterULong.write(value.`version`, buf)
+                Unit
+            }
+            is LibraryException.ReadOnly -> {
+                buf.putInt(4)
+                FfiConverterString.write(value.`path`, buf)
+                Unit
+            }
+            is LibraryException.BadIdentifier -> {
+                buf.putInt(5)
+                FfiConverterString.write(value.`field`, buf)
+                FfiConverterString.write(value.`value`, buf)
+                Unit
+            }
+            is LibraryException.BadInstallation -> {
+                buf.putInt(6)
+                FfiConverterString.write(value.`field`, buf)
+                FfiConverterString.write(value.`reason`, buf)
+                Unit
+            }
+            is LibraryException.BadName -> {
+                buf.putInt(7)
+                FfiConverterString.write(value.`name`, buf)
+                Unit
+            }
+            is LibraryException.Missing -> {
+                buf.putInt(8)
+                FfiConverterString.write(value.`folder`, buf)
+                FfiConverterString.write(value.`name`, buf)
+                Unit
+            }
+            is LibraryException.NotDownloaded -> {
+                buf.putInt(9)
+                FfiConverterString.write(value.`folder`, buf)
+                FfiConverterString.write(value.`name`, buf)
+                Unit
+            }
+            is LibraryException.DigestMismatch -> {
+                buf.putInt(10)
+                FfiConverterString.write(value.`folder`, buf)
+                FfiConverterString.write(value.`name`, buf)
+                FfiConverterString.write(value.`expected`, buf)
+                FfiConverterString.write(value.`found`, buf)
+                Unit
+            }
+            is LibraryException.FileClash -> {
+                buf.putInt(11)
+                FfiConverterString.write(value.`folder`, buf)
+                FfiConverterString.write(value.`name`, buf)
+                Unit
+            }
+            is LibraryException.NewerRecord -> {
+                buf.putInt(12)
+                FfiConverterString.write(value.`folder`, buf)
+                FfiConverterString.write(value.`file`, buf)
+                FfiConverterUInt.write(value.`version`, buf)
+                Unit
+            }
+            is LibraryException.Io -> {
+                buf.putInt(13)
+                FfiConverterString.write(value.`path`, buf)
+                FfiConverterString.write(value.`reason`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
+}
+
+
+
+/**
+ * Something odd a scan found and did not use.
+ */
+sealed class LibraryProblem {
+    
+    /**
+     * A record file could not be read or is not a valid record.
+     */
+    data class UnreadableRecord(
+        /**
+         * The paper's folder.
+         */
+        val `folder`: kotlin.String, 
+        /**
+         * The record file.
+         */
+        val `file`: kotlin.String, 
+        /**
+         * Why.
+         */
+        val `reason`: kotlin.String) : LibraryProblem()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * A paper folder or its `records/` directory could not be listed.
+     */
+    data class UnreadableFolder(
+        /**
+         * The paper's folder.
+         */
+        val `folder`: kotlin.String, 
+        /**
+         * Why.
+         */
+        val `reason`: kotlin.String) : LibraryProblem()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * A record written by a newer layout.
+     */
+    data class NewerRecord(
+        /**
+         * The paper's folder.
+         */
+        val `folder`: kotlin.String, 
+        /**
+         * The record file.
+         */
+        val `file`: kotlin.String, 
+        /**
+         * Its version.
+         */
+        val `version`: kotlin.UInt) : LibraryProblem()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * A record present only as an iCloud placeholder or evicted (dataless):
+     * its installation's uses are unknown until it is downloaded.
+     */
+    data class RecordNotDownloaded(
+        /**
+         * The paper's folder.
+         */
+        val `folder`: kotlin.String, 
+        /**
+         * The record file it stands for.
+         */
+        val `file`: kotlin.String) : LibraryProblem()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * A temporary file of an atomic write, in flight or left by a crash.
+     * Never deleted.
+     */
+    data class LeftoverTemp(
+        /**
+         * The paper's folder.
+         */
+        val `folder`: kotlin.String, 
+        /**
+         * The file, as `records/<name>` when it is in `records/`.
+         */
+        val `name`: kotlin.String) : LibraryProblem()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * A valid record whose file name is not its installation's.
+     */
+    data class MisnamedRecord(
+        /**
+         * The paper's folder.
+         */
+        val `folder`: kotlin.String, 
+        /**
+         * The record file.
+         */
+        val `file`: kotlin.String) : LibraryProblem()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * Two records of one folder hold different values for one identifier.
+     */
+    data class ConflictingIds(
+        /**
+         * The paper's folder.
+         */
+        val `folder`: kotlin.String, 
+        /**
+         * `"pmid"`, `"doi"` or `"pmcid"`.
+         */
+        val `field`: kotlin.String) : LibraryProblem()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * A source file no valid record lists.
+     */
+    data class UnrecordedFile(
+        /**
+         * The paper's folder.
+         */
+        val `folder`: kotlin.String, 
+        /**
+         * The file.
+         */
+        val `name`: kotlin.String) : LibraryProblem()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
+     * An entry of `papers/` that is not a folder.
+     */
+    data class StrayEntry(
+        /**
+         * The entry.
+         */
+        val `name`: kotlin.String) : LibraryProblem()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLibraryProblem : FfiConverterRustBuffer<LibraryProblem>{
+    override fun read(buf: ByteBuffer): LibraryProblem {
+        return when(buf.getInt()) {
+            1 -> LibraryProblem.UnreadableRecord(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            2 -> LibraryProblem.UnreadableFolder(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            3 -> LibraryProblem.NewerRecord(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterUInt.read(buf),
+                )
+            4 -> LibraryProblem.RecordNotDownloaded(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            5 -> LibraryProblem.LeftoverTemp(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            6 -> LibraryProblem.MisnamedRecord(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            7 -> LibraryProblem.ConflictingIds(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            8 -> LibraryProblem.UnrecordedFile(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            9 -> LibraryProblem.StrayEntry(
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: LibraryProblem): ULong = when(value) {
+        is LibraryProblem.UnreadableRecord -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`folder`)
+                + FfiConverterString.allocationSize(value.`file`)
+                + FfiConverterString.allocationSize(value.`reason`)
+            )
+        }
+        is LibraryProblem.UnreadableFolder -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`folder`)
+                + FfiConverterString.allocationSize(value.`reason`)
+            )
+        }
+        is LibraryProblem.NewerRecord -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`folder`)
+                + FfiConverterString.allocationSize(value.`file`)
+                + FfiConverterUInt.allocationSize(value.`version`)
+            )
+        }
+        is LibraryProblem.RecordNotDownloaded -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`folder`)
+                + FfiConverterString.allocationSize(value.`file`)
+            )
+        }
+        is LibraryProblem.LeftoverTemp -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`folder`)
+                + FfiConverterString.allocationSize(value.`name`)
+            )
+        }
+        is LibraryProblem.MisnamedRecord -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`folder`)
+                + FfiConverterString.allocationSize(value.`file`)
+            )
+        }
+        is LibraryProblem.ConflictingIds -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`folder`)
+                + FfiConverterString.allocationSize(value.`field`)
+            )
+        }
+        is LibraryProblem.UnrecordedFile -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`folder`)
+                + FfiConverterString.allocationSize(value.`name`)
+            )
+        }
+        is LibraryProblem.StrayEntry -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`name`)
+            )
+        }
+    }
+
+    override fun write(value: LibraryProblem, buf: ByteBuffer) {
+        when(value) {
+            is LibraryProblem.UnreadableRecord -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`folder`, buf)
+                FfiConverterString.write(value.`file`, buf)
+                FfiConverterString.write(value.`reason`, buf)
+                Unit
+            }
+            is LibraryProblem.UnreadableFolder -> {
+                buf.putInt(2)
+                FfiConverterString.write(value.`folder`, buf)
+                FfiConverterString.write(value.`reason`, buf)
+                Unit
+            }
+            is LibraryProblem.NewerRecord -> {
+                buf.putInt(3)
+                FfiConverterString.write(value.`folder`, buf)
+                FfiConverterString.write(value.`file`, buf)
+                FfiConverterUInt.write(value.`version`, buf)
+                Unit
+            }
+            is LibraryProblem.RecordNotDownloaded -> {
+                buf.putInt(4)
+                FfiConverterString.write(value.`folder`, buf)
+                FfiConverterString.write(value.`file`, buf)
+                Unit
+            }
+            is LibraryProblem.LeftoverTemp -> {
+                buf.putInt(5)
+                FfiConverterString.write(value.`folder`, buf)
+                FfiConverterString.write(value.`name`, buf)
+                Unit
+            }
+            is LibraryProblem.MisnamedRecord -> {
+                buf.putInt(6)
+                FfiConverterString.write(value.`folder`, buf)
+                FfiConverterString.write(value.`file`, buf)
+                Unit
+            }
+            is LibraryProblem.ConflictingIds -> {
+                buf.putInt(7)
+                FfiConverterString.write(value.`folder`, buf)
+                FfiConverterString.write(value.`field`, buf)
+                Unit
+            }
+            is LibraryProblem.UnrecordedFile -> {
+                buf.putInt(8)
+                FfiConverterString.write(value.`folder`, buf)
+                FfiConverterString.write(value.`name`, buf)
+                Unit
+            }
+            is LibraryProblem.StrayEntry -> {
+                buf.putInt(9)
+                FfiConverterString.write(value.`name`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+
+/**
  * Why a Retraction Watch index could not be built or opened. Either way the
  * export was **not consulted**: pass `None` as `export`, never `[]`.
  */
@@ -3327,6 +5869,93 @@ public object FfiConverterTypeRetractionStatus: FfiConverterRustBuffer<Retractio
 
 
 
+/**
+ * What a stored source file is.
+ */
+
+enum class SourceKind {
+    
+    /**
+     * A PDF.
+     */
+    PDF,
+    /**
+     * JATS XML.
+     */
+    JATS,
+    /**
+     * An HTML page.
+     */
+    HTML,
+    /**
+     * Markdown.
+     */
+    MARKDOWN,
+    /**
+     * Plain text.
+     */
+    TEXT;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeSourceKind: FfiConverterRustBuffer<SourceKind> {
+    override fun read(buf: ByteBuffer) = try {
+        SourceKind.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: SourceKind) = 4UL
+
+    override fun write(value: SourceKind, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalInt: FfiConverterRustBuffer<kotlin.Int?> {
+    override fun read(buf: ByteBuffer): kotlin.Int? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterInt.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Int?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterInt.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Int?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterInt.write(value, buf)
+        }
+    }
+}
+
+
+
 
 /**
  * @suppress
@@ -3353,6 +5982,70 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
         } else {
             buf.put(1)
             FfiConverterString.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeFileRef: FfiConverterRustBuffer<FileRef?> {
+    override fun read(buf: ByteBuffer): FileRef? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeFileRef.read(buf)
+    }
+
+    override fun allocationSize(value: FileRef?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeFileRef.allocationSize(value)
+        }
+    }
+
+    override fun write(value: FileRef?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeFileRef.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeFileUsers: FfiConverterRustBuffer<FileUsers?> {
+    override fun read(buf: ByteBuffer): FileUsers? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeFileUsers.read(buf)
+    }
+
+    override fun allocationSize(value: FileUsers?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeFileUsers.allocationSize(value)
+        }
+    }
+
+    override fun write(value: FileUsers?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeFileUsers.write(value, buf)
         }
     }
 }
@@ -3427,6 +6120,38 @@ public object FfiConverterOptionalTypeCrossrefResult: FfiConverterRustBuffer<Cro
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeSourceKind: FfiConverterRustBuffer<SourceKind?> {
+    override fun read(buf: ByteBuffer): SourceKind? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeSourceKind.read(buf)
+    }
+
+    override fun allocationSize(value: SourceKind?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeSourceKind.allocationSize(value)
+        }
+    }
+
+    override fun write(value: SourceKind?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeSourceKind.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalSequenceTypeRetractionEvidence: FfiConverterRustBuffer<List<RetractionEvidence>?> {
     override fun read(buf: ByteBuffer): List<RetractionEvidence>? {
         if (buf.get().toInt() == 0) {
@@ -3449,6 +6174,34 @@ public object FfiConverterOptionalSequenceTypeRetractionEvidence: FfiConverterRu
         } else {
             buf.put(1)
             FfiConverterSequenceTypeRetractionEvidence.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceULong: FfiConverterRustBuffer<List<kotlin.ULong>> {
+    override fun read(buf: ByteBuffer): List<kotlin.ULong> {
+        val len = buf.getInt()
+        return List<kotlin.ULong>(len) {
+            FfiConverterULong.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.ULong>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterULong.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.ULong>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterULong.write(it, buf)
         }
     }
 }
@@ -3505,6 +6258,62 @@ public object FfiConverterSequenceTypeCrossrefBatch: FfiConverterRustBuffer<List
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeCrossrefBatch.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeFileEntry: FfiConverterRustBuffer<List<FileEntry>> {
+    override fun read(buf: ByteBuffer): List<FileEntry> {
+        val len = buf.getInt()
+        return List<FileEntry>(len) {
+            FfiConverterTypeFileEntry.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<FileEntry>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeFileEntry.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<FileEntry>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeFileEntry.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeInstallation: FfiConverterRustBuffer<List<Installation>> {
+    override fun read(buf: ByteBuffer): List<Installation> {
+        val len = buf.getInt()
+        return List<Installation>(len) {
+            FfiConverterTypeInstallation.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<Installation>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeInstallation.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<Installation>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeInstallation.write(it, buf)
         }
     }
 }
@@ -3739,6 +6548,62 @@ public object FfiConverterSequenceTypeJatsTable: FfiConverterRustBuffer<List<Jat
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeLibraryRecord: FfiConverterRustBuffer<List<LibraryRecord>> {
+    override fun read(buf: ByteBuffer): List<LibraryRecord> {
+        val len = buf.getInt()
+        return List<LibraryRecord>(len) {
+            FfiConverterTypeLibraryRecord.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<LibraryRecord>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeLibraryRecord.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<LibraryRecord>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeLibraryRecord.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypePaperFolder: FfiConverterRustBuffer<List<PaperFolder>> {
+    override fun read(buf: ByteBuffer): List<PaperFolder> {
+        val len = buf.getInt()
+        return List<PaperFolder>(len) {
+            FfiConverterTypePaperFolder.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<PaperFolder>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypePaperFolder.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<PaperFolder>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypePaperFolder.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeRetractionEvidence: FfiConverterRustBuffer<List<RetractionEvidence>> {
     override fun read(buf: ByteBuffer): List<RetractionEvidence> {
         val len = buf.getInt()
@@ -3767,6 +6632,34 @@ public object FfiConverterSequenceTypeRetractionEvidence: FfiConverterRustBuffer
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeLibraryProblem: FfiConverterRustBuffer<List<LibraryProblem>> {
+    override fun read(buf: ByteBuffer): List<LibraryProblem> {
+        val len = buf.getInt()
+        return List<LibraryProblem>(len) {
+            FfiConverterTypeLibraryProblem.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<LibraryProblem>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeLibraryProblem.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<LibraryProblem>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeLibraryProblem.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeRetractionLookup: FfiConverterRustBuffer<List<RetractionLookup>> {
     override fun read(buf: ByteBuffer): List<RetractionLookup> {
         val len = buf.getInt()
@@ -3785,6 +6678,34 @@ public object FfiConverterSequenceTypeRetractionLookup: FfiConverterRustBuffer<L
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeRetractionLookup.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceSequenceULong: FfiConverterRustBuffer<List<List<kotlin.ULong>>> {
+    override fun read(buf: ByteBuffer): List<List<kotlin.ULong>> {
+        val len = buf.getInt()
+        return List<List<kotlin.ULong>>(len) {
+            FfiConverterSequenceULong.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<List<kotlin.ULong>>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterSequenceULong.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<List<kotlin.ULong>>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterSequenceULong.write(it, buf)
         }
     }
 }
@@ -3917,6 +6838,49 @@ public object FfiConverterMapStringTypeCrossrefResult: FfiConverterRustBuffer<Ma
         
         FfiConverterString.lower(`xml`),
         FfiConverterString.lower(`knownPmcId`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * A validated installation.
+         *
+         * # Errors
+         *
+         * `BadInstallation` naming the field that is not acceptable.
+         */
+    @Throws(LibraryException::class) fun `installationNew`(`app`: kotlin.String, `id`: kotlin.String, `label`: kotlin.String): Installation {
+            return FfiConverterTypeInstallation.lift(
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_func_installation_new(
+    
+        
+        FfiConverterString.lower(`app`),
+        FfiConverterString.lower(`id`),
+        FfiConverterString.lower(`label`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Canonical identifiers from raw ones; blank values become `None`. Use it to
+         * check identifiers before storing them.
+         *
+         * # Errors
+         *
+         * `BadIdentifier` naming the first field that is not valid.
+         */
+    @Throws(LibraryException::class) fun `paperIdsCanonical`(`pmid`: kotlin.String?, `doi`: kotlin.String?, `pmcid`: kotlin.String?): PaperIds {
+            return FfiConverterTypePaperIds.lift(
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_func_paper_ids_canonical(
+    
+        
+        FfiConverterOptionalString.lower(`pmid`),
+        FfiConverterOptionalString.lower(`doi`),
+        FfiConverterOptionalString.lower(`pmcid`),_status)
 }
     )
     }

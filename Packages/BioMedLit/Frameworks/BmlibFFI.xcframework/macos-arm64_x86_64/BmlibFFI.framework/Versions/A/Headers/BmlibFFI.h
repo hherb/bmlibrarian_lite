@@ -243,6 +243,101 @@ typedef void (*UniffiForeignFutureCompleteVoid)(uint64_t, UniffiForeignFutureRes
     );
 
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_CLONE_LIBRARYSCAN
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_CLONE_LIBRARYSCAN
+uint64_t uniffi_bmlib_ffi_fn_clone_libraryscan(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FREE_LIBRARYSCAN
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FREE_LIBRARYSCAN
+void uniffi_bmlib_ffi_fn_free_libraryscan(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_FIND
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_FIND
+RustBuffer uniffi_bmlib_ffi_fn_method_libraryscan_find(uint64_t ptr, RustBuffer ids, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_FIND_DIGEST
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_FIND_DIGEST
+RustBuffer uniffi_bmlib_ffi_fn_method_libraryscan_find_digest(uint64_t ptr, RustBuffer sha256, RustBuffer kind, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_FOLDERS
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_FOLDERS
+RustBuffer uniffi_bmlib_ffi_fn_method_libraryscan_folders(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_GROUP
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_GROUP
+RustBuffer uniffi_bmlib_ffi_fn_method_libraryscan_group(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_PROBLEMS
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_PROBLEMS
+RustBuffer uniffi_bmlib_ffi_fn_method_libraryscan_problems(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_USED_BY
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_USED_BY
+RustBuffer uniffi_bmlib_ffi_fn_method_libraryscan_used_by(uint64_t ptr, RustBuffer folder, RustBuffer sha256, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_CLONE_PAPERLIBRARY
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_CLONE_PAPERLIBRARY
+uint64_t uniffi_bmlib_ffi_fn_clone_paperlibrary(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FREE_PAPERLIBRARY
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FREE_PAPERLIBRARY
+void uniffi_bmlib_ffi_fn_free_paperlibrary(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_CONSTRUCTOR_PAPERLIBRARY_OPEN
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_CONSTRUCTOR_PAPERLIBRARY_OPEN
+uint64_t uniffi_bmlib_ffi_fn_constructor_paperlibrary_open(RustBuffer root, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_READ
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_READ
+RustBuffer uniffi_bmlib_ffi_fn_method_paperlibrary_read(uint64_t ptr, RustBuffer file, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_RECORD_USE
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_RECORD_USE
+void uniffi_bmlib_ffi_fn_method_paperlibrary_record_use(uint64_t ptr, RustBuffer who, RustBuffer paper, RustBuffer file, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_RELEASE
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_RELEASE
+void uniffi_bmlib_ffi_fn_method_paperlibrary_release(uint64_t ptr, RustBuffer who, RustBuffer file, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_REMOVE_FILE
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_REMOVE_FILE
+void uniffi_bmlib_ffi_fn_method_paperlibrary_remove_file(uint64_t ptr, RustBuffer file, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_REMOVE_FOLDER
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_REMOVE_FOLDER
+void uniffi_bmlib_ffi_fn_method_paperlibrary_remove_folder(uint64_t ptr, RustBuffer folder, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_ROOT
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_ROOT
+RustBuffer uniffi_bmlib_ffi_fn_method_paperlibrary_root(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_SAVE
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_SAVE
+RustBuffer uniffi_bmlib_ffi_fn_method_paperlibrary_save(uint64_t ptr, RustBuffer who, RustBuffer paper, RustBuffer bytes, RustBuffer kind, RustBuffer origin, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_SCAN
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_PAPERLIBRARY_SCAN
+uint64_t uniffi_bmlib_ffi_fn_method_paperlibrary_scan(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_CLONE_RETRACTIONINDEX
 #define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_CLONE_RETRACTIONINDEX
 uint64_t uniffi_bmlib_ffi_fn_clone_retractionindex(uint64_t handle, RustCallStatus *_Nonnull out_status
@@ -278,6 +373,11 @@ uint64_t uniffi_bmlib_ffi_fn_method_retractionindex_notice_count(uint64_t ptr, R
 RustBuffer uniffi_bmlib_ffi_fn_method_retractionindex_to_bytes(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYERROR_UNIFFI_TRAIT_DISPLAY
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYERROR_UNIFFI_TRAIT_DISPLAY
+RustBuffer uniffi_bmlib_ffi_fn_method_libraryerror_uniffi_trait_display(RustBuffer ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_BMLIB_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_BMLIB_VERSION
 RustBuffer uniffi_bmlib_ffi_fn_func_bmlib_version(RustCallStatus *_Nonnull out_status
@@ -292,6 +392,16 @@ RustBuffer uniffi_bmlib_ffi_fn_func_parse_jats(RustBuffer xml, RustCallStatus *_
 #ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_PARSE_JATS_AUDITED
 #define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_PARSE_JATS_AUDITED
 RustBuffer uniffi_bmlib_ffi_fn_func_parse_jats_audited(RustBuffer xml, RustBuffer known_pmc_id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_INSTALLATION_NEW
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_INSTALLATION_NEW
+RustBuffer uniffi_bmlib_ffi_fn_func_installation_new(RustBuffer app, RustBuffer id, RustBuffer label, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_PAPER_IDS_CANONICAL
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_PAPER_IDS_CANONICAL
+RustBuffer uniffi_bmlib_ffi_fn_func_paper_ids_canonical(RustBuffer pmid, RustBuffer doi, RustBuffer pmcid, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_BUILD_RETRACTION_INDEX
@@ -592,6 +702,18 @@ uint16_t uniffi_bmlib_ffi_checksum_func_parse_jats_audited(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_FUNC_INSTALLATION_NEW
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_FUNC_INSTALLATION_NEW
+uint16_t uniffi_bmlib_ffi_checksum_func_installation_new(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_FUNC_PAPER_IDS_CANONICAL
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_FUNC_PAPER_IDS_CANONICAL
+uint16_t uniffi_bmlib_ffi_checksum_func_paper_ids_canonical(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_FUNC_BUILD_RETRACTION_INDEX
 #define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_FUNC_BUILD_RETRACTION_INDEX
 uint16_t uniffi_bmlib_ffi_checksum_func_build_retraction_index(void
@@ -616,6 +738,90 @@ uint16_t uniffi_bmlib_ffi_checksum_func_retraction_status(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_FIND
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_FIND
+uint16_t uniffi_bmlib_ffi_checksum_method_libraryscan_find(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_FIND_DIGEST
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_FIND_DIGEST
+uint16_t uniffi_bmlib_ffi_checksum_method_libraryscan_find_digest(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_FOLDERS
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_FOLDERS
+uint16_t uniffi_bmlib_ffi_checksum_method_libraryscan_folders(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_GROUP
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_GROUP
+uint16_t uniffi_bmlib_ffi_checksum_method_libraryscan_group(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_PROBLEMS
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_PROBLEMS
+uint16_t uniffi_bmlib_ffi_checksum_method_libraryscan_problems(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_USED_BY
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_USED_BY
+uint16_t uniffi_bmlib_ffi_checksum_method_libraryscan_used_by(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_READ
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_READ
+uint16_t uniffi_bmlib_ffi_checksum_method_paperlibrary_read(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_RECORD_USE
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_RECORD_USE
+uint16_t uniffi_bmlib_ffi_checksum_method_paperlibrary_record_use(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_RELEASE
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_RELEASE
+uint16_t uniffi_bmlib_ffi_checksum_method_paperlibrary_release(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_REMOVE_FILE
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_REMOVE_FILE
+uint16_t uniffi_bmlib_ffi_checksum_method_paperlibrary_remove_file(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_REMOVE_FOLDER
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_REMOVE_FOLDER
+uint16_t uniffi_bmlib_ffi_checksum_method_paperlibrary_remove_folder(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_ROOT
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_ROOT
+uint16_t uniffi_bmlib_ffi_checksum_method_paperlibrary_root(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_SAVE
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_SAVE
+uint16_t uniffi_bmlib_ffi_checksum_method_paperlibrary_save(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_SCAN
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_PAPERLIBRARY_SCAN
+uint16_t uniffi_bmlib_ffi_checksum_method_paperlibrary_scan(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_RETRACTIONINDEX_DATA_AS_OF
 #define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_RETRACTIONINDEX_DATA_AS_OF
 uint16_t uniffi_bmlib_ffi_checksum_method_retractionindex_data_as_of(void
@@ -637,6 +843,12 @@ uint16_t uniffi_bmlib_ffi_checksum_method_retractionindex_notice_count(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_RETRACTIONINDEX_TO_BYTES
 #define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_RETRACTIONINDEX_TO_BYTES
 uint16_t uniffi_bmlib_ffi_checksum_method_retractionindex_to_bytes(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_CONSTRUCTOR_PAPERLIBRARY_OPEN
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_CONSTRUCTOR_PAPERLIBRARY_OPEN
+uint16_t uniffi_bmlib_ffi_checksum_constructor_paperlibrary_open(void
     
 );
 #endif
