@@ -481,6 +481,38 @@ fileprivate struct FfiConverterUInt16: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
+    typealias FfiType = UInt32
+    typealias SwiftType = UInt32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterInt32: FfiConverterPrimitive {
+    typealias FfiType = Int32
+    typealias SwiftType = Int32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Int32, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
     typealias FfiType = UInt64
     typealias SwiftType = UInt64
@@ -581,6 +613,645 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
         writeBytes(&buf, value)
     }
 }
+
+
+
+
+/**
+ * What [`PaperLibrary::scan`] found: a snapshot, unchanged by later saves.
+ */
+public protocol LibraryScanProtocol: AnyObject, Sendable {
+    
+    /**
+     * Every folder of the paper(s) matching `ids`: a paper split across
+     * folders by its identifiers comes back whole.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` for an identifier that is not valid.
+     */
+    func find(ids: PaperIds) throws  -> [PaperFolder]
+    
+    /**
+     * The file named for `sha256`, if any; with `kind`, only the file stored
+     * as that kind (the same bytes saved as two kinds are two files). Only
+     * the name is looked at; [`PaperLibrary::read`] checks the bytes.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` (field `"sha256"`) for a digest that is not 64
+     * lowercase hex digits, which bmlib would answer with "not found".
+     */
+    func findDigest(sha256: String, kind: SourceKind?) throws  -> FileRef?
+    
+    /**
+     * Every paper folder, ordered by name.
+     */
+    func folders()  -> [PaperFolder]
+    
+    /**
+     * Every folder's index into [`LibraryScan::folders`], grouped into the
+     * folders that are one paper (a folder alone is a group of one); each
+     * group and the list sorted.
+     */
+    func group()  -> [[UInt64]]
+    
+    /**
+     * Everything odd, in the order found.
+     */
+    func problems()  -> [LibraryProblem]
+    
+    /**
+     * The installations whose record in `folder` lists a file with this
+     * digest, and whether that list is complete; `None` for a folder the scan
+     * did not find.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` (field `"sha256"`) for a digest that is not 64
+     * lowercase hex digits, which would otherwise read as "nobody".
+     */
+    func usedBy(folder: String, sha256: String) throws  -> FileUsers?
+    
+}
+/**
+ * What [`PaperLibrary::scan`] found: a snapshot, unchanged by later saves.
+ */
+open class LibraryScan: LibraryScanProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bmlib_ffi_fn_clone_libraryscan(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bmlib_ffi_fn_free_libraryscan(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * Every folder of the paper(s) matching `ids`: a paper split across
+     * folders by its identifiers comes back whole.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` for an identifier that is not valid.
+     */
+open func find(ids: PaperIds)throws  -> [PaperFolder]  {
+    return try  FfiConverterSequenceTypePaperFolder.lift(try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_libraryscan_find(
+            self.uniffiCloneHandle(),
+        FfiConverterTypePaperIds_lower(ids),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * The file named for `sha256`, if any; with `kind`, only the file stored
+     * as that kind (the same bytes saved as two kinds are two files). Only
+     * the name is looked at; [`PaperLibrary::read`] checks the bytes.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` (field `"sha256"`) for a digest that is not 64
+     * lowercase hex digits, which bmlib would answer with "not found".
+     */
+open func findDigest(sha256: String, kind: SourceKind?)throws  -> FileRef?  {
+    return try  FfiConverterOptionTypeFileRef.lift(try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_libraryscan_find_digest(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(sha256),
+        FfiConverterOptionTypeSourceKind.lower(kind),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Every paper folder, ordered by name.
+     */
+open func folders() -> [PaperFolder]  {
+    return try!  FfiConverterSequenceTypePaperFolder.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_libraryscan_folders(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Every folder's index into [`LibraryScan::folders`], grouped into the
+     * folders that are one paper (a folder alone is a group of one); each
+     * group and the list sorted.
+     */
+open func group() -> [[UInt64]]  {
+    return try!  FfiConverterSequenceSequenceUInt64.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_libraryscan_group(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Everything odd, in the order found.
+     */
+open func problems() -> [LibraryProblem]  {
+    return try!  FfiConverterSequenceTypeLibraryProblem.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_libraryscan_problems(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * The installations whose record in `folder` lists a file with this
+     * digest, and whether that list is complete; `None` for a folder the scan
+     * did not find.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` (field `"sha256"`) for a digest that is not 64
+     * lowercase hex digits, which would otherwise read as "nobody".
+     */
+open func usedBy(folder: String, sha256: String)throws  -> FileUsers?  {
+    return try  FfiConverterOptionTypeFileUsers.lift(try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_libraryscan_used_by(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(folder),
+        FfiConverterString.lower(sha256),uniffiCallStatus
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLibraryScan: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = LibraryScan
+
+    public static func lift(_ handle: UInt64) throws -> LibraryScan {
+        return LibraryScan(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: LibraryScan) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LibraryScan {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: LibraryScan, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLibraryScan_lift(_ handle: UInt64) throws -> LibraryScan {
+    return try FfiConverterTypeLibraryScan.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLibraryScan_lower(_ value: LibraryScan) -> UInt64 {
+    return FfiConverterTypeLibraryScan.lower(value)
+}
+
+
+
+
+
+
+/**
+ * A library folder, opened and checked.
+ *
+ * Not `Library`: every UniFFI Kotlin binding imports `com.sun.jna.Library`,
+ * which would shadow a class of that name and break the Android build.
+ */
+public protocol PaperLibraryProtocol: AnyObject, Sendable {
+    
+    /**
+     * A file's bytes, checked against `file.sha256`.
+     *
+     * # Errors
+     *
+     * `BadName`, `NotDownloaded`, `Missing`, `DigestMismatch` or `Io`.
+     */
+    func read(file: FileRef) throws  -> Data
+    
+    /**
+     * Note in `who`'s record that it uses `file`, a file already in the
+     * library (one another app saved, say). The bytes are read and checked
+     * first.
+     *
+     * # Errors
+     *
+     * `BadInstallation`, `BadIdentifier`, `NewerRecord`, `ReadOnly` or `Io`
+     * as for [`PaperLibrary::save`]; `Missing`, `NotDownloaded` or
+     * `DigestMismatch` from reading the file (`NotDownloaded` also when
+     * `who`'s own record is only a placeholder), and `BadName` for a name that
+     * is not one path component or not the library's name for those bytes
+     * (nothing written).
+     */
+    func recordUse(who: Installation, paper: PaperInfo, file: FileRef) throws 
+    
+    /**
+     * Drop the file with `file.sha256` and `file.kind` from `who`'s record in
+     * `file.folder` (`file.name` need only be a plain name). The file and
+     * other records stay. A file the record does not list, or a folder `who`
+     * has no record in, is already released, so that is `Ok`.
+     *
+     * # Errors
+     *
+     * `BadInstallation`, `BadName`, `NewerRecord`, `NotDownloaded`,
+     * `ReadOnly` or `Io`; `BadIdentifier` (field `"sha256"`) for a digest
+     * that is not 64 lowercase hex digits, which would match nothing and so
+     * read as released (nothing written).
+     */
+    func release(who: Installation, file: FileRef) throws 
+    
+    /**
+     * Delete the source file `file.folder`/`file.name`: the user's manual
+     * clear, never automatic. `sha256` and `kind` are not checked.
+     *
+     * # Errors
+     *
+     * `BadName`, `Missing`, `ReadOnly` or `Io`.
+     */
+    func removeFile(file: FileRef) throws 
+    
+    /**
+     * Delete a paper's whole folder, records included: the user's manual
+     * clear, never automatic.
+     *
+     * # Errors
+     *
+     * `BadName`, `Missing`, `ReadOnly` or `Io`.
+     */
+    func removeFolder(folder: String) throws 
+    
+    /**
+     * The library's folder, as given to [`PaperLibrary::open`].
+     */
+    func root()  -> String
+    
+    /**
+     * Save `bytes` for `paper` and note them in `who`'s record. Bytes already
+     * in the library are not written again: the use goes to the folder that
+     * holds them. Returns where the file is.
+     *
+     * # Errors
+     *
+     * `BadInstallation` or `BadIdentifier` (nothing written), `FileClash`
+     * (nothing overwritten), `NewerRecord`, `NotDownloaded`, `ReadOnly` or
+     * `Io`.
+     */
+    func save(who: Installation, paper: PaperInfo, bytes: Data, kind: SourceKind, origin: String) throws  -> FileRef
+    
+    /**
+     * Read every paper folder. Never writes.
+     *
+     * # Errors
+     *
+     * `Io` when `papers/` cannot be listed; trouble inside a folder is a
+     * [`LibraryScan::problems`] entry instead.
+     */
+    func scan() throws  -> LibraryScan
+    
+}
+/**
+ * A library folder, opened and checked.
+ *
+ * Not `Library`: every UniFFI Kotlin binding imports `com.sun.jna.Library`,
+ * which would shadow a class of that name and break the Android build.
+ */
+open class PaperLibrary: PaperLibraryProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_bmlib_ffi_fn_clone_paperlibrary(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_bmlib_ffi_fn_free_paperlibrary(handle, $0) }
+    }
+
+    
+    /**
+     * Open the library at `root`, creating it in an empty folder. On macOS and
+     * iOS, `root` is the path of the resolved security-scoped bookmark, whose
+     * access the app holds for as long as it uses the library.
+     *
+     * # Errors
+     *
+     * `Unreachable` (missing or not a folder), `NotALibrary` (holds other
+     * things), `NewerLibrary`, `ReadOnly` or `Io`.
+     */
+public static func `open`(root: String)throws  -> PaperLibrary  {
+    return try  FfiConverterTypePaperLibrary_lift(try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_constructor_paperlibrary_open(
+        FfiConverterString.lower(root),uniffiCallStatus
+    )
+})
+}
+    
+
+    
+    /**
+     * A file's bytes, checked against `file.sha256`.
+     *
+     * # Errors
+     *
+     * `BadName`, `NotDownloaded`, `Missing`, `DigestMismatch` or `Io`.
+     */
+open func read(file: FileRef)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_paperlibrary_read(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeFileRef_lower(file),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Note in `who`'s record that it uses `file`, a file already in the
+     * library (one another app saved, say). The bytes are read and checked
+     * first.
+     *
+     * # Errors
+     *
+     * `BadInstallation`, `BadIdentifier`, `NewerRecord`, `ReadOnly` or `Io`
+     * as for [`PaperLibrary::save`]; `Missing`, `NotDownloaded` or
+     * `DigestMismatch` from reading the file (`NotDownloaded` also when
+     * `who`'s own record is only a placeholder), and `BadName` for a name that
+     * is not one path component or not the library's name for those bytes
+     * (nothing written).
+     */
+open func recordUse(who: Installation, paper: PaperInfo, file: FileRef)throws   {try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_paperlibrary_record_use(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeInstallation_lower(who),
+        FfiConverterTypePaperInfo_lower(paper),
+        FfiConverterTypeFileRef_lower(file),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Drop the file with `file.sha256` and `file.kind` from `who`'s record in
+     * `file.folder` (`file.name` need only be a plain name). The file and
+     * other records stay. A file the record does not list, or a folder `who`
+     * has no record in, is already released, so that is `Ok`.
+     *
+     * # Errors
+     *
+     * `BadInstallation`, `BadName`, `NewerRecord`, `NotDownloaded`,
+     * `ReadOnly` or `Io`; `BadIdentifier` (field `"sha256"`) for a digest
+     * that is not 64 lowercase hex digits, which would match nothing and so
+     * read as released (nothing written).
+     */
+open func release(who: Installation, file: FileRef)throws   {try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_paperlibrary_release(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeInstallation_lower(who),
+        FfiConverterTypeFileRef_lower(file),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Delete the source file `file.folder`/`file.name`: the user's manual
+     * clear, never automatic. `sha256` and `kind` are not checked.
+     *
+     * # Errors
+     *
+     * `BadName`, `Missing`, `ReadOnly` or `Io`.
+     */
+open func removeFile(file: FileRef)throws   {try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_paperlibrary_remove_file(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeFileRef_lower(file),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Delete a paper's whole folder, records included: the user's manual
+     * clear, never automatic.
+     *
+     * # Errors
+     *
+     * `BadName`, `Missing`, `ReadOnly` or `Io`.
+     */
+open func removeFolder(folder: String)throws   {try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_paperlibrary_remove_folder(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(folder),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * The library's folder, as given to [`PaperLibrary::open`].
+     */
+open func root() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_paperlibrary_root(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Save `bytes` for `paper` and note them in `who`'s record. Bytes already
+     * in the library are not written again: the use goes to the folder that
+     * holds them. Returns where the file is.
+     *
+     * # Errors
+     *
+     * `BadInstallation` or `BadIdentifier` (nothing written), `FileClash`
+     * (nothing overwritten), `NewerRecord`, `NotDownloaded`, `ReadOnly` or
+     * `Io`.
+     */
+open func save(who: Installation, paper: PaperInfo, bytes: Data, kind: SourceKind, origin: String)throws  -> FileRef  {
+    return try  FfiConverterTypeFileRef_lift(try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_paperlibrary_save(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeInstallation_lower(who),
+        FfiConverterTypePaperInfo_lower(paper),
+        FfiConverterData.lower(bytes),
+        FfiConverterTypeSourceKind_lower(kind),
+        FfiConverterString.lower(origin),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Read every paper folder. Never writes.
+     *
+     * # Errors
+     *
+     * `Io` when `papers/` cannot be listed; trouble inside a folder is a
+     * [`LibraryScan::problems`] entry instead.
+     */
+open func scan()throws  -> LibraryScan  {
+    return try  FfiConverterTypeLibraryScan_lift(try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_paperlibrary_scan(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePaperLibrary: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = PaperLibrary
+
+    public static func lift(_ handle: UInt64) throws -> PaperLibrary {
+        return PaperLibrary(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: PaperLibrary) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PaperLibrary {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: PaperLibrary, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePaperLibrary_lift(_ handle: UInt64) throws -> PaperLibrary {
+    return try FfiConverterTypePaperLibrary.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePaperLibrary_lower(_ value: PaperLibrary) -> UInt64 {
+    return FfiConverterTypePaperLibrary.lower(value)
+}
+
+
 
 
 
@@ -928,6 +1599,362 @@ public func FfiConverterTypeCrossrefRequests_lift(_ buf: RustBuffer) throws -> C
 #endif
 public func FfiConverterTypeCrossrefRequests_lower(_ value: CrossrefRequests) -> RustBuffer {
     return FfiConverterTypeCrossrefRequests.lower(value)
+}
+
+
+/**
+ * One source file an installation's record lists.
+ */
+public struct FileEntry: Equatable, Hashable {
+    /**
+     * The SHA-256 of the bytes, 64 lowercase hex digits.
+     */
+    public let sha256: String
+    /**
+     * What the file is.
+     */
+    public let kind: SourceKind
+    /**
+     * Its name in the folder.
+     */
+    public let name: String
+    /**
+     * Where the bytes came from, such as a repository's name; may be empty.
+     */
+    public let origin: String
+    /**
+     * Its size in bytes.
+     */
+    public let size: UInt64
+    /**
+     * When it was saved, as the writer formatted it.
+     */
+    public let savedAt: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The SHA-256 of the bytes, 64 lowercase hex digits.
+         */sha256: String, 
+        /**
+         * What the file is.
+         */kind: SourceKind, 
+        /**
+         * Its name in the folder.
+         */name: String, 
+        /**
+         * Where the bytes came from, such as a repository's name; may be empty.
+         */origin: String, 
+        /**
+         * Its size in bytes.
+         */size: UInt64, 
+        /**
+         * When it was saved, as the writer formatted it.
+         */savedAt: String) {
+        self.sha256 = sha256
+        self.kind = kind
+        self.name = name
+        self.origin = origin
+        self.size = size
+        self.savedAt = savedAt
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension FileEntry: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFileEntry: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FileEntry {
+        return
+            try FileEntry(
+                sha256: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterTypeSourceKind.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                origin: FfiConverterString.read(from: &buf), 
+                size: FfiConverterUInt64.read(from: &buf), 
+                savedAt: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FileEntry, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.sha256, into: &buf)
+        FfiConverterTypeSourceKind.write(value.kind, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.origin, into: &buf)
+        FfiConverterUInt64.write(value.size, into: &buf)
+        FfiConverterString.write(value.savedAt, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFileEntry_lift(_ buf: RustBuffer) throws -> FileEntry {
+    return try FfiConverterTypeFileEntry.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFileEntry_lower(_ value: FileEntry) -> RustBuffer {
+    return FfiConverterTypeFileEntry.lower(value)
+}
+
+
+/**
+ * A source file in a paper's folder, with the digest it should have. An app
+ * stores `sha256` and `kind`, and finds the file again with
+ * [`LibraryScan::find_digest`] given both.
+ */
+public struct FileRef: Equatable, Hashable {
+    /**
+     * The paper's folder, under `papers/`.
+     */
+    public let folder: String
+    /**
+     * The file's name in the folder.
+     */
+    public let name: String
+    /**
+     * The full SHA-256 the bytes must have, 64 lowercase hex digits.
+     */
+    public let sha256: String
+    /**
+     * What the file is.
+     */
+    public let kind: SourceKind
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The paper's folder, under `papers/`.
+         */folder: String, 
+        /**
+         * The file's name in the folder.
+         */name: String, 
+        /**
+         * The full SHA-256 the bytes must have, 64 lowercase hex digits.
+         */sha256: String, 
+        /**
+         * What the file is.
+         */kind: SourceKind) {
+        self.folder = folder
+        self.name = name
+        self.sha256 = sha256
+        self.kind = kind
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension FileRef: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFileRef: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FileRef {
+        return
+            try FileRef(
+                folder: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                sha256: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterTypeSourceKind.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FileRef, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.folder, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.sha256, into: &buf)
+        FfiConverterTypeSourceKind.write(value.kind, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFileRef_lift(_ buf: RustBuffer) throws -> FileRef {
+    return try FfiConverterTypeFileRef.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFileRef_lower(_ value: FileRef) -> RustBuffer {
+    return FfiConverterTypeFileRef.lower(value)
+}
+
+
+/**
+ * Who uses a file, from [`LibraryScan::used_by`].
+ */
+public struct FileUsers: Equatable, Hashable {
+    /**
+     * The installations whose record in the folder lists the file.
+     */
+    public let installations: [Installation]
+    /**
+     * `false` when the folder holds a record the scan could not count
+     * (unreadable, newer, misnamed, not downloaded, or a record write in
+     * flight; see [`LibraryScan::problems`]), so others may use the file too.
+     * Say so before offering to remove it.
+     */
+    public let complete: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The installations whose record in the folder lists the file.
+         */installations: [Installation], 
+        /**
+         * `false` when the folder holds a record the scan could not count
+         * (unreadable, newer, misnamed, not downloaded, or a record write in
+         * flight; see [`LibraryScan::problems`]), so others may use the file too.
+         * Say so before offering to remove it.
+         */complete: Bool) {
+        self.installations = installations
+        self.complete = complete
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension FileUsers: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFileUsers: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FileUsers {
+        return
+            try FileUsers(
+                installations: FfiConverterSequenceTypeInstallation.read(from: &buf), 
+                complete: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FileUsers, into buf: inout [UInt8]) {
+        FfiConverterSequenceTypeInstallation.write(value.installations, into: &buf)
+        FfiConverterBool.write(value.complete, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFileUsers_lift(_ buf: RustBuffer) throws -> FileUsers {
+    return try FfiConverterTypeFileUsers.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFileUsers_lower(_ value: FileUsers) -> RustBuffer {
+    return FfiConverterTypeFileUsers.lower(value)
+}
+
+
+/**
+ * One app on one machine, which writes its own record per paper.
+ */
+public struct Installation: Equatable, Hashable {
+    /**
+     * The app, `[a-z0-9]{1,40}`.
+     */
+    public let app: String
+    /**
+     * This installation, `[a-z0-9-]{1,64}`. Generate it once and keep it.
+     */
+    public let id: String
+    /**
+     * A name a person recognises, such as the machine's: 1 to 200
+     * characters, no control or bidirectional control characters.
+     */
+    public let label: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The app, `[a-z0-9]{1,40}`.
+         */app: String, 
+        /**
+         * This installation, `[a-z0-9-]{1,64}`. Generate it once and keep it.
+         */id: String, 
+        /**
+         * A name a person recognises, such as the machine's: 1 to 200
+         * characters, no control or bidirectional control characters.
+         */label: String) {
+        self.app = app
+        self.id = id
+        self.label = label
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension Installation: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeInstallation: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Installation {
+        return
+            try Installation(
+                app: FfiConverterString.read(from: &buf), 
+                id: FfiConverterString.read(from: &buf), 
+                label: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Installation, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.app, into: &buf)
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.label, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeInstallation_lift(_ buf: RustBuffer) throws -> Installation {
+    return try FfiConverterTypeInstallation.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeInstallation_lower(_ value: Installation) -> RustBuffer {
+    return FfiConverterTypeInstallation.lower(value)
 }
 
 
@@ -2154,6 +3181,345 @@ public func FfiConverterTypeJatsTable_lower(_ value: JatsTable) -> RustBuffer {
 
 
 /**
+ * One installation's account of a paper (bmlib's `Record`).
+ */
+public struct LibraryRecord: Equatable, Hashable {
+    /**
+     * Who wrote the record.
+     */
+    public let installation: Installation
+    /**
+     * What it knows of the paper.
+     */
+    public let paper: PaperInfo
+    /**
+     * The files it uses.
+     */
+    public let files: [FileEntry]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Who wrote the record.
+         */installation: Installation, 
+        /**
+         * What it knows of the paper.
+         */paper: PaperInfo, 
+        /**
+         * The files it uses.
+         */files: [FileEntry]) {
+        self.installation = installation
+        self.paper = paper
+        self.files = files
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension LibraryRecord: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLibraryRecord: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LibraryRecord {
+        return
+            try LibraryRecord(
+                installation: FfiConverterTypeInstallation.read(from: &buf), 
+                paper: FfiConverterTypePaperInfo.read(from: &buf), 
+                files: FfiConverterSequenceTypeFileEntry.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LibraryRecord, into buf: inout [UInt8]) {
+        FfiConverterTypeInstallation.write(value.installation, into: &buf)
+        FfiConverterTypePaperInfo.write(value.paper, into: &buf)
+        FfiConverterSequenceTypeFileEntry.write(value.files, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLibraryRecord_lift(_ buf: RustBuffer) throws -> LibraryRecord {
+    return try FfiConverterTypeLibraryRecord.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLibraryRecord_lower(_ value: LibraryRecord) -> RustBuffer {
+    return FfiConverterTypeLibraryRecord.lower(value)
+}
+
+
+/**
+ * One paper's folder as found on disk.
+ */
+public struct PaperFolder: Equatable, Hashable {
+    /**
+     * The folder's name under `papers/`.
+     */
+    public let folder: String
+    /**
+     * The union of the records' identifiers; the first record wins a
+     * conflict, which the scan reports as [`LibraryProblem::ConflictingIds`].
+     */
+    public let ids: PaperIds
+    /**
+     * The valid, correctly named records, by file name.
+     */
+    public let records: [LibraryRecord]
+    /**
+     * The source files present, by name.
+     */
+    public let filesOnDisk: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The folder's name under `papers/`.
+         */folder: String, 
+        /**
+         * The union of the records' identifiers; the first record wins a
+         * conflict, which the scan reports as [`LibraryProblem::ConflictingIds`].
+         */ids: PaperIds, 
+        /**
+         * The valid, correctly named records, by file name.
+         */records: [LibraryRecord], 
+        /**
+         * The source files present, by name.
+         */filesOnDisk: [String]) {
+        self.folder = folder
+        self.ids = ids
+        self.records = records
+        self.filesOnDisk = filesOnDisk
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PaperFolder: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePaperFolder: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PaperFolder {
+        return
+            try PaperFolder(
+                folder: FfiConverterString.read(from: &buf), 
+                ids: FfiConverterTypePaperIds.read(from: &buf), 
+                records: FfiConverterSequenceTypeLibraryRecord.read(from: &buf), 
+                filesOnDisk: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PaperFolder, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.folder, into: &buf)
+        FfiConverterTypePaperIds.write(value.ids, into: &buf)
+        FfiConverterSequenceTypeLibraryRecord.write(value.records, into: &buf)
+        FfiConverterSequenceString.write(value.filesOnDisk, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePaperFolder_lift(_ buf: RustBuffer) throws -> PaperFolder {
+    return try FfiConverterTypePaperFolder.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePaperFolder_lower(_ value: PaperFolder) -> RustBuffer {
+    return FfiConverterTypePaperFolder.lower(value)
+}
+
+
+/**
+ * A paper's identifiers. Coming out of the library each is canonical or
+ * `None`; going in, raw values are canonicalised and blank ones dropped.
+ */
+public struct PaperIds: Equatable, Hashable {
+    /**
+     * PubMed ID: digits without leading zeros, or `PPR` and digits.
+     */
+    public let pmid: String?
+    /**
+     * DOI: lower-case, starting `10.` and holding a `/`.
+     */
+    public let doi: String?
+    /**
+     * PubMed Central ID: `PMC` and digits without leading zeros.
+     */
+    public let pmcid: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * PubMed ID: digits without leading zeros, or `PPR` and digits.
+         */pmid: String?, 
+        /**
+         * DOI: lower-case, starting `10.` and holding a `/`.
+         */doi: String?, 
+        /**
+         * PubMed Central ID: `PMC` and digits without leading zeros.
+         */pmcid: String?) {
+        self.pmid = pmid
+        self.doi = doi
+        self.pmcid = pmcid
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PaperIds: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePaperIds: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PaperIds {
+        return
+            try PaperIds(
+                pmid: FfiConverterOptionString.read(from: &buf), 
+                doi: FfiConverterOptionString.read(from: &buf), 
+                pmcid: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PaperIds, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.pmid, into: &buf)
+        FfiConverterOptionString.write(value.doi, into: &buf)
+        FfiConverterOptionString.write(value.pmcid, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePaperIds_lift(_ buf: RustBuffer) throws -> PaperIds {
+    return try FfiConverterTypePaperIds.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePaperIds_lower(_ value: PaperIds) -> RustBuffer {
+    return FfiConverterTypePaperIds.lower(value)
+}
+
+
+/**
+ * What an app knows of a paper: its identifiers and what names its folder.
+ */
+public struct PaperInfo: Equatable, Hashable {
+    /**
+     * The paper's identifiers.
+     */
+    public let ids: PaperIds
+    /**
+     * Its title.
+     */
+    public let title: String?
+    /**
+     * Its publication year.
+     */
+    public let year: Int32?
+    /**
+     * Its first author's name.
+     */
+    public let firstAuthor: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The paper's identifiers.
+         */ids: PaperIds, 
+        /**
+         * Its title.
+         */title: String?, 
+        /**
+         * Its publication year.
+         */year: Int32?, 
+        /**
+         * Its first author's name.
+         */firstAuthor: String?) {
+        self.ids = ids
+        self.title = title
+        self.year = year
+        self.firstAuthor = firstAuthor
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PaperInfo: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePaperInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PaperInfo {
+        return
+            try PaperInfo(
+                ids: FfiConverterTypePaperIds.read(from: &buf), 
+                title: FfiConverterOptionString.read(from: &buf), 
+                year: FfiConverterOptionInt32.read(from: &buf), 
+                firstAuthor: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PaperInfo, into buf: inout [UInt8]) {
+        FfiConverterTypePaperIds.write(value.ids, into: &buf)
+        FfiConverterOptionString.write(value.title, into: &buf)
+        FfiConverterOptionInt32.write(value.year, into: &buf)
+        FfiConverterOptionString.write(value.firstAuthor, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePaperInfo_lift(_ buf: RustBuffer) throws -> PaperInfo {
+    return try FfiConverterTypePaperInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePaperInfo_lower(_ value: PaperInfo) -> RustBuffer {
+    return FfiConverterTypePaperInfo.lower(value)
+}
+
+
+/**
  * One source's statement about one paper.
  */
 public struct RetractionEvidence: Equatable, Hashable {
@@ -2663,6 +4029,615 @@ public func FfiConverterTypeJatsError_lift(_ buf: RustBuffer) throws -> JatsErro
 public func FfiConverterTypeJatsError_lower(_ value: JatsError) -> RustBuffer {
     return FfiConverterTypeJatsError.lower(value)
 }
+
+
+/**
+ * Why a library call failed: bmlib's `LibraryError`, case for case. Paths are
+ * strings. Its exported `Display` is bmlib's own wording, fit to show the
+ * user: Kotlin's `toString()` (not `message`, which is UniFFI's field list),
+ * and Swift's `description`, which `errorDescription` reads once the app adds
+ * `extension LibraryError: CustomStringConvertible {}` (UniFFI 0.32.2 leaves
+ * the conformance out). No field is named `message`, which collides with
+ * Kotlin's `Throwable.message`.
+ */
+public 
+enum LibraryError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    /**
+     * From [`PaperLibrary::open`] only: the library's folder is missing or not
+     * a folder (an unmounted drive, a revoked bookmark). The library may come
+     * back, so offer to try again rather than choosing another folder. Once
+     * open, a folder that vanishes reads as `Io` from `scan` and `save`,
+     * `Missing` from `read`, `record_use`, `remove_file` and `remove_folder`,
+     * and `release` succeeds (there is nothing to release).
+     */
+    case Unreachable(
+        /**
+         * The folder.
+         */path: String, 
+        /**
+         * Why.
+         */reason: String
+    )
+    /**
+     * The folder holds something other than a library.
+     */
+    case NotALibrary(
+        /**
+         * The folder.
+         */path: String, 
+        /**
+         * Why.
+         */reason: String
+    )
+    /**
+     * The library's layout is newer than this bmlib.
+     */
+    case NewerLibrary(
+        /**
+         * Its layout version.
+         */version: UInt64
+    )
+    /**
+     * The library cannot be written.
+     */
+    case ReadOnly(
+        /**
+         * What could not be written.
+         */path: String
+    )
+    /**
+     * An identifier is not valid.
+     */
+    case BadIdentifier(
+        /**
+         * `"pmid"`, `"doi"` or `"pmcid"`; `"sha256"` from
+         * [`LibraryScan::find_digest`].
+         */field: String, 
+        /**
+         * The value refused.
+         */value: String
+    )
+    /**
+     * An installation is not acceptable.
+     */
+    case BadInstallation(
+        /**
+         * `"app"`, `"id"` or `"label"`.
+         */field: String, 
+        /**
+         * Why.
+         */reason: String
+    )
+    /**
+     * A folder or file name that is not one plain path component.
+     */
+    case BadName(
+        /**
+         * The name.
+         */name: String
+    )
+    /**
+     * The file is not there. From [`PaperLibrary::remove_folder`], `folder` is
+     * `papers` and `name` the paper's folder.
+     */
+    case Missing(
+        /**
+         * The paper's folder.
+         */folder: String, 
+        /**
+         * The file.
+         */name: String
+    )
+    /**
+     * Only an iCloud placeholder is here, or the file is evicted (dataless):
+     * it is not downloaded yet.
+     */
+    case NotDownloaded(
+        /**
+         * The paper's folder.
+         */folder: String, 
+        /**
+         * The file.
+         */name: String
+    )
+    /**
+     * The file's bytes are not the ones its digest names.
+     */
+    case DigestMismatch(
+        /**
+         * The paper's folder.
+         */folder: String, 
+        /**
+         * The file.
+         */name: String, 
+        /**
+         * The digest asked for.
+         */expected: String, 
+        /**
+         * The digest of the bytes found.
+         */found: String
+    )
+    /**
+     * A different file of that name is already there; nothing was overwritten.
+     */
+    case FileClash(
+        /**
+         * The full path of the folder holding it, unlike the bare name the
+         * other cases carry (bmlib does the same).
+         */folder: String, 
+        /**
+         * The file.
+         */name: String
+    )
+    /**
+     * A record from a newer layout is in the way.
+     */
+    case NewerRecord(
+        /**
+         * The paper's folder.
+         */folder: String, 
+        /**
+         * The record file.
+         */file: String, 
+        /**
+         * Its version.
+         */version: UInt32
+    )
+    /**
+     * Any other failure: the file system's, or a record that cannot be read
+     * or written back, or no free folder name (the reason says which).
+     */
+    case Io(
+        /**
+         * The path concerned.
+         */path: String, 
+        /**
+         * Why.
+         */reason: String
+    )
+
+    
+
+    
+// The local Rust `Display` implementation.
+public var description: String {
+    return try!  FfiConverterString.lift(
+        try! rustCall() {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_libraryerror_uniffi_trait_display(
+            FfiConverterTypeLibraryError_lower(self),uniffiCallStatus
+    )
+}
+    )
+}
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension LibraryError: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLibraryError: FfiConverterRustBuffer {
+    typealias SwiftType = LibraryError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LibraryError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .Unreachable(
+            path: try FfiConverterString.read(from: &buf), 
+            reason: try FfiConverterString.read(from: &buf)
+            )
+        case 2: return .NotALibrary(
+            path: try FfiConverterString.read(from: &buf), 
+            reason: try FfiConverterString.read(from: &buf)
+            )
+        case 3: return .NewerLibrary(
+            version: try FfiConverterUInt64.read(from: &buf)
+            )
+        case 4: return .ReadOnly(
+            path: try FfiConverterString.read(from: &buf)
+            )
+        case 5: return .BadIdentifier(
+            field: try FfiConverterString.read(from: &buf), 
+            value: try FfiConverterString.read(from: &buf)
+            )
+        case 6: return .BadInstallation(
+            field: try FfiConverterString.read(from: &buf), 
+            reason: try FfiConverterString.read(from: &buf)
+            )
+        case 7: return .BadName(
+            name: try FfiConverterString.read(from: &buf)
+            )
+        case 8: return .Missing(
+            folder: try FfiConverterString.read(from: &buf), 
+            name: try FfiConverterString.read(from: &buf)
+            )
+        case 9: return .NotDownloaded(
+            folder: try FfiConverterString.read(from: &buf), 
+            name: try FfiConverterString.read(from: &buf)
+            )
+        case 10: return .DigestMismatch(
+            folder: try FfiConverterString.read(from: &buf), 
+            name: try FfiConverterString.read(from: &buf), 
+            expected: try FfiConverterString.read(from: &buf), 
+            found: try FfiConverterString.read(from: &buf)
+            )
+        case 11: return .FileClash(
+            folder: try FfiConverterString.read(from: &buf), 
+            name: try FfiConverterString.read(from: &buf)
+            )
+        case 12: return .NewerRecord(
+            folder: try FfiConverterString.read(from: &buf), 
+            file: try FfiConverterString.read(from: &buf), 
+            version: try FfiConverterUInt32.read(from: &buf)
+            )
+        case 13: return .Io(
+            path: try FfiConverterString.read(from: &buf), 
+            reason: try FfiConverterString.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: LibraryError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case let .Unreachable(path,reason):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(path, into: &buf)
+            FfiConverterString.write(reason, into: &buf)
+            
+        
+        case let .NotALibrary(path,reason):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(path, into: &buf)
+            FfiConverterString.write(reason, into: &buf)
+            
+        
+        case let .NewerLibrary(version):
+            writeInt(&buf, Int32(3))
+            FfiConverterUInt64.write(version, into: &buf)
+            
+        
+        case let .ReadOnly(path):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(path, into: &buf)
+            
+        
+        case let .BadIdentifier(field,value):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(field, into: &buf)
+            FfiConverterString.write(value, into: &buf)
+            
+        
+        case let .BadInstallation(field,reason):
+            writeInt(&buf, Int32(6))
+            FfiConverterString.write(field, into: &buf)
+            FfiConverterString.write(reason, into: &buf)
+            
+        
+        case let .BadName(name):
+            writeInt(&buf, Int32(7))
+            FfiConverterString.write(name, into: &buf)
+            
+        
+        case let .Missing(folder,name):
+            writeInt(&buf, Int32(8))
+            FfiConverterString.write(folder, into: &buf)
+            FfiConverterString.write(name, into: &buf)
+            
+        
+        case let .NotDownloaded(folder,name):
+            writeInt(&buf, Int32(9))
+            FfiConverterString.write(folder, into: &buf)
+            FfiConverterString.write(name, into: &buf)
+            
+        
+        case let .DigestMismatch(folder,name,expected,found):
+            writeInt(&buf, Int32(10))
+            FfiConverterString.write(folder, into: &buf)
+            FfiConverterString.write(name, into: &buf)
+            FfiConverterString.write(expected, into: &buf)
+            FfiConverterString.write(found, into: &buf)
+            
+        
+        case let .FileClash(folder,name):
+            writeInt(&buf, Int32(11))
+            FfiConverterString.write(folder, into: &buf)
+            FfiConverterString.write(name, into: &buf)
+            
+        
+        case let .NewerRecord(folder,file,version):
+            writeInt(&buf, Int32(12))
+            FfiConverterString.write(folder, into: &buf)
+            FfiConverterString.write(file, into: &buf)
+            FfiConverterUInt32.write(version, into: &buf)
+            
+        
+        case let .Io(path,reason):
+            writeInt(&buf, Int32(13))
+            FfiConverterString.write(path, into: &buf)
+            FfiConverterString.write(reason, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLibraryError_lift(_ buf: RustBuffer) throws -> LibraryError {
+    return try FfiConverterTypeLibraryError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLibraryError_lower(_ value: LibraryError) -> RustBuffer {
+    return FfiConverterTypeLibraryError.lower(value)
+}
+
+
+/**
+ * Something odd a scan found and did not use.
+ */
+
+public enum LibraryProblem: Equatable, Hashable {
+    
+    /**
+     * A record file could not be read or is not a valid record.
+     */
+    case unreadableRecord(
+        /**
+         * The paper's folder.
+         */folder: String, 
+        /**
+         * The record file.
+         */file: String, 
+        /**
+         * Why.
+         */reason: String
+    )
+    /**
+     * A paper folder or its `records/` directory could not be listed.
+     */
+    case unreadableFolder(
+        /**
+         * The paper's folder.
+         */folder: String, 
+        /**
+         * Why.
+         */reason: String
+    )
+    /**
+     * A record written by a newer layout.
+     */
+    case newerRecord(
+        /**
+         * The paper's folder.
+         */folder: String, 
+        /**
+         * The record file.
+         */file: String, 
+        /**
+         * Its version.
+         */version: UInt32
+    )
+    /**
+     * A record present only as an iCloud placeholder or evicted (dataless):
+     * its installation's uses are unknown until it is downloaded.
+     */
+    case recordNotDownloaded(
+        /**
+         * The paper's folder.
+         */folder: String, 
+        /**
+         * The record file it stands for.
+         */file: String
+    )
+    /**
+     * A temporary file of an atomic write, in flight or left by a crash.
+     * Never deleted.
+     */
+    case leftoverTemp(
+        /**
+         * The paper's folder.
+         */folder: String, 
+        /**
+         * The file, as `records/<name>` when it is in `records/`.
+         */name: String
+    )
+    /**
+     * A valid record whose file name is not its installation's.
+     */
+    case misnamedRecord(
+        /**
+         * The paper's folder.
+         */folder: String, 
+        /**
+         * The record file.
+         */file: String
+    )
+    /**
+     * Two records of one folder hold different values for one identifier.
+     */
+    case conflictingIds(
+        /**
+         * The paper's folder.
+         */folder: String, 
+        /**
+         * `"pmid"`, `"doi"` or `"pmcid"`.
+         */field: String
+    )
+    /**
+     * A source file no valid record lists.
+     */
+    case unrecordedFile(
+        /**
+         * The paper's folder.
+         */folder: String, 
+        /**
+         * The file.
+         */name: String
+    )
+    /**
+     * An entry of `papers/` that is not a folder.
+     */
+    case strayEntry(
+        /**
+         * The entry.
+         */name: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension LibraryProblem: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLibraryProblem: FfiConverterRustBuffer {
+    typealias SwiftType = LibraryProblem
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LibraryProblem {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .unreadableRecord(folder: try FfiConverterString.read(from: &buf), file: try FfiConverterString.read(from: &buf), reason: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .unreadableFolder(folder: try FfiConverterString.read(from: &buf), reason: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 3: return .newerRecord(folder: try FfiConverterString.read(from: &buf), file: try FfiConverterString.read(from: &buf), version: try FfiConverterUInt32.read(from: &buf)
+        )
+        
+        case 4: return .recordNotDownloaded(folder: try FfiConverterString.read(from: &buf), file: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 5: return .leftoverTemp(folder: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 6: return .misnamedRecord(folder: try FfiConverterString.read(from: &buf), file: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 7: return .conflictingIds(folder: try FfiConverterString.read(from: &buf), field: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 8: return .unrecordedFile(folder: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 9: return .strayEntry(name: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: LibraryProblem, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .unreadableRecord(folder,file,reason):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(folder, into: &buf)
+            FfiConverterString.write(file, into: &buf)
+            FfiConverterString.write(reason, into: &buf)
+            
+        
+        case let .unreadableFolder(folder,reason):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(folder, into: &buf)
+            FfiConverterString.write(reason, into: &buf)
+            
+        
+        case let .newerRecord(folder,file,version):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(folder, into: &buf)
+            FfiConverterString.write(file, into: &buf)
+            FfiConverterUInt32.write(version, into: &buf)
+            
+        
+        case let .recordNotDownloaded(folder,file):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(folder, into: &buf)
+            FfiConverterString.write(file, into: &buf)
+            
+        
+        case let .leftoverTemp(folder,name):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(folder, into: &buf)
+            FfiConverterString.write(name, into: &buf)
+            
+        
+        case let .misnamedRecord(folder,file):
+            writeInt(&buf, Int32(6))
+            FfiConverterString.write(folder, into: &buf)
+            FfiConverterString.write(file, into: &buf)
+            
+        
+        case let .conflictingIds(folder,field):
+            writeInt(&buf, Int32(7))
+            FfiConverterString.write(folder, into: &buf)
+            FfiConverterString.write(field, into: &buf)
+            
+        
+        case let .unrecordedFile(folder,name):
+            writeInt(&buf, Int32(8))
+            FfiConverterString.write(folder, into: &buf)
+            FfiConverterString.write(name, into: &buf)
+            
+        
+        case let .strayEntry(name):
+            writeInt(&buf, Int32(9))
+            FfiConverterString.write(name, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLibraryProblem_lift(_ buf: RustBuffer) throws -> LibraryProblem {
+    return try FfiConverterTypeLibraryProblem.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLibraryProblem_lower(_ value: LibraryProblem) -> RustBuffer {
+    return FfiConverterTypeLibraryProblem.lower(value)
+}
+
 
 
 /**
@@ -3210,6 +5185,135 @@ public func FfiConverterTypeRetractionStatus_lower(_ value: RetractionStatus) ->
 }
 
 
+
+/**
+ * What a stored source file is.
+ */
+
+public enum SourceKind: Equatable, Hashable {
+    
+    /**
+     * A PDF.
+     */
+    case pdf
+    /**
+     * JATS XML.
+     */
+    case jats
+    /**
+     * An HTML page.
+     */
+    case html
+    /**
+     * Markdown.
+     */
+    case markdown
+    /**
+     * Plain text.
+     */
+    case text
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension SourceKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSourceKind: FfiConverterRustBuffer {
+    typealias SwiftType = SourceKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SourceKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .pdf
+        
+        case 2: return .jats
+        
+        case 3: return .html
+        
+        case 4: return .markdown
+        
+        case 5: return .text
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: SourceKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .pdf:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .jats:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .html:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .markdown:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .text:
+            writeInt(&buf, Int32(5))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSourceKind_lift(_ buf: RustBuffer) throws -> SourceKind {
+    return try FfiConverterTypeSourceKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSourceKind_lower(_ value: SourceKind) -> RustBuffer {
+    return FfiConverterTypeSourceKind.lower(value)
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionInt32: FfiConverterRustBuffer {
+    typealias SwiftType = Int32?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterInt32.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
@@ -3229,6 +5333,54 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeFileRef: FfiConverterRustBuffer {
+    typealias SwiftType = FileRef?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeFileRef.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeFileRef.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeFileUsers: FfiConverterRustBuffer {
+    typealias SwiftType = FileUsers?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeFileUsers.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeFileUsers.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -3285,6 +5437,30 @@ fileprivate struct FfiConverterOptionTypeCrossrefResult: FfiConverterRustBuffer 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeSourceKind: FfiConverterRustBuffer {
+    typealias SwiftType = SourceKind?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeSourceKind.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeSourceKind.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionSequenceTypeRetractionEvidence: FfiConverterRustBuffer {
     typealias SwiftType = [RetractionEvidence]?
 
@@ -3303,6 +5479,31 @@ fileprivate struct FfiConverterOptionSequenceTypeRetractionEvidence: FfiConverte
         case 1: return try FfiConverterSequenceTypeRetractionEvidence.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceUInt64: FfiConverterRustBuffer {
+    typealias SwiftType = [UInt64]
+
+    public static func write(_ value: [UInt64], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterUInt64.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UInt64] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [UInt64]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterUInt64.read(from: &buf))
+        }
+        return seq
     }
 }
 
@@ -3351,6 +5552,56 @@ fileprivate struct FfiConverterSequenceTypeCrossrefBatch: FfiConverterRustBuffer
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeCrossrefBatch.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFileEntry: FfiConverterRustBuffer {
+    typealias SwiftType = [FileEntry]
+
+    public static func write(_ value: [FileEntry], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFileEntry.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FileEntry] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FileEntry]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFileEntry.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeInstallation: FfiConverterRustBuffer {
+    typealias SwiftType = [Installation]
+
+    public static func write(_ value: [Installation], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeInstallation.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Installation] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Installation]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeInstallation.read(from: &buf))
         }
         return seq
     }
@@ -3559,6 +5810,56 @@ fileprivate struct FfiConverterSequenceTypeJatsTable: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeLibraryRecord: FfiConverterRustBuffer {
+    typealias SwiftType = [LibraryRecord]
+
+    public static func write(_ value: [LibraryRecord], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeLibraryRecord.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [LibraryRecord] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [LibraryRecord]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeLibraryRecord.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypePaperFolder: FfiConverterRustBuffer {
+    typealias SwiftType = [PaperFolder]
+
+    public static func write(_ value: [PaperFolder], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypePaperFolder.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [PaperFolder] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [PaperFolder]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypePaperFolder.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeRetractionEvidence: FfiConverterRustBuffer {
     typealias SwiftType = [RetractionEvidence]
 
@@ -3584,6 +5885,31 @@ fileprivate struct FfiConverterSequenceTypeRetractionEvidence: FfiConverterRustB
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeLibraryProblem: FfiConverterRustBuffer {
+    typealias SwiftType = [LibraryProblem]
+
+    public static func write(_ value: [LibraryProblem], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeLibraryProblem.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [LibraryProblem] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [LibraryProblem]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeLibraryProblem.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeRetractionLookup: FfiConverterRustBuffer {
     typealias SwiftType = [RetractionLookup]
 
@@ -3601,6 +5927,31 @@ fileprivate struct FfiConverterSequenceTypeRetractionLookup: FfiConverterRustBuf
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeRetractionLookup.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceSequenceUInt64: FfiConverterRustBuffer {
+    typealias SwiftType = [[UInt64]]
+
+    public static func write(_ value: [[UInt64]], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterSequenceUInt64.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [[UInt64]] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [[UInt64]]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterSequenceUInt64.read(from: &buf))
         }
         return seq
     }
@@ -3713,6 +6064,41 @@ public func parseJatsAudited(xml: String, knownPmcId: String)throws  -> JatsPars
 })
 }
 /**
+ * A validated installation.
+ *
+ * # Errors
+ *
+ * `BadInstallation` naming the field that is not acceptable.
+ */
+public func installationNew(app: String, id: String, label: String)throws  -> Installation  {
+    return try  FfiConverterTypeInstallation_lift(try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_func_installation_new(
+        FfiConverterString.lower(app),
+        FfiConverterString.lower(id),
+        FfiConverterString.lower(label),uniffiCallStatus
+    )
+})
+}
+/**
+ * Canonical identifiers from raw ones; blank values become `None`. Use it to
+ * check identifiers before storing them.
+ *
+ * # Errors
+ *
+ * `BadIdentifier` naming the first field that is not valid.
+ */
+public func paperIdsCanonical(pmid: String?, doi: String?, pmcid: String?)throws  -> PaperIds  {
+    return try  FfiConverterTypePaperIds_lift(try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_func_paper_ids_canonical(
+        FfiConverterOptionString.lower(pmid),
+        FfiConverterOptionString.lower(doi),
+        FfiConverterOptionString.lower(pmcid),uniffiCallStatus
+    )
+})
+}
+/**
  * Build an index from the export's CSV bytes. `data_as_of` is your date for
  * the copy (the day it was downloaded), returned by
  * [`RetractionIndex::data_as_of`] so a verdict can say how fresh it is.
@@ -3803,6 +6189,12 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bmlib_ffi_checksum_func_parse_jats_audited() != 54867) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_bmlib_ffi_checksum_func_installation_new() != 16010) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_func_paper_ids_canonical() != 57621) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_bmlib_ffi_checksum_func_build_retraction_index() != 50609) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3815,6 +6207,48 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bmlib_ffi_checksum_func_retraction_status() != 39250) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_bmlib_ffi_checksum_method_libraryscan_find() != 35371) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_method_libraryscan_find_digest() != 64843) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_method_libraryscan_folders() != 6121) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_method_libraryscan_group() != 28136) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_method_libraryscan_problems() != 41033) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_method_libraryscan_used_by() != 23413) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_method_paperlibrary_read() != 37147) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_method_paperlibrary_record_use() != 41641) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_method_paperlibrary_release() != 2624) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_method_paperlibrary_remove_file() != 9886) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_method_paperlibrary_remove_folder() != 18066) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_method_paperlibrary_root() != 2620) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_method_paperlibrary_save() != 59969) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_method_paperlibrary_scan() != 33102) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_bmlib_ffi_checksum_method_retractionindex_data_as_of() != 7573) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3825,6 +6259,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bmlib_ffi_checksum_method_retractionindex_to_bytes() != 45359) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_constructor_paperlibrary_open() != 25515) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bmlib_ffi_checksum_constructor_retractionindex_from_bytes() != 29137) {
