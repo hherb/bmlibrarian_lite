@@ -34,14 +34,16 @@ its slice has landed; add a new section when handing off new work.
 pins; the bindings gain the shared paper library's objects (`PaperLibrary`,
 `LibraryScan`), which no app calls. **At `8c8e689a` the object was
 `Library`, which every UniFFI Kotlin binding's `import com.sun.jna.Library`
-shadows, so Android did not compile**; bmlib PR #774 renamed it, and bmlib's
-`ffi` CI job now fails on a Kotlin binding that declares a name it imports.
-The ledger triage (15 rows) lodged **#780** (the bucket's md5 and record
-shape, all three) and **#781** (lenient service JSON, bmlib#753). **Left:**
-an Apple archive from master lists `BmlibFFI.framework.dSYM` with no
-warning (one from `0641e80c` keeps 1.9.0's pin). **Decision for the
-maintainer:** whether lite keeps its papers in bmlib's shared paper library
-(`bmlib.library`); the ledger rows say n/a until then.
+shadows, so Android did not compile**; bmlib's PR #774 (`hherb/bmlib#774`)
+renamed it, and bmlib's `ffi` CI job now fails on a Kotlin binding that
+declares a name it imports. The ledger triage (15 new rows;
+`lite:pmc-open-data` is now ported in bmlib) lodged **#780** (the bucket's
+md5 and record shape, all three) and **#781** (lenient service JSON,
+bmlib#753). **Left:** an Apple archive from master lists
+`BmlibFFI.framework.dSYM` with no warning (one from `0641e80c` keeps 1.9.0's
+pin). **Decision for the maintainer:** whether lite keeps its papers in
+bmlib's shared paper library (`bmlib.library`); the ledger rows say n/a
+until then.
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
@@ -236,9 +238,10 @@ Open issues by family; each issue carries the detail. None blocks another.
 - **From the bmlib syncs.** PR #757's issues are fixed and unreleased (a
   0.6.1 is the maintainer's call; PRs #765–#767, #771, #774, #775). Still
   deferred: #768, #769 (apps' Ollama), #770 (prompts ask for null), #773
-  (desktop PDF read faults into the report), #776–#778 (Android upload,
-  `PdfText`). PR #779's: **#780** (check the bucket JATS's md5, refuse a
-  record naming another article's file; all three) and **#781**.
+  (desktop PDF read faults into the report; `pdf_title_check` still opens
+  PDFs with `fitz`), #776–#778 (Android upload, `PdfText`). PR #779's:
+  **#780** (check the bucket JATS's md5, refuse a record naming another
+  article's file; all three) and **#781**.
 - **Retraction checking** follow-ups (#662, #726–#728, #730, #731 and
   #737–#739 landed; **their rules, the unreadable-snapshot ones above all,
   are in `doc/developer/retraction_checking.md`**: read it before touching

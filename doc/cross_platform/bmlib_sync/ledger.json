@@ -3096,7 +3096,7 @@
       "swift": "n/a",
       "android": "n/a",
       "issue": null,
-      "note": "Rust only, and the FFI builds without bmlib's `pdf` feature (`default-features = false`), so neither app links `mupdf_backend`. The desktop reads PDFs through bmlib's Python `PyMuPDFConverter`, which this does not touch."
+      "note": "Rust only, and the FFI builds without bmlib's `pdf` feature (bmlib-ffi never enables it), so neither app links `mupdf_backend`. The desktop reads PDFs through bmlib's Python `PyMuPDFConverter`, which this does not touch."
     },
     {
       "id": "bmlib#341",
