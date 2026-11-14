@@ -2617,9 +2617,9 @@
       "title": "`canonical_from_html` caps a page's `<` count, not its length",
       "python": "equivalent",
       "swift": "n/a",
-      "android": "owed",
+      "android": "equivalent",
       "issue": "#763",
-      "note": "The desktop's only HTML-to-text reader is the upload's `full_text_upload.html_to_text`, the stdlib's streaming `html.parser` building no tree, so html5ever's depth and formatting-element costs cannot arise; its bound is the upload's 100 MB byte cap (`MAX_PDF_SIZE`). Swift's upload (`ios/.../Utilities/FullTextUpload.swift`) keeps HTML as markup unparsed, and nothing in Swift reduces a page to text. Android refuses an HTML upload over `MAX_STORED_TEXT_BYTES` (1 MB, the cap meant for the stored text) before reducing it, so a page saved with its images inline, the case #656 measured (median 94% `data:`), is refused though its text would fit. The Rust element budget and `scripts/sample_html_pages.py --saved-dir` reach no platform."
+      "note": "The desktop's only HTML-to-text reader is the upload's `full_text_upload.html_to_text`, the stdlib's streaming `html.parser` building no tree, so html5ever's depth and formatting-element costs cannot arise; its bound is the upload's 100 MB byte cap (`MAX_PDF_SIZE`). Swift's upload (`ios/.../Utilities/FullTextUpload.swift`) keeps HTML as markup unparsed, and nothing in Swift reduces a page to text. Android, since #763: an HTML upload is read up to `MAX_UPLOAD_HTML_BYTES` (16 MB: it is reduced in the heap, a few copies at once, unlike the desktop's streaming parser, and a heap too small for it is refused, never a crash) and only its reduced text is held to `MAX_STORED_TEXT_BYTES` (1 MB, what a row can hold), so a page saved with its images inline, the case #656 measured (median 94% `data:`), is read when its text fits. The Rust element budget and `scripts/sample_html_pages.py --saved-dir` reach no platform."
     },
     {
       "id": "bmlib#744",
@@ -2743,9 +2743,9 @@
       "title": "What MuPDF reads past is reported",
       "python": "ported",
       "swift": "equivalent",
-      "android": "owed",
+      "android": "equivalent",
       "issue": "#762, #764",
-      "note": "The checker reads hherb/StudyAnalyzer#21 in three titles (#598, #599, #600). Desktop, ported in #762: `pdf_utils.read_pdf_text` reads through bmlib's `PyMuPDFConverter` with a `PDFLimit` (discovery's cancel), keeps MuPDF's messages, and the upload names the cause (encrypted, unreadable, engine). Swift: `PDFKitTextExtractor` tells a locked PDF from an unopenable one and stops on `Task.isCancelled` per page; PDFKit has no repair messages. Android: `PdfText.extractedPdfText`'s page loop never checks cancellation."
+      "note": "The checker reads hherb/StudyAnalyzer#21 in three titles (#598, #599, #600). Desktop, ported in #762: `pdf_utils.read_pdf_text` reads through bmlib's `PyMuPDFConverter` with a `PDFLimit` (discovery's cancel), keeps MuPDF's messages, and the upload names the cause (encrypted, unreadable, engine). Swift: `PDFKitTextExtractor` tells a locked PDF from an unopenable one and stops on `Task.isCancelled` per page; PDFKit has no repair messages. Android, since #764: `PdfText.extractedPdfText` checks cancellation before each page and throws it, never a partial text; it logs file faults apart from code faults, and iText's `hasRebuiltXref()` is not read."
     },
     {
       "id": "bmlib#599",
@@ -2815,9 +2815,9 @@
       "title": "`canonical_from_html` refuses a page it cannot parse in time",
       "python": "equivalent",
       "swift": "n/a",
-      "android": "owed",
+      "android": "equivalent",
       "issue": "#763",
-      "note": "The desktop's only HTML-to-text reader is the upload's `full_text_upload.html_to_text`, the stdlib's streaming `html.parser` building no tree, so html5ever's depth and formatting-element costs cannot arise; its bound is the upload's 100 MB byte cap (`MAX_PDF_SIZE`). Swift's upload (`ios/.../Utilities/FullTextUpload.swift`) keeps HTML as markup unparsed, and nothing in Swift reduces a page to text. Android's regex reading has no time bound and is quadratic on an unclosed `<script`/`<style`/`<head` (`(?is)<(script|style|head)\\b.*?</\\1\\s*>` scans to the end from each one: 400 KB of `<script ` took 35 s, so about 4 minutes at its 1 MB cap)."
+      "note": "The desktop's only HTML-to-text reader is the upload's `full_text_upload.html_to_text`, the stdlib's streaming `html.parser` building no tree, so html5ever's depth and formatting-element costs cannot arise; its bound is the upload's 100 MB byte cap (`MAX_PDF_SIZE`). Swift's upload (`ios/.../Utilities/FullTextUpload.swift`) keeps HTML as markup unparsed, and nothing in Swift reduces a page to text. Android, since #763: `FullTextUpload.htmlToText` is linear in the page (one forward-only matcher per pattern, never `find(start)`, which on Android hands native code the page again), so it needs no time bound; its lazy regex was quadratic on an unclosed `<script`/`<style`/`<head` (400 KB of `<script ` took 35 s), and the tag strip on a `<` with no `>` after it, both now scanned once."
     },
     {
       "id": "bmlib:0.13.0-small-table-body-size",
@@ -2878,9 +2878,9 @@
       "title": "A PDF extraction can be cancelled or bounded in time",
       "python": "ported",
       "swift": "equivalent",
-      "android": "owed",
+      "android": "equivalent",
       "issue": "#762, #764",
-      "note": "Ported in #762 for the desktop: `FulltextDiscoverer.cancel()` sets the event of the `PDFLimit` its three PDF reads pass, checked before each page, and a cancelled read is a cancelled discovery, never an unreadable PDF; the upload has no cancel (it reads on the GUI thread). Swift's `PDFKitTextExtractor` checks `Task.isCancelled` before each page. Android's `PdfText.extractedPdfText` joins every page in `withContext(Dispatchers.IO)` with no `ensureActive`, so a cancelled read runs on."
+      "note": "Ported in #762 for the desktop: `FulltextDiscoverer.cancel()` sets the event of the `PDFLimit` its three PDF reads pass, checked before each page, and a cancelled read is a cancelled discovery, never an unreadable PDF; the upload has no cancel (it reads on the GUI thread). Swift's `PDFKitTextExtractor` checks `Task.isCancelled` before each page. Android's `PdfText.extractedPdfText` calls `ensureActive()` before each page (#764) and rethrows the cancellation, never a partial text; an upload's copy checks it per buffer and reads the text before replacing an earlier PDF (a cancel after the rename, before the row is written, is #776)."
     },
     {
       "id": "bmlib#590",

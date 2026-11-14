@@ -26,12 +26,16 @@ import com.bmlibrarian.factchecker.data.local.entity.DocumentEntity
 import com.bmlibrarian.factchecker.util.Constants
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.util.Date
 import java.util.Locale
+import java.util.regex.Matcher
+import java.util.regex.Pattern
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -81,11 +85,15 @@ class FullTextUpload @Inject constructor(
      * @param uri The file the reader chose
      * @param documentId The document, which names a stored PDF
      * @param maxBytes The largest PDF read; a larger one is refused, never cut
-     * @param maxTextBytes The largest text or HTML file read, kept whole on the
-     *   document's row; a larger one is refused, never cut
+     * @param maxHtmlBytes The largest HTML file read; a larger one is refused,
+     *   never cut
+     * @param maxTextBytes The longest text kept whole on the document's row: a
+     *   text file's size, or an HTML page's text once its markup is dropped (a
+     *   page saved with its images inline is mostly markup, #763); a longer one
+     *   is refused, never cut
      * @return What the file holds
      * @throws FullTextUploadException for a file of a kind not supported, one
-     *   too large, one holding no text or text that is not UTF-8, or one that
+     *   too large (or too large for this device's memory), one holding no text or text that is not UTF-8, or one that
      *   could not be read or stored; a PDF uploaded before for the paper is kept
      *   unless the new one is stored whole
      */
@@ -93,6 +101,7 @@ class FullTextUpload @Inject constructor(
         uri: Uri,
         documentId: String,
         maxBytes: Long = Constants.MAX_UPLOAD_BYTES,
+        maxHtmlBytes: Long = Constants.MAX_UPLOAD_HTML_BYTES,
         maxTextBytes: Long = Constants.MAX_STORED_TEXT_BYTES
     ): FullTextUploadContent = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
@@ -102,11 +111,8 @@ class FullTextUpload @Inject constructor(
             val stream = resolver.openInputStream(uri) ?: throw IOException("the file could not be opened")
             stream.use { input ->
                 when (kind) {
-                    Kind.PDF -> {
-                        val stored = store(input, documentId, maxBytes)
-                        FullTextUploadContent.Pdf(stored.path, extractedPdfText(stored.path))
-                    }
-                    Kind.HTML -> textContent(htmlToText(readText(input, maxTextBytes)))
+                    Kind.PDF -> store(input, documentId, maxBytes)
+                    Kind.HTML -> textContent(heldToRow(htmlToText(readText(input, maxHtmlBytes)), maxTextBytes))
                     Kind.TEXT -> textContent(readText(input, maxTextBytes))
                 }
             }
@@ -116,7 +122,19 @@ class FullTextUpload @Inject constructor(
         } catch (e: SecurityException) {
             Log.e(TAG, "The file chosen for $documentId could not be opened", e)
             throw FullTextUploadException("The file could not be opened.")
+        } catch (e: OutOfMemoryError) {
+            // A small heap, several copies of a page while it is reduced: told, never a crash
+            Log.e(TAG, "The file chosen for $documentId is too large to read on this device", e)
+            throw FullTextUploadException(TOO_LARGE_FOR_DEVICE_MESSAGE)
         }
+    }
+
+    /** An HTML page's text, refused rather than cut when longer than a row can hold. */
+    private fun heldToRow(text: String, maxTextBytes: Long): String {
+        if (text.toByteArray(Charsets.UTF_8).size > maxTextBytes) {
+            throw FullTextUploadException(textTooLongMessage(maxTextBytes))
+        }
+        return text
     }
 
     /** A text file's content; one with no text is refused rather than stored as a full text. */
@@ -133,35 +151,43 @@ class FullTextUpload @Inject constructor(
     }
 
     /**
-     * Copy a chosen PDF to its stored name, replacing an earlier upload only once
-     * the copy is whole.
+     * Copy a chosen PDF to its stored name, with its text, replacing an earlier
+     * upload only once the copy is whole and read: a cancel during the copy or
+     * the read leaves the earlier PDF beside the text the row holds of it. A
+     * cancel after the rename, before the caller writes the row, can still
+     * leave the new PDF beside the old text (Deferred: #776).
      */
-    private fun store(input: InputStream, documentId: String, maxBytes: Long): File {
+    private suspend fun store(input: InputStream, documentId: String, maxBytes: Long): FullTextUploadContent.Pdf {
         val folder = File(context.filesDir, Constants.UPLOADED_FULLTEXT_DIR).apply { mkdirs() }
         // An identifier may hold characters a file name cannot
         val name = documentId.map { if (it.isLetterOrDigit()) it else '_' }.joinToString("")
         val destination = File(folder, "uploaded-$name.pdf")
+        // A staged copy an upload killed with the app left behind, never cleared by the system
+        folder.listFiles { file -> file.name.startsWith("uploaded-$name.") && file.name.endsWith(".part") }
+            ?.forEach(File::delete)
         val staged = File.createTempFile("uploaded-$name.", ".part", folder)
         try {
             staged.outputStream().use { output -> copyBounded(input, output, maxBytes) }
+            val text = extractedPdfText(staged.path)
             if (!staged.renameTo(destination)) throw IOException("the PDF could not be stored")
+            return FullTextUploadContent.Pdf(destination.path, text)
         } finally {
             staged.delete()
         }
-        return destination
     }
 
     /** Read a text file, refusing one too large to read whole or not UTF-8. */
-    private fun readText(input: InputStream, maxBytes: Long): String {
+    private suspend fun readText(input: InputStream, maxBytes: Long): String {
         val bytes = java.io.ByteArrayOutputStream().also { copyBounded(input, it, maxBytes) }.toByteArray()
         return decodedUtf8(bytes)
     }
 
-    /** Copy a stream, refusing past [maxBytes] rather than keeping part of it. */
-    private fun copyBounded(input: InputStream, output: java.io.OutputStream, maxBytes: Long) {
+    /** Copy a stream, refusing past [maxBytes] rather than keeping part of it; a cancel stops it (#764). */
+    private suspend fun copyBounded(input: InputStream, output: java.io.OutputStream, maxBytes: Long) {
         val buffer = ByteArray(COPY_BUFFER_BYTES)
         var total = 0L
         while (true) {
+            currentCoroutineContext().ensureActive()
             val read = input.read(buffer)
             if (read < 0) return
             total += read
@@ -187,6 +213,9 @@ class FullTextUpload @Inject constructor(
         const val PDF_WITHOUT_TEXT_MESSAGE = "The PDF was stored, but its text could not be read or is too long " +
             "to keep, so the analysis still reads the paper's abstract."
 
+        /** Told when a file passed its size bound but this device's memory could not hold it while read. */
+        const val TOO_LARGE_FOR_DEVICE_MESSAGE = "The file is too large to read on this device, so it was not used."
+
         /** Told when the chosen text file holds no text. */
         const val NO_TEXT_MESSAGE = "The file holds no text, so it was not used."
 
@@ -199,10 +228,20 @@ class FullTextUpload @Inject constructor(
          * @param maxBytes The limit applied
          * @return The sentence
          */
-        fun tooLargeMessage(maxBytes: Long): String {
+        fun tooLargeMessage(maxBytes: Long): String = "The file is larger than ${shownSize(maxBytes)}, so it was not used."
+
+        /**
+         * Told when an HTML page's text is longer than a document's row can hold.
+         *
+         * @param maxBytes The limit applied
+         * @return The sentence
+         */
+        fun textTooLongMessage(maxBytes: Long): String =
+            "The page's text is longer than ${shownSize(maxBytes)}, so it was not used."
+
+        private fun shownSize(maxBytes: Long): String {
             val megabytes = maxBytes.toDouble() / BYTES_PER_MEGABYTE
-            val shown = if (megabytes >= 1) "%.0f MB".format(Locale.ROOT, megabytes) else "$maxBytes bytes"
-            return "The file is larger than $shown, so it was not used."
+            return if (megabytes >= 1) "%.0f MB".format(Locale.ROOT, megabytes) else "$maxBytes bytes"
         }
 
         private const val BYTES_PER_MEGABYTE = 1024 * 1024
@@ -258,13 +297,16 @@ class FullTextUpload @Inject constructor(
          * shortcut: a regex reading of HTML, enough for the prose citation
          * extraction needs; use a real parser if uploaded pages lose their text.
          *
+         * Linear in the page (#763): a lazy regex from each unclosed opener
+         * scanned to the page's end, 400 KB of `<script ` taking 35 s.
+         *
          * @param html The page
          * @return Its text
          */
-        internal fun htmlToText(html: String): String = html
-            .replace(Regex("(?is)<(script|style|head)\\b.*?</\\1\\s*>"), " ")
-            .replace(Regex("(?i)<br\\s*/?>|</(p|div|h[1-6]|li|tr|section|article|blockquote)\\s*>"), "\n")
-            .replace(Regex("(?s)<[^>]*>"), " ")
+        internal fun htmlToText(html: String): String = withoutTags(
+            withoutSkipped(html)
+                .replace(Regex("(?i)<br\\s*/?>|</(p|div|h[1-6]|li|tr|section|article|blockquote)\\s*>"), "\n")
+        )
             .replace(Regex("&#(\\d+);")) { match ->
                 match.groupValues[1].toIntOrNull()?.takeIf(Character::isValidCodePoint)
                     ?.let { String(Character.toChars(it)) } ?: match.value
@@ -274,6 +316,65 @@ class FullTextUpload @Inject constructor(
             .lines().joinToString("\n") { it.replace(Regex("[ \\t]+"), " ").trim() }
             .replace(Regex("\n{3,}"), "\n\n")
             .trim()
+
+        // One group per name: Android's case-insensitive matching is Unicode-aware,
+        // so the opener's text (`<ſcript`) need not lowercase to a name
+        private val SKIPPED_OPENER = Pattern.compile("(?i)<(?:(script)|(style)|(head))\\b")
+        private val SKIPPED_CLOSERS = listOf("script", "style", "head").map { Pattern.compile("(?i)</$it\\s*>") }
+
+        /**
+         * The page with each script, style and head dropped, its tags with it.
+         * An opener never closed is left for [withoutTags]. Each pattern keeps
+         * one matcher that only moves forward, so no stretch of the page is
+         * scanned twice: a match of either kind holds a single `<`, its first
+         * character, so matches never overlap and a matcher passes none. Never
+         * `find(start)`, which resets the matcher and on Android hands native
+         * code the whole page again.
+         */
+        private fun withoutSkipped(html: String): String {
+            val kept = StringBuilder(html.length)
+            val opener = SKIPPED_OPENER.matcher(html)
+            val closers = SKIPPED_CLOSERS.map { it.matcher(html) }
+            // Per name: its matcher holds a match; it has none left
+            val matched = BooleanArray(closers.size)
+            val exhausted = BooleanArray(closers.size)
+            var at = 0
+            while (opener.find()) {
+                if (opener.start() < at) continue
+                val named = (1..closers.size).first { opener.group(it) != null } - 1
+                val closer = closers[named]
+                if (!exhausted[named] && !(matched[named] && closer.start() >= opener.end())) {
+                    matched[named] = advancePast(closer, opener.end())
+                    exhausted[named] = !matched[named]
+                }
+                if (exhausted[named]) {
+                    kept.append(html, at, opener.end())
+                    at = opener.end()
+                } else {
+                    kept.append(html, at, opener.start()).append(' ')
+                    at = closer.end()
+                }
+            }
+            return kept.append(html, at, html.length).toString()
+        }
+
+        /** Move [matcher] to its first match starting at or past [from]; false when none is left. */
+        private fun advancePast(matcher: Matcher, from: Int): Boolean {
+            while (matcher.find()) {
+                if (matcher.start() >= from) return true
+            }
+            return false
+        }
+
+        /**
+         * Every tag replaced by a space. Past the page's last `>` nothing can
+         * be a tag, and a `<` there would scan to the end for one: only the
+         * part before it is searched.
+         */
+        private fun withoutTags(html: String): String {
+            val end = html.lastIndexOf('>') + 1
+            return html.substring(0, end).replace(Regex("<[^>]*>"), " ") + html.substring(end)
+        }
     }
 }
 

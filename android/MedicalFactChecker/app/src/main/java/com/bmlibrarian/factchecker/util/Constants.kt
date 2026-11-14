@@ -668,6 +668,15 @@ object Constants {
     const val MAX_UPLOAD_BYTES = 100L * 1024 * 1024
 
     /**
+     * The largest HTML file a full-text upload reads (#763). Unlike a PDF,
+     * copied to disk, a page is reduced to its text in the heap, a few copies
+     * at once, so it gets a bound a default heap (192–256 MB) can hold rather
+     * than the desktop's; a page saved with its images inline is mostly markup,
+     * so its text is held to [MAX_STORED_TEXT_BYTES] apart.
+     */
+    const val MAX_UPLOAD_HTML_BYTES = 16L * 1024 * 1024
+
+    /**
      * The longest text kept on a document's row, in UTF-8 bytes: an uploaded text
      * file, or the text read from a PDF. Android reads a row through a 2 MB
      * window and cannot read back one larger, which would leave the session's
