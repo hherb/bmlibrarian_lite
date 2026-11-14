@@ -28,13 +28,17 @@ its slice has landed; add a new section when handing off new work.
   = a bmlib worktree at **`aa47a57`**, 1.9.0's pin), internal track, smoke
   test, tag `android_1.9.0`.
 
-**bmlib re-pinned to `d3b10b5b`** (PR #757, 2026-11-12): the FFI pin and
-the sync ledger both name bmlib `main` `d3b10b5b`. The xcframework is that
-PR's `bmlib-xcframework` artifact and now carries each slice's dSYM (#752,
-closed; bmlib#742), 30 MB instead of ~4 MB; what the apps call barely changed
-(detail in PR #757). The ledger triage (116 rows) lodged
-**#758–#764**, see *Next up*. **Left:** an Apple archive from master lists
-`BmlibFFI.framework.dSYM` with no warning (one from `0641e80c` keeps 1.9.0's pin).
+**bmlib re-pinned to `8c8e689a`** (PR #779, 2026-11-14; the one before was
+`d3b10b5b`, PR #757): the FFI pin and the sync ledger both name bmlib `main`
+`8c8e689a`. The FFI's JATS and retraction code did not change between the
+pins; the bindings gain the shared paper library's objects (`Library`,
+`LibraryScan`), which no app calls. The ledger triage (12 rows) lodged
+**#780** (the bucket's md5 and record shape, all three) and **#781**
+(lenient service JSON, bmlib#753). **Left:** an Apple archive from master
+lists `BmlibFFI.framework.dSYM` with no warning (one from `0641e80c` keeps
+1.9.0's pin). **Decision for the maintainer:** whether lite keeps its
+papers in bmlib's shared paper library (`bmlib.library`); the ledger rows
+say n/a until then.
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
@@ -64,7 +68,7 @@ warning merges the readable checks the same way (`RetractionCheckRecord.merged`,
 **A missing native library** leaves papers unchecked, but stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
 FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C
-~/src/bmlib worktree add --detach <dir> d3b10b5b`); without it they skip
+~/src/bmlib worktree add --detach <dir> 8c8e689a`); without it they skip
 locally, and CI fails if they skip. **A ViewModel test mocks the workflow:
 every new workflow `StateFlow` must be stubbed in the three
 `FactCheckViewModel*Test`s**, or the unstubbed `collect` leaks a
@@ -137,7 +141,7 @@ contract `doc/cross_platform/retraction_parity/`). bmlib comes from PyPI (`>=0.1
   windows, 250 overlap, no reference list, **one window failing fails the
   paper**, never `text[:N]`; contract `text_windows.json`).
 - **bmlib: the FFI pin and the port set** (#583; PRs #564–#570, #572). The
-  pin names bmlib `main` (`d3b10b5b`, PR #757); `android-tests.yml` builds
+  pin names bmlib `main` (`8c8e689a`, PR #779); `android-tests.yml` builds
   bmlib there and fails if an FFI test skips or the contract copy drifts; **the committed xcframework is
   `bmlib-xcframework.yml`'s own build** (re-pin from its artifact as its
   header says). **`doc/cross_platform/bmlib_sync/ledger.json` records every
@@ -226,26 +230,12 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Next up
 
-- **From the bmlib sync (PR #757)**, fixed, unreleased (a 0.6.1 is the
-  maintainer's call): **#758**/**#759** (no Claude `temperature`; PRs #765,
-  #766), **#760** (PR #767: apps ask Ollama on `/api/chat` with a
-  per-request `num_ctx`, overflow is a 400; Android has no Ollama URL
-  setting; deferred #768, #769), **#761** (PR #771: a reply holding `NaN`,
-  `Infinity`, `1e999` or a lone surrogate is unreadable whole; retries carry
-  `JSON_CORRECTION_NOTE`; deferred #770). **#762** (PR #774, merged): the
-  desktop reads every PDF through bmlib's `PyMuPDFConverter`
-  (`pdf_utils.read_pdf_text`, one read at a time), a typed
-  `PDFExtractionError`; `pdf_title_check` still uses `fitz`; deferred #773.
-  **#763/#764** (Android, PR #775): an HTML upload is read up to
-  16 MB (`MAX_UPLOAD_HTML_BYTES`; a heap too small is refused, never a
-  crash) and only its text held to a row's 1 MB; `htmlToText` is linear
-  (forward-only matchers); `extractedPdfText` checks a cancel before each
-  page and throws it; an upload's copy stops on cancel and reads a PDF's
-  text before replacing an earlier one. Deferred: #776, #777, #778.
-  **bmlib `main` (`644bb0db`) has moved past the pin**:
-  `check_bmlib_ledger.py` against it fails on the entries made since
-  (`bmlib.library`, a shared folder of papers, and bmlib#746–#753 among
-  them) until the next sync triages them.
+- **From the bmlib syncs.** PR #757's issues are fixed and unreleased (a
+  0.6.1 is the maintainer's call; PRs #765–#767, #771, #774, #775). Still
+  deferred: #768, #769 (apps' Ollama), #770 (prompts ask for null), #773
+  (desktop PDF read faults into the report), #776–#778 (Android upload,
+  `PdfText`). PR #779's: **#780** (check the bucket JATS's md5, refuse a
+  record naming another article's file; all three) and **#781**.
 - **Retraction checking** follow-ups (#662, #726–#728, #730, #731 and
   #737–#739 landed; **their rules, the unreadable-snapshot ones above all,
   are in `doc/developer/retraction_checking.md`**: read it before touching
