@@ -37,6 +37,7 @@ import com.bmlibrarian.factchecker.data.remote.debugHttpLoggingInterceptor
 import com.bmlibrarian.factchecker.data.remote.pubmed.PubMedApi
 import com.bmlibrarian.factchecker.data.remote.pubmed.PubMedService
 import com.bmlibrarian.factchecker.data.remote.pubmed.createPubMedApi
+import com.bmlibrarian.factchecker.data.remote.strictJsonRetrofit
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.bmlibrarian.factchecker.util.Constants
@@ -49,9 +50,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
-import retrofit2.converter.scalars.ScalarsConverterFactory
 import java.util.concurrent.TimeUnit
-import javax.inject.Named
 import javax.inject.Singleton
 
 /**
@@ -123,31 +122,6 @@ object NetworkModule {
         val contentType = "application/json".toMediaType()
         return Retrofit.Builder()
             .client(okHttpClient)
-            .addConverterFactory(json.asConverterFactory(contentType))
-    }
-
-    /**
-     * Provides a Retrofit builder with both Scalars and JSON converters.
-     *
-     * Used for APIs that return both XML (as string) and JSON responses.
-     *
-     * @param okHttpClient The OkHttpClient to use for requests
-     * @param json The Json instance for serialization
-     * @return A configured Retrofit.Builder with scalars support
-     */
-    @Provides
-    @Singleton
-    @Named("scalarsAndJson")
-    fun provideScalarsRetrofitBuilder(
-        okHttpClient: OkHttpClient,
-        json: Json
-    ): Retrofit.Builder {
-        val contentType = "application/json".toMediaType()
-        return Retrofit.Builder()
-            .client(okHttpClient)
-            // Scalars first for raw string responses (XML)
-            .addConverterFactory(ScalarsConverterFactory.create())
-            // JSON second for parsed responses
             .addConverterFactory(json.asConverterFactory(contentType))
     }
 
@@ -288,21 +262,16 @@ object NetworkModule {
     /**
      * Provides the Europe PMC API interface.
      *
-     * Uses scalars converter for XML full-text responses.
+     * Scalars for XML full-text responses; JSON read strictly ([strictJsonRetrofit], #781).
      *
-     * @param retrofitBuilder The Retrofit builder with scalars support
+     * @param okHttpClient The shared client
+     * @param json The Json instance for search responses
      * @return Europe PMC API interface
      */
     @Provides
     @Singleton
-    fun provideEuropePMCApi(
-        @Named("scalarsAndJson") retrofitBuilder: Retrofit.Builder
-    ): EuropePMCApi {
-        return retrofitBuilder
-            .baseUrl(Constants.EUROPE_PMC_BASE_URL)
-            .build()
-            .create(EuropePMCApi::class.java)
-    }
+    fun provideEuropePMCApi(okHttpClient: OkHttpClient, json: Json): EuropePMCApi =
+        strictJsonRetrofit(okHttpClient, json, Constants.EUROPE_PMC_BASE_URL).create(EuropePMCApi::class.java)
 
     /**
      * Provides the Europe PMC service.
@@ -321,19 +290,17 @@ object NetworkModule {
     /**
      * Provides the Unpaywall API interface.
      *
-     * Used for looking up open access PDF versions of articles.
+     * Used for looking up open access PDF versions of articles; its JSON is read
+     * strictly ([strictJsonRetrofit], #781).
      *
-     * @param retrofitBuilder The Retrofit builder to use
+     * @param okHttpClient The shared client
+     * @param json The Json instance for Unpaywall's answers
      * @return Unpaywall API interface
      */
     @Provides
     @Singleton
-    fun provideUnpaywallApi(retrofitBuilder: Retrofit.Builder): UnpaywallApi {
-        return retrofitBuilder
-            .baseUrl(UnpaywallApi.BASE_URL)
-            .build()
-            .create(UnpaywallApi::class.java)
-    }
+    fun provideUnpaywallApi(okHttpClient: OkHttpClient, json: Json): UnpaywallApi =
+        strictJsonRetrofit(okHttpClient, json, UnpaywallApi.BASE_URL).create(UnpaywallApi::class.java)
 
     // ==================== Full-Text Service ====================
 

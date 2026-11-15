@@ -167,10 +167,7 @@ def test_the_desktop_discovers_the_same_pdfs(row: dict[str, Any]) -> None:
 
     class _Answer:
         status_code = 200
-
-        @staticmethod
-        def json() -> dict[str, Any]:
-            return row["response"]
+        content = json.dumps(row["response"]).encode()
 
         @staticmethod
         def raise_for_status() -> None:

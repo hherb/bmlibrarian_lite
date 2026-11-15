@@ -18,7 +18,6 @@ The pure functions here are pinned with the Swift and Kotlin ports by
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -33,14 +32,13 @@ from .constants import (
     HTTP_NOT_FOUND,
     HTTP_OK,
     OPENALEX_API_BASE_URL,
-    OPENALEX_ENCODING,
     OPENALEX_MAX_RETRIES,
     OPENALEX_REQUEST_TIMEOUT_SECONDS,
     RETRYABLE_HTTP_STATUSES,
 )
 from .data_models import RequestFailure, RequestFailureKind
 from .polite_session import mount_politely
-from .search_failures import request_failure_from_exception
+from .search_failures import request_failure_from_exception, strict_response_json
 
 logger = logging.getLogger(__name__)
 
@@ -246,11 +244,9 @@ class OpenAlexLocationsClient:
                 RequestFailure(RequestFailureKind.HTTP_STATUS, response.status_code)
             )
         try:
-            # Decoded explicitly, as JSON is UTF-8: ``.json()`` would guess
-            urls = openalex_pdf_urls(
-                json.loads(response.content.decode(OPENALEX_ENCODING))
-            )
-        except ValueError:  # includes UnicodeDecodeError, JSONDecodeError
+            # Read as UTF-8 and strictly: ``.json()`` would guess (#781).
+            urls = openalex_pdf_urls(strict_response_json(response))
+        except ValueError:  # the decode's JSONDecodeError, or the shape's
             return OpenAlexWorkFetch.unreachable(
                 RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
             )

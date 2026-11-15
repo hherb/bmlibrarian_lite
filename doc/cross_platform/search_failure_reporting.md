@@ -54,7 +54,11 @@ A request fails when, after its retries:
   - Europe PMC search: not a JSON object; `hitCount` missing or not a
     non-negative integer; `resultList.result` missing or not a list. Checked
     live on 2026-09-14: an unknown `cursorMark` answers HTTP 200 with only a
-    `version` field (`{"version":"6.9"}`).
+    `version` field (`{"version":"6.9"}`). The body is read strictly, as
+    bmlib and `serde_json` read it (#781): bytes that are not UTF-8, `NaN`,
+    `Infinity`, a number past binary64 or a lone surrogate escape make it
+    unreadable, on all three platforms. The desktop and Android also refuse a
+    BOM; iOS's `JSONDecoder` reads one.
 - its answer holds less than it says (`incomplete_response`):
   - esearch lists fewer PMIDs than `min(retmax, count − retstart, 9999 − retstart)`.
     PubMed lists only the first 9,999 records of a search, and `retstart`

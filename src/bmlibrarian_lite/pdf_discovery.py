@@ -119,7 +119,7 @@ from .pdf_download import (
 from .pdf_library_check import is_kept, set_aside
 from .pdf_title_check import TitleCheck, TitleCheckOutcome, check_pdf_title
 from .polite_session import mount_politely
-from .search_failures import request_failure_from_exception
+from .search_failures import request_failure_from_exception, strict_response_json
 
 logger = logging.getLogger(__name__)
 
@@ -1445,7 +1445,7 @@ class PDFDiscoverer:
             # bare `except Exception` used to hide every shape error here
             # along with the request failures; narrowing it means each shape
             # is now tested for rather than caught after the fact.
-            data = response.json()
+            data = strict_response_json(response)
             if not isinstance(data, dict):
                 return None, self._unreadable_id_converter(pmid, "not an object")
             records = data.get("records", [])
@@ -1584,7 +1584,7 @@ class PDFDiscoverer:
                 return sources, None
 
             response.raise_for_status()
-            data = response.json()
+            data = strict_response_json(response)
 
             # Every location's PDF URL, best location first. A location with
             # none whose ``url`` is a PMC article page yields the PMC renders

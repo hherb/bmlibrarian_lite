@@ -17,7 +17,6 @@ URL, a log line or a ``repr``.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -31,7 +30,6 @@ from urllib3.util.retry import Retry
 from .constants import (
     CORE_API_BASE_URL,
     CORE_BACKOFF_FACTOR,
-    CORE_ENCODING,
     CORE_KEY_REFUSED_STATUS,
     CORE_MAX_RETRIES,
     CORE_MIN_FULLTEXT_CHARS,
@@ -56,7 +54,7 @@ from .data_models import (
 )
 from .keyed_service_session import KeyedServiceSession, key_digest
 from .polite_session import mount_politely
-from .search_failures import request_failure_from_exception
+from .search_failures import request_failure_from_exception, strict_response_json
 
 logger = logging.getLogger(__name__)
 
@@ -429,7 +427,7 @@ class CoreTextClient:
                 RequestFailure(RequestFailureKind.HTTP_STATUS, response.status_code)
             )
         try:
-            text = core_full_text(json.loads(response.content.decode(CORE_ENCODING)), doi)
+            text = core_full_text(strict_response_json(response), doi)
         except (ValueError, RecursionError) as error:
             # ValueError: not UTF-8, not JSON, or not the expected shape.
             # RecursionError: nested deeper than the parser can follow.

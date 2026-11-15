@@ -3110,11 +3110,11 @@
     {
       "id": "bmlib#753",
       "title": "`FullTextService` reads its three remaining JSON bodies as the Rust port does",
-      "python": "owed",
-      "swift": "owed",
-      "android": "owed",
+      "python": "ported",
+      "swift": "equivalent",
+      "android": "ported",
       "issue": "#781",
-      "note": "Lite's own Europe PMC search, ID Converter and Unpaywall readers are not bmlib's `FullTextService`, but the rule (a body `serde_json` refuses is a fault) is theirs to match: the desktop decodes them with `requests`' `.json()`, which accepts a BOM, `NaN`, `Infinity` and a lone surrogate; Android's kotlinx.serialization and Swift's decoders are to be checked against the same list (#781)."
+      "note": "Lite's own Europe PMC search, ID Converter and Unpaywall readers are not bmlib's `FullTextService`, but the rule (a body `serde_json` refuses is a fault) is theirs to match (#781). The desktop reads them, and OpenAlex, CORE, CrossRef, ClinicalTrials.gov and the transparency analysis' own clients, through `search_failures.strict_response_json` (bmlib's `strict_json_loads` over strict UTF-8; the search's PubMed reader, `pubmed/search_client.py`, keeps reading E-utilities' raw control characters). Android reads Europe PMC and Unpaywall through `strictJsonRetrofit` (strict UTF-8, no BOM, `ResponseParser.holdsRefusedValue`); nesting past 127 levels is read. Swift's `JSONDecoder` already refuses `NaN`, `Infinity`, `1e999`, a lone surrogate and bytes that are not UTF-8 (probed 2026-11-15); it reads a BOM and deep nesting, both still readable bodies, as iOS's model replies do (#761)."
     },
     {
       "id": "bmlib#746",

@@ -225,6 +225,16 @@ def test_an_answer_nested_too_deep_is_malformed() -> None:
     assert fetch.failure == RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
 
 
+@pytest.mark.parametrize("value", [b"NaN", b"Infinity", b"1e999"])
+def test_an_answer_holding_a_value_json_does_not_define_is_malformed(value: bytes) -> None:
+    """A text served beside ``NaN`` or an overflowing number is not read (#781)."""
+    text = b"x" * CORE_MIN_FULLTEXT_CHARS
+    body = b'{"results": [{"doi": "' + DOI.encode() + b'", "fullText": "' + text + b'", "n": ' + value + b"}]}"
+    with running({PATH: [_body(body)]}) as server:
+        fetch = _client(server.url).fetch_full_text(DOI)
+    assert fetch.failure == RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+
+
 def test_a_text_one_short_of_the_minimum_is_absent_through_the_client() -> None:
     """The service holds the production minimum, not just the pure rule's."""
     short = {"results": [{"doi": DOI, "fullText": "x" * (CORE_MIN_FULLTEXT_CHARS - 1)}]}

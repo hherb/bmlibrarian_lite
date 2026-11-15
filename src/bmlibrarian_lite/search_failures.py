@@ -21,6 +21,9 @@ Pure functions that carry a search failure from the HTTP layer to the reader:
 - :func:`request_failure_from_exception` reduces a ``requests`` exception to a
   :class:`~bmlibrarian_lite.data_models.RequestFailure`, keeping nothing that
   could print the NCBI API key.
+- :func:`strict_response_json` reads a response's JSON body as bmlib and
+  ``serde_json`` read it, refusing what they refuse as ``requests``' own
+  ``JSONDecodeError`` (#781).
 - :func:`shortfalls_for_missing_records` and :func:`combined_shortfalls` build
   the :class:`~bmlibrarian_lite.data_models.RetrievalShortfall` list a search
   records.
@@ -38,15 +41,17 @@ The contract, which the Swift and Android ports mirror, is in
 ``doc/cross_platform/search_failure_reporting.md``.
 """
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from http import HTTPStatus
 from typing import Any
 
 import requests
+from bmlib.llm.utils import strict_json_loads
 from urllib3.exceptions import MaxRetryError, ReadTimeoutError
 
-from .constants import RETRIEVAL_SHORTFALLS_METADATA_KEY
+from .constants import RETRIEVAL_SHORTFALLS_METADATA_KEY, SERVICE_JSON_ENCODING
 from .data_models import RequestFailure, RequestFailureKind, RetrievalShortfall, SearchProvider
 from .exceptions import SearchFailedError
 
@@ -76,6 +81,42 @@ def request_failure_from_exception(exc: requests.RequestException) -> RequestFai
     if isinstance(exc, requests.exceptions.InvalidJSONError):
         return RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
     return RequestFailure(RequestFailureKind.REQUEST_FAILED)
+
+
+def strict_response_json(response: requests.Response) -> Any:
+    """A response's JSON body, read as bmlib and ``serde_json`` read it (#781).
+
+    ``Response.json()`` guesses at a charset and accepts a BOM, ``NaN``,
+    ``Infinity``, a number past the largest float, a lone surrogate escape
+    and nesting past 127 levels; a lone surrogate then reaches SQLite and the
+    report as text that cannot be encoded. A body we cannot read is a
+    failure, not an answer (golden rule 3), so each of those is refused here,
+    as is a body that is not UTF-8 or nested too deeply to decode at all.
+
+    Args:
+        response: The answer.
+
+    Returns:
+        The decoded value.
+
+    Raises:
+        requests.exceptions.JSONDecodeError: For every refusal. It is a
+            ``RequestException`` and a ``ValueError``, as ``.json()``'s is, so
+            each caller's handler and :func:`request_failure_from_exception`
+            (``MALFORMED_RESPONSE``) read it unchanged.
+    """
+    try:
+        return strict_json_loads(response.content.decode(SERVICE_JSON_ENCODING))
+    except json.JSONDecodeError as exc:
+        raise requests.exceptions.JSONDecodeError(exc.msg, exc.doc, exc.pos) from None
+    except UnicodeDecodeError as exc:
+        raise requests.exceptions.JSONDecodeError(
+            f"not {SERVICE_JSON_ENCODING}: {exc.reason}", "", exc.start
+        ) from None
+    except RecursionError:
+        # The decoder recurses before bmlib's depth check runs; bmlib's pin
+        # predates its own fix (bmlib#758).
+        raise requests.exceptions.JSONDecodeError("nested too deeply to decode", "", 0) from None
 
 
 def _is_spent_timeout_retry(exc: requests.RequestException) -> bool:
