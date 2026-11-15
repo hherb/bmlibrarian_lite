@@ -243,8 +243,7 @@ Open issues by family; each issue carries the detail. None blocks another.
   deferred: #768, #769 (apps' Ollama), #770 (prompts ask for null), #773
   (desktop PDF read faults into the report; `pdf_title_check` still opens
   PDFs with `fitz`), #776–#778 (Android upload, `PdfText`), #772 (iOS
-  unreadable citation reply; needs a decision). **#786**: an integration
-  test expects a PDF where PMC's bucket now serves the XML first.
+  unreadable citation reply; needs a decision).
 - **Retraction checking** follow-ups (#662, #726–#728, #730, #731 and
   #737–#739 landed; **their rules, the unreadable-snapshot ones above all,
   are in `doc/developer/retraction_checking.md`**: read it before touching

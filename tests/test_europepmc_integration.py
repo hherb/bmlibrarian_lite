@@ -39,6 +39,7 @@ from bmlibrarian_lite.fulltext_discovery import (
     FulltextDiscoverer,
     FulltextSourceType,
 )
+from bmlibrarian_lite.pmc_open_data import PmcOpenDataFetch
 
 # Known open-access articles with JATS XML full text
 TEST_ARTICLES = [
@@ -272,6 +273,14 @@ PMC_PDF_ONLY_ARTICLE = {
 }
 
 
+class _AbsentBucket:
+    """PMC's open-data bucket answering "not here"; no request is made."""
+
+    def fetch_xml(self, pmcid: str) -> PmcOpenDataFetch:
+        """Answer that the bucket holds nothing."""
+        return PmcOpenDataFetch.absent()
+
+
 @pytest.mark.integration
 class TestPMCPDFDiscovery:
     """Tests for PMC PDF fallback when JATS XML is unavailable.
@@ -314,14 +323,16 @@ class TestPMCPDFDiscovery:
         )
 
     def test_discover_fulltext_finds_pdf_fallback(self, tmp_path: Path) -> None:
-        """Skipped at the XML tier, the article reaches the PDF tiers.
+        """Skipped at the XML tiers, the article reaches the PDF tiers.
 
         The caches are bypassed, so a warm cache cannot answer instead of
-        the path under test. Europe PMC's render answered 403 to every
+        the path under test. PMC's open-data bucket serves this article's
+        JATS ahead of the PDF tiers (#786), so it answers "not here" (no
+        request is made). Europe PMC's render answered 403 to every
         non-browser client on 2026-10-01 (#453); while it does, the chain
         must say so rather than settle an absence.
         """
-        discoverer = FulltextDiscoverer()
+        discoverer = FulltextDiscoverer(pmc_open_data=_AbsentBucket())
         with (
             patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext", return_value=None),
             patch("bmlibrarian_lite.fulltext_discovery.find_existing_pdf", return_value=None),
