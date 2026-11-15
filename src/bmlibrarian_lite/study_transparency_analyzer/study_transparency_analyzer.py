@@ -49,6 +49,7 @@ from ..pubmed.record_ids import (
 from ..analysis_failures import (
     COI_DISCLOSURE_SOUGHT,
     PUBMED_NOT_ASKED_FOR_PMID_CLAUSE,
+    PUBMED_PMID_NOT_LOOKED_UP_CLAUSE,
     coi_not_assessed_caveat,
     configuration_nudge,
     not_saved_note,
@@ -333,8 +334,8 @@ class TransparencyReport:
 
     # Whether PubMed could not be read at all, as opposed to answering that
     # it holds no such article. Only the first is our silence (#346, #356).
-    # Also set, with no PMID, when the ID converter a DOI-only study's PMID
-    # is looked up in could not be read (#785).
+    # Also set, with no PMID, when a DOI-only study's PMID could not be
+    # looked up (#785).
     pubmed_record_unreachable: bool = False
 
     # Whether the caller gave a PMID that PubMed could not be asked by: a
@@ -441,7 +442,7 @@ def funding_was_assessed(report: TransparencyReport) -> bool:
     pubmed_owed = (
         bool(report.pmid)
         or report.pubmed_identifier_unusable
-        # The ID converter went unread, so PubMed was owed its question (#785)
+        # Its PMID lookup went unread, so PubMed was owed its question (#785)
         or report.pubmed_record_unreachable
     )
     return not (
@@ -1493,15 +1494,52 @@ class PubMedClient:
         response = self.session.get(url, params=params, timeout=30)
         # An error status is no answer: its body would read as "no PMID" (#785)
         response.raise_for_status()
-        data = strict_response_json(response)
+        records = strict_response_json(response).get('records')
+        # A body without its records is no answer, not "no PMID" (#785)
+        if not isinstance(records, list):
+            raise ValueError("the ID converter's answer carries no records")
 
         result = {}
-        for record in data.get('records', []):
-            source_id = record.get(from_type)
+        for record in records:
+            # Keyed by the id as asked: the record's own is PMC's spelling,
+            # which differs in case from a DOI as the caller wrote it (#785)
+            source_id = record.get('requested-id') or record.get(from_type)
             target_id = record.get(to_type)
             if source_id and target_id:
                 result[source_id] = target_id
         return result
+
+    def find_pmid_by_doi(self, doi: str) -> str | None:
+        """Ask PubMed's own index for the PMID of the article a DOI names.
+
+        PMC's ID converter knows only the articles PubMed Central holds, so
+        its "no PMID" says nothing of the many PubMed holds outside it
+        (#785).
+
+        Args:
+            doi: The DOI to look up.
+
+        Returns:
+            The PMID of the one article PubMed holds with this DOI, or
+            ``None`` when it holds none.
+
+        Raises:
+            requests.RequestException: If PubMed could not be read.
+            ValueError: If PubMed names more than one article for the DOI,
+                so which is the study cannot be told.
+            KeyError, TypeError, AttributeError: If its answer is of a shape
+                we cannot read.
+        """
+        response = self._make_request(
+            'esearch.fcgi',
+            {'db': 'pubmed', 'term': f'"{doi}"[doi]', 'retmode': 'json'},
+        )
+        ids = strict_response_json(response)['esearchresult']['idlist']
+        if not isinstance(ids, list):
+            raise TypeError("PubMed's search answer carries no id list")
+        if len(ids) > 1:
+            raise ValueError(f"PubMed names {len(ids)} articles for one DOI")
+        return ids[0] if ids else None
 
     def _parse_pubmed_xml(self, xml_text: str, pmid: str) -> RecordFetch:
         """Parse PubMed XML response into structured data.
@@ -2223,6 +2261,11 @@ _END_MATTER_SECTIONS = ('funding', 'funding_role', 'acknowledgments', 'contribut
 PUBMED_RECORD_SOUGHT = (
     "what PubMed records about this study, including its trial registrations"
 )
+
+#: What a DOI-to-PMID lookup's answer raises when it is of a shape we cannot
+#: read (#785): a body or record that is not a dict, an unhashable or
+#: missing id, records that are not a list, or more than one article named.
+_ID_LOOKUP_SHAPE_FAULTS = (AttributeError, KeyError, TypeError, ValueError)
 
 #: What an unread CrossRef record leaves unestablished.
 CROSSREF_RECORD_SOUGHT = "the funders CrossRef records for this study"
@@ -3264,9 +3307,10 @@ class StudyTransparencyAnalyzer:
                     report.doi = record_doi
 
                 # Get PMCID, keeping one already on the report. analyze()
-                # sets one only from a PMC ID given as the PMID, and then has
-                # no PMID to ask PubMed with, so through analyze() this guard
-                # never decides; it keeps a direct caller's PMC ID theirs.
+                # sets one only from a PMC ID given as the PMID; PubMed is
+                # then read only when a DOI given beside it was looked up to
+                # a PMID (#785). The guard keeps that PMC ID, and a direct
+                # caller's, theirs.
                 if pubmed_data.get('pmcid') and not report.pmcid:
                     report.pmcid = pubmed_data['pmcid']
 
@@ -3319,26 +3363,31 @@ class StudyTransparencyAnalyzer:
                 report._crossref_funders = crossref_data.get('funder', [])
 
     def _look_up_pmid(self, report: TransparencyReport, doi: str) -> None:
-        """Look a DOI-only study's PMID up in PubMed Central's ID converter.
+        """Look a DOI-only study's PMID up, in PMC's ID converter, then PubMed.
 
-        A converter we could not read, or whose answer we could not, leaves
-        PubMed unasked for a record it may hold: that is recorded as PubMed
-        unreachable, never as a study PubMed holds no record of (#785). Only
-        the converter's own answer naming no PMID is an absence.
+        The converter knows only articles in PubMed Central, so when it names
+        no PMID, PubMed's own index is searched for the DOI. A source we
+        could not read, or whose answer we could not, leaves PubMed unasked
+        for a record it may hold: that is recorded as PubMed unreachable,
+        never as a study PubMed holds no record of (#785). Only PubMed's own
+        answer that no article carries the DOI is an absence.
 
         Args:
-            report: The report whose ``pmid`` is set when the converter
-                names one.
+            report: The report whose ``pmid`` is set when a PMID is found.
             doi: The report's DOI.
         """
+        service = SERVICE_PMC_ID_CONVERTER
+        fault: Exception | None = None
         try:
             found = self.pubmed.convert_ids([doi], 'doi', 'pmid').get(doi)
-        except Exception as e:  # convert_ids also raises on a body of the wrong shape
-            failure = (
-                request_failure_from_exception(e)
-                if isinstance(e, requests.RequestException)
-                else RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
-            )
+            if found is None:
+                service = SERVICE_PUBMED
+                found = self.pubmed.find_pmid_by_doi(doi)
+        except requests.RequestException as e:
+            failure = request_failure_from_exception(e)
+        except _ID_LOOKUP_SHAPE_FAULTS as e:
+            fault = e
+            failure = RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
         else:
             if found is None:
                 return
@@ -3350,16 +3399,16 @@ class StudyTransparencyAnalyzer:
             # run of digits as a PMID of its own (bmlib#470)
             failure = RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
         logger.warning(
-            "The ID converter could not be read for DOI %s (%s), so PubMed "
-            "was not asked about this study.",
+            "%s could not be read for DOI %s (%s), so PubMed was not asked "
+            "about this study.",
+            service,
             doi,
             failure.describe(),
+            exc_info=fault,
         )
         report.pubmed_record_unreachable = True
         report.warnings.append(
-            unreachable_source_caveat(
-                SERVICE_PMC_ID_CONVERTER, failure, PUBMED_RECORD_SOUGHT
-            )
+            unreachable_source_caveat(service, failure, PUBMED_RECORD_SOUGHT)
         )
 
     def _fetch_funder_info(self, report: TransparencyReport):
@@ -3382,12 +3431,7 @@ class StudyTransparencyAnalyzer:
             name
             for name, was_unreachable, could_ask in (
                 (SERVICE_CROSSREF, report.crossref_record_unreachable, report.doi),
-                # An unread ID converter leaves PubMed unasked, so no PMID (#785)
-                (
-                    SERVICE_PUBMED,
-                    report.pubmed_record_unreachable,
-                    report.pmid or report.pubmed_record_unreachable,
-                ),
+                (SERVICE_PUBMED, report.pubmed_record_unreachable, report.pmid),
             )
             if could_ask and was_unreachable
         ]
@@ -3410,12 +3454,17 @@ class StudyTransparencyAnalyzer:
             if could_ask and not was_read and not was_unreachable
         ]
         clause = unread_records_clause(unreachable, absent)
+        not_asked = None
         if report.pubmed_identifier_unusable and not report.pubmed_record_read:
             # The caller named a PubMed record by a value PubMed cannot be
             # asked by: neither unreachable nor absent, but unasked (#356)
-            clause = " and ".join(
-                part for part in (clause, PUBMED_NOT_ASKED_FOR_PMID_CLAUSE) if part
-            )
+            not_asked = PUBMED_NOT_ASKED_FOR_PMID_CLAUSE
+        elif report.pubmed_record_unreachable and not report.pmid:
+            # The DOI's PMID could not be looked up, so PubMed's record was
+            # never asked for: unasked too, not unread (#785)
+            not_asked = PUBMED_PMID_NOT_LOOKED_UP_CLAUSE
+        if not_asked:
+            clause = " and ".join(part for part in (clause, not_asked) if part)
         if clause:
             report.warnings.append(
                 unassessed_caveat(clause, "this study's funding in full")

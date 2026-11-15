@@ -442,6 +442,7 @@ def test_analyzer_pmc_id_as_pmid_reaches_full_text_discovery(monkeypatch) -> Non
     a.pubmed = MagicMock()
     a.pubmed.fetch_article.side_effect = AssertionError("PubMed was asked")
     a.pubmed.convert_ids.side_effect = AssertionError("the converter was asked")
+    a.pubmed.find_pmid_by_doi.side_effect = AssertionError("PubMed's search was asked")
     a.crossref = MagicMock()
     a.crossref.get_work.side_effect = AssertionError("CrossRef was asked")
     seen: dict = {}
@@ -498,6 +499,7 @@ def _offline_analyzer(pubmed_record: dict | None = None):
     else:
         a.pubmed.fetch_article.return_value = m.RecordFetch.served(pubmed_record)
     a.pubmed.convert_ids.side_effect = AssertionError("the ID converter was asked")
+    a.pubmed.find_pmid_by_doi.side_effect = AssertionError("PubMed's search was asked")
     a.crossref = MagicMock()
     a.crossref.get_work.return_value = m.RecordFetch.served({"title": ["T"], "funder": []})
     return m, a
@@ -529,6 +531,8 @@ def test_a_refused_pmid_beside_a_doi_does_not_answer_from_crossref_alone() -> No
     m, a = _offline_analyzer()
     a.pubmed.convert_ids.side_effect = None
     a.pubmed.convert_ids.return_value = {}
+    a.pubmed.find_pmid_by_doi.side_effect = None
+    a.pubmed.find_pmid_by_doi.return_value = None
     report = a.analyze(doi="10.1/x", pmid="PMID:33301246")
     assert report.crossref_record_read
     assert not m.funding_was_assessed(report)
@@ -537,11 +541,14 @@ def test_a_refused_pmid_beside_a_doi_does_not_answer_from_crossref_alone() -> No
 
 
 def test_a_doi_alone_still_answers_from_crossref() -> None:
-    """Control: no PMID was given, so PubMed was owed nothing and "NO" stands."""
+    """Control: PubMed holds no article with the DOI, so "NO" stands (#785)."""
     m, a = _offline_analyzer()
     a.pubmed.convert_ids.side_effect = None
     a.pubmed.convert_ids.return_value = {}
+    a.pubmed.find_pmid_by_doi.side_effect = None
+    a.pubmed.find_pmid_by_doi.return_value = None
     report = a.analyze(doi="10.1/x")
+    a.pubmed.find_pmid_by_doi.assert_called_once_with("10.1/x")
     assert m.funding_was_assessed(report)
     assert "Industry Funding: NO" in m.format_report_summary(report)
     assert not any("PubMed was not asked" in w for w in report.warnings)
@@ -557,42 +564,73 @@ def test_a_real_pmid_whose_record_names_no_funder_still_answers_no() -> None:
     assert not any("PubMed was not asked" in w for w in report.warnings)
 
 
-# ---- A DOI-only study's PMID, looked up in the ID converter (#785) ----
+# ---- A DOI-only study's PMID, looked up in the ID converter, then PubMed (#785) ----
 
 
 @pytest.mark.parametrize(
-    "answer",
+    ("converted", "searched", "service", "why"),
     [
-        requests.ConnectionError("down"),
-        ValueError("unreadable body"),
-        {"10.1/x": "PMC7745181"},
+        (requests.ConnectionError("down"), None, "PubMed Central's ID converter", "the connection failed"),
+        (ValueError("no records"), None, "PubMed Central's ID converter", "the response could not be read"),
+        ({"10.1/x": "PMC7745181"}, None, "PubMed Central's ID converter", "the response could not be read"),
+        ({}, requests.ConnectionError("down"), "PubMed", "the connection failed"),
+        ({}, ValueError("two articles"), "PubMed", "the response could not be read"),
+        ({}, "PMC7745181", "PubMed", "the response could not be read"),
     ],
-    ids=["unreachable", "unreadable", "not-a-pmid"],
+    ids=[
+        "converter-unreachable",
+        "converter-unreadable",
+        "converter-not-a-pmid",
+        "search-unreachable",
+        "search-unreadable",
+        "search-not-a-pmid",
+    ],
 )
-def test_an_unread_id_converter_leaves_funding_unassessed(answer) -> None:
+def test_an_unread_pmid_lookup_leaves_funding_unassessed(converted, searched, service, why) -> None:
     """Unreachable is not absent: PubMed went unasked, so funding is no "NO"."""
+    from bmlibrarian_lite.transparency.assessment import build_transparency_result
+    from bmlibrarian_lite.transparency.transparency_settings import TransparencySettings
+
     m, a = _offline_analyzer()
-    if isinstance(answer, Exception):
-        a.pubmed.convert_ids.side_effect = answer
-    else:
-        a.pubmed.convert_ids.side_effect = None
-        a.pubmed.convert_ids.return_value = answer
+    for stub, answer in ((a.pubmed.convert_ids, converted), (a.pubmed.find_pmid_by_doi, searched)):
+        stub.side_effect = answer if isinstance(answer, Exception) else None
+        stub.return_value = answer
     report = a.analyze(doi="10.1/x")
     assert report.pmid is None and report.pubmed_record_unreachable
     assert not m.funding_was_assessed(report)
     assert "Industry Funding: Not assessed" in m.format_report_summary(report)
-    assert any("PubMed Central's ID converter" in w for w in report.warnings)
-    assert any("PubMed could not be read" in w for w in report.warnings)
+    caveat = next(w for w in report.warnings if w.startswith(f"{service} could not be read"))
+    assert why in caveat
+    assert any("PMID could not be looked up" in w for w in report.warnings)
+    assert not any("PubMed holds no record" in w for w in report.warnings)
+    assert build_transparency_result("doc-1", report, TransparencySettings()).sources_unreachable
 
 
-def test_a_pmid_the_converter_names_is_read_from_pubmed() -> None:
-    """The converted PMID reaches PubMed, whose grants then count."""
+@pytest.mark.parametrize(
+    ("converted", "searched"),
+    [({"10.1/x": "0123"}, None), ({}, "0123")],
+    ids=["by-the-converter", "by-pubmed-search"],
+)
+def test_a_pmid_found_for_the_doi_is_read_from_pubmed(converted, searched) -> None:
+    """The PMID found reaches PubMed, whose grants then count."""
     m, a = _offline_analyzer(pubmed_record={"title": "T", "grants": [{"agency": "Pfizer"}]})
     a.pubmed.convert_ids.side_effect = None
-    a.pubmed.convert_ids.return_value = {"10.1/x": "0123"}
+    a.pubmed.convert_ids.return_value = converted
+    a.pubmed.find_pmid_by_doi.side_effect = None
+    a.pubmed.find_pmid_by_doi.return_value = searched
     report = a.analyze(doi="10.1/x")
     a.pubmed.fetch_article.assert_called_once_with("123")
     assert report.pubmed_record_read and not report.pubmed_record_unreachable
     assert m.funding_was_assessed(report)
     assert "Industry Funding: YES" in m.format_report_summary(report)
     assert not any("PubMed holds no record" in w for w in report.warnings)
+
+
+def test_a_given_pmid_beside_a_doi_is_never_looked_up() -> None:
+    """A PMID given is read as given: neither lookup is asked (#785)."""
+    m, a = _offline_analyzer(pubmed_record={"title": "T", "grants": []})
+    report = a.analyze(pmid="33301246", doi="10.1/x")
+    a.pubmed.convert_ids.assert_not_called()
+    a.pubmed.find_pmid_by_doi.assert_not_called()
+    assert report.pubmed_record_read and not report.pubmed_record_unreachable
+    assert not any("looked up" in w for w in report.warnings)

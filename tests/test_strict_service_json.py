@@ -205,3 +205,55 @@ def test_an_id_converter_error_status_is_refused() -> None:
     client.session = session_answering(_answer(b'{"records": []}', status=500))
     with pytest.raises(requests.HTTPError):
         client.convert_ids(["10.1/x"], "doi", "pmid")
+
+
+def test_an_id_converter_record_is_keyed_by_the_id_as_asked() -> None:
+    """PMC spells a DOI its own way; the PMID is found for the DOI as asked (#785)."""
+    client = PubMedClient(email="test@example.com")
+    body = b'{"records": [{"doi": "10.1/ab", "pmid": 1, "requested-id": "10.1/AB"}]}'
+    client.session = session_answering(_answer(body))
+    assert client.convert_ids(["10.1/AB"], "doi", "pmid") == {"10.1/AB": 1}
+
+
+def test_an_id_converter_answer_without_records_is_refused() -> None:
+    """A body naming no records is no answer, not "no PMID" (#785)."""
+    client = PubMedClient(email="test@example.com")
+    client.session = session_answering(_answer(b'{"status": "error"}'))
+    with pytest.raises(ValueError):
+        client.convert_ids(["10.1/x"], "doi", "pmid")
+
+
+def _posting(answer: requests.Response):
+    """A session whose ``post`` (E-utilities, by ``_make_request``) returns ``answer``."""
+    session = session_answering(answer)
+    session.post.return_value = answer
+    return session
+
+
+@pytest.mark.parametrize(
+    ("idlist", "pmid"),
+    [(b"[]", None), (b'["23432189"]', "23432189")],
+    ids=["none", "one"],
+)
+def test_pubmed_search_by_doi_is_read(idlist: bytes, pmid: str | None) -> None:
+    """PubMed's own index answers for a DOI PMC does not hold (#785)."""
+    client = PubMedClient(email="test@example.com")
+    client.session = _posting(_answer(b'{"esearchresult": {"idlist": ' + idlist + b"}}"))
+    assert client.find_pmid_by_doi("10.1056/NEJMoa1200303") == pmid
+
+
+@pytest.mark.parametrize(
+    ("body", "fault"),
+    [
+        (b'{"esearchresult": {"idlist": ["1", "2"]}}', ValueError),
+        (b'{"esearchresult": {"ERROR": "bad"}}', KeyError),
+        (b'{"esearchresult": {"idlist": "1"}}', TypeError),
+    ],
+    ids=["two-articles", "no-idlist", "idlist-not-a-list"],
+)
+def test_pubmed_search_by_doi_refuses_an_answer_it_cannot_read(body: bytes, fault: type) -> None:
+    """More than one article, or a shape we cannot read, is never "no PMID"."""
+    client = PubMedClient(email="test@example.com")
+    client.session = _posting(_answer(body))
+    with pytest.raises(fault):
+        client.find_pmid_by_doi("10.1/x")

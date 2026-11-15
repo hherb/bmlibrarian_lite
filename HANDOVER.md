@@ -42,10 +42,12 @@ kotlinx overflowed the stack at 100,000 levels of arrays), Europe PMC and
 Unpaywall via `strictJsonRetrofit` (its own builder), the retraction lookup's
 bytes unchanged to bmlib. **#785 (PR #794, analyser 2.8):** the desktop
 analyser looks a DOI-only study's PMID up *before* reading PubMed (a converted
-PMID was never read, and the reader told "PubMed holds no record"); a
-converter unreachable, unreadable, erroring or naming no PMID sets
-`pubmed_record_unreachable`, so funding is not assessed (the apps never
-convert). **bmlib `main` is past the pin**: bmlib#761, #766 and #780 have no
+PMID was never read, and the reader told "PubMed holds no record"): in PMC's
+ID converter, then, when it names none, PubMed's esearch
+(`find_pmid_by_doi`; the converter holds PMC's articles only). A lookup
+unreachable, an error status, a body it cannot read, more than one article or
+a value that is not a PMID sets `pubmed_record_unreachable`, so funding is not
+assessed (the apps never convert). **bmlib `main` is past the pin**: bmlib#761, #766 and #780 have no
 ledger row yet (the next sync). **Left:** an Apple archive from master lists
 `BmlibFFI.framework.dSYM` with no warning. **The shared paper library:
 decided 2026-11-15** (#788 macOS, #789 desktop, #790 Android); PR #787 (3a)

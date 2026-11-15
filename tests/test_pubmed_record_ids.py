@@ -373,6 +373,7 @@ def _metadata_with(
     asked: list[str] = []
     analyzer.pubmed.fetch_article = lambda pmid: RecordFetch.served(record)
     analyzer.pubmed.convert_ids = lambda *a, **k: {}
+    analyzer.pubmed.find_pmid_by_doi = lambda *a, **k: None
 
     def get_work(asked_doi: str) -> RecordFetch:
         asked.append(asked_doi)
