@@ -356,6 +356,8 @@ enum MacFullTextColors {
         case .doi: return doiTint
         case .cached: return cachedTint
         case .uploaded: return uploadedTint
+        // a copy held on this Mac, as the cache's is
+        case .library: return cachedTint
         }
     }
 }

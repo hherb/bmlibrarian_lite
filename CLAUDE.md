@@ -123,7 +123,8 @@ Shared iOS/macOS components:
   - iCloudSyncStorage, LocalFolderSyncStorage, OnDemandFetcher
   - SessionEvictionManager, WorkspaceInitializer, StorageMonitor
   - ChangeLogReader/Writer, LWWMergeStrategy, IntegrityFunctions
-- `Library/` (bmlib's shared paper library, through BmlibCore): LibraryInstallation (the installation id and label), LibraryState (the setting's state; LibrarySettingsStore); macOS only: LibraryBookmark (security-scoped bookmark), LibraryAccess (LibrarySetup: choose, resume; access held), LibrarySession (the Library setting's logic)
+- iOS: one stop path for running work, `stopWork(_:)`.
+- `Library/` (bmlib's shared paper library, through BmlibCore): LibraryInstallation (the installation id and label), LibraryState (the setting's state; LibrarySettingsStore), FullTextLibrary (the fetch's view of the library: protocol and value types; the library's reading of a paper's ids), UnreachableLibrary (a set library that cannot be reached: every call fails, so sources wait); macOS only: LibraryBookmark (security-scoped bookmark), LibraryAccess (LibrarySetup: choose, resume; access held), LibrarySession (the Library setting's logic), LibrarySource (reads and saves by bmlib's rules; which failures wait)
 - `Retraction/`: RetractionCrossrefLookup, RetractionIndexStore (Retraction Watch index, Wi-Fi only), RetractionChecker, RetractionText, RetractionNames, RetractionReportSection
 - `Utilities/`: RetryHelper, OllamaContext (`num_ctx` per request, native `/api/chat` root), CostCalculator, BudgetChecker, QueryTranslator, ResponseParser, SearchResultMerger, ParallelProcessingConstants, ConcurrencyDetector
 

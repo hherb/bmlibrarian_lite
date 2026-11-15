@@ -193,6 +193,11 @@ struct ParseWarningBannerContent: Equatable {
     /// so nothing about open access went unsettled, and the fault is ours.
     let pdfNotSavedNote: String?
 
+    /// What the reader is told about the shared paper library (design §4.6),
+    /// one line each: lines of their own, since they say where the source is
+    /// kept, not what the text on screen lacks.
+    let libraryNotices: [String]
+
     /// Gather what the banner says.
     ///
     /// - Parameters:
@@ -201,24 +206,29 @@ struct ParseWarningBannerContent: Equatable {
     ///   - extractionCoverage: How much of a PDF yielded text, when one was extracted.
     ///   - openAccessShortfall: Why the open-access copy went unassessed, if it did.
     ///   - pdfNotSavedNote: The caching note, if a PDF was served and not saved.
+    ///   - libraryNotices: What is said about the paper library; none — the
+    ///     default — when nothing is.
     init?(
         warnings: JATSParseWarnings,
         degradation: FullTextDegradation?,
         extractionCoverage: PDFExtractionCoverage?,
         openAccessShortfall: OpenAccessShortfall?,
-        pdfNotSavedNote: String?
+        pdfNotSavedNote: String?,
+        libraryNotices: [String] = []
     ) {
         let message = ParseWarningMessage(
             warnings: warnings,
             degradation: degradation,
             extractionCoverage: extractionCoverage
         )
-        guard message != nil || openAccessShortfall != nil || pdfNotSavedNote != nil else {
+        guard message != nil || openAccessShortfall != nil || pdfNotSavedNote != nil
+            || !libraryNotices.isEmpty else {
             return nil
         }
         self.message = message
         self.openAccessNotice = openAccessShortfall?.notice
         self.pdfNotSavedNote = pdfNotSavedNote
+        self.libraryNotices = libraryNotices
     }
 
     /// Whether the banner is a warning or a note.
@@ -307,6 +317,13 @@ struct ParseWarningBanner: View {
     /// describe need not name it.
     var pdfNotSavedNote: String? = nil
 
+    /// What is said about the shared paper library (design §4.6), from
+    /// `Document.libraryNotices(libraryState:)`.
+    ///
+    /// Defaulted like `pdfNotSavedNote`: only the macOS full-text viewer has
+    /// a library to speak of.
+    var libraryNotices: [String] = []
+
     @State private var showingDetail = false
 
     var body: some View {
@@ -315,7 +332,8 @@ struct ParseWarningBanner: View {
             degradation: degradation,
             extractionCoverage: extractionCoverage,
             openAccessShortfall: openAccessShortfall,
-            pdfNotSavedNote: pdfNotSavedNote
+            pdfNotSavedNote: pdfNotSavedNote,
+            libraryNotices: libraryNotices
         ) {
             VStack(alignment: .leading, spacing: ParseWarningBannerConstants.spacing) {
                 if let message = content.message {
@@ -340,6 +358,18 @@ struct ParseWarningBanner: View {
                 if let note = content.pdfNotSavedNote {
                     Label {
                         Text(verbatim: note)
+                    } icon: {
+                        Image(systemName: "info.circle.fill")
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.primary)
+                }
+
+                // Verbatim and selectable: bmlib's reasons, shown whole for the reader to quote
+                ForEach(Array(content.libraryNotices.enumerated()), id: \.offset) { _, notice in
+                    Label {
+                        Text(verbatim: notice)
+                            .textSelection(.enabled)
                     } icon: {
                         Image(systemName: "info.circle.fill")
                     }

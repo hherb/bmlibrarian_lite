@@ -29,7 +29,7 @@ URL (#493).
 | Elsevier's API | PDF | Good (requires parsing) | Elsevier's articles (`10.1016/`) the requestor is entitled to, by DOI, with a key |
 | Unpaywall | PDF URL | Good (requires parsing) | ~30M open access articles |
 | OpenAlex | PDF URLs | Good (requires parsing) | locations Unpaywall does not list, by DOI |
-| CORE | Plain text | Fair (no structure) | text CORE extracted from repository copies, by DOI, with a key |
+| CORE | Plain text | Fair (no structure) | text CORE extracted from repository copies, by DOI, with a key; a hit counts only by its own DOI |
 | DOI Resolution | Web URL | Variable | Nearly all articles with DOI |
 
 ## Content Kind

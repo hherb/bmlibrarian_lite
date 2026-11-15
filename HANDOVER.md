@@ -10,57 +10,61 @@ its slice has landed; add a new section when handing off new work.
 
 **Release: desktop 0.6.0, apps 1.9.0** (plan
 `docs/superpowers/plans/2026-11-08-release-0.6.0-and-1.9.0.md`).
-- **Tasks 1–10 done** (merge `0641e80c`); deferred #744, #527. **Desktop
-  0.6.0 published 2026-11-10** (`twine` needs `packaging>=26`); mypy is out
-  of the next DMG (#750, not yet a full build). **medfactcheck.org** (PR
-  #753): re-run `website/build_privacy.py` after editing `PRIVACY.md`.
-- **Task 11, apps: the maintainer's.** Apple: **the 1.6 → 1.9.0 upgrade
-  passed on an iPhone 13 Pro Max (2026-11-11)** (Debug build from `0641e80c`,
-  every session and report kept, #289's risk did not show; the "no dSYM"
-  warning is `BmlibFFI`, #752, expected for 1.9.0).
-  Left: archive both schemes, upload, tags `appstore_1.9` / `macos_1.9.0`.
-  Android 1.9.0 (debug, from `0641e80c`) runs on the maintainer's phone over
-  1.6.0. Left: sign a release AAB built at `0641e80c` (`JAVA_HOME` = Android
-  Studio's `jbr`, `BMLIB_DIR` = a bmlib worktree at **`aa47a57`**, 1.9.0's
-  pin), internal track, smoke test, tag `android_1.9.0`.
+- **Tasks 1–10 done** (merge `0641e80c`). Deferred: #744, #527.
+- **Task 11, desktop: published 2026-11-10** from `0641e80c` (PyPI, tag
+  `0.6.0`, signed DMG; `twine` needs `packaging>=26`). **mypy is out of the
+  next DMG** (#750), checked by a PyInstaller analysis, not yet a full build.
+- **medfactcheck.org** (PR #753): `website/build_privacy.py` regenerates
+  `privacy.html` from `PRIVACY.md`.
+- **Task 11, apps: the maintainer's.** Apple: the 1.6 → 1.9.0 upgrade passed
+  on an iPhone 13 Pro Max (2026-11-11; the "no dSYM" warning is `BmlibFFI`,
+  #752, expected). Left: archive both schemes, upload, tags `appstore_1.9` /
+  `macos_1.9.0`. Android 1.9.0 (debug) runs on the maintainer's phone. Left:
+  sign a release AAB built at `0641e80c` (`JAVA_HOME` = Android Studio's
+  `jbr`, `BMLIB_DIR` = a bmlib worktree at **`aa47a57`**), internal track,
+  smoke test, tag `android_1.9.0`.
 
-**The shared paper library** (decided 2026-11-15: every app uses it where its
-platform allows; #788 macOS, #789 desktop, #790 Android; design:
-StudyAnalyzer's `2026-11-13-shared-paper-library-design.md` §5.3). **3a, PR
-#787** (plan `2026-11-15-library-3a-macos-setting.md`): FFI at bmlib
-`ac16ee90` (links refused, `ForeignJats`), the Library tab, BioMedLit
-`Library/` (`LibrarySession` over `LibrarySettingsStore`, which `AppSettings`
-adopts), launch resume, quit stop, `bookmarks.app-scope`; nothing is saved or
-read yet. Review fixes: a volume's `.Trashes` is a Trash; a marker-less folder
-at launch is lost. **Owed by the maintainer:** 3a's sandboxed click-through
-(plan Task 4 Step 5). **Next: 3b**: `FullTextService` looks in the library by
-identifier and saves PDFs and the JATS it converts; `Document` gains each
-file's digest and kind; sources wait while it cannot be reached, with the
-banner (§4.6). Then 3c (the move, §4.7), 3d (the clear, §4.8). **Left:** an
-Apple archive from master lists `BmlibFFI.framework.dSYM` with no warning;
-#784, #785 (PR #783's deferrals); #792 (3a review minors, for 3b).
+**The shared paper library** (decided 2026-11-15: every app, where its platform
+allows; #788 macOS, #789 desktop, #790 Android; design: StudyAnalyzer's
+`2026-11-13-shared-paper-library-design.md` §5.3). **3a, PR #787** (the Library
+tab, `LibrarySession`, launch resume, quit stop). **3b, PR #793, stacked on
+#787** (plan `2026-11-15-library-3b-macos-fetch.md`): FFI at bmlib `747e7a80`
+(`LibraryScan`, `libraryIds`; #784/#785). BioMedLit `Library/`: three types
+(CLAUDE.md); `LibrarySession.recheck()` on activation; `unsaved`: a stale
+bookmark not remade. `FullTextService(…, library:)`: a usable library JATS ends
+the lookup with no request; the chain's JATS and PDFs are kept in the library
+(only a PDF this fetch admitted loses its cache copy, after the save); its PDF
+is used before the PDF tiers, after the title check. A library failure never
+stops a fetch; one that `waits` (not reached, read or written; still being
+reached at launch) leaves the source in the PDF cache (JATS as
+`<cacheKey>-<sha12>.xml`, kept by a cache clear) with `libraryWaiting` set.
+Source `.library` ("Paper library"). `Document` gains
+`fullTextLibrary{SHA256,Kind,Waiting,Note}`; a moved library PDF is found again
+by digest. **Owed by the maintainer: the sandboxed click-throughs.** 3a's (plan
+Task 4 Step 5). 3b's: choose a library; fetch a PMC paper (its JATS appears in
+the library; a re-fetch reads "Paper library", no request); fetch a PDF-only
+paper (it is in the library, not `PDFCache`); unplug or rename the folder and
+switch back (the setting says unreachable; a new fetch says it is kept in this
+app); the record's label is the machine name under the sandbox; `PaperLibrary`
+I/O is synchronous on the service actor: does a hanging (iCloud dataless) read
+block its fetches? **Next: 3c** (move waiting sources and the PDF cache in,
+§4.7; the switch), then 3d (the manual clear, §4.8). **Left:** an Apple archive
+from master lists `BmlibFFI.framework.dSYM` with no warning; #785; the ledger's
+other library rows stay `owed` (#788). 3b's minors: an extraction-off library
+PDF serves `.noText` and asks CORE; `FullTextService` is ~4,500 lines (split);
+the unreachable warning logs on every activation and call. For 3c: *Stop
+using*/*Choose…* mid-fetch stops the old access, so its source waits under a
+wrong reason; after *Stop using* a library PDF reads "no longer on this device"
+(3c's switch: §4.7's "unavailable").
 
 **Strict service JSON (#781 desktop, PR #783; #784 Android, PR #791).** The
-desktop reads every service's JSON but PubMed's esearch (`strict=False`, on
-purpose) through `search_failures.strict_response_json` (bmlib's
-`strict_json_loads`, strict UTF-8, a `RecursionError` refused too; **a test
-double scripts `.content`, never `.json()`**); Swift's `JSONDecoder` already
-refused all but a BOM and depth. Android reads every service's JSON but
-PubMed's esearch as bytes: OpenAlex, CORE, PMC's bucket, CrossRef and
-ClinicalTrials.gov through `strictJsonElement` (`data/remote/StrictJson.kt`:
-non-lenient, no bare word, no raw control character in a string, depth checked
-on the text first: kotlinx overflowed the stack at 100,000 levels of arrays),
-Europe PMC and Unpaywall via `strictJsonRetrofit` (its own builder), the
-retraction lookup's bytes unchanged to bmlib.
-
-**#785 (PR #794, analyser 2.8):** the desktop analyser looks a DOI-only
-study's PMID up *before* reading PubMed (a converted PMID was never read, and
-the reader told "PubMed holds no record"): in PMC's ID converter, then, when
-it names none, PubMed's esearch (`find_pmid_by_doi`; the converter holds
-PMC's articles only). A lookup unreachable, an error status, a body it cannot
-read, more than one article or a value that is not a PMID sets
-`pubmed_record_unreachable`, so funding is not assessed (the apps never
-convert).
+desktop reads every service's JSON but PubMed's esearch through
+`search_failures.strict_response_json` (**a test double scripts `.content`,
+never `.json()`**); Android through `strictJsonElement`
+(`data/remote/StrictJson.kt`) or `strictJsonRetrofit`. **#785 (PR #794,
+analyser 2.8):** the desktop looks a DOI-only study's PMID up before reading
+PubMed (PMC's ID converter, then `find_pmid_by_doi`); any lookup it cannot
+settle sets `pubmed_record_unreachable`, so funding is not assessed.
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
@@ -103,9 +107,7 @@ wait on a fetch** (#665): an OkHttp call a run makes goes through
 `OkHttpClient.executeCancellably` (`util/CancellableCall.kt`), never a bare
 `execute()`; a cancel then ends the call and its body read, thrown as the
 cancellation it is (the one bare `execute()` left, `RetractionIndexStore`'s
-export refresh, runs in the service's own scope, not a run's). Each fetching
-service has a test that cancels a request in flight (`cancelInFlight`, test
-`util/InFlightCancel.kt`).
+export refresh, runs in the service's own scope, not a run's).
 
 **Retraction checking, iOS/macOS: done** (PRs #650, #652; plan
 `docs/superpowers/plans/2026-10-29-retraction-checking-apple.md`). The
@@ -117,10 +119,9 @@ the export cause now reads "(no up-to-date copy is on this device)" in both
 apps, not a Wi-Fi hint a reader on Wi-Fi was given too. **A scored paper with no snapshot row is unchecked in a report written again, never clear** (#657, all three; the snapshot does not gain it); *Check again* checks and counts it (#684: the desktop gives it a row, the apps' line reads its stored check, on Android any session's). A reopen's line counts it unchecked while no check of it is stored (#685: the desktop adds an unchecked row for the line, the apps' `recheckedChecks` the `failed` stand-in).
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
-error follows a cancel). Open, lodged by recent rounds: #641 (JATS whitespace,
-Swift, Kotlin, desktop journal title), #598, #621, #624, #625, #627, #633–#635; Apple #612, #613;
-Android #614, #615, #617–#619. The apps have no refusal handling yet (the
-Python-only rows in `doc/cross_platform/analysis_failure_reporting.md`).
+error follows a cancel). Open: #641, #598, #621, #624, #625, #627, #633–#635;
+Apple #612, #613; Android #614, #615, #617–#619. The apps have no refusal
+handling yet (Python-only rows in `doc/cross_platform/analysis_failure_reporting.md`).
 
 **Owed by the maintainer** (stages C1 and C2 and the desktop browser rescue
 have landed):
@@ -142,8 +143,10 @@ have landed):
   ScienceDirect entry, tick the check, quit; download a supplement there and
   see *Keep this PDF* offered (offscreen smoke passed bar #530's segfault).
 
-**Retraction checking, desktop: done** (PRs #594, #597, #605; spec `docs/superpowers/specs/2026-10-18-retraction-checking-design.md`;
-contract `doc/cross_platform/retraction_parity/`). bmlib comes from PyPI (`>=0.13.0`, the first release with `find_passage`'s contradiction guard; never a git pin, which PyPI refuses). Snapshot rows keep `run_status`/`run_deciding` as set-once facts of the run. Open: #590–#593, #595, #599–#604 (#600 in part), #607.
+**Retraction checking, desktop: done** (PRs #594, #597, #605; spec
+`docs/superpowers/specs/2026-10-18-retraction-checking-design.md`; contract
+`doc/cross_platform/retraction_parity/`). bmlib from PyPI (`>=0.13.0`, never a
+git pin). Snapshot rows keep `run_status`/`run_deciding` as set-once facts.
 
 ## Recently landed (context)
 
@@ -163,7 +166,7 @@ contract `doc/cross_platform/retraction_parity/`). bmlib comes from PyPI (`>=0.1
   windows, 250 overlap, no reference list, **one window failing fails the
   paper**, never `text[:N]`; contract `text_windows.json`).
 - **bmlib: the FFI pin and the port set** (#583; PRs #564–#570, #572). The
-  pin names bmlib `main` (`ac16ee90`, PR #787); `android-tests.yml` builds
+  pin names bmlib `main` (`747e7a80`, PR #785); `android-tests.yml` builds
   bmlib there and fails if an FFI test skips or the contract copy drifts; **the committed xcframework is
   `bmlib-xcframework.yml`'s own build** (re-pin from its artifact as its
   header says). **`doc/cross_platform/bmlib_sync/ledger.json` records every
@@ -171,26 +174,9 @@ contract `doc/cross_platform/retraction_parity/`). bmlib comes from PyPI (`>=0.1
   id `scripts/check_bmlib_ledger.py --bmlib ~/src/bmlib` lists (the weekly
   `bmlib drift` workflow fails until then). Contracts `pmid_canonical.json`,
   `score_values.json` (an unreadable score is a parse failure, never 3),
-  `europepmc_free_pdf.json`; converter **6**, analyser **2.7**. **Phase 4
-  consumes bmlib's Rust through UniFFI** (no production caller yet). Open:
-  #573–#581, #585, #587.
-- **Wrong-article PDFs** (PRs #542, #548, #559): `.mismatch`, never read; `wrong_article` is a skip, never an absence.
-- **Bot-walled PDFs: the desktop browser rescue** (#480; PRs #521, #529,
-  #536; spec `docs/superpowers/specs/2026-10-12-browser-rescue-design.md`, doc
-  `doc/developer/browser_rescue.md`, which holds the binding rules): **one
-  visit at a time, all in the service**; engine tests run only in
-  `tests/browser_rescue_harness.py`'s subprocess; change a detection needle
-  (`challenge_detection.json`) only against live pages.
-- **Full-text stages A–C2** (PRs #487, #491, #501, #507): **the first copy
-  served ends the walk**; **no stealth clients**; Elsevier: **a first-page PDF
-  is never served**, 403 `AUTHENTICATION_ERROR` = "not from this network", 401
-  refuses the key, **never a redirect**; CORE counts a hit only by its own DOI.
-- **Retrieval and statements** (PRs #426–#482): an Unpaywall PDF not obtained
-  is refused, never a link; **no absence while an `OpenAccessShortfall` is
-  set**; **preprints by their `PPR` ID**; **an `HTTP_STATUS` is an answer
-  except a 429 or a 5xx**. iOS: one stop path, `stopWork(_:)`. Bump
-  `JATS_MARKDOWN_CONVERTER_VERSION` when `jats_markdown.py`'s output changes;
-  **no `END_MATTER_MARKER`, no charge** (#359).
+  `europepmc_free_pdf.json`; converter **6**, analyser **2.7**. bmlib's Rust is
+  consumed through UniFFI (`BmlibFFI`): the retraction checks and the shared
+  paper library call it in production. Open: #573–#581, #585, #587.
 - **Transparency, compressed** (PRs #358–#419): every no-full-text rating
   says "Limited certainty because of lack of full text access". **Score =
   clamped sum of `score_components`; High iff `high_risk_triggers` is
@@ -233,8 +219,6 @@ contract `doc/cross_platform/retraction_parity/`). bmlib comes from PyPI (`>=0.1
     `schemaVersion` (#163). **Route markup on the owning element** (#156–#175).
     **Measure JATS prevalence from the XML, never through the parser** (#164);
     **bmlib is ahead of Swift — port from it** (#165).
-  - **Real PMC JATS corpus** (#146): read `doc/cross_platform/jats_corpus/README.md`
-    first; the fixture walk stops at the checkout root.
   - **CI on all three platforms** (#129). **No job may gain a `paths:`
     filter.** **The Qt preflight (`.github/scripts/qt_preflight.py`, QtWebEngine
     included) runs before pytest.** No test starts a settings-dialog thread.

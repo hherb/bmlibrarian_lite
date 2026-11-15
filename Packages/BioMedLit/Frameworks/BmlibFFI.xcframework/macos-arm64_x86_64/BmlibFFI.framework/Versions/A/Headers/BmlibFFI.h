@@ -273,6 +273,16 @@ RustBuffer uniffi_bmlib_ffi_fn_method_libraryscan_folders(uint64_t ptr, RustCall
 RustBuffer uniffi_bmlib_ffi_fn_method_libraryscan_group(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_LISTS_USE
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_LISTS_USE
+int8_t uniffi_bmlib_ffi_fn_method_libraryscan_lists_use(uint64_t ptr, RustBuffer who, RustBuffer file, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_NEWEST_SOURCE
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_NEWEST_SOURCE
+RustBuffer uniffi_bmlib_ffi_fn_method_libraryscan_newest_source(uint64_t ptr, RustBuffer ids, RustBuffer kind, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_PROBLEMS
 #define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_METHOD_LIBRARYSCAN_PROBLEMS
 RustBuffer uniffi_bmlib_ffi_fn_method_libraryscan_problems(uint64_t ptr, RustCallStatus *_Nonnull out_status
@@ -399,9 +409,19 @@ RustBuffer uniffi_bmlib_ffi_fn_func_parse_jats_audited(RustBuffer xml, RustBuffe
 RustBuffer uniffi_bmlib_ffi_fn_func_installation_new(RustBuffer app, RustBuffer id, RustBuffer label, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_LIBRARY_IDS
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_LIBRARY_IDS
+RustBuffer uniffi_bmlib_ffi_fn_func_library_ids(RustBuffer pmid, RustBuffer doi, RustBuffer pmcid, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_PAPER_IDS_CANONICAL
 #define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_PAPER_IDS_CANONICAL
 RustBuffer uniffi_bmlib_ffi_fn_func_paper_ids_canonical(RustBuffer pmid, RustBuffer doi, RustBuffer pmcid, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_PAPER_IDS_CONTRADICTION
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_PAPER_IDS_CONTRADICTION
+RustBuffer uniffi_bmlib_ffi_fn_func_paper_ids_contradiction(RustBuffer theirs, RustBuffer ours, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_FN_FUNC_BUILD_RETRACTION_INDEX
@@ -708,9 +728,21 @@ uint16_t uniffi_bmlib_ffi_checksum_func_installation_new(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_FUNC_LIBRARY_IDS
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_FUNC_LIBRARY_IDS
+uint16_t uniffi_bmlib_ffi_checksum_func_library_ids(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_FUNC_PAPER_IDS_CANONICAL
 #define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_FUNC_PAPER_IDS_CANONICAL
 uint16_t uniffi_bmlib_ffi_checksum_func_paper_ids_canonical(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_FUNC_PAPER_IDS_CONTRADICTION
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_FUNC_PAPER_IDS_CONTRADICTION
+uint16_t uniffi_bmlib_ffi_checksum_func_paper_ids_contradiction(void
     
 );
 #endif
@@ -759,6 +791,18 @@ uint16_t uniffi_bmlib_ffi_checksum_method_libraryscan_folders(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_GROUP
 #define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_GROUP
 uint16_t uniffi_bmlib_ffi_checksum_method_libraryscan_group(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_LISTS_USE
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_LISTS_USE
+uint16_t uniffi_bmlib_ffi_checksum_method_libraryscan_lists_use(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_NEWEST_SOURCE
+#define UNIFFI_FFIDEF_UNIFFI_BMLIB_FFI_CHECKSUM_METHOD_LIBRARYSCAN_NEWEST_SOURCE
+uint16_t uniffi_bmlib_ffi_checksum_method_libraryscan_newest_source(void
     
 );
 #endif

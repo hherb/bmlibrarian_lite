@@ -302,7 +302,8 @@ for then (`rescue_delay_ms`).
   clearances), with its PDF viewer **off**, so a PDF arrives through
   `downloadRequested` instead of rendering.
 - QtWebEngine's own User-Agent and no automation protocol: what passed the walls
-  in the spikes. Nothing is impersonated.
+  in the spikes. Nothing is impersonated: no stealth clients, so a wall that refuses this
+  browser stays a wall.
 - A load failure's domain says whether the network failed; ERR_ABORTED (-3) is
   not a failure.
 - The page is judged by its serialised DOM, after a short grace

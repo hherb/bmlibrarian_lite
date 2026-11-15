@@ -657,6 +657,34 @@ public protocol LibraryScanProtocol: AnyObject, Sendable {
     func group()  -> [[UInt64]]
     
     /**
+     * Whether `who`'s record in `file.folder` already lists `file` (digest
+     * and kind): the service's check before it notes a use (`lists_use`).
+     * When it does not, note the use with [`PaperLibrary::record_use`].
+     *
+     * # Errors
+     *
+     * `BadInstallation` naming the field that is not acceptable;
+     * `BadIdentifier` (field `"sha256"`) for a digest that is not 64
+     * lowercase hex digits, which would otherwise read as "not listed".
+     */
+    func listsUse(who: Installation, file: FileRef) throws  -> Bool
+    
+    /**
+     * The paper's newest source file of `kind` that may be served for `ids`,
+     * not yet read: the full-text service's rule (`newest_source`), for an
+     * app whose own lookup chain reads the library. Only a file a record lists
+     * under identifiers not contradicting `ids` is chosen, newest by
+     * `saved_at`. Read it with [`PaperLibrary::read`], which checks its
+     * digest; a file that fails that check is to be reported, not passed
+     * over for an older one.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` for an identifier that is not valid.
+     */
+    func newestSource(ids: PaperIds, kind: SourceKind) throws  -> FileRef?
+    
+    /**
      * Everything odd, in the order found.
      */
     func problems()  -> [LibraryProblem]
@@ -791,6 +819,52 @@ open func group() -> [[UInt64]]  {
         uniffiCallStatus in
     uniffi_bmlib_ffi_fn_method_libraryscan_group(
             self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Whether `who`'s record in `file.folder` already lists `file` (digest
+     * and kind): the service's check before it notes a use (`lists_use`).
+     * When it does not, note the use with [`PaperLibrary::record_use`].
+     *
+     * # Errors
+     *
+     * `BadInstallation` naming the field that is not acceptable;
+     * `BadIdentifier` (field `"sha256"`) for a digest that is not 64
+     * lowercase hex digits, which would otherwise read as "not listed".
+     */
+open func listsUse(who: Installation, file: FileRef)throws  -> Bool  {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_libraryscan_lists_use(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeInstallation_lower(who),
+        FfiConverterTypeFileRef_lower(file),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * The paper's newest source file of `kind` that may be served for `ids`,
+     * not yet read: the full-text service's rule (`newest_source`), for an
+     * app whose own lookup chain reads the library. Only a file a record lists
+     * under identifiers not contradicting `ids` is chosen, newest by
+     * `saved_at`. Read it with [`PaperLibrary::read`], which checks its
+     * digest; a file that fails that check is to be reported, not passed
+     * over for an older one.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` for an identifier that is not valid.
+     */
+open func newestSource(ids: PaperIds, kind: SourceKind)throws  -> FileRef?  {
+    return try  FfiConverterOptionTypeFileRef.lift(try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_method_libraryscan_newest_source(
+            self.uniffiCloneHandle(),
+        FfiConverterTypePaperIds_lower(ids),
+        FfiConverterTypeSourceKind_lower(kind),uniffiCallStatus
     )
 })
 }
@@ -1886,6 +1960,85 @@ public func FfiConverterTypeFileUsers_lower(_ value: FileUsers) -> RustBuffer {
 
 
 /**
+ * Where two sets of identifiers name different papers.
+ */
+public struct IdContradiction: Equatable, Hashable {
+    /**
+     * The field, as `"pmid"`, `"doi"` or `"pmc_id"`.
+     */
+    public let field: String
+    /**
+     * The first set's value.
+     */
+    public let theirs: String
+    /**
+     * The second set's value.
+     */
+    public let ours: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The field, as `"pmid"`, `"doi"` or `"pmc_id"`.
+         */field: String, 
+        /**
+         * The first set's value.
+         */theirs: String, 
+        /**
+         * The second set's value.
+         */ours: String) {
+        self.field = field
+        self.theirs = theirs
+        self.ours = ours
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension IdContradiction: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeIdContradiction: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> IdContradiction {
+        return
+            try IdContradiction(
+                field: FfiConverterString.read(from: &buf), 
+                theirs: FfiConverterString.read(from: &buf), 
+                ours: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: IdContradiction, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.field, into: &buf)
+        FfiConverterString.write(value.theirs, into: &buf)
+        FfiConverterString.write(value.ours, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeIdContradiction_lift(_ buf: RustBuffer) throws -> IdContradiction {
+    return try FfiConverterTypeIdContradiction.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeIdContradiction_lower(_ value: IdContradiction) -> RustBuffer {
+    return FfiConverterTypeIdContradiction.lower(value)
+}
+
+
+/**
  * One app on one machine, which writes its own record per paper.
  */
 public struct Installation: Equatable, Hashable {
@@ -2761,8 +2914,9 @@ public func FfiConverterTypeJatsFundingSource_lower(_ value: JatsFundingSource) 
 
 
 /**
- * A parse with its audit: the counted publisher losses (`warnings`) and the
- * reader-defect diagnostics (`diagnostics`, empty on a correct reader).
+ * A parse with its audit: the counted publisher losses (`warnings`), the
+ * lines bmlib logs at DEBUG (`debug`) and the reader-defect diagnostics
+ * (`diagnostics`, empty on a correct reader).
  */
 public struct JatsParseReport: Equatable, Hashable {
     /**
@@ -2782,6 +2936,11 @@ public struct JatsParseReport: Equatable, Hashable {
      * Counted losses that are the publisher's deposit.
      */
     public let warnings: [String]
+    /**
+     * The lines bmlib logs at DEBUG (#782): evidence, not a loss, such as an
+     * article whose contributor list names nobody.
+     */
+    public let debug: [String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -2798,11 +2957,16 @@ public struct JatsParseReport: Equatable, Hashable {
          */diagnostics: [String], 
         /**
          * Counted losses that are the publisher's deposit.
-         */warnings: [String]) {
+         */warnings: [String], 
+        /**
+         * The lines bmlib logs at DEBUG (#782): evidence, not a loss, such as an
+         * article whose contributor list names nobody.
+         */debug: [String]) {
         self.article = article
         self.articleLabel = articleLabel
         self.diagnostics = diagnostics
         self.warnings = warnings
+        self.debug = debug
     }
 
     
@@ -2824,7 +2988,8 @@ public struct FfiConverterTypeJatsParseReport: FfiConverterRustBuffer {
                 article: FfiConverterTypeJatsArticle.read(from: &buf), 
                 articleLabel: FfiConverterString.read(from: &buf), 
                 diagnostics: FfiConverterSequenceString.read(from: &buf), 
-                warnings: FfiConverterSequenceString.read(from: &buf)
+                warnings: FfiConverterSequenceString.read(from: &buf), 
+                debug: FfiConverterSequenceString.read(from: &buf)
         )
     }
 
@@ -2833,6 +2998,7 @@ public struct FfiConverterTypeJatsParseReport: FfiConverterRustBuffer {
         FfiConverterString.write(value.articleLabel, into: &buf)
         FfiConverterSequenceString.write(value.diagnostics, into: &buf)
         FfiConverterSequenceString.write(value.warnings, into: &buf)
+        FfiConverterSequenceString.write(value.debug, into: &buf)
     }
 }
 
@@ -3185,6 +3351,75 @@ public func FfiConverterTypeJatsTable_lift(_ buf: RustBuffer) throws -> JatsTabl
 #endif
 public func FfiConverterTypeJatsTable_lower(_ value: JatsTable) -> RustBuffer {
     return FfiConverterTypeJatsTable.lower(value)
+}
+
+
+/**
+ * A request's identifiers as the library's, with the fields refused.
+ */
+public struct LibraryIds: Equatable, Hashable {
+    /**
+     * The identifiers that are valid, canonical.
+     */
+    public let ids: PaperIds
+    /**
+     * The fields refused, as `"pmid"`, `"doi"` or `"pmc_id"`, in that order.
+     */
+    public let dropped: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The identifiers that are valid, canonical.
+         */ids: PaperIds, 
+        /**
+         * The fields refused, as `"pmid"`, `"doi"` or `"pmc_id"`, in that order.
+         */dropped: [String]) {
+        self.ids = ids
+        self.dropped = dropped
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension LibraryIds: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLibraryIds: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LibraryIds {
+        return
+            try LibraryIds(
+                ids: FfiConverterTypePaperIds.read(from: &buf), 
+                dropped: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LibraryIds, into buf: inout [UInt8]) {
+        FfiConverterTypePaperIds.write(value.ids, into: &buf)
+        FfiConverterSequenceString.write(value.dropped, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLibraryIds_lift(_ buf: RustBuffer) throws -> LibraryIds {
+    return try FfiConverterTypeLibraryIds.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLibraryIds_lower(_ value: LibraryIds) -> RustBuffer {
+    return FfiConverterTypeLibraryIds.lower(value)
 }
 
 
@@ -5437,6 +5672,30 @@ fileprivate struct FfiConverterOptionTypeFileUsers: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeIdContradiction: FfiConverterRustBuffer {
+    typealias SwiftType = IdContradiction?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeIdContradiction.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeIdContradiction.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeRetractionEvidence: FfiConverterRustBuffer {
     typealias SwiftType = RetractionEvidence?
 
@@ -6073,9 +6332,9 @@ public func bmlibVersion() -> String  {
  *
  * bmlib counts what a parse loses (refused table spans, dropped formulas,
  * unfiled terms…) and checks itself for reader defects. This function returns
- * the article alone: those lines go only to the process's stderr, which an
- * iOS app does not see outside an attached debugger and Android discards. Use
- * [`parse_jats_audited`] to receive them.
+ * the article alone: those lines go only to the `log` facade, which records
+ * nothing unless the host process installs a logger (bmlib-ffi installs none).
+ * Use [`parse_jats_audited`] to receive them.
  *
  * # Errors
  *
@@ -6096,7 +6355,7 @@ public func parseJats(xml: String)throws  -> JatsArticle  {
  *
  * `known_pmc_id` is the id the caller already holds, or `""` for none; a bare
  * number is `PMC`-prefixed, and it wins over an id the document deposits. The
- * audit's lines are also written to stderr, as for [`parse_jats`].
+ * audit's lines are also sent to the `log` facade, as for [`parse_jats`].
  *
  * # Errors
  *
@@ -6129,6 +6388,22 @@ public func installationNew(app: String, id: String, label: String)throws  -> In
 })
 }
 /**
+ * A lookup's identifiers as the library's: each of `pmid`, `doi` and `pmcid`
+ * made canonical on its own, so one bad value costs only that identifier
+ * (the full-text service's `library_ids`; blank and absent are the same).
+ * Unlike [`paper_ids_canonical`], it never fails: what it refuses is listed.
+ */
+public func libraryIds(pmid: String?, doi: String?, pmcid: String?) -> LibraryIds  {
+    return try!  FfiConverterTypeLibraryIds_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_func_library_ids(
+        FfiConverterOptionString.lower(pmid),
+        FfiConverterOptionString.lower(doi),
+        FfiConverterOptionString.lower(pmcid),uniffiCallStatus
+    )
+})
+}
+/**
  * Canonical identifiers from raw ones; blank values become `None`. Use it to
  * check identifiers before storing them.
  *
@@ -6143,6 +6418,26 @@ public func paperIdsCanonical(pmid: String?, doi: String?, pmcid: String?)throws
         FfiConverterOptionString.lower(pmid),
         FfiConverterOptionString.lower(doi),
         FfiConverterOptionString.lower(pmcid),uniffiCallStatus
+    )
+})
+}
+/**
+ * The first identifier on which `theirs` contradicts `ours`, or `None` when
+ * they agree; a field absent on either side agrees. The full-text service's
+ * rule (`contradiction`) for a library JATS's own identifiers (from
+ * [`parse_jats`](crate::parse_jats), through [`library_ids`]) against the
+ * request's: a contradiction means the file is another paper's.
+ *
+ * # Errors
+ *
+ * `BadIdentifier` for an identifier that is not valid.
+ */
+public func paperIdsContradiction(theirs: PaperIds, ours: PaperIds)throws  -> IdContradiction?  {
+    return try  FfiConverterOptionTypeIdContradiction.lift(try rustCallWithError(FfiConverterTypeLibraryError_lift) {
+        uniffiCallStatus in
+    uniffi_bmlib_ffi_fn_func_paper_ids_contradiction(
+        FfiConverterTypePaperIds_lower(theirs),
+        FfiConverterTypePaperIds_lower(ours),uniffiCallStatus
     )
 })
 }
@@ -6231,16 +6526,22 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bmlib_ffi_checksum_func_bmlib_version() != 39912) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bmlib_ffi_checksum_func_parse_jats() != 30685) {
+    if (uniffi_bmlib_ffi_checksum_func_parse_jats() != 3772) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bmlib_ffi_checksum_func_parse_jats_audited() != 54867) {
+    if (uniffi_bmlib_ffi_checksum_func_parse_jats_audited() != 1936) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bmlib_ffi_checksum_func_installation_new() != 16010) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_bmlib_ffi_checksum_func_library_ids() != 44882) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_bmlib_ffi_checksum_func_paper_ids_canonical() != 57621) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_func_paper_ids_contradiction() != 61720) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bmlib_ffi_checksum_func_build_retraction_index() != 50609) {
@@ -6265,6 +6566,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bmlib_ffi_checksum_method_libraryscan_group() != 28136) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_method_libraryscan_lists_use() != 19326) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_bmlib_ffi_checksum_method_libraryscan_newest_source() != 4197) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bmlib_ffi_checksum_method_libraryscan_problems() != 41033) {

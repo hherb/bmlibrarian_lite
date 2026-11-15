@@ -23,7 +23,7 @@ Medical Fact Checker is developed by Dr Horst Herb. It has no servers and no use
 - **App settings**: your preferences and configuration
 - **API keys**: on iPhone, iPad and Mac in the Apple Keychain; on Android encrypted with a key held in the Android Keystore
 - **Usage records**: token counts and cost tracking for your budgets
-- **Paper library (Mac, optional)**: if you choose a library folder in Settings, the app keeps a bookmark to it in its settings. The folder and the papers in it stay on your disk, or in the synced folder you chose; the app sends nothing about them anywhere
+- **Paper library (Mac, optional)**: if you choose a library folder in Settings, the app keeps a bookmark to it in its settings. The folder and the papers in it stay on your disk, or in the synced folder you chose; the app keeps the papers it downloads there (the PDFs and the JATS XML it reads), and sends nothing about them anywhere
 
 ## Third-Party Services
 

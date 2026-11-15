@@ -52,6 +52,10 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
     /// Cached content (previously downloaded).
     case cached = "cached"
 
+    /// The shared paper library (design §4.5): its JATS, which ends the
+    /// lookup, or its PDF, read in place of a download.
+    case library = "library"
+
     /// Display name for the source.
     public var displayName: String {
         switch self {
@@ -73,6 +77,8 @@ public enum FullTextSource: String, Sendable, Codable, CaseIterable {
             return "Publisher"
         case .cached:
             return "Cached"
+        case .library:
+            return "Paper library"
         }
     }
 }
@@ -206,9 +212,13 @@ public enum FullTextContentKind: String, Sendable, Codable, CaseIterable {
 /// app's own `AppFullTextResult` was already written down with, and which the
 /// enum form of this type contradicted.
 public struct FullTextResult: Sendable, Equatable {
-    /// Whether the content is parsed JATS (Europe PMC's or PMC's bucket).
-    private static func isParsedJATS(_ source: FullTextSource) -> Bool {
-        source == .europePMC || source == .pmcOpenData
+    /// Whether the content is parsed JATS (Europe PMC's, PMC's bucket's or
+    /// the library's).
+    private static func isParsedJATS(_ content: FullTextContent) -> Bool {
+        switch content {
+        case .europePMC, .pmcOpenData, .libraryJATS: return true
+        default: return false
+        }
     }
 
     /// The content retrieved, in whichever form its source gave it.
@@ -294,6 +304,27 @@ public struct FullTextResult: Sendable, Equatable {
     /// so the two must stay one string.
     public let pdfNotSavedFrom: String?
 
+    /// The shared paper library's file this text came from, or the file the
+    /// fetch saved it to (design §4.4: by digest and kind, never by path).
+    /// `nil` when no library is set, or the library holds no file of it.
+    public let libraryFile: LibraryFileReference?
+
+    /// Why the library could not be used in this fetch, worded as bmlib
+    /// words it (an unreachable library, a file failing its digest, a file of
+    /// another paper), or `nil` when nothing went wrong. A fetch can meet
+    /// more than one: then each is a sentence of its own, joined by
+    /// ``BioMedLitConstants/libraryFailureSeparator`` in the order they
+    /// happened. Never stops a fetch: the source stays where it would be
+    /// without a library.
+    public let libraryFailure: String?
+
+    /// Whether this fetch found a source it could not keep because the
+    /// library could not be reached or written, so it waits in the PDF cache
+    /// for the library (design §4.6): a JATS left there, or this result's own
+    /// PDF. `false` for a file of another paper, a use that could not be
+    /// noted, a paper with no identifier the library takes, or no library.
+    public let libraryWaiting: Bool
+
     /// Create a retrieval result.
     ///
     /// - Parameters:
@@ -314,6 +345,12 @@ public struct FullTextResult: Sendable, Equatable {
     ///     `nil` — the default — when nothing was left unsettled.
     ///   - pdfNotSavedFrom: The PDF a source served that could not be saved,
     ///     or `nil` — the default — when none was.
+    ///   - libraryFile: The library's file of this text, or `nil` — the
+    ///     default — when there is none.
+    ///   - libraryFailure: Why the library could not be used, or `nil` — the
+    ///     default — when nothing went wrong.
+    ///   - libraryWaiting: Whether a source waits for the library; `false` —
+    ///     the default — when none does.
     public init(
         content: FullTextContent,
         warnings: JATSParseWarnings = JATSParseWarnings(),
@@ -323,7 +360,10 @@ public struct FullTextResult: Sendable, Equatable {
         localPDFPath: String? = nil,
         extractionCoverage: PDFExtractionCoverage? = nil,
         openAccessShortfall: OpenAccessShortfall? = nil,
-        pdfNotSavedFrom: String? = nil
+        pdfNotSavedFrom: String? = nil,
+        libraryFile: LibraryFileReference? = nil,
+        libraryFailure: String? = nil,
+        libraryWaiting: Bool = false
     ) {
         // Three combinations the fallback chain never emits, and which the reader
         // would be shown as fact if it ever did. They were unspellable while
@@ -336,14 +376,14 @@ public struct FullTextResult: Sendable, Equatable {
         // the false alarm that teaches a reader to dismiss the banner on the
         // article where text really was discarded.
         assert(
-            warnings.isClean || Self.isParsedJATS(content.source),
+            warnings.isClean || Self.isParsedJATS(content),
             "parse warnings on \(content.source), which involves no parse"
         )
         // And a parse that succeeded is not a degradation: this flag means the
         // machine-readable source was lost, so it cannot travel with that
         // source's own content.
         assert(
-            degradation == nil || !Self.isParsedJATS(content.source),
+            degradation == nil || !Self.isParsedJATS(content),
             "\(content.source) content marked as a degradation from itself"
         )
         // The one case with no producer. Asserted rather than trusted, because
@@ -365,13 +405,13 @@ public struct FullTextResult: Sendable, Equatable {
         // `.fulltext` and `.abstract` name what a *parse* found, and JATS XML
         // (Europe PMC's or PMC's bucket's) is the only thing this service parses.
         assert(
-            (contentKind != .fulltext && contentKind != .abstract) || Self.isParsedJATS(content.source),
+            (contentKind != .fulltext && contentKind != .abstract) || Self.isParsedJATS(content),
             "\(contentKind) claims a parse, but \(content.source) involves none"
         )
         // And the converse: a parsed source's text is its own. Extracted text
         // on it would mean two texts with no rule for which the analyzer reads.
         assert(
-            extractedText == nil || !Self.isParsedJATS(content.source),
+            extractedText == nil || !Self.isParsedJATS(content),
             "extracted text on \(content.source), which is parsed rather than extracted"
         )
         // A path on a publisher link hands the viewer a file that is not there.
@@ -411,6 +451,17 @@ public struct FullTextResult: Sendable, Equatable {
         if case .elsevier(let path) = content {
             assert(localPDFPath == path, "Elsevier's PDF is its local file, and only that")
         }
+        // The library's PDF is the file in the library, and the library's
+        // content is always one of its files.
+        if case .libraryPDF(let path) = content {
+            assert(localPDFPath == path, "the library's PDF is its file in the library, and only that")
+        }
+        assert(
+            content.source != .library || libraryFile != nil,
+            "library content with no library file"
+        )
+        // A source waits only because the library failed, which is told
+        assert(!libraryWaiting || libraryFailure != nil, "a source waits for the library with no failure told")
         // Coverage describes reading a PDF, so there has to be one.
         assert(
             extractionCoverage == nil || content.pdfURL != nil,
@@ -443,6 +494,9 @@ public struct FullTextResult: Sendable, Equatable {
         self.extractionCoverage = extractionCoverage
         self.openAccessShortfall = openAccessShortfall
         self.pdfNotSavedFrom = pdfNotSavedFrom
+        self.libraryFile = libraryFile
+        self.libraryFailure = libraryFailure
+        self.libraryWaiting = libraryWaiting
     }
 
     /// This result, noting why the open-access copy went unassessed and which
@@ -465,7 +519,38 @@ public struct FullTextResult: Sendable, Equatable {
             localPDFPath: localPDFPath,
             extractionCoverage: extractionCoverage,
             openAccessShortfall: openAccessShortfall,
-            pdfNotSavedFrom: pdfNotSavedFrom
+            pdfNotSavedFrom: pdfNotSavedFrom,
+            libraryFile: libraryFile,
+            libraryFailure: libraryFailure,
+            libraryWaiting: libraryWaiting
+        )
+    }
+
+    /// This result, with the library's file of it and the fetch's library
+    /// failure and waiting flag.
+    ///
+    /// - Parameters:
+    ///   - libraryFile: The library's file of this text, or `nil`.
+    ///   - libraryFailure: Why the library could not be used, or `nil`.
+    ///   - libraryWaiting: Whether a source waits for the library.
+    /// - Returns: The same result with ``libraryFile``, ``libraryFailure`` and
+    ///   ``libraryWaiting`` set.
+    func noting(
+        libraryFile: LibraryFileReference?, libraryFailure: String?, libraryWaiting: Bool
+    ) -> FullTextResult {
+        FullTextResult(
+            content: content,
+            warnings: warnings,
+            degradation: degradation,
+            contentKind: contentKind,
+            extractedText: extractedText,
+            localPDFPath: localPDFPath,
+            extractionCoverage: extractionCoverage,
+            openAccessShortfall: openAccessShortfall,
+            pdfNotSavedFrom: pdfNotSavedFrom,
+            libraryFile: libraryFile,
+            libraryFailure: libraryFailure,
+            libraryWaiting: libraryWaiting
         )
     }
 
@@ -519,6 +604,14 @@ public enum FullTextContent: Sendable, Equatable {
     /// Cached PDF file path.
     case cached(filePath: String)
 
+    /// The shared paper library's JATS, converted to HTML and markdown: it
+    /// ended the lookup before any request (design §4.5).
+    case libraryJATS(html: String, markdown: String)
+
+    /// The shared paper library's PDF, read in place of a download, at this
+    /// path in the library (design §4.5).
+    case libraryPDF(localPath: String)
+
     /// The source this content came from.
     public var source: FullTextSource {
         switch self {
@@ -540,23 +633,27 @@ public enum FullTextContent: Sendable, Equatable {
             return .doi
         case .cached:
             return .cached
+        case .libraryJATS, .libraryPDF:
+            return .library
         }
     }
 
-    /// HTML content if available (parsed JATS: Europe PMC or PMC's bucket).
+    /// HTML content if available (parsed JATS: Europe PMC's, PMC's bucket's or
+    /// the library's).
     public var html: String? {
         switch self {
-        case .europePMC(let html, _), .pmcOpenData(let html, _):
+        case .europePMC(let html, _), .pmcOpenData(let html, _), .libraryJATS(let html, _):
             return html
         default:
             return nil
         }
     }
 
-    /// Markdown content if available (parsed JATS: Europe PMC or PMC's bucket).
+    /// Markdown content if available (parsed JATS: Europe PMC's, PMC's
+    /// bucket's or the library's).
     public var markdown: String? {
         switch self {
-        case .europePMC(_, let markdown), .pmcOpenData(_, let markdown):
+        case .europePMC(_, let markdown), .pmcOpenData(_, let markdown), .libraryJATS(_, let markdown):
             return markdown
         default:
             return nil
@@ -564,14 +661,15 @@ public enum FullTextContent: Sendable, Equatable {
     }
 
     /// PDF URL if available (Europe PMC PDF, Unpaywall, OpenAlex, or cached),
-    /// or the local file of Elsevier's PDF, never its article URL.
+    /// or the local file of Elsevier's PDF, never its article URL, or of the
+    /// library's.
     public var pdfURL: URL? {
         switch self {
         case .europePMCPDF(let url):
             return url
         case .unpaywall(let url), .openAlex(let url):
             return url
-        case .elsevier(let path), .cached(let path):
+        case .elsevier(let path), .cached(let path), .libraryPDF(let path):
             return URL(fileURLWithPath: path)
         default:
             return nil

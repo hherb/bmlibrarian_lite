@@ -72,6 +72,8 @@ struct FullTextSourceBadge: View {
         case .doi: return .orange
         case .cached: return .gray
         case .uploaded: return .purple
+        // a copy held locally, as the cache's is (a library document synced from a Mac)
+        case .library: return .gray
         }
     }
 }

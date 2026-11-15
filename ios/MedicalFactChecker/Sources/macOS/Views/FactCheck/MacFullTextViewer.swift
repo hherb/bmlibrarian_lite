@@ -60,6 +60,9 @@ struct MacFullTextViewer: View {
             minHeight: MacFullTextLayout.viewerMinHeight
         )
         .background(MacFullTextColors.markdownBackground)
+        // A library PDF whose stored path is gone is found again by digest
+        // keyed on the document: the viewer's identity outlives a change of selection
+        .task(id: document.persistentModelID) { await LibraryController.refindPDF(of: document) }
         .focusable()
         .onKeyPress(keys: [.init("f")], phases: .down) { _ in
             if NSEvent.modifierFlags.contains(.command) {
@@ -182,7 +185,9 @@ struct MacFullTextViewer: View {
                 degradation: document.cachedRetrievalNotice.degradation,
                 extractionCoverage: document.cachedRetrievalNotice.extractionCoverage,
                 openAccessShortfall: document.cachedRetrievalNotice.openAccessShortfall,
-                pdfNotSavedNote: document.storedPDFNotSavedNote
+                pdfNotSavedNote: document.storedPDFNotSavedNote,
+                // Reading the session's state here re-renders the banner as it changes
+                libraryNotices: document.libraryNotices(libraryState: LibraryController.session.state)
             )
             renderedContent
         }
@@ -214,6 +219,8 @@ struct MacFullTextViewer: View {
             // out of this fix's scope; naming the two cases apart at least
             // makes it visible rather than hidden behind one `path`.
             MacPDFView(filePath: path)
+                // A path found again in the library loads afresh
+                .id(path)
         case .none:
             if isLoadingPDF {
                 loadingView

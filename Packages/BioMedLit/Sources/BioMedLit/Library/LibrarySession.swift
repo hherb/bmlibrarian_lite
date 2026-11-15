@@ -23,7 +23,9 @@ import Observation
 /// *Stop using this library*. Its `state` is what the setting shows.
 ///
 /// The disk work (bmlib's calls, the bookmark) runs off the main actor; the
-/// state changes on it.
+/// state changes on it. A resume or re-check never undoes a choice or *Stop
+/// using* made while it ran (#792 item 4): its outcome is dropped, and any
+/// access it opened stopped.
 @MainActor
 @Observable
 public final class LibrarySession {
@@ -38,14 +40,56 @@ public final class LibrarySession {
     /// success.
     public private(set) var lastError: String?
 
-    /// True while a choice or a launch's resume is running.
-    public private(set) var isWorking = false
+    /// Why the stored bookmark could not be made again at the last launch or
+    /// re-check, though the library is reached (the old one still works); nil
+    /// otherwise. Forgotten when the setting changes (#792 item 2).
+    public private(set) var unsaved: String?
+
+    /// True while the launch's resume reaches a stored library: the setting
+    /// says "Reaching the library…" rather than that none is set (#792 item 3).
+    public var isReaching: Bool {
+        running > 0 && state == .notChosen && store.libraryBookmark != nil
+    }
+
+    /// True while a choice or the launch's resume is running: what disables
+    /// the Library setting's buttons. A re-check does not count (a missing
+    /// volume can be slow to resolve); a choice made during one stands.
+    public var isWorking: Bool { running > 0 }
+
+    /// How many choices and launch resumes are running.
+    private var running = 0
+
+    /// How many re-checks are running.
+    @ObservationIgnored private var rechecking = 0
+
+    /// Bumped by each choice made and each *Stop using*: a resume or re-check
+    /// that started under an older one is out of date when it ends.
+    @ObservationIgnored private var generation = 0
 
     @ObservationIgnored private let store: LibrarySettingsStore
 
+    /// How a stored bookmark is reached: ``LibrarySetup/resume(bookmark:sandboxed:makeBookmark:)``.
+    @ObservationIgnored private let resume: @Sendable (Data) -> LibraryResume
+
+    /// Why a held library's folder is not the library any more, or nil:
+    /// ``LibrarySetup/lostReason(of:)``.
+    @ObservationIgnored private let recheckFolder: @Sendable (URL) -> String?
+
     /// A session over `store`, where the bookmark and installation id live.
-    public init(store: LibrarySettingsStore) {
+    public convenience init(store: LibrarySettingsStore) {
+        self.init(store: store, resume: { LibrarySetup.resume(bookmark: $0) })
+    }
+
+    /// A session with how a bookmark is reached and a held folder re-checked
+    /// passed in, so a test can hold either while it acts.
+    init(
+        store: LibrarySettingsStore,
+        resume: @escaping @Sendable (Data) -> LibraryResume,
+        recheckFolder: @escaping @Sendable (URL) -> String? = { LibrarySetup.lostReason(of: $0) }
+    ) {
         self.store = store
+        self.resume = resume
+        self.recheckFolder = recheckFolder
     }
 
     /// This installation's id: the stored one when bmlib accepts it, else a
@@ -61,18 +105,32 @@ public final class LibrarySession {
     /// At launch: reach the stored library, if any. An unreachable one keeps
     /// its bookmark (a drive may be plugged back in) and shows why.
     public func resumeAtLaunch() async {
+        running += 1
+        defer { running -= 1 }
+        await resumeStored()
+    }
+
+    /// Reach the stored library, if any; an outcome out of date when it ends
+    /// is dropped.
+    private func resumeStored() async {
         guard let bookmark = store.libraryBookmark else {
             state = .notChosen
             return
         }
-        isWorking = true
-        defer { isWorking = false }
-        let outcome = await Task.detached { LibrarySetup.resume(bookmark: bookmark) }.value
+        let startedAt = generation
+        let resume = self.resume
+        let outcome = await Task.detached { resume(bookmark) }.value
+        guard generation == startedAt else {
+            if case let .held(access, _, _) = outcome { access.stop() }
+            return
+        }
         switch outcome {
-        case let .held(access, renewed):
+        case let .held(access, renewed, unsaved):
             hold(access)
             if let renewed { store.libraryBookmark = renewed }
+            self.unsaved = unsaved
         case let .lost(reason):
+            unsaved = nil
             state = .unreachable(reason: reason)
         }
     }
@@ -81,16 +139,18 @@ public final class LibrarySession {
     /// changes but `lastError`: the previous library, if any, stays set.
     public func choose(_ url: URL) async {
         _ = installationID()
-        isWorking = true
-        defer { isWorking = false }
+        running += 1
+        defer { running -= 1 }
         let result = await Task.detached { () -> Result<LibraryChoice, Error> in
             Result { try LibrarySetup.choose(url) }
         }.value
         switch result {
         case let .success(choice):
+            generation += 1
             access?.stop()
             store.libraryBookmark = choice.bookmark
             hold(choice.access)
+            unsaved = nil
             lastError = nil
         case let .failure(error):
             lastError = String(describing: error)
@@ -100,10 +160,51 @@ public final class LibrarySession {
     /// *Stop using this library*: access stops and the bookmark is dropped;
     /// the folder itself is never changed, and the installation id is kept.
     public func stopUsing() {
+        generation += 1
         stopAccess()
         store.libraryBookmark = nil
         state = .notChosen
+        unsaved = nil
         lastError = nil
+    }
+
+    /// When the app becomes active (design §4.6): a held library whose folder
+    /// is gone (its drive unplugged) becomes unreachable, its bookmark kept
+    /// and access stopped, and is resumed once at once (a drive remounted
+    /// elsewhere); an unreachable one is resumed again, as at launch; with
+    /// none set nothing happens. Skipped while a choice, the launch's resume
+    /// or another re-check runs.
+    public func recheck() async {
+        guard !isWorking, rechecking == 0 else { return }
+        rechecking += 1
+        defer { rechecking -= 1 }
+        switch state {
+        case .notChosen:
+            return
+        case .unreachable:
+            await resumeStored()
+        case .reachable:
+            guard let held = access else { return }
+            let startedAt = generation
+            let recheckFolder = self.recheckFolder
+            let lost = await Task.detached { recheckFolder(held.folderURL) }.value
+            guard generation == startedAt, access === held, let lost else { return }
+            stopAccess()
+            unsaved = nil
+            state = .unreachable(reason: lost)
+            await resumeStored()
+        }
+    }
+
+    /// The library a fetch goes through while the one set cannot be reached:
+    /// one that fails with the reason, so a source fetched waits for it
+    /// (design §4.6). While the launch's resume still reaches it, one that
+    /// fails as still being reached, so a fetch meanwhile does not run as
+    /// with no library set. nil otherwise.
+    public var unreachableLibrary: UnreachableLibrary? {
+        if isReaching { return UnreachableLibrary(reason: BioMedLitConstants.libraryStillReachingReason) }
+        guard case let .unreachable(reason) = state else { return nil }
+        return UnreachableLibrary(reason: reason)
     }
 
     /// Stop access to the folder (at quit), keeping the setting.

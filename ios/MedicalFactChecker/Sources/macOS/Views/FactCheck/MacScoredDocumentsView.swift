@@ -667,7 +667,7 @@ struct MacDocumentCard: View {
 
         Task {
             do {
-                let service = BioMedLit.FullTextService.create(from: AppSettings.shared)
+                let service = BioMedLit.FullTextService.create(from: AppSettings.shared, library: LibraryController.library())
                 let bmlResult = try await service.fetchFullText(for: document)
                 let result = BioMedLitAdapters.toAppFullTextResult(bmlResult)
 
@@ -729,19 +729,26 @@ struct MacDocumentCard: View {
     /// Asks for the *file* path, so a stored remote URL string cannot be
     /// turned into a `file://` URL that names nothing.
     private func openInPreview() {
-        guard let path = document.localPDFFilePath else { return }
-        let url = URL(fileURLWithPath: path)
-        if !NSWorkspace.shared.open(url) {
-            AppLogger.fullText.error(
-                "Preview.app declined to open the cached PDF at \(path, privacy: .public)"
-            )
+        Task {
+            // A library PDF whose stored path is gone is found again by digest
+            await LibraryController.refindPDF(of: document)
+            guard let path = document.localPDFFilePath else { return }
+            let url = URL(fileURLWithPath: path)
+            if !NSWorkspace.shared.open(url) {
+                AppLogger.fullText.error(
+                    "Preview.app declined to open the cached PDF at \(path, privacy: .public)"
+                )
+            }
         }
     }
 
     /// Reveal the cached PDF in Finder.
     private func revealInFinder() {
-        guard let path = document.localPDFFilePath else { return }
-        NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
+        Task {
+            await LibraryController.refindPDF(of: document)
+            guard let path = document.localPDFFilePath else { return }
+            NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "")
+        }
     }
 
     /// Copy the article's identifier, unlabelled.

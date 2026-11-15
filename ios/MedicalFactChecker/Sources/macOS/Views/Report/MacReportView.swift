@@ -1117,7 +1117,7 @@ struct MacDocumentDetailSheet: View {
 
         Task {
             do {
-                let service = BioMedLit.FullTextService.create(from: AppSettings.shared)
+                let service = BioMedLit.FullTextService.create(from: AppSettings.shared, library: LibraryController.library())
                 let bmlResult = try await service.fetchFullText(for: document)
                 // Shown as the error, the stored link left as it is (#464)
                 if let kept = FullTextAutoFetch.storedLinkKept(document, refetched: bmlResult) {

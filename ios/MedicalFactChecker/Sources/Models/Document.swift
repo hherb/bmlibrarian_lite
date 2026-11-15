@@ -353,6 +353,75 @@ final class Document {
     /// True if full text fetch was attempted but no source was available.
     var fullTextUnavailable: Bool = false
 
+    // MARK: - Paper Library
+
+    /// The SHA-256 of the shared paper library's file of this full text, or
+    /// `nil` when none. The file is referred to by digest and kind, never by
+    /// path (design §4.4); a stored path is only a hint (``libraryPDFReference``).
+    /// Optional so no schema version is needed.
+    var fullTextLibrarySHA256: String?
+
+    /// The kind of the library file ``fullTextLibrarySHA256`` names, by
+    /// bmlib's name (`BioMedLitConstants.libraryKindPDF`, `libraryKindJATS`),
+    /// or `nil` when none. Optional so no schema version is needed.
+    var fullTextLibraryKind: String?
+
+    /// Why this full text waits for the library (design §4.6): it could not
+    /// be kept there because the library could not be reached or written.
+    /// `nil` when nothing waits. Optional so no schema version is needed.
+    var fullTextLibraryWaiting: String?
+
+    /// What went wrong with the library in the fetch of this full text, its
+    /// failures one per line, whether or not anything waits; `nil` when
+    /// nothing did. Optional so no schema version is needed.
+    var fullTextLibraryNote: String?
+
+    /// The library file to find this document's PDF by when its stored path
+    /// is gone: set when a local PDF is stored and its library file is a PDF;
+    /// `nil` otherwise.
+    var libraryPDFReference: LibraryFileReference? {
+        guard localPDFFilePath != nil, let sha256 = fullTextLibrarySHA256,
+              fullTextLibraryKind == BioMedLitConstants.libraryKindPDF else { return nil }
+        return LibraryFileReference(sha256: sha256, kind: BioMedLitConstants.libraryKindPDF)
+    }
+
+    /// What the reader is told about the shared paper library for this full
+    /// text (design §4.6), one sentence each, shown whole: why its source
+    /// waits for the library, or else what went wrong with the library; and,
+    /// when the library cannot be reached (`libraryState`) and this text's
+    /// file is in it, that it cannot. Empty when there is nothing to say.
+    func libraryNotices(libraryState: LibraryState) -> [String] {
+        // The why is bmlib's text: one that ends its own sentence gets no second stop
+        func ending(_ text: String) -> String { text.hasSuffix(".") ? text : text + "." }
+        var notices: [String] = []
+        if let why = fullTextLibraryWaiting {
+            notices.append(LibraryNoticeCopy.waitingPrefix + ending(why))
+        } else if let note = fullTextLibraryNote {
+            notices.append(LibraryNoticeCopy.failurePrefix + ending(note))
+        }
+        if case let .unreachable(reason) = libraryState, fullTextLibrarySHA256 != nil {
+            notices.append(LibraryNoticeCopy.unreachablePrefix + ending(reason))
+        }
+        return notices
+    }
+
+    /// The sentences of ``libraryNotices(libraryState:)``, each followed by
+    /// bmlib's or the session's text.
+    private enum LibraryNoticeCopy {
+        /// Before why a source waits for the library.
+        static let waitingPrefix = "Kept in this app until the paper library can be reached: "
+        /// Before what went wrong with the library, when nothing waits.
+        static let failurePrefix = "The paper library could not be used for this paper: "
+        /// Before why the library cannot be reached.
+        static let unreachablePrefix = "The paper library cannot be reached: "
+    }
+
+    /// Store `path`, the PDF's file found again in the library by
+    /// ``libraryPDFReference``, as this document's local PDF.
+    func storeRefoundLibraryPDF(at path: String) {
+        storePDFPath(path, isLocalFile: true)
+    }
+
     /// Whether full text is known to be available in PubMed Central.
     ///
     /// Set from search results metadata (Europe PMC `inPMC` flag or presence of PMC ID).
@@ -1145,6 +1214,7 @@ final class Document {
         fullTextPDFNotSavedFrom = result.pdfNotSavedFrom
         fullTextContentKindRaw = result.contentKind.rawValue
         storeExtractionCoverage(result.extractionCoverage)
+        storeLibraryFile(result.libraryFile, waiting: result.libraryWaiting, note: result.libraryNote)
 
         switch result.content {
         case .markdown(let content):
@@ -1207,6 +1277,16 @@ final class Document {
         fullTextPDFPathIsLocalFile = path == nil ? nil : isLocalFile
     }
 
+    /// Store the library's file of the full text, why it waits and what went
+    /// wrong, or clear them (`nil`, `nil`, `nil`): one writer for the four
+    /// fields.
+    private func storeLibraryFile(_ file: LibraryFileReference?, waiting: String?, note: String?) {
+        fullTextLibrarySHA256 = file?.sha256
+        fullTextLibraryKind = file?.kind
+        fullTextLibraryWaiting = waiting
+        fullTextLibraryNote = note
+    }
+
     /// Store an extraction's coverage, or clear it.
     ///
     /// One writer for the pair, for the reason ``storePDFPath(_:isLocalFile:)``
@@ -1247,6 +1327,7 @@ final class Document {
         fullTextPDFNotSavedFrom = nil
         fullTextContentKindRaw = nil
         storeExtractionCoverage(nil)
+        storeLibraryFile(nil, waiting: nil, note: nil)
     }
 
     /// Clear cached full text data to allow re-fetching.
@@ -1264,6 +1345,7 @@ final class Document {
         fullTextPDFNotSavedFrom = nil
         fullTextContentKindRaw = nil
         storeExtractionCoverage(nil)
+        storeLibraryFile(nil, waiting: nil, note: nil)
     }
 
     // MARK: - Cached Full Text

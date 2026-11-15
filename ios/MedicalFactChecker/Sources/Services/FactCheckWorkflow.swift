@@ -3097,7 +3097,7 @@ final class FactCheckWorkflow {
         )
         guard !targets.isEmpty else { return }
 
-        let service = BMLFullTextService.create(from: settings)
+        let service = BMLFullTextService.create(from: settings, library: BMLFullTextService.appLibrary())
 
         let failures = try await FullTextAutoFetch.retrieve(
             targets,

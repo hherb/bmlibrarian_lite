@@ -467,7 +467,11 @@ enum BioMedLitAdapters {
             contentKind: result.contentKind,
             extractedText: result.extractedText,
             localPDFPath: result.localPDFPath,
-            extractionCoverage: result.extractionCoverage
+            extractionCoverage: result.extractionCoverage,
+            libraryFile: result.libraryFile,
+            // Only a wait is kept: another failure leaves nothing waiting
+            libraryWaiting: result.libraryWaiting ? result.libraryFailure : nil,
+            libraryNote: result.libraryFailure
         )
     }
 
@@ -482,7 +486,8 @@ enum BioMedLitAdapters {
         localPDFPath: String?
     ) -> AppFullTextContentType {
         switch content {
-        case .europePMC(let html, let markdown), .pmcOpenData(let html, let markdown):
+        case .europePMC(let html, let markdown), .pmcOpenData(let html, let markdown),
+             .libraryJATS(let html, let markdown):
             // Both HTML (for rendering) and markdown (for search/export fallback)
             return .html(content: html, markdown: markdown)
         case .europePMCPDF(let pdfURL), .unpaywall(let pdfURL), .openAlex(let pdfURL):
@@ -509,6 +514,9 @@ enum BioMedLitAdapters {
             return .webURL(webURL)
         case .cached(let filePath):
             return .pdfURL(URL(fileURLWithPath: filePath))
+        case .libraryPDF(let localPath):
+            // The library's own file, which the service names in both
+            return .pdfURL(URL(fileURLWithPath: localPDFPath ?? localPath))
         }
     }
 
@@ -527,6 +535,7 @@ enum BioMedLitAdapters {
         case .core: return .core
         case .doi: return .doi
         case .cached: return .cached
+        case .libraryJATS, .libraryPDF: return .library
         }
     }
 
@@ -603,12 +612,22 @@ extension BMLEuropePMCService {
 }
 
 extension BMLFullTextService {
+    /// The shared paper library the app's fetches go through, asked at each
+    /// fetch. The macOS app sets it at launch to `LibraryController.library`,
+    /// which shared code cannot name (the package build leaves `macOS/` out);
+    /// it answers `nil` — the default, and iOS's, which has no library yet —
+    /// and the fetch then runs as without a library.
+    @MainActor static var appLibrary: @MainActor () -> (any FullTextLibrary)? = { nil }
+
     /// Create a configured full text service from app settings.
     ///
-    /// - Parameter settings: App settings containing email for API identification,
-    ///   the optional CORE key and the optional Elsevier key and institutional token.
+    /// - Parameters:
+    ///   - settings: App settings containing email for API identification,
+    ///     the optional CORE key and the optional Elsevier key and institutional token.
+    ///   - library: The shared paper library to look in first and keep what is
+    ///     fetched in (design §4.5), or `nil` — the default — for none.
     /// - Returns: Configured full text service.
-    static func create(from settings: AppSettings) -> BMLFullTextService {
+    static func create(from settings: AppSettings, library: (any FullTextLibrary)? = nil) -> BMLFullTextService {
         // read once each: a key the Keychain could not give is unreachable, not absent (#511)
         let core = settings.coreAPIKeyIfReadable
         let elsevierKey = settings.elsevierAPIKeyIfReadable
@@ -619,7 +638,8 @@ extension BMLFullTextService {
             elsevierAPIKey: elsevierKey ?? "",
             elsevierInstToken: elsevierToken ?? "",
             coreKeyUnreadable: core == nil,
-            elsevierCredentialsUnreadable: elsevierCredentialsUnreadable(key: elsevierKey, token: elsevierToken)
+            elsevierCredentialsUnreadable: elsevierCredentialsUnreadable(key: elsevierKey, token: elsevierToken),
+            library: library
         )
     }
 
@@ -647,6 +667,7 @@ extension BMLFullTextService {
     ///   - coreKeyUnreadable: The CORE key could not be read from the Keychain (#511).
     ///   - elsevierCredentialsUnreadable: The Elsevier key, or the token beside a
     ///     key, could not be read (#511).
+    ///   - library: The shared paper library, or `nil` — the default — for none.
     /// - Returns: Configured full text service.
     static func create(
         ncbiEmail: String,
@@ -654,7 +675,8 @@ extension BMLFullTextService {
         elsevierAPIKey: String = "",
         elsevierInstToken: String = "",
         coreKeyUnreadable: Bool = false,
-        elsevierCredentialsUnreadable: Bool = false
+        elsevierCredentialsUnreadable: Bool = false,
+        library: (any FullTextLibrary)? = nil
     ) -> BMLFullTextService {
         let email = ncbiEmail.isEmpty ? "user@medicalfactchecker.app" : ncbiEmail
         return BMLFullTextService(
@@ -663,7 +685,8 @@ extension BMLFullTextService {
             coreKeyUnreadable: coreKeyUnreadable,
             elsevierAPIKey: credential(elsevierAPIKey),
             elsevierInstToken: credential(elsevierInstToken),
-            elsevierCredentialsUnreadable: elsevierCredentialsUnreadable
+            elsevierCredentialsUnreadable: elsevierCredentialsUnreadable,
+            library: library
         )
     }
 

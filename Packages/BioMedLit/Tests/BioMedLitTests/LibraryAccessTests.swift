@@ -124,6 +124,49 @@ final class LibraryAccessTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: marker(in: dir).path))
     }
 
+    /// #792 item 1: a volume refusing bookmarks is left untouched.
+    func testChooseWhoseBookmarkFailsWritesNoMarker() throws {
+        let dir = try freshFolder()
+        struct Refused: Error {}
+        XCTAssertThrowsError(try LibrarySetup.choose(
+            dir, startAccess: { _ in false }, makeBookmark: { _ in throw Refused() }))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker(in: dir).path))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: dir.appendingPathComponent(BioMedLitConstants.libraryPapersFolderName).path))
+    }
+
+    /// #792 item 2: the library opens, and the bookmark not made again is said.
+    func testResumeWhoseRemakeFailsSaysSo() throws {
+        let dir = try freshFolder()
+        let choice = try LibrarySetup.choose(dir)
+        choice.access.stop()
+        struct Refused: Error, LocalizedError { var errorDescription: String? { "volume refuses" } }
+        guard case let .held(access, renewed, unsaved) = LibrarySetup.resume(
+            bookmark: choice.bookmark, makeBookmark: { _ in throw Refused() })
+        else { return XCTFail("the library opens without a new bookmark") }
+        defer { access.stop() }
+        XCTAssertNil(renewed)
+        XCTAssertEqual(unsaved, "volume refuses")
+    }
+
+    /// #792 item 6: StudyAnalyzer's `resume_does_not_follow_a_library_into_the_trash`.
+    func testResumeDoesNotFollowALibraryIntoTheTrash() throws {
+        let dir = try freshFolder()
+        let choice = try LibrarySetup.choose(dir)
+        choice.access.stop()
+        var trashed: NSURL?
+        do {
+            try FileManager.default.trashItem(at: dir, resultingItemURL: &trashed)
+        } catch {
+            throw XCTSkip("this process cannot use the Trash: \(error)")
+        }
+        if let trashed { made.append(trashed as URL) }
+        guard case let .lost(reason) = LibrarySetup.resume(bookmark: choice.bookmark) else {
+            return XCTFail("a library in the Trash is not followed")
+        }
+        XCTAssertTrue(reason.contains("Trash"), reason)
+    }
+
     func testResumeFollowsRenamedFolder() throws {
         let dir = try freshFolder()
         let choice = try LibrarySetup.choose(dir)
@@ -133,13 +176,14 @@ final class LibraryAccessTests: XCTestCase {
         try FileManager.default.moveItem(at: dir, to: moved)
         made.append(moved)
 
-        guard case let .held(access, renewed) = LibrarySetup.resume(bookmark: choice.bookmark) else {
+        guard case let .held(access, renewed, unsaved) = LibrarySetup.resume(bookmark: choice.bookmark) else {
             return XCTFail("a renamed folder is followed")
         }
         defer { access.stop() }
         XCTAssertTrue(samePath(access.folderURL, moved), access.folderURL.path)
         XCTAssertEqual(access.folderName, moved.lastPathComponent)
         XCTAssertNotNil(renewed)
+        XCTAssertNil(unsaved)
     }
 
     func testResumeOfDeletedFolderIsLostAndKeepsNoAccess() throws {

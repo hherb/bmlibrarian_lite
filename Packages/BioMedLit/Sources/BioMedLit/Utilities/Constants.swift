@@ -894,6 +894,17 @@ public enum BioMedLitConstants {
     /// access to a chosen folder needs the bookmark's grant.
     public static let sandboxContainerEnvironmentKey = "APP_SANDBOX_CONTAINER_ID"
 
+    /// What the Library setting says while the launch reaches a stored library.
+    public static let libraryReachingText = "Reaching the library…"
+
+    /// Why a fetch keeps nothing in the library while the launch still reaches
+    /// it: the source waits for it.
+    public static let libraryStillReachingReason = "the library is still being reached at launch"
+
+    /// Before the reason, when the library is reached but its bookmark could
+    /// not be made again (it may not survive the next launch).
+    public static let libraryUnsavedPrefix = "The library is open, but its folder could not be remembered again, so choose it again if it is lost at the next launch: "
+
     /// The marker file bmlib writes at a library folder's root
     /// (`{"format": "bmlib-library", "version": 1}`).
     public static let libraryMarkerFileName = "bmlib-library.json"
@@ -901,6 +912,135 @@ public enum BioMedLitConstants {
     /// The names of the folders macOS keeps trashed items in: the home Trash
     /// and each volume's. A library is never kept inside one.
     public static let trashFolderNames: Set<String> = [".Trash", ".Trashes"]
+
+    /// The folder under a library's root that holds the paper folders
+    /// (bmlib's `PAPERS_DIR`): a file is at `<root>/papers/<folder>/<name>`.
+    public static let libraryPapersFolderName = "papers"
+
+    /// bmlib's name for a PDF source file (`SourceKind::Pdf`), as a
+    /// `LibraryFileReference` and `Document` store it.
+    public static let libraryKindPDF = "pdf"
+
+    /// bmlib's name for a JATS XML source file (`SourceKind::Jats`).
+    public static let libraryKindJATS = "jats"
+
+    /// bmlib's name for an HTML source file (`SourceKind::Html`).
+    public static let libraryKindHTML = "html"
+
+    /// bmlib's name for a Markdown source file (`SourceKind::Markdown`).
+    public static let libraryKindMarkdown = "markdown"
+
+    /// bmlib's name for a plain-text source file (`SourceKind::Text`).
+    public static let libraryKindText = "text"
+
+    /// The suffix of a JATS kept in the PDF cache while the library cannot be
+    /// reached (`<cacheKey>-<sha12>.xml`), waiting to be moved in (design §4.6).
+    public static let libraryWaitingJATSSuffix = ".xml"
+
+    /// How many hex digits of its SHA-256 name a waiting JATS (the `sha12` of
+    /// `<cacheKey>-<sha12>.xml`).
+    public static let libraryWaitingDigestHexChars = 12
+
+    // MARK: - Shared paper library: bmlib's sentences
+    //
+    // The notes and failures of the fetch's library source, in bmlib's
+    // wording (its full-text service and `LibraryStore`); the service and the
+    // tests match on them, so they live here, one copy each.
+
+    /// What `describe_ids` says of a paper with no identifiers.
+    public static let libraryNoIdentifiers = "no identifiers"
+
+    /// bmlib's `failure`: "library, paper <ids>[ file F/N]: <reason>".
+    ///
+    /// - Parameters:
+    ///   - ids: The paper's identifiers as `describe_ids` words them.
+    ///   - file: The file as "folder/name", or nil.
+    ///   - reason: bmlib's text for the error.
+    public static func libraryFailure(ids: String, file: String?, reason: String) -> String {
+        "library, paper \(ids)\(file.map { " file \($0)" } ?? ""): \(reason)"
+    }
+
+    /// The failure for a file named only by digest and kind: "library, file
+    /// <kind> <sha256>: <reason>".
+    public static func libraryFileFailure(kind: String, sha256: String, reason: String) -> String {
+        "library, file \(kind) \(sha256): \(reason)"
+    }
+
+    /// The failure when bmlib refuses this installation's id or label.
+    public static func libraryInstallationFailure(id: String, reason: String) -> String {
+        "library, installation \(id): \(reason)"
+    }
+
+    /// The reason for a kind name bmlib does not have.
+    public static func libraryUnknownKindReason(_ kind: String) -> String {
+        "\(kind) is not a kind of file the library holds"
+    }
+
+    /// The reason for a digest the library holds no file of that kind for.
+    public static func libraryDigestNotHeldReason(kind: String, sha256: String) -> String {
+        "it holds no \(kind) file with digest \(sha256)"
+    }
+
+    /// bmlib's warning for a request identifier `libraryIds` refused.
+    public static func libraryDroppedIdentifierWarning(field: String) -> String {
+        "The request's \(field) is not an identifier the library accepts; "
+            + "looking the paper up in the library without it."
+    }
+
+    /// bmlib's note for a library JATS that does not parse.
+    ///
+    /// - Parameters:
+    ///   - file: The file as "folder/name".
+    ///   - reason: Why: the XML reader's text, or ``libraryJATSNotUTF8Reason``.
+    public static func libraryJATSUnparseableNote(file: String, reason: String) -> String {
+        "Not serving the library's JATS \(file): it does not parse (\(reason)); looking further."
+    }
+
+    /// The reason a library JATS does not parse when its bytes are not UTF-8.
+    public static let libraryJATSNotUTF8Reason = "it is not UTF-8"
+
+    /// bmlib-ffi's text for a JATS refused for nesting too deep.
+    public static func libraryJATSNestingReason(depth: UInt64, limit: UInt64) -> String {
+        "JATS document nests \(depth) elements deep, beyond the \(limit) this reader accepts"
+    }
+
+    /// bmlib's note for a library JATS with no body.
+    public static func libraryJATSBodylessNote(file: String) -> String {
+        "Not serving the library's JATS \(file): it has no body; looking further."
+    }
+
+    /// bmlib's failure for a library JATS whose own identifier contradicts the
+    /// request's.
+    ///
+    /// - Parameters:
+    ///   - file: The file as "folder/name".
+    ///   - field: The field, as `"pmid"`, `"doi"` or `"pmc_id"`.
+    ///   - theirs: The JATS's own value.
+    ///   - ours: The request's value.
+    public static func libraryJATSWrongPaperNote(file: String, field: String, theirs: String, ours: String) -> String {
+        "the library's JATS \(file) is another paper's: its own \(field) \(theirs) is not the request's \(ours), "
+            + "so nothing is kept in the library in this lookup"
+    }
+
+    /// The failure for a library PDF the title check refuses (design §4.4: a
+    /// record is a claim, not proof).
+    ///
+    /// - Parameter file: The file as "folder/name".
+    public static func libraryPDFAnotherArticleFailure(file: String) -> String {
+        "the library's PDF \(file) is another article's: its first page with text does not carry the title, "
+            + "so it is not served"
+    }
+
+    /// What separates a fetch's library failures in its `libraryFailure`:
+    /// one sentence each, in the order they were met.
+    public static let libraryFailureSeparator = "\n"
+
+    /// The warning for a library PDF gone between its read and its extraction.
+    ///
+    /// - Parameter path: Where it was.
+    public static func libraryPDFGoneWarning(path: String) -> String {
+        "The library's PDF \(path) went away before it was read; downloading the paper's PDF instead."
+    }
 }
 
 // MARK: - PubMed Filters
