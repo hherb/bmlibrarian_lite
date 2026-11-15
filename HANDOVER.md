@@ -49,9 +49,22 @@ switch back (the setting says unreachable; a new fetch says it is kept in this
 app); the record's label is the machine name under the sandbox; `PaperLibrary`
 I/O is synchronous on the service actor: does a hanging (iCloud dataless) read
 block its fetches? **#798** split the service verbatim into
-`FullTextService+<concern>.swift` extensions. **Next: 3c** (move waiting
-sources and the PDF cache in, §4.7; the switch; in `+Library`), then 3d
-(the manual clear, §4.8). **Left:** an Apple archive from master lists
+`FullTextService+<concern>.swift` extensions (PR #801).
+**3c, the move and the switch** (plan `2026-11-15-library-3c-macos-move.md`,
+branch `feat/library-3c-move`, PR in review). Decided 2026-11-15: the move
+takes the cached PDFs and waiting JATS that a `Document` uses; cache entries
+no document uses stay cache. Sources waiting for the library move in by
+themselves whenever a library is held (`LibrarySession.onHeld`). *Copy back*
+returns PDFs and JATS to the PDF cache as `<key>-<sha12>.pdf|.xml`.
+`LibraryMove` (BioMedLit) keeps each file and reads it back through bmlib;
+the app's copy goes only after the documents are saved (`removeAppCopies`).
+`LibraryMover` (`Sources/Utilities`) maps documents to files and back.
+`LibraryController` runs the move, the settle (its outcome in
+`settleReport`), the switch's `carry` and `carryBack`. A document whose file
+was not carried keeps its digest and gets a note naming why. The offers are
+unticked toggles in the Library tab. **Owed by the maintainer: 3c's
+click-through** (plan Task 4 Step 3). The review's leftovers are **#803**.
+**Next: 3d**, the manual clear (§4.8). **Left:** an Apple archive from master lists
 `BmlibFFI.framework.dSYM` with no warning; the ledger's other library rows
 stay `owed` (#788). 3b's leftovers, lodged: **#796** (the race fallback can
 record a refused PDF), **#797** (an extraction-off library PDF asks CORE),

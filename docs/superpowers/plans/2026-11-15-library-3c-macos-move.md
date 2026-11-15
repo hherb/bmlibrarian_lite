@@ -274,3 +274,21 @@ waiting settle).
   but a fetch's own `LibrarySource` still sees it stop afterwards. Lodged as
   an issue if not fixed in passing.
 - Cache entries no document uses (decision 1).
+
+## As built
+
+- **The app copy goes after the save** (review): `LibraryMove.moveIn` keeps
+  and checks only; `removeAppCopies` runs after the documents are saved.
+- **The settle takes a waiting file with every document reading it**
+  (review): `moveItems` groups over all documents, then keeps the groups
+  with a waiting one. A document with a file that did not move keeps
+  waiting (`keepLibraryWaiting`).
+- **The settle's outcome is shown** in the Library tab
+  (`LibraryController.settleReport`, `LibraryMoveSummary.lines(done:)`).
+- **A choice while the old library is unreachable** notes its documents
+  (`libraryUnreachableLeftNote`); *Stop using* while unreachable notes them
+  too (`libraryNoLongerUsedNote`). A refused installation is reported.
+- `stopUsing()` stays synchronous beside `stopUsing(carry:)`.
+- `LibraryMover` is in `Sources/Utilities` (the test package leaves out
+  `Sources/macOS`); the project file is hand-edited (4 lines).
+- Left for later: #803.
