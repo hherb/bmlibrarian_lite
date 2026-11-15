@@ -222,6 +222,15 @@ extension LibraryController {
         return summary
     }
 
+    /// *Stop using* a library that cannot be reached: nothing can be copied
+    /// back, so each document with a library file is told it is left there.
+    static func noteNoLongerUsed() {
+        var summary = LibraryMoveSummary(moved: 0, failed: [])
+        LibraryMover.notCarried(LibraryMover.libraryFiles(documents()).flatMap(\.documents),
+                                note: BioMedLitConstants.libraryNoLongerUsedNote)
+        save(&summary)
+    }
+
     /// *Stop using*: copy the library files this app uses back into the PDF
     /// cache when `copying`; a file not copied is noted on its documents as
     /// in a library this app no longer uses (design §4.7).
