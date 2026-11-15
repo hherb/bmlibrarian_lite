@@ -33,14 +33,19 @@ import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 
 /**
- * Retrofit's JSON converter for a service's answer, read as bmlib reads it (#781).
+ * Retrofit's JSON converter for a service's answer, refusing the values bmlib refuses (#781).
  *
  * The app's lenient `Json` keeps a lone surrogate escape in a string, and OkHttp's
  * `string()` turns bytes that are not UTF-8 into U+FFFD, so either reached Room and
- * the report as text. This converter refuses an answer that is not UTF-8 (a BOM
- * included, as the desktop does), or that holds `NaN`, `Infinity`, a number past
+ * the report as text. This converter refuses an answer that is not UTF-8 or starts
+ * with a BOM (as the desktop does), or that holds `NaN`, `Infinity`, a number past
  * binary64 or a lone surrogate ([ResponseParser.holdsRefusedValue]). It refuses as a
  * [SerializationException], which every caller already reads as a malformed answer.
+ * The parse itself stays the app's lenient one: unquoted words and nesting past
+ * serde_json's 127 levels are still read.
+ *
+ * It declines `String`, so a raw answer (full-text XML) is never read as JSON,
+ * whatever the order of the converters.
  *
  * @param json The app's `Json`, which decodes what is read
  */
@@ -49,7 +54,8 @@ class StrictJsonConverterFactory(private val json: Json) : Converter.Factory() {
         type: Type,
         annotations: Array<out Annotation>,
         retrofit: Retrofit
-    ): Converter<ResponseBody, *> {
+    ): Converter<ResponseBody, *>? {
+        if (type == String::class.java) return null
         val serializer = json.serializersModule.serializer(type)
         return Converter<ResponseBody, Any?> { body ->
             body.use { json.decodeFromJsonElement(serializer, strictJsonElement(json, it.bytes())) }
@@ -63,8 +69,8 @@ class StrictJsonConverterFactory(private val json: Json) : Converter.Factory() {
  * @param json The `Json` that parses the text
  * @param bytes The answer as served
  * @return The parsed answer
- * @throws SerializationException when the bytes are not UTF-8, start with a BOM, are
- *   not JSON, or hold a value JSON does not define; the message never quotes the body
+ * @throws SerializationException when the bytes are not UTF-8, start with a BOM, do
+ *   not parse, or hold a value JSON does not define; the message never quotes the body
  */
 internal fun strictJsonElement(json: Json, bytes: ByteArray): JsonElement {
     val text = try {
@@ -89,9 +95,8 @@ private const val BYTE_ORDER_MARK = '\uFEFF'
 /**
  * A Retrofit for a service whose JSON is read strictly: Europe PMC and Unpaywall (#781).
  *
- * Built on its own `Retrofit.Builder`, as `createPubMedApi` is: the shared builders
- * are mutable singletons, so adding a converter to one would reach every API built
- * from it, the LLM APIs and PubMed included.
+ * Built on its own `Retrofit.Builder`, as `createPubMedApi` is: the shared builder is
+ * a mutable singleton, so a converter added to it would reach the LLM APIs built from it.
  *
  * @param client The app's shared client
  * @param json The app's `Json`

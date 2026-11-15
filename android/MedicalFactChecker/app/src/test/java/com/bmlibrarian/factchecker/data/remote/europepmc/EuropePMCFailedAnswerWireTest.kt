@@ -20,14 +20,14 @@ package com.bmlibrarian.factchecker.data.remote.europepmc
 
 import android.util.Log
 import com.bmlibrarian.factchecker.di.AppModule
-import com.bmlibrarian.factchecker.data.remote.strictJsonRetrofit
+import com.bmlibrarian.factchecker.di.NetworkModule
+import com.bmlibrarian.factchecker.data.remote.serverBoundClient
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
 import okio.Buffer
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -42,7 +42,7 @@ import org.junit.Test
 /**
  * Europe PMC's failed and damaged answers, as they arrive over the wire (#252).
  *
- * Runs the app's Retrofit builder and `Json` against a local server: whether an
+ * Runs the app's Europe PMC provider and `Json` against a local server: whether an
  * answer or one record of it decodes is a property of the real converter.
  */
 class EuropePMCFailedAnswerWireTest {
@@ -71,12 +71,9 @@ class EuropePMCFailedAnswerWireTest {
         }
     }
 
-    /** A service on the app's converters, pointed at the local server. */
-    private fun service(): EuropePMCService {
-        val api = strictJsonRetrofit(OkHttpClient(), AppModule.provideJson(), server.url("/").toString())
-            .create(EuropePMCApi::class.java)
-        return EuropePMCService(api)
-    }
+    /** A service built by the app's own provider, its requests sent to the local server. */
+    private fun service(): EuropePMCService =
+        EuropePMCService(NetworkModule.provideEuropePMCApi(serverBoundClient(server), AppModule.provideJson()))
 
     /** Answer the next request with an HTTP 200 and this body. */
     private fun answer(body: String) {
@@ -142,6 +139,15 @@ class EuropePMCFailedAnswerWireTest {
         val searched = service().search(query = "aspirin", resultsReceived = 0).getOrThrow()
 
         assertEquals(listOf("T\u00e9 \ud83d\ude00"), searched.articles.map { it.title })
+    }
+
+    @Test
+    fun `full-text XML is read as text, never as JSON`() = runBlocking {
+        answer("<article><body>Text</body></article>")
+
+        val fetch = service().fetchFullTextXml("PMC1")
+
+        assertEquals(FullTextXmlFetch.Served("<article><body>Text</body></article>"), fetch)
     }
 
     @Test

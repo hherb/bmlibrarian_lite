@@ -33,12 +33,15 @@ ledger both name bmlib `main` `110d906b`; the bindings gain the shared paper
 library (`PaperLibrary`, `LibraryScan`), which no app calls (bmlib's `ffi`
 job now refuses a name Kotlin's imports shadow, bmlib#774). Its triage's
 #780 (bucket record against its stem and md5) landed in PR #782; #781 in
-**PR #783**: the desktop reads every service's JSON through
-`search_failures.strict_response_json` (bmlib's `strict_json_loads`, strict
-UTF-8; **a test double scripts `.content`, never `.json()`**), Android reads
-Europe PMC and Unpaywall through `strictJsonRetrofit` (never the shared
-builders, which the LLM APIs share), and Swift's `JSONDecoder` already
-refused all but a BOM and depth. **bmlib `main` is past the pin**: bmlib#761,
+**PR #783**: the desktop reads every service's JSON but PubMed's esearch
+(`strict=False`, on purpose) through `search_failures.strict_response_json`
+(bmlib's `strict_json_loads`, strict UTF-8, a `RecursionError` refused too;
+**a test double scripts `.content`, never `.json()`**), Android reads Europe
+PMC and Unpaywall through `strictJsonRetrofit` (never the shared builder,
+which the LLM APIs share), and Swift's `JSONDecoder` already refused all but
+a BOM and depth. Deferred: #784 (Android's other service clients, and its
+lenient parse step), #785 (an unreadable ID-converter answer in the
+transparency analyser leaves PubMed's grants unasked, unreported). **bmlib `main` is past the pin**: bmlib#761,
 #766 and #780 have no ledger row yet (the next sync). **Left:** an Apple
 archive from master lists `BmlibFFI.framework.dSYM` with no warning.
 **Decision for the maintainer:** whether lite keeps its papers in bmlib's

@@ -87,10 +87,11 @@ def strict_response_json(response: requests.Response) -> Any:
     """A response's JSON body, read as bmlib and ``serde_json`` read it (#781).
 
     ``Response.json()`` guesses at a charset and accepts a BOM, ``NaN``,
-    ``Infinity``, a number past the largest float and a lone surrogate
-    escape, which then reaches SQLite and the report as text that cannot be
-    encoded. A body we cannot read is a failure, not an answer (golden rule
-    3), so each of those is refused here, as is a body that is not UTF-8.
+    ``Infinity``, a number past the largest float, a lone surrogate escape
+    and nesting past 127 levels; a lone surrogate then reaches SQLite and the
+    report as text that cannot be encoded. A body we cannot read is a
+    failure, not an answer (golden rule 3), so each of those is refused here,
+    as is a body that is not UTF-8 or nested too deeply to decode at all.
 
     Args:
         response: The answer.
@@ -112,6 +113,10 @@ def strict_response_json(response: requests.Response) -> Any:
         raise requests.exceptions.JSONDecodeError(
             f"not {SERVICE_JSON_ENCODING}: {exc.reason}", "", exc.start
         ) from None
+    except RecursionError:
+        # The decoder recurses before bmlib's depth check runs; bmlib's pin
+        # predates its own fix (bmlib#758).
+        raise requests.exceptions.JSONDecodeError("nested too deeply to decode", "", 0) from None
 
 
 def _is_spent_timeout_retry(exc: requests.RequestException) -> bool:

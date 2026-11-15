@@ -35,6 +35,7 @@ from bmlibrarian_lite.search_failures import (
 from bmlibrarian_lite.study_transparency_analyzer.study_transparency_analyzer import (
     ClinicalTrialsClient,
     CrossRefClient,
+    PubMedClient,
 )
 from tests.http_responses import session_answering
 
@@ -50,6 +51,10 @@ LENIENT_BODIES = {
     "a lone surrogate": b'{"a": "\\ud800"}',
     "nesting past 127 levels": b"[" * 200 + b"]" * 200,
 }
+
+# Deep enough that the decoder itself raises ``RecursionError`` before bmlib's
+# depth check runs (a 100 KB body).
+DEEP_ENOUGH_TO_RECURSE = 50_000
 
 
 def _answer(body: bytes, status: int = 200) -> requests.Response:
@@ -77,8 +82,14 @@ def test_requests_reads_what_serde_refuses(body: bytes) -> None:
 
 @pytest.mark.parametrize(
     "body",
-    [*LENIENT_BODIES.values(), b'{"a": "\xff"}', b"<html></html>", b""],
-    ids=[*LENIENT_BODIES.keys(), "not UTF-8", "not JSON", "empty"],
+    [
+        *LENIENT_BODIES.values(),
+        b'{"a": "\xff"}',
+        b"<html></html>",
+        b"",
+        b"[" * DEEP_ENOUGH_TO_RECURSE + b"]" * DEEP_ENOUGH_TO_RECURSE,
+    ],
+    ids=[*LENIENT_BODIES.keys(), "not UTF-8", "not JSON", "empty", "nested past the recursion limit"],
 )
 def test_each_refusal_is_a_malformed_response(body: bytes) -> None:
     """Every refusal is ``requests``' own error, so every handler reads it."""
@@ -171,3 +182,18 @@ def test_a_trial_record_holding_a_huge_number_is_unreachable() -> None:
     fetch = client.get_study("NCT00000001")
     assert fetch.record is None
     assert fetch.failure == MALFORMED
+
+
+def test_an_id_converter_answer_holding_a_lone_surrogate_is_refused() -> None:
+    """The transparency analyser's ID Converter: no PMID from an unreadable body."""
+    client = PubMedClient(email="test@example.com")
+    client.session = session_answering(_answer(b'{"records": [{"doi": "10.1/x", "pmid": "\\ud800"}]}'))
+    with pytest.raises(requests.exceptions.JSONDecodeError):
+        client.convert_ids(["10.1/x"], "doi", "pmid")
+
+
+def test_an_id_converter_answer_that_is_well_formed_is_read() -> None:
+    """The control: a readable answer maps the DOI to its PMID."""
+    client = PubMedClient(email="test@example.com")
+    client.session = session_answering(_answer(b'{"records": [{"doi": "10.1/x", "pmid": "1"}]}'))
+    assert client.convert_ids(["10.1/x"], "doi", "pmid") == {"10.1/x": "1"}

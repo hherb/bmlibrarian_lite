@@ -350,7 +350,8 @@ GET https://api.unpaywall.org/v2/{doi}?email={your_email}
 
 The answer is read strictly, as Europe PMC's search is (#781): bytes that are
 not UTF-8, `NaN`, `Infinity`, a number past binary64 or a lone surrogate
-escape make it a `malformed_response`, never a PDF URL.
+escape make it a `malformed_response`, never a PDF URL. The desktop and Android
+also refuse a BOM; iOS reads one.
 
 ### Retrieval
 
@@ -377,7 +378,7 @@ async function fetch_unpaywall_pdf_urls(doi: string, email: string) -> list[stri
                                       # first; any status of 400 or above but
                                       # 404 is Unsettled (#466); below 400 the
                                       # body is decoded
-        data = response.json()
+        data = strict_json(response)  # #781: refused as malformed_response
 
         pdf_urls = unpaywall_pdf_urls(data)   # every url_for_pdf, kept once
         if pdf_urls:
