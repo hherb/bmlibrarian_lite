@@ -829,6 +829,7 @@ class TestTheWiringItself:
         """
         analyzer.pubmed.fetch_article = lambda pmid: RecordFetch.absent()
         analyzer.pubmed.convert_ids = lambda *a, **k: {}
+        analyzer.pubmed.find_pmid_by_doi = lambda *a, **k: None
         analyzer.crossref.get_work = lambda doi: RecordFetch.absent()
         analyzer.clinicaltrials.get_study = lambda nct: None
 
@@ -879,6 +880,7 @@ class TestTheWiringItself:
         analyzer.crossref.get_work = lambda doi: RecordFetch.absent()
         analyzer.pubmed.fetch_article = lambda pmid: RecordFetch.absent()
         analyzer.pubmed.convert_ids = lambda *a, **k: {}
+        analyzer.pubmed.find_pmid_by_doi = lambda *a, **k: None
 
         report = TransparencyReport(pmid="1")
         analyzer._fetch_basic_metadata(report)

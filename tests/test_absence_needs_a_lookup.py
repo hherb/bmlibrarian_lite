@@ -970,6 +970,7 @@ class TestAnUnreadSourceIsNotAnUnregisteredStudy:
             analyzer.crossref.get_work = lambda *_a, **_k: crossref
             report.doi = "10.1/abc"
         analyzer.pubmed.convert_ids = lambda *_a, **_k: {}
+        analyzer.pubmed.find_pmid_by_doi = lambda *_a, **_k: None
         analyzer._fetch_basic_metadata(report)
         return report
 
@@ -1122,6 +1123,7 @@ class TestTheGapsTheMutationSweepFound:
         analyzer = self._analyzer()
         analyzer.pubmed.fetch_article = lambda *_a, **_k: RecordFetch.absent()
         analyzer.pubmed.convert_ids = lambda *_a, **_k: {}
+        analyzer.pubmed.find_pmid_by_doi = lambda *_a, **_k: None
         analyzer.crossref.get_work = lambda *_a, **_k: RecordFetch.absent()
 
         report = analyzer.analyze(doi="10.1/x")
@@ -1150,6 +1152,7 @@ class TestTheGapsTheMutationSweepFound:
         analyzer = self._analyzer()
         analyzer.pubmed.fetch_article = lambda *_a, **_k: RecordFetch.absent()
         analyzer.pubmed.convert_ids = lambda *_a, **_k: {}
+        analyzer.pubmed.find_pmid_by_doi = lambda *_a, **_k: None
         analyzer.crossref.get_work = lambda *_a, **_k: RecordFetch.absent()
 
         report = analyzer.analyze(
@@ -1176,6 +1179,7 @@ class TestTheGapsTheMutationSweepFound:
             {"title": "A study", "grants": []}
         )
         analyzer.pubmed.convert_ids = lambda *_a, **_k: {}
+        analyzer.pubmed.find_pmid_by_doi = lambda *_a, **_k: None
         analyzer.crossref.get_work = lambda *_a, **_k: RecordFetch.served(
             {"title": ["A study"], "funder": []}
         )
@@ -1192,6 +1196,7 @@ class TestTheGapsTheMutationSweepFound:
 
         analyzer = self._analyzer()
         analyzer.pubmed.convert_ids = lambda *_a, **_k: {}
+        analyzer.pubmed.find_pmid_by_doi = lambda *_a, **_k: None
 
         absent = self._report(pmid="1")
         analyzer.pubmed.fetch_article = lambda *_a, **_k: RecordFetch.absent()
@@ -1696,6 +1701,7 @@ class TestTheGapsTheReviewFound:
             {"title": "A study", "grants": []}
         )
         analyzer.pubmed.convert_ids = lambda *_a, **_k: {}
+        analyzer.pubmed.find_pmid_by_doi = lambda *_a, **_k: None
         analyzer.crossref.get_work = lambda *_a, **_k: RecordFetch.absent()
         report = self._report(pmid="1", doi="10.1/x")
 
@@ -1718,6 +1724,7 @@ class TestTheGapsTheReviewFound:
             {"title": "A study", "grants": []}
         )
         analyzer.pubmed.convert_ids = lambda *_a, **_k: {}
+        analyzer.pubmed.find_pmid_by_doi = lambda *_a, **_k: None
         analyzer.crossref.get_work = lambda *_a, **_k: (
             RecordFetch.unreachable(
                 RequestFailure(RequestFailureKind.HTTP_STATUS, 429)
@@ -1744,6 +1751,7 @@ class TestTheGapsTheReviewFound:
             RecordFetch.unreachable(THROTTLED)
         )
         analyzer.pubmed.convert_ids = lambda *_a, **_k: {}
+        analyzer.pubmed.find_pmid_by_doi = lambda *_a, **_k: None
         analyzer.crossref.get_work = lambda *_a, **_k: RecordFetch.served(
             {"title": ["A study"], "funder": []}
         )

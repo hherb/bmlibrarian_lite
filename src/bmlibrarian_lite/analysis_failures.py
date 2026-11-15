@@ -793,6 +793,12 @@ PUBMED_NOT_ASKED_FOR_PMID_CLAUSE = (
     "PubMed was not asked, because the PMID given is not a PubMed ID"
 )
 
+#: Why PubMed's record was not read when no PMID was given and the DOI's
+#: could not be looked up (#785): its record was never asked for.
+PUBMED_PMID_NOT_LOOKED_UP_CLAUSE = (
+    "PubMed was not asked, because this study's PMID could not be looked up"
+)
+
 
 #: What the COI caveats say was not established, as the reader is told it.
 #: One place, because every COI reason is completed by it -- the two below

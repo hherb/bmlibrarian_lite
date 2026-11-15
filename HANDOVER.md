@@ -61,9 +61,10 @@ wrong reason; after *Stop using* a library PDF reads "no longer on this device"
 desktop reads every service's JSON but PubMed's esearch through
 `search_failures.strict_response_json` (**a test double scripts `.content`,
 never `.json()`**); Android through `strictJsonElement`
-(`data/remote/StrictJson.kt`) or `strictJsonRetrofit`. Deferred: #785 (an
-unreadable ID-converter answer in the transparency analyser leaves PubMed's
-grants unasked, unreported).
+(`data/remote/StrictJson.kt`) or `strictJsonRetrofit`. **#785 (PR #794,
+analyser 2.8):** the desktop looks a DOI-only study's PMID up before reading
+PubMed (PMC's ID converter, then `find_pmid_by_doi`); any lookup it cannot
+settle sets `pubmed_record_unreachable`, so funding is not assessed.
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
