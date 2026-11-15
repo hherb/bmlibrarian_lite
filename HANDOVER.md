@@ -24,39 +24,38 @@ its slice has landed; add a new section when handing off new work.
   `jbr`, `BMLIB_DIR` = a bmlib worktree at **`aa47a57`**), internal track,
   smoke test, tag `android_1.9.0`.
 
-**The shared paper library** (decided 2026-11-15: every app uses it where its
-platform allows; #788 macOS, #789 desktop, #790 Android; design:
-StudyAnalyzer's `2026-11-13-shared-paper-library-design.md` §5.3). **3a, PR
-#787** (the Library tab, `LibrarySession`, launch resume, quit stop). **3b, PR
-#793, stacked on #787** (plan `2026-11-15-library-3b-macos-fetch.md`): FFI at
-bmlib `747e7a80` (`LibraryScan`, `libraryIds`, `paperIdsContradiction`,
-#784/#785). BioMedLit `Library/` gains `FullTextLibrary` (protocol),
-`LibrarySource` (macOS), `UnreachableLibrary` (a set library that cannot be
-reached: every call fails, so sources wait); `LibrarySession.recheck()` runs on
-activation (a generation counter), `unsaved`: a stale bookmark not remade.
-`FullTextService(…, library:)`: a usable library JATS ends the lookup with no
-request; Europe PMC / PMC JATS and admitted PDFs are kept in the library (the
-cache copy goes only after the save returned); its PDF is used before the PDF
-tiers, after the title check. An unreachable library never stops a fetch: the
-source stays in the PDF cache (JATS as `<cacheKey>-<sha12>.xml`) and
-`libraryWaiting` is set. Source `.library` ("Paper library"). `Document` gains
-`fullTextLibrarySHA256`, `fullTextLibraryKind`, `fullTextLibraryWaiting`,
-`fullTextLibraryNote`; a moved library PDF is found again by digest. **Owed by
-the maintainer: the sandboxed click-throughs.** 3a's (plan Task 4 Step 5).
-3b's: choose a library; fetch a PMC paper (its JATS file appears in the library
-folder; a re-fetch reads "Paper library" with no network request); fetch a
-PDF-only paper (the PDF is in the library, not in `PDFCache`); unplug or rename
-the folder and switch back (the setting says unreachable; a new fetch's
-full-text view says it is kept in this app until the library can be reached);
-check `SCDynamicStoreCopyComputerName` gives the machine name under the sandbox
-(the record file's label). **Next: 3c** (move waiting sources and the PDF cache
-in, §4.7; the switch), then 3d (the manual clear, §4.8). **Left:** an Apple
-archive from master lists `BmlibFFI.framework.dSYM` with no warning; #785; the
-ledger's other library rows stay `owed` (#788). 3b's minors: an extraction-off
-library PDF serves `.noText` and asks CORE; a `noteUse` failure on a held-back
-abstract library JATS ends the library's use for that fetch; `FullTextService`
-is ~4,400 lines (split); the unreachable warning logs on every activation and
-call.
+**The shared paper library** (decided 2026-11-15: every app, where its platform
+allows; #788 macOS, #789 desktop, #790 Android; design: StudyAnalyzer's
+`2026-11-13-shared-paper-library-design.md` §5.3). **3a, PR #787** (the Library
+tab, `LibrarySession`, launch resume, quit stop). **3b, PR #793, stacked on
+#787** (plan `2026-11-15-library-3b-macos-fetch.md`): FFI at bmlib `747e7a80`
+(`LibraryScan`, `libraryIds`; #784/#785). BioMedLit `Library/`: three types
+(CLAUDE.md); `LibrarySession.recheck()` on activation; `unsaved`: a stale
+bookmark not remade. `FullTextService(…, library:)`: a usable library JATS ends
+the lookup with no request; the chain's JATS and PDFs are kept in the library
+(only a PDF this fetch admitted loses its cache copy, after the save); its PDF
+is used before the PDF tiers, after the title check. A library failure never
+stops a fetch; one that `waits` (not reached, read or written; still being
+reached at launch) leaves the source in the PDF cache (JATS as
+`<cacheKey>-<sha12>.xml`, kept by a cache clear) with `libraryWaiting` set.
+Source `.library` ("Paper library"). `Document` gains
+`fullTextLibrary{SHA256,Kind,Waiting,Note}`; a moved library PDF is found again
+by digest. **Owed by the maintainer: the sandboxed click-throughs.** 3a's (plan
+Task 4 Step 5). 3b's: choose a library; fetch a PMC paper (its JATS appears in
+the library; a re-fetch reads "Paper library", no request); fetch a PDF-only
+paper (it is in the library, not `PDFCache`); unplug or rename the folder and
+switch back (the setting says unreachable; a new fetch says it is kept in this
+app); the record's label is the machine name under the sandbox; `PaperLibrary`
+I/O is synchronous on the service actor: does a hanging (iCloud dataless) read
+block its fetches? **Next: 3c** (move waiting sources and the PDF cache in,
+§4.7; the switch), then 3d (the manual clear, §4.8). **Left:** an Apple archive
+from master lists `BmlibFFI.framework.dSYM` with no warning; #785; the ledger's
+other library rows stay `owed` (#788). 3b's minors: an extraction-off library
+PDF serves `.noText` and asks CORE; `FullTextService` is ~4,500 lines (split);
+the unreachable warning logs on every activation and call. For 3c: *Stop
+using*/*Choose…* mid-fetch stops the old access, so its source waits under a
+wrong reason; after *Stop using* a library PDF reads "no longer on this device"
+(3c's switch: §4.7's "unavailable").
 
 **Strict service JSON (#781 desktop, PR #783; #784 Android, PR #791).** The
 desktop reads every service's JSON but PubMed's esearch through
