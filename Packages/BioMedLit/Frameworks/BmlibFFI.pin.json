@@ -19,5 +19,5 @@
     "macOS": "14.0"
   },
   "treeSha256Script": ".github/scripts/xcframework_tree_sha256.py",
-  "treeSha256": "ba1306722a5dbd2646c6f1bc796415e6446b203ed0da0aa11e5345a8653ac3fd"
+  "treeSha256": "58c197ae184d17ab3c0ab248377900e421396f83379429013c440014808c198c"
 }

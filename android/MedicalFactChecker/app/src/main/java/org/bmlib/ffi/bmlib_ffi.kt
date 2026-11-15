@@ -685,7 +685,11 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_bmlib_ffi_checksum_func_installation_new(
     ): Int
+    external fun uniffi_bmlib_ffi_checksum_func_library_ids(
+    ): Int
     external fun uniffi_bmlib_ffi_checksum_func_paper_ids_canonical(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_func_paper_ids_contradiction(
     ): Int
     external fun uniffi_bmlib_ffi_checksum_func_build_retraction_index(
     ): Int
@@ -702,6 +706,10 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_bmlib_ffi_checksum_method_libraryscan_folders(
     ): Int
     external fun uniffi_bmlib_ffi_checksum_method_libraryscan_group(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_libraryscan_lists_use(
+    ): Int
+    external fun uniffi_bmlib_ffi_checksum_method_libraryscan_newest_source(
     ): Int
     external fun uniffi_bmlib_ffi_checksum_method_libraryscan_problems(
     ): Int
@@ -767,6 +775,10 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_bmlib_ffi_fn_method_libraryscan_group(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_bmlib_ffi_fn_method_libraryscan_lists_use(`ptr`: Long,`who`: RustBuffer.ByValue,`file`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_bmlib_ffi_fn_method_libraryscan_newest_source(`ptr`: Long,`ids`: RustBuffer.ByValue,`kind`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_bmlib_ffi_fn_method_libraryscan_problems(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_bmlib_ffi_fn_method_libraryscan_used_by(`ptr`: Long,`folder`: RustBuffer.ByValue,`sha256`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -817,7 +829,11 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_bmlib_ffi_fn_func_installation_new(`app`: RustBuffer.ByValue,`id`: RustBuffer.ByValue,`label`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_bmlib_ffi_fn_func_library_ids(`pmid`: RustBuffer.ByValue,`doi`: RustBuffer.ByValue,`pmcid`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_bmlib_ffi_fn_func_paper_ids_canonical(`pmid`: RustBuffer.ByValue,`doi`: RustBuffer.ByValue,`pmcid`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_bmlib_ffi_fn_func_paper_ids_contradiction(`theirs`: RustBuffer.ByValue,`ours`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_bmlib_ffi_fn_func_build_retraction_index(`csv`: RustBuffer.ByValue,`dataAsOf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -958,7 +974,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_bmlib_ffi_checksum_func_installation_new() and 0xFFFF) != 16010) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_bmlib_ffi_checksum_func_library_ids() and 0xFFFF) != 44882) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_bmlib_ffi_checksum_func_paper_ids_canonical() and 0xFFFF) != 57621) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_func_paper_ids_contradiction() and 0xFFFF) != 61720) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_bmlib_ffi_checksum_func_build_retraction_index() and 0xFFFF) != 50609) {
@@ -983,6 +1005,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_bmlib_ffi_checksum_method_libraryscan_group() and 0xFFFF) != 28136) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_libraryscan_lists_use() and 0xFFFF) != 19326) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_bmlib_ffi_checksum_method_libraryscan_newest_source() and 0xFFFF) != 4197) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_bmlib_ffi_checksum_method_libraryscan_problems() and 0xFFFF) != 41033) {
@@ -1521,6 +1549,34 @@ public interface LibraryScanInterface {
     fun `group`(): List<List<kotlin.ULong>>
     
     /**
+     * Whether `who`'s record in `file.folder` already lists `file` (digest
+     * and kind): the service's check before it notes a use (`lists_use`).
+     * When it does not, note the use with [`PaperLibrary::record_use`].
+     *
+     * # Errors
+     *
+     * `BadInstallation` naming the field that is not acceptable;
+     * `BadIdentifier` (field `"sha256"`) for a digest that is not 64
+     * lowercase hex digits, which would otherwise read as "not listed".
+     */
+    fun `listsUse`(`who`: Installation, `file`: FileRef): kotlin.Boolean
+    
+    /**
+     * The paper's newest source file of `kind` that may be served for `ids`,
+     * not yet read: the full-text service's rule (`newest_source`), for an
+     * app whose own lookup chain reads the library. Only a file a record lists
+     * under identifiers not contradicting `ids` is chosen, newest by
+     * `saved_at`. Read it with [`PaperLibrary::read`], which checks its
+     * digest; a file that fails that check is to be reported, not passed
+     * over for an older one.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` for an identifier that is not valid.
+     */
+    fun `newestSource`(`ids`: PaperIds, `kind`: SourceKind): FileRef?
+    
+    /**
      * Everything odd, in the order found.
      */
     fun `problems`(): List<LibraryProblem>
@@ -1721,6 +1777,62 @@ open class LibraryScan: Disposable, AutoCloseable, LibraryScanInterface
     UniffiLib.uniffi_bmlib_ffi_fn_method_libraryscan_group(
         it,
         _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Whether `who`'s record in `file.folder` already lists `file` (digest
+     * and kind): the service's check before it notes a use (`lists_use`).
+     * When it does not, note the use with [`PaperLibrary::record_use`].
+     *
+     * # Errors
+     *
+     * `BadInstallation` naming the field that is not acceptable;
+     * `BadIdentifier` (field `"sha256"`) for a digest that is not 64
+     * lowercase hex digits, which would otherwise read as "not listed".
+     */
+    @Throws(LibraryException::class)override fun `listsUse`(`who`: Installation, `file`: FileRef): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_libraryscan_lists_use(
+        it,
+        
+        FfiConverterTypeInstallation.lower(`who`),
+        FfiConverterTypeFileRef.lower(`file`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The paper's newest source file of `kind` that may be served for `ids`,
+     * not yet read: the full-text service's rule (`newest_source`), for an
+     * app whose own lookup chain reads the library. Only a file a record lists
+     * under identifiers not contradicting `ids` is chosen, newest by
+     * `saved_at`. Read it with [`PaperLibrary::read`], which checks its
+     * digest; a file that fails that check is to be reported, not passed
+     * over for an older one.
+     *
+     * # Errors
+     *
+     * `BadIdentifier` for an identifier that is not valid.
+     */
+    @Throws(LibraryException::class)override fun `newestSource`(`ids`: PaperIds, `kind`: SourceKind): FileRef? {
+            return FfiConverterOptionalTypeFileRef.lift(
+    callWithHandle {
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_method_libraryscan_newest_source(
+        it,
+        
+        FfiConverterTypePaperIds.lower(`ids`),
+        FfiConverterTypeSourceKind.lower(`kind`),_status)
 }
     }
     )
@@ -3019,6 +3131,61 @@ public object FfiConverterTypeFileUsers: FfiConverterRustBuffer<FileUsers> {
 
 
 /**
+ * Where two sets of identifiers name different papers.
+ */
+data class IdContradiction (
+    /**
+     * The field, as `"pmid"`, `"doi"` or `"pmc_id"`.
+     */
+    val `field`: kotlin.String
+    , 
+    /**
+     * The first set's value.
+     */
+    val `theirs`: kotlin.String
+    , 
+    /**
+     * The second set's value.
+     */
+    val `ours`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeIdContradiction: FfiConverterRustBuffer<IdContradiction> {
+    override fun read(buf: ByteBuffer): IdContradiction {
+        return IdContradiction(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: IdContradiction) = (
+            FfiConverterString.allocationSize(value.`field`) +
+            FfiConverterString.allocationSize(value.`theirs`) +
+            FfiConverterString.allocationSize(value.`ours`)
+    )
+
+    override fun write(value: IdContradiction, buf: ByteBuffer) {
+            FfiConverterString.write(value.`field`, buf)
+            FfiConverterString.write(value.`theirs`, buf)
+            FfiConverterString.write(value.`ours`, buf)
+    }
+}
+
+
+
+/**
  * One app on one machine, which writes its own record per paper.
  */
 data class Installation (
@@ -3946,6 +4113,53 @@ public object FfiConverterTypeJatsTable: FfiConverterRustBuffer<JatsTable> {
             FfiConverterSequenceString.write(value.`footnotes`, buf)
             FfiConverterSequenceSequenceString.write(value.`headerRows`, buf)
             FfiConverterSequenceSequenceString.write(value.`bodyRows`, buf)
+    }
+}
+
+
+
+/**
+ * A request's identifiers as the library's, with the fields refused.
+ */
+data class LibraryIds (
+    /**
+     * The identifiers that are valid, canonical.
+     */
+    val `ids`: PaperIds
+    , 
+    /**
+     * The fields refused, as `"pmid"`, `"doi"` or `"pmc_id"`, in that order.
+     */
+    val `dropped`: List<kotlin.String>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLibraryIds: FfiConverterRustBuffer<LibraryIds> {
+    override fun read(buf: ByteBuffer): LibraryIds {
+        return LibraryIds(
+            FfiConverterTypePaperIds.read(buf),
+            FfiConverterSequenceString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: LibraryIds) = (
+            FfiConverterTypePaperIds.allocationSize(value.`ids`) +
+            FfiConverterSequenceString.allocationSize(value.`dropped`)
+    )
+
+    override fun write(value: LibraryIds, buf: ByteBuffer) {
+            FfiConverterTypePaperIds.write(value.`ids`, buf)
+            FfiConverterSequenceString.write(value.`dropped`, buf)
     }
 }
 
@@ -6127,6 +6341,38 @@ public object FfiConverterOptionalTypeFileUsers: FfiConverterRustBuffer<FileUser
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeIdContradiction: FfiConverterRustBuffer<IdContradiction?> {
+    override fun read(buf: ByteBuffer): IdContradiction? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeIdContradiction.read(buf)
+    }
+
+    override fun allocationSize(value: IdContradiction?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeIdContradiction.allocationSize(value)
+        }
+    }
+
+    override fun write(value: IdContradiction?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeIdContradiction.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeRetractionEvidence: FfiConverterRustBuffer<RetractionEvidence?> {
     override fun read(buf: ByteBuffer): RetractionEvidence? {
         if (buf.get().toInt() == 0) {
@@ -6936,6 +7182,25 @@ public object FfiConverterMapStringTypeCrossrefResult: FfiConverterRustBuffer<Ma
     
 
         /**
+         * A lookup's identifiers as the library's: each of `pmid`, `doi` and `pmcid`
+         * made canonical on its own, so one bad value costs only that identifier
+         * (the full-text service's `library_ids`; blank and absent are the same).
+         * Unlike [`paper_ids_canonical`], it never fails: what it refuses is listed.
+         */ fun `libraryIds`(`pmid`: kotlin.String?, `doi`: kotlin.String?, `pmcid`: kotlin.String?): LibraryIds {
+            return FfiConverterTypeLibraryIds.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_func_library_ids(
+    
+        
+        FfiConverterOptionalString.lower(`pmid`),
+        FfiConverterOptionalString.lower(`doi`),
+        FfiConverterOptionalString.lower(`pmcid`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Canonical identifiers from raw ones; blank values become `None`. Use it to
          * check identifiers before storing them.
          *
@@ -6952,6 +7217,30 @@ public object FfiConverterMapStringTypeCrossrefResult: FfiConverterRustBuffer<Ma
         FfiConverterOptionalString.lower(`pmid`),
         FfiConverterOptionalString.lower(`doi`),
         FfiConverterOptionalString.lower(`pmcid`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * The first identifier on which `theirs` contradicts `ours`, or `None` when
+         * they agree; a field absent on either side agrees. The full-text service's
+         * rule (`contradiction`) for a library JATS's own identifiers (from
+         * [`parse_jats`](crate::parse_jats), through [`library_ids`]) against the
+         * request's: a contradiction means the file is another paper's.
+         *
+         * # Errors
+         *
+         * `BadIdentifier` for an identifier that is not valid.
+         */
+    @Throws(LibraryException::class) fun `paperIdsContradiction`(`theirs`: PaperIds, `ours`: PaperIds): IdContradiction? {
+            return FfiConverterOptionalTypeIdContradiction.lift(
+    uniffiRustCallWithError(LibraryException) { _status ->
+    UniffiLib.uniffi_bmlib_ffi_fn_func_paper_ids_contradiction(
+    
+        
+        FfiConverterTypePaperIds.lower(`theirs`),
+        FfiConverterTypePaperIds.lower(`ours`),_status)
 }
     )
     }
