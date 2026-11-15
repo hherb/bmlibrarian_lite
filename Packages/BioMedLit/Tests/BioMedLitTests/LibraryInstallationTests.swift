@@ -59,6 +59,14 @@ final class LibraryInstallationTests: XCTestCase {
         XCTAssertEqual(LibraryInstallation.label(machineName: name), "MedicalFactChecker")
     }
 
+    /// Counted in scalars as bmlib counts `chars()`: 150 flags are 150
+    /// graphemes but 300 scalars, so the label is the bare app name.
+    func testLabelCountsUnicodeScalarsNotGraphemes() {
+        let name = String(repeating: "\u{1F1E9}\u{1F1EA}", count: 150)
+        XCTAssertEqual(name.count, 150)
+        XCTAssertEqual(LibraryInstallation.label(machineName: name), "MedicalFactChecker")
+    }
+
     func testLabelIsAcceptedByBmlib() throws {
         let names: [String?] = [
             "Horst's MacBook", nil, "", "Mac\u{202E}Book\u{0007}",

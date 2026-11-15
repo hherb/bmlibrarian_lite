@@ -894,6 +894,13 @@ public enum BioMedLitConstants {
     /// access to a chosen folder needs the bookmark's grant.
     public static let sandboxContainerEnvironmentKey = "APP_SANDBOX_CONTAINER_ID"
 
+    /// What the Library setting says while the launch reaches a stored library.
+    public static let libraryReachingText = "Reaching the library…"
+
+    /// Before the reason, when the library is reached but its bookmark could
+    /// not be made again (it may not survive the next launch).
+    public static let libraryUnsavedPrefix = "The library is open, but its folder could not be remembered again, so choose it again if it is lost at the next launch: "
+
     /// The marker file bmlib writes at a library folder's root
     /// (`{"format": "bmlib-library", "version": 1}`).
     public static let libraryMarkerFileName = "bmlib-library.json"

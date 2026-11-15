@@ -42,8 +42,14 @@ public final class LibraryAccess: @unchecked Sendable {
 
     /// Whether `stopAccessingSecurityScopedResource` is still owed.
     private var accessStarted: Bool
+
+    /// Guards `accessStarted`, so a stop from two threads (a quit and a
+    /// *Stop using*) owes only one `stopAccessingSecurityScopedResource`.
     private let lock = NSLock()
 
+    /// Wraps an open library: `accessStarted` is true when
+    /// `startAccessingSecurityScopedResource` succeeded on `folderURL`, so that
+    /// a stop is owed.
     init(folderURL: URL, library: PaperLibrary, accessStarted: Bool) {
         self.folderURL = folderURL
         self.library = library
@@ -60,6 +66,7 @@ public final class LibraryAccess: @unchecked Sendable {
         }
     }
 
+    /// Releases the folder's access if it is still held.
     deinit { stop() }
 }
 
@@ -76,8 +83,9 @@ public enum LibraryResume: Sendable {
     /// The library is open and access is held. `renewedBookmark` is the
     /// bookmark made again from where the folder is now, which covers a stale
     /// bookmark and a moved folder; the caller stores it. It is nil only when
-    /// making it again failed (logged; the old bookmark still works).
-    case held(LibraryAccess, renewedBookmark: Data?)
+    /// making it again failed (logged; the old bookmark still works), and
+    /// then `unsaved` says why, for the user (#792 item 2).
+    case held(LibraryAccess, renewedBookmark: Data?, unsaved: String?)
     /// The library cannot be reached; `reason` says why, for the user. The
     /// caller keeps the bookmark: a drive may be plugged back in.
     case lost(reason: String)
@@ -109,14 +117,21 @@ public enum LibrarySetup {
     ///   library and not empty, cannot be written, or cannot be bookmarked.
     ///   Access is stopped again before it throws.
     public static func choose(_ url: URL) throws -> LibraryChoice {
-        try choose(url, startAccess: { $0.startAccessingSecurityScopedResource() })
+        try choose(
+            url, startAccess: { $0.startAccessingSecurityScopedResource() },
+            makeBookmark: { try LibraryBookmark.make(for: $0) })
     }
 
-    /// ``choose(_:)`` with how access is started passed in, so a test can make
-    /// the start fail. A start that does not happen is not a refusal here: the
+    /// ``choose(_:)`` with how access is started and the bookmark made passed
+    /// in, so a test can make either fail. The bookmark is made before bmlib
+    /// writes the marker, so a volume refusing bookmarks is left untouched
+    /// (as StudyAnalyzer does; #792 item 1). A start that does not happen is not a refusal here: the
     /// folder panel's grant already reaches the folder (StudyAnalyzer's choose
     /// allows it too); `started` only says whether a stop is owed.
-    static func choose(_ url: URL, startAccess: (URL) -> Bool) throws -> LibraryChoice {
+    static func choose(
+        _ url: URL, startAccess: (URL) -> Bool,
+        makeBookmark: (URL) throws -> Data = { try LibraryBookmark.make(for: $0) }
+    ) throws -> LibraryChoice {
         let name = url.lastPathComponent
         if isInTrash(url) {
             log(.warning, "\(url.path) is in the Trash; it is not made the library")
@@ -126,6 +141,15 @@ public enum LibrarySetup {
         let started = startAccess(url)
         if !started { log(.info, "access to \(url.path) was not started; the panel's grant is used") }
         let stopIfStarted = { if started { url.stopAccessingSecurityScopedResource() } }
+        let bookmark: Data
+        do {
+            bookmark = try makeBookmark(url)
+        } catch {
+            stopIfStarted()
+            log(.error, "no bookmark of \(url.path): \(error)")
+            throw LibrarySetupError(description:
+                "“\(name)” could not be remembered for the next launch: \(error.localizedDescription)")
+        }
         let library: PaperLibrary
         do {
             library = try PaperLibrary.open(root: url.path)
@@ -133,15 +157,6 @@ public enum LibrarySetup {
             stopIfStarted()
             log(.warning, "\(url.path) was not made the library: \(error)")
             throw LibrarySetupError(description: "“\(name)” cannot be the library: \(error)")
-        }
-        let bookmark: Data
-        do {
-            bookmark = try LibraryBookmark.make(for: url)
-        } catch {
-            stopIfStarted()
-            log(.error, "no bookmark of \(url.path): \(error)")
-            throw LibrarySetupError(description:
-                "“\(name)” could not be remembered for the next launch: \(error.localizedDescription)")
         }
         log(.info, "the library is \(url.path)")
         return LibraryChoice(
@@ -152,7 +167,10 @@ public enum LibrarySetup {
     /// At launch: reach the library through its stored bookmark. Never
     /// throws; what went wrong is the `.lost` reason. Call it off the main
     /// thread.
-    public static func resume(bookmark: Data, sandboxed: Bool = LibrarySetup.isSandboxed) -> LibraryResume {
+    public static func resume(
+        bookmark: Data, sandboxed: Bool = LibrarySetup.isSandboxed,
+        makeBookmark: (URL) throws -> Data = { try LibraryBookmark.make(for: $0) }
+    ) -> LibraryResume {
         let resolved: ResolvedBookmark
         do {
             resolved = try LibraryBookmark.resolve(bookmark)
@@ -184,14 +202,16 @@ public enum LibrarySetup {
         }
         if resolved.isStale { log(.info, "the library's bookmark was stale; making it again") }
         var renewed: Data?
+        var unsaved: String?
         do {
-            renewed = try LibraryBookmark.make(for: url)
+            renewed = try makeBookmark(url)
         } catch {
             log(.error, "the library's bookmark was not made again: \(error)")
+            unsaved = error.localizedDescription
         }
         return .held(
             LibraryAccess(folderURL: url, library: library, accessStarted: started),
-            renewedBookmark: renewed)
+            renewedBookmark: renewed, unsaved: unsaved)
     }
 
     /// Why the library at `url`, a folder this process can reach, is not
@@ -222,8 +242,10 @@ public enum LibrarySetup {
             .contains { BioMedLitConstants.trashFolderNames.contains($0) }
     }
 
+    /// How serious a log line is.
     private enum Level { case info, warning, error }
 
+    /// Log `message` to the app's logger (the library category), if one is set.
     private static func log(_ level: Level, _ message: String) {
         guard let logger = BioMedLitLib.logger else { return }
         switch level {

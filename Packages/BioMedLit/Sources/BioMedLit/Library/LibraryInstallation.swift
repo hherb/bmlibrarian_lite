@@ -46,7 +46,7 @@ public enum LibraryInstallation {
     ///
     /// Control and bidirectional control characters are dropped (bmlib refuses
     /// them; a bidi mark could disguise the name). With no usable machine name,
-    /// or one too long for bmlib's 200 characters, the label is the app's name
+    /// or one too long for bmlib's 200 characters (counted in Unicode scalars, as bmlib's `chars()`), the label is the app's name
     /// alone: a label is never cut.
     ///
     /// - Parameter machineName: The computer's name as the system gives it
@@ -58,7 +58,7 @@ public enum LibraryInstallation {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return app }
         let label = "\(app) on \(cleaned)"
-        return label.count <= BioMedLitConstants.libraryLabelMaxChars ? label : app
+        return label.unicodeScalars.count <= BioMedLitConstants.libraryLabelMaxChars ? label : app
     }
 
     /// True for the characters bmlib refuses in a label: controls, and the

@@ -40,6 +40,17 @@ public final class LibrarySession {
     /// success.
     public private(set) var lastError: String?
 
+    /// Why the stored bookmark could not be made again at the last launch or
+    /// re-check, though the library is reached (the old one still works); nil
+    /// otherwise. Forgotten when the setting changes (#792 item 2).
+    public private(set) var unsaved: String?
+
+    /// True while the launch's resume reaches a stored library: the setting
+    /// says "Reaching the library…" rather than that none is set (#792 item 3).
+    public var isReaching: Bool {
+        running > 0 && state == .notChosen && store.libraryBookmark != nil
+    }
+
     /// True while a choice or the launch's resume is running: what disables
     /// the Library setting's buttons. A re-check does not count (a missing
     /// volume can be slow to resolve); a choice made during one stands.
@@ -110,13 +121,14 @@ public final class LibrarySession {
         let resume = self.resume
         let outcome = await Task.detached { resume(bookmark) }.value
         guard generation == startedAt else {
-            if case let .held(access, _) = outcome { access.stop() }
+            if case let .held(access, _, _) = outcome { access.stop() }
             return
         }
         switch outcome {
-        case let .held(access, renewed):
+        case let .held(access, renewed, unsaved):
             hold(access)
             if let renewed { store.libraryBookmark = renewed }
+            self.unsaved = unsaved
         case let .lost(reason):
             state = .unreachable(reason: reason)
         }
@@ -137,6 +149,7 @@ public final class LibrarySession {
             access?.stop()
             store.libraryBookmark = choice.bookmark
             hold(choice.access)
+            unsaved = nil
             lastError = nil
         case let .failure(error):
             lastError = String(describing: error)
@@ -150,6 +163,7 @@ public final class LibrarySession {
         stopAccess()
         store.libraryBookmark = nil
         state = .notChosen
+        unsaved = nil
         lastError = nil
     }
 

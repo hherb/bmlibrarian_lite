@@ -22,7 +22,9 @@ import XCTest
 private final class MemoryStore: LibrarySettingsStore {
     /// How many times the bookmark was written.
     var bookmarkWrites = 0
+    /// The stored bookmark; each write is counted.
     var libraryBookmark: Data? { didSet { bookmarkWrites += 1 } }
+    /// The stored installation id.
     var libraryInstallationID: String?
 }
 
@@ -187,6 +189,47 @@ final class LibrarySessionTests: XCTestCase {
         guard case .reachable = session.state else { return XCTFail("\(session.state)") }
         XCTAssertEqual(store.bookmarkWrites, writes + 1, "the renewed bookmark is stored")
         XCTAssertNotNil(store.libraryBookmark)
+    }
+
+    /// #792 item 2: a bookmark not made again is a note, forgotten on a change.
+    func testUnsavedBookmarkIsNotedAndForgottenOnChange() async throws {
+        let store = MemoryStore()
+        _ = try await chosenLibrary(in: store)
+        struct Refused: Error, LocalizedError { var errorDescription: String? { "refused" } }
+        let session = LibrarySession(store: store, resume: {
+            LibrarySetup.resume(bookmark: $0, makeBookmark: { _ in throw Refused() })
+        })
+        await session.resumeAtLaunch()
+        defer { session.stopAccess() }
+        guard case .reachable = session.state else { return XCTFail("\(session.state)") }
+        XCTAssertEqual(session.unsaved, "refused")
+        await session.choose(try freshFolder())
+        XCTAssertNil(session.unsaved)
+
+        await session.resumeAtLaunch()
+        XCTAssertEqual(session.unsaved, "refused")
+        session.stopUsing()
+        XCTAssertNil(session.unsaved)
+    }
+
+    /// #792 item 3: "Reaching…" only while a stored library is being reached.
+    func testIsReachingOnlyWhileAStoredLibraryResumes() async throws {
+        let store = MemoryStore()
+        _ = try await chosenLibrary(in: store)
+        let gate = Gate()
+        let session = LibrarySession(store: store, resume: { gate.pass(); return LibrarySetup.resume(bookmark: $0) })
+        XCTAssertFalse(session.isReaching)
+        let resuming = Task { await session.resumeAtLaunch() }
+        await fulfillment(of: [gate.entered], timeout: 10)
+        XCTAssertTrue(session.isReaching)
+        gate.open()
+        await resuming.value
+        defer { session.stopAccess() }
+        XCTAssertFalse(session.isReaching)
+
+        let none = LibrarySession(store: MemoryStore())
+        await none.resumeAtLaunch()
+        XCTAssertFalse(none.isReaching, "no bookmark, nothing to reach")
     }
 
     // MARK: - Re-check when the app becomes active (design §4.6)

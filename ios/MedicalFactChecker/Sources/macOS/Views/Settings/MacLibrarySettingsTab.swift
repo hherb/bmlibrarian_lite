@@ -54,6 +54,9 @@ struct LibrarySettingsTab: View {
     @ViewBuilder
     private var stateView: some View {
         switch session.state {
+        case .notChosen where session.isReaching:
+            Text(BioMedLitConstants.libraryReachingText)
+                .foregroundColor(.secondary)
         case .notChosen:
             Text("No library folder is set. Papers are kept in this app's own storage.")
                 .foregroundColor(.secondary)
@@ -65,6 +68,12 @@ struct LibrarySettingsTab: View {
                 .textSelection(.enabled)
         case let .unreachable(reason):
             Label("The library folder cannot be reached: \(reason)", systemImage: "exclamationmark.triangle.fill")
+                .foregroundColor(.orange)
+                .textSelection(.enabled)
+        }
+        if let unsaved = session.unsaved {
+            Label(BioMedLitConstants.libraryUnsavedPrefix + unsaved, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
                 .foregroundColor(.orange)
                 .textSelection(.enabled)
         }
