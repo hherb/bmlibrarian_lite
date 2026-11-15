@@ -28,20 +28,21 @@ its slice has landed; add a new section when handing off new work.
   = a bmlib worktree at **`aa47a57`**, 1.9.0's pin), internal track, smoke
   test, tag `android_1.9.0`.
 
-**The shared paper library** (decided 2026-11-15: every app uses it where
-its platform allows; #788 macOS, #789 desktop, #790 Android; design:
+**The shared paper library** (decided 2026-11-15: every app uses it where its
+platform allows; #788 macOS, #789 desktop, #790 Android; design:
 StudyAnalyzer's `2026-11-13-shared-paper-library-design.md` §5.3). **3a, PR
 #787** (plan `2026-11-15-library-3a-macos-setting.md`): FFI at bmlib
 `ac16ee90` (links refused, `ForeignJats`), the Library tab, BioMedLit
 `Library/` (`LibrarySession` over `LibrarySettingsStore`, which `AppSettings`
-adopts), launch resume, quit stop, `bookmarks.app-scope`; nothing is saved
-or read yet. **Owed by the maintainer:** 3a's sandboxed click-through (plan
-Task 4 Step 5). **Next: 3b**: `FullTextService` looks in the library by
+adopts), launch resume, quit stop, `bookmarks.app-scope`; nothing is saved or
+read yet. Review fixes: a volume's `.Trashes` is a Trash; a marker-less folder
+at launch is lost. **Owed by the maintainer:** 3a's sandboxed click-through
+(plan Task 4 Step 5). **Next: 3b**: `FullTextService` looks in the library by
 identifier and saves PDFs and the JATS it converts; `Document` gains each
 file's digest and kind; sources wait while it cannot be reached, with the
 banner (§4.6). Then 3c (the move, §4.7), 3d (the clear, §4.8). **Left:** an
 Apple archive from master lists `BmlibFFI.framework.dSYM` with no warning;
-#784, #785 (PR #783's deferrals).
+#784, #785 (PR #783's deferrals); #792 (3a review minors, for 3b).
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
