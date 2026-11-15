@@ -15,18 +15,18 @@ its slice has landed; add a new section when handing off new work.
 - **Task 11, desktop: published 2026-11-10** from `0641e80c` (PyPI, tag
   `0.6.0`, signed DMG; `twine` needs `packaging>=26`). **mypy is out of the
   next DMG** (#750), checked by a PyInstaller analysis, not yet a full build.
-- **medfactcheck.org** (PR #753): `website/`; `privacy.html` is generated
-  from `ios/MedicalFactChecker/PRIVACY.md` by `website/build_privacy.py`
-  (edit the policy, re-run it). Store text: `PLAY_STORE.md`, `APP_STORE.md`.
+- **medfactcheck.org** (PR #753): `website/`; `website/build_privacy.py`
+  makes `privacy.html` from `ios/MedicalFactChecker/PRIVACY.md` (edit the
+  policy, re-run it). Store text: `PLAY_STORE.md`, `APP_STORE.md`.
 - **Task 11, apps: the maintainer's.** Apple: **the 1.6 → 1.9.0 upgrade
-  passed on an iPhone 13 Pro Max (2026-11-11)**: a Debug build from
-  `0641e80c` kept every session and report (#289's risk did not show);
-  the "no dSYM" warning is `BmlibFFI` (#752), expected for 1.9.0. Left: archive both schemes, upload, tags
-  `appstore_1.9` / `macos_1.9.0`. Android 1.9.0 (debug variant, from
-  `0641e80c`) runs on the maintainer's phone over 1.6.0. Left: sign a release
-  AAB built at `0641e80c` (`JAVA_HOME` = Android Studio's `jbr`, `BMLIB_DIR`
-  = a bmlib worktree at **`aa47a57`**, 1.9.0's pin), internal track, smoke
-  test, tag `android_1.9.0`.
+  passed on an iPhone 13 Pro Max (2026-11-11)** (Debug build from `0641e80c`,
+  every session and report kept, #289's risk did not show; the "no dSYM"
+  warning is `BmlibFFI`, #752, expected for 1.9.0).
+  Left: archive both schemes, upload, tags `appstore_1.9` / `macos_1.9.0`.
+  Android 1.9.0 (debug, from `0641e80c`) runs on the maintainer's phone over
+  1.6.0. Left: sign a release AAB built at `0641e80c` (`JAVA_HOME` = Android
+  Studio's `jbr`, `BMLIB_DIR` = a bmlib worktree at **`aa47a57`**, 1.9.0's
+  pin), internal track, smoke test, tag `android_1.9.0`.
 
 **The shared paper library** (decided 2026-11-15: every app uses it where its
 platform allows; #788 macOS, #789 desktop, #790 Android; design:
@@ -43,6 +43,21 @@ file's digest and kind; sources wait while it cannot be reached, with the
 banner (§4.6). Then 3c (the move, §4.7), 3d (the clear, §4.8). **Left:** an
 Apple archive from master lists `BmlibFFI.framework.dSYM` with no warning;
 #784, #785 (PR #783's deferrals); #792 (3a review minors, for 3b).
+
+**Strict service JSON (#781 desktop, PR #783; #784 Android, PR #791).** The
+desktop reads every service's JSON but PubMed's esearch (`strict=False`, on
+purpose) through `search_failures.strict_response_json` (bmlib's
+`strict_json_loads`, strict UTF-8, a `RecursionError` refused too; **a test
+double scripts `.content`, never `.json()`**); Swift's `JSONDecoder` already
+refused all but a BOM and depth. Android reads every service's JSON but
+PubMed's esearch as bytes: OpenAlex, CORE, PMC's bucket, CrossRef and
+ClinicalTrials.gov through `strictJsonElement` (`data/remote/StrictJson.kt`:
+non-lenient, no bare word, no raw control character in a string, depth checked
+on the text first: kotlinx overflowed the stack at 100,000 levels of arrays),
+Europe PMC and Unpaywall via `strictJsonRetrofit` (its own builder), the
+retraction lookup's bytes unchanged to bmlib. Deferred: #785 (an unreadable
+ID-converter answer in the transparency analyser leaves PubMed's grants
+unasked, unreported).
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay

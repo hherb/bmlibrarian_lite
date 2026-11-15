@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.data.remote.transparency
 
+import com.bmlibrarian.factchecker.data.remote.REFUSED_JSON_VALUES
 import android.util.Log
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyConstants
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyTestFixtures
@@ -137,6 +138,21 @@ class ClinicalTrialsServiceTest {
         } catch (e: ClinicalTrialsException.ParseError) {
             assertEquals("Failed to parse response: Invalid JSON", e.message)
         }
+    }
+
+    @Test
+    fun `a study holding a value serde_json refuses is a parse error`() = runBlocking {
+        for (value in REFUSED_JSON_VALUES) {
+            server.enqueue(MockResponse().setBody("""{"protocolSection": {}, "x": $value}"""))
+            try {
+                service.getStudy("NCT00000000")
+                fail("read: ${value.take(10)}")
+            } catch (e: ClinicalTrialsException.ParseError) {
+                assertEquals("Failed to parse response: Invalid JSON", e.message)
+            }
+        }
+        server.enqueue(MockResponse().setBody("""{"protocolSection": {}, "x": 1}"""))
+        assertEquals(setOf("protocolSection", "x"), service.getStudy("NCT00000000")?.keys)
     }
 
     /**

@@ -17,6 +17,7 @@
  */
 package com.bmlibrarian.factchecker.data.remote.fulltext
 
+import com.bmlibrarian.factchecker.data.remote.REFUSED_JSON_VALUES
 import android.util.Log
 import com.bmlibrarian.factchecker.data.remote.transparency.RequestPacer
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
@@ -141,6 +142,17 @@ class OpenAlexServiceTest {
         }
         routes[path] = MockResponse().setBody(Buffer().writeByte(0xFF))
         assertEquals(malformed, service().fetchPdfUrls("10.1/x"))
+    }
+
+    @Test
+    fun `a work holding a value serde_json refuses is malformed`() = runBlocking {
+        val work = """{"locations":[{"pdf_url":"https://repo.example.org/a.pdf"}],"x":%s}"""
+        for (value in REFUSED_JSON_VALUES) {
+            routes[path] = MockResponse().setBody(work.format(value))
+            assertEquals(value.take(10), malformed, service().fetchPdfUrls("10.1/x"))
+        }
+        routes[path] = MockResponse().setBody(work.format("1"))
+        assertEquals(served, service().fetchPdfUrls("10.1/x"))
     }
 
     @Test

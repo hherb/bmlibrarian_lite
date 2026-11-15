@@ -548,7 +548,7 @@ object ResponseParser {
     )
 
     /** A JSON number as RFC 8259 writes it. */
-    private val JSON_NUMBER = Regex("""-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?""")
+    internal val JSON_NUMBER = Regex("""-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?""")
     private const val DEFAULT_VERDICT = "UNCLEAR"
     private const val DEFAULT_SUMMARY = "Unable to generate summary"
 }

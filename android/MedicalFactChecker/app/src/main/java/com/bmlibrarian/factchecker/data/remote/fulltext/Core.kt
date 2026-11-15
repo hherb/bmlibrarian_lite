@@ -17,6 +17,7 @@
  */
 package com.bmlibrarian.factchecker.data.remote.fulltext
 
+import com.bmlibrarian.factchecker.data.remote.strictJsonElement
 import android.util.Log
 import com.bmlibrarian.factchecker.data.remote.transparency.RequestPacer
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
@@ -28,7 +29,6 @@ import com.bmlibrarian.factchecker.util.executeCancellably
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -115,7 +115,7 @@ object Core {
      *   (an unpaired surrogate escape included)
      */
     fun fullText(json: String, doi: String, minChars: Int = Constants.CORE_MIN_FULLTEXT_CHARS): String? =
-        fullText(Json.parseToJsonElement(json), doi, minChars) // SerializationException is an IllegalArgumentException
+        fullText(strictJsonElement(json), doi, minChars) // SerializationException is an IllegalArgumentException
 
     /**
      * The first result that is an object, whose string `doi` normalises to this DOI's
