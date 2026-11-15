@@ -61,7 +61,8 @@ struct MacFullTextViewer: View {
         )
         .background(MacFullTextColors.markdownBackground)
         // A library PDF whose stored path is gone is found again by digest
-        .task { await LibraryController.refindPDF(of: document) }
+        // keyed on the document: the viewer's identity outlives a change of selection
+        .task(id: document.persistentModelID) { await LibraryController.refindPDF(of: document) }
         .focusable()
         .onKeyPress(keys: [.init("f")], phases: .down) { _ in
             if NSEvent.modifierFlags.contains(.command) {

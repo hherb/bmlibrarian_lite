@@ -80,14 +80,12 @@ enum LibraryController {
     /// file still where it was, or no library held. The disk work runs off
     /// the main actor.
     static func refindPDF(of document: Document) async {
-        guard let file = document.libraryPDFReference, let path = document.localPDFFilePath,
-              let library = library() else { return }
-        // nil: the file is still there; .some(nil): gone, and not in the library
-        let found: String?? = await Task.detached(priority: .userInitiated) {
-            FileManager.default.fileExists(atPath: path) ? .none : .some(library.path(of: file))
-        }.value
-        guard case let .some(refound) = found else { return }
-        guard let refound else {
+        guard let file = document.libraryPDFReference, let path = document.localPDFFilePath else { return }
+        // The common case, the file still there, builds no library
+        let gone = await Task.detached(priority: .userInitiated) { !FileManager.default.fileExists(atPath: path) }.value
+        guard gone, let library = library() else { return }
+        let found = await Task.detached(priority: .userInitiated) { library.path(of: file) }.value
+        guard let refound = found else {
             AppLogger.fullText.warning(
                 "The PDF at \(path, privacy: .public) is gone and the library holds no \(file.sha256, privacy: .public)"
             )
