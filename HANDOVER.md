@@ -30,8 +30,8 @@ allows; #788 macOS, #789 desktop, #790 Android; design: StudyAnalyzer's
 2026-11-15.** **3a, PR #787** (the Library tab, `LibrarySession`, launch
 resume, quit stop). **3b, PR #793** (plan
 `2026-11-15-library-3b-macos-fetch.md`): FFI at bmlib `747e7a80`
-(`LibraryScan`, `libraryIds`; #784/#785). BioMedLit `Library/`: three types
-(CLAUDE.md); `LibrarySession.recheck()` on activation; `unsaved`: a stale
+(`LibraryScan`, `libraryIds`; bmlib#784/#785). BioMedLit `Library/`: three
+types (CLAUDE.md); `LibrarySession.recheck()` on activation; `unsaved`: a stale
 bookmark not remade. `FullTextService(…, library:)`: a usable library JATS ends
 the lookup with no request; the chain's JATS and PDFs are kept in the library
 (only a PDF this fetch admitted loses its cache copy, after the save); its PDF
@@ -148,8 +148,10 @@ git pin). Snapshot rows keep `run_status`/`run_deciding` as set-once facts.
   but PubMed's esearch is read strictly (desktop
   `search_failures.strict_response_json`, **a test double scripts `.content`,
   never `.json()`**; Android `strictJsonElement` / `strictJsonRetrofit`).
-  **#785** (PR #794, analyser 2.8): a DOI-only study's PMID is looked up
-  before PubMed is read; an unsettled lookup leaves funding unassessed.
+  **#785** (PR #794, analyser 2.8, desktop): a DOI-only study's PMID is
+  looked up (PMC's ID converter, then `find_pmid_by_doi`) before PubMed is
+  read; a lookup it cannot settle sets `pubmed_record_unreachable`, so funding
+  is not assessed.
 - **Apple** (PRs #676, #678–#680, #682): the Mac app is sandboxed; **a run
   never waits for the Retraction Watch refresh** (#681). **Owed by the
   maintainer before the App Store**: the latest Program License Agreement,
@@ -166,8 +168,8 @@ git pin). Snapshot rows keep `run_status`/`run_deciding` as set-once facts.
   windows, 250 overlap, no reference list, **one window failing fails the
   paper**, never `text[:N]`; contract `text_windows.json`).
 - **bmlib: the FFI pin and the port set** (#583; PRs #564–#570, #572). The
-  pin names bmlib `main` (`747e7a80`, PR #785); `android-tests.yml` builds
-  bmlib there and fails if an FFI test skips or the contract copy drifts; **the committed xcframework is
+  pin names bmlib `main` (`747e7a80`, bmlib PR #785); `android-tests.yml`
+  builds bmlib there and fails if an FFI test skips or the contract copy drifts; **the committed xcframework is
   `bmlib-xcframework.yml`'s own build** (re-pin from its artifact as its
   header says). **`doc/cross_platform/bmlib_sync/ledger.json` records every
   bmlib change per platform**: a sync bumps `bmlib_commit` and triages every
