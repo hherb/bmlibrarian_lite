@@ -28,22 +28,20 @@ its slice has landed; add a new section when handing off new work.
   = a bmlib worktree at **`aa47a57`**, 1.9.0's pin), internal track, smoke
   test, tag `android_1.9.0`.
 
-**bmlib re-pinned to `110d906b`** (PR #779, 2026-11-14; the one before was
-`d3b10b5b`, PR #757): the FFI pin and the sync ledger both name bmlib `main`
-`110d906b`. The FFI's JATS and retraction code did not change between the
-pins; the bindings gain the shared paper library's objects (`PaperLibrary`,
-`LibraryScan`), which no app calls. **At `8c8e689a` the object was
-`Library`, which every UniFFI Kotlin binding's `import com.sun.jna.Library`
-shadows, so Android did not compile**; bmlib's PR #774 (`hherb/bmlib#774`)
-renamed it, and bmlib's `ffi` CI job now fails on a Kotlin binding that
-declares a name it imports. The ledger triage (15 new rows;
-`lite:pmc-open-data` is now ported in bmlib) lodged **#780** (the bucket's
-md5 and record shape, all three) and **#781** (lenient service JSON,
-bmlib#753). **Left:** an Apple archive from master lists
-`BmlibFFI.framework.dSYM` with no warning (one from `0641e80c` keeps 1.9.0's
-pin). **Decision for the maintainer:** whether lite keeps its papers in
-bmlib's shared paper library (`bmlib.library`); the ledger rows say n/a
-until then.
+**bmlib re-pinned to `110d906b`** (PR #779, 2026-11-14): FFI pin and sync
+ledger both name bmlib `main` `110d906b`; the bindings gain the shared paper
+library (`PaperLibrary`, `LibraryScan`), which no app calls (at `8c8e689a` it
+was `Library`, shadowed by Kotlin's `import com.sun.jna.Library`; bmlib#774
+renamed it and bmlib's `ffi` job now refuses such a name). Its triage lodged
+#780, **fixed on all three by PR #782** (the bucket record is read against
+the listed stem, so another article's or version's `xml_url` is malformed and
+never fetched; a `?md5=` of 32 lowercase hex is checked against the JATS
+bytes, on a 200 answer only; the record is read strictly, no NaN or lone
+surrogate, on all three; contract `record`/`xml_checksum` rows; ledger bmlib#750/#751 ported), and
+**#781** (lenient service JSON). **Left:** an Apple archive from master lists
+`BmlibFFI.framework.dSYM` with no warning. **Decision for the maintainer:**
+whether lite keeps its papers in bmlib's shared paper library
+(`bmlib.library`); the ledger rows say n/a until then.
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
@@ -239,9 +237,8 @@ Open issues by family; each issue carries the detail. None blocks another.
   0.6.1 is the maintainer's call; PRs #765–#767, #771, #774, #775). Still
   deferred: #768, #769 (apps' Ollama), #770 (prompts ask for null), #773
   (desktop PDF read faults into the report; `pdf_title_check` still opens
-  PDFs with `fitz`), #776–#778 (Android upload, `PdfText`). PR #779's:
-  **#780** (check the bucket JATS's md5, refuse a record naming another
-  article's file; all three) and **#781**.
+  PDFs with `fitz`), #776–#778 (Android upload, `PdfText`), #772 (iOS
+  unreadable citation reply; needs a decision). PR #779's: **#781**.
 - **Retraction checking** follow-ups (#662, #726–#728, #730, #731 and
   #737–#739 landed; **their rules, the unreadable-snapshot ones above all,
   are in `doc/developer/retraction_checking.md`**: read it before touching

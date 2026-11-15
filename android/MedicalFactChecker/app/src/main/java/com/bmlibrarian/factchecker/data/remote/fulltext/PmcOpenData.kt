@@ -6,6 +6,7 @@ import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
+import com.bmlibrarian.factchecker.util.ResponseParser
 import com.bmlibrarian.factchecker.util.executeCancellably
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -28,6 +29,7 @@ import java.math.BigInteger
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -53,6 +55,11 @@ object PmcOpenData {
     private const val KEY_ELEMENT = "Key"
     private const val S3_SCHEME_PREFIX = "s3://"
     private const val METADATA_PREFIX = "metadata/"
+    private const val METADATA_SUFFIX = ".json"
+    private const val MD5_QUERY = "md5="
+
+    /** What the bucket writes after `?md5=`; anything else is no md5. */
+    private val MD5_HEX = Regex("[0-9a-f]{32}")
 
     /**
      * The metadata key of the newest version of [pmcid] an S3 listing names, or null.
@@ -103,7 +110,7 @@ object PmcOpenData {
         val prefix = "$METADATA_PREFIX$pmcid."
         // `[0-9]`, spelled out: only ASCII digits are a version, on every platform (a Unicode
         // `\d` would read other scripts' digits)
-        val pattern = Regex("${Regex.escape(prefix)}([0-9]+)\\.json")
+        val pattern = Regex("${Regex.escape(prefix)}([0-9]+)${Regex.escape(METADATA_SUFFIX)}")
         val versions = keys.mapNotNull { key ->
             pattern.matchEntire(key)?.let { it.groupValues[1].toBigInteger() to key }
         }
@@ -115,6 +122,28 @@ object PmcOpenData {
             .maxWithOrNull(compareBy<Pair<BigInteger, String>>({ it.first }, { it.second }))
             ?.second
     }
+
+    /** The version a metadata key names: `PMC1.2` for `metadata/PMC1.2.json`. */
+    fun stem(metadataKey: String): String = metadataKey.removePrefix(METADATA_PREFIX).removeSuffix(METADATA_SUFFIX)
+
+    /**
+     * The HTTPS address and md5 of [stem]'s own JATS, as an `xml_url` names it.
+     *
+     * @param s3Url The record's `xml_url`
+     * @param stem The version the listing named, `PMC1.2`
+     * @return The address and the md5 (null unless the query is exactly `md5=<32 lowercase hex>`),
+     *   or null when [s3Url] names any file but this bucket's `<stem>/<stem>.xml`
+     */
+    fun ownXml(s3Url: String, stem: String): Pair<String, String?>? {
+        val own = "$S3_SCHEME_PREFIX${Constants.PMC_OPEN_DATA_BUCKET}/$stem/$stem.xml"
+        if (s3Url.substringBefore('?') != own) return null
+        val md5 = s3Url.substringAfter('?', "").takeIf { it.startsWith(MD5_QUERY) }?.removePrefix(MD5_QUERY)
+        return httpsUrl(s3Url)?.let { it to md5?.takeIf(MD5_HEX::matches) }
+    }
+
+    /** These bytes' md5 as lowercase hex: the bucket's checksum, not security. */
+    fun md5Hex(bytes: ByteArray): String =
+        MessageDigest.getInstance("MD5").digest(bytes).joinToString("") { "%02x".format(it) }
 
     /**
      * The public HTTPS address of an object in the bucket; the `?md5=` query is dropped.
@@ -135,12 +164,15 @@ object PmcOpenData {
  *
  * @property xmlUrl The JATS XML's HTTPS address, or null only when the record
  *   names no XML (`xml_url` missing or JSON null)
+ * @property xmlMd5 The md5 the JATS's bytes must have, as lowercase hex, or null
+ *   when the record gives none we can read
  * @property isOpenAccess Whether PMC lists it as open access, or null when not said
  * @property isManuscript Whether it is an author manuscript, or null when not said
  * @property licenseCode The licence, for example "CC BY", or null
  */
 data class PmcOpenDataRecord(
     val xmlUrl: String?,
+    val xmlMd5: String?,
     val isOpenAccess: Boolean?,
     val isManuscript: Boolean?,
     val licenseCode: String?
@@ -152,32 +184,38 @@ data class PmcOpenDataRecord(
          * Read a metadata record from its JSON text.
          *
          * An `xml_url` that is missing or JSON null names no XML. One that is
-         * there but is not a string, or is a string that is not an `s3://` address
-         * of an object in this bucket, is an answer we cannot read: it throws, so
-         * the fetch reports it as malformed, never as an absence (Python's
-         * `PmcOpenDataRecord.from_metadata`).
+         * there but is not a string, or is a string that is not this bucket's
+         * `s3://` address of the listed version's own `<stem>/<stem>.xml`, is an
+         * answer we cannot read: it throws, so the fetch reports it as malformed,
+         * never as an absence, and never serves another article's file as this
+         * one's (#780; Python's `PmcOpenDataRecord.from_metadata`).
          *
          * @param json The record, untrusted
+         * @param stem The version the listing named, `PMC1.2`
          * @return The record
-         * @throws IllegalArgumentException when [json] is not a JSON object, or its
-         *   `xml_url` is there but names nothing in this bucket
+         * @throws IllegalArgumentException when [json] is not a JSON object, holds a value
+         *   JSON does not define (`NaN`, a lone surrogate: read strictly, as the desktop's
+         *   `strict_json_loads` does), or its `xml_url` is there but does not name this
+         *   version's JATS
          */
-        fun fromMetadata(json: String): PmcOpenDataRecord {
+        fun fromMetadata(json: String, stem: String): PmcOpenDataRecord {
             val obj = runCatching { Json.parseToJsonElement(json) }.getOrNull() as? JsonObject
                 ?: throw IllegalArgumentException("a metadata record is a JSON object")
+            require(!ResponseParser.holdsRefusedValue(obj)) { "a metadata record holds a value JSON does not define" }
             fun string(name: String) = (obj[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
             fun bool(name: String) = (obj[name] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
-            val xmlUrl = when (val named = obj[XML_URL_FIELD]) {
+            val xml = when (val named = obj[XML_URL_FIELD]) {
                 null, JsonNull -> null
                 else -> {
                     val s3Url = (named as? JsonPrimitive)?.takeIf { it.isString }?.content
                         ?: throw IllegalArgumentException("the record's $XML_URL_FIELD is not a string")
-                    PmcOpenData.httpsUrl(s3Url)
-                        ?: throw IllegalArgumentException("the record's $XML_URL_FIELD names nothing in this bucket")
+                    PmcOpenData.ownXml(s3Url, stem)
+                        ?: throw IllegalArgumentException("the record's $XML_URL_FIELD does not name $stem's JATS")
                 }
             }
             return PmcOpenDataRecord(
-                xmlUrl = xmlUrl,
+                xmlUrl = xml?.first,
+                xmlMd5 = xml?.second,
                 isOpenAccess = bool("is_pmc_openaccess"),
                 isManuscript = bool("is_manuscript"),
                 licenseCode = string("license_code")
@@ -274,7 +312,8 @@ class PmcOpenDataService internal constructor(
      * between), not an article missing from the collection, so it is unreachable
      * like every other failure, of its real kind; an answer we cannot read (a
      * version that is not ASCII digits, an `xml_url` that is not this bucket's
-     * `s3://` address, a body that is not UTF-8) is malformed. A preprint or DOI
+     * `s3://` address of the listed version's JATS, a body that is not UTF-8, XML
+     * whose bytes do not match the record's md5) is malformed. A preprint or DOI
      * is never asked.
      *
      * @param pmcid A PMC ID, with or without its prefix
@@ -303,11 +342,12 @@ class PmcOpenDataService internal constructor(
             val record = get(recordUrl)
             if (record.code != HTTP_OK) return unreachableStatus(record.code)
             val recordText = record.text() ?: return malformed()
-            val xmlUrl = try {
-                PmcOpenDataRecord.fromMetadata(recordText).xmlUrl
+            val metadata = try {
+                PmcOpenDataRecord.fromMetadata(recordText, PmcOpenData.stem(key))
             } catch (e: IllegalArgumentException) {
                 return malformed()
-            } ?: return PmcOpenDataFetch.Absent
+            }
+            val xmlUrl = metadata.xmlUrl ?: return PmcOpenDataFetch.Absent
 
             // A test seam: tests point baseUrl at a local server. In production
             // baseUrl is PMC_OPEN_DATA_BASE_URL, so this replaces it with itself
@@ -315,6 +355,9 @@ class PmcOpenDataService internal constructor(
                 .toHttpUrlOrNull() ?: return malformed()
             val article = get(articleUrl)
             if (article.code != HTTP_OK) return unreachableStatus(article.code)
+            // Damaged or stale bytes are not the article: a fault, never served (#780)
+            // (logged by the chain, as every malformed answer is)
+            if (metadata.xmlMd5 != null && PmcOpenData.md5Hex(article.bytes) != metadata.xmlMd5) return malformed()
             val xml = article.text() ?: return malformed()
             if (xml.isBlank()) {
                 return PmcOpenDataFetch.Unreachable(RequestFailure(RequestFailureKind.INCOMPLETE_RESPONSE))

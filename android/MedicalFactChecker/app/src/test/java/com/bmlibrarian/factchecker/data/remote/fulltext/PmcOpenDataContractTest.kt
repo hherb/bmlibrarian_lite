@@ -82,20 +82,27 @@ class PmcOpenDataContractTest {
     fun record() {
         contract["record"]!!.jsonArray.map { it.jsonObject }.forEach { row ->
             val name = row.text("name")
+            val stem = row.text("stem")!!
             if (row.containsKey("error")) {
                 // An answer we cannot read: the fetch reports it as malformed, never as absent
                 assertEquals(name, "malformed", row.text("error"))
                 assertThrows(name, IllegalArgumentException::class.java) {
-                    PmcOpenDataRecord.fromMetadata(row["metadata"].toString())
+                    PmcOpenDataRecord.fromMetadata(row["metadata"].toString(), stem)
                 }
                 return@forEach
             }
-            val record = PmcOpenDataRecord.fromMetadata(row["metadata"].toString())
+            val record = PmcOpenDataRecord.fromMetadata(row["metadata"].toString(), stem)
             assertEquals(name, row.text("xml_url"), record.xmlUrl)
+            assertEquals(name, row.text("xml_md5"), record.xmlMd5)
             assertEquals(name, row["is_open_access"]?.jsonPrimitive?.booleanOrNull, record.isOpenAccess)
             assertEquals(name, row["is_manuscript"]?.jsonPrimitive?.booleanOrNull, record.isManuscript)
             assertEquals(name, row.text("license_code"), record.licenseCode)
         }
+    }
+
+    @Test
+    fun `the stem of a metadata key`() {
+        assertEquals("PMC10358571.12", PmcOpenData.stem("metadata/PMC10358571.12.json"))
     }
 
     @Test

@@ -448,12 +448,61 @@ final class FullTextServicePMCOpenDataTests: XCTestCase {
         XCTAssertFalse(StubURLProtocol.requested("some-other-bucket"))
     }
 
+    /// Another article's file is never fetched as this one's (#780).
+    func testAnXMLURLNamingAnotherArticleIsMalformedNotFetched() async throws {
+        routeBucket()
+        StubURLProtocol.routes[metadataRoute] = (200, Data(
+            #"{"xml_url":"s3://pmc-oa-opendata/PMC2.1/PMC2.1.xml"}"#.utf8))
+        let fetch = try await service().fetchPMCOpenDataXML(pmcid: pmcid)
+        XCTAssertEqual(fetch, .unreachable(.malformedResponse))
+        XCTAssertFalse(StubURLProtocol.requested("PMC2.1"))
+    }
+
+    /// The contract's checksum rows: bytes that do not match the record's
+    /// md5 are a fault, never the article (#780).
+    func testTheContractsChecksums() async throws {
+        let rows = try XCTUnwrap(PMCOpenDataContract.load()["xml_checksum"] as? [[String: Any]])
+        XCTAssertTrue(rows.contains { $0["outcome"] as? String == "malformed" }, "control")
+        for row in rows {
+            let name = row["name"] as? String ?? "?"
+            let xml = try XCTUnwrap(row["xml"] as? String)
+            let query = (row["xml_md5"] as? String).map { "?md5=\($0)" } ?? ""
+            StubURLProtocol.reset()
+            routeBucket()
+            StubURLProtocol.routes[metadataRoute] = (200, Data(
+                #"{"xml_url":"s3://pmc-oa-opendata/PMC10358571.1/PMC10358571.1.xml\#(query)"}"#.utf8))
+            let status = row["xml_status"] as? Int ?? 200
+            StubURLProtocol.routes[xmlRoute] = (status, Data(xml.utf8))
+            let fetch = try await service().fetchPMCOpenDataXML(pmcid: pmcid)
+            switch row["outcome"] as? String {
+            case "served":
+                guard case .served(let served) = fetch else { XCTFail("\(name): got \(fetch)"); continue }
+                XCTAssertEqual(served.data, Data(xml.utf8), name)
+            case "malformed":
+                XCTAssertEqual(fetch, .unreachable(.malformedResponse), name)
+            case "http_status":
+                XCTAssertEqual(fetch, .unreachable(.httpStatus(status)), name)
+            default:
+                XCTFail("unknown outcome in \(name)")
+            }
+        }
+    }
+
     func testAnXMLURLOfNullIsAbsent() async throws {
         routeBucket()
         StubURLProtocol.routes[metadataRoute] = (200, Data(#"{"xml_url":null}"#.utf8))
         let fetch = try await service().fetchPMCOpenDataXML(pmcid: pmcid)
         XCTAssertEqual(fetch, .absent)
         XCTAssertFalse(StubURLProtocol.requested(xmlRoute))
+    }
+
+    /// NaN is not JSON: refused, as the desktop's strict reader refuses it (#780).
+    func testARecordHoldingNaNIsMalformed() async throws {
+        routeBucket()
+        StubURLProtocol.routes[metadataRoute] = (200, Data(
+            #"{"xml_url":"s3://pmc-oa-opendata/PMC10358571.1/PMC10358571.1.xml","version":NaN}"#.utf8))
+        let fetch = try await service().fetchPMCOpenDataXML(pmcid: pmcid)
+        XCTAssertEqual(fetch, .unreachable(.malformedResponse))
     }
 
     func testARecordThatIsNotJSONIsMalformed() async throws {

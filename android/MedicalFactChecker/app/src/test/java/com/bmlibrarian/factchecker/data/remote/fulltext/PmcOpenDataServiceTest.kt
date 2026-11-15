@@ -11,6 +11,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -393,6 +394,54 @@ class PmcOpenDataServiceTest {
     }
 
     @Test
+    fun `a record naming another article's XML is malformed and never fetched`() = runBlocking {
+        routeAll()
+        routes[badRecordRoute] = MockResponse().setBody("""{"xml_url":"s3://pmc-oa-opendata/PMC2.1/PMC2.1.xml"}""")
+        assertEquals(malformed, service().fetchXml("PMC10358571"))
+        assertEquals(2, server.requestCount)
+    }
+
+    /** The contract's checksum rows: bytes that do not match the record's md5 are a fault (#780). */
+    @Test
+    fun `every checksum row of the fixture gets its outcome`() = runBlocking {
+        val rows = contractRows("xml_checksum")
+        assertTrue(rows.any { it.getValue("outcome").jsonPrimitive.content == "malformed" })
+        for (row in rows) {
+            val name = row.getValue("name").jsonPrimitive.content
+            val xml = row.getValue("xml").jsonPrimitive.content
+            val md5 = row.getValue("xml_md5").jsonPrimitive.contentOrNull
+            routes.clear()
+            routeAll()
+            val query = md5?.let { "?md5=$it" } ?: ""
+            routes[badRecordRoute] = MockResponse().setBody(
+                """{"xml_url":"s3://pmc-oa-opendata/PMC10358571.1/PMC10358571.1.xml$query"}"""
+            )
+            val status = row["xml_status"]?.jsonPrimitive?.int ?: 200
+            routes[articlePath] = MockResponse().setResponseCode(status)
+                .setBody(Buffer().write(xml.toByteArray(Charsets.UTF_8)))
+            val fetch = service().fetchXml("PMC10358571")
+            when (val outcome = row.getValue("outcome").jsonPrimitive.content) {
+                "served" -> assertEquals(name, PmcOpenDataFetch.Served(xml), fetch)
+                "malformed" -> assertEquals(name, malformed, fetch)
+                "http_status" -> assertEquals(
+                    name, PmcOpenDataFetch.Unreachable(RequestFailure.forHttpStatus(status)), fetch
+                )
+                else -> error("unknown outcome $outcome")
+            }
+        }
+    }
+
+    /** NaN is not JSON: refused, as Python's strict reader and Swift's JSONSerialization refuse it (#780). */
+    @Test
+    fun `a record holding NaN is malformed`() = runBlocking {
+        routeAll()
+        routes[badRecordRoute] = MockResponse().setBody(
+            """{"xml_url":"s3://pmc-oa-opendata/PMC10358571.1/PMC10358571.1.xml","version":NaN}"""
+        )
+        assertEquals(malformed, service().fetchXml("PMC10358571"))
+    }
+
+    @Test
     fun `a record whose xml_url is not a string is malformed, not absent`() = runBlocking {
         routeAll()
         routes[badRecordRoute] = MockResponse().setBody("""{"xml_url":42}""")
@@ -445,13 +494,15 @@ class PmcOpenDataServiceTest {
         )
     }
 
-    private fun statusRows() = run {
+    private fun statusRows() = contractRows("status")
+
+    private fun contractRows(section: String) = run {
         var candidate: File? = File("").absoluteFile
         while (candidate != null) {
             val file = File(candidate, "doc/cross_platform/fulltext_parity/pmc_open_data.json")
             if (file.isFile) {
                 return@run Json.parseToJsonElement(file.readText())
-                    .jsonObject.getValue("status").jsonArray.map { it.jsonObject }
+                    .jsonObject.getValue(section).jsonArray.map { it.jsonObject }
             }
             candidate = candidate.parentFile
         }

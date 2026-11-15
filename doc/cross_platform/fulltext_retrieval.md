@@ -275,14 +275,22 @@ function fetch_pmc_open_data(pmcid) -> PmcOpenDataFetch:
                                                        # only under versions it cannot read:
                                                        # UNREACHABLE(malformed_response)
     if key == null: return ABSENT                      # no version of this article listed
+    stem = key without "metadata/" and ".json"         # PMC1.2: the version listed
     record = GET {base}/{key}                          # 404 here: UNREACHABLE(404)
-                                                       # not UTF-8, unparseable JSON or not an object:
+                                                       # not UTF-8, unparseable JSON (read strictly
+                                                       # everywhere: no NaN, no lone surrogate)
+                                                       # or not an object:
                                                        # UNREACHABLE(malformed_response)
     if record.xml_url is missing or null: return ABSENT  # no XML named
+    if record.xml_url without its query != s3://pmc-oa-opendata/{stem}/{stem}.xml:
+        return UNREACHABLE(malformed_response)         # XML named where we cannot read (#486),
+                                                       # or another article's or version's (#780)
     xml_url = https_url(record.xml_url)                # s3://pmc-oa-opendata/k?md5= -> https://…/k
-    if xml_url == null: return UNREACHABLE(malformed_response)
-                                                       # XML named where we cannot read (#486)
-    xml = GET xml_url                                  # 404: UNREACHABLE(404); blank: incomplete_response
+    md5 = the query's 32 lowercase hex digits, when it is exactly md5=<them>; else null
+    xml = GET xml_url                                  # 404: UNREACHABLE(404)
+    if md5 != null and md5(xml bytes) != md5:          # on a 200 only, before decoding
+        return UNREACHABLE(malformed_response)         # damaged or stale: never served (#780)
+    if xml is blank: return UNREACHABLE(incomplete_response)
     return SERVED(xml)
 ```
 
@@ -307,8 +315,11 @@ so a 404 is `NoSuchBucket` (or something in between), which says nothing about
 the article. A 404 on the metadata record or on the XML *after the listing
 named it* is **unreachable** too: the bucket is disagreeing with itself, and
 that is a lookup that failed. An answer we cannot read (a version that is not
-ASCII digits, an `xml_url` that is not this bucket's `s3://` URL) is
-`malformed_response`, never an absence.
+ASCII digits, an `xml_url` that is not this bucket's `s3://` URL of the listed
+version's own `<stem>/<stem>.xml`, XML whose bytes do not match the record's
+md5) is `malformed_response`, never an absence. A record naming another
+article's file is never fetched: served, it would be that article's text given
+as this one's (#780).
 
 ## Unpaywall PDF
 
