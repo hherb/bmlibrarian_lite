@@ -48,14 +48,14 @@ paper (it is in the library, not `PDFCache`); unplug or rename the folder and
 switch back (the setting says unreachable; a new fetch says it is kept in this
 app); the record's label is the machine name under the sandbox; `PaperLibrary`
 I/O is synchronous on the service actor: does a hanging (iCloud dataless) read
-block its fetches? **Next: #798** (split `FullTextService.swift`, 4,532
-lines, a verbatim move), **then 3c** (move waiting sources and the PDF cache
-in, §4.7; the switch), then 3d (the manual clear, §4.8). **Left:** an Apple
-archive from master lists `BmlibFFI.framework.dSYM` with no warning; the
-ledger's other library rows stay `owed` (#788). 3b's leftovers, lodged:
-**#796** (the race fallback can record a refused PDF), **#797** (an
-extraction-off library PDF asks CORE), **#799** (the unreachable warning on
-every call). For 3c: *Stop
+block its fetches? **#798** split the service verbatim into
+`FullTextService+<concern>.swift` extensions. **Next: 3c** (move waiting
+sources and the PDF cache in, §4.7; the switch; in `+Library`), then 3d
+(the manual clear, §4.8). **Left:** an Apple archive from master lists
+`BmlibFFI.framework.dSYM` with no warning; the ledger's other library rows
+stay `owed` (#788). 3b's leftovers, lodged: **#796** (the race fallback can
+record a refused PDF), **#797** (an extraction-off library PDF asks CORE),
+**#799** (the unreachable warning on every call). For 3c: *Stop
 using*/*Choose…* mid-fetch stops the old access, so its source waits under a
 wrong reason; after *Stop using* a library PDF reads "no longer on this device"
 (3c's switch: §4.7's "unavailable").

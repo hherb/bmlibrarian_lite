@@ -113,7 +113,7 @@ exceptions.py         # Custom exception hierarchy
 
 Shared iOS/macOS components:
 - `JATS/`: XML parsing → HTML/Markdown (JATSXMLParser, JATSModels)
-- `Services/`: EuropePMCService, PubMedService, FullTextService, PMCOpenData (PMC's open-data bucket), OpenAlex, CORE (extracted text), Elsevier (PDFs, with a key), KeyedServiceSession (CORE's and Elsevier's session state), BotWalls (bot-wall challenge pages), PDFTitleCheck (another article's PDF)
+- `Services/`: EuropePMCService, PubMedService, FullTextService (one extension file per tier, `FullTextService+<concern>.swift`), PMCOpenData (PMC's open-data bucket), OpenAlex, CORE (extracted text), Elsevier (PDFs, with a key), KeyedServiceSession (CORE's and Elsevier's session state), BotWalls (bot-wall challenge pages), PDFTitleCheck (another article's PDF)
 - `Transparency/`: Study transparency analysis
   - `Analysis/`: TransparencyScorer, FundingAnalyzer, COIAnalyzer, DataAvailabilityAnalyzer, TrialComplianceAnalyzer
   - `Models/`: TransparencyModels, TransparencyConstants
