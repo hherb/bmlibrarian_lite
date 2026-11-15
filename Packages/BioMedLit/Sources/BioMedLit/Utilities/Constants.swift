@@ -955,6 +955,23 @@ public enum BioMedLitConstants {
     public static let libraryMoveReadBackMismatchReason =
         "the copy read back from the library is not the file this app holds, so this app's copy is kept"
 
+    /// A document's note when its library file was not copied into the folder
+    /// chosen in place of `folderName` (design §4.7: it reads as unavailable,
+    /// naming the folder).
+    public static func libraryNotCarriedNote(folderName: String) -> String {
+        "its file was left in the paper library “\(folderName)”; choose that folder again to read it"
+    }
+
+    /// Why a move did nothing: bmlib refused this installation (logged with
+    /// bmlib's reason).
+    public static let libraryInstallationRefusedText =
+        "The paper library refused this app's installation record; see the log for why."
+
+    /// A document's note when its library file was not copied back into this
+    /// app as it stopped using the library.
+    public static let libraryNoLongerUsedNote =
+        "its file is in a paper library this app no longer uses; choose that folder again to read it"
+
     /// Why a file was not moved into the library: this app's copy could not
     /// be read.
     public static func libraryMoveUnreadableReason(path: String, reason: String) -> String {

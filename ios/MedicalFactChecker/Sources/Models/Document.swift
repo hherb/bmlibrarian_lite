@@ -422,6 +422,35 @@ final class Document {
         storePDFPath(path, isLocalFile: true)
     }
 
+    /// Store `kept`, this document's file now in the library (moved in, or
+    /// copied there on a switch; design §4.7): a PDF is read from the
+    /// library's file. A JATS names the library file only when no library PDF
+    /// is this document's. Either way nothing waits any more.
+    func storeMovedLibraryFile(_ kept: LibraryKept) {
+        if kept.file.kind == BioMedLitConstants.libraryKindPDF {
+            storePDFPath(kept.path, isLocalFile: true)
+            storeLibraryFile(kept.file, waiting: nil, note: nil)
+        } else if libraryPDFReference == nil {
+            storeLibraryFile(kept.file, waiting: nil, note: nil)
+        } else {
+            fullTextLibraryWaiting = nil
+        }
+    }
+
+    /// Store `path`, the copy of this document's library file of `kind` made
+    /// in this app as it stopped using the library: a PDF is read from it, and
+    /// the library fields are cleared.
+    func storeAppCopy(at path: String, kind: String) {
+        if kind == BioMedLitConstants.libraryKindPDF { storePDFPath(path, isLocalFile: true) }
+        storeLibraryFile(nil, waiting: nil, note: nil)
+    }
+
+    /// Store `note`, why this document's library file cannot be read after a
+    /// switch (design §4.7), keeping the file's digest.
+    func noteLibraryFileLeft(_ note: String) {
+        fullTextLibraryNote = note
+    }
+
     /// Whether full text is known to be available in PubMed Central.
     ///
     /// Set from search results metadata (Europe PMC `inPMC` flag or presence of PMC ID).

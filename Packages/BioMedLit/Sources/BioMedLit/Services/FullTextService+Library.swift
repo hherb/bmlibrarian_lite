@@ -119,7 +119,7 @@ extension FullTextService {
     ///   - primaryKind: What the slot holds, when stated.
     ///   - title: The article's title.
     /// - Returns: The paper.
-    static func libraryPaper(
+    public static func libraryPaper(
         pmcId: String?, doi: String?, pmid: String, primaryKind: ArticleIdentifierKind?, title: String?
     ) -> LibraryPaper {
         let slot = pmid.trimmingCharacters(in: .whitespacesAndNewlines)
