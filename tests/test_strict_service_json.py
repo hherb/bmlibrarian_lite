@@ -197,3 +197,11 @@ def test_an_id_converter_answer_that_is_well_formed_is_read() -> None:
     client = PubMedClient(email="test@example.com")
     client.session = session_answering(_answer(b'{"records": [{"doi": "10.1/x", "pmid": "1"}]}'))
     assert client.convert_ids(["10.1/x"], "doi", "pmid") == {"10.1/x": "1"}
+
+
+def test_an_id_converter_error_status_is_refused() -> None:
+    """An error status is no answer, even with a readable body (#785)."""
+    client = PubMedClient(email="test@example.com")
+    client.session = session_answering(_answer(b'{"records": []}', status=500))
+    with pytest.raises(requests.HTTPError):
+        client.convert_ids(["10.1/x"], "doi", "pmid")

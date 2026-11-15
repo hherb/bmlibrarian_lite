@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 
 from bmlibrarian_lite.identifiers import (
     PmidReading,
@@ -554,3 +555,44 @@ def test_a_real_pmid_whose_record_names_no_funder_still_answers_no() -> None:
     assert m.funding_was_assessed(report)
     assert "Industry Funding: NO" in m.format_report_summary(report)
     assert not any("PubMed was not asked" in w for w in report.warnings)
+
+
+# ---- A DOI-only study's PMID, looked up in the ID converter (#785) ----
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        requests.ConnectionError("down"),
+        ValueError("unreadable body"),
+        {"10.1/x": "PMC7745181"},
+    ],
+    ids=["unreachable", "unreadable", "not-a-pmid"],
+)
+def test_an_unread_id_converter_leaves_funding_unassessed(answer) -> None:
+    """Unreachable is not absent: PubMed went unasked, so funding is no "NO"."""
+    m, a = _offline_analyzer()
+    if isinstance(answer, Exception):
+        a.pubmed.convert_ids.side_effect = answer
+    else:
+        a.pubmed.convert_ids.side_effect = None
+        a.pubmed.convert_ids.return_value = answer
+    report = a.analyze(doi="10.1/x")
+    assert report.pmid is None and report.pubmed_record_unreachable
+    assert not m.funding_was_assessed(report)
+    assert "Industry Funding: Not assessed" in m.format_report_summary(report)
+    assert any("PubMed Central's ID converter" in w for w in report.warnings)
+    assert any("PubMed could not be read" in w for w in report.warnings)
+
+
+def test_a_pmid_the_converter_names_is_read_from_pubmed() -> None:
+    """The converted PMID reaches PubMed, whose grants then count."""
+    m, a = _offline_analyzer(pubmed_record={"title": "T", "grants": [{"agency": "Pfizer"}]})
+    a.pubmed.convert_ids.side_effect = None
+    a.pubmed.convert_ids.return_value = {"10.1/x": "0123"}
+    report = a.analyze(doi="10.1/x")
+    a.pubmed.fetch_article.assert_called_once_with("123")
+    assert report.pubmed_record_read and not report.pubmed_record_unreachable
+    assert m.funding_was_assessed(report)
+    assert "Industry Funding: YES" in m.format_report_summary(report)
+    assert not any("PubMed holds no record" in w for w in report.warnings)

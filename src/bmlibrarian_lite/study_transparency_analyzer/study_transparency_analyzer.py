@@ -63,6 +63,7 @@ from ..constants import (
     HTTP_NOT_FOUND,
     PUBMED_TRIAL_REGISTRY_DATABANKS,
     SERVICE_CROSSREF,
+    SERVICE_PMC_ID_CONVERTER,
     SERVICE_PUBMED,
 )
 from ..data_models import (
@@ -332,6 +333,8 @@ class TransparencyReport:
 
     # Whether PubMed could not be read at all, as opposed to answering that
     # it holds no such article. Only the first is our silence (#346, #356).
+    # Also set, with no PMID, when the ID converter a DOI-only study's PMID
+    # is looked up in could not be read (#785).
     pubmed_record_unreachable: bool = False
 
     # Whether the caller gave a PMID that PubMed could not be asked by: a
@@ -435,7 +438,12 @@ def funding_was_assessed(report: TransparencyReport) -> bool:
         True when each of CrossRef and PubMed either served a record or
         could not be asked for want of an identifier.
     """
-    pubmed_owed = bool(report.pmid) or report.pubmed_identifier_unusable
+    pubmed_owed = (
+        bool(report.pmid)
+        or report.pubmed_identifier_unusable
+        # The ID converter went unread, so PubMed was owed its question (#785)
+        or report.pubmed_record_unreachable
+    )
     return not (
         (bool(report.doi) and not report.crossref_record_read)
         or (pubmed_owed and not report.pubmed_record_read)
@@ -1483,6 +1491,8 @@ class PubMedClient:
         # Use ID converter API
         url = "https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/"
         response = self.session.get(url, params=params, timeout=30)
+        # An error status is no answer: its body would read as "no PMID" (#785)
+        response.raise_for_status()
         data = strict_response_json(response)
 
         result = {}
@@ -3192,6 +3202,11 @@ class StudyTransparencyAnalyzer:
             report: The report to collect metadata onto.
         """
 
+        # A DOI-only study's PMID is looked up first, so PubMed's record is
+        # read for it too: a PMID found after it went unread (#785)
+        if not report.pmid and report.doi:
+            self._look_up_pmid(report, report.doi)
+
         # Try PubMed first if we have PMID
         if report.pmid:
             logger.info(f"Fetching PubMed data for PMID {report.pmid}")
@@ -3303,14 +3318,49 @@ class StudyTransparencyAnalyzer:
                 # Store funders for later analysis
                 report._crossref_funders = crossref_data.get('funder', [])
 
-        # Try to get PMID from DOI if we don't have it
-        if not report.pmid and report.doi:
-            try:
-                id_mapping = self.pubmed.convert_ids([report.doi], 'doi', 'pmid')
-                if report.doi in id_mapping:
-                    report.pmid = id_mapping[report.doi]
-            except Exception as e:
-                logger.warning(f"Could not convert DOI to PMID: {e}")
+    def _look_up_pmid(self, report: TransparencyReport, doi: str) -> None:
+        """Look a DOI-only study's PMID up in PubMed Central's ID converter.
+
+        A converter we could not read, or whose answer we could not, leaves
+        PubMed unasked for a record it may hold: that is recorded as PubMed
+        unreachable, never as a study PubMed holds no record of (#785). Only
+        the converter's own answer naming no PMID is an absence.
+
+        Args:
+            report: The report whose ``pmid`` is set when the converter
+                names one.
+            doi: The report's DOI.
+        """
+        try:
+            found = self.pubmed.convert_ids([doi], 'doi', 'pmid').get(doi)
+        except Exception as e:  # convert_ids also raises on a body of the wrong shape
+            failure = (
+                request_failure_from_exception(e)
+                if isinstance(e, requests.RequestException)
+                else RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+            )
+        else:
+            if found is None:
+                return
+            pmid = canonical_pmid(found).pmid
+            if pmid is not None:
+                report.pmid = pmid
+                return
+            # A value that is no PMID would reach efetch, which reads every
+            # run of digits as a PMID of its own (bmlib#470)
+            failure = RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)
+        logger.warning(
+            "The ID converter could not be read for DOI %s (%s), so PubMed "
+            "was not asked about this study.",
+            doi,
+            failure.describe(),
+        )
+        report.pubmed_record_unreachable = True
+        report.warnings.append(
+            unreachable_source_caveat(
+                SERVICE_PMC_ID_CONVERTER, failure, PUBMED_RECORD_SOUGHT
+            )
+        )
 
     def _fetch_funder_info(self, report: TransparencyReport):
         """Analyze funding sources."""
@@ -3332,7 +3382,12 @@ class StudyTransparencyAnalyzer:
             name
             for name, was_unreachable, could_ask in (
                 (SERVICE_CROSSREF, report.crossref_record_unreachable, report.doi),
-                (SERVICE_PUBMED, report.pubmed_record_unreachable, report.pmid),
+                # An unread ID converter leaves PubMed unasked, so no PMID (#785)
+                (
+                    SERVICE_PUBMED,
+                    report.pubmed_record_unreachable,
+                    report.pmid or report.pubmed_record_unreachable,
+                ),
             )
             if could_ask and was_unreachable
         ]
