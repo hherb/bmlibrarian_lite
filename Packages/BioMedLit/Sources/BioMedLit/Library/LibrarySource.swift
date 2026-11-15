@@ -147,6 +147,29 @@ public final class LibrarySource: FullTextLibrary {
         }
     }
 
+    public func read(_ file: LibraryFileReference) -> Result<Data, LibraryLookupFailure> {
+        func failure(_ error: Any) -> LibraryLookupFailure {
+            let failure = LibraryLookupFailure(
+                description: BioMedLitConstants.libraryFileFailure(kind: file.kind, sha256: file.sha256,
+                                                                   reason: "\(error)"),
+                waits: Self.waits(error))
+            Self.warn(failure.description)
+            return failure
+        }
+        guard let kind = Self.sourceKind(file.kind) else {
+            return .failure(failure(BioMedLitConstants.libraryUnknownKindReason(file.kind)))
+        }
+        do {
+            guard let ref = try access.library.scan().findDigest(sha256: file.sha256, kind: kind) else {
+                return .failure(failure(BioMedLitConstants.libraryDigestNotHeldReason(kind: file.kind,
+                                                                                      sha256: file.sha256)))
+            }
+            return .success(try access.library.read(file: ref))
+        } catch {
+            return .failure(failure(error))
+        }
+    }
+
     // MARK: bmlib's rules
 
     /// The paper's newest source of `kind` that may be served, read and

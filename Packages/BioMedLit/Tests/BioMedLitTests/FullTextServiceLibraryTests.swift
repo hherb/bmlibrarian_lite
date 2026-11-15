@@ -68,6 +68,10 @@ private final class FakeLibrary: FullTextLibrary, @unchecked Sendable {
     }
 
     func path(of file: LibraryFileReference) -> String? { nil }
+
+    func read(_ file: LibraryFileReference) -> Result<Data, LibraryLookupFailure> {
+        .failure(LibraryLookupFailure(description: "not read in these tests", waits: false))
+    }
 }
 
 /// The fetch through the shared paper library (design §4.5): the library's

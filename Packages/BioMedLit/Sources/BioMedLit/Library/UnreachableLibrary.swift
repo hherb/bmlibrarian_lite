@@ -54,6 +54,14 @@ public struct UnreachableLibrary: FullTextLibrary {
         return nil
     }
 
+    public func read(_ file: LibraryFileReference) -> Result<Data, LibraryLookupFailure> {
+        let failure = LibraryLookupFailure(
+            description: BioMedLitConstants.libraryFileFailure(kind: file.kind, sha256: file.sha256, reason: reason),
+            waits: true)
+        BioMedLitLib.logger?.warning(failure.description, category: .library)
+        return .failure(failure)
+    }
+
     /// The failure for `paper`, logged at warning, or nil for a paper with no
     /// identifier the library accepts (read as the library reads them). It
     /// always waits: the library may come back.

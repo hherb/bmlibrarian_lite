@@ -941,6 +941,26 @@ public enum BioMedLitConstants {
     /// `<cacheKey>-<sha12>.xml`).
     public static let libraryWaitingDigestHexChars = 12
 
+    /// The suffix of a library PDF copied back into the PDF cache
+    /// (`<cacheKey>-<sha12>.pdf`) when the app stops using the library.
+    public static let libraryAppCopyPDFSuffix = ".pdf"
+
+    /// Why a file was not moved into the library: its paper has no identifier
+    /// the library accepts.
+    public static let libraryMoveNoIdentifierReason =
+        "the paper has no identifier the library accepts, so it was not moved"
+
+    /// Why a file was not moved into the library: the copy read back from the
+    /// library is not the file the app holds.
+    public static let libraryMoveReadBackMismatchReason =
+        "the copy read back from the library is not the file this app holds, so this app's copy is kept"
+
+    /// Why a file was not moved into the library: this app's copy could not
+    /// be read.
+    public static func libraryMoveUnreadableReason(path: String, reason: String) -> String {
+        "this app's copy \(path) could not be read (\(reason))"
+    }
+
     // MARK: - Shared paper library: bmlib's sentences
     //
     // The notes and failures of the fetch's library source, in bmlib's
