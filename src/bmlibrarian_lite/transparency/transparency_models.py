@@ -140,7 +140,9 @@ class TransparencyUnassessed:
 #: a paper in its reference list, and the record read is the one asked
 #: about; stored COI and data-availability ratings read from a cited
 #: paper's full text can move).
-TRANSPARENCY_ANALYZER_VERSION = "2.7"
+#: 2.8: #785 (a DOI-only study's PMID is looked up before PubMed is read,
+#: so its record is read; an unread ID converter leaves funding unassessed).
+TRANSPARENCY_ANALYZER_VERSION = "2.8"
 
 #: What every row written before #360 says, whatever analysed it: the field
 #: was never compared to anything, so it never moved off its default.

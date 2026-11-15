@@ -10,14 +10,10 @@ its slice has landed; add a new section when handing off new work.
 
 **Release: desktop 0.6.0, apps 1.9.0** (plan
 `docs/superpowers/plans/2026-11-08-release-0.6.0-and-1.9.0.md`).
-- **Tasks 1–10 done** (PRs #743, #745, #746, #748, #749; merge `0641e80c`,
-  all CI green). Deferred: #744, #527 (signed build from a second account).
-- **Task 11, desktop: published 2026-11-10** from `0641e80c` (PyPI, tag
-  `0.6.0`, signed DMG; `twine` needs `packaging>=26`). **mypy is out of the
-  next DMG** (#750), checked by a PyInstaller analysis, not yet a full build.
-- **medfactcheck.org** (PR #753): `website/`; `website/build_privacy.py`
-  makes `privacy.html` from `ios/MedicalFactChecker/PRIVACY.md` (edit the
-  policy, re-run it). Store text: `PLAY_STORE.md`, `APP_STORE.md`.
+- **Tasks 1–10 done** (merge `0641e80c`); deferred #744, #527. **Desktop
+  0.6.0 published 2026-11-10** (`twine` needs `packaging>=26`); mypy is out
+  of the next DMG (#750, not yet a full build). **medfactcheck.org** (PR
+  #753): re-run `website/build_privacy.py` after editing `PRIVACY.md`.
 - **Task 11, apps: the maintainer's.** Apple: **the 1.6 → 1.9.0 upgrade
   passed on an iPhone 13 Pro Max (2026-11-11)** (Debug build from `0641e80c`,
   every session and report kept, #289's risk did not show; the "no dSYM"
@@ -55,9 +51,16 @@ ClinicalTrials.gov through `strictJsonElement` (`data/remote/StrictJson.kt`:
 non-lenient, no bare word, no raw control character in a string, depth checked
 on the text first: kotlinx overflowed the stack at 100,000 levels of arrays),
 Europe PMC and Unpaywall via `strictJsonRetrofit` (its own builder), the
-retraction lookup's bytes unchanged to bmlib. Deferred: #785 (an unreadable
-ID-converter answer in the transparency analyser leaves PubMed's grants
-unasked, unreported).
+retraction lookup's bytes unchanged to bmlib.
+
+**#785 (PR #794, analyser 2.8):** the desktop analyser looks a DOI-only
+study's PMID up *before* reading PubMed (a converted PMID was never read, and
+the reader told "PubMed holds no record"): in PMC's ID converter, then, when
+it names none, PubMed's esearch (`find_pmid_by_doi`; the converter holds
+PMC's articles only). A lookup unreachable, an error status, a body it cannot
+read, more than one article or a value that is not a PMID sets
+`pubmed_record_unreachable`, so funding is not assessed (the apps never
+convert).
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
