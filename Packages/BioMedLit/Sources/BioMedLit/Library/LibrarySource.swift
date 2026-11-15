@@ -39,7 +39,8 @@ public final class LibrarySource: FullTextLibrary {
         do {
             who = try installationNew(app: BioMedLitConstants.libraryAppName, id: installationID, label: label)
         } catch {
-            let failure = LibraryLookupFailure(description: "library, installation \(installationID): \(error)")
+            let failure = LibraryLookupFailure(description:
+                BioMedLitConstants.libraryInstallationFailure(id: installationID, reason: "\(error)"))
             Self.warn(failure.description)
             throw failure
         }
@@ -60,17 +61,18 @@ public final class LibrarySource: FullTextLibrary {
         let article: JatsArticle
         do {
             guard let xml = String(data: held.bytes, encoding: .utf8) else {
-                return unusable("Not serving the library's JATS \(at): it does not parse (it is not UTF-8); looking further.")
+                return unusable(BioMedLitConstants.libraryJATSUnparseableNote(
+                    file: at, reason: BioMedLitConstants.libraryJATSNotUTF8Reason))
             }
             article = try parseJats(xml: xml)
         } catch {
-            return unusable("Not serving the library's JATS \(at): it does not parse (\(error)); looking further.")
+            return unusable(BioMedLitConstants.libraryJATSUnparseableNote(file: at, reason: Self.jatsReason(error)))
         }
         let own = libraryIds(pmid: article.pmid, doi: article.doi, pmcid: article.pmcId).ids
         do {
             if let clash = try paperIdsContradiction(theirs: own, ours: ids) {
-                let message = "the library's JATS \(at) is another paper's: its own \(clash.field) "
-                    + "\(clash.theirs) is not the request's \(clash.ours), so nothing is kept in the library in this lookup"
+                let message = BioMedLitConstants.libraryJATSWrongPaperNote(
+                    file: at, field: clash.field, theirs: clash.theirs, ours: clash.ours)
                 Self.warn(message)
                 return .wrongPaper(message)
             }
@@ -78,7 +80,7 @@ public final class LibrarySource: FullTextLibrary {
             return .failed(fail(ids, held.file, error).description)
         }
         guard article.hasBody else {
-            return unusable("Not serving the library's JATS \(at): it has no body; looking further.")
+            return unusable(BioMedLitConstants.libraryJATSBodylessNote(file: at))
         }
         return .usable(held.bytes, Self.reference(held.file))
     }
@@ -94,7 +96,7 @@ public final class LibrarySource: FullTextLibrary {
         -> Result<LibraryKept?, LibraryLookupFailure> {
         guard let ids = requestIDs(paper) else { return .success(nil) }
         guard let sourceKind = Self.sourceKind(kind) else {
-            return .failure(fail(ids, nil, "\(kind) is not a kind of file the library holds"))
+            return .failure(fail(ids, nil, BioMedLitConstants.libraryUnknownKindReason(kind)))
         }
         do {
             let file = try access.library.save(who: who, paper: info(paper, ids), bytes: bytes,
@@ -108,7 +110,7 @@ public final class LibrarySource: FullTextLibrary {
     public func noteUse(_ file: LibraryFileReference, paper: LibraryPaper) -> LibraryLookupFailure? {
         guard let ids = requestIDs(paper) else { return nil }
         guard let kind = Self.sourceKind(file.kind) else {
-            return fail(ids, nil, "\(file.kind) is not a kind of file the library holds")
+            return fail(ids, nil, BioMedLitConstants.libraryUnknownKindReason(file.kind))
         }
         let scan: LibraryScan
         let found: FileRef?
@@ -119,7 +121,7 @@ public final class LibrarySource: FullTextLibrary {
             return fail(ids, nil, error)
         }
         guard let ref = found else {
-            return fail(ids, nil, "it holds no \(file.kind) file with digest \(file.sha256)")
+            return fail(ids, nil, BioMedLitConstants.libraryDigestNotHeldReason(kind: file.kind, sha256: file.sha256))
         }
         do {
             if try scan.listsUse(who: who, file: ref) { return nil }
@@ -132,13 +134,14 @@ public final class LibrarySource: FullTextLibrary {
 
     public func path(of file: LibraryFileReference) -> String? {
         guard let kind = Self.sourceKind(file.kind) else {
-            Self.warn("library: \(file.kind) is not a kind of file the library holds")
+            Self.warn(BioMedLitConstants.libraryFileFailure(
+                kind: file.kind, sha256: file.sha256, reason: BioMedLitConstants.libraryUnknownKindReason(file.kind)))
             return nil
         }
         do {
             return try access.library.scan().findDigest(sha256: file.sha256, kind: kind).map(path(held:))
         } catch {
-            Self.warn("library, file \(file.kind) \(file.sha256): \(error)")
+            Self.warn(BioMedLitConstants.libraryFileFailure(kind: file.kind, sha256: file.sha256, reason: "\(error)"))
             return nil
         }
     }
@@ -150,8 +153,7 @@ public final class LibrarySource: FullTextLibrary {
     private func requestIDs(_ paper: LibraryPaper) -> PaperIds? {
         let made = libraryIds(pmid: paper.pmid, doi: paper.doi, pmcid: paper.pmcId)
         for field in made.dropped {
-            Self.warn("The request's \(field) is not an identifier the library accepts; "
-                + "looking the paper up in the library without it.")
+            Self.warn(BioMedLitConstants.libraryDroppedIdentifierWarning(field: field))
         }
         let ids = made.ids
         return ids.pmid == nil && ids.doi == nil && ids.pmcid == nil ? nil : ids
@@ -193,10 +195,21 @@ public final class LibrarySource: FullTextLibrary {
 
     /// bmlib's `failure`: "library, paper <ids>[ file F/N]: <error>", logged.
     private func fail(_ ids: PaperIds, _ file: FileRef?, _ error: Any) -> LibraryLookupFailure {
-        let at = file.map { " file \($0.folder)/\($0.name)" } ?? ""
-        let failure = LibraryLookupFailure(description: "library, paper \(Self.describe(ids))\(at): \(error)")
+        let failure = LibraryLookupFailure(description: BioMedLitConstants.libraryFailure(
+            ids: Self.describe(ids), file: file.map { "\($0.folder)/\($0.name)" }, reason: "\(error)"))
         Self.warn(failure.description)
         return failure
+    }
+
+    /// bmlib-ffi's text for a failed parse, not Swift's debug form of the
+    /// error.
+    static func jatsReason(_ error: Error) -> String {
+        switch error {
+        case let JatsError.Xml(reason), let JatsError.Resource(reason): return reason
+        case let JatsError.NestingTooDeep(depth, limit):
+            return BioMedLitConstants.libraryJATSNestingReason(depth: depth, limit: limit)
+        default: return "\(error)"
+        }
     }
 
     private func unusable(_ note: String) -> LibraryJATSLookup {
@@ -208,7 +221,7 @@ public final class LibrarySource: FullTextLibrary {
     static func describe(_ ids: PaperIds) -> String {
         let parts = [("pmid", ids.pmid), ("doi", ids.doi), ("pmcid", ids.pmcid)]
             .compactMap { name, value in value.map { "\(name)=\($0)" } }
-        return parts.isEmpty ? "no identifiers" : parts.joined(separator: " ")
+        return parts.isEmpty ? BioMedLitConstants.libraryNoIdentifiers : parts.joined(separator: " ")
     }
 
     // MARK: Kinds, the one mapping

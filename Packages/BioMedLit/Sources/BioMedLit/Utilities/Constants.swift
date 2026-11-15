@@ -925,6 +925,87 @@ public enum BioMedLitConstants {
     /// The suffix of a JATS kept in the PDF cache while the library cannot be
     /// reached (`<cacheKey>-<sha12>.xml`), waiting to be moved in (design §4.6).
     public static let libraryWaitingJATSSuffix = ".xml"
+
+    // MARK: - Shared paper library: bmlib's sentences
+    //
+    // The notes and failures of the fetch's library source, in bmlib's
+    // wording (its full-text service and `LibraryStore`); the service and the
+    // tests match on them, so they live here, one copy each.
+
+    /// What `describe_ids` says of a paper with no identifiers.
+    public static let libraryNoIdentifiers = "no identifiers"
+
+    /// bmlib's `failure`: "library, paper <ids>[ file F/N]: <reason>".
+    ///
+    /// - Parameters:
+    ///   - ids: The paper's identifiers as `describe_ids` words them.
+    ///   - file: The file as "folder/name", or nil.
+    ///   - reason: bmlib's text for the error.
+    public static func libraryFailure(ids: String, file: String?, reason: String) -> String {
+        "library, paper \(ids)\(file.map { " file \($0)" } ?? ""): \(reason)"
+    }
+
+    /// The failure for a file named only by digest and kind: "library, file
+    /// <kind> <sha256>: <reason>".
+    public static func libraryFileFailure(kind: String, sha256: String, reason: String) -> String {
+        "library, file \(kind) \(sha256): \(reason)"
+    }
+
+    /// The failure when bmlib refuses this installation's id or label.
+    public static func libraryInstallationFailure(id: String, reason: String) -> String {
+        "library, installation \(id): \(reason)"
+    }
+
+    /// The reason for a kind name bmlib does not have.
+    public static func libraryUnknownKindReason(_ kind: String) -> String {
+        "\(kind) is not a kind of file the library holds"
+    }
+
+    /// The reason for a digest the library holds no file of that kind for.
+    public static func libraryDigestNotHeldReason(kind: String, sha256: String) -> String {
+        "it holds no \(kind) file with digest \(sha256)"
+    }
+
+    /// bmlib's warning for a request identifier `libraryIds` refused.
+    public static func libraryDroppedIdentifierWarning(field: String) -> String {
+        "The request's \(field) is not an identifier the library accepts; "
+            + "looking the paper up in the library without it."
+    }
+
+    /// bmlib's note for a library JATS that does not parse.
+    ///
+    /// - Parameters:
+    ///   - file: The file as "folder/name".
+    ///   - reason: Why: the XML reader's text, or ``libraryJATSNotUTF8Reason``.
+    public static func libraryJATSUnparseableNote(file: String, reason: String) -> String {
+        "Not serving the library's JATS \(file): it does not parse (\(reason)); looking further."
+    }
+
+    /// The reason a library JATS does not parse when its bytes are not UTF-8.
+    public static let libraryJATSNotUTF8Reason = "it is not UTF-8"
+
+    /// bmlib-ffi's text for a JATS refused for nesting too deep.
+    public static func libraryJATSNestingReason(depth: UInt64, limit: UInt64) -> String {
+        "JATS document nests \(depth) elements deep, beyond the \(limit) this reader accepts"
+    }
+
+    /// bmlib's note for a library JATS with no body.
+    public static func libraryJATSBodylessNote(file: String) -> String {
+        "Not serving the library's JATS \(file): it has no body; looking further."
+    }
+
+    /// bmlib's failure for a library JATS whose own identifier contradicts the
+    /// request's.
+    ///
+    /// - Parameters:
+    ///   - file: The file as "folder/name".
+    ///   - field: The field, as `"pmid"`, `"doi"` or `"pmc_id"`.
+    ///   - theirs: The JATS's own value.
+    ///   - ours: The request's value.
+    public static func libraryJATSWrongPaperNote(file: String, field: String, theirs: String, ours: String) -> String {
+        "the library's JATS \(file) is another paper's: its own \(field) \(theirs) is not the request's \(ours), "
+            + "so nothing is kept in the library in this lookup"
+    }
 }
 
 // MARK: - PubMed Filters

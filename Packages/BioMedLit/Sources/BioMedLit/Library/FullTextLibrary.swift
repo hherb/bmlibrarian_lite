@@ -92,6 +92,12 @@ public struct LibraryHeldPDF: Sendable, Equatable {
     public let path: String
     /// The file, by digest and kind.
     public let file: LibraryFileReference
+
+    /// The PDF at `path`, which is `file`.
+    public init(path: String, file: LibraryFileReference) {
+        self.path = path
+        self.file = file
+    }
 }
 
 /// A file saved in the library (or found there already, for the same bytes).
@@ -100,6 +106,12 @@ public struct LibraryKept: Sendable, Equatable {
     public let file: LibraryFileReference
     /// Where the file is: `<root>/papers/<folder>/<name>`.
     public let path: String
+
+    /// `file`, kept at `path`.
+    public init(file: LibraryFileReference, path: String) {
+        self.file = file
+        self.path = path
+    }
 }
 
 /// Why a library call failed, worded as bmlib's service words it:

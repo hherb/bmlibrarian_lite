@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 #if os(macOS)
+import BmlibCore
 import XCTest
 @testable import BioMedLit
 
@@ -73,7 +74,10 @@ final class LibrarySourceTests: XCTestCase {
     private func kept(_ src: LibrarySource, _ bytes: Data, kind: String, paper: LibraryPaper) throws -> LibraryKept {
         switch src.keep(bytes, kind: kind, paper: paper, origin: "Test tier") {
         case let .success(kept?): return kept
-        case .success(nil): throw XCTSkip("not kept: the paper has no identifiers")
+        case .success(nil):
+            let failure = LibraryLookupFailure(description: "not kept: the paper has no identifiers")
+            XCTFail(failure.description)
+            throw failure
         case let .failure(failure): XCTFail("keep failed: \(failure)"); throw failure
         }
     }
@@ -196,6 +200,16 @@ final class LibrarySourceTests: XCTestCase {
         XCTAssertTrue(k.path.hasPrefix(root.appendingPathComponent("papers").path + "/"), k.path)
         XCTAssertNil(src.path(of: LibraryFileReference(sha256: k.file.sha256, kind: "jats")))
         XCTAssertNil(src.path(of: LibraryFileReference(sha256: String(repeating: "0", count: 64), kind: "pdf")))
+    }
+
+    func testJATSParseReasonIsBmlibsText() {
+        XCTAssertEqual(LibrarySource.jatsReason(JatsError.Xml(reason: "unexpected end")), "unexpected end")
+        XCTAssertEqual(LibrarySource.jatsReason(JatsError.Resource(reason: "no thread")), "no thread")
+        XCTAssertEqual(LibrarySource.jatsReason(JatsError.NestingTooDeep(depth: 600, limit: 512)),
+                       "JATS document nests 600 elements deep, beyond the 512 this reader accepts")
+        XCTAssertThrowsError(try parseJats(xml: "<article><front>")) { error in
+            XCTAssertFalse(LibrarySource.jatsReason(error).contains("Xml("), LibrarySource.jatsReason(error))
+        }
     }
 
     func testRemovedRootIsFailure() throws {
