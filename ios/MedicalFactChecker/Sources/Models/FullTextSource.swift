@@ -274,6 +274,11 @@ struct AppFullTextResult: Equatable, Sendable {
     /// library could not be reached or written, `nil` when none waits.
     let libraryWaiting: String?
 
+    /// What went wrong with the library in this fetch (the service's
+    /// `libraryFailure`), whether or not anything waits, or `nil` when
+    /// nothing did: every library failure reaches the reader.
+    let libraryNote: String?
+
     /// Create a full-text result.
     ///
     /// Replaces the synthesised memberwise initialiser so `warnings` and
@@ -305,6 +310,8 @@ struct AppFullTextResult: Equatable, Sendable {
     ///     default — when there is none.
     ///   - libraryWaiting: Why a source waits for the library, or `nil` — the
     ///     default — when none does.
+    ///   - libraryNote: What went wrong with the library, or `nil` — the
+    ///     default — when nothing did.
     init(
         content: AppFullTextContentType,
         source: AppFullTextSource,
@@ -317,7 +324,8 @@ struct AppFullTextResult: Equatable, Sendable {
         localPDFPath: String? = nil,
         extractionCoverage: PDFExtractionCoverage? = nil,
         libraryFile: LibraryFileReference? = nil,
-        libraryWaiting: String? = nil
+        libraryWaiting: String? = nil,
+        libraryNote: String? = nil
     ) {
         self.content = content
         self.source = source
@@ -331,6 +339,7 @@ struct AppFullTextResult: Equatable, Sendable {
         self.extractionCoverage = extractionCoverage
         self.libraryFile = libraryFile
         self.libraryWaiting = libraryWaiting
+        self.libraryNote = libraryNote
     }
 
     /// Whether this result can be displayed within the app.

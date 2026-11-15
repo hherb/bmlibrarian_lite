@@ -371,6 +371,11 @@ final class Document {
     /// `nil` when nothing waits. Optional so no schema version is needed.
     var fullTextLibraryWaiting: String?
 
+    /// What went wrong with the library in the fetch of this full text, its
+    /// failures one per line, whether or not anything waits; `nil` when
+    /// nothing did. Optional so no schema version is needed.
+    var fullTextLibraryNote: String?
+
     /// The library file to find this document's PDF by when its stored path
     /// is gone: set when a local PDF is stored and its library file is a PDF;
     /// `nil` otherwise.
@@ -378,6 +383,26 @@ final class Document {
         guard localPDFFilePath != nil, let sha256 = fullTextLibrarySHA256,
               fullTextLibraryKind == BioMedLitConstants.libraryKindPDF else { return nil }
         return LibraryFileReference(sha256: sha256, kind: BioMedLitConstants.libraryKindPDF)
+    }
+
+    /// What the reader is told about the shared paper library for this full
+    /// text (design §4.6), one sentence each, shown whole: why its source
+    /// waits for the library, or else what went wrong with the library; and,
+    /// when the library cannot be reached (`libraryState`) and this text's
+    /// file is in it, that it cannot. Empty when there is nothing to say.
+    func libraryNotices(libraryState: LibraryState) -> [String] {
+        // The why is bmlib's text: one that ends its own sentence gets no second stop
+        func ending(_ text: String) -> String { text.hasSuffix(".") ? text : text + "." }
+        var notices: [String] = []
+        if let why = fullTextLibraryWaiting {
+            notices.append("Kept in this app until the paper library can be reached: " + ending(why))
+        } else if let note = fullTextLibraryNote {
+            notices.append("The paper library could not be used for this paper: " + ending(note))
+        }
+        if case let .unreachable(reason) = libraryState, fullTextLibrarySHA256 != nil {
+            notices.append("The paper library cannot be reached: " + ending(reason))
+        }
+        return notices
     }
 
     /// Store `path`, the PDF's file found again in the library by
@@ -1178,7 +1203,7 @@ final class Document {
         fullTextPDFNotSavedFrom = result.pdfNotSavedFrom
         fullTextContentKindRaw = result.contentKind.rawValue
         storeExtractionCoverage(result.extractionCoverage)
-        storeLibraryFile(result.libraryFile, waiting: result.libraryWaiting)
+        storeLibraryFile(result.libraryFile, waiting: result.libraryWaiting, note: result.libraryNote)
 
         switch result.content {
         case .markdown(let content):
@@ -1241,12 +1266,14 @@ final class Document {
         fullTextPDFPathIsLocalFile = path == nil ? nil : isLocalFile
     }
 
-    /// Store the library's file of the full text and why it waits, or clear
-    /// them (`nil`, `nil`): one writer for the three fields.
-    private func storeLibraryFile(_ file: LibraryFileReference?, waiting: String?) {
+    /// Store the library's file of the full text, why it waits and what went
+    /// wrong, or clear them (`nil`, `nil`, `nil`): one writer for the four
+    /// fields.
+    private func storeLibraryFile(_ file: LibraryFileReference?, waiting: String?, note: String?) {
         fullTextLibrarySHA256 = file?.sha256
         fullTextLibraryKind = file?.kind
         fullTextLibraryWaiting = waiting
+        fullTextLibraryNote = note
     }
 
     /// Store an extraction's coverage, or clear it.
@@ -1289,7 +1316,7 @@ final class Document {
         fullTextPDFNotSavedFrom = nil
         fullTextContentKindRaw = nil
         storeExtractionCoverage(nil)
-        storeLibraryFile(nil, waiting: nil)
+        storeLibraryFile(nil, waiting: nil, note: nil)
     }
 
     /// Clear cached full text data to allow re-fetching.
@@ -1307,7 +1334,7 @@ final class Document {
         fullTextPDFNotSavedFrom = nil
         fullTextContentKindRaw = nil
         storeExtractionCoverage(nil)
-        storeLibraryFile(nil, waiting: nil)
+        storeLibraryFile(nil, waiting: nil, note: nil)
     }
 
     // MARK: - Cached Full Text

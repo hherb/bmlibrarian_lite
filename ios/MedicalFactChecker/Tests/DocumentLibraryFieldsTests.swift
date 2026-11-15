@@ -58,6 +58,13 @@ final class DocumentLibraryFieldsTests: XCTestCase {
         XCTAssertNil(BioMedLitAdapters.toAppFullTextResult(libraryPDF(waiting: false, failure: why)).libraryWaiting)
     }
 
+    /// Every library failure reaches the reader, whether or not anything waits.
+    func testTheLibraryNoteIsTheFailureWhetherOrNotASourceWaits() {
+        XCTAssertEqual(BioMedLitAdapters.toAppFullTextResult(libraryPDF(waiting: true, failure: why)).libraryNote, why)
+        XCTAssertEqual(BioMedLitAdapters.toAppFullTextResult(libraryPDF(waiting: false, failure: why)).libraryNote, why)
+        XCTAssertNil(BioMedLitAdapters.toAppFullTextResult(libraryPDF()).libraryNote)
+    }
+
     func testApplyingAResultStoresItsLibraryFileAndWait() {
         let document = makeDocument()
         document.applyFullTextResult(BioMedLitAdapters.toAppFullTextResult(libraryPDF(waiting: true, failure: why)))
@@ -65,6 +72,7 @@ final class DocumentLibraryFieldsTests: XCTestCase {
         XCTAssertEqual(document.fullTextLibrarySHA256, digest)
         XCTAssertEqual(document.fullTextLibraryKind, BioMedLitConstants.libraryKindPDF)
         XCTAssertEqual(document.fullTextLibraryWaiting, why)
+        XCTAssertEqual(document.fullTextLibraryNote, why)
         XCTAssertEqual(document.fullTextSource, "library")
         XCTAssertEqual(document.localPDFFilePath, libraryPath)
     }
@@ -78,6 +86,7 @@ final class DocumentLibraryFieldsTests: XCTestCase {
         XCTAssertNil(document.fullTextLibrarySHA256)
         XCTAssertNil(document.fullTextLibraryKind)
         XCTAssertNil(document.fullTextLibraryWaiting)
+        XCTAssertNil(document.fullTextLibraryNote)
     }
 
     func testClearingTheCacheClearsTheLibraryFields() {
@@ -88,6 +97,7 @@ final class DocumentLibraryFieldsTests: XCTestCase {
         XCTAssertNil(document.fullTextLibrarySHA256)
         XCTAssertNil(document.fullTextLibraryKind)
         XCTAssertNil(document.fullTextLibraryWaiting)
+        XCTAssertNil(document.fullTextLibraryNote)
     }
 
     func testMarkingUnavailableClearsTheLibraryFields() {
@@ -98,6 +108,7 @@ final class DocumentLibraryFieldsTests: XCTestCase {
         XCTAssertNil(document.fullTextLibrarySHA256)
         XCTAssertNil(document.fullTextLibraryKind)
         XCTAssertNil(document.fullTextLibraryWaiting)
+        XCTAssertNil(document.fullTextLibraryNote)
     }
 
     /// The PDF to find again by digest: only a stored local PDF whose library
@@ -112,5 +123,67 @@ final class DocumentLibraryFieldsTests: XCTestCase {
 
         document.fullTextLibraryKind = BioMedLitConstants.libraryKindJATS
         XCTAssertNil(document.libraryPDFReference, "a JATS is not the PDF")
+    }
+
+    // MARK: - What the reader is told (design §4.6)
+
+    func testNothingIsSaidWithoutALibraryNoteOrFile() {
+        let document = makeDocument()
+        document.applyFullTextResult(.europePMC(html: "<p>x</p>", markdown: "x"))
+        XCTAssertEqual(document.libraryNotices(libraryState: .unreachable(reason: "gone")), [])
+        XCTAssertEqual(document.libraryNotices(libraryState: .notChosen), [])
+    }
+
+    func testAWaitingSourceSaysWhyItWaits() {
+        let document = makeDocument()
+        document.applyFullTextResult(BioMedLitAdapters.toAppFullTextResult(libraryPDF(waiting: true, failure: why)))
+        XCTAssertEqual(document.libraryNotices(libraryState: .notChosen),
+                       ["Kept in this app until the paper library can be reached: \(why)."])
+    }
+
+    /// A failure that left nothing waiting is still told, in its own sentence.
+    func testAFailureWithNothingWaitingIsTold() {
+        let document = makeDocument()
+        document.applyFullTextResult(BioMedLitAdapters.toAppFullTextResult(libraryPDF(waiting: false, failure: why)))
+        XCTAssertEqual(document.libraryNotices(libraryState: .reachable(folderName: "L", path: "/L")),
+                       ["The paper library could not be used for this paper: \(why)."])
+    }
+
+    /// Several failures, one per line, are shown whole.
+    func testAMultiSentenceNoteIsShownWhole() {
+        let document = makeDocument()
+        let both = [why, "library, file pdf \(digest): it is read-only"]
+            .joined(separator: BioMedLitConstants.libraryFailureSeparator)
+        document.applyFullTextResult(BioMedLitAdapters.toAppFullTextResult(libraryPDF(failure: both)))
+        XCTAssertEqual(document.libraryNotices(libraryState: .notChosen),
+                       ["The paper library could not be used for this paper: \(both)."])
+    }
+
+    /// A why that ends its own sentence gets no second full stop.
+    func testANoteEndingInAFullStopGetsNoSecond() {
+        let document = makeDocument()
+        document.applyFullTextResult(BioMedLitAdapters.toAppFullTextResult(libraryPDF(failure: "it broke.")))
+        XCTAssertEqual(document.libraryNotices(libraryState: .notChosen),
+                       ["The paper library could not be used for this paper: it broke."])
+    }
+
+    /// An unreachable library is told only for a paper whose file is in it.
+    func testAnUnreachableLibraryIsToldForAPaperWithALibraryFile() {
+        let document = makeDocument()
+        document.applyFullTextResult(BioMedLitAdapters.toAppFullTextResult(libraryPDF()))
+        XCTAssertEqual(document.libraryNotices(libraryState: .unreachable(reason: "the drive is unplugged")),
+                       ["The paper library cannot be reached: the drive is unplugged."])
+        XCTAssertEqual(document.libraryNotices(libraryState: .reachable(folderName: "L", path: "/L")), [])
+    }
+
+    /// The banner speaks for the library alone, as a note, not a warning.
+    func testTheBannerSpeaksForTheLibraryAloneAsANote() throws {
+        let content = try XCTUnwrap(ParseWarningBannerContent(
+            warnings: JATSParseWarnings(), degradation: nil, extractionCoverage: nil,
+            openAccessShortfall: nil, pdfNotSavedNote: nil, libraryNotices: ["x"]
+        ))
+        XCTAssertEqual(content.libraryNotices, ["x"])
+        XCTAssertNil(content.message)
+        XCTAssertFalse(content.isWarning)
     }
 }

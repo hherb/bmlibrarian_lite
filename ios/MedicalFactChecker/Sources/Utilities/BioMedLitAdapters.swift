@@ -470,7 +470,8 @@ enum BioMedLitAdapters {
             extractionCoverage: result.extractionCoverage,
             libraryFile: result.libraryFile,
             // Only a wait is kept: another failure leaves nothing waiting
-            libraryWaiting: result.libraryWaiting ? result.libraryFailure : nil
+            libraryWaiting: result.libraryWaiting ? result.libraryFailure : nil,
+            libraryNote: result.libraryFailure
         )
     }
 

@@ -185,7 +185,9 @@ struct MacFullTextViewer: View {
                 degradation: document.cachedRetrievalNotice.degradation,
                 extractionCoverage: document.cachedRetrievalNotice.extractionCoverage,
                 openAccessShortfall: document.cachedRetrievalNotice.openAccessShortfall,
-                pdfNotSavedNote: document.storedPDFNotSavedNote
+                pdfNotSavedNote: document.storedPDFNotSavedNote,
+                // Reading the session's state here re-renders the banner as it changes
+                libraryNotices: document.libraryNotices(libraryState: LibraryController.session.state)
             )
             renderedContent
         }

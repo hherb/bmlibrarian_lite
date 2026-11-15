@@ -236,6 +236,7 @@ final class StoreMigrationTests: XCTestCase {
         XCTAssertNil(document.fullTextLibrarySHA256, "an older row names no library file")
         XCTAssertNil(document.fullTextLibraryKind)
         XCTAssertNil(document.fullTextLibraryWaiting)
+        XCTAssertNil(document.fullTextLibraryNote)
         XCTAssertFalse(setAsideRan, "A store that migrates must never reach the last resort")
     }
 
