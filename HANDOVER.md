@@ -33,7 +33,7 @@ ledger both name bmlib `main` `110d906b`; the bindings gain the shared paper
 library (`PaperLibrary`, `LibraryScan`), which no app calls (bmlib's `ffi`
 job now refuses a name Kotlin's imports shadow, bmlib#774). Its triage's
 #780 (bucket record against its stem and md5) landed in PR #782; #781 in
-**PR #PRNUM**: the desktop reads every service's JSON through
+**PR #783**: the desktop reads every service's JSON through
 `search_failures.strict_response_json` (bmlib's `strict_json_loads`, strict
 UTF-8; **a test double scripts `.content`, never `.json()`**), Android reads
 Europe PMC and Unpaywall through `strictJsonRetrofit` (never the shared
