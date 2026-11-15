@@ -893,6 +893,10 @@ public enum BioMedLitConstants {
     /// The environment variable macOS sets in a sandboxed process, whose
     /// access to a chosen folder needs the bookmark's grant.
     public static let sandboxContainerEnvironmentKey = "APP_SANDBOX_CONTAINER_ID"
+
+    /// The marker file bmlib writes at a library folder's root
+    /// (`{"format": "bmlib-library", "version": 1}`).
+    public static let libraryMarkerFileName = "bmlib-library.json"
 }
 
 // MARK: - PubMed Filters

@@ -116,6 +116,7 @@ public enum BioMedLitLogCategory: String, Sendable {
     case fullText = "fullText"
     case search = "search"
     case transparency = "transparency"
+    case library = "library"
 }
 
 /// Default logger that prints to console.
