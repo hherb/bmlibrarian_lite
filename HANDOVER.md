@@ -16,11 +16,12 @@ its slice has landed; add a new section when handing off new work.
   `0.6.0`, signed DMG; `twine` needs `packaging>=26`). **mypy is out of the
   next DMG** (#750), checked by a PyInstaller analysis, not yet a full build.
 - **medfactcheck.org** (PR #753): `website/`; `website/build_privacy.py`
-  makes `privacy.html` from `ios/MedicalFactChecker/PRIVACY.md`. Store text:
-  `PLAY_STORE.md`, `APP_STORE.md`.
+  makes `privacy.html` from `ios/MedicalFactChecker/PRIVACY.md` (edit the
+  policy, re-run it). Store text: `PLAY_STORE.md`, `APP_STORE.md`.
 - **Task 11, apps: the maintainer's.** Apple: **the 1.6 → 1.9.0 upgrade
   passed on an iPhone 13 Pro Max (2026-11-11)** (Debug build from `0641e80c`,
-  every session and report kept; the "no dSYM" warning is `BmlibFFI`, #752).
+  every session and report kept, #289's risk did not show; the "no dSYM"
+  warning is `BmlibFFI`, #752, expected for 1.9.0).
   Left: archive both schemes, upload, tags `appstore_1.9` / `macos_1.9.0`.
   Android 1.9.0 (debug, from `0641e80c`) runs on the maintainer's phone over
   1.6.0. Left: sign a release AAB built at `0641e80c` (`JAVA_HOME` = Android
@@ -36,13 +37,17 @@ PR #783: the desktop reads every service's JSON but PubMed's esearch
 (`strict=False`, on purpose) through `search_failures.strict_response_json`
 (bmlib's `strict_json_loads`, strict UTF-8, a `RecursionError` refused too;
 **a test double scripts `.content`, never `.json()`**); Swift's `JSONDecoder`
-already refused all but a BOM and depth. **Android (#784, PR #791)**
-reads every service's JSON as bytes through `strictJsonElement`
-(`data/remote/StrictJson.kt`: non-lenient, no bare word, depth checked on the
-text first: kotlinx overflowed the stack at 100,000 levels), Europe PMC and
-Unpaywall via `strictJsonRetrofit` (its own builder). Deferred: #785 (an unreadable ID-converter answer in the
-transparency analyser leaves PubMed's grants unasked, unreported). **bmlib `main` is past the pin**: bmlib#761,
-#766 and #780 have no ledger row yet (the next sync). **Left:** an Apple
+already refused all but a BOM and depth. **Android (#784, PR #791)** reads
+every service's JSON but PubMed's esearch (as the desktop) as bytes: OpenAlex,
+CORE, PMC's bucket, CrossRef and ClinicalTrials.gov through
+`strictJsonElement` (`data/remote/StrictJson.kt`: non-lenient, no bare word,
+no raw control character in a string, depth checked on the text first:
+kotlinx overflowed the stack at 100,000 levels of arrays), Europe PMC and
+Unpaywall via `strictJsonRetrofit` (its own builder), the retraction lookup's
+bytes unchanged to bmlib. Deferred: #785 (an unreadable ID-converter answer in
+the transparency analyser leaves PubMed's grants unasked, unreported). **bmlib
+`main` is past the pin**: bmlib#761, #766 and #780 have no ledger row yet (the
+next sync). **Left:** an Apple
 archive from master lists `BmlibFFI.framework.dSYM` with no warning.
 **Decision for the maintainer:** whether lite keeps its papers in bmlib's
 shared paper library (`bmlib.library`); the ledger rows say n/a until then.

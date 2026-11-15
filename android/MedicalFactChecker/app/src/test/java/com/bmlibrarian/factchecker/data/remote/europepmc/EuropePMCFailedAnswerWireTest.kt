@@ -21,6 +21,7 @@ package com.bmlibrarian.factchecker.data.remote.europepmc
 import android.util.Log
 import com.bmlibrarian.factchecker.di.AppModule
 import com.bmlibrarian.factchecker.di.NetworkModule
+import com.bmlibrarian.factchecker.data.remote.REFUSED_JSON_VALUES
 import com.bmlibrarian.factchecker.data.remote.serverBoundClient
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
@@ -130,6 +131,18 @@ class EuropePMCFailedAnswerWireTest {
                 (error as SourceRequestException).failure
             )
         }
+    }
+
+    /** The grammar, depth and control-character refusals reach the wire too (#784). */
+    @Test
+    fun `a page holding a value serde_json refuses is unreadable`() = runBlocking {
+        for (value in REFUSED_JSON_VALUES) {
+            answer(onePage.replace("\"hitCount\":1", "\"hitCount\":1,\"score\":$value"))
+            val error = service().search(query = "aspirin", resultsReceived = 0).exceptionOrNull()
+            assertEquals(value.take(10), RequestFailure(RequestFailureKind.MALFORMED_RESPONSE), (error as SourceRequestException).failure)
+        }
+        answer(onePage.replace("\"hitCount\":1", "\"hitCount\":1,\"score\":1"))
+        assertEquals(1, service().search(query = "aspirin", resultsReceived = 0).getOrThrow().articles.size)
     }
 
     @Test

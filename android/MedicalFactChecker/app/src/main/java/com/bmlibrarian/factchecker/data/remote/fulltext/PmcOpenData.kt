@@ -192,10 +192,10 @@ data class PmcOpenDataRecord(
          * @param json The record, untrusted
          * @param stem The version the listing named, `PMC1.2`
          * @return The record
-         * @throws IllegalArgumentException when [json] is not a JSON object, holds a value
-         *   JSON does not define (`NaN`, a lone surrogate: read strictly, as the desktop's
-         *   `strict_json_loads` does), or its `xml_url` is there but does not name this
-         *   version's JATS
+         * @throws IllegalArgumentException when [json] is not a JSON object, is refused
+         *   by `strictJsonElement` (`NaN`, a lone surrogate, a bare word, deep nesting:
+         *   read strictly, as the desktop's `strict_json_loads` does), or its `xml_url`
+         *   is there but does not name this version's JATS
          */
         fun fromMetadata(json: String, stem: String): PmcOpenDataRecord {
             val obj = strictJsonElement(json) as? JsonObject // SerializationException is an IllegalArgumentException

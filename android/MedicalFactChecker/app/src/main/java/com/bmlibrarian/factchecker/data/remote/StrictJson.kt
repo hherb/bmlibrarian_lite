@@ -69,7 +69,7 @@ class StrictJsonConverterFactory(private val json: Json) : Converter.Factory() {
  * @param bytes The answer as served
  * @return The parsed answer
  * @throws SerializationException when the bytes are not UTF-8, or the text is refused
- *   by [strictJsonElement]; the message never quotes the body
+ *   by the text overload; the message never quotes the body
  */
 internal fun strictJsonElement(bytes: ByteArray): JsonElement {
     val text = try {
@@ -84,10 +84,11 @@ internal fun strictJsonElement(bytes: ByteArray): JsonElement {
  * Parse an answer's text as bmlib's `strict_json_loads` and serde_json do (#781, #784).
  *
  * Refused: a leading BOM; what strict JSON does not parse (an unquoted key, a
- * trailing comma, a comment); a bare word (`abc`, `'abc'`), which kotlinx reads as a
- * literal even when not lenient; `NaN`, `Infinity`, a number past binary64 and a lone
- * surrogate ([ResponseParser.holdsRefusedValue]); arrays and objects nested deeper
- * than [SERDE_MAX_DEPTH].
+ * trailing comma, a comment); a bare word or malformed number (`abc`, `'abc'`, `01`,
+ * `+1`) and a raw control character in a string, which kotlinx reads even when not
+ * lenient; `NaN`, `Infinity`, a number past binary64 and a lone surrogate
+ * ([ResponseParser.holdsRefusedValue]); arrays and objects nested deeper than
+ * [SERDE_MAX_DEPTH].
  *
  * @param text The answer, already decoded as strict UTF-8
  * @return The parsed answer
@@ -95,8 +96,8 @@ internal fun strictJsonElement(bytes: ByteArray): JsonElement {
  */
 internal fun strictJsonElement(text: String): JsonElement {
     if (text.startsWith(BYTE_ORDER_MARK)) throw SerializationException("the answer starts with a BOM")
-    // Before the parse: kotlinx recurses per level and overflows the stack on deep nesting
-    if (nestsTooDeep(text)) throw SerializationException("the answer nests deeper than $SERDE_MAX_DEPTH levels")
+    // Before the parse: kotlinx 1.6 recurses per array level, and the walks below per level of either kind
+    textRefusal(text)?.let { throw SerializationException(it) }
     val element = try {
         Json.parseToJsonElement(text)
     } catch (_: SerializationException) {
@@ -114,30 +115,36 @@ internal fun strictJsonElement(text: String): JsonElement {
 /** serde_json's nesting limit: 127 levels of arrays or objects parse, 128 do not (bmlib's `SERDE_MAX_DEPTH`). */
 internal const val SERDE_MAX_DEPTH = 127
 
-private val JSON_NUMBER = Regex("""-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?""")
-
-/** Whether arrays and objects open more than [SERDE_MAX_DEPTH] deep, outside strings; text that does not parse is the parser's. */
-private fun nestsTooDeep(text: String): Boolean {
+/**
+ * Why the text is refused before the parse, or null: arrays and objects open more than
+ * [SERDE_MAX_DEPTH] deep, or a string holds a raw control character. Text that does
+ * not parse is the parser's.
+ */
+private fun textRefusal(text: String): String? {
     var depth = 0
     var inString = false
     var escaped = false
     for (c in text) {
         when {
             escaped -> escaped = false
-            inString -> if (c == '\\') escaped = true else if (c == '"') inString = false
+            inString -> when {
+                c == '\\' -> escaped = true
+                c == '"' -> inString = false
+                c < ' ' -> return "the answer holds a raw control character in a string"
+            }
             c == '"' -> inString = true
-            c == '[' || c == '{' -> if (++depth > SERDE_MAX_DEPTH) return true
+            c == '[' || c == '{' -> if (++depth > SERDE_MAX_DEPTH) return "the answer nests deeper than $SERDE_MAX_DEPTH levels"
             c == ']' || c == '}' -> depth--
         }
     }
-    return false
+    return null
 }
 
 /** Whether a literal outside every string is not `true`, `false`, `null` or a JSON number. */
 private fun breaksStrictGrammar(element: JsonElement): Boolean = when (element) {
     is JsonObject -> element.values.any(::breaksStrictGrammar)
     is JsonArray -> element.any(::breaksStrictGrammar)
-    is JsonPrimitive -> !element.isString && element.content !in JSON_WORDS && !JSON_NUMBER.matches(element.content)
+    is JsonPrimitive -> !element.isString && element.content !in JSON_WORDS && !ResponseParser.JSON_NUMBER.matches(element.content)
 }
 
 private val JSON_WORDS = setOf("true", "false", "null")

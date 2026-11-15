@@ -201,6 +201,8 @@ class CrossRefServiceTest {
             fail("read")
         } catch (_: CrossRefException.ParseError) {
         }
+        server.enqueue(MockResponse().setBody(Buffer().write("{\"message\": {\"title\": [\"\u00ff\"]}}".toByteArray())))
+        assertEquals("\u00ff", service.extractTitle(service.getWork("10.1000/x")))
     }
 
     /** No answer body reaches the log. */

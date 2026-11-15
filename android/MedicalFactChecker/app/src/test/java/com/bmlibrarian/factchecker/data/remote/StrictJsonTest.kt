@@ -45,6 +45,8 @@ internal val REFUSED_JSON_BODIES: Map<String, String> = mapOf(
     "a leading zero" to """{"a": 01}""",
     "a plus sign" to """{"a": +1}""",
     "a trailing comma" to """{"a": 1,}""",
+    "a raw control character in a string" to "{\"a\": \"x\ny\"}",
+    "a bare word in an array" to """{"a": [1, abc]}""",
 )
 
 /**
@@ -54,6 +56,7 @@ internal val REFUSED_JSON_BODIES: Map<String, String> = mapOf(
  */
 internal val REFUSED_JSON_VALUES: List<String> = listOf(
     "NaN", "Infinity", "1e999", "abc", "'abc'", "01", "\"\\ud800\"", "[".repeat(200) + "]".repeat(200),
+    "\"x\ty\"", "[abc]",
 )
 
 class StrictJsonTest {
@@ -83,6 +86,26 @@ class StrictJsonTest {
     @Test
     fun `nesting far past the limit is refused without overflowing the stack`() {
         refused("deep", "[".repeat(100_000) + "]".repeat(100_000))
+    }
+
+    @Test
+    fun `an escaped quote or backslash in a string does not hide nesting`() {
+        val deep = "[".repeat(100_000) + "]".repeat(100_000)
+        refused("after an escaped quote", "{\"a\":\"\\\"\", \"b\": $deep}")
+        val past = "[".repeat(SERDE_MAX_DEPTH + 1) + "]".repeat(SERDE_MAX_DEPTH + 1)
+        refused("after an escaped backslash", "{\"a\":\"\\\\\", \"b\": $past}")
+    }
+
+    @Test
+    fun `brackets in a string are text, never nesting`() {
+        val text = "[".repeat(200) + "{".repeat(200)
+        assertEquals(text, strictJsonElement("{\"a\": \"$text\"}").jsonObject.getValue("a").jsonPrimitive.content)
+        refused("closers in a string", "{\"a\": \"${"]".repeat(1000)}\", \"b\": ${"[".repeat(200) + "]".repeat(200)}}")
+    }
+
+    @Test
+    fun `an escaped control character is read`() {
+        assertEquals("x\ny\tz", strictJsonElement("""{"a": "x\ny\tz"}""").jsonObject.getValue("a").jsonPrimitive.content)
     }
 
     @Test
