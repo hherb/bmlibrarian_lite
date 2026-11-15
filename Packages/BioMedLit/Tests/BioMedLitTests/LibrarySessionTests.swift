@@ -133,6 +133,74 @@ final class LibrarySessionTests: XCTestCase {
         XCTAssertEqual(store.libraryInstallationID, id)
     }
 
+    /// 3c: a switch's carry runs with the old library still held and the new
+    /// one open; the new one is held once it ends.
+    func testCarryRunsWhileBothAccessesHeld() async throws {
+        let session = LibrarySession(store: MemoryStore())
+        await session.choose(try freshFolder())
+        let first = try XCTUnwrap(session.access)
+        let second = try freshFolder()
+        var seen: (old: LibraryAccess?, new: LibraryAccess?, heldDuring: LibraryAccess?)
+        await session.choose(second) { old, new in
+            seen = (old, new, session.access)
+        }
+        defer { session.stopAccess() }
+        XCTAssertTrue(seen.old === first)
+        XCTAssertTrue(seen.heldDuring === first, "the old library is still the session's during the carry")
+        XCTAssertEqual(seen.new?.folderURL.lastPathComponent, second.lastPathComponent)
+        XCTAssertTrue(session.access === seen.new)
+    }
+
+    /// 3c: the waiting settle's hook runs each time a library is held, and
+    /// not for one that cannot be reached.
+    func testOnHeldRunsOnResumeAndChoice() async throws {
+        let store = MemoryStore()
+        let chooser = LibrarySession(store: store)
+        await chooser.choose(try freshFolder())
+        chooser.stopAccess()
+
+        let session = LibrarySession(store: store)
+        var held = 0
+        session.onHeld = { _ in held += 1 }
+        await session.resumeAtLaunch()
+        XCTAssertEqual(held, 1)
+        await session.choose(try freshFolder())
+        defer { session.stopAccess() }
+        XCTAssertEqual(held, 2)
+
+        let lostStore = MemoryStore()
+        let lostDir = try freshFolder()
+        let lostChooser = LibrarySession(store: lostStore)
+        await lostChooser.choose(lostDir)
+        lostChooser.stopAccess()
+        try FileManager.default.removeItem(at: lostDir)
+        let lost = LibrarySession(store: lostStore)
+        var lostHeld = 0
+        lost.onHeld = { _ in lostHeld += 1 }
+        await lost.resumeAtLaunch()
+        XCTAssertEqual(lostHeld, 0)
+    }
+
+    /// 3c: *Stop using*'s copy back runs with the library still held; then
+    /// the setting goes.
+    func testStopUsingCarryRunsBeforeAccessStops() async throws {
+        let store = MemoryStore()
+        let session = LibrarySession(store: store)
+        await session.choose(try freshFolder())
+        let held = try XCTUnwrap(session.access)
+        var carried: LibraryAccess?
+        var stateDuring: LibraryState?
+        await session.stopUsing { access in
+            carried = access
+            stateDuring = session.state
+        }
+        XCTAssertTrue(carried === held)
+        if case .reachable = stateDuring {} else { XCTFail("during: \(String(describing: stateDuring))") }
+        XCTAssertEqual(session.state, .notChosen)
+        XCTAssertNil(store.libraryBookmark)
+        XCTAssertNil(session.access)
+    }
+
     func testInstallationIDIsMadeOnceAndKept() async throws {
         let store = MemoryStore()
         let session = LibrarySession(store: store)

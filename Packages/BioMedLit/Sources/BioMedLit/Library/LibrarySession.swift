@@ -59,6 +59,11 @@ public final class LibrarySession {
     /// How many choices and launch resumes are running.
     private var running = 0
 
+    /// Run each time a library is held (a launch or re-check resume, a
+    /// choice), after the state shows it: the waiting settle (design §4.6).
+    /// The setting's buttons wait for it.
+    @ObservationIgnored public var onHeld: (@MainActor (LibraryAccess) async -> Void)?
+
     /// How many re-checks are running.
     @ObservationIgnored private var rechecking = 0
 
@@ -129,6 +134,7 @@ public final class LibrarySession {
             hold(access)
             if let renewed { store.libraryBookmark = renewed }
             self.unsaved = unsaved
+            await settle(access)
         case let .lost(reason):
             unsaved = nil
             state = .unreachable(reason: reason)
@@ -137,7 +143,14 @@ public final class LibrarySession {
 
     /// Make `url`, a folder the user picked, the library. On failure nothing
     /// changes but `lastError`: the previous library, if any, stays set.
-    public func choose(_ url: URL) async {
+    ///
+    /// - Parameter carry: Run once the new folder is open and before the old
+    ///   access stops, with the old library (nil for none) and the new one:
+    ///   the move or the switch's copy (design §4.7). The old library is
+    ///   still the session's while it runs.
+    public func choose(
+        _ url: URL, carry: (@MainActor (_ old: LibraryAccess?, _ new: LibraryAccess) async -> Void)? = nil
+    ) async {
         _ = installationID()
         running += 1
         defer { running -= 1 }
@@ -147,11 +160,13 @@ public final class LibrarySession {
         switch result {
         case let .success(choice):
             generation += 1
+            if let carry { await carry(access, choice.access) }
             access?.stop()
             store.libraryBookmark = choice.bookmark
             hold(choice.access)
             unsaved = nil
             lastError = nil
+            await settle(choice.access)
         case let .failure(error):
             lastError = String(describing: error)
         }
@@ -166,6 +181,17 @@ public final class LibrarySession {
         state = .notChosen
         unsaved = nil
         lastError = nil
+    }
+
+    /// *Stop using this library* after `carry` ran with the held library (the
+    /// copy back, design §4.7); with none held, as ``stopUsing()``.
+    public func stopUsing(carry: @MainActor (LibraryAccess) async -> Void) async {
+        if let held = access {
+            running += 1
+            await carry(held)
+            running -= 1
+        }
+        stopUsing()
     }
 
     /// When the app becomes active (design §4.6): a held library whose folder
@@ -211,6 +237,14 @@ public final class LibrarySession {
     public func stopAccess() {
         access?.stop()
         access = nil
+    }
+
+    /// Run ``onHeld`` for `held`, counted as running work.
+    private func settle(_ held: LibraryAccess) async {
+        guard let onHeld else { return }
+        running += 1
+        defer { running -= 1 }
+        await onHeld(held)
     }
 
     private func hold(_ new: LibraryAccess) {
