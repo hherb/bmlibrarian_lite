@@ -299,6 +299,10 @@ Providing an email helps NCBI identify your requests. They may contact you if th
 #### NCBI API Key (optional)
 Increases your rate limit for PubMed queries. Get one free at [NCBI](https://www.ncbi.nlm.nih.gov/account/).
 
+### Paper Library (Mac)
+
+Settings > Library lets you choose a folder for a paper library shared with the other apps that use one, such as StudyAnalyzer. Choose an empty folder to start a new library, or a folder that already holds one. A folder of your own files is refused. The app remembers the folder between launches. If the folder cannot be reached (an unplugged drive, a folder moved to the Trash), the setting says why. *Stop Using This Library* drops the setting and leaves the folder and its papers as they are. Nothing in the library is ever deleted automatically. In this version the app does not yet save papers into the library or read them from it.
+
 ---
 
 ## Cost Management
