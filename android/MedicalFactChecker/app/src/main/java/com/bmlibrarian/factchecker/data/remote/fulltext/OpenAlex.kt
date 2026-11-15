@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.data.remote.fulltext
 
+import com.bmlibrarian.factchecker.data.remote.strictJsonElement
 import android.util.Log
 import com.bmlibrarian.factchecker.data.remote.transparency.RequestPacer
 import com.bmlibrarian.factchecker.data.repository.SettingsRepository
@@ -30,7 +31,6 @@ import com.bmlibrarian.factchecker.util.executeCancellably
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -89,7 +89,7 @@ object OpenAlex {
      *
      * @throws IllegalArgumentException for a body that is not JSON, or a work that is unreadable
      */
-    fun pdfUrls(json: String): List<String> = pdfUrls(Json.parseToJsonElement(json))
+    fun pdfUrls(json: String): List<String> = pdfUrls(strictJsonElement(json))
 
     /**
      * Every PDF URL a decoded work's locations name: each `pdf_url` that is a

@@ -1,16 +1,15 @@
 package com.bmlibrarian.factchecker.data.remote.fulltext
 
+import com.bmlibrarian.factchecker.data.remote.strictJsonElement
 import com.bmlibrarian.factchecker.data.remote.europepmc.FullTextAccession
 import com.bmlibrarian.factchecker.data.remote.transparency.RequestPacer
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.util.Constants
 import com.bmlibrarian.factchecker.util.NetworkRetry
-import com.bmlibrarian.factchecker.util.ResponseParser
 import com.bmlibrarian.factchecker.util.executeCancellably
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -193,15 +192,14 @@ data class PmcOpenDataRecord(
          * @param json The record, untrusted
          * @param stem The version the listing named, `PMC1.2`
          * @return The record
-         * @throws IllegalArgumentException when [json] is not a JSON object, holds a value
-         *   JSON does not define (`NaN`, a lone surrogate: read strictly, as the desktop's
-         *   `strict_json_loads` does), or its `xml_url` is there but does not name this
-         *   version's JATS
+         * @throws IllegalArgumentException when [json] is not a JSON object, is refused
+         *   by `strictJsonElement` (`NaN`, a lone surrogate, a bare word, deep nesting:
+         *   read strictly, as the desktop's `strict_json_loads` does), or its `xml_url`
+         *   is there but does not name this version's JATS
          */
         fun fromMetadata(json: String, stem: String): PmcOpenDataRecord {
-            val obj = runCatching { Json.parseToJsonElement(json) }.getOrNull() as? JsonObject
+            val obj = strictJsonElement(json) as? JsonObject // SerializationException is an IllegalArgumentException
                 ?: throw IllegalArgumentException("a metadata record is a JSON object")
-            require(!ResponseParser.holdsRefusedValue(obj)) { "a metadata record holds a value JSON does not define" }
             fun string(name: String) = (obj[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
             fun bool(name: String) = (obj[name] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
             val xml = when (val named = obj[XML_URL_FIELD]) {

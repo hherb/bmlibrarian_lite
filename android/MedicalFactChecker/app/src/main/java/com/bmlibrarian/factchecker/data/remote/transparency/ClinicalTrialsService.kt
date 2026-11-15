@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.data.remote.transparency
 
+import com.bmlibrarian.factchecker.data.remote.strictJsonElement
 import android.util.Log
 import com.bmlibrarian.factchecker.domain.transparency.JsonCasts
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyConstants
@@ -33,7 +34,6 @@ import java.time.format.DateTimeParseException
 import java.time.format.ResolverStyle
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -135,7 +135,7 @@ class ClinicalTrialsService(
         }
 
         val study = try {
-            JsonCasts.obj(Json.parseToJsonElement(body))
+            JsonCasts.obj(strictJsonElement(body))
         } catch (e: SerializationException) {
             null
         } ?: throw ClinicalTrialsException.ParseError("Invalid JSON")

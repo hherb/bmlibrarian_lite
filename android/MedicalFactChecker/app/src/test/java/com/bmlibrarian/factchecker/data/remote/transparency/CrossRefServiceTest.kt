@@ -19,6 +19,7 @@
 package com.bmlibrarian.factchecker.data.remote.transparency
 
 import android.util.Log
+import com.bmlibrarian.factchecker.data.remote.REFUSED_JSON_VALUES
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyConstants
 import com.bmlibrarian.factchecker.domain.transparency.TransparencyTestFixtures
 import com.bmlibrarian.factchecker.util.cancelInFlight
@@ -33,6 +34,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.QueueDispatcher
 import okhttp3.mockwebserver.SocketPolicy
+import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -174,6 +176,33 @@ class CrossRefServiceTest {
         } catch (e: CrossRefException.ParseError) {
             assertFalse(e.isRetryable)
         }
+    }
+
+    @Test
+    fun `a work holding a value serde_json refuses is a parse error`() = runBlocking {
+        for (value in REFUSED_JSON_VALUES) {
+            server.enqueue(MockResponse().setBody("""{"message": {"title": ["T"], "x": $value}}"""))
+            try {
+                service.getWork("10.1000/x")
+                fail("read: ${value.take(10)}")
+            } catch (e: CrossRefException.ParseError) {
+                assertFalse(e.isRetryable)
+            }
+        }
+        server.enqueue(MockResponse().setBody("""{"message": {"title": ["T"], "x": 1}}"""))
+        assertEquals("T", service.extractTitle(service.getWork("10.1000/x")))
+    }
+
+    @Test
+    fun `a work that is not UTF-8 is a parse error`() = runBlocking {
+        server.enqueue(MockResponse().setBody(Buffer().write("{\"message\": {\"title\": [\"".toByteArray()).writeByte(0xFF).write("\"]}}".toByteArray())))
+        try {
+            service.getWork("10.1000/x")
+            fail("read")
+        } catch (_: CrossRefException.ParseError) {
+        }
+        server.enqueue(MockResponse().setBody(Buffer().write("{\"message\": {\"title\": [\"\u00ff\"]}}".toByteArray())))
+        assertEquals("\u00ff", service.extractTitle(service.getWork("10.1000/x")))
     }
 
     /** No answer body reaches the log. */

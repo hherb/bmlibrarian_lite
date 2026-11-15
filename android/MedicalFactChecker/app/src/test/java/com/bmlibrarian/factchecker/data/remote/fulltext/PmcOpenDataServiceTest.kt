@@ -1,5 +1,6 @@
 package com.bmlibrarian.factchecker.data.remote.fulltext
 
+import com.bmlibrarian.factchecker.data.remote.REFUSED_JSON_VALUES
 import com.bmlibrarian.factchecker.data.remote.transparency.RequestPacer
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
@@ -373,6 +374,19 @@ class PmcOpenDataServiceTest {
         routeAll()
         routes[badRecordRoute] = MockResponse().setBody("""{"license_code":"TDM"}""")
         assertEquals(PmcOpenDataFetch.Absent, service().fetchXml("PMC10358571"))
+    }
+
+    @Test
+    fun `a record holding a value serde_json refuses is malformed, not absent`() = runBlocking {
+        val record = """{"xml_url":"s3://pmc-oa-opendata/PMC10358571.1/PMC10358571.1.xml?md5=a","x":%s}"""
+        for (value in REFUSED_JSON_VALUES) {
+            routeAll()
+            routes[badRecordRoute] = MockResponse().setBody(record.format(value))
+            assertEquals(value.take(10), malformed, service().fetchXml("PMC10358571"))
+        }
+        routeAll()
+        routes[badRecordRoute] = MockResponse().setBody(record.format("1"))
+        assertEquals(PmcOpenDataFetch.Served(article), service().fetchXml("PMC10358571"))
     }
 
     @Test

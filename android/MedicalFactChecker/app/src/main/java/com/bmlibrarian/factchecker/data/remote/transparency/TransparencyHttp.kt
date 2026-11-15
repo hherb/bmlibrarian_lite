@@ -74,8 +74,12 @@ data class TransparencyRetryPolicy(
     val maxDelayMs: Long = TransparencyHttpConstants.MAX_RETRY_DELAY_MS,
 )
 
-/** What one HTTP exchange produced: the status and, for a 200, the body text. */
-internal data class TransparencyHttpResponse(val statusCode: Int, val body: String?)
+/**
+ * What one HTTP exchange produced: the status and, for a 200, the body as served.
+ *
+ * Bytes, never `string()`, which turns what is not UTF-8 into U+FFFD (#784).
+ */
+internal class TransparencyHttpResponse(val statusCode: Int, val body: ByteArray?)
 
 /**
  * Keeps successive requests to one service at least [minimumIntervalMs] apart.
@@ -121,7 +125,7 @@ internal class RequestPacer(
 internal suspend fun executeTransparencyRequest(client: OkHttpClient, request: Request): TransparencyHttpResponse =
     withContext(Dispatchers.IO) {
         client.executeCancellably(request) { response ->
-            val body = if (response.code == TransparencyHttpConstants.HTTP_STATUS_OK) response.body?.string() else null
+            val body = if (response.code == TransparencyHttpConstants.HTTP_STATUS_OK) response.body?.bytes() else null
             TransparencyHttpResponse(response.code, body)
         }
     }

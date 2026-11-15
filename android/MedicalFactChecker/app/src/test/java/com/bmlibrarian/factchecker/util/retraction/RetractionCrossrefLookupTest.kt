@@ -136,6 +136,19 @@ class RetractionCrossrefLookupTest {
         assertEquals(RequestFailure(RequestFailureKind.MALFORMED_RESPONSE), out["10.1000/a0"]?.failure)
     }
 
+    /** The bytes reach bmlib as served: `string()` made a U+FFFD of them, which bmlib read (#784). */
+    @Test
+    fun `a batch that is not UTF-8 is malformed, and its UTF-8 twin is served`() = runTest {
+        val body = StubServer.crossrefBody(notice.replace("\"DOI\": \"10.1000/a0\",", "\"DOI\": \"10.1000/a0\", \"x\": \"\u00ff\","))
+        stub.stubbed = StubServer.answer(200, body.toByteArray(Charsets.ISO_8859_1))
+        val refused = lookup().results(listOf("10.1000/a0"))
+        assertTrue(refused["10.1000/a0"]?.result is CrossrefResult.Unreachable)
+        assertEquals(RequestFailure(RequestFailureKind.MALFORMED_RESPONSE), refused["10.1000/a0"]?.failure)
+
+        stub.stubbed = StubServer.answer(200, body.toByteArray(Charsets.UTF_8))
+        assertTrue(lookup().results(listOf("10.1000/a0"))["10.1000/a0"]?.result is CrossrefResult.Served)
+    }
+
     /** A status bmlib does not retry is still unanswered, never clear (#649). */
     @Test
     fun `a 404 is unreachable`() = runTest {
