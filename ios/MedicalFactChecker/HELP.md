@@ -301,7 +301,7 @@ Increases your rate limit for PubMed queries. Get one free at [NCBI](https://www
 
 ### Paper Library (Mac)
 
-Settings > Library lets you choose a folder for a paper library shared with the other apps that use one, such as StudyAnalyzer. Choose an empty folder to start a new library, or a folder that already holds one. A folder of your own files is refused. The app remembers the folder between launches. If the folder cannot be reached (an unplugged drive, a folder moved to the Trash), the setting says why. *Stop Using This Library* drops the setting and leaves the folder and its papers as they are. Nothing in the library is ever deleted automatically. In this version the app does not yet save papers into the library or read them from it.
+Settings > Library lets you choose a folder for a paper library shared with the other apps that use one, such as StudyAnalyzer. Choose an empty folder to start a new library, or a folder that already holds one. A folder of your own files is refused. The app remembers the folder between launches. If the folder cannot be reached (an unplugged drive, a folder moved to the Trash), the setting says why. *Stop Using This Library* drops the setting and leaves the folder and its papers as they are. Nothing in the library is ever deleted automatically. When you fetch a full text, the app first looks in the library, and keeps the papers it downloads there: the PDF, or the JATS XML it reads. If the library cannot be reached, a new paper stays in the app until it can be, and the paper's full-text view says so. Papers the app saved before you chose a library are not moved in yet.
 
 ---
 

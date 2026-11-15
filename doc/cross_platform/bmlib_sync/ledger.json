@@ -3237,7 +3237,7 @@
       "id": "bmlib#784",
       "title": "The full-text lookup's library rules, alone",
       "python": "owed",
-      "swift": "owed",
+      "swift": "ported",
       "android": "owed",
       "issue": "#788",
       "note": "Decided 2026-11-15: every bmlib-family app uses the shared paper library wherever its platform allows. The macOS app adopts it in steps 3a–3d (#788). Comes with the library through the FFI pin (`747e7a80`, bmlib #785's merge); nothing to port by hand. Swift reads them as `LibraryScan.newestSource`, `LibraryScan.listsUse`, `libraryIds` and `paperIdsContradiction` instead of a copy of the service's rules."
