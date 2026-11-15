@@ -445,6 +445,12 @@ final class Document {
         storeLibraryFile(nil, waiting: nil, note: nil)
     }
 
+    /// Keep this document waiting for the library, for `why`: one of its
+    /// files did not move though another did.
+    func keepLibraryWaiting(_ why: String) {
+        fullTextLibraryWaiting = why
+    }
+
     /// Store `note`, why this document's library file cannot be read after a
     /// switch (design §4.7), keeping the file's digest.
     func noteLibraryFileLeft(_ note: String) {

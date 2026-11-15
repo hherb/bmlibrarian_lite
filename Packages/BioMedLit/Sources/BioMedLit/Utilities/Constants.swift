@@ -967,6 +967,33 @@ public enum BioMedLitConstants {
     public static let libraryInstallationRefusedText =
         "The paper library refused this app's installation record; see the log for why."
 
+    /// What a move says when the documents it rewrote could not be saved (their
+    /// files stay in this app too).
+    public static func libraryDocumentsNotSaved(reason: String) -> String {
+        "the documents could not be saved, so this app keeps its copies: \(reason)"
+    }
+
+    /// What a move or copy says when it did nothing.
+    public static let libraryNothingMovedText = "Nothing was copied or moved."
+
+    /// Before each file a move or copy left where it was.
+    public static let libraryNotMovedPrefix = "Not moved: "
+
+    /// What a move did, after its count ("3 files moved into the paper library.").
+    public static let libraryMovedInDone = "moved into the paper library"
+
+    /// What a switch's copy did, after its count.
+    public static let libraryCopiedAlongDone = "copied into the new folder"
+
+    /// What *Stop using*'s copy back did, after its count.
+    public static let libraryCopiedBackDone = "copied back into this app"
+
+    /// A document's note when its library file was in a library that could not
+    /// be reached as another folder was chosen.
+    public static let libraryUnreachableLeftNote =
+        "its file is in the paper library that could not be reached when another folder was chosen; "
+            + "choose that folder again to read it"
+
     /// A document's note when its library file was not copied back into this
     /// app as it stopped using the library.
     public static let libraryNoLongerUsedNote =

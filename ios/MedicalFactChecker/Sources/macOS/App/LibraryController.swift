@@ -17,8 +17,19 @@
 
 import AppKit
 import BioMedLit
+import Observation
 import SwiftData
 import SystemConfiguration
+
+/// What the waiting settle last did, for the Library setting (design §4.6:
+/// the app says how many it moved and names a paper not moved).
+@MainActor
+@Observable
+final class LibrarySettleReport {
+    /// The last settle's lines (``LibraryMoveSummary/lines(done:)``); empty
+    /// before one moved or failed anything.
+    var lines: [String] = []
+}
 
 /// The app's one shared-paper-library session, with its launch and quit:
 /// access to the library folder is started at launch and stopped at exit
@@ -30,6 +41,9 @@ enum LibraryController {
     static let session = LibrarySession(store: AppSettings.shared)
 
     private static var started = false
+
+    /// What the waiting settle last did, shown by the Library setting.
+    static let settleReport = LibrarySettleReport()
 
     /// The app's store, whose documents the move and the switch rewrite
     /// (design §4.7); nil when the store could not be opened.
@@ -56,11 +70,9 @@ enum LibraryController {
         BMLFullTextService.appLibrary = library
         session.onHeld = { access in
             let summary = await moveIn(into: access, onlyWaiting: true)
-            if summary.moved > 0 || !summary.failed.isEmpty {
-                AppLogger.fullText.info(
-                    "Waiting sources settled: \(summary.moved) moved, \(summary.failed.count) not"
-                )
-            }
+            guard summary.moved > 0 || !summary.failed.isEmpty else { return }
+            AppLogger.fullText.info("Waiting sources settled: \(summary.moved) moved, \(summary.failed.count) not")
+            settleReport.lines = summary.lines(done: BioMedLitConstants.libraryMovedInDone)
         }
         Task.detached(priority: .utility) { _ = machineName }
         NotificationCenter.default.addObserver(
@@ -149,12 +161,17 @@ extension LibraryController {
 
     /// Save the documents a move or a copy rewrote; a failure is logged and
     /// added to `summary`'s failures, so the setting shows it.
-    private static func save(_ summary: inout LibraryMoveSummary) {
+    ///
+    /// - Returns: Whether they were saved.
+    @discardableResult
+    private static func save(_ summary: inout LibraryMoveSummary) -> Bool {
         do {
             try container?.mainContext.save()
+            return true
         } catch {
             AppLogger.fullText.error("The documents' library files were not saved: \(error, privacy: .public)")
-            summary.failed.append("The documents could not be saved: \(error.localizedDescription)")
+            summary.failed.append(BioMedLitConstants.libraryDocumentsNotSaved(reason: error.localizedDescription))
+            return false
         }
     }
 
@@ -198,8 +215,23 @@ extension LibraryController {
         let items = groups.map(\.item)
         let outcomes = await Task.detached(priority: .userInitiated) { LibraryMove.moveIn(items, into: library) }.value
         var summary = LibraryMover.apply(outcomes, to: groups.map(\.documents))
-        save(&summary)
+        // The app's copies go only once the documents pointing at the library are saved
+        guard save(&summary) else { return summary }
+        let moved = zip(outcomes, items).compactMap { outcome, item -> String? in
+            if case .moved = outcome { return item.path }
+            return nil
+        }
+        await Task.detached(priority: .utility) { LibraryMove.removeAppCopies(moved) }.value
         return summary
+    }
+
+    /// A choice made while the library set could not be reached: nothing can
+    /// be copied from it, so each document with a library file is told so.
+    static func noteUnreachableLeft() {
+        var summary = LibraryMoveSummary(moved: 0, failed: [])
+        LibraryMover.notCarried(LibraryMover.libraryFiles(documents()).flatMap(\.documents),
+                                note: BioMedLitConstants.libraryUnreachableLeftNote)
+        save(&summary)
     }
 
     /// A switch of folder: copy the library files this app uses from `old`
@@ -209,7 +241,12 @@ extension LibraryController {
         let groups = LibraryMover.libraryFiles(documents())
         let note = BioMedLitConstants.libraryNotCarriedNote(folderName: old.folderName)
         var summary = LibraryMoveSummary(moved: 0, failed: [])
-        if copying, !groups.isEmpty, let from = source(for: old), let to = source(for: new) {
+        let from = copying ? source(for: old) : nil
+        let to = copying ? source(for: new) : nil
+        if copying, !groups.isEmpty, from == nil || to == nil {
+            summary.failed.append(BioMedLitConstants.libraryInstallationRefusedText)
+        }
+        if copying, !groups.isEmpty, let from, let to {
             let files = groups.map { (file: $0.file, paper: $0.paper) }
             let outcomes = await Task.detached(priority: .userInitiated) {
                 LibraryMove.copy(files, from: from, to: to)
@@ -238,7 +275,11 @@ extension LibraryController {
         let groups = LibraryMover.libraryFiles(documents())
         let note = BioMedLitConstants.libraryNoLongerUsedNote
         var summary = LibraryMoveSummary(moved: 0, failed: [])
-        guard copying, let library = source(for: access) else {
+        let library = copying ? source(for: access) : nil
+        if copying, !groups.isEmpty, library == nil {
+            summary.failed.append(BioMedLitConstants.libraryInstallationRefusedText)
+        }
+        guard let library else {
             LibraryMover.notCarried(groups.flatMap(\.documents), note: note)
             save(&summary)
             return summary

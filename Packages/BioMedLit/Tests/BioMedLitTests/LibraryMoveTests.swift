@@ -90,7 +90,10 @@ final class LibraryMoveTests: XCTestCase {
         }
         XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: kept.path)), pdfBytes)
         XCTAssertEqual(kept.file.kind, BioMedLitConstants.libraryKindPDF)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: item.path), "the app's copy goes once checked")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: item.path),
+                      "the app's copy stays until its documents are saved (review #3)")
+        LibraryMove.removeAppCopies([item.path])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: item.path), "the app's copy goes once saved")
     }
 
     func testRefusedSaveLeavesTheAppCopy() throws {

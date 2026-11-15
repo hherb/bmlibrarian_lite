@@ -115,6 +115,45 @@ final class LibraryMoverTests: XCTestCase {
         XCTAssertEqual(groups.map(\.item.path), [cache.appendingPathComponent("b.pdf").path])
     }
 
+    /// Review #1: the settle takes a waiting file with every document reading
+    /// it, not only the waiting one, so none is left on a removed path.
+    func testOnlyWaitingTakesEveryDocumentOfAWaitingFile() {
+        let plain = document(pmid: "99999305", pdf: "p.pdf")
+        let waiting = document(pmid: "99999305", pdf: "p.pdf", waiting: "unplugged")
+        let groups = LibraryMover.moveItems([plain, waiting], cacheDirectory: cache, cacheNames: ["p.pdf"],
+                                            onlyWaiting: true)
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups.first?.documents.count, 2)
+        _ = LibraryMover.apply([.moved(kept("/lib/papers/a/p.pdf"))], to: groups.map(\.documents))
+        XCTAssertEqual(plain.localPDFFilePath, "/lib/papers/a/p.pdf")
+        XCTAssertEqual(waiting.localPDFFilePath, "/lib/papers/a/p.pdf")
+    }
+
+    /// Review #2: a document whose PDF moved but whose JATS did not still waits.
+    func testPartlyMovedDocumentStillWaits() throws {
+        let document = document(pdf: "p.pdf", waiting: "unplugged")
+        let jats = "\(try key(document).filenameComponent)-abc123def456.xml"
+        let groups = LibraryMover.moveItems([document], cacheDirectory: cache, cacheNames: ["p.pdf", jats],
+                                            onlyWaiting: true)
+        XCTAssertEqual(groups.count, 2)
+        let outcomes: [LibraryMoveOutcome] = groups.map {
+            $0.item.kind == BioMedLitConstants.libraryKindPDF ? .moved(kept("/lib/papers/a/p.pdf")) : .failed("refused")
+        }
+        _ = LibraryMover.apply(outcomes, to: groups.map(\.documents))
+        XCTAssertEqual(document.localPDFFilePath, "/lib/papers/a/p.pdf")
+        XCTAssertEqual(document.fullTextLibraryWaiting, "unplugged", "its JATS still waits")
+    }
+
+    /// Review #4: what a move came to, as the setting shows it.
+    func testSummaryLines() {
+        XCTAssertEqual(LibraryMoveSummary(moved: 0, failed: []).lines(done: "moved into the paper library"),
+                       ["Nothing was copied or moved."])
+        XCTAssertEqual(LibraryMoveSummary(moved: 1, failed: ["T: refused"]).lines(done: "moved into the paper library"),
+                       ["1 file moved into the paper library.", "Not moved: T: refused"])
+        XCTAssertEqual(LibraryMoveSummary(moved: 2, failed: []).lines(done: "copied into the new folder"),
+                       ["2 files copied into the new folder."])
+    }
+
     func testFailedMoveNamesThePaper() {
         let document = document(title: "Moving trial", pdf: "p.pdf", waiting: "unplugged")
         let groups = LibraryMover.moveItems([document], cacheDirectory: cache, cacheNames: ["p.pdf"],

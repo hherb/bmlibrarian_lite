@@ -51,12 +51,8 @@ struct LibrarySettingsTab: View {
                 stateView
                 offers
                 buttons
-                ForEach(outcome, id: \.self) { line in
-                    Text(line)
-                        .font(.caption)
-                        .foregroundColor(line == outcome.first ? .secondary : .orange)
-                        .textSelection(.enabled)
-                }
+                outcomeLines(outcome)
+                outcomeLines(LibraryController.settleReport.lines)
                 if let error = session.lastError {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
@@ -74,6 +70,17 @@ struct LibrarySettingsTab: View {
         .formStyle(.grouped)
         .padding()
         .task { await refreshCounts() }
+    }
+
+    /// What a change or the waiting settle did: the first line plain, a line
+    /// per file not moved in orange.
+    private func outcomeLines(_ lines: [String]) -> some View {
+        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+            Text(line)
+                .font(.caption)
+                .foregroundColor(index == 0 ? .secondary : .orange)
+                .textSelection(.enabled)
+        }
     }
 
     /// The unticked offers that go with the next change.
@@ -165,14 +172,9 @@ struct LibrarySettingsTab: View {
         used = LibraryController.usedCount()
     }
 
-    /// What `summary` did, worded with `done` ("moved into the paper
-    /// library"), then one line per file not moved.
+    /// What `summary` did, worded with `done`, or nothing for no summary.
     private func lines(_ summary: LibraryMoveSummary?, done: String) -> [String] {
-        guard let summary else { return [] }
-        let head = summary.moved == 0 && summary.failed.isEmpty
-            ? "Nothing was copied or moved."
-            : "\(files(summary.moved)) \(done)."
-        return [head] + summary.failed.map { "Not moved: \($0)" }
+        summary?.lines(done: done) ?? []
     }
 
     /// *Move … Into the Library*: this app's files into the held library.
@@ -181,7 +183,7 @@ struct LibrarySettingsTab: View {
         moving = true
         Task {
             let summary = await LibraryController.moveIn(into: access, onlyWaiting: false)
-            outcome = lines(summary, done: "moved into the paper library")
+            outcome = lines(summary, done: BioMedLitConstants.libraryMovedInDone)
             moving = false
             await refreshCounts()
         }
@@ -198,7 +200,7 @@ struct LibrarySettingsTab: View {
             await session.stopUsing { access in
                 summary = await LibraryController.carryBack(from: access, copying: copying)
             }
-            outcome = copying ? lines(summary, done: "copied back into this app") : []
+            outcome = copying ? lines(summary, done: BioMedLitConstants.libraryCopiedBackDone) : []
             copyBack = false
             await refreshCounts()
         }
@@ -217,15 +219,18 @@ struct LibrarySettingsTab: View {
         confirmingStop = false
         let bringing = !isReachable && bring && pending > 0
         let copying = isReachable && copyAlong && used > 0
+        let oldUnreachable: Bool
+        if case .unreachable = session.state { oldUnreachable = true } else { oldUnreachable = false }
         Task {
             var summary: LibraryMoveSummary?
-            var done = "moved into the paper library"
+            var done = BioMedLitConstants.libraryMovedInDone
             await session.choose(url) { old, new in
                 if let old {
-                    done = "copied into the new folder"
+                    done = BioMedLitConstants.libraryCopiedAlongDone
                     summary = await LibraryController.carry(from: old, to: new, copying: copying)
-                } else if bringing {
-                    summary = await LibraryController.moveIn(into: new, onlyWaiting: false)
+                } else {
+                    if oldUnreachable { LibraryController.noteUnreachableLeft() }
+                    if bringing { summary = await LibraryController.moveIn(into: new, onlyWaiting: false) }
                 }
             }
             outcome = session.lastError == nil ? lines(summary, done: done) : []

@@ -48,6 +48,17 @@ struct LibraryMoveSummary: Equatable {
     var moved: Int
     /// One line per file not moved: "‹title›: ‹why›".
     var failed: [String]
+
+    /// What it did, for the setting: "N files ‹done›." (or that nothing
+    /// was), then a line per file not moved.
+    ///
+    /// - Parameter done: What was done, as `BioMedLitConstants.libraryMovedInDone`.
+    func lines(done: String) -> [String] {
+        let head = moved == 0 && failed.isEmpty
+            ? BioMedLitConstants.libraryNothingMovedText
+            : "\(moved == 1 ? "1 file" : "\(moved) files") \(done)."
+        return [head] + failed.map { BioMedLitConstants.libraryNotMovedPrefix + $0 }
+    }
 }
 
 /// The documents' side of the move and the switch (design §4.7): which files
@@ -64,8 +75,10 @@ enum LibraryMover {
     ///   - cacheDirectory: The PDF cache.
     ///   - cacheNames: The names of the files in it now; a document's file
     ///     not among them is not offered.
-    ///   - onlyWaiting: Take only documents whose source waits for the
-    ///     library (the settle); otherwise every document (the user's move).
+    ///   - onlyWaiting: Take only the files a document waiting for the
+    ///     library reads (the settle), each still with every document reading
+    ///     it, so none is left on a removed path; otherwise every file (the
+    ///     user's move).
     static func moveItems(_ documents: [Document], cacheDirectory: URL, cacheNames: Set<String>,
                           onlyWaiting: Bool) -> [LibraryMoveGroup] {
         var groups: [LibraryMoveGroup] = []
@@ -82,7 +95,7 @@ enum LibraryMover {
                 documents: [document]))
         }
         let cachePath = cacheDirectory.standardizedFileURL.path
-        for document in documents where !onlyWaiting || document.fullTextLibraryWaiting != nil {
+        for document in documents {
             if let local = document.localPDFFilePath {
                 let url = URL(fileURLWithPath: local)
                 if url.deletingLastPathComponent().standardizedFileURL.path == cachePath,
@@ -96,7 +109,8 @@ enum LibraryMover {
                 }
             }
         }
-        return groups
+        guard onlyWaiting else { return groups }
+        return groups.filter { $0.documents.contains { $0.fullTextLibraryWaiting != nil } }
     }
 
     /// The library files `documents` use, one group per file.
@@ -121,10 +135,18 @@ enum LibraryMover {
     /// Write `outcomes[i]` to the documents `documents[i]`: a moved file is
     /// stored as the documents' library file; a failed one is named by its
     /// paper's title, and its documents get `notCarriedNote` when given (a
-    /// switch's copy).
+    /// switch's copy). A document with a file that did not move keeps
+    /// waiting, whatever else of it moved.
     static func apply(_ outcomes: [LibraryMoveOutcome], to documents: [[Document]],
                       notCarriedNote: String? = nil) -> LibraryMoveSummary {
         var summary = LibraryMoveSummary(moved: 0, failed: [])
+        let waitingBefore = documents.joined().map { ($0, $0.fullTextLibraryWaiting) }
+        var stillWaiting: Set<ObjectIdentifier> = []
+        defer {
+            for (document, why) in waitingBefore where stillWaiting.contains(ObjectIdentifier(document)) {
+                if let why { document.keepLibraryWaiting(why) }
+            }
+        }
         for (outcome, group) in zip(outcomes, documents) {
             switch outcome {
             case let .moved(kept):
@@ -132,6 +154,7 @@ enum LibraryMover {
                 for document in group { document.storeMovedLibraryFile(kept) }
             case let .failed(reason):
                 summary.failed.append("\(group.first?.title ?? ""): \(reason)")
+                stillWaiting.formUnion(group.map(ObjectIdentifier.init))
                 if let notCarriedNote { notCarried(group, note: notCarriedNote) }
             }
         }

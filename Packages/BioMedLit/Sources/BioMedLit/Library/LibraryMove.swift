@@ -49,15 +49,16 @@ public enum LibraryMoveOutcome: Sendable, Equatable {
 
 /// Moving this app's files into the shared paper library and copying the
 /// library's files on a switch (design §4.7). Every copy is read back
-/// through bmlib (digest checked) and compared before the app's copy goes;
-/// nothing is ever removed from a library. Disk I/O on the calling thread:
+/// through bmlib (digest checked) and compared; the app's copy goes only
+/// through ``removeAppCopies(_:)``, once the caller has saved the documents
+/// that now point at the library. Nothing is ever removed from a library. Disk I/O on the calling thread:
 /// call it off the main thread.
 public enum LibraryMove {
 
     /// Move `items` into `library`, in order: read the app's copy, keep it in
-    /// the library, read it back and compare, and only then remove the app's
-    /// copy. A failed remove is logged and the file still counts as moved (the
-    /// library's copy is the one read from now).
+    /// the library, read it back and compare. The app's copy stays: remove it
+    /// with ``removeAppCopies(_:)`` once the documents reading it are saved,
+    /// so a crash or a failed save never leaves one pointing at a removed file.
     ///
     /// - Returns: One outcome per item, in the same order.
     public static func moveIn(_ items: [LibraryMoveItem], into library: any FullTextLibrary) -> [LibraryMoveOutcome] {
@@ -70,16 +71,25 @@ public enum LibraryMove {
                     path: item.path, reason: error.localizedDescription))
             }
             let outcome = keepChecked(bytes, kind: item.kind, paper: item.paper, origin: item.origin, in: library)
-            guard case let .moved(kept) = outcome else { return outcome }
+            if case let .moved(kept) = outcome {
+                BioMedLitLib.logger?.info("Kept \(item.path) in the library at \(kept.path)", category: .library)
+            }
+            return outcome
+        }
+    }
+
+    /// Remove the app's copies at `paths`, files the library now holds
+    /// (checked by ``moveIn(_:into:)``) whose documents are saved. A failed
+    /// remove is logged: the library's copy is the one read from now, so the
+    /// leftover is only disk.
+    public static func removeAppCopies(_ paths: [String]) {
+        for path in paths {
             do {
-                try FileManager.default.removeItem(atPath: item.path)
+                try FileManager.default.removeItem(atPath: path)
             } catch {
                 BioMedLitLib.logger?.warning(
-                    "Could not remove \(item.path), now in the library at \(kept.path): \(error.localizedDescription)",
-                    category: .library)
+                    "Could not remove \(path), now in the library: \(error.localizedDescription)", category: .library)
             }
-            BioMedLitLib.logger?.info("Moved \(item.path) into the library at \(kept.path)", category: .library)
-            return outcome
         }
     }
 
