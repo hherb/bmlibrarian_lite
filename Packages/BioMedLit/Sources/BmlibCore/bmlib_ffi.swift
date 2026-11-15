@@ -907,7 +907,9 @@ public protocol PaperLibraryProtocol: AnyObject, Sendable {
      * `DigestMismatch` from reading the file (`NotDownloaded` also when
      * `who`'s own record is only a placeholder), and `BadName` for a name that
      * is not one path component or not the library's name for those bytes
-     * (nothing written).
+     * (nothing written); `ForeignJats` when the file is a JATS naming another
+     * paper or its folder holds one, another JATS there that cannot be read
+     * failing as reading it does (nothing written).
      */
     func recordUse(who: Installation, paper: PaperInfo, file: FileRef) throws 
     
@@ -960,7 +962,9 @@ public protocol PaperLibraryProtocol: AnyObject, Sendable {
      *
      * `BadInstallation` or `BadIdentifier` (nothing written), `FileClash`
      * (nothing overwritten), `NewerRecord`, `NotDownloaded`, `ReadOnly` or
-     * `Io`.
+     * `Io`; `ForeignJats` when `bytes` are a JATS naming another paper or the
+     * folder holds one, and `NotDownloaded` or `DigestMismatch` when a JATS
+     * there cannot be checked (nothing written).
      */
     func save(who: Installation, paper: PaperInfo, bytes: Data, kind: SourceKind, origin: String) throws  -> FileRef
     
@@ -1082,7 +1086,9 @@ open func read(file: FileRef)throws  -> Data  {
      * `DigestMismatch` from reading the file (`NotDownloaded` also when
      * `who`'s own record is only a placeholder), and `BadName` for a name that
      * is not one path component or not the library's name for those bytes
-     * (nothing written).
+     * (nothing written); `ForeignJats` when the file is a JATS naming another
+     * paper or its folder holds one, another JATS there that cannot be read
+     * failing as reading it does (nothing written).
      */
 open func recordUse(who: Installation, paper: PaperInfo, file: FileRef)throws   {try rustCallWithError(FfiConverterTypeLibraryError_lift) {
         uniffiCallStatus in
@@ -1173,7 +1179,9 @@ open func root() -> String  {
      *
      * `BadInstallation` or `BadIdentifier` (nothing written), `FileClash`
      * (nothing overwritten), `NewerRecord`, `NotDownloaded`, `ReadOnly` or
-     * `Io`.
+     * `Io`; `ForeignJats` when `bytes` are a JATS naming another paper or the
+     * folder holds one, and `NotDownloaded` or `DigestMismatch` when a JATS
+     * there cannot be checked (nothing written).
      */
 open func save(who: Installation, paper: PaperInfo, bytes: Data, kind: SourceKind, origin: String)throws  -> FileRef  {
     return try  FfiConverterTypeFileRef_lift(try rustCallWithError(FfiConverterTypeLibraryError_lift) {
@@ -4187,6 +4195,30 @@ enum LibraryError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
          */version: UInt32
     )
     /**
+     * A JATS whose own identifiers name another paper (bmlib #766), from
+     * [`PaperLibrary::save`] and [`PaperLibrary::record_use`]: one in the
+     * paper's folder, or the one being saved (`folder` `None`). Nothing was
+     * written; offer the manual clear of a `folder`, or, with none, keep the
+     * file out as another paper's.
+     */
+    case ForeignJats(
+        /**
+         * The paper's folder holding the JATS; `None` for the bytes being saved.
+         */folder: String?, 
+        /**
+         * The JATS file.
+         */name: String, 
+        /**
+         * The first contradicting identifier: `"pmid"`, `"doi"` or `"pmcid"`.
+         */field: String, 
+        /**
+         * The JATS's own value.
+         */theirs: String, 
+        /**
+         * The paper's value.
+         */ours: String
+    )
+    /**
      * Any other failure: the file system's, or a record that cannot be read
      * or written back, or no free folder name (the reason says which).
      */
@@ -4286,7 +4318,14 @@ public struct FfiConverterTypeLibraryError: FfiConverterRustBuffer {
             file: try FfiConverterString.read(from: &buf), 
             version: try FfiConverterUInt32.read(from: &buf)
             )
-        case 13: return .Io(
+        case 13: return .ForeignJats(
+            folder: try FfiConverterOptionString.read(from: &buf), 
+            name: try FfiConverterString.read(from: &buf), 
+            field: try FfiConverterString.read(from: &buf), 
+            theirs: try FfiConverterString.read(from: &buf), 
+            ours: try FfiConverterString.read(from: &buf)
+            )
+        case 14: return .Io(
             path: try FfiConverterString.read(from: &buf), 
             reason: try FfiConverterString.read(from: &buf)
             )
@@ -4374,8 +4413,17 @@ public struct FfiConverterTypeLibraryError: FfiConverterRustBuffer {
             FfiConverterUInt32.write(version, into: &buf)
             
         
-        case let .Io(path,reason):
+        case let .ForeignJats(folder,name,field,theirs,ours):
             writeInt(&buf, Int32(13))
+            FfiConverterOptionString.write(folder, into: &buf)
+            FfiConverterString.write(name, into: &buf)
+            FfiConverterString.write(field, into: &buf)
+            FfiConverterString.write(theirs, into: &buf)
+            FfiConverterString.write(ours, into: &buf)
+            
+        
+        case let .Io(path,reason):
+            writeInt(&buf, Int32(14))
             FfiConverterString.write(path, into: &buf)
             FfiConverterString.write(reason, into: &buf)
             
@@ -6228,7 +6276,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bmlib_ffi_checksum_method_paperlibrary_read() != 37147) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bmlib_ffi_checksum_method_paperlibrary_record_use() != 41641) {
+    if (uniffi_bmlib_ffi_checksum_method_paperlibrary_record_use() != 22164) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bmlib_ffi_checksum_method_paperlibrary_release() != 2624) {
@@ -6243,7 +6291,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bmlib_ffi_checksum_method_paperlibrary_root() != 2620) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bmlib_ffi_checksum_method_paperlibrary_save() != 59969) {
+    if (uniffi_bmlib_ffi_checksum_method_paperlibrary_save() != 39511) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bmlib_ffi_checksum_method_paperlibrary_scan() != 33102) {

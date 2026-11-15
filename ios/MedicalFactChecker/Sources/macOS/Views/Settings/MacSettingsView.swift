@@ -53,6 +53,11 @@ struct MacSettingsView: View {
                     Label("Sync", systemImage: "icloud")
                 }
 
+            LibrarySettingsTab()
+                .tabItem {
+                    Label("Library", systemImage: "books.vertical.fill")
+                }
+
             AboutTab()
                 .tabItem {
                     Label("About", systemImage: "info.circle")

@@ -24,34 +24,43 @@ its slice has landed; add a new section when handing off new work.
   Studio's `jbr`, `BMLIB_DIR` = a bmlib worktree at **`aa47a57`**, 1.9.0's
   pin), internal track, smoke test, tag `android_1.9.0`.
 
-**bmlib re-pinned to `110d906b`** (PR #779, 2026-11-14): FFI pin and sync
-ledger both name bmlib `main` `110d906b`; the bindings gain the shared paper
-library (`PaperLibrary`, `LibraryScan`), which no app calls (bmlib's `ffi`
-job now refuses a name Kotlin's imports shadow, bmlib#774). Its triage's
-#780 (bucket record against its stem and md5) landed in PR #782; #781 in
-PR #783: the desktop reads every service's JSON but PubMed's esearch
-(`strict=False`, on purpose) through `search_failures.strict_response_json`
-(bmlib's `strict_json_loads`, strict UTF-8, a `RecursionError` refused too;
-**a test double scripts `.content`, never `.json()`**); Swift's `JSONDecoder`
-already refused all but a BOM and depth. **Android (#784, PR #791)** reads
-every service's JSON but PubMed's esearch (as the desktop) as bytes: OpenAlex,
-CORE, PMC's bucket, CrossRef and ClinicalTrials.gov through
-`strictJsonElement` (`data/remote/StrictJson.kt`: non-lenient, no bare word,
-no raw control character in a string, depth checked on the text first:
-kotlinx overflowed the stack at 100,000 levels of arrays), Europe PMC and
-Unpaywall via `strictJsonRetrofit` (its own builder), the retraction lookup's
-bytes unchanged to bmlib. **#785 (PR #794, analyser 2.8):** the desktop
-analyser looks a DOI-only study's PMID up *before* reading PubMed (a converted
-PMID was never read, and the reader told "PubMed holds no record"): in PMC's
-ID converter, then, when it names none, PubMed's esearch
-(`find_pmid_by_doi`; the converter holds PMC's articles only). A lookup
-unreachable, an error status, a body it cannot read, more than one article or
-a value that is not a PMID sets `pubmed_record_unreachable`, so funding is not
-assessed (the apps never convert). **bmlib `main` is past the pin**: bmlib#761, #766 and #780 have no
-ledger row yet (the next sync). **Left:** an Apple archive from master lists
-`BmlibFFI.framework.dSYM` with no warning. **The shared paper library:
-decided 2026-11-15** (#788 macOS, #789 desktop, #790 Android); PR #787 (3a)
-and draft PR #793 (3b) carry its handover.
+**The shared paper library** (decided 2026-11-15: every app uses it where its
+platform allows; #788 macOS, #789 desktop, #790 Android; design:
+StudyAnalyzer's `2026-11-13-shared-paper-library-design.md` §5.3). **3a, PR
+#787** (plan `2026-11-15-library-3a-macos-setting.md`): FFI at bmlib
+`ac16ee90` (links refused, `ForeignJats`), the Library tab, BioMedLit
+`Library/` (`LibrarySession` over `LibrarySettingsStore`, which `AppSettings`
+adopts), launch resume, quit stop, `bookmarks.app-scope`; nothing is saved or
+read yet. Review fixes: a volume's `.Trashes` is a Trash; a marker-less folder
+at launch is lost. **Owed by the maintainer:** 3a's sandboxed click-through
+(plan Task 4 Step 5). **Next: 3b**: `FullTextService` looks in the library by
+identifier and saves PDFs and the JATS it converts; `Document` gains each
+file's digest and kind; sources wait while it cannot be reached, with the
+banner (§4.6). Then 3c (the move, §4.7), 3d (the clear, §4.8). **Left:** an
+Apple archive from master lists `BmlibFFI.framework.dSYM` with no warning;
+#784, #785 (PR #783's deferrals); #792 (3a review minors, for 3b).
+
+**Strict service JSON (#781 desktop, PR #783; #784 Android, PR #791).** The
+desktop reads every service's JSON but PubMed's esearch (`strict=False`, on
+purpose) through `search_failures.strict_response_json` (bmlib's
+`strict_json_loads`, strict UTF-8, a `RecursionError` refused too; **a test
+double scripts `.content`, never `.json()`**); Swift's `JSONDecoder` already
+refused all but a BOM and depth. Android reads every service's JSON but
+PubMed's esearch as bytes: OpenAlex, CORE, PMC's bucket, CrossRef and
+ClinicalTrials.gov through `strictJsonElement` (`data/remote/StrictJson.kt`:
+non-lenient, no bare word, no raw control character in a string, depth checked
+on the text first: kotlinx overflowed the stack at 100,000 levels of arrays),
+Europe PMC and Unpaywall via `strictJsonRetrofit` (its own builder), the
+retraction lookup's bytes unchanged to bmlib.
+
+**#785 (PR #794, analyser 2.8):** the desktop analyser looks a DOI-only
+study's PMID up *before* reading PubMed (a converted PMID was never read, and
+the reader told "PubMed holds no record"): in PMC's ID converter, then, when
+it names none, PubMed's esearch (`find_pmid_by_doi`; the converter holds
+PMC's articles only). A lookup unreachable, an error status, a body it cannot
+read, more than one article or a value that is not a PMID sets
+`pubmed_record_unreachable`, so funding is not assessed (the apps never
+convert).
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
@@ -154,7 +163,7 @@ contract `doc/cross_platform/retraction_parity/`). bmlib comes from PyPI (`>=0.1
   windows, 250 overlap, no reference list, **one window failing fails the
   paper**, never `text[:N]`; contract `text_windows.json`).
 - **bmlib: the FFI pin and the port set** (#583; PRs #564–#570, #572). The
-  pin names bmlib `main` (`110d906b`, PR #779); `android-tests.yml` builds
+  pin names bmlib `main` (`ac16ee90`, PR #787); `android-tests.yml` builds
   bmlib there and fails if an FFI test skips or the contract copy drifts; **the committed xcframework is
   `bmlib-xcframework.yml`'s own build** (re-pin from its artifact as its
   header says). **`doc/cross_platform/bmlib_sync/ledger.json` records every

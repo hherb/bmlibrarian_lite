@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "bmlib_commit": "110d906ba0d176a2e1a5c5edef53199fba0aa1b2",
+  "bmlib_commit": "ac16ee9009ce840482e9c09b4d99cb0ecdd9b20f",
   "from_bmlib": [
     {
       "id": "lite:pubmed-articleid-reference-list",
@@ -3155,47 +3155,47 @@
     {
       "id": "bmlib#755",
       "title": "`Library.save` keeps bytes once; `FullTextService` on a shared library",
-      "python": "n/a",
-      "swift": "n/a",
-      "android": "n/a",
-      "issue": null,
-      "note": "Lite does not use bmlib's shared paper library: each platform keeps its own store (the desktop's SQLite and PDF folder, SwiftData, Room), and no lite code opens a `bmlib.library` folder. Adopting it is the maintainer's call."
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#788",
+      "note": "Decided 2026-11-15: every bmlib-family app uses the shared paper library wherever its platform allows. The macOS app adopts it in steps 3a–3d (#788; 3a, PR #787, is the Library setting and bookmark, and calls no save or read yet); the desktop is #789 and Android #790 (phase 4). iOS joins in phase 4 with #788's code. Its `FullTextService` half is bmlib's own chain; the apps keep their own chains and save into the library themselves (design §5.3)."
     },
     {
       "id": "bmlib#767",
       "title": "The shared paper library: a file is found by its kind",
-      "python": "n/a",
-      "swift": "n/a",
-      "android": "n/a",
-      "issue": null,
-      "note": "Lite does not use bmlib's shared paper library: each platform keeps its own store (the desktop's SQLite and PDF folder, SwiftData, Room), and no lite code opens a `bmlib.library` folder. Adopting it is the maintainer's call."
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#788",
+      "note": "Decided 2026-11-15: every bmlib-family app uses the shared paper library wherever its platform allows. The macOS app adopts it in steps 3a–3d (#788; 3a, PR #787, is the Library setting and bookmark, and calls no save or read yet); the desktop is #789 and Android #790 (phase 4). iOS joins in phase 4 with #788's code."
     },
     {
       "id": "bmlib#768",
       "title": "The shared paper library: a save is durable when it returns",
-      "python": "n/a",
-      "swift": "n/a",
-      "android": "n/a",
-      "issue": null,
-      "note": "Lite does not use bmlib's shared paper library: each platform keeps its own store (the desktop's SQLite and PDF folder, SwiftData, Room), and no lite code opens a `bmlib.library` folder. Adopting it is the maintainer's call."
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#788",
+      "note": "Decided 2026-11-15: every bmlib-family app uses the shared paper library wherever its platform allows. The macOS app adopts it in steps 3a–3d (#788; 3a, PR #787, is the Library setting and bookmark, and calls no save or read yet); the desktop is #789 and Android #790 (phase 4). iOS joins in phase 4 with #788's code."
     },
     {
       "id": "bmlib:unreleased-library-ffi",
       "title": "The shared paper library through bmlib-ffi",
-      "python": "n/a",
-      "swift": "n/a",
-      "android": "n/a",
-      "issue": null,
-      "note": "Lite does not use bmlib's shared paper library: each platform keeps its own store (the desktop's SQLite and PDF folder, SwiftData, Room), and no lite code opens a `bmlib.library` folder. Adopting it is the maintainer's call. The FFI pin puts its `PaperLibrary` and `LibraryScan` objects into both apps' bindings and binaries; no app calls them. At `8c8e689a` the object was `Library`, which JNA's import shadows, so the Kotlin binding did not compile; bmlib PR #774 renamed it."
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#788",
+      "note": "Decided 2026-11-15: every bmlib-family app uses the shared paper library wherever its platform allows. The macOS app adopts it in steps 3a–3d (#788; 3a, PR #787, is the Library setting and bookmark, and calls no save or read yet); the desktop is #789 and Android #790 (phase 4). iOS joins in phase 4 with #788's code. The FFI puts `PaperLibrary` and `LibraryScan` into both apps' bindings (bmlib PR #774 renamed `Library`, which JNA's import shadowed)."
     },
     {
       "id": "bmlib:unreleased-library",
       "title": "`bmlib.library` / `bmlib::library`: a shared folder of research papers",
-      "python": "n/a",
-      "swift": "n/a",
-      "android": "n/a",
-      "issue": null,
-      "note": "Lite does not use bmlib's shared paper library: each platform keeps its own store (the desktop's SQLite and PDF folder, SwiftData, Room), and no lite code opens a `bmlib.library` folder. Adopting it is the maintainer's call."
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#788",
+      "note": "Decided 2026-11-15: every bmlib-family app uses the shared paper library wherever its platform allows. The macOS app adopts it in steps 3a–3d (#788; 3a, PR #787, is the Library setting and bookmark, and calls no save or read yet); the desktop is #789 and Android #790 (phase 4). iOS joins in phase 4 with #788's code."
     },
     {
       "id": "bmlib#758",
@@ -3209,11 +3209,29 @@
     {
       "id": "bmlib#769",
       "title": "The shared paper library never downloads an evicted file to read it",
-      "python": "n/a",
-      "swift": "n/a",
-      "android": "n/a",
-      "issue": null,
-      "note": "Lite does not use bmlib's shared paper library: each platform keeps its own store (the desktop's SQLite and PDF folder, SwiftData, Room), and no lite code opens a `bmlib.library` folder. Adopting it is the maintainer's call."
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#788",
+      "note": "Decided 2026-11-15: every bmlib-family app uses the shared paper library wherever its platform allows. The macOS app adopts it in steps 3a–3d (#788; 3a, PR #787, is the Library setting and bookmark, and calls no save or read yet); the desktop is #789 and Android #790 (phase 4). iOS joins in phase 4 with #788's code."
+    },
+    {
+      "id": "bmlib#761",
+      "title": "The shared paper library uses only real files and folders",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#788",
+      "note": "Decided 2026-11-15: every bmlib-family app uses the shared paper library wherever its platform allows. The macOS app adopts it in steps 3a–3d (#788; 3a, PR #787, is the Library setting and bookmark, and calls no save or read yet); the desktop is #789 and Android #790 (phase 4). iOS joins in phase 4 with #788's code. Comes with the library through the FFI pin (`ac16ee90`); nothing to port by hand."
+    },
+    {
+      "id": "bmlib#766",
+      "title": "The library refuses to file anything beside another paper's JATS",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#788",
+      "note": "Decided 2026-11-15: every bmlib-family app uses the shared paper library wherever its platform allows. The macOS app adopts it in steps 3a–3d (#788; 3a, PR #787, is the Library setting and bookmark, and calls no save or read yet); the desktop is #789 and Android #790 (phase 4). iOS joins in phase 4 with #788's code. Comes with the library through the FFI pin (`ac16ee90`): `save` and `record_use` refuse with `ForeignJats`, which the apps show as bmlib's text."
     },
     {
       "id": "bmlib:unreleased-meca-s3",
