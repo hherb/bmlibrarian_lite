@@ -419,7 +419,7 @@ class _FakeResponse:
         """Hold the body the registry "served".
 
         Args:
-            body: What ``json()`` returns.
+            body: The JSON value served.
             status_code: The HTTP status.
         """
         self._body = body
@@ -428,13 +428,10 @@ class _FakeResponse:
     def raise_for_status(self) -> None:
         """A 200 raises nothing."""
 
-    def json(self) -> Any:
-        """Return the served body.
-
-        Returns:
-            The body.
-        """
-        return self._body
+    @property
+    def content(self) -> bytes:
+        """The served body, as bytes."""
+        return json.dumps(self._body).encode()
 
 
 class TestARegistryAnswerThatIsNotAStudyIsUnread:

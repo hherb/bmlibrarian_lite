@@ -22,7 +22,7 @@ import android.util.Log
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCSearchResult
 import com.bmlibrarian.factchecker.data.remote.europepmc.EuropePMCService
 import com.bmlibrarian.factchecker.di.AppModule
-import com.bmlibrarian.factchecker.di.NetworkModule
+import com.bmlibrarian.factchecker.data.remote.strictJsonRetrofit
 import com.bmlibrarian.factchecker.domain.model.OpenAccessShortfall
 import com.bmlibrarian.factchecker.domain.model.OpenAccessSource
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
@@ -55,7 +55,7 @@ import org.junit.Test
 /**
  * The Unpaywall tier against a local server (#464): Unpaywall's answer and the
  * landing page it names are both served by [server], and Unpaywall is asked
- * through Retrofit built by `NetworkModule.provideRetrofitBuilder` from
+ * through Retrofit built by `strictJsonRetrofit`, as the app builds it, from
  * `AppModule.provideJson`, so the decoding is the app's own.
  *
  * The parsing rules themselves are pinned by [UnpaywallLandingPageContractTest].
@@ -85,9 +85,7 @@ class FullTextServiceUnpaywallTest {
         server.start()
 
         val httpClient = OkHttpClient()
-        val unpaywallApi = NetworkModule.provideRetrofitBuilder(httpClient, AppModule.provideJson())
-            .baseUrl(server.url("/v2/"))
-            .build()
+        val unpaywallApi = strictJsonRetrofit(httpClient, AppModule.provideJson(), server.url("/v2/").toString())
             .create(UnpaywallApi::class.java)
 
         // Europe PMC knows no record, so the chain reaches Unpaywall
@@ -421,6 +419,17 @@ class FullTextServiceUnpaywallTest {
         routes[unpaywallPath] = MockResponse()
             .setHeader("Content-Type", "application/json")
             .setBody("not json")
+
+        assertEquals(
+            doiLinkLeaving(OpenAccessSource.UNPAYWALL, RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)),
+            fetch()
+        )
+    }
+
+    @Test
+    fun `an Unpaywall answer holding a lone surrogate leaves the copy unassessed`() = runTest {
+        // The lenient parse keeps the surrogate in the URL; bmlib refuses the whole answer (#781)
+        unpaywallLocations(listOf("https://repo.example.org/\\ud800.pdf"))
 
         assertEquals(
             doiLinkLeaving(OpenAccessSource.UNPAYWALL, RequestFailure(RequestFailureKind.MALFORMED_RESPONSE)),

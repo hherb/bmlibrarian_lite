@@ -348,6 +348,10 @@ GET https://api.unpaywall.org/v2/{doi}?email={your_email}
 }
 ```
 
+The answer is read strictly, as Europe PMC's search is (#781): bytes that are
+not UTF-8, `NaN`, `Infinity`, a number past binary64 or a lone surrogate
+escape make it a `malformed_response`, never a PDF URL.
+
 ### Retrieval
 
 ```pseudocode

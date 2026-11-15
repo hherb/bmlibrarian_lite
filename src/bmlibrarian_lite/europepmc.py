@@ -82,7 +82,7 @@ from .exceptions import SourceRequestError
 from .identifiers import is_canonical_pmid
 from .jats_markdown import jats_to_markdown
 from .polite_session import mount_politely
-from .search_failures import request_failure_from_exception
+from .search_failures import request_failure_from_exception, strict_response_json
 
 logger = logging.getLogger(__name__)
 
@@ -860,7 +860,7 @@ class EuropePMCClient:
                 timeout=EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
             )
             response.raise_for_status()
-            data = response.json()
+            data = strict_response_json(response)
         except requests.exceptions.RequestException as e:
             # Never an absence: a throttled or unreachable Europe PMC has
             # said nothing about this article, and a caller that read this
@@ -898,7 +898,7 @@ class EuropePMCClient:
                 timeout=EUROPEPMC_REQUEST_TIMEOUT_SECONDS,
             )
             response.raise_for_status()
-            data = response.json()
+            data = strict_response_json(response)
         except requests.exceptions.RequestException as e:
             failure = request_failure_from_exception(e)
         # Raised here, outside the except block, so the requests exception --

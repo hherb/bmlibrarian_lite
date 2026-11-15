@@ -28,6 +28,7 @@ Tests cover:
 - Error handling and edge cases
 """
 
+import json
 from http import HTTPStatus
 
 import pytest
@@ -153,7 +154,7 @@ class TestGetArticleInfo:
         """Test searching by PMID."""
         mock_session = MagicMock()
         mock_response = MagicMock()
-        mock_response.json.return_value = sample_europepmc_search_response
+        mock_response.content = json.dumps(sample_europepmc_search_response).encode()
         mock_response.raise_for_status = MagicMock()
         mock_session.get.return_value = mock_response
         mock_session_class.return_value = mock_session
@@ -174,7 +175,7 @@ class TestGetArticleInfo:
         """Test searching by PMC ID."""
         mock_session = MagicMock()
         mock_response = MagicMock()
-        mock_response.json.return_value = sample_europepmc_search_response
+        mock_response.content = json.dumps(sample_europepmc_search_response).encode()
         mock_response.raise_for_status = MagicMock()
         mock_session.get.return_value = mock_response
         mock_session_class.return_value = mock_session
@@ -193,7 +194,7 @@ class TestGetArticleInfo:
         """Test searching by DOI."""
         mock_session = MagicMock()
         mock_response = MagicMock()
-        mock_response.json.return_value = sample_europepmc_search_response
+        mock_response.content = json.dumps(sample_europepmc_search_response).encode()
         mock_response.raise_for_status = MagicMock()
         mock_session.get.return_value = mock_response
         mock_session_class.return_value = mock_session
@@ -209,7 +210,7 @@ class TestGetArticleInfo:
         """Test when no results are found."""
         mock_session = MagicMock()
         mock_response = MagicMock()
-        mock_response.json.return_value = {"hitCount": 0, "resultList": {"result": []}}
+        mock_response.content = json.dumps({"hitCount": 0, "resultList": {"result": []}}).encode()
         mock_response.raise_for_status = MagicMock()
         mock_session.get.return_value = mock_response
         mock_session_class.return_value = mock_session
@@ -443,10 +444,10 @@ class TestFetchArticleInfoIdentifiers:
             The client and its mocked session.
         """
         response = MagicMock()
-        response.json.return_value = {
+        response.content = json.dumps({
             "hitCount": len(results),
             "resultList": {"result": results},
-        }
+        }).encode()
         return _client_answering(response)
 
     def test_a_preprint_keeps_what_its_full_text_is_fetched_by(self) -> None:
@@ -506,7 +507,7 @@ class TestHasFulltextXmlFollowsWhatFullTextXmlServes:
             The parsed article.
         """
         response = MagicMock()
-        response.json.return_value = {"hitCount": 1, "resultList": {"result": [result]}}
+        response.content = json.dumps({"hitCount": 1, "resultList": {"result": [result]}}).encode()
         client, _ = _client_answering(response)
         info = client.fetch_article_info(pmcid="PMC7339914").info
         assert info is not None
@@ -585,7 +586,7 @@ class TestArticleInfoAnswerIsRead:
             The fetch.
         """
         response = MagicMock()
-        response.json.return_value = answer
+        response.content = json.dumps(answer).encode()
         client, _ = _client_answering(response)
         return client.fetch_article_info(pmid="31996627")
 

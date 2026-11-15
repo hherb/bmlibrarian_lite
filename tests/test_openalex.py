@@ -151,8 +151,14 @@ class TestFetchPdfUrls:
 
     @pytest.mark.parametrize(
         "body",
-        [b"not json", b"[]", b'{"locations": {"pdf_url": "x"}}', b'{"locations": ["\xff"]}'],
-        ids=["not json", "not an object", "locations not a list", "not utf-8"],
+        [
+            b"not json",
+            b"[]",
+            b'{"locations": {"pdf_url": "x"}}',
+            b'{"locations": ["\xff"]}',
+            b'{"locations": [{"pdf_url": "https://x.org/\\ud800.pdf"}]}',
+        ],
+        ids=["not json", "not an object", "locations not a list", "not utf-8", "a lone surrogate"],
     )
     def test_an_answer_we_cannot_read_is_malformed(self, body: bytes) -> None:
         """Unreadable is not absent."""

@@ -22,6 +22,7 @@ No test here touches the network: the sessions are replaced with doubles
 that raise the ``requests`` exceptions the real ones would.
 """
 
+import json
 import re
 
 import pytest
@@ -342,7 +343,7 @@ class TestTheIdConverterDistrustsItsInput:
             """Record the body to answer with.
 
             Args:
-                payload: What ``response.json()`` should return.
+                payload: The JSON value the body holds.
             """
             self._payload = payload
 
@@ -350,11 +351,11 @@ class TestTheIdConverterDistrustsItsInput:
             """Answer 200 with the recorded body.
 
             Returns:
-                A response whose ``json()`` is the recorded payload.
+                A response whose body is the recorded payload, as JSON.
             """
             response = requests.Response()
             response.status_code = 200
-            response.json = lambda **_kw: self._payload
+            response._content = json.dumps(self._payload).encode()
             return response
 
     def test_a_json_array_is_malformed_not_a_crash(self, discoverer) -> None:
@@ -587,7 +588,7 @@ class TestTheIdConverterLeafShapes:
             """Record the body to answer with.
 
             Args:
-                payload: What ``response.json()`` should return.
+                payload: The JSON value the body holds.
             """
             self._payload = payload
 
@@ -595,11 +596,11 @@ class TestTheIdConverterLeafShapes:
             """Answer 200 with the recorded body.
 
             Returns:
-                A response whose ``json()`` is the recorded payload.
+                A response whose body is the recorded payload, as JSON.
             """
             response = requests.Response()
             response.status_code = 200
-            response.json = lambda **_kw: self._payload
+            response._content = json.dumps(self._payload).encode()
             return response
 
     @pytest.mark.parametrize("value", [123, None, [], {}, ""])

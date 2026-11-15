@@ -76,7 +76,7 @@ fun pubMedHttpClient(base: OkHttpClient): OkHttpClient =
 /**
  * Build the [PubMedApi], on a client derived by [pubMedHttpClient].
  *
- * Uses its own `Retrofit.Builder` rather than the shared `scalarsAndJson` one.
+ * Uses its own `Retrofit.Builder` rather than the shared one.
  * That builder is a mutable singleton, so setting this client on it would hand
  * the no-redirect client to every API built from it afterwards.
  *

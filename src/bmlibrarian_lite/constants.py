@@ -1201,8 +1201,9 @@ OPENALEX_HOST = "api.openalex.org"
 OPENALEX_API_BASE_URL = f"https://{OPENALEX_HOST}"
 OPENALEX_REQUEST_TIMEOUT_SECONDS = 30
 OPENALEX_MAX_RETRIES = 3
-# OpenAlex serves JSON, which is UTF-8 (RFC 8259); nothing is guessed.
-OPENALEX_ENCODING = "utf-8"
+# A service's JSON body is read as UTF-8 (RFC 8259) and strictly, as bmlib and
+# serde_json read it (#781): no BOM, NaN, Infinity or lone surrogate.
+SERVICE_JSON_ENCODING = "utf-8"
 
 # CORE's search of the text it extracted from repository copies, asked by
 # DOI with the user's own key, last in the chain (#480, stage C). Named as
@@ -1228,8 +1229,6 @@ CORE_KEY_REFUSED_STATUS = 401
 CORE_REQUEST_TIMEOUT_SECONDS = 30
 CORE_MAX_RETRIES = 3
 CORE_BACKOFF_FACTOR = 1
-# CORE serves JSON, which is UTF-8 (RFC 8259).
-CORE_ENCODING = "utf-8"
 # The environment variable a CORE key may be given in, as NCBI_API_KEY is.
 ENV_CORE_API_KEY = "CORE_API_KEY"
 # What the Full Text settings tab says each field is for.

@@ -73,7 +73,7 @@ from ..data_models import (
 )
 from ..elsevier_api import ElsevierCredentials
 from ..jats_markdown import COI_WORDING_PATTERN
-from ..search_failures import request_failure_from_exception
+from ..search_failures import request_failure_from_exception, strict_response_json
 from ..transparency_terms import (
     COI_INDUSTRY_TIES_LABEL,
     COI_MISSING_LABEL,
@@ -1432,7 +1432,7 @@ class PubMedClient:
             'retmode': 'json',
         }
         response = self._make_request('esearch.fcgi', params)
-        data = response.json()
+        data = strict_response_json(response)
         return data.get('esearchresult', {}).get('idlist', [])
 
     def fetch_article(self, pmid: str) -> RecordFetch:
@@ -1483,7 +1483,7 @@ class PubMedClient:
         # Use ID converter API
         url = "https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/"
         response = self.session.get(url, params=params, timeout=30)
-        data = response.json()
+        data = strict_response_json(response)
 
         result = {}
         for record in data.get('records', []):
@@ -1717,7 +1717,7 @@ class CrossRefClient:
                 logger.info("CrossRef holds no record of DOI %s.", doi)
                 return RecordFetch.absent()
             response.raise_for_status()
-            message = response.json().get('message')
+            message = strict_response_json(response).get('message')
         except (requests.RequestException, ValueError, AttributeError) as e:
             # ValueError covers a body that is not JSON, AttributeError one
             # that is JSON but not an object. Both are caught here rather
@@ -1894,7 +1894,7 @@ class ClinicalTrialsClient:
                 )
                 return RecordFetch.absent()
             response.raise_for_status()
-            record = response.json()
+            record = strict_response_json(response)
         except (requests.RequestException, ValueError, AttributeError) as e:
             failure = (
                 request_failure_from_exception(e)
@@ -2037,7 +2037,7 @@ class OpenAlexClient:
         try:
             response = self.session.get(url, params=params, timeout=30)
             response.raise_for_status()
-            return response.json()
+            return strict_response_json(response)
         except requests.RequestException as e:
             logger.error(f"OpenAlex API error: {e}")
             return None

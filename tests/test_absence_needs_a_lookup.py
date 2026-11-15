@@ -23,6 +23,7 @@ never asked at all as the article's own answer:
 No test here touches the network.
 """
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -2097,7 +2098,7 @@ class _AnsweringSession:
         """Record the body to answer with.
 
         Args:
-            payload: What ``json()`` returns.
+            payload: The JSON value served.
         """
         self._payload = payload
 
@@ -2120,17 +2121,14 @@ class _JsonResponse:
         """Record the body.
 
         Args:
-            payload: What ``json()`` returns.
+            payload: The JSON value served.
         """
         self._payload = payload
 
     def raise_for_status(self) -> None:
         """Succeed, as a 200 does."""
 
-    def json(self) -> dict:
-        """Answer with the recorded body.
-
-        Returns:
-            The body.
-        """
-        return self._payload
+    @property
+    def content(self) -> bytes:
+        """The recorded body, as the bytes served."""
+        return json.dumps(self._payload).encode()

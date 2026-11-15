@@ -272,9 +272,9 @@ def test_europepmc_lookup_sends_a_canonical_pmid() -> None:
 
     client = EuropePMCClient.__new__(EuropePMCClient)
     client._session = MagicMock()
-    client._session.get.return_value.json.return_value = {
+    client._session.get.return_value.content = json.dumps({
         "hitCount": 0, "resultList": {"result": []},
-    }
+    }).encode()
     client.fetch_article_info(pmid="33301246")
     params = client._session.get.call_args.kwargs["params"]
     assert params["query"] == "ext_id:33301246 src:med"
@@ -372,7 +372,7 @@ def test_discover_and_download_canonicalises_at_its_entry(monkeypatch) -> None:
 
     d = PDFDiscoverer.__new__(PDFDiscoverer)
     d._session = MagicMock()
-    d._session.get.return_value.json.return_value = {"records": []}
+    d._session.get.return_value.content = json.dumps({"records": []}).encode()
     monkeypatch.setattr(pdf_discovery, "replace", lambda r, **k: r)
     asked: list = []
 

@@ -20,7 +20,7 @@ package com.bmlibrarian.factchecker.data.remote.europepmc
 
 import android.util.Log
 import com.bmlibrarian.factchecker.di.AppModule
-import com.bmlibrarian.factchecker.di.NetworkModule
+import com.bmlibrarian.factchecker.data.remote.strictJsonRetrofit
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
 import com.bmlibrarian.factchecker.domain.model.RequestFailureKind
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
@@ -28,6 +28,7 @@ import com.bmlibrarian.factchecker.domain.model.SearchProvider
 import com.bmlibrarian.factchecker.domain.model.SourceRequestException
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
+import okio.Buffer
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.QueueDispatcher
@@ -72,9 +73,7 @@ class EuropePMCFailedAnswerWireTest {
 
     /** A service on the app's converters, pointed at the local server. */
     private fun service(): EuropePMCService {
-        val api = NetworkModule.provideScalarsRetrofitBuilder(OkHttpClient(), AppModule.provideJson())
-            .baseUrl(server.url("/").toString())
-            .build()
+        val api = strictJsonRetrofit(OkHttpClient(), AppModule.provideJson(), server.url("/").toString())
             .create(EuropePMCApi::class.java)
         return EuropePMCService(api)
     }
@@ -107,6 +106,42 @@ class EuropePMCFailedAnswerWireTest {
         for (line in Log.lines) {
             assertFalse("logged the body: $line", line.contains("BODY_TEXT"))
         }
+    }
+
+    /** Answer the next request with an HTTP 200 and these bytes. */
+    private fun answerBytes(body: ByteArray) {
+        server.enqueue(MockResponse().setResponseCode(HTTP_OK).setBody(Buffer().write(body)))
+        answersQueued++
+    }
+
+    private val onePage = """{"hitCount":1,"resultList":{"result":[{"pmid":"1","title":"T\u00e9 \ud83d\ude00","source":"MED"}]}}"""
+
+    @Test
+    fun `an answer bmlib refuses is unreadable, never a page`() = runBlocking {
+        val refused = listOf(
+            onePage.replace("\\ud83d\\ude00", "\\ud800").toByteArray(), // a lone surrogate escape
+            onePage.replace("T", "T\u00ff").toByteArray(Charsets.ISO_8859_1), // not UTF-8
+            byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) + onePage.toByteArray(), // a BOM
+            onePage.replace("\"hitCount\":1", "\"hitCount\":1,\"score\":NaN").toByteArray()
+        )
+        for (body in refused) {
+            answerBytes(body)
+            val error = service().search(query = "aspirin", resultsReceived = 0).exceptionOrNull()
+            assertEquals(
+                String(body, Charsets.ISO_8859_1),
+                RequestFailure(RequestFailureKind.MALFORMED_RESPONSE),
+                (error as SourceRequestException).failure
+            )
+        }
+    }
+
+    @Test
+    fun `a well-formed answer, escapes and a surrogate pair included, is read`() = runBlocking {
+        answer(onePage)
+
+        val searched = service().search(query = "aspirin", resultsReceived = 0).getOrThrow()
+
+        assertEquals(listOf("T\u00e9 \ud83d\ude00"), searched.articles.map { it.title })
     }
 
     @Test
