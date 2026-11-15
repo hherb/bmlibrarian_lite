@@ -36,7 +36,7 @@ PR #783: the desktop reads every service's JSON but PubMed's esearch
 (`strict=False`, on purpose) through `search_failures.strict_response_json`
 (bmlib's `strict_json_loads`, strict UTF-8, a `RecursionError` refused too;
 **a test double scripts `.content`, never `.json()`**); Swift's `JSONDecoder`
-already refused all but a BOM and depth. **Android (#784, this branch's PR)**
+already refused all but a BOM and depth. **Android (#784, PR #791)**
 reads every service's JSON as bytes through `strictJsonElement`
 (`data/remote/StrictJson.kt`: non-lenient, no bare word, depth checked on the
 text first: kotlinx overflowed the stack at 100,000 levels), Europe PMC and
