@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "bmlib_commit": "9dae8b05ff1d6734fef197564dd9b72c50a9cead",
+  "bmlib_commit": "747e7a8098c46f88703ee2a7e977934006bb9ecb",
   "from_bmlib": [
     {
       "id": "lite:pubmed-articleid-reference-list",
@@ -3240,7 +3240,7 @@
       "swift": "owed",
       "android": "owed",
       "issue": "#788",
-      "note": "Decided 2026-11-15: every bmlib-family app uses the shared paper library wherever its platform allows. The macOS app adopts it in steps 3a–3d (#788). Comes with the library through the FFI pin (`9dae8b05`, bmlib #785's head, re-pinned to its merge); nothing to port by hand. Swift reads them as `LibraryScan.newestSource`, `LibraryScan.listsUse`, `libraryIds` and `paperIdsContradiction` instead of a copy of the service's rules."
+      "note": "Decided 2026-11-15: every bmlib-family app uses the shared paper library wherever its platform allows. The macOS app adopts it in steps 3a–3d (#788). Comes with the library through the FFI pin (`747e7a80`, bmlib #785's merge); nothing to port by hand. Swift reads them as `LibraryScan.newestSource`, `LibraryScan.listsUse`, `libraryIds` and `paperIdsContradiction` instead of a copy of the service's rules."
     },
     {
       "id": "bmlib#780",
@@ -3249,7 +3249,16 @@
       "swift": "owed",
       "android": "owed",
       "issue": "#788",
-      "note": "Decided 2026-11-15: every bmlib-family app uses the shared paper library wherever its platform allows. The macOS app adopts it in steps 3a–3d (#788). Comes with the library through the FFI pin (`9dae8b05`, bmlib #785's head, re-pinned to its merge); nothing to port by hand. Rust-side logging only; no app code changes."
+      "note": "Decided 2026-11-15: every bmlib-family app uses the shared paper library wherever its platform allows. The macOS app adopts it in steps 3a–3d (#788). Comes with the library through the FFI pin (`747e7a80`, bmlib #785's merge); nothing to port by hand. Rust-side logging only; no app code changes."
+    },
+    {
+      "id": "bmlib#782",
+      "title": "Rust logs an author-less article at DEBUG, as Python does",
+      "python": "owed",
+      "swift": "owed",
+      "android": "owed",
+      "issue": "#788",
+      "note": "Decided 2026-11-15: every bmlib-family app uses the shared paper library wherever its platform allows. Comes with the FFI pin (`747e7a80`); `JatsParseReport` in the binding now carries the DEBUG lines."
     },
     {
       "id": "bmlib:unreleased-meca-s3",

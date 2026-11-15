@@ -965,10 +965,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_bmlib_ffi_checksum_func_bmlib_version() and 0xFFFF) != 39912) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_bmlib_ffi_checksum_func_parse_jats() and 0xFFFF) != 30685) {
+    if ((lib.uniffi_bmlib_ffi_checksum_func_parse_jats() and 0xFFFF) != 3772) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_bmlib_ffi_checksum_func_parse_jats_audited() and 0xFFFF) != 54867) {
+    if ((lib.uniffi_bmlib_ffi_checksum_func_parse_jats_audited() and 0xFFFF) != 1936) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_bmlib_ffi_checksum_func_installation_new() and 0xFFFF) != 16010) {
@@ -3806,8 +3806,9 @@ public object FfiConverterTypeJatsFundingSource: FfiConverterRustBuffer<JatsFund
 
 
 /**
- * A parse with its audit: the counted publisher losses (`warnings`) and the
- * reader-defect diagnostics (`diagnostics`, empty on a correct reader).
+ * A parse with its audit: the counted publisher losses (`warnings`), the
+ * lines bmlib logs at DEBUG (`debug`) and the reader-defect diagnostics
+ * (`diagnostics`, empty on a correct reader).
  */
 data class JatsParseReport (
     /**
@@ -3830,6 +3831,12 @@ data class JatsParseReport (
      * Counted losses that are the publisher's deposit.
      */
     val `warnings`: List<kotlin.String>
+    , 
+    /**
+     * The lines bmlib logs at DEBUG (#782): evidence, not a loss, such as an
+     * article whose contributor list names nobody.
+     */
+    val `debug`: List<kotlin.String>
     
 ){
     
@@ -3850,6 +3857,7 @@ public object FfiConverterTypeJatsParseReport: FfiConverterRustBuffer<JatsParseR
             FfiConverterString.read(buf),
             FfiConverterSequenceString.read(buf),
             FfiConverterSequenceString.read(buf),
+            FfiConverterSequenceString.read(buf),
         )
     }
 
@@ -3857,7 +3865,8 @@ public object FfiConverterTypeJatsParseReport: FfiConverterRustBuffer<JatsParseR
             FfiConverterTypeJatsArticle.allocationSize(value.`article`) +
             FfiConverterString.allocationSize(value.`articleLabel`) +
             FfiConverterSequenceString.allocationSize(value.`diagnostics`) +
-            FfiConverterSequenceString.allocationSize(value.`warnings`)
+            FfiConverterSequenceString.allocationSize(value.`warnings`) +
+            FfiConverterSequenceString.allocationSize(value.`debug`)
     )
 
     override fun write(value: JatsParseReport, buf: ByteBuffer) {
@@ -3865,6 +3874,7 @@ public object FfiConverterTypeJatsParseReport: FfiConverterRustBuffer<JatsParseR
             FfiConverterString.write(value.`articleLabel`, buf)
             FfiConverterSequenceString.write(value.`diagnostics`, buf)
             FfiConverterSequenceString.write(value.`warnings`, buf)
+            FfiConverterSequenceString.write(value.`debug`, buf)
     }
 }
 
@@ -7114,9 +7124,9 @@ public object FfiConverterMapStringTypeCrossrefResult: FfiConverterRustBuffer<Ma
          *
          * bmlib counts what a parse loses (refused table spans, dropped formulas,
          * unfiled terms…) and checks itself for reader defects. This function returns
-         * the article alone: those lines go only to the process's stderr, which an
-         * iOS app does not see outside an attached debugger and Android discards. Use
-         * [`parse_jats_audited`] to receive them.
+         * the article alone: those lines go only to the `log` facade, which records
+         * nothing unless the host process installs a logger (bmlib-ffi installs none).
+         * Use [`parse_jats_audited`] to receive them.
          *
          * # Errors
          *
@@ -7141,7 +7151,7 @@ public object FfiConverterMapStringTypeCrossrefResult: FfiConverterRustBuffer<Ma
          *
          * `known_pmc_id` is the id the caller already holds, or `""` for none; a bare
          * number is `PMC`-prefixed, and it wins over an id the document deposits. The
-         * audit's lines are also written to stderr, as for [`parse_jats`].
+         * audit's lines are also sent to the `log` facade, as for [`parse_jats`].
          *
          * # Errors
          *

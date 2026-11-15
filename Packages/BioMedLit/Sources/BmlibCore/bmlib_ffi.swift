@@ -2914,8 +2914,9 @@ public func FfiConverterTypeJatsFundingSource_lower(_ value: JatsFundingSource) 
 
 
 /**
- * A parse with its audit: the counted publisher losses (`warnings`) and the
- * reader-defect diagnostics (`diagnostics`, empty on a correct reader).
+ * A parse with its audit: the counted publisher losses (`warnings`), the
+ * lines bmlib logs at DEBUG (`debug`) and the reader-defect diagnostics
+ * (`diagnostics`, empty on a correct reader).
  */
 public struct JatsParseReport: Equatable, Hashable {
     /**
@@ -2935,6 +2936,11 @@ public struct JatsParseReport: Equatable, Hashable {
      * Counted losses that are the publisher's deposit.
      */
     public let warnings: [String]
+    /**
+     * The lines bmlib logs at DEBUG (#782): evidence, not a loss, such as an
+     * article whose contributor list names nobody.
+     */
+    public let debug: [String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -2951,11 +2957,16 @@ public struct JatsParseReport: Equatable, Hashable {
          */diagnostics: [String], 
         /**
          * Counted losses that are the publisher's deposit.
-         */warnings: [String]) {
+         */warnings: [String], 
+        /**
+         * The lines bmlib logs at DEBUG (#782): evidence, not a loss, such as an
+         * article whose contributor list names nobody.
+         */debug: [String]) {
         self.article = article
         self.articleLabel = articleLabel
         self.diagnostics = diagnostics
         self.warnings = warnings
+        self.debug = debug
     }
 
     
@@ -2977,7 +2988,8 @@ public struct FfiConverterTypeJatsParseReport: FfiConverterRustBuffer {
                 article: FfiConverterTypeJatsArticle.read(from: &buf), 
                 articleLabel: FfiConverterString.read(from: &buf), 
                 diagnostics: FfiConverterSequenceString.read(from: &buf), 
-                warnings: FfiConverterSequenceString.read(from: &buf)
+                warnings: FfiConverterSequenceString.read(from: &buf), 
+                debug: FfiConverterSequenceString.read(from: &buf)
         )
     }
 
@@ -2986,6 +2998,7 @@ public struct FfiConverterTypeJatsParseReport: FfiConverterRustBuffer {
         FfiConverterString.write(value.articleLabel, into: &buf)
         FfiConverterSequenceString.write(value.diagnostics, into: &buf)
         FfiConverterSequenceString.write(value.warnings, into: &buf)
+        FfiConverterSequenceString.write(value.debug, into: &buf)
     }
 }
 
@@ -6319,9 +6332,9 @@ public func bmlibVersion() -> String  {
  *
  * bmlib counts what a parse loses (refused table spans, dropped formulas,
  * unfiled terms…) and checks itself for reader defects. This function returns
- * the article alone: those lines go only to the process's stderr, which an
- * iOS app does not see outside an attached debugger and Android discards. Use
- * [`parse_jats_audited`] to receive them.
+ * the article alone: those lines go only to the `log` facade, which records
+ * nothing unless the host process installs a logger (bmlib-ffi installs none).
+ * Use [`parse_jats_audited`] to receive them.
  *
  * # Errors
  *
@@ -6342,7 +6355,7 @@ public func parseJats(xml: String)throws  -> JatsArticle  {
  *
  * `known_pmc_id` is the id the caller already holds, or `""` for none; a bare
  * number is `PMC`-prefixed, and it wins over an id the document deposits. The
- * audit's lines are also written to stderr, as for [`parse_jats`].
+ * audit's lines are also sent to the `log` facade, as for [`parse_jats`].
  *
  * # Errors
  *
@@ -6513,10 +6526,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_bmlib_ffi_checksum_func_bmlib_version() != 39912) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bmlib_ffi_checksum_func_parse_jats() != 30685) {
+    if (uniffi_bmlib_ffi_checksum_func_parse_jats() != 3772) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_bmlib_ffi_checksum_func_parse_jats_audited() != 54867) {
+    if (uniffi_bmlib_ffi_checksum_func_parse_jats_audited() != 1936) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_bmlib_ffi_checksum_func_installation_new() != 16010) {
