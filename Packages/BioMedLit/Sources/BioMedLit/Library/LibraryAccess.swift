@@ -170,14 +170,9 @@ public enum LibrarySetup {
             log(.warning, "access to the library \(url.path) was not started")
             return .lost(reason: "macOS did not grant access to the folder; choose it again")
         }
-        // A bookmark is stored only after bmlib made or found the library, so a
-        // folder without its marker is not the library any more (deleted and
-        // made again empty, say): opening it would make a new, empty library.
-        let marker = url.appendingPathComponent(BioMedLitConstants.libraryMarkerFileName)
-        if !FileManager.default.fileExists(atPath: marker.path) {
+        if let reason = lostReason(of: url) {
             if started { url.stopAccessingSecurityScopedResource() }
-            log(.warning, "\(url.path) no longer holds the paper library")
-            return .lost(reason: "the folder no longer holds the paper library (is its drive unplugged?)")
+            return .lost(reason: reason)
         }
         let library: PaperLibrary
         do {
@@ -197,6 +192,19 @@ public enum LibrarySetup {
         return .held(
             LibraryAccess(folderURL: url, library: library, accessStarted: started),
             renewedBookmark: renewed)
+    }
+
+    /// Why the library at `url`, a folder this process can reach, is not
+    /// there any more (logged at warning), or nil when it is. A bookmark is
+    /// stored only after bmlib made or found the library, so a folder without
+    /// its marker is not the library any more (deleted and made again empty,
+    /// say; or its drive unplugged): opening it would make a new, empty
+    /// library. Disk I/O: call it off the main thread.
+    public static func lostReason(of url: URL) -> String? {
+        let marker = url.appendingPathComponent(BioMedLitConstants.libraryMarkerFileName)
+        guard !FileManager.default.fileExists(atPath: marker.path) else { return nil }
+        log(.warning, "\(url.path) no longer holds the paper library")
+        return "the folder no longer holds the paper library (is its drive unplugged?)"
     }
 
     /// Whether a failed start of access means the folder cannot be used: only

@@ -38,8 +38,10 @@ enum LibraryController {
     /// label is then the app's name alone.
     nonisolated private static let machineName: String? = SCDynamicStoreCopyComputerName(nil, nil) as String?
 
-    /// Resume the library and arrange to stop access when the app quits.
-    /// Called once from the app's `init`; a second call does nothing.
+    /// Resume the library, re-check it each time the app becomes active
+    /// (design §4.6: a drive unplugged or plugged back in meanwhile), and
+    /// arrange to stop access when the app quits. Called once from the app's
+    /// `init`; a second call does nothing.
     static func startAtLaunch() {
         guard !started else { return }
         started = true
@@ -49,6 +51,11 @@ enum LibraryController {
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { _ in
             MainActor.assumeIsolated { session.stopAccess() }
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { _ in
+            Task { @MainActor in await session.recheck() }
         }
         Task { await session.resumeAtLaunch() }
     }
