@@ -381,10 +381,12 @@ public actor FullTextService {
     /// when usable, ends the lookup before any request; otherwise a JATS a
     /// tier serves with a body is kept there, the library's PDF is read in
     /// place of the first PDF tier's download, and a PDF the chain reads from
-    /// its cache is kept there, its cache copy removed once the library holds
-    /// it. A library that cannot be used never stops the lookup: the result's
+    /// its cache is kept there; one this call downloaded loses its cache copy
+    /// once the library holds it, one cached earlier keeps it. A library that
+    /// cannot be used never stops the lookup: the result's
     /// ``FullTextResult/libraryFailure`` says why, and the source stays where
-    /// it is without a library.
+    /// it is, waiting for the library when it could not be reached
+    /// (``FullTextResult/libraryWaiting``).
     ///
     /// - Parameters:
     ///   - pmcId: PubMed Central ID (e.g., "PMC1234567").
@@ -512,8 +514,8 @@ public actor FullTextService {
                 }
             case .wrongPaper(let message):
                 lookup.fail(message, ends: true, unreachable: false)
-            case .failed(let message):
-                lookup.fail(message, ends: true, unreachable: true)
+            case .failed(let failure):
+                lookup.fail(failure.description, ends: true, unreachable: failure.waits)
             case .unusable, .none:
                 break
             }
@@ -1889,7 +1891,7 @@ public actor FullTextService {
         let service = BioMedLitConstants.elsevierServiceName
         var fetched = try await fetchElsevierPDF(doi: doi, cacheKey: cacheKey)
         var read = try readElsevierPDF(fetched, doi: doi, title: title)
-        if case .vanished? = read {
+        if case .vanished? = read?.outcome {
             // Set aside by another fetch between the cache read and this one
             // (#560): asked again, once, so the download is judged on its own
             BioMedLitLib.logger?.info(
@@ -1994,21 +1996,21 @@ public actor FullTextService {
     ///   - doi: The DOI, for the log.
     ///   - title: The article's title, or `nil` to check nothing.
     /// - Returns: What came of the PDF (`.noText` and `.extracted` carry where
-    ///   it is read from; a refusal carries no path), or `nil` when the fetch
-    ///   served no PDF.
+    ///   it is read from; a refusal carries no path) and whether this call
+    ///   admitted it to the cache, or `nil` when the fetch served no PDF.
     /// - Throws: `CancellationError` if the caller cancelled.
     private func readElsevierPDF(
         _ fetched: ElsevierFetch,
         doi: String,
         title: String?
-    ) throws -> PDFTierOutcome? {
+    ) throws -> (outcome: PDFTierOutcome, admitted: Bool)? {
         let service = BioMedLitConstants.elsevierServiceName
         switch fetched {
         case .cached(let localPath):
             BioMedLitLib.logger?.info(
                 "Retrieved the PDF from \(service) for DOI \(doi) at \(localPath)", category: .fullText
             )
-            return try extractText(fromCachedPDF: localPath, title: title)
+            return (try extractText(fromCachedPDF: localPath, title: title), false)
         case .downloaded(let staged, let cachePath):
             switch try admit(staged: staged, cachePath: cachePath, title: title) {
             case .admitted(let localPath):
@@ -2016,10 +2018,10 @@ public actor FullTextService {
                     "Retrieved the PDF from \(service) for DOI \(doi) at \(localPath)", category: .fullText
                 )
                 // Judged already: read without a second check
-                return try extractText(fromCachedPDF: localPath, title: nil)
-            case .refused: return .wrongArticle
-            case .notCached: return .notCached
-            case .gone: return .vanished
+                return (try extractText(fromCachedPDF: localPath, title: nil), true)
+            case .refused: return (.wrongArticle, false)
+            case .notCached: return (.notCached, false)
+            case .gone: return (.vanished, false)
             }
         case .absent, .unreachable, .keyRefused, .networkRefused, .notSaved:
             return nil
@@ -3140,17 +3142,20 @@ public actor FullTextService {
     /// (#546), logged either way it is not a plain match.
     ///
     /// - Parameters:
-    ///   - path: The PDF, cached or waiting for its check.
+    ///   - path: The PDF, cached, waiting for its check, or the library's.
     ///   - title: The article's title.
+    ///   - inLibrary: Whether `path` is the library's file, which a mismatch
+    ///     leaves where it is (the caller sets a cached one aside).
     /// - Returns: `true` for a mismatch, the one outcome that refuses a PDF.
     /// - Throws: `CancellationError` if the caller cancelled during the check.
-    private func refusesAsAnotherArticle(_ path: String, title: String) throws -> Bool {
+    private func refusesAsAnotherArticle(_ path: String, title: String, inLibrary: Bool = false) throws -> Bool {
         let check = titleChecker(URL(fileURLWithPath: path), title)
         try Task.checkCancellation()
         if case .mismatch(let share) = check {
             BioMedLitLib.logger?.warning(
                 "PDF \(path) is another article's: its first page with text carries "
-                    + "\(Int((share * 100).rounded()))% of the title's word pairs; set aside unread",
+                    + "\(Int((share * 100).rounded()))% of the title's word pairs; "
+                    + (inLibrary ? "not read, and left in the library" : "set aside unread"),
                 category: .fullText
             )
             return true
@@ -3249,17 +3254,19 @@ public actor FullTextService {
     ///     ``fetchFullText(pmcId:doi:pmid:primaryKind:title:)``.
     ///   - title: The article's title the PDF is checked against (#546), or
     ///     `nil` to check nothing.
-    /// - Returns: What the attempt produced. See ``PDFTierOutcome``.
+    /// - Returns: What the attempt produced (see ``PDFTierOutcome``), and
+    ///   whether its PDF was downloaded and admitted to the cache by this
+    ///   call rather than cached earlier.
     /// - Throws: `CancellationError` if the caller cancelled.
     private func downloadAndExtract(
         from url: URL,
         key: ArticleCacheKey,
         title: String?
-    ) async throws -> PDFTierOutcome {
-        guard extractPDFText else { return .notAttempted }
+    ) async throws -> (outcome: PDFTierOutcome, admitted: Bool) {
+        guard extractPDFText else { return (.notAttempted, false) }
 
-        let outcome = try await obtainAndRead(from: url, key: key, title: title)
-        guard case .vanished = outcome else { return outcome }
+        let read = try await obtainAndRead(from: url, key: key, title: title)
+        guard case .vanished = read.outcome else { return read }
         // Asked again, once: the cache name is empty now, so this downloads,
         // and the download is judged on its own
         BioMedLitLib.logger?.info(
@@ -3268,7 +3275,7 @@ public actor FullTextService {
             category: .fullText
         )
         let again = try await obtainAndRead(from: url, key: key, title: title)
-        guard case .vanished = again else { return again }
+        guard case .vanished = again.outcome else { return again }
         // Gone a second time: the retry may itself have been a cache hit that
         // another fetch refused, so it is no copy served and keeps no link
         BioMedLitLib.logger?.error(
@@ -3276,7 +3283,7 @@ public actor FullTextService {
                 + "before it was read, twice; that copy is not assessed",
             category: .fullText
         )
-        return .vanished
+        return (.vanished, false)
     }
 
     /// One attempt of ``downloadAndExtract(from:key:title:)``: the cached PDF
@@ -3287,14 +3294,15 @@ public actor FullTextService {
     ///   - url: The remote PDF.
     ///   - key: Names the article, and so the cached file.
     ///   - title: The article's title, or `nil` to check nothing.
-    /// - Returns: What the attempt produced; `.vanished` when the cached file
-    ///   was gone before it was read.
+    /// - Returns: What the attempt produced (`.vanished` when the cached file
+    ///   was gone before it was read), and whether its PDF was admitted to the
+    ///   cache by this attempt rather than cached earlier.
     /// - Throws: `CancellationError` if the caller cancelled.
     private func obtainAndRead(
         from url: URL,
         key: ArticleCacheKey,
         title: String?
-    ) async throws -> PDFTierOutcome {
+    ) async throws -> (outcome: PDFTierOutcome, admitted: Bool) {
         let obtained: ObtainedPDF
         do {
             obtained = try await obtainPDF(from: url, for: key)
@@ -3309,22 +3317,22 @@ public actor FullTextService {
                 category: .fullText
             )
             if case FullTextError.pdfDownloadFailed(let failure) = error {
-                return .downloadFailed(failure)
+                return (.downloadFailed(failure), false)
             }
             // The only other failure the download throws is the cache write's
-            return .notCached
+            return (.notCached, false)
         }
 
         switch obtained {
         case .cached(let path):
-            return try extractText(fromCachedPDF: path, title: title)
+            return (try extractText(fromCachedPDF: path, title: title), false)
         case .staged(let staged, let cachePath):
             switch try admit(staged: staged, cachePath: cachePath, title: title) {
             // Judged already: read without a second check
-            case .admitted(let path): return try extractText(fromCachedPDF: path, title: nil)
-            case .refused: return .wrongArticle
-            case .notCached: return .notCached
-            case .gone: return .vanished
+            case .admitted(let path): return (try extractText(fromCachedPDF: path, title: nil), true)
+            case .refused: return (.wrongArticle, false)
+            case .notCached: return (.notCached, false)
+            case .gone: return (.vanished, false)
             }
         }
     }
@@ -4039,7 +4047,9 @@ public actor FullTextService {
     ///
     /// Plural because one article can hold an entry per source URL — see
     /// ``cacheFilename(key:url:)``. Quarantined entries go too: they belong to
-    /// the same article and are of no use once it is being discarded.
+    /// the same article and are of no use once it is being discarded. A JATS
+    /// waiting there for the library (``writeWaitingJATS(_:key:)``) is no
+    /// cached PDF and stays: a source is never deleted by a cache clear.
     ///
     /// - Parameter key: Names the article whose PDFs are to be deleted.
     public static func deleteCachedPDF(for key: ArticleCacheKey) {
@@ -4050,8 +4060,9 @@ public actor FullTextService {
             includingPropertiesForKeys: nil
         ) else { return }
         for fileURL in contents
-        where fileURL.lastPathComponent.hasPrefix("\(articleName)-")
-            || fileURL.lastPathComponent.hasPrefix("\(articleName).") {
+        where (fileURL.lastPathComponent.hasPrefix("\(articleName)-")
+            || fileURL.lastPathComponent.hasPrefix("\(articleName)."))
+            && !fileURL.lastPathComponent.hasSuffix(BioMedLitConstants.libraryWaitingJATSSuffix) {
             try? FileManager.default.removeItem(at: fileURL)
         }
     }
@@ -4128,7 +4139,8 @@ extension FullTextService {
         private(set) var unreachable = false
         /// Whether a JATS was left waiting in the PDF cache.
         private var wroteWaitingJATS = false
-        /// The PDFs this call kept in the library, by their path there.
+        /// The PDFs this call kept in the library, by the path a result
+        /// reads them from (the library's, or an earlier fetch's cache copy).
         private var kept: [String: LibraryFileReference] = [:]
 
         /// The part of one fetch for `paper` in `library`, `nil` for none.
@@ -4153,10 +4165,10 @@ extension FullTextService {
             self.unreachable = self.unreachable || unreachable
         }
 
-        /// Record a PDF kept in the library, so the result read from it names
-        /// its file.
-        func record(_ file: LibraryKept) {
-            kept[file.path] = file.file
+        /// Record a PDF kept in the library, so the result read from `path`
+        /// names its file.
+        func record(_ file: LibraryFileReference, at path: String) {
+            kept[path] = file
         }
 
         /// Record that a JATS waits for the library in the PDF cache.
@@ -4244,10 +4256,11 @@ extension FullTextService {
             return nil
         }
         // A note that fails ends the library's use, but the JATS is still
-        // served: its bytes passed the digest check (bmlib's rule). Nothing
-        // is left out of the library, so nothing waits.
+        // served: its bytes passed the digest check (bmlib's rule). It is in
+        // the library already; a source fetched past it (an abstract held
+        // back) waits when the library could not be reached.
         if let failure = lookup.inUse?.noteUse(file, paper: lookup.paper) {
-            lookup.fail(failure.description, ends: true, unreachable: false)
+            lookup.fail(failure.description, ends: true, unreachable: failure.waits)
         }
         BioMedLitLib.logger?.info("Serving the library's JATS for \(articleName)", category: .fullText)
         return FullTextResult(
@@ -4285,7 +4298,7 @@ extension FullTextService {
                 }
                 return kept?.file
             case .failure(let failure):
-                lookup.fail(failure.description, ends: true, unreachable: true)
+                lookup.fail(failure.description, ends: true, unreachable: failure.waits)
             }
         }
         if lookup.unreachable, let key, Self.writeWaitingJATS(xml, key: key) { lookup.recordWaitingJATS() }
@@ -4355,10 +4368,10 @@ extension FullTextService {
         case .success(let found?): held = found
         case .success(nil): return nil
         case .failure(let failure):
-            lookup.fail(failure.description, ends: true, unreachable: true)
+            lookup.fail(failure.description, ends: true, unreachable: failure.waits)
             return nil
         }
-        if let title, try refusesAsAnotherArticle(held.path, title: title) {
+        if let title, try refusesAsAnotherArticle(held.path, title: title, inLibrary: true) {
             let url = URL(fileURLWithPath: held.path)
             let message = BioMedLitConstants.libraryPDFAnotherArticleFailure(
                 file: "\(url.deletingLastPathComponent().lastPathComponent)/\(url.lastPathComponent)"
@@ -4380,9 +4393,10 @@ extension FullTextService {
             )
             return nil
         }
-        // Served all the same, and nothing is left out of the library
+        // Served all the same: it is in the library already, and a source
+        // fetched past it waits when the library could not be reached
         if let failure = library.noteUse(held.file, paper: lookup.paper) {
-            lookup.fail(failure.description, ends: true, unreachable: false)
+            lookup.fail(failure.description, ends: true, unreachable: failure.waits)
         }
         BioMedLitLib.logger?.info(
             "Using the library's PDF \(held.path) for \(articleName) in place of a download", category: .fullText
@@ -4400,20 +4414,27 @@ extension FullTextService {
         )
     }
 
-    /// A PDF a tier read from the cache, kept in the library (design §4.5):
-    /// once the library holds it (the save returned), the cache copy is
-    /// removed and the outcome reads from the library's file. A PDF the save
-    /// refuses stays in the cache, read from there, and the failure is the
-    /// call's. Any other outcome, or no library in use, is returned as it is.
+    /// A PDF a tier read from the cache, kept in the library (design §4.5).
+    /// One this call downloaded and admitted loses its cache copy once the
+    /// library holds it (the save returned), and the outcome reads from the
+    /// library's file. One an earlier fetch cached is kept too, but its cache
+    /// copy stays and is still read from: an earlier session's document may
+    /// point at it, and moving it in is §4.7's move, step 3c's. A PDF the
+    /// save refuses stays in the cache, read from there, and the failure is
+    /// the call's. Any other outcome, or no library in use, is returned as it
+    /// is.
     ///
     /// - Parameters:
-    ///   - outcome: What the tier's read came to.
+    ///   - read: What the tier's read came to, and whether this call admitted
+    ///     its PDF to the cache.
     ///   - origin: The tier, whose display name the library records.
     ///   - lookup: The fetch's part of the library.
-    /// - Returns: The outcome, its path the library's when kept.
+    /// - Returns: The outcome, its path the library's when this call's copy
+    ///   was kept.
     private func keptInLibrary(
-        _ outcome: PDFTierOutcome, origin: FullTextSource, lookup: LibraryLookup
+        _ read: (outcome: PDFTierOutcome, admitted: Bool), origin: FullTextSource, lookup: LibraryLookup
     ) -> PDFTierOutcome {
+        let outcome = read.outcome
         guard let library = lookup.inUse else { return outcome }
         let cachePath: String
         switch outcome {
@@ -4424,6 +4445,12 @@ extension FullTextService {
         do {
             bytes = try Data(contentsOf: URL(fileURLWithPath: cachePath))
         } catch {
+            // Another service fetching the paper kept it and removed this
+            // copy meanwhile: read from the library's file, not a gone path
+            if !FileManager.default.fileExists(atPath: cachePath),
+               let held = heldInstead(of: cachePath, lookup: lookup) {
+                return Self.outcome(outcome, readingFrom: held.path)
+            }
             // Not the library's failure: the PDF is served from the cache
             BioMedLitLib.logger?.warning(
                 "Could not read the cached PDF \(cachePath) to keep it in the library "
@@ -4438,13 +4465,18 @@ extension FullTextService {
         case .success(let file?): kept = file
         case .success(nil): return outcome
         case .failure(let failure):
-            lookup.fail(failure.description, ends: true, unreachable: true)
+            lookup.fail(failure.description, ends: true, unreachable: failure.waits)
             return outcome
         }
-        lookup.record(kept)
         BioMedLitLib.logger?.info(
             "PDF from \(origin.displayName) kept in the library at \(kept.path)", category: .fullText
         )
+        guard read.admitted else {
+            // An earlier fetch's copy: left, and still read from (Ruling L′)
+            lookup.record(kept.file, at: cachePath)
+            return outcome
+        }
+        lookup.record(kept.file, at: kept.path)
         do {
             try FileManager.default.removeItem(atPath: cachePath)
         } catch {
@@ -4455,10 +4487,45 @@ extension FullTextService {
                 category: .fullText
             )
         }
+        return Self.outcome(outcome, readingFrom: kept.path)
+    }
+
+    /// The library's PDF of the paper, read in place of a cache copy that
+    /// went away before it could be kept (another fetch kept it and removed
+    /// it), recorded as the call's. A library that cannot be read is the
+    /// call's failure.
+    ///
+    /// - Parameters:
+    ///   - cachePath: The cache copy that is gone, for the log.
+    ///   - lookup: The fetch's part of the library.
+    /// - Returns: The library's PDF, or `nil` when it holds none or cannot
+    ///   be read.
+    private func heldInstead(of cachePath: String, lookup: LibraryLookup) -> LibraryHeldPDF? {
+        guard let library = lookup.inUse else { return nil }
+        switch library.pdf(for: lookup.paper) {
+        case .success(let held?):
+            BioMedLitLib.logger?.info(
+                "The cached PDF \(cachePath) went away before it was kept (another fetch kept it?); "
+                    + "reading the library's \(held.path)",
+                category: .fullText
+            )
+            lookup.record(held.file, at: held.path)
+            return held
+        case .success(nil):
+            return nil
+        case .failure(let failure):
+            lookup.fail(failure.description, ends: true, unreachable: failure.waits)
+            return nil
+        }
+    }
+
+    /// `outcome`, read from `path`: a PDF's outcome moved to where it is read
+    /// from now; any other outcome unchanged.
+    private static func outcome(_ outcome: PDFTierOutcome, readingFrom path: String) -> PDFTierOutcome {
         switch outcome {
-        case .noText(_, let coverage): return .noText(localPath: kept.path, coverage: coverage)
+        case .noText(_, let coverage): return .noText(localPath: path, coverage: coverage)
         case .extracted(_, let text, let coverage):
-            return .extracted(localPath: kept.path, text: text, coverage: coverage)
+            return .extracted(localPath: path, text: text, coverage: coverage)
         case .notAttempted, .downloadFailed, .notCached, .wrongArticle, .vanished: return outcome
         }
     }

@@ -19,8 +19,8 @@ import Foundation
 /// The library a fetch goes through while the one set cannot be reached
 /// (design §4.6): every call fails with why, so the fetch keeps its source
 /// where it is and marks it waiting for the library, as for a library that
-/// fails mid-fetch. A paper with no identifier is not touched, as the
-/// library's own rule.
+/// fails mid-fetch. A paper with no identifier the library accepts is not
+/// touched, as the library's own rule.
 public struct UnreachableLibrary: FullTextLibrary {
     /// Why the library cannot be reached, for the user.
     public let reason: String
@@ -31,7 +31,7 @@ public struct UnreachableLibrary: FullTextLibrary {
     }
 
     public func jats(for paper: LibraryPaper) -> LibraryJATSLookup {
-        failure(for: paper).map { .failed($0.description) } ?? .none
+        failure(for: paper).map { .failed($0) } ?? .none
     }
 
     public func pdf(for paper: LibraryPaper) -> Result<LibraryHeldPDF?, LibraryLookupFailure> {
@@ -55,13 +55,13 @@ public struct UnreachableLibrary: FullTextLibrary {
     }
 
     /// The failure for `paper`, logged at warning, or nil for a paper with no
-    /// identifier.
+    /// identifier the library accepts (read as the library reads them). It
+    /// always waits: the library may come back.
     private func failure(for paper: LibraryPaper) -> LibraryLookupFailure? {
-        let ids = [("pmid", paper.pmid), ("doi", paper.doi), ("pmcid", paper.pmcId)]
-            .compactMap { name, value in value.map { "\(name)=\($0)" } }
-        guard !ids.isEmpty else { return nil }
-        let failure = LibraryLookupFailure(description: BioMedLitConstants.libraryFailure(
-            ids: ids.joined(separator: " "), file: nil, reason: reason))
+        guard let ids = paper.libraryRequestIDs else { return nil }
+        let failure = LibraryLookupFailure(
+            description: BioMedLitConstants.libraryFailure(ids: LibraryPaper.describe(ids), file: nil, reason: reason),
+            waits: true)
         BioMedLitLib.logger?.warning(failure.description, category: .library)
         return failure
     }

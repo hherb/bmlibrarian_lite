@@ -239,10 +239,13 @@ final class LibrarySessionTests: XCTestCase {
         let resuming = Task { await session.resumeAtLaunch() }
         await fulfillment(of: [gate.entered], timeout: 10)
         XCTAssertTrue(session.isReaching)
+        // A fetch meanwhile keeps its source waiting (Ruling S)
+        XCTAssertEqual(session.unreachableLibrary?.reason, BioMedLitConstants.libraryStillReachingReason)
         gate.open()
         await resuming.value
         defer { session.stopAccess() }
         XCTAssertFalse(session.isReaching)
+        XCTAssertNil(session.unreachableLibrary, "reached")
 
         let none = LibrarySession(store: MemoryStore())
         await none.resumeAtLaunch()
@@ -450,10 +453,11 @@ final class LibrarySessionTests: XCTestCase {
         await lost.resumeAtLaunch()
         guard case let .unreachable(reason) = lost.state else { return XCTFail("\(lost.state)") }
         let paper = LibraryPaper(pmid: "1", doi: nil, pmcId: nil)
-        guard case let .failed(message) = try XCTUnwrap(lost.unreachableLibrary).jats(for: paper) else {
+        guard case let .failed(failure) = try XCTUnwrap(lost.unreachableLibrary).jats(for: paper) else {
             return XCTFail("not failed")
         }
-        XCTAssertTrue(message.contains(reason))
+        XCTAssertTrue(failure.description.contains(reason))
+        XCTAssertTrue(failure.waits)
     }
 }
 #endif

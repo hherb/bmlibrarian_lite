@@ -18,10 +18,15 @@ import CryptoKit
 import XCTest
 @testable import BioMedLit
 
-/// Serves a fixed extraction, so a PDF needs no real file.
+/// Serves a fixed extraction, so a PDF needs no real file; `afterRead`
+/// runs after each, to act as another fetch meanwhile.
 private struct LibraryTestExtractor: PDFTextExtracting {
+    var afterRead: (@Sendable (URL) -> Void)?
+
     func extract(from fileURL: URL) -> PDFExtractionResult {
-        PDFExtractionResult(text: "Recovered prose.", success: true, pageCount: 1, convertedPages: 1, warnings: [])
+        defer { afterRead?(fileURL) }
+        return PDFExtractionResult(text: "Recovered prose.", success: true, pageCount: 1, convertedPages: 1,
+                                   warnings: [])
     }
 }
 
@@ -89,11 +94,13 @@ final class FullTextServiceLibraryTests: XCTestCase {
         super.setUp()
         StubURLProtocol.reset()
         FullTextService.deleteCachedPDF(for: Self.cacheKey)
+        removeWaitingJATS()
     }
 
     override func tearDown() {
         StubURLProtocol.reset()
         FullTextService.deleteCachedPDF(for: Self.cacheKey)
+        removeWaitingJATS()
         #if os(macOS)
         for access in accesses { access.stop() }
         accesses = []
@@ -105,8 +112,24 @@ final class FullTextServiceLibraryTests: XCTestCase {
 
     // MARK: Helpers
 
+    /// The JATS files waiting for the library under the test's cache key,
+    /// which a cache clear leaves.
+    private func waitingJATS() -> [URL] {
+        let names = (try? FileManager.default.contentsOfDirectory(
+            at: FullTextService.pdfCacheDirectory, includingPropertiesForKeys: nil)) ?? []
+        return names.filter {
+            $0.lastPathComponent.hasPrefix("\(Self.cacheKey.filenameComponent)-")
+                && $0.lastPathComponent.hasSuffix(BioMedLitConstants.libraryWaitingJATSSuffix)
+        }
+    }
+
+    private func removeWaitingJATS() {
+        for url in waitingJATS() { try? FileManager.default.removeItem(at: url) }
+    }
+
     private func makeService(
         library: (any FullTextLibrary)?,
+        extractor: LibraryTestExtractor = LibraryTestExtractor(),
         titleChecker: @escaping @Sendable (URL, String) -> PDFTitleCheck = { _, _ in .matches(share: 1) }
     ) -> FullTextService {
         let config = URLSessionConfiguration.ephemeral
@@ -116,23 +139,24 @@ final class FullTextServiceLibraryTests: XCTestCase {
             email: "test@example.org",
             session: session,
             europePMCService: EuropePMCService(session: session),
-            extractor: LibraryTestExtractor(),
+            extractor: extractor,
             titleChecker: titleChecker,
             library: library
         )
     }
 
-    /// A JATS article with the test's ids, with body prose.
-    private static func jats() -> Data {
-        Data("""
+    /// A JATS article with the test's ids (its own DOI `doi`), with body
+    /// prose unless `body` is false.
+    private static func jats(doi: String = doi, body: Bool = true) -> Data {
+        let bodyXML = body ? "<body><sec><title>Methods</title><p>We measured things.</p></sec></body>" : ""
+        return Data("""
             <?xml version="1.0" encoding="UTF-8"?>
             <article><front><article-meta>
             <article-id pub-id-type="pmid">\(pmid)</article-id>
             <article-id pub-id-type="doi">\(doi)</article-id>
             <title-group><article-title>\(title)</article-title></title-group>
             <abstract><p>Things were tried.</p></abstract>
-            </article-meta></front>
-            <body><sec><title>Methods</title><p>We measured things.</p></sec></body></article>
+            </article-meta></front>\(bodyXML)</article>
             """.utf8)
     }
 
@@ -177,7 +201,11 @@ final class FullTextServiceLibraryTests: XCTestCase {
     }
 
     private static let unreachable = LibraryLookupFailure(
-        description: "library, paper pmid=99999101: the library folder cannot be reached")
+        description: "library, paper pmid=99999101: the library folder cannot be reached", waits: true)
+
+    /// A save the library, reached, refused (a name clash): nothing waits.
+    private static let refused = LibraryLookupFailure(
+        description: "library, paper pmid=99999101: a different file of that name is already there", waits: false)
 
     // MARK: The library's JATS
 
@@ -219,6 +247,22 @@ final class FullTextServiceLibraryTests: XCTestCase {
         XCTAssertFalse(result.libraryWaiting, "another paper's file is no reason to wait")
     }
 
+    /// A usable library JATS without a body is held back as Europe PMC's
+    /// body-less deposit is: the chain runs for the full text.
+    func testAbstractOnlyLibraryJATSIsHeldBack() async throws {
+        let fake = FakeLibrary()
+        let ref = LibraryFileReference(sha256: String(repeating: "a", count: 64), kind: "jats")
+        fake.jatsAnswer = .usable(Self.jats(body: false), ref)
+        stubEuropePMCJATS()
+
+        let result = try await fetchWithPMCID(makeService(library: fake))
+
+        XCTAssertEqual(result.source, .europePMC, "the chain runs past the held-back abstract")
+        XCTAssertEqual(result.contentKind, .fulltext)
+        XCTAssertTrue(StubURLProtocol.requested("fullTextXML"))
+        XCTAssertEqual(fake.noted, [ref], "the library's JATS is still noted as used")
+    }
+
     // MARK: The chain's JATS
 
     func testUnkeptJATSWaitsInTheCache() async throws {
@@ -237,6 +281,35 @@ final class FullTextServiceLibraryTests: XCTestCase {
             .appendingPathComponent("\(Self.cacheKey.filenameComponent)-\(digest.prefix(12)).xml")
         XCTAssertEqual(try Data(contentsOf: waiting), Self.jats(), "the JATS waits in the PDF cache")
         XCTAssertTrue(result.libraryWaiting)
+    }
+
+    /// A save the library refuses (reached, not unreachable) is reported,
+    /// and the JATS does not wait for the library (Ruling R).
+    func testRefusedJATSSaveDoesNotWait() async throws {
+        let fake = FakeLibrary()
+        fake.keepAnswer = .failure(Self.refused)
+        stubEuropePMCJATS()
+
+        let result = try await fetchWithPMCID(makeService(library: fake))
+
+        XCTAssertEqual(result.source, .europePMC)
+        XCTAssertEqual(result.libraryFailure, Self.refused.description)
+        XCTAssertFalse(result.libraryWaiting)
+        XCTAssertEqual(waitingJATS(), [], "no JATS waits for a library that refused it")
+    }
+
+    /// A cache clear for the paper leaves its JATS waiting for the library:
+    /// a source is never deleted by it.
+    func testCacheClearLeavesTheWaitingJATS() throws {
+        XCTAssertTrue(FullTextService.writeWaitingJATS(Self.jats(), key: Self.cacheKey))
+        try FileManager.default.createDirectory(at: FullTextService.pdfCacheDirectory,
+                                                withIntermediateDirectories: true)
+        try Self.pdfBytes.write(to: URL(fileURLWithPath: cachedPDFPath))
+
+        FullTextService.deleteCachedPDF(for: Self.cacheKey)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cachedPDFPath), "the cached PDF goes")
+        XCTAssertEqual(waitingJATS().count, 1, "the waiting JATS stays")
     }
 
     // MARK: The library's PDF
@@ -265,7 +338,8 @@ final class FullTextServiceLibraryTests: XCTestCase {
         let fake = FakeLibrary()
         let held = try heldPDF()
         fake.pdfAnswer = .success(held)
-        fake.noteAnswer = LibraryLookupFailure(description: "library, paper pmid=99999101: the record is read-only")
+        fake.noteAnswer = LibraryLookupFailure(description: "library, paper pmid=99999101: the record is read-only",
+                                               waits: true)
         stubUnpaywallPDF()
 
         let result = try await fetchPDF(makeService(library: fake), title: Self.title)
@@ -321,7 +395,7 @@ final class FullTextServiceLibraryTests: XCTestCase {
 
     func testUnreachableLibraryKeepsTheCacheCopy() async throws {
         let fake = FakeLibrary()
-        fake.jatsAnswer = .failed(Self.unreachable.description)
+        fake.jatsAnswer = .failed(Self.unreachable)
         stubUnpaywallPDF()
 
         let result = try await fetchPDF(makeService(library: fake))
@@ -361,6 +435,82 @@ final class FullTextServiceLibraryTests: XCTestCase {
         XCTAssertNil(try library.pdf(for: paper).get())
         XCTAssertNil(try library.keep(Data(), kind: BioMedLitConstants.libraryKindPDF, paper: paper, origin: "o").get())
         XCTAssertNil(library.noteUse(LibraryFileReference(sha256: "a", kind: "pdf"), paper: paper))
+        let refusedOnly = LibraryPaper(pmid: "not-a-pmid", doi: nil, pmcId: nil, title: "T")
+        XCTAssertNil(try library.keep(Data(), kind: BioMedLitConstants.libraryKindPDF, paper: refusedOnly,
+                                      origin: "o").get(), "an id the library refuses is none")
+    }
+
+    /// The unreachable library reads and words a paper's ids as the library
+    /// does, and its failure always waits.
+    func testTheUnreachableLibraryWordsTheIdsAsTheLibrary() {
+        let library = UnreachableLibrary(reason: "gone")
+        let paper = LibraryPaper(pmid: "1", doi: "not-a-doi", pmcId: "PMC2", title: "T")
+        guard case let .failure(failure) = library.pdf(for: paper) else { return XCTFail("did not fail") }
+        XCTAssertEqual(failure.description, "library, paper pmid=1 pmcid=PMC2: gone")
+        XCTAssertTrue(failure.waits)
+    }
+
+    /// A PDF an earlier fetch cached is kept in the library, but its cache
+    /// copy stays and is still read from: an earlier document may point at
+    /// it (Ruling L′).
+    func testCachedPDFKeptLeavesTheCacheCopy() async throws {
+        let fake = FakeLibrary()
+        let held = try heldPDF()
+        fake.keepAnswer = .success(LibraryKept(file: held.file, path: held.path))
+        try FileManager.default.createDirectory(at: FullTextService.pdfCacheDirectory,
+                                                withIntermediateDirectories: true)
+        try Self.pdfBytes.write(to: URL(fileURLWithPath: cachedPDFPath))
+        stubUnpaywallPDF()
+
+        let result = try await fetchPDF(makeService(library: fake))
+
+        XCTAssertFalse(StubURLProtocol.requested("library-test.pdf"), "served from the cache")
+        XCTAssertEqual(fake.kept.map(\.kind), ["pdf"], "kept in the library all the same")
+        XCTAssertEqual(result.localPDFPath, cachedPDFPath, "still read from the cache copy")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cachedPDFPath), "the cache copy stays")
+        XCTAssertEqual(result.libraryFile, held.file)
+        XCTAssertFalse(result.libraryWaiting)
+    }
+
+    /// A PDF this fetch downloaded loses its cache copy once the library
+    /// holds it, and is read from the library's file.
+    func testDownloadedPDFKeptLeavesNoCacheCopy() async throws {
+        let fake = FakeLibrary()
+        let held = try heldPDF()
+        fake.keepAnswer = .success(LibraryKept(file: held.file, path: held.path))
+        stubUnpaywallPDF()
+
+        let result = try await fetchPDF(makeService(library: fake))
+
+        XCTAssertTrue(StubURLProtocol.requested("library-test.pdf"))
+        XCTAssertEqual(result.localPDFPath, held.path)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cachedPDFPath), "the cache copy is removed")
+        XCTAssertEqual(result.libraryFile, held.file)
+    }
+
+    /// Another service fetching the paper kept it and removed the cache copy
+    /// between this one's read and its keep: the library's file is served,
+    /// not the gone path.
+    func testCacheCopyGoneBeforeTheKeepReadsTheLibrary() async throws {
+        let fake = FakeLibrary()
+        let held = try heldPDF()
+        let cached = cachedPDFPath
+        let extractor = LibraryTestExtractor(afterRead: { url in
+            guard url.path == cached else { return }
+            try? FileManager.default.removeItem(at: url)
+            fake.pdfAnswer = .success(held)
+        })
+        stubUnpaywallPDF()
+
+        let result = try await fetchPDF(makeService(library: fake, extractor: extractor))
+
+        XCTAssertEqual(result.source, .unpaywall)
+        XCTAssertEqual(result.localPDFPath, held.path)
+        XCTAssertEqual(result.libraryFile, held.file)
+        XCTAssertEqual(result.extractedText, "Recovered prose.")
+        XCTAssertTrue(fake.kept.isEmpty, "nothing left to keep")
+        XCTAssertFalse(result.libraryWaiting)
+        XCTAssertNil(result.libraryFailure)
     }
 
     func testFailedPDFSaveKeepsTheCacheCopy() async throws {
@@ -485,6 +635,23 @@ final class FullTextServiceLibraryTests: XCTestCase {
         XCTAssertEqual(result.source, .europePMC, "the chain runs")
         let failure = try XCTUnwrap(result.libraryFailure)
         XCTAssertTrue(failure.contains("digest"), failure)
+        XCTAssertFalse(result.libraryWaiting, "the library was reached: a bad file is no reason to wait")
+        XCTAssertEqual(waitingJATS(), [])
+    }
+
+    /// Europe PMC's JATS whose own DOI names another paper: the library
+    /// refuses it (bmlib's ForeignJats), reached, so nothing waits.
+    func testForeignJATSSaveDoesNotWait() async throws {
+        let (library, _) = try realLibrary()
+        StubURLProtocol.routes["fullTextXML"] = (200, Self.jats(doi: "10.99999/another-paper"))
+
+        let result = try await fetchWithPMCID(makeService(library: library))
+
+        XCTAssertEqual(result.source, .europePMC)
+        XCTAssertNotNil(result.libraryFailure)
+        XCTAssertNil(result.libraryFile)
+        XCTAssertFalse(result.libraryWaiting)
+        XCTAssertEqual(waitingJATS(), [])
     }
 
     func testSavedPDFLeavesNoCacheCopy() async throws {

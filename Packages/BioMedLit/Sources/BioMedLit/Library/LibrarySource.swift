@@ -39,8 +39,9 @@ public final class LibrarySource: FullTextLibrary {
         do {
             who = try installationNew(app: BioMedLitConstants.libraryAppName, id: installationID, label: label)
         } catch {
-            let failure = LibraryLookupFailure(description:
-                BioMedLitConstants.libraryInstallationFailure(id: installationID, reason: "\(error)"))
+            let failure = LibraryLookupFailure(
+                description: BioMedLitConstants.libraryInstallationFailure(id: installationID, reason: "\(error)"),
+                waits: Self.waits(error))
             Self.warn(failure.description)
             throw failure
         }
@@ -50,12 +51,12 @@ public final class LibrarySource: FullTextLibrary {
     // MARK: FullTextLibrary
 
     public func jats(for paper: LibraryPaper) -> LibraryJATSLookup {
-        guard let ids = requestIDs(paper) else { return .none }
+        guard let ids = paper.libraryRequestIDs else { return .none }
         let held: (file: FileRef, bytes: Data)
         switch source(ids, kind: .jats) {
         case let .success(found?): held = found
         case .success(nil): return .none
-        case let .failure(failure): return .failed(failure.description)
+        case let .failure(failure): return .failed(failure)
         }
         let at = "\(held.file.folder)/\(held.file.name)"
         let article: JatsArticle
@@ -77,7 +78,7 @@ public final class LibrarySource: FullTextLibrary {
                 return .wrongPaper(message)
             }
         } catch {
-            return .failed(fail(ids, held.file, error).description)
+            return .failed(fail(ids, held.file, error))
         }
         guard article.hasBody else {
             return unusable(BioMedLitConstants.libraryJATSBodylessNote(file: at))
@@ -86,7 +87,7 @@ public final class LibrarySource: FullTextLibrary {
     }
 
     public func pdf(for paper: LibraryPaper) -> Result<LibraryHeldPDF?, LibraryLookupFailure> {
-        guard let ids = requestIDs(paper) else { return .success(nil) }
+        guard let ids = paper.libraryRequestIDs else { return .success(nil) }
         return source(ids, kind: .pdf).map { held in
             held.map { LibraryHeldPDF(path: path(held: $0.file), file: Self.reference($0.file)) }
         }
@@ -94,7 +95,7 @@ public final class LibrarySource: FullTextLibrary {
 
     public func keep(_ bytes: Data, kind: String, paper: LibraryPaper, origin: String)
         -> Result<LibraryKept?, LibraryLookupFailure> {
-        guard let ids = requestIDs(paper) else { return .success(nil) }
+        guard let ids = paper.libraryRequestIDs else { return .success(nil) }
         guard let sourceKind = Self.sourceKind(kind) else {
             return .failure(fail(ids, nil, BioMedLitConstants.libraryUnknownKindReason(kind)))
         }
@@ -108,7 +109,7 @@ public final class LibrarySource: FullTextLibrary {
     }
 
     public func noteUse(_ file: LibraryFileReference, paper: LibraryPaper) -> LibraryLookupFailure? {
-        guard let ids = requestIDs(paper) else { return nil }
+        guard let ids = paper.libraryRequestIDs else { return nil }
         guard let kind = Self.sourceKind(file.kind) else {
             return fail(ids, nil, BioMedLitConstants.libraryUnknownKindReason(file.kind))
         }
@@ -148,17 +149,6 @@ public final class LibrarySource: FullTextLibrary {
 
     // MARK: bmlib's rules
 
-    /// The paper's ids as the library's (`libraryIds`), each refused one
-    /// warned of; nil when none is left, so the library is skipped.
-    private func requestIDs(_ paper: LibraryPaper) -> PaperIds? {
-        let made = libraryIds(pmid: paper.pmid, doi: paper.doi, pmcid: paper.pmcId)
-        for field in made.dropped {
-            Self.warn(BioMedLitConstants.libraryDroppedIdentifierWarning(field: field))
-        }
-        let ids = made.ids
-        return ids.pmid == nil && ids.doi == nil && ids.pmcid == nil ? nil : ids
-    }
-
     /// The paper's newest source of `kind` that may be served, read and
     /// digest checked (bmlib's `find_source`): one scan. A file failing its
     /// digest is a failure, never passed over for an older one.
@@ -195,10 +185,37 @@ public final class LibrarySource: FullTextLibrary {
 
     /// bmlib's `failure`: "library, paper <ids>[ file F/N]: <error>", logged.
     private func fail(_ ids: PaperIds, _ file: FileRef?, _ error: Any) -> LibraryLookupFailure {
-        let failure = LibraryLookupFailure(description: BioMedLitConstants.libraryFailure(
-            ids: Self.describe(ids), file: file.map { "\($0.folder)/\($0.name)" }, reason: "\(error)"))
+        let failure = LibraryLookupFailure(
+            description: BioMedLitConstants.libraryFailure(
+                ids: LibraryPaper.describe(ids), file: file.map { "\($0.folder)/\($0.name)" }, reason: "\(error)"),
+            waits: Self.waits(error))
         Self.warn(failure.description)
         return failure
+    }
+
+    /// Whether a failure for `error` leaves the source waiting for the
+    /// library (design §4.6): yes when the library could not be reached,
+    /// read or written, so it may come back (a folder gone or not a library
+    /// now, a drive read-only, an iCloud file not downloaded, the file
+    /// system's error); no when the library was reached and refused (a digest
+    /// mismatch, another paper's JATS, a name clash, a refused identifier,
+    /// name or installation, a newer record). Our own reason (a `String`: a
+    /// kind or digest the library has not) is no reachability failure; any
+    /// other error (a panic in bmlib) waits, so the source is kept, not lost.
+    /// Exhaustive, so a case bmlib adds fails the build here.
+    static func waits(_ error: Any) -> Bool {
+        switch error {
+        case let error as LibraryError:
+            switch error {
+            case .Unreachable, .NotALibrary, .NewerLibrary, .ReadOnly, .Missing, .NotDownloaded, .Io:
+                return true
+            case .BadIdentifier, .BadInstallation, .BadName, .DigestMismatch, .FileClash, .NewerRecord,
+                 .ForeignJats:
+                return false
+            }
+        case is String: return false
+        default: return true
+        }
     }
 
     /// bmlib-ffi's text for a failed parse, not Swift's debug form of the
@@ -215,13 +232,6 @@ public final class LibrarySource: FullTextLibrary {
     private func unusable(_ note: String) -> LibraryJATSLookup {
         Self.warn(note)
         return .unusable(note: note)
-    }
-
-    /// bmlib's `describe_ids`: "pmid=1 doi=10.1/a pmcid=PMC1", the ones present.
-    static func describe(_ ids: PaperIds) -> String {
-        let parts = [("pmid", ids.pmid), ("doi", ids.doi), ("pmcid", ids.pmcid)]
-            .compactMap { name, value in value.map { "\(name)=\($0)" } }
-        return parts.isEmpty ? BioMedLitConstants.libraryNoIdentifiers : parts.joined(separator: " ")
     }
 
     // MARK: Kinds, the one mapping

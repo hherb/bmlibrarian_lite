@@ -62,10 +62,11 @@ enum LibraryController {
 
     /// The library a full-text fetch goes through (design §4.5): a
     /// `LibrarySource` over the held access as this installation; while the
-    /// library set cannot be reached, one that fails with why, so a source
-    /// fetched meanwhile waits for it (§4.6); or `nil` when none is set, or
-    /// when bmlib refuses the installation (logged at error with bmlib's
-    /// reason). Without one the fetch runs as it does with no library set.
+    /// library set cannot be reached, or the launch still reaches it, one
+    /// that fails with why, so a source fetched meanwhile waits for it
+    /// (§4.6); or `nil` when none is set, or when bmlib refuses the
+    /// installation (logged at error with bmlib's reason). Without one the
+    /// fetch runs as it does with no library set.
     static func library() -> (any FullTextLibrary)? {
         if let unreachable = session.unreachableLibrary { return unreachable }
         guard let access = session.access else { return nil }

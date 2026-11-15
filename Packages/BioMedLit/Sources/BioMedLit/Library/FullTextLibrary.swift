@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import BmlibCore
 import Foundation
 
 /// A file in the shared paper library, referred to by digest and kind, never by
@@ -81,9 +82,10 @@ public enum LibraryJATSLookup: Sendable {
     /// kept in the library for the rest of that lookup.
     case wrongPaper(String)
     /// The library could not be read (unreachable, or a file failing its
-    /// digest): bmlib's text, the paper and the file named. It is the lookup's
-    /// library failure, and the rest of the lookup uses no library.
-    case failed(String)
+    /// digest): bmlib's text, the paper and the file named, and whether a
+    /// source the lookup then fetches waits for the library. It is the
+    /// lookup's library failure, and the rest of the lookup uses no library.
+    case failed(LibraryLookupFailure)
 }
 
 /// The library's PDF for a paper, read and digest checked.
@@ -119,10 +121,17 @@ public struct LibraryKept: Sendable, Equatable {
 public struct LibraryLookupFailure: Error, Sendable, CustomStringConvertible {
     /// The whole sentence, fit for a log and for the result's library failure.
     public let description: String
+    /// Whether a source the fetch could not keep because of this failure
+    /// waits for the library (design §4.6): true when the library could not
+    /// be reached, read or written (it may come back); false when it was
+    /// reached and refused (a file failing its digest, another paper's JATS,
+    /// a name clash, an identifier it refuses).
+    public let waits: Bool
 
-    /// A failure worded `description`.
-    public init(description: String) {
+    /// A failure worded `description`, whose source waits when `waits`.
+    public init(description: String, waits: Bool) {
         self.description = description
+        self.waits = waits
     }
 }
 
@@ -155,4 +164,29 @@ public protocol FullTextLibrary: Sendable {
     /// Where `file` is in the library now, or nil when the library does not
     /// hold it (or cannot be read: logged).
     func path(of file: LibraryFileReference) -> String?
+}
+
+// MARK: The library's reading of a paper's ids, shared by every library
+
+extension LibraryPaper {
+    /// The paper's ids as the library reads them (bmlib's `libraryIds`), each
+    /// refused one warned of; nil when none is left, so the library is
+    /// skipped.
+    var libraryRequestIDs: PaperIds? {
+        let made = libraryIds(pmid: pmid, doi: doi, pmcid: pmcId)
+        for field in made.dropped {
+            BioMedLitLib.logger?.warning(
+                BioMedLitConstants.libraryDroppedIdentifierWarning(field: field), category: .library)
+        }
+        let ids = made.ids
+        return ids.pmid == nil && ids.doi == nil && ids.pmcid == nil ? nil : ids
+    }
+
+    /// bmlib's `describe_ids`: "pmid=1 doi=10.1/a pmcid=PMC1", the ones
+    /// present.
+    static func describe(_ ids: PaperIds) -> String {
+        let parts = [("pmid", ids.pmid), ("doi", ids.doi), ("pmcid", ids.pmcid)]
+            .compactMap { name, value in value.map { "\(name)=\($0)" } }
+        return parts.isEmpty ? BioMedLitConstants.libraryNoIdentifiers : parts.joined(separator: " ")
+    }
 }

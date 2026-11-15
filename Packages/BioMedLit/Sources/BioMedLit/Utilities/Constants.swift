@@ -897,6 +897,10 @@ public enum BioMedLitConstants {
     /// What the Library setting says while the launch reaches a stored library.
     public static let libraryReachingText = "Reaching the library…"
 
+    /// Why a fetch keeps nothing in the library while the launch still reaches
+    /// it: the source waits for it.
+    public static let libraryStillReachingReason = "the library is still being reached at launch"
+
     /// Before the reason, when the library is reached but its bookmark could
     /// not be made again (it may not survive the next launch).
     public static let libraryUnsavedPrefix = "The library is open, but its folder could not be remembered again, so choose it again if it is lost at the next launch: "

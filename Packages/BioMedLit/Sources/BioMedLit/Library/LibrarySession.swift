@@ -198,8 +198,11 @@ public final class LibrarySession {
 
     /// The library a fetch goes through while the one set cannot be reached:
     /// one that fails with the reason, so a source fetched waits for it
-    /// (design §4.6). nil unless the state is unreachable.
+    /// (design §4.6). While the launch's resume still reaches it, one that
+    /// fails as still being reached, so a fetch meanwhile does not run as
+    /// with no library set. nil otherwise.
     public var unreachableLibrary: UnreachableLibrary? {
+        if isReaching { return UnreachableLibrary(reason: BioMedLitConstants.libraryStillReachingReason) }
         guard case let .unreachable(reason) = state else { return nil }
         return UnreachableLibrary(reason: reason)
     }

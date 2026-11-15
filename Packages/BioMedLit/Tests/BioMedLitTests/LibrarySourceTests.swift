@@ -75,7 +75,7 @@ final class LibrarySourceTests: XCTestCase {
         switch src.keep(bytes, kind: kind, paper: paper, origin: "Test tier") {
         case let .success(kept?): return kept
         case .success(nil):
-            let failure = LibraryLookupFailure(description: "not kept: the paper has no identifiers")
+            let failure = LibraryLookupFailure(description: "not kept: the paper has no identifiers", waits: false)
             XCTFail(failure.description)
             throw failure
         case let .failure(failure): XCTFail("keep failed: \(failure)"); throw failure
@@ -128,12 +128,46 @@ final class LibrarySourceTests: XCTestCase {
         let src = try source(access)
         let k = try kept(src, jats(pmid: "1", doi: "10.1/a"), kind: "jats", paper: paper())
         try Data("<article>not what was saved</article>".utf8).write(to: URL(fileURLWithPath: k.path))
-        guard case let .failed(message) = src.jats(for: paper()) else {
+        guard case let .failed(failure) = src.jats(for: paper()) else {
             return XCTFail("not failed: \(src.jats(for: paper()))")
         }
+        let message = failure.description
         XCTAssertTrue(message.contains("digest"), message)
         XCTAssertTrue(message.contains(URL(fileURLWithPath: k.path).lastPathComponent), message)
         XCTAssertTrue(message.hasPrefix("library, paper pmid=1 file "), message)
+        XCTAssertFalse(failure.waits, "the library was reached")
+    }
+
+    /// bmlib refuses to save a JATS whose own ids name another paper: the
+    /// library was reached, so the source does not wait for it.
+    func testForeignJATSSaveDoesNotWait() throws {
+        let (access, _) = try freshLibrary()
+        let src = try source(access)
+        guard case let .failure(failure) = src.keep(jats(pmid: "1", doi: "10.1/a"), kind: "jats",
+                                                   paper: paper(doi: "10.1/b"), origin: "Test") else {
+            return XCTFail("kept another paper's JATS")
+        }
+        XCTAssertFalse(failure.waits, failure.description)
+    }
+
+    /// Which of bmlib's errors leave a source waiting (Ruling R): the library
+    /// not reached, read or written waits; one reached that refused does not.
+    func testWhichFailuresWait() {
+        let waiting: [LibraryError] = [
+            .Unreachable(path: "/l", reason: "gone"), .NotALibrary(path: "/l", reason: "no marker"),
+            .NewerLibrary(version: 9), .ReadOnly(path: "/l"), .Missing(folder: "f", name: "n"),
+            .NotDownloaded(folder: "f", name: "n"), .Io(path: "/l", reason: "denied"),
+        ]
+        let refused: [LibraryError] = [
+            .BadIdentifier(field: "pmid", value: "x"), .BadInstallation(field: "id", reason: "r"),
+            .BadName(name: "a/b"), .DigestMismatch(folder: "f", name: "n", expected: "a", found: "b"),
+            .FileClash(folder: "/l/papers/f", name: "n"), .NewerRecord(folder: "f", file: "r", version: 9),
+            .ForeignJats(folder: nil, name: "n", field: "doi", theirs: "a", ours: "b"),
+        ]
+        for error in waiting { XCTAssertTrue(LibrarySource.waits(error), "\(error)") }
+        for error in refused { XCTAssertFalse(LibrarySource.waits(error), "\(error)") }
+        XCTAssertFalse(LibrarySource.waits("pdfx is not a kind of file the library holds"), "our own reason")
+        XCTAssertTrue(LibrarySource.waits(CocoaError(.fileReadUnknown)), "anything else keeps the source")
     }
 
     func testBodylessJATSIsUnusable() throws {
@@ -216,15 +250,19 @@ final class LibrarySourceTests: XCTestCase {
         let (access, root) = try freshLibrary()
         let src = try source(access)
         try FileManager.default.removeItem(at: root)
-        guard case let .failed(message) = src.jats(for: paper()) else {
+        guard case let .failed(jatsFailure) = src.jats(for: paper()) else {
             return XCTFail("not failed: \(src.jats(for: paper()))")
         }
-        XCTAssertTrue(message.hasPrefix("library, paper pmid=1: "), message)
+        XCTAssertTrue(jatsFailure.description.hasPrefix("library, paper pmid=1: "), jatsFailure.description)
+        XCTAssertTrue(jatsFailure.waits, "a library gone may come back")
         guard case let .failure(failure) = src.pdf(for: paper()) else { return XCTFail("pdf did not fail") }
         XCTAssertTrue(failure.description.hasPrefix("library, paper pmid=1"), failure.description)
-        guard case .failure = src.keep(Data("%PDF-1.4".utf8), kind: "pdf", paper: paper(), origin: "Test") else {
+        XCTAssertTrue(failure.waits)
+        guard case let .failure(keepFailure) = src.keep(Data("%PDF-1.4".utf8), kind: "pdf", paper: paper(),
+                                                        origin: "Test") else {
             return XCTFail("keep did not fail")
         }
+        XCTAssertTrue(keepFailure.waits, keepFailure.description)
     }
 }
 #endif
