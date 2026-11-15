@@ -26,11 +26,12 @@ its slice has landed; add a new section when handing off new work.
 
 **The shared paper library** (decided 2026-11-15: every app, where its platform
 allows; #788 macOS, #789 desktop, #790 Android; design: StudyAnalyzer's
-`2026-11-13-shared-paper-library-design.md` §5.3). **3a, PR #787** (the Library
-tab, `LibrarySession`, launch resume, quit stop). **3b, PR #793, stacked on
-#787** (plan `2026-11-15-library-3b-macos-fetch.md`): FFI at bmlib `747e7a80`
-(`LibraryScan`, `libraryIds`; #784/#785). BioMedLit `Library/`: three types
-(CLAUDE.md); `LibrarySession.recheck()` on activation; `unsaved`: a stale
+`2026-11-13-shared-paper-library-design.md` §5.3). **3a and 3b landed
+2026-11-15.** **3a, PR #787** (the Library tab, `LibrarySession`, launch
+resume, quit stop). **3b, PR #793** (plan
+`2026-11-15-library-3b-macos-fetch.md`): FFI at bmlib `747e7a80`
+(`LibraryScan`, `libraryIds`; bmlib#784/#785). BioMedLit `Library/`: three
+types (CLAUDE.md); `LibrarySession.recheck()` on activation; `unsaved`: a stale
 bookmark not remade. `FullTextService(…, library:)`: a usable library JATS ends
 the lookup with no request; the chain's JATS and PDFs are kept in the library
 (only a PDF this fetch admitted loses its cache copy, after the save); its PDF
@@ -47,24 +48,16 @@ paper (it is in the library, not `PDFCache`); unplug or rename the folder and
 switch back (the setting says unreachable; a new fetch says it is kept in this
 app); the record's label is the machine name under the sandbox; `PaperLibrary`
 I/O is synchronous on the service actor: does a hanging (iCloud dataless) read
-block its fetches? **Next: 3c** (move waiting sources and the PDF cache in,
-§4.7; the switch), then 3d (the manual clear, §4.8). **Left:** an Apple archive
-from master lists `BmlibFFI.framework.dSYM` with no warning; #785; the ledger's
-other library rows stay `owed` (#788). 3b's minors: an extraction-off library
-PDF serves `.noText` and asks CORE; `FullTextService` is ~4,500 lines (split);
-the unreachable warning logs on every activation and call. For 3c: *Stop
-using*/*Choose…* mid-fetch stops the old access, so its source waits under a
-wrong reason; after *Stop using* a library PDF reads "no longer on this device"
-(3c's switch: §4.7's "unavailable").
-
-**Strict service JSON (#781 desktop, PR #783; #784 Android, PR #791).** The
-desktop reads every service's JSON but PubMed's esearch through
-`search_failures.strict_response_json` (**a test double scripts `.content`,
-never `.json()`**); Android through `strictJsonElement`
-(`data/remote/StrictJson.kt`) or `strictJsonRetrofit`. **#785 (PR #794,
-analyser 2.8):** the desktop looks a DOI-only study's PMID up before reading
-PubMed (PMC's ID converter, then `find_pmid_by_doi`); any lookup it cannot
-settle sets `pubmed_record_unreachable`, so funding is not assessed.
+block its fetches? **Next: #798** (split `FullTextService.swift`, 4,532
+lines, a verbatim move), **then 3c** (move waiting sources and the PDF cache
+in, §4.7; the switch), then 3d (the manual clear, §4.8). **Left:** an Apple
+archive from master lists `BmlibFFI.framework.dSYM` with no warning; the
+ledger's other library rows stay `owed` (#788). 3b's leftovers, lodged:
+**#796** (the race fallback can record a refused PDF), **#797** (an
+extraction-off library PDF asks CORE), **#799** (the unreachable warning on
+every call). For 3c: *Stop using*/*Choose…* mid-fetch stops the old access, so
+its source waits under a wrong reason; after *Stop using* a library PDF reads
+"no longer on this device" (3c's switch: §4.7's "unavailable").
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
@@ -94,7 +87,7 @@ warning merges the readable checks the same way (`RetractionCheckRecord.merged`,
 **A missing native library** leaves papers unchecked, but stored warnings and a paper's own label still decide; `paperKey` and
 `isReusable` call bmlib, so keep them inside a `LinkageError` guard. **The
 FFI suites need `BMLIB_DIR`** (a bmlib worktree at the pin, `git -C
-~/src/bmlib worktree add --detach <dir> 110d906b`); without it they skip
+~/src/bmlib worktree add --detach <dir> 747e7a80`); without it they skip
 locally, and CI fails if they skip. **A ViewModel test mocks the workflow:
 every new workflow `StateFlow` must be stubbed in the three
 `FactCheckViewModel*Test`s**, or the unstubbed `collect` leaks a
@@ -150,6 +143,14 @@ git pin). Snapshot rows keep `run_status`/`run_deciding` as set-once facts.
 
 ## Recently landed (context)
 
+- **Strict service JSON** (#781, #784; PRs #783, #791): every service's JSON
+  but PubMed's esearch is read strictly (desktop
+  `search_failures.strict_response_json`, **a test double scripts `.content`,
+  never `.json()`**; Android `strictJsonElement` / `strictJsonRetrofit`).
+  **#785** (PR #794, analyser 2.8, desktop): a DOI-only study's PMID is
+  looked up (PMC's ID converter, then `find_pmid_by_doi`) before PubMed is
+  read; a lookup it cannot settle sets `pubmed_record_unreachable`, so funding
+  is not assessed.
 - **Apple** (PRs #676, #678–#680, #682): the Mac app is sandboxed; **a run
   never waits for the Retraction Watch refresh** (#681). **Owed by the
   maintainer before the App Store**: the latest Program License Agreement,
@@ -166,8 +167,8 @@ git pin). Snapshot rows keep `run_status`/`run_deciding` as set-once facts.
   windows, 250 overlap, no reference list, **one window failing fails the
   paper**, never `text[:N]`; contract `text_windows.json`).
 - **bmlib: the FFI pin and the port set** (#583; PRs #564–#570, #572). The
-  pin names bmlib `main` (`747e7a80`, PR #785); `android-tests.yml` builds
-  bmlib there and fails if an FFI test skips or the contract copy drifts; **the committed xcframework is
+  pin names bmlib `main` (`747e7a80`, bmlib PR #785); `android-tests.yml`
+  builds bmlib there and fails if an FFI test skips or the contract copy drifts; **the committed xcframework is
   `bmlib-xcframework.yml`'s own build** (re-pin from its artifact as its
   header says). **`doc/cross_platform/bmlib_sync/ledger.json` records every
   bmlib change per platform**: a sync bumps `bmlib_commit` and triages every
@@ -241,7 +242,8 @@ Open issues by family; each issue carries the detail. None blocks another.
   deferred: #768, #769 (apps' Ollama), #770 (prompts ask for null), #773
   (desktop PDF read faults into the report; `pdf_title_check` still opens
   PDFs with `fitz`), #776–#778 (Android upload, `PdfText`), #772 (iOS
-  unreadable citation reply; needs a decision).
+  unreadable citation reply; needs a decision). **#786**: an integration
+  test expects a PDF where PMC's bucket now serves the XML first.
 - **Retraction checking** follow-ups (#662, #726–#728, #730, #731 and
   #737–#739 landed; **their rules, the unreadable-snapshot ones above all,
   are in `doc/developer/retraction_checking.md`**: read it before touching
