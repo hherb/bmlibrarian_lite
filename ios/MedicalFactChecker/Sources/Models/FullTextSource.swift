@@ -59,6 +59,10 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
     /// User-uploaded content (PDF, HTML, or Markdown).
     case uploaded = "uploaded"
 
+    /// The shared paper library (design §4.5): its JATS, which ended the
+    /// lookup, or its PDF, read in place of a download.
+    case library = "library"
+
     /// Human-readable display name for the source.
     var displayName: String {
         switch self {
@@ -72,6 +76,7 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
         case .doi: return "Publisher"
         case .cached: return "Cached"
         case .uploaded: return "Uploaded"
+        case .library: return BioMedLit.FullTextSource.library.displayName
         }
     }
 
@@ -88,6 +93,7 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
         case .doi: return "link"
         case .cached: return "arrow.down.circle"
         case .uploaded: return "square.and.arrow.up"
+        case .library: return "books.vertical"
         }
     }
 
@@ -99,7 +105,7 @@ enum AppFullTextSource: String, Codable, CaseIterable, Sendable {
     var canDisplayInApp: Bool {
         switch self {
         case .europePMC, .pmcOpenData, .europePMCPDF, .elsevier, .unpaywall, .openAlex, .core, .cached,
-             .uploaded:
+             .uploaded, .library:
             return true
         case .doi:
             return false
@@ -259,6 +265,15 @@ struct AppFullTextResult: Equatable, Sendable {
     /// in the log of the session that fetched it.
     let extractionCoverage: PDFExtractionCoverage?
 
+    /// The shared paper library's file of this text, by digest and kind
+    /// (design §4.4), or `nil` when there is none.
+    let libraryFile: LibraryFileReference?
+
+    /// Why this fetch's source waits for the library (design §4.6): the
+    /// service's `libraryFailure` when a source could not be kept because the
+    /// library could not be reached or written, `nil` when none waits.
+    let libraryWaiting: String?
+
     /// Create a full-text result.
     ///
     /// Replaces the synthesised memberwise initialiser so `warnings` and
@@ -286,6 +301,10 @@ struct AppFullTextResult: Equatable, Sendable {
     ///     default — when none was cached.
     ///   - extractionCoverage: How much of the PDF `extractedText` came from,
     ///     or `nil` — the default — when no extraction was run.
+    ///   - libraryFile: The library's file of this text, or `nil` — the
+    ///     default — when there is none.
+    ///   - libraryWaiting: Why a source waits for the library, or `nil` — the
+    ///     default — when none does.
     init(
         content: AppFullTextContentType,
         source: AppFullTextSource,
@@ -296,7 +315,9 @@ struct AppFullTextResult: Equatable, Sendable {
         contentKind: FullTextContentKind = .none,
         extractedText: String? = nil,
         localPDFPath: String? = nil,
-        extractionCoverage: PDFExtractionCoverage? = nil
+        extractionCoverage: PDFExtractionCoverage? = nil,
+        libraryFile: LibraryFileReference? = nil,
+        libraryWaiting: String? = nil
     ) {
         self.content = content
         self.source = source
@@ -308,6 +329,8 @@ struct AppFullTextResult: Equatable, Sendable {
         self.extractedText = extractedText
         self.localPDFPath = localPDFPath
         self.extractionCoverage = extractionCoverage
+        self.libraryFile = libraryFile
+        self.libraryWaiting = libraryWaiting
     }
 
     /// Whether this result can be displayed within the app.

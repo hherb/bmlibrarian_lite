@@ -60,6 +60,8 @@ struct MacFullTextViewer: View {
             minHeight: MacFullTextLayout.viewerMinHeight
         )
         .background(MacFullTextColors.markdownBackground)
+        // A library PDF whose stored path is gone is found again by digest
+        .task { await LibraryController.refindPDF(of: document) }
         .focusable()
         .onKeyPress(keys: [.init("f")], phases: .down) { _ in
             if NSEvent.modifierFlags.contains(.command) {
@@ -214,6 +216,8 @@ struct MacFullTextViewer: View {
             // out of this fix's scope; naming the two cases apart at least
             // makes it visible rather than hidden behind one `path`.
             MacPDFView(filePath: path)
+                // A path found again in the library loads afresh
+                .id(path)
         case .none:
             if isLoadingPDF {
                 loadingView

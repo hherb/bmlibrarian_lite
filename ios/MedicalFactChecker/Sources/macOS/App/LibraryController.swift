@@ -17,6 +17,7 @@
 
 import AppKit
 import BioMedLit
+import SystemConfiguration
 
 /// The app's one shared-paper-library session, with its launch and quit:
 /// access to the library folder is started at launch and stopped at exit
@@ -29,17 +30,75 @@ enum LibraryController {
 
     private static var started = false
 
+    /// This Mac's name for the installation's label, read once.
+    /// `SCDynamicStoreCopyComputerName` rather than `Host.current().localizedName`:
+    /// `Host.current()` resolves the host's names and addresses, which can
+    /// block on DNS (#792); the computer name is a local lookup. Primed off
+    /// the main actor at launch; `nil` when the system gives none, and the
+    /// label is then the app's name alone.
+    nonisolated private static let machineName: String? = SCDynamicStoreCopyComputerName(nil, nil) as String?
+
     /// Resume the library and arrange to stop access when the app quits.
     /// Called once from the app's `init`; a second call does nothing.
     static func startAtLaunch() {
         guard !started else { return }
         started = true
+        BMLFullTextService.appLibrary = library
+        Task.detached(priority: .utility) { _ = machineName }
         NotificationCenter.default.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { _ in
             MainActor.assumeIsolated { session.stopAccess() }
         }
         Task { await session.resumeAtLaunch() }
+    }
+
+    /// The library a full-text fetch goes through (design §4.5): a
+    /// `LibrarySource` over the held access as this installation, or `nil`
+    /// when no access is held, or when bmlib refuses the installation (logged
+    /// at error with bmlib's reason). Without one the fetch runs as it does
+    /// with no library set.
+    static func library() -> (any FullTextLibrary)? {
+        guard let access = session.access else { return nil }
+        do {
+            return try LibrarySource(
+                access: access,
+                installationID: session.installationID(),
+                label: LibraryInstallation.label(machineName: machineName)
+            )
+        } catch {
+            AppLogger.fullText.error(
+                "The paper library is not used for this fetch: \(String(describing: error), privacy: .public)"
+            )
+            return nil
+        }
+    }
+
+    /// Find `document`'s PDF again in the library when its stored path is
+    /// gone (design §4.4: a stored library path is only a hint), and store
+    /// the file found. Does nothing for a document with no library PDF, a
+    /// file still where it was, or no library held. The disk work runs off
+    /// the main actor.
+    static func refindPDF(of document: Document) async {
+        guard let file = document.libraryPDFReference, let path = document.localPDFFilePath,
+              let library = library() else { return }
+        // nil: the file is still there; .some(nil): gone, and not in the library
+        let found: String?? = await Task.detached(priority: .userInitiated) {
+            FileManager.default.fileExists(atPath: path) ? .none : .some(library.path(of: file))
+        }.value
+        guard case let .some(refound) = found else { return }
+        guard let refound else {
+            AppLogger.fullText.warning(
+                "The PDF at \(path, privacy: .public) is gone and the library holds no \(file.sha256, privacy: .public)"
+            )
+            return
+        }
+        // A fetch meanwhile stored another file: that one stands
+        guard document.localPDFFilePath == path else { return }
+        AppLogger.fullText.info(
+            "The library PDF \(file.sha256, privacy: .public) moved from \(path, privacy: .public) to \(refound, privacy: .public)"
+        )
+        document.storeRefoundLibraryPDF(at: refound)
     }
 }
 #endif

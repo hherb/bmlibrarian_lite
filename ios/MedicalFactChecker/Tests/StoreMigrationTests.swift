@@ -233,6 +233,9 @@ final class StoreMigrationTests: XCTestCase {
         XCTAssertNil(document.cachedRetrievalNotice.openAccessShortfall)
         XCTAssertNil(document.fullTextPDFNotSavedFrom)
         XCTAssertNil(document.storedPDFNotSavedNote)
+        XCTAssertNil(document.fullTextLibrarySHA256, "an older row names no library file")
+        XCTAssertNil(document.fullTextLibraryKind)
+        XCTAssertNil(document.fullTextLibraryWaiting)
         XCTAssertFalse(setAsideRan, "A store that migrates must never reach the last resort")
     }
 
