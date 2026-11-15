@@ -311,8 +311,11 @@ public struct FullTextResult: Sendable, Equatable {
 
     /// Why the library could not be used in this fetch, worded as bmlib
     /// words it (an unreachable library, a file failing its digest, a file of
-    /// another paper), or `nil` when nothing went wrong. Never stops a fetch:
-    /// the source stays where it would be without a library.
+    /// another paper), or `nil` when nothing went wrong. A fetch can meet
+    /// more than one: then each is a sentence of its own, joined by
+    /// ``BioMedLitConstants/libraryFailureSeparator`` in the order they
+    /// happened. Never stops a fetch: the source stays where it would be
+    /// without a library.
     public let libraryFailure: String?
 
     /// Whether this fetch found a source it could not keep because the

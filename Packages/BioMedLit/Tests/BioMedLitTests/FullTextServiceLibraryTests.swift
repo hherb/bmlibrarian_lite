@@ -386,8 +386,8 @@ final class FullTextServiceLibraryTests: XCTestCase {
     // MARK: The paper the library is told of
 
     func testLibraryPaperReadsTheIdsAsBmlib() {
-        func paper(_ slot: String, pmcId: String? = nil) -> LibraryPaper {
-            FullTextService.libraryPaper(pmcId: pmcId, doi: nil, pmid: slot, title: nil)
+        func paper(_ slot: String, pmcId: String? = nil, kind: ArticleIdentifierKind? = nil) -> LibraryPaper {
+            FullTextService.libraryPaper(pmcId: pmcId, doi: nil, pmid: slot, primaryKind: kind, title: nil)
         }
         XCTAssertEqual(paper(" 123 ").pmid, "123")
         XCTAssertNil(paper("000").pmid, "all zeros is no PMID")
@@ -398,7 +398,12 @@ final class FullTextServiceLibraryTests: XCTestCase {
         XCTAssertEqual(paper("PMC123").pmcId, "PMC123")
         XCTAssertEqual(paper("PMC123", pmcId: "PMC9").pmcId, "PMC9", "the request's PMC ID wins")
         XCTAssertNil(paper("pmc123").pmcId, "only PMC and digits")
-        let full = FullTextService.libraryPaper(pmcId: "PMC9", doi: " 10.1/a ", pmid: "123", title: "T")
+        XCTAssertEqual(paper("123", kind: .pubmed).pmid, "123")
+        XCTAssertNil(paper("123", kind: .europePMCSource("agr")).pmid, "another source's accession is no PMID")
+        XCTAssertNil(paper("123", kind: .preprint).pmid, "a preprint's accession is no PMID")
+        XCTAssertNil(paper("123", kind: .pmc).pmid, "a PMC record's accession is no PMID")
+        let full = FullTextService.libraryPaper(pmcId: "PMC9", doi: " 10.1/a ", pmid: "123", primaryKind: nil,
+                                                title: "T")
         XCTAssertEqual(full.doi, "10.1/a")
         XCTAssertEqual(full.title, "T")
     }

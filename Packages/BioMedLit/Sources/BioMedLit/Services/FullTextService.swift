@@ -431,7 +431,7 @@ public actor FullTextService {
     ) async throws -> FullTextResult {
         let lookup = LibraryLookup(
             library: library,
-            paper: Self.libraryPaper(pmcId: pmcId, doi: doi, pmid: pmid, title: title)
+            paper: Self.libraryPaper(pmcId: pmcId, doi: doi, pmid: pmid, primaryKind: primaryKind, title: title)
         )
         return lookup.finish(try await fetchThroughChain(
             pmcId: pmcId, doi: doi, pmid: pmid, primaryKind: primaryKind, title: title, lookup: lookup
@@ -4191,17 +4191,24 @@ extension FullTextService {
     /// lookup: the primary slot is the pmid only when it is ASCII digits and
     /// not all zeros; a PMC ID in it (`PMC` and digits) is the PMC ID when the
     /// request names none; anything else (a `PPR` accession included) is not
-    /// passed.
+    /// passed. A slot whose kind says it is no PubMed ID (another Europe PMC
+    /// source's accession, a preprint's, a PMC record's) is never the pmid,
+    /// digits or not: the library would file the paper under another's PMID.
     ///
     /// - Parameters:
     ///   - pmcId: The request's PMC ID, passed as given (blank is none).
     ///   - doi: The request's DOI.
     ///   - pmid: The request's primary slot.
+    ///   - primaryKind: What the slot holds, when stated.
     ///   - title: The article's title.
     /// - Returns: The paper.
-    static func libraryPaper(pmcId: String?, doi: String?, pmid: String, title: String?) -> LibraryPaper {
+    static func libraryPaper(
+        pmcId: String?, doi: String?, pmid: String, primaryKind: ArticleIdentifierKind?, title: String?
+    ) -> LibraryPaper {
         let slot = pmid.trimmingCharacters(in: .whitespacesAndNewlines)
-        let usablePMID = ArticleIdentifierKind.isAllASCIIDigits(slot) && slot.contains { $0 != "0" }
+        let kind = ArticleIdentifierKind.resolved(declared: primaryKind, accession: slot)
+        let mayBePubMed = kind == .pubmed || kind == .unknown
+        let usablePMID = mayBePubMed && ArticleIdentifierKind.isAllASCIIDigits(slot) && slot.contains { $0 != "0" }
         let prefix = BioMedLitConstants.pmcAccessionPrefix
         let pmcShaped = slot.hasPrefix(prefix) && ArticleIdentifierKind.isAllASCIIDigits(String(slot.dropFirst(prefix.count)))
         let givenPMCID = pmcId.flatMap { $0.isEmpty ? nil : $0 }
@@ -4321,9 +4328,11 @@ extension FullTextService {
     /// of a download (design §4.5), its use noted.
     ///
     /// Checked against the title first (§4.4: a record is a claim, not proof),
-    /// once, on the library's path: a PDF the check refuses is not served and
-    /// is the call's library failure, and it is left where it is (a cached one
-    /// would be set aside; the library's files are bmlib's).
+    /// once, on the library's path: a PDF the check refuses is not served, is
+    /// reported as one of the call's library failures without ending the
+    /// library's use (the PDF downloaded instead is kept), and is left where
+    /// it is (a cached one would be set aside; the library's files are
+    /// bmlib's).
     ///
     /// - Parameters:
     ///   - lookup: The fetch's part of the library.
