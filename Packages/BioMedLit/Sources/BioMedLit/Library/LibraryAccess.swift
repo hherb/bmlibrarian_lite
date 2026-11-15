@@ -64,7 +64,7 @@ public final class LibraryAccess: @unchecked Sendable {
 }
 
 /// A folder made (or found to be) a library, with its bookmark to store.
-public struct LibraryChoice {
+public struct LibraryChoice: Sendable {
     /// Access to the folder, started.
     public let access: LibraryAccess
     /// The bookmark the app stores to reach the folder after a relaunch.
@@ -72,7 +72,7 @@ public struct LibraryChoice {
 }
 
 /// What a launch found through the stored bookmark.
-public enum LibraryResume {
+public enum LibraryResume: Sendable {
     /// The library is open and access is held. `renewedBookmark` is the
     /// bookmark made again from where the folder is now, which covers a stale
     /// bookmark and a moved folder; the caller stores it. It is nil only when

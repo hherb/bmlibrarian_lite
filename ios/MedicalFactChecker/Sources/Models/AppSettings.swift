@@ -35,6 +35,26 @@ final class AppSettings {
     /// read the Keychain refuses is told apart from no key (#511).
     private let credentialFlags: UserDefaults
 
+    /// Where the shared paper library's settings are kept (the bookmark and
+    /// the installation id); a test passes its own suite.
+    private let libraryDefaults: UserDefaults
+
+    // MARK: - Shared paper library
+
+    /// The library folder's security-scoped bookmark, or nil for no library
+    /// (design §4.1). Written only through `LibrarySession`.
+    var libraryBookmark: Data? {
+        get { libraryDefaults.data(forKey: Keys.libraryBookmark) }
+        set { libraryDefaults.set(newValue, forKey: Keys.libraryBookmark) }
+    }
+
+    /// This installation's id in the library's records, made once and kept
+    /// (`LibrarySession.installationID()`).
+    var libraryInstallationID: String? {
+        get { libraryDefaults.string(forKey: Keys.libraryInstallationID) }
+        set { libraryDefaults.set(newValue, forKey: Keys.libraryInstallationID) }
+    }
+
     // MARK: - LLM Configuration
 
     /// Selected LLM provider.
@@ -374,9 +394,16 @@ final class AppSettings {
     ///     Keychain; a test passes a stand-in, having no Keychain entitlement.
     ///   - credentialFlags: Where whether each optional credential is saved is
     ///     kept. Defaults to the standard defaults; a test passes its own suite.
-    init(secretStore: any SecretStore = KeychainSecretStore(), credentialFlags: UserDefaults = .standard) {
+    ///   - libraryDefaults: Where the shared paper library's settings are
+    ///     kept. Defaults to the standard defaults; a test passes its own suite.
+    init(
+        secretStore: any SecretStore = KeychainSecretStore(),
+        credentialFlags: UserDefaults = .standard,
+        libraryDefaults: UserDefaults = .standard
+    ) {
         self.secretStore = secretStore
         self.credentialFlags = credentialFlags
+        self.libraryDefaults = libraryDefaults
         let defaults = UserDefaults.standard
 
         // Determine provider first (need local variable before any self access)
@@ -508,6 +535,8 @@ final class AppSettings {
         static let elsevierInstToken = "elsevier_insttoken"
         /// Appended to a credential's account: the defaults key saying one is saved.
         static let savedSuffix = "_saved"
+        static let libraryBookmark = "library_bookmark"
+        static let libraryInstallationID = "library_installation_id"
         static let batchSize = "batch_size"
         static let minRelevantDocuments = "min_relevant_documents"
         static let minScoreThreshold = "min_score_threshold"
@@ -608,3 +637,5 @@ final class AppSettings {
         return nil
     }
 }
+
+extension AppSettings: LibrarySettingsStore {}

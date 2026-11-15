@@ -32,6 +32,7 @@ struct MedicalFactCheckerMacApp: App {
     init() {
         // Configure BioMedLit library with app settings
         configureBioMedLit()
+        LibraryController.startAtLaunch()
     }
 
     /// The store, or an empty stand-in and why the store could not be opened,
@@ -91,6 +92,7 @@ struct MedicalFactCheckerMacApp: App {
         Settings {
             MacSettingsView()
                 .environment(AppSettings.shared)
+                .environment(LibraryController.session)
                 .modelContainer(sharedModelContainer)
         }
 
