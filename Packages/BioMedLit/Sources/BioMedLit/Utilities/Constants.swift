@@ -901,6 +901,30 @@ public enum BioMedLitConstants {
     /// The names of the folders macOS keeps trashed items in: the home Trash
     /// and each volume's. A library is never kept inside one.
     public static let trashFolderNames: Set<String> = [".Trash", ".Trashes"]
+
+    /// The folder under a library's root that holds the paper folders
+    /// (bmlib's `PAPERS_DIR`): a file is at `<root>/papers/<folder>/<name>`.
+    public static let libraryPapersFolderName = "papers"
+
+    /// bmlib's name for a PDF source file (`SourceKind::Pdf`), as a
+    /// `LibraryFileReference` and `Document` store it.
+    public static let libraryKindPDF = "pdf"
+
+    /// bmlib's name for a JATS XML source file (`SourceKind::Jats`).
+    public static let libraryKindJATS = "jats"
+
+    /// bmlib's name for an HTML source file (`SourceKind::Html`).
+    public static let libraryKindHTML = "html"
+
+    /// bmlib's name for a Markdown source file (`SourceKind::Markdown`).
+    public static let libraryKindMarkdown = "markdown"
+
+    /// bmlib's name for a plain-text source file (`SourceKind::Text`).
+    public static let libraryKindText = "text"
+
+    /// The suffix of a JATS kept in the PDF cache while the library cannot be
+    /// reached (`<cacheKey>-<sha12>.xml`), waiting to be moved in (design §4.6).
+    public static let libraryWaitingJATSSuffix = ".xml"
 }
 
 // MARK: - PubMed Filters
