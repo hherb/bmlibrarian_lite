@@ -1017,8 +1017,12 @@ public enum BioMedLitConstants {
     /// - Parameter file: The file as "folder/name".
     public static func libraryPDFAnotherArticleFailure(file: String) -> String {
         "the library's PDF \(file) is another article's: its first page with text does not carry the title, "
-            + "so it is not served and nothing is kept in the library in this lookup"
+            + "so it is not served"
     }
+
+    /// What separates a fetch's library failures in its `libraryFailure`:
+    /// one sentence each, in the order they were met.
+    public static let libraryFailureSeparator = "\n"
 
     /// The warning for a library PDF gone between its read and its extraction.
     ///

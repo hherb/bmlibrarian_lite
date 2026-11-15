@@ -315,6 +315,13 @@ public struct FullTextResult: Sendable, Equatable {
     /// the source stays where it would be without a library.
     public let libraryFailure: String?
 
+    /// Whether this fetch found a source it could not keep because the
+    /// library could not be reached or written, so it waits in the PDF cache
+    /// for the library (design §4.6): a JATS left there, or this result's own
+    /// PDF. `false` for a file of another paper, a use that could not be
+    /// noted, a paper with no identifier the library takes, or no library.
+    public let libraryWaiting: Bool
+
     /// Create a retrieval result.
     ///
     /// - Parameters:
@@ -339,6 +346,8 @@ public struct FullTextResult: Sendable, Equatable {
     ///     default — when there is none.
     ///   - libraryFailure: Why the library could not be used, or `nil` — the
     ///     default — when nothing went wrong.
+    ///   - libraryWaiting: Whether a source waits for the library; `false` —
+    ///     the default — when none does.
     public init(
         content: FullTextContent,
         warnings: JATSParseWarnings = JATSParseWarnings(),
@@ -350,7 +359,8 @@ public struct FullTextResult: Sendable, Equatable {
         openAccessShortfall: OpenAccessShortfall? = nil,
         pdfNotSavedFrom: String? = nil,
         libraryFile: LibraryFileReference? = nil,
-        libraryFailure: String? = nil
+        libraryFailure: String? = nil,
+        libraryWaiting: Bool = false
     ) {
         // Three combinations the fallback chain never emits, and which the reader
         // would be shown as fact if it ever did. They were unspellable while
@@ -447,6 +457,8 @@ public struct FullTextResult: Sendable, Equatable {
             content.source != .library || libraryFile != nil,
             "library content with no library file"
         )
+        // A source waits only because the library failed, which is told
+        assert(!libraryWaiting || libraryFailure != nil, "a source waits for the library with no failure told")
         // Coverage describes reading a PDF, so there has to be one.
         assert(
             extractionCoverage == nil || content.pdfURL != nil,
@@ -481,6 +493,7 @@ public struct FullTextResult: Sendable, Equatable {
         self.pdfNotSavedFrom = pdfNotSavedFrom
         self.libraryFile = libraryFile
         self.libraryFailure = libraryFailure
+        self.libraryWaiting = libraryWaiting
     }
 
     /// This result, noting why the open-access copy went unassessed and which
@@ -505,18 +518,23 @@ public struct FullTextResult: Sendable, Equatable {
             openAccessShortfall: openAccessShortfall,
             pdfNotSavedFrom: pdfNotSavedFrom,
             libraryFile: libraryFile,
-            libraryFailure: libraryFailure
+            libraryFailure: libraryFailure,
+            libraryWaiting: libraryWaiting
         )
     }
 
     /// This result, with the library's file of it and the fetch's library
-    /// failure.
+    /// failure and waiting flag.
     ///
     /// - Parameters:
     ///   - libraryFile: The library's file of this text, or `nil`.
     ///   - libraryFailure: Why the library could not be used, or `nil`.
-    /// - Returns: The same result with ``libraryFile`` and ``libraryFailure`` set.
-    func noting(libraryFile: LibraryFileReference?, libraryFailure: String?) -> FullTextResult {
+    ///   - libraryWaiting: Whether a source waits for the library.
+    /// - Returns: The same result with ``libraryFile``, ``libraryFailure`` and
+    ///   ``libraryWaiting`` set.
+    func noting(
+        libraryFile: LibraryFileReference?, libraryFailure: String?, libraryWaiting: Bool
+    ) -> FullTextResult {
         FullTextResult(
             content: content,
             warnings: warnings,
@@ -528,7 +546,8 @@ public struct FullTextResult: Sendable, Equatable {
             openAccessShortfall: openAccessShortfall,
             pdfNotSavedFrom: pdfNotSavedFrom,
             libraryFile: libraryFile,
-            libraryFailure: libraryFailure
+            libraryFailure: libraryFailure,
+            libraryWaiting: libraryWaiting
         )
     }
 

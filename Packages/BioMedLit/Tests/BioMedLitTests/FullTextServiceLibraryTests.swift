@@ -33,6 +33,8 @@ private final class FakeLibrary: FullTextLibrary, @unchecked Sendable {
     var keepAnswer: Result<LibraryKept?, LibraryLookupFailure> = .success(nil)
     /// Called on each `keep`, before it answers.
     var onKeep: (() -> Void)?
+    /// What `noteUse` answers.
+    var noteAnswer: LibraryLookupFailure?
     private(set) var papers: [LibraryPaper] = []
     private(set) var kept: [(kind: String, origin: String, bytes: Data)] = []
     private(set) var noted: [LibraryFileReference] = []
@@ -57,7 +59,7 @@ private final class FakeLibrary: FullTextLibrary, @unchecked Sendable {
 
     func noteUse(_ file: LibraryFileReference, paper: LibraryPaper) -> LibraryLookupFailure? {
         noted.append(file)
-        return nil
+        return noteAnswer
     }
 
     func path(of file: LibraryFileReference) -> String? { nil }
@@ -214,18 +216,7 @@ final class FullTextServiceLibraryTests: XCTestCase {
         XCTAssertNil(result.libraryFile)
         XCTAssertTrue(fake.kept.isEmpty, "nothing is kept in that lookup")
         XCTAssertEqual(fake.pdfAsked, 0)
-    }
-
-    func testFailedLibraryTurnsTheLibraryOffForTheCall() async throws {
-        let fake = FakeLibrary()
-        fake.jatsAnswer = .failed(Self.unreachable.description)
-        stubUnpaywallPDF()
-
-        let result = try await fetchPDF(makeService(library: fake))
-
-        XCTAssertEqual(result.libraryFailure, Self.unreachable.description)
-        XCTAssertEqual(fake.pdfAsked, 0)
-        XCTAssertTrue(fake.kept.isEmpty)
+        XCTAssertFalse(result.libraryWaiting, "another paper's file is no reason to wait")
     }
 
     // MARK: The chain's JATS
@@ -245,6 +236,7 @@ final class FullTextServiceLibraryTests: XCTestCase {
         let waiting = FullTextService.pdfCacheDirectory
             .appendingPathComponent("\(Self.cacheKey.filenameComponent)-\(digest.prefix(12)).xml")
         XCTAssertEqual(try Data(contentsOf: waiting), Self.jats(), "the JATS waits in the PDF cache")
+        XCTAssertTrue(result.libraryWaiting)
     }
 
     // MARK: The library's PDF
@@ -266,6 +258,21 @@ final class FullTextServiceLibraryTests: XCTestCase {
         XCTAssertEqual(fake.noted, [held.file])
         XCTAssertFalse(StubURLProtocol.requested("library-test.pdf"), "no download")
         XCTAssertTrue(fake.kept.isEmpty, "the library's own PDF is not kept again")
+        XCTAssertFalse(result.libraryWaiting)
+    }
+
+    func testUnnotedUseIsReportedAndNothingWaits() async throws {
+        let fake = FakeLibrary()
+        let held = try heldPDF()
+        fake.pdfAnswer = .success(held)
+        fake.noteAnswer = LibraryLookupFailure(description: "library, paper pmid=99999101: the record is read-only")
+        stubUnpaywallPDF()
+
+        let result = try await fetchPDF(makeService(library: fake), title: Self.title)
+
+        XCTAssertEqual(result.content, .libraryPDF(localPath: held.path), "served all the same")
+        XCTAssertEqual(result.libraryFailure, "library, paper pmid=99999101: the record is read-only")
+        XCTAssertFalse(result.libraryWaiting, "nothing was left out of the library")
     }
 
     func testLibraryPDFFailingTitleCheckIsNotServed() async throws {
@@ -285,7 +292,29 @@ final class FullTextServiceLibraryTests: XCTestCase {
         XCTAssertTrue(failure.contains("another article's"), failure)
         XCTAssertTrue(FileManager.default.fileExists(atPath: held.path), "the library's file is left alone")
         XCTAssertTrue(fake.noted.isEmpty)
-        XCTAssertTrue(fake.kept.isEmpty)
+        XCTAssertEqual(fake.kept.map(\.kind), ["pdf"], "the downloaded PDF is kept, and outranks the wrong one")
+        XCTAssertEqual(fake.kept.first?.origin, FullTextSource.unpaywall.displayName)
+        XCTAssertFalse(result.libraryWaiting)
+    }
+
+    func testRefusedLibraryPDFThenUnreachableKeepTellsBoth() async throws {
+        let fake = FakeLibrary()
+        fake.pdfAnswer = .success(try heldPDF())
+        fake.keepAnswer = .failure(Self.unreachable)
+        stubUnpaywallPDF()
+        let service = makeService(library: fake, titleChecker: { url, _ in
+            url.lastPathComponent == "library.pdf" ? .mismatch(share: 0.1) : .matches(share: 1)
+        })
+
+        let result = try await fetchPDF(service, title: Self.title)
+
+        let failure = try XCTUnwrap(result.libraryFailure)
+        let lines = failure.components(separatedBy: BioMedLitConstants.libraryFailureSeparator)
+        XCTAssertEqual(lines.count, 2, failure)
+        XCTAssertTrue(lines.first?.contains("another article's") == true, failure)
+        XCTAssertEqual(lines.last, Self.unreachable.description)
+        XCTAssertTrue(result.libraryWaiting, "the downloaded PDF waits for the library")
+        XCTAssertEqual(result.localPDFPath, cachedPDFPath)
     }
 
     // MARK: A download kept
@@ -302,6 +331,9 @@ final class FullTextServiceLibraryTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: cachedPDFPath))
         XCTAssertEqual(result.libraryFailure, Self.unreachable.description)
         XCTAssertNil(result.libraryFile)
+        XCTAssertTrue(result.libraryWaiting)
+        XCTAssertEqual(fake.pdfAsked, 0, "the library is off for the rest of the call")
+        XCTAssertTrue(fake.kept.isEmpty)
     }
 
     func testFailedPDFSaveKeepsTheCacheCopy() async throws {
@@ -322,6 +354,20 @@ final class FullTextServiceLibraryTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: cachedPDFPath), "the cache copy stays")
         XCTAssertEqual(result.libraryFailure, Self.unreachable.description)
         XCTAssertNil(result.libraryFile)
+        XCTAssertTrue(result.libraryWaiting)
+    }
+
+    func testNilKeepIsNotWaiting() async throws {
+        let fake = FakeLibrary()
+        fake.keepAnswer = .success(nil)
+        stubUnpaywallPDF()
+
+        let result = try await fetchPDF(makeService(library: fake))
+
+        XCTAssertEqual(fake.kept.map(\.kind), ["pdf"])
+        XCTAssertEqual(result.localPDFPath, cachedPDFPath)
+        XCTAssertNil(result.libraryFailure)
+        XCTAssertFalse(result.libraryWaiting)
     }
 
     func testNoLibraryIsUnchanged() async throws {
@@ -334,26 +380,27 @@ final class FullTextServiceLibraryTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: cachedPDFPath))
         XCTAssertNil(result.libraryFile)
         XCTAssertNil(result.libraryFailure)
+        XCTAssertFalse(result.libraryWaiting)
     }
 
     // MARK: The paper the library is told of
 
-    func testLibraryPaperResolvesTheSlotByKind() {
-        let pmc = FullTextService.libraryPaper(pmcId: nil, doi: nil, pmid: "PMC123", primaryKind: nil, title: nil)
-        XCTAssertNil(pmc.pmid)
-        XCTAssertEqual(pmc.pmcId, "PMC123")
-        let preprint = FullTextService.libraryPaper(pmcId: nil, doi: nil, pmid: "PPR42", primaryKind: nil, title: nil)
-        XCTAssertEqual(preprint.pmid, "PPR42")
-        let pubmed = FullTextService.libraryPaper(pmcId: "PMC9", doi: " 10.1/a ", pmid: " 123 ",
-                                                  primaryKind: .pubmed, title: "T")
-        XCTAssertEqual(pubmed.pmid, "123")
-        XCTAssertEqual(pubmed.pmcId, "PMC9")
-        XCTAssertEqual(pubmed.doi, "10.1/a")
-        XCTAssertEqual(pubmed.title, "T")
-        XCTAssertNil(FullTextService.libraryPaper(pmcId: nil, doi: nil, pmid: "not-an-id", primaryKind: nil,
-                                                  title: nil).pmid)
-        XCTAssertNil(FullTextService.libraryPaper(pmcId: nil, doi: nil, pmid: "123",
-                                                  primaryKind: .europePMCSource("agr"), title: nil).pmid)
+    func testLibraryPaperReadsTheIdsAsBmlib() {
+        func paper(_ slot: String, pmcId: String? = nil) -> LibraryPaper {
+            FullTextService.libraryPaper(pmcId: pmcId, doi: nil, pmid: slot, title: nil)
+        }
+        XCTAssertEqual(paper(" 123 ").pmid, "123")
+        XCTAssertNil(paper("000").pmid, "all zeros is no PMID")
+        XCTAssertNil(paper("PPR42").pmid, "a preprint accession is not passed")
+        XCTAssertNil(paper("PPR42").pmcId)
+        XCTAssertNil(paper("not-an-id").pmid)
+        XCTAssertNil(paper("PMC123").pmid)
+        XCTAssertEqual(paper("PMC123").pmcId, "PMC123")
+        XCTAssertEqual(paper("PMC123", pmcId: "PMC9").pmcId, "PMC9", "the request's PMC ID wins")
+        XCTAssertNil(paper("pmc123").pmcId, "only PMC and digits")
+        let full = FullTextService.libraryPaper(pmcId: "PMC9", doi: " 10.1/a ", pmid: "123", title: "T")
+        XCTAssertEqual(full.doi, "10.1/a")
+        XCTAssertEqual(full.title, "T")
     }
 
     // MARK: End to end, a real library
@@ -420,6 +467,7 @@ final class FullTextServiceLibraryTests: XCTestCase {
         XCTAssertTrue(path.hasPrefix(root.appendingPathComponent("papers").path + "/"), path)
         XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: path)), Self.pdfBytes)
         XCTAssertEqual(result.libraryFile?.kind, "pdf")
+        XCTAssertFalse(result.libraryWaiting)
         XCTAssertFalse(FileManager.default.fileExists(atPath: cachedPDFPath), "the cache copy is removed")
     }
     #endif

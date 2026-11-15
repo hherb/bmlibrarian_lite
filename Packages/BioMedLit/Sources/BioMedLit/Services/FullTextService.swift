@@ -431,7 +431,7 @@ public actor FullTextService {
     ) async throws -> FullTextResult {
         let lookup = LibraryLookup(
             library: library,
-            paper: Self.libraryPaper(pmcId: pmcId, doi: doi, pmid: pmid, primaryKind: primaryKind, title: title)
+            paper: Self.libraryPaper(pmcId: pmcId, doi: doi, pmid: pmid, title: title)
         )
         return lookup.finish(try await fetchThroughChain(
             pmcId: pmcId, doi: doi, pmid: pmid, primaryKind: primaryKind, title: title, lookup: lookup
@@ -511,9 +511,9 @@ public actor FullTextService {
                     if served.contentKind == .abstract { abstractOnly = served } else { return served }
                 }
             case .wrongPaper(let message):
-                lookup.fail(message, unreachable: false)
+                lookup.fail(message, ends: true, unreachable: false)
             case .failed(let message):
-                lookup.fail(message, unreachable: true)
+                lookup.fail(message, ends: true, unreachable: true)
             case .unusable, .none:
                 break
             }
@@ -4105,9 +4105,10 @@ public actor FullTextService {
 
 extension FullTextService {
     /// The shared library's part in one fetch (bmlib's `_FromLibrary`): the
-    /// paper it is told of, the PDFs the fetch kept there, and the first
-    /// library failure, which ends the library's use for the rest of the call
-    /// (bmlib's rule). One per
+    /// paper it is told of, the PDFs the fetch kept there, and the library
+    /// failures met. A library error ends the library's use for the rest of
+    /// the call (bmlib's rule); a library PDF of another article is only
+    /// reported, so the PDF the chain downloads instead is still kept. One per
     /// ``fetchFullText(pmcId:doi:pmid:primaryKind:title:)`` call, passed down
     /// the chain and never shared, so two fetches interleaving on the actor
     /// cannot see each other's failure.
@@ -4116,13 +4117,17 @@ extension FullTextService {
         private let library: (any FullTextLibrary)?
         /// The paper as the library is told of it.
         let paper: LibraryPaper
-        /// The first library failure in this call, or `nil`.
-        private(set) var failure: String?
-        /// Whether that failure means the library could not be read or
-        /// written, so a JATS the chain serves waits in the PDF cache (design
-        /// §4.6). Not for a file of another paper: that is no reason to move
-        /// one in later.
+        /// The library failures in this call, in the order met.
+        private var failures: [String] = []
+        /// Whether a failure ended the library's use in this call.
+        private var ended = false
+        /// Whether the library could not be read or written in this call, so
+        /// a source the chain fetched and could not keep waits for it (design
+        /// §4.6). Not for a file of another paper, nor a use that could not be
+        /// noted: neither leaves a source out of the library.
         private(set) var unreachable = false
+        /// Whether a JATS was left waiting in the PDF cache.
+        private var wroteWaitingJATS = false
         /// The PDFs this call kept in the library, by their path there.
         private var kept: [String: LibraryFileReference] = [:]
 
@@ -4133,19 +4138,19 @@ extension FullTextService {
         }
 
         /// The library while this call may still use it: one is set and no
-        /// library failure has been met.
-        var inUse: (any FullTextLibrary)? { failure == nil ? library : nil }
+        /// failure has ended its use.
+        var inUse: (any FullTextLibrary)? { ended ? nil : library }
 
-        /// Record the call's library failure, already logged where it was
-        /// worded; the library is not used again in this call.
+        /// Record a library failure, already logged where it was worded.
         ///
         /// - Parameters:
         ///   - text: The failure, for the result's `libraryFailure`.
+        ///   - ends: Whether the library is not used again in this call.
         ///   - unreachable: Whether the library could not be read or written.
-        func fail(_ text: String, unreachable: Bool) {
-            guard failure == nil else { return }
-            failure = text
-            self.unreachable = unreachable
+        func fail(_ text: String, ends: Bool, unreachable: Bool) {
+            failures.append(text)
+            ended = ended || ends
+            self.unreachable = self.unreachable || unreachable
         }
 
         /// Record a PDF kept in the library, so the result read from it names
@@ -4154,14 +4159,26 @@ extension FullTextService {
             kept[file.path] = file.file
         }
 
-        /// `result` with this call's library failure, and its library file:
-        /// its own (the library's content, a JATS kept), else that of the PDF
-        /// it reads, when this call kept it. Unchanged without a library.
+        /// Record that a JATS waits for the library in the PDF cache.
+        func recordWaitingJATS() {
+            wroteWaitingJATS = true
+        }
+
+        /// `result` with this call's library failures (one sentence each, in
+        /// order), its library file (its own, else that of the PDF it reads,
+        /// when this call kept it), and whether a source waits for the
+        /// library: a JATS left in the cache, or the result's own PDF, read
+        /// from the cache and not kept because the library could not be
+        /// reached. Unchanged without a library.
         func finish(_ result: FullTextResult) -> FullTextResult {
             guard library != nil else { return result }
+            let file = result.libraryFile ?? result.localPDFPath.flatMap { kept[$0] }
+            let pdfWaits = unreachable && file == nil && result.localPDFPath != nil && result.source != .library
             return result.noting(
-                libraryFile: result.libraryFile ?? result.localPDFPath.flatMap { kept[$0] },
-                libraryFailure: failure
+                libraryFile: file,
+                libraryFailure: failures.isEmpty
+                    ? nil : failures.joined(separator: BioMedLitConstants.libraryFailureSeparator),
+                libraryWaiting: wroteWaitingJATS || pdfWaits
             )
         }
     }
@@ -4170,37 +4187,30 @@ extension FullTextService {
     /// never ones a lookup resolved (as ``ArticleCacheKey`` is built, so the
     /// paper is filed the same way on every run), and its title.
     ///
-    /// The primary slot is read by its kind: a PMC accession in it is the PMC
-    /// ID (when the request names none), a PubMed ID or a `PPR` accession
-    /// (bmlib's `PaperIds` takes one as the pmid) is the pmid, and anything
-    /// else (another Europe PMC source's accession, a value neither digits
-    /// nor `PPR` and digits) is not passed: the library would refuse it.
+    /// Read as bmlib's `library_request_ids` reads them, so both make the same
+    /// lookup: the primary slot is the pmid only when it is ASCII digits and
+    /// not all zeros; a PMC ID in it (`PMC` and digits) is the PMC ID when the
+    /// request names none; anything else (a `PPR` accession included) is not
+    /// passed.
     ///
     /// - Parameters:
-    ///   - pmcId: The request's PMC ID.
+    ///   - pmcId: The request's PMC ID, passed as given (blank is none).
     ///   - doi: The request's DOI.
     ///   - pmid: The request's primary slot.
-    ///   - primaryKind: What the slot holds, when stated.
     ///   - title: The article's title.
-    /// - Returns: The paper, each value trimmed, blank ones `nil`.
-    static func libraryPaper(
-        pmcId: String?, doi: String?, pmid: String, primaryKind: ArticleIdentifierKind?, title: String?
-    ) -> LibraryPaper {
-        var pmcSlot = trimmed(pmcId)
-        var pmidSlot: String?
-        if let slot = trimmed(pmid) {
-            switch ArticleIdentifierKind.resolved(declared: primaryKind, accession: slot) {
-            case .pmc:
-                pmcSlot = pmcSlot ?? slot
-            case .pubmed, .preprint, .unknown:
-                let prefix = BioMedLitConstants.europePMCPreprintAccessionPrefix
-                let digits = slot.uppercased().hasPrefix(prefix) ? String(slot.dropFirst(prefix.count)) : slot
-                if ArticleIdentifierKind.isAllASCIIDigits(digits) { pmidSlot = slot }
-            case .europePMCSource:
-                break
-            }
-        }
-        return LibraryPaper(pmid: pmidSlot, doi: trimmed(doi), pmcId: pmcSlot, title: trimmed(title))
+    /// - Returns: The paper.
+    static func libraryPaper(pmcId: String?, doi: String?, pmid: String, title: String?) -> LibraryPaper {
+        let slot = pmid.trimmingCharacters(in: .whitespacesAndNewlines)
+        let usablePMID = ArticleIdentifierKind.isAllASCIIDigits(slot) && slot.contains { $0 != "0" }
+        let prefix = BioMedLitConstants.pmcAccessionPrefix
+        let pmcShaped = slot.hasPrefix(prefix) && ArticleIdentifierKind.isAllASCIIDigits(String(slot.dropFirst(prefix.count)))
+        let givenPMCID = pmcId.flatMap { $0.isEmpty ? nil : $0 }
+        return LibraryPaper(
+            pmid: usablePMID ? slot : nil,
+            doi: trimmed(doi),
+            pmcId: givenPMCID ?? (pmcShaped ? slot : nil),
+            title: trimmed(title)
+        )
     }
 
     /// The library's usable JATS, rendered as the lookup's result, its use
@@ -4227,9 +4237,10 @@ extension FullTextService {
             return nil
         }
         // A note that fails ends the library's use, but the JATS is still
-        // served: its bytes passed the digest check (bmlib's rule)
+        // served: its bytes passed the digest check (bmlib's rule). Nothing
+        // is left out of the library, so nothing waits.
         if let failure = lookup.inUse?.noteUse(file, paper: lookup.paper) {
-            lookup.fail(failure.description, unreachable: true)
+            lookup.fail(failure.description, ends: true, unreachable: false)
         }
         BioMedLitLib.logger?.info("Serving the library's JATS for \(articleName)", category: .fullText)
         return FullTextResult(
@@ -4267,10 +4278,10 @@ extension FullTextService {
                 }
                 return kept?.file
             case .failure(let failure):
-                lookup.fail(failure.description, unreachable: true)
+                lookup.fail(failure.description, ends: true, unreachable: true)
             }
         }
-        if lookup.unreachable, let key { Self.writeWaitingJATS(xml, key: key) }
+        if lookup.unreachable, let key, Self.writeWaitingJATS(xml, key: key) { lookup.recordWaitingJATS() }
         return nil
     }
 
@@ -4283,7 +4294,9 @@ extension FullTextService {
     /// - Parameters:
     ///   - xml: The JATS as served.
     ///   - key: Names the article.
-    static func writeWaitingJATS(_ xml: Data, key: ArticleCacheKey) {
+    /// - Returns: Whether it was written.
+    @discardableResult
+    static func writeWaitingJATS(_ xml: Data, key: ArticleCacheKey) -> Bool {
         let digest = SHA256.hash(data: xml).map { String(format: "%02x", $0) }.joined()
         let name = "\(key.filenameComponent)-\(digest.prefix(BioMedLitConstants.libraryWaitingDigestHexChars))"
             + BioMedLitConstants.libraryWaitingJATSSuffix
@@ -4293,12 +4306,14 @@ extension FullTextService {
             BioMedLitLib.logger?.info(
                 "JATS for \(key.logDescription) waits for the library at \(url.path)", category: .fullText
             )
+            return true
         } catch {
             BioMedLitLib.logger?.error(
                 "Could not keep the JATS for \(key.logDescription) waiting for the library at \(url.path): "
                     + error.localizedDescription,
                 category: .fullText
             )
+            return false
         }
     }
 
@@ -4331,7 +4346,7 @@ extension FullTextService {
         case .success(let found?): held = found
         case .success(nil): return nil
         case .failure(let failure):
-            lookup.fail(failure.description, unreachable: true)
+            lookup.fail(failure.description, ends: true, unreachable: true)
             return nil
         }
         if let title, try refusesAsAnotherArticle(held.path, title: title) {
@@ -4340,7 +4355,9 @@ extension FullTextService {
                 file: "\(url.deletingLastPathComponent().lastPathComponent)/\(url.lastPathComponent)"
             )
             BioMedLitLib.logger?.warning(message, category: .fullText)
-            lookup.fail(message, unreachable: false)
+            // Reported, and the library stays in use: the PDF the chain
+            // downloads instead is kept, and outranks this one as the newer
+            lookup.fail(message, ends: false, unreachable: false)
             return nil
         }
         // Judged already: read without a second check. With extraction off
@@ -4354,8 +4371,9 @@ extension FullTextService {
             )
             return nil
         }
+        // Served all the same, and nothing is left out of the library
         if let failure = library.noteUse(held.file, paper: lookup.paper) {
-            lookup.fail(failure.description, unreachable: true)
+            lookup.fail(failure.description, ends: true, unreachable: false)
         }
         BioMedLitLib.logger?.info(
             "Using the library's PDF \(held.path) for \(articleName) in place of a download", category: .fullText
@@ -4411,7 +4429,7 @@ extension FullTextService {
         case .success(let file?): kept = file
         case .success(nil): return outcome
         case .failure(let failure):
-            lookup.fail(failure.description, unreachable: true)
+            lookup.fail(failure.description, ends: true, unreachable: true)
             return outcome
         }
         lookup.record(kept)
