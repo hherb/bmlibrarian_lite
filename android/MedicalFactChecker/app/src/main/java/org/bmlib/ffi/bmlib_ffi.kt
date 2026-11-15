@@ -994,7 +994,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_read() and 0xFFFF) != 37147) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_record_use() and 0xFFFF) != 41641) {
+    if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_record_use() and 0xFFFF) != 22164) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_release() and 0xFFFF) != 2624) {
@@ -1009,7 +1009,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_root() and 0xFFFF) != 2620) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_save() and 0xFFFF) != 59969) {
+    if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_save() and 0xFFFF) != 39511) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_bmlib_ffi_checksum_method_paperlibrary_scan() and 0xFFFF) != 33102) {
@@ -1932,7 +1932,9 @@ public interface PaperLibraryInterface {
      * `DigestMismatch` from reading the file (`NotDownloaded` also when
      * `who`'s own record is only a placeholder), and `BadName` for a name that
      * is not one path component or not the library's name for those bytes
-     * (nothing written).
+     * (nothing written); `ForeignJats` when the file is a JATS naming another
+     * paper or its folder holds one, another JATS there that cannot be read
+     * failing as reading it does (nothing written).
      */
     fun `recordUse`(`who`: Installation, `paper`: PaperInfo, `file`: FileRef)
     
@@ -1985,7 +1987,9 @@ public interface PaperLibraryInterface {
      *
      * `BadInstallation` or `BadIdentifier` (nothing written), `FileClash`
      * (nothing overwritten), `NewerRecord`, `NotDownloaded`, `ReadOnly` or
-     * `Io`.
+     * `Io`; `ForeignJats` when `bytes` are a JATS naming another paper or the
+     * folder holds one, and `NotDownloaded` or `DigestMismatch` when a JATS
+     * there cannot be checked (nothing written).
      */
     fun `save`(`who`: Installation, `paper`: PaperInfo, `bytes`: kotlin.ByteArray, `kind`: SourceKind, `origin`: kotlin.String): FileRef
     
@@ -2144,7 +2148,9 @@ open class PaperLibrary: Disposable, AutoCloseable, PaperLibraryInterface
      * `DigestMismatch` from reading the file (`NotDownloaded` also when
      * `who`'s own record is only a placeholder), and `BadName` for a name that
      * is not one path component or not the library's name for those bytes
-     * (nothing written).
+     * (nothing written); `ForeignJats` when the file is a JATS naming another
+     * paper or its folder holds one, another JATS there that cannot be read
+     * failing as reading it does (nothing written).
      */
     @Throws(LibraryException::class)override fun `recordUse`(`who`: Installation, `paper`: PaperInfo, `file`: FileRef)
         = 
@@ -2259,7 +2265,9 @@ open class PaperLibrary: Disposable, AutoCloseable, PaperLibraryInterface
      *
      * `BadInstallation` or `BadIdentifier` (nothing written), `FileClash`
      * (nothing overwritten), `NewerRecord`, `NotDownloaded`, `ReadOnly` or
-     * `Io`.
+     * `Io`; `ForeignJats` when `bytes` are a JATS naming another paper or the
+     * folder holds one, and `NotDownloaded` or `DigestMismatch` when a JATS
+     * there cannot be checked (nothing written).
      */
     @Throws(LibraryException::class)override fun `save`(`who`: Installation, `paper`: PaperInfo, `bytes`: kotlin.ByteArray, `kind`: SourceKind, `origin`: kotlin.String): FileRef {
             return FfiConverterTypeFileRef.lift(
@@ -4907,6 +4915,44 @@ sealed class LibraryException: kotlin.Exception() {
     }
     
     /**
+     * A JATS whose own identifiers name another paper (bmlib #766), from
+     * [`PaperLibrary::save`] and [`PaperLibrary::record_use`]: one in the
+     * paper's folder, or the one being saved (`folder` `None`). Nothing was
+     * written; offer the manual clear of a `folder`, or, with none, keep the
+     * file out as another paper's.
+     */
+    class ForeignJats(
+        
+        /**
+         * The paper's folder holding the JATS; `None` for the bytes being saved.
+         */
+        val `folder`: kotlin.String?, 
+        
+        /**
+         * The JATS file.
+         */
+        val `name`: kotlin.String, 
+        
+        /**
+         * The first contradicting identifier: `"pmid"`, `"doi"` or `"pmcid"`.
+         */
+        val `field`: kotlin.String, 
+        
+        /**
+         * The JATS's own value.
+         */
+        val `theirs`: kotlin.String, 
+        
+        /**
+         * The paper's value.
+         */
+        val `ours`: kotlin.String
+        ) : LibraryException() {
+        override val message
+            get() = "folder=${ `folder` }, name=${ `name` }, field=${ `field` }, theirs=${ `theirs` }, ours=${ `ours` }"
+    }
+    
+    /**
      * Any other failure: the file system's, or a record that cannot be read
      * or written back, or no free folder name (the reason says which).
      */
@@ -5002,7 +5048,14 @@ public object FfiConverterTypeLibraryError : FfiConverterRustBuffer<LibraryExcep
                 FfiConverterString.read(buf),
                 FfiConverterUInt.read(buf),
                 )
-            13 -> LibraryException.Io(
+            13 -> LibraryException.ForeignJats(
+                FfiConverterOptionalString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            14 -> LibraryException.Io(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
@@ -5083,6 +5136,15 @@ public object FfiConverterTypeLibraryError : FfiConverterRustBuffer<LibraryExcep
                 + FfiConverterString.allocationSize(value.`folder`)
                 + FfiConverterString.allocationSize(value.`file`)
                 + FfiConverterUInt.allocationSize(value.`version`)
+            )
+            is LibraryException.ForeignJats -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterOptionalString.allocationSize(value.`folder`)
+                + FfiConverterString.allocationSize(value.`name`)
+                + FfiConverterString.allocationSize(value.`field`)
+                + FfiConverterString.allocationSize(value.`theirs`)
+                + FfiConverterString.allocationSize(value.`ours`)
             )
             is LibraryException.Io -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
@@ -5167,8 +5229,17 @@ public object FfiConverterTypeLibraryError : FfiConverterRustBuffer<LibraryExcep
                 FfiConverterUInt.write(value.`version`, buf)
                 Unit
             }
-            is LibraryException.Io -> {
+            is LibraryException.ForeignJats -> {
                 buf.putInt(13)
+                FfiConverterOptionalString.write(value.`folder`, buf)
+                FfiConverterString.write(value.`name`, buf)
+                FfiConverterString.write(value.`field`, buf)
+                FfiConverterString.write(value.`theirs`, buf)
+                FfiConverterString.write(value.`ours`, buf)
+                Unit
+            }
+            is LibraryException.Io -> {
+                buf.putInt(14)
                 FfiConverterString.write(value.`path`, buf)
                 FfiConverterString.write(value.`reason`, buf)
                 Unit
