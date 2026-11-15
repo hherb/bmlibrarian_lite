@@ -68,7 +68,7 @@ public final class LibrarySession {
 
     @ObservationIgnored private let store: LibrarySettingsStore
 
-    /// How a stored bookmark is reached: ``LibrarySetup/resume(bookmark:sandboxed:)``.
+    /// How a stored bookmark is reached: ``LibrarySetup/resume(bookmark:sandboxed:makeBookmark:)``.
     @ObservationIgnored private let resume: @Sendable (Data) -> LibraryResume
 
     /// Why a held library's folder is not the library any more, or nil:
@@ -130,6 +130,7 @@ public final class LibrarySession {
             if let renewed { store.libraryBookmark = renewed }
             self.unsaved = unsaved
         case let .lost(reason):
+            unsaved = nil
             state = .unreachable(reason: reason)
         }
     }
@@ -189,6 +190,7 @@ public final class LibrarySession {
             let lost = await Task.detached { recheckFolder(held.folderURL) }.value
             guard generation == startedAt, access === held, let lost else { return }
             stopAccess()
+            unsaved = nil
             state = .unreachable(reason: lost)
             await resumeStored()
         }

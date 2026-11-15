@@ -212,6 +212,23 @@ final class LibrarySessionTests: XCTestCase {
         XCTAssertNil(session.unsaved)
     }
 
+    /// A lost library does not keep the note of its bookmark: a re-check that
+    /// finds it gone shows only "cannot be reached".
+    func testUnsavedNoteIsForgottenWhenARecheckFindsTheLibraryLost() async throws {
+        let store = MemoryStore()
+        let dir = try await chosenLibrary(in: store)
+        struct Refused: Error, LocalizedError { var errorDescription: String? { "refused" } }
+        let session = LibrarySession(store: store, resume: {
+            LibrarySetup.resume(bookmark: $0, makeBookmark: { _ in throw Refused() })
+        })
+        await session.resumeAtLaunch()
+        XCTAssertEqual(session.unsaved, "refused")
+        try FileManager.default.removeItem(at: marker(of: dir))
+        await session.recheck()
+        guard case .unreachable = session.state else { return XCTFail("\(session.state)") }
+        XCTAssertNil(session.unsaved)
+    }
+
     /// #792 item 3: "Reaching…" only while a stored library is being reached.
     func testIsReachingOnlyWhileAStoredLibraryResumes() async throws {
         let store = MemoryStore()

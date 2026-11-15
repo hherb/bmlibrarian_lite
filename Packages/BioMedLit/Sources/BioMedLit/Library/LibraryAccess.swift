@@ -125,9 +125,10 @@ public enum LibrarySetup {
     /// ``choose(_:)`` with how access is started and the bookmark made passed
     /// in, so a test can make either fail. The bookmark is made before bmlib
     /// writes the marker, so a volume refusing bookmarks is left untouched
-    /// (as StudyAnalyzer does; #792 item 1). A start that does not happen is not a refusal here: the
-    /// folder panel's grant already reaches the folder (StudyAnalyzer's choose
-    /// allows it too); `started` only says whether a stop is owed.
+    /// (as StudyAnalyzer does; #792 item 1). A start that does not happen is
+    /// not a refusal here: the folder panel's grant already reaches the folder
+    /// (StudyAnalyzer's choose allows it too); `started` only says whether a
+    /// stop is owed.
     static func choose(
         _ url: URL, startAccess: (URL) -> Bool,
         makeBookmark: (URL) throws -> Data = { try LibraryBookmark.make(for: $0) }
@@ -166,7 +167,8 @@ public enum LibrarySetup {
 
     /// At launch: reach the library through its stored bookmark. Never
     /// throws; what went wrong is the `.lost` reason. Call it off the main
-    /// thread.
+    /// thread. `makeBookmark` makes the bookmark again from the folder as it
+    /// is now (a test passes one that fails).
     public static func resume(
         bookmark: Data, sandboxed: Bool = LibrarySetup.isSandboxed,
         makeBookmark: (URL) throws -> Data = { try LibraryBookmark.make(for: $0) }
