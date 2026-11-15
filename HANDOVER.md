@@ -119,9 +119,9 @@ the export cause now reads "(no up-to-date copy is on this device)" in both
 apps, not a Wi-Fi hint a reader on Wi-Fi was given too. **A scored paper with no snapshot row is unchecked in a report written again, never clear** (#657, all three; the snapshot does not gain it); *Check again* checks and counts it (#684: the desktop gives it a row, the apps' line reads its stored check, on Android any session's). A reopen's line counts it unchecked while no check of it is stored (#685: the desktop adds an unchecked row for the line, the apps' `recheckedChecks` the `failed` stand-in).
 **#629 stays open for the maintainer's decision** on item 4 (a re-lost page is
 counted twice; shortfalls keep no offset) and item 7 (counts lost when an
-error follows a cancel). Open issues are on the tracker. The apps have no
-refusal handling yet (the Python-only rows in
-`doc/cross_platform/analysis_failure_reporting.md`).
+error follows a cancel). Open: #641, #598, #621, #624, #625, #627, #633–#635;
+Apple #612, #613; Android #614, #615, #617–#619. The apps have no refusal
+handling yet (Python-only rows in `doc/cross_platform/analysis_failure_reporting.md`).
 
 **Owed by the maintainer** (stages C1 and C2 and the desktop browser rescue
 have landed):
@@ -174,9 +174,9 @@ git pin). Snapshot rows keep `run_status`/`run_deciding` as set-once facts.
   id `scripts/check_bmlib_ledger.py --bmlib ~/src/bmlib` lists (the weekly
   `bmlib drift` workflow fails until then). Contracts `pmid_canonical.json`,
   `score_values.json` (an unreadable score is a parse failure, never 3),
-  `europepmc_free_pdf.json`; converter **6**, analyser **2.7**. **Phase 4
-  consumes bmlib's Rust through UniFFI** (no production caller yet). Open:
-  #573–#581, #585, #587.
+  `europepmc_free_pdf.json`; converter **6**, analyser **2.7**. bmlib's Rust is
+  consumed through UniFFI (`BmlibFFI`): the retraction checks and the shared
+  paper library call it in production. Open: #573–#581, #585, #587.
 - **Transparency, compressed** (PRs #358–#419): every no-full-text rating
   says "Limited certainty because of lack of full text access". **Score =
   clamped sum of `score_components`; High iff `high_risk_triggers` is
