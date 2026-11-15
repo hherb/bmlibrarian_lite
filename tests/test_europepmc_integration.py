@@ -330,9 +330,14 @@ class TestPMCPDFDiscovery:
         JATS ahead of the PDF tiers (#786), so it answers "not here" (no
         request is made). Europe PMC's render answered 403 to every
         non-browser client on 2026-10-01 (#453); while it does, the chain
-        must say so rather than settle an absence.
+        must say so rather than settle an absence. Either way the render
+        must have been asked, so a failure before the PDF tiers cannot pass.
         """
-        discoverer = FulltextDiscoverer(pmc_open_data=_AbsentBucket())
+        progress: list[tuple[str, str]] = []
+        discoverer = FulltextDiscoverer(
+            progress_callback=lambda stage, status: progress.append((stage, status)),
+            pmc_open_data=_AbsentBucket(),  # type: ignore[arg-type]
+        )
         with (
             patch("bmlibrarian_lite.fulltext_discovery.find_existing_fulltext", return_value=None),
             patch("bmlibrarian_lite.fulltext_discovery.find_existing_pdf", return_value=None),
@@ -345,6 +350,7 @@ class TestPMCPDFDiscovery:
                 pmcid=PMC_PDF_ONLY_ARTICLE["pmcid"],
                 doi=PMC_PDF_ONLY_ARTICLE["doi"],
             )
+        assert ("discovery", "checking_europepmc_pdf") in progress, progress
         if not result.success:
             assert not result.absence_established, result.error
             assert result.lookups.failures, result.error
