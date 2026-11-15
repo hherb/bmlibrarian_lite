@@ -116,7 +116,7 @@ class RetractionCrossrefLookup(
         }
 
         val status = response.statusCode
-        val body = response.body?.toByteArray(Charsets.UTF_8) ?: ByteArray(0)
+        val body = response.body ?: ByteArray(0)
         val statusFailure = if (status == TransparencyHttpConstants.HTTP_STATUS_OK) null else RequestFailure.forHttpStatus(status)
         return parseCrossrefRetractionResponse(status.toUShort(), body, batch.dois).mapValues { (_, result) ->
             if (result !is CrossrefResult.Unreachable) return@mapValues CrossrefAnswer(result, null)

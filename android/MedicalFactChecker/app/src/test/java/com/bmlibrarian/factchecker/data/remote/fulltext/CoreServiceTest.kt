@@ -17,6 +17,7 @@
  */
 package com.bmlibrarian.factchecker.data.remote.fulltext
 
+import com.bmlibrarian.factchecker.data.remote.REFUSED_JSON_VALUES
 import android.util.Log
 import com.bmlibrarian.factchecker.data.remote.transparency.RequestPacer
 import com.bmlibrarian.factchecker.domain.model.RequestFailure
@@ -121,6 +122,17 @@ class CoreServiceTest {
             routes[path] = MockResponse().setBody(row.getValue("body").jsonPrimitive.content)
             assertEquals(row.getValue("name").jsonPrimitive.content, malformed, service().fetchText(doi))
         }
+    }
+
+    @Test
+    fun `an answer holding a value serde_json refuses is malformed`() = runBlocking {
+        val answer = """{"results":[{"doi":"$doi","fullText":"$hitText"}],"x":%s}"""
+        for (value in REFUSED_JSON_VALUES) {
+            routes[path] = MockResponse().setBody(answer.format(value))
+            assertEquals(value.take(10), malformed, service().fetchText(doi))
+        }
+        routes[path] = MockResponse().setBody(answer.format("1"))
+        assertEquals(served, service().fetchText(doi))
     }
 
     @Test

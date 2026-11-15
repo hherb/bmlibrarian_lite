@@ -18,6 +18,7 @@
 
 package com.bmlibrarian.factchecker.data.remote.transparency
 
+import com.bmlibrarian.factchecker.data.remote.strictJsonElement
 import android.util.Log
 import com.bmlibrarian.factchecker.domain.transparency.FunderInfo
 import com.bmlibrarian.factchecker.domain.transparency.FundingAnalyzer
@@ -29,7 +30,6 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
@@ -133,7 +133,7 @@ class CrossRefService(
         }
 
         val message = try {
-            JsonCasts.obj(JsonCasts.obj(Json.parseToJsonElement(body))?.get(MESSAGE_KEY))
+            JsonCasts.obj(JsonCasts.obj(strictJsonElement(body))?.get(MESSAGE_KEY))
         } catch (e: SerializationException) {
             null
         } ?: throw CrossRefException.ParseError("Invalid JSON structure")
