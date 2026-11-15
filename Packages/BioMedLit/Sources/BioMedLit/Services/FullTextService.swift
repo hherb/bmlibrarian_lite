@@ -103,6 +103,11 @@ public actor FullTextService {
     /// file. Defaults to ``PDFTitleChecker/check(fileURL:title:)``.
     private let titleChecker: @Sendable (URL, String) -> PDFTitleCheck
 
+    /// The shared paper library (design §4.5), or `nil` when none is set, and
+    /// then the chain runs exactly as without one. Read before any request,
+    /// and what the chain fetches is kept there.
+    private let library: (any FullTextLibrary)?
+
     /// How the Europe PMC full-text XML fetch retries a transient failure.
     ///
     /// Injectable so a test can pin what a throttle that outlasts its retries
@@ -274,6 +279,8 @@ public actor FullTextService {
     ///   - titleChecker: Whether a cached PDF carries the article's title
     ///     (#546). Defaults to ``PDFTitleChecker/check(fileURL:title:)``;
     ///     injectable so a test can decide it without a real PDF.
+    ///   - library: The shared paper library, or `nil` — the default — for
+    ///     none. Only macOS sets one; iOS keeps `nil`.
     public init(
         email: String,
         session: URLSession = FullTextService.makeSession(),
@@ -295,7 +302,8 @@ public actor FullTextService {
         writeCachedPDF: @escaping @Sendable (Data, URL) throws -> Void = FullTextService.writeAtomically,
         titleChecker: @escaping @Sendable (URL, String) -> PDFTitleCheck = { url, title in
             PDFTitleChecker.check(fileURL: url, title: title)
-        }
+        },
+        library: (any FullTextLibrary)? = nil
     ) {
         self.email = email
         self.europePMCService = europePMCService
@@ -317,6 +325,7 @@ public actor FullTextService {
         self.elsevierSession = elsevierSession
         self.writeCachedPDF = writeCachedPDF
         self.titleChecker = titleChecker
+        self.library = library
     }
 
     /// A credential as the settings hold it, trimmed; blank is none.
@@ -341,7 +350,7 @@ public actor FullTextService {
 
     /// The transport production uses.
     ///
-    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:openAlexRetry:coreAPIKey:coreKeyUnreadable:coreRetry:coreThrottle:elsevierAPIKey:elsevierInstToken:elsevierCredentialsUnreadable:elsevierRetry:elsevierSession:writeCachedPDF:titleChecker:)``
+    /// Separated from ``init(email:session:europePMCService:extractor:extractPDFText:europePMCRetry:pmcOpenDataRetry:openAlexRetry:coreAPIKey:coreKeyUnreadable:coreRetry:coreThrottle:elsevierAPIKey:elsevierInstToken:elsevierCredentialsUnreadable:elsevierRetry:elsevierSession:writeCachedPDF:titleChecker:library:)``
     /// so a test can
     /// substitute a stubbed `URLSession` without reproducing these timeouts.
     ///
@@ -367,6 +376,15 @@ public actor FullTextService {
     /// body-less XML deposit is held back rather than returned, so the PDF
     /// tiers still get their turn. A PDF that yields no text is returned only
     /// after CORE, asked once, served none (#499).
+    ///
+    /// With a library set (design §4.5), the library's JATS for the paper,
+    /// when usable, ends the lookup before any request; otherwise a JATS a
+    /// tier serves with a body is kept there, the library's PDF is read in
+    /// place of the first PDF tier's download, and a PDF the chain reads from
+    /// its cache is kept there, its cache copy removed once the library holds
+    /// it. A library that cannot be used never stops the lookup: the result's
+    /// ``FullTextResult/libraryFailure`` says why, and the source stays where
+    /// it is without a library.
     ///
     /// - Parameters:
     ///   - pmcId: PubMed Central ID (e.g., "PMC1234567").
@@ -410,6 +428,26 @@ public actor FullTextService {
         pmid: String,
         primaryKind: ArticleIdentifierKind? = nil,
         title: String? = nil
+    ) async throws -> FullTextResult {
+        let lookup = LibraryLookup(
+            library: library,
+            paper: Self.libraryPaper(pmcId: pmcId, doi: doi, pmid: pmid, primaryKind: primaryKind, title: title)
+        )
+        return lookup.finish(try await fetchThroughChain(
+            pmcId: pmcId, doi: doi, pmid: pmid, primaryKind: primaryKind, title: title, lookup: lookup
+        ))
+    }
+
+    /// ``fetchFullText(pmcId:doi:pmid:primaryKind:title:)``'s chain, given the
+    /// fetch's part of the library, which it reads, keeps into and records
+    /// failures on.
+    private func fetchThroughChain(
+        pmcId: String?,
+        doi: String?,
+        pmid: String,
+        primaryKind: ArticleIdentifierKind?,
+        title: String?,
+        lookup: LibraryLookup
     ) async throws -> FullTextResult {
         // Names the article for the PDF cache. Built once, from the identifiers
         // the *document* carries rather than from `resolvedPmcId` below: a key
@@ -463,6 +501,24 @@ public actor FullTextService {
         // was asked and could not be read (#480). Its own absence sets nothing.
         var pmcOpenDataShortfall: RequestFailure?
 
+        // The library's JATS first (design §4.5): usable, it ends the lookup
+        // before any request. Its notes and failures are logged by the library.
+        if let library = lookup.inUse {
+            switch library.jats(for: lookup.paper) {
+            case .usable(let xml, let file):
+                if let served = libraryJATSResult(xml, file: file, lookup: lookup, articleName: articleName) {
+                    // Held back like Europe PMC's body-less deposit
+                    if served.contentKind == .abstract { abstractOnly = served } else { return served }
+                }
+            case .wrongPaper(let message):
+                lookup.fail(message, unreachable: false)
+            case .failed(let message):
+                lookup.fail(message, unreachable: true)
+            case .unusable, .none:
+                break
+            }
+        }
+
         // Resolve PMC ID and PDF render URL from PMID or DOI if not already available
         var resolvedPmcId = pmcId
         var resolvedPreprintAccession: String?
@@ -513,7 +569,8 @@ public actor FullTextService {
                     let parsed = FullTextResult(
                         content: .europePMC(html: content.html, markdown: content.markdown),
                         warnings: content.warnings,
-                        contentKind: content.contentKind
+                        contentKind: content.contentKind,
+                        libraryFile: keptJATS(xml.data, content, origin: .europePMC, key: cacheKey, lookup: lookup)
                     )
                     // A body-less deposit is not an article. Returning it here —
                     // as this did — made it beat every remaining tier, so an
@@ -600,7 +657,8 @@ public actor FullTextService {
                     let parsed = FullTextResult(
                         content: .pmcOpenData(html: content.html, markdown: content.markdown),
                         warnings: content.warnings,
-                        contentKind: content.contentKind
+                        contentKind: content.contentKind,
+                        libraryFile: keptJATS(xml.data, content, origin: .pmcOpenData, key: cacheKey, lookup: lookup)
                     )
                     // Held back like Europe PMC's, so a PDF tier still gets its
                     // turn at the article body.
@@ -632,6 +690,21 @@ public actor FullTextService {
                     category: .fullText
                 )
             }
+        }
+
+        // The DOI CORE is asked by: resolver prefixes removed, as Python's
+        // `_clean_doi` (blank asks nothing)
+        let coreDOI = CORE.bareDOI(doi ?? "")
+
+        // The library's PDF, before the first PDF tier's request (design §4.5)
+        if let result = try libraryPDFResult(
+            lookup: lookup,
+            title: title,
+            degradation: degradation,
+            holdingAbstract: abstractOnly != nil,
+            articleName: articleName
+        ) {
+            return try await textlessCopyOrCORE(result, doi: coreDOI, degradation: degradation)
         }
 
         // Try Europe PMC PDF render URL (when XML is unavailable or body-less).
@@ -672,9 +745,6 @@ public actor FullTextService {
                 category: .fullText
             )
         }
-        // The DOI CORE is asked by: resolver prefixes removed, as Python's
-        // `_clean_doi` (blank asks nothing)
-        let coreDOI = CORE.bareDOI(doi ?? "")
         // A render served and not cached (#480). Not an open-access copy, so it
         // neither settles the shortfall nor stops the Unpaywall walk: a copy
         // Unpaywall names may still be saved. Told only if none is.
@@ -696,7 +766,11 @@ public actor FullTextService {
                 "Using Europe PMC PDF render: \(urlString)",
                 category: .fullText
             )
-            let outcome = try await downloadAndExtract(from: pdfURL, key: cacheKey, title: title)
+            let outcome = keptInLibrary(
+                try await downloadAndExtract(from: pdfURL, key: cacheKey, title: title),
+                origin: .europePMCPDF,
+                lookup: lookup
+            )
             // Every outcome named, so a new one is decided here, not lost
             switch outcome {
             case .notCached:
@@ -754,7 +828,8 @@ public actor FullTextService {
                holdingAbstract: abstractOnly != nil,
                articleName: articleName,
                shortfall: &openAccessShortfall,
-               copyServed: &openAccessCopyServed
+               copyServed: &openAccessCopyServed,
+               lookup: lookup
            ) {
             return try await textlessCopyOrCORE(result, doi: coreDOI, degradation: degradation)
         }
@@ -805,7 +880,8 @@ public actor FullTextService {
                 shortfall: &openAccessShortfall,
                 notSavedFrom: &openAccessNotSavedFrom,
                 copyServed: &openAccessCopyServed,
-                tried: &triedPDFs
+                tried: &triedPDFs,
+                lookup: lookup
             ) {
                 return try await textlessCopyOrCORE(result, doi: coreDOI, degradation: degradation)
             }
@@ -833,7 +909,8 @@ public actor FullTextService {
                         shortfall: &openAccessShortfall,
                         notSavedFrom: &openAccessNotSavedFrom,
                         copyServed: &openAccessCopyServed,
-                        tried: &triedPDFs
+                        tried: &triedPDFs,
+                        lookup: lookup
                     ) {
                         return try await textlessCopyOrCORE(result, doi: coreDOI, degradation: degradation)
                     }
@@ -1746,7 +1823,7 @@ public actor FullTextService {
     /// what it left unsettled: the chain's Elsevier step.
     ///
     /// Served, the PDF's text is extracted as any downloaded PDF's, by the rule
-    /// every PDF tier shares (``pdfTierResult(outcome:content:degradation:holdingAbstract:articleName:linkFallback:)``).
+    /// every PDF tier shares (``pdfTierResult(outcome:content:degradation:holdingAbstract:articleName:linkFallback:libraryFile:)``).
     /// A 404 or a first page adds nothing. An unreachable Elsevier, its refused
     /// key or its refusal from this network is added to the shortfall. A PDF
     /// that could not be saved adds `request_failed` (the apps' deviation from
@@ -1768,6 +1845,8 @@ public actor FullTextService {
     ///   - shortfall: What went unsettled so far; added to.
     ///   - copyServed: Set when the PDF is cached without text while an
     ///     abstract is held: obtained, so the question is settled.
+    ///   - lookup: The fetch's part of the library, which the PDF read is
+    ///     kept in.
     /// - Returns: The result to return, or `nil` to go on to Unpaywall.
     /// - Throws: `CancellationError`.
     private func elsevierResult(
@@ -1778,7 +1857,8 @@ public actor FullTextService {
         holdingAbstract: Bool,
         articleName: String,
         shortfall: inout OpenAccessShortfall?,
-        copyServed: inout Bool
+        copyServed: inout Bool,
+        lookup: LibraryLookup
     ) async throws -> FullTextResult? {
         guard !doi.isEmpty, Elsevier.isEligible(doi: doi) else { return nil }
         // its PDF is only read with extraction on, so only then is a lost key a loss
@@ -1820,7 +1900,7 @@ public actor FullTextService {
             fetched = try await fetchElsevierPDF(doi: doi, cacheKey: cacheKey)
             read = try readElsevierPDF(fetched, doi: doi, title: title)
         }
-        if let read {
+        if let read = read.map({ keptInLibrary($0, origin: .elsevier, lookup: lookup) }) {
             let localPath: String
             switch read {
             case .wrongArticle:
@@ -3343,6 +3423,8 @@ public actor FullTextService {
     ///   - linkFallback: Set to a link-only result when a download failed, so
     ///     the chain can still offer the URL if no later tier does better.
     ///     First writer wins: the earliest tier is the best-quality source.
+    ///   - libraryFile: The library's file of the PDF, for the library's own
+    ///     PDF; `nil` — the default — for a tier's.
     /// - Returns: The result to return, or `nil` to continue the chain.
     private func pdfTierResult(
         outcome: PDFTierOutcome,
@@ -3350,7 +3432,8 @@ public actor FullTextService {
         degradation: FullTextDegradation?,
         holdingAbstract: Bool,
         articleName: String,
-        linkFallback: inout FullTextResult?
+        linkFallback: inout FullTextResult?,
+        libraryFile: LibraryFileReference? = nil
     ) -> FullTextResult? {
         switch outcome {
         case .downloadFailed, .notCached:
@@ -3407,7 +3490,8 @@ public actor FullTextService {
                 degradation: degradation,
                 contentKind: .none,
                 localPDFPath: localPath,
-                extractionCoverage: coverage
+                extractionCoverage: coverage,
+                libraryFile: libraryFile
             )
 
         case .extracted(let localPath, let text, let coverage):
@@ -3417,7 +3501,8 @@ public actor FullTextService {
                 contentKind: .extracted,
                 extractedText: text,
                 localPDFPath: localPath,
-                extractionCoverage: coverage
+                extractionCoverage: coverage,
+                libraryFile: libraryFile
             )
         }
     }
@@ -3445,8 +3530,8 @@ public actor FullTextService {
     ///   - content: The result content for an address.
     ///   - cacheKey: Names the article, and so the cached file.
     ///   - title: The article's title each PDF is checked against (#546), or `nil`.
-    ///   - degradation: As ``pdfTierResult(outcome:content:degradation:holdingAbstract:articleName:linkFallback:)``.
-    ///   - holdingAbstract: As ``pdfTierResult(outcome:content:degradation:holdingAbstract:articleName:linkFallback:)``.
+    ///   - degradation: As ``pdfTierResult(outcome:content:degradation:holdingAbstract:articleName:linkFallback:libraryFile:)``.
+    ///   - holdingAbstract: As ``pdfTierResult(outcome:content:degradation:holdingAbstract:articleName:linkFallback:libraryFile:)``.
     ///   - articleName: How to name this article in the log.
     ///   - linkFallback: The chain's link fallback.
     ///   - shortfall: What went unsettled so far; added to.
@@ -3454,6 +3539,8 @@ public actor FullTextService {
     ///   - copyServed: Set when a copy is served, whether not cached or
     ///     cached without text: either settles the open-access question.
     ///   - tried: Addresses already asked, across sources; updated.
+    ///   - lookup: The fetch's part of the library, which each PDF read is
+    ///     kept in.
     /// - Returns: The result to return, or `nil` to go on down the chain.
     /// - Throws: `CancellationError`.
     private func tryOpenAccessPDFs(
@@ -3469,7 +3556,8 @@ public actor FullTextService {
         shortfall: inout OpenAccessShortfall?,
         notSavedFrom: inout String?,
         copyServed: inout Bool,
-        tried: inout Set<String>
+        tried: inout Set<String>,
+        lookup: LibraryLookup
     ) async throws -> FullTextResult? {
         for address in addresses where tried.insert(address).inserted {
             // An address we cannot fetch leaves that copy unassessed, not
@@ -3487,7 +3575,11 @@ public actor FullTextService {
                 )
                 continue
             }
-            let outcome = try await downloadAndExtract(from: pdfURL, key: cacheKey, title: title)
+            let outcome = keptInLibrary(
+                try await downloadAndExtract(from: pdfURL, key: cacheKey, title: title),
+                origin: content(pdfURL).source,
+                lookup: lookup
+            )
             switch outcome {
             case .wrongArticle:
                 // Served, and another article's (#546): it settles nothing
@@ -4005,6 +4097,342 @@ public actor FullTextService {
                 "Failed to clear PDF cache: \(error.localizedDescription)",
                 category: .fullText
             )
+        }
+    }
+}
+
+// MARK: - Shared paper library
+
+extension FullTextService {
+    /// The shared library's part in one fetch (bmlib's `_FromLibrary`): the
+    /// paper it is told of, the PDFs the fetch kept there, and the first
+    /// library failure, which ends the library's use for the rest of the call
+    /// (bmlib's rule). One per
+    /// ``fetchFullText(pmcId:doi:pmid:primaryKind:title:)`` call, passed down
+    /// the chain and never shared, so two fetches interleaving on the actor
+    /// cannot see each other's failure.
+    final class LibraryLookup {
+        /// The library, or `nil` when none is set.
+        private let library: (any FullTextLibrary)?
+        /// The paper as the library is told of it.
+        let paper: LibraryPaper
+        /// The first library failure in this call, or `nil`.
+        private(set) var failure: String?
+        /// Whether that failure means the library could not be read or
+        /// written, so a JATS the chain serves waits in the PDF cache (design
+        /// §4.6). Not for a file of another paper: that is no reason to move
+        /// one in later.
+        private(set) var unreachable = false
+        /// The PDFs this call kept in the library, by their path there.
+        private var kept: [String: LibraryFileReference] = [:]
+
+        /// The part of one fetch for `paper` in `library`, `nil` for none.
+        init(library: (any FullTextLibrary)?, paper: LibraryPaper) {
+            self.library = library
+            self.paper = paper
+        }
+
+        /// The library while this call may still use it: one is set and no
+        /// library failure has been met.
+        var inUse: (any FullTextLibrary)? { failure == nil ? library : nil }
+
+        /// Record the call's library failure, already logged where it was
+        /// worded; the library is not used again in this call.
+        ///
+        /// - Parameters:
+        ///   - text: The failure, for the result's `libraryFailure`.
+        ///   - unreachable: Whether the library could not be read or written.
+        func fail(_ text: String, unreachable: Bool) {
+            guard failure == nil else { return }
+            failure = text
+            self.unreachable = unreachable
+        }
+
+        /// Record a PDF kept in the library, so the result read from it names
+        /// its file.
+        func record(_ file: LibraryKept) {
+            kept[file.path] = file.file
+        }
+
+        /// `result` with this call's library failure, and its library file:
+        /// its own (the library's content, a JATS kept), else that of the PDF
+        /// it reads, when this call kept it. Unchanged without a library.
+        func finish(_ result: FullTextResult) -> FullTextResult {
+            guard library != nil else { return result }
+            return result.noting(
+                libraryFile: result.libraryFile ?? result.localPDFPath.flatMap { kept[$0] },
+                libraryFailure: failure
+            )
+        }
+    }
+
+    /// The paper as the library is told of it: the request's own identifiers,
+    /// never ones a lookup resolved (as ``ArticleCacheKey`` is built, so the
+    /// paper is filed the same way on every run), and its title.
+    ///
+    /// The primary slot is read by its kind: a PMC accession in it is the PMC
+    /// ID (when the request names none), a PubMed ID or a `PPR` accession
+    /// (bmlib's `PaperIds` takes one as the pmid) is the pmid, and anything
+    /// else (another Europe PMC source's accession, a value neither digits
+    /// nor `PPR` and digits) is not passed: the library would refuse it.
+    ///
+    /// - Parameters:
+    ///   - pmcId: The request's PMC ID.
+    ///   - doi: The request's DOI.
+    ///   - pmid: The request's primary slot.
+    ///   - primaryKind: What the slot holds, when stated.
+    ///   - title: The article's title.
+    /// - Returns: The paper, each value trimmed, blank ones `nil`.
+    static func libraryPaper(
+        pmcId: String?, doi: String?, pmid: String, primaryKind: ArticleIdentifierKind?, title: String?
+    ) -> LibraryPaper {
+        var pmcSlot = trimmed(pmcId)
+        var pmidSlot: String?
+        if let slot = trimmed(pmid) {
+            switch ArticleIdentifierKind.resolved(declared: primaryKind, accession: slot) {
+            case .pmc:
+                pmcSlot = pmcSlot ?? slot
+            case .pubmed, .preprint, .unknown:
+                let prefix = BioMedLitConstants.europePMCPreprintAccessionPrefix
+                let digits = slot.uppercased().hasPrefix(prefix) ? String(slot.dropFirst(prefix.count)) : slot
+                if ArticleIdentifierKind.isAllASCIIDigits(digits) { pmidSlot = slot }
+            case .europePMCSource:
+                break
+            }
+        }
+        return LibraryPaper(pmid: pmidSlot, doi: trimmed(doi), pmcId: pmcSlot, title: trimmed(title))
+    }
+
+    /// The library's usable JATS, rendered as the lookup's result, its use
+    /// noted in this installation's record.
+    ///
+    /// - Parameters:
+    ///   - xml: The JATS, digest checked.
+    ///   - file: The library's file of it.
+    ///   - lookup: The fetch's part of the library.
+    ///   - articleName: How the log names the article.
+    /// - Returns: The result, or `nil` when it does not render here (warned
+    ///   of, and the chain runs).
+    func libraryJATSResult(
+        _ xml: Data, file: LibraryFileReference, lookup: LibraryLookup, articleName: String
+    ) -> FullTextResult? {
+        let content: EuropePMCRendering
+        do {
+            content = try renderEuropePMCXML(xml, accession: lookup.paper.pmcId ?? "")
+        } catch {
+            BioMedLitLib.logger?.warning(
+                "The library's JATS for \(articleName) could not be rendered (\(error)); looking further",
+                category: .fullText
+            )
+            return nil
+        }
+        // A note that fails ends the library's use, but the JATS is still
+        // served: its bytes passed the digest check (bmlib's rule)
+        if let failure = lookup.inUse?.noteUse(file, paper: lookup.paper) {
+            lookup.fail(failure.description, unreachable: true)
+        }
+        BioMedLitLib.logger?.info("Serving the library's JATS for \(articleName)", category: .fullText)
+        return FullTextResult(
+            content: .libraryJATS(html: content.html, markdown: content.markdown),
+            warnings: content.warnings,
+            contentKind: content.contentKind,
+            libraryFile: file
+        )
+    }
+
+    /// A JATS a chain tier served and rendered, kept in the library when it
+    /// has a body (bmlib keeps no body-less one). While the library cannot be
+    /// reached it waits in the PDF cache instead (``writeWaitingJATS(_:key:)``).
+    ///
+    /// - Parameters:
+    ///   - xml: The JATS as served.
+    ///   - content: Its rendering.
+    ///   - origin: The tier that served it.
+    ///   - key: Names the article in the PDF cache, or `nil` for none.
+    ///   - lookup: The fetch's part of the library.
+    /// - Returns: The library's file of it, or `nil` when it was not kept.
+    func keptJATS(
+        _ xml: Data, _ content: EuropePMCRendering, origin: FullTextSource, key: ArticleCacheKey?,
+        lookup: LibraryLookup
+    ) -> LibraryFileReference? {
+        guard content.contentKind != .abstract else { return nil }
+        if let library = lookup.inUse {
+            switch library.keep(xml, kind: BioMedLitConstants.libraryKindJATS, paper: lookup.paper,
+                                origin: origin.displayName) {
+            case .success(let kept):
+                if let kept {
+                    BioMedLitLib.logger?.info(
+                        "JATS from \(origin.displayName) kept in the library at \(kept.path)", category: .fullText
+                    )
+                }
+                return kept?.file
+            case .failure(let failure):
+                lookup.fail(failure.description, unreachable: true)
+            }
+        }
+        if lookup.unreachable, let key { Self.writeWaitingJATS(xml, key: key) }
+        return nil
+    }
+
+    /// A JATS kept while the library cannot be reached, waiting in the PDF
+    /// cache as `<cacheKey>-<sha12>.xml` (design §4.6; moving it in is step
+    /// 3c's). A write that fails is logged: the article's text is still
+    /// served, and the result's library failure already says the library was
+    /// not reached.
+    ///
+    /// - Parameters:
+    ///   - xml: The JATS as served.
+    ///   - key: Names the article.
+    static func writeWaitingJATS(_ xml: Data, key: ArticleCacheKey) {
+        let digest = SHA256.hash(data: xml).map { String(format: "%02x", $0) }.joined()
+        let name = "\(key.filenameComponent)-\(digest.prefix(BioMedLitConstants.libraryWaitingDigestHexChars))"
+            + BioMedLitConstants.libraryWaitingJATSSuffix
+        let url = pdfCacheDirectory.appendingPathComponent(name)
+        do {
+            try writeAtomically(xml, to: url)
+            BioMedLitLib.logger?.info(
+                "JATS for \(key.logDescription) waits for the library at \(url.path)", category: .fullText
+            )
+        } catch {
+            BioMedLitLib.logger?.error(
+                "Could not keep the JATS for \(key.logDescription) waiting for the library at \(url.path): "
+                    + error.localizedDescription,
+                category: .fullText
+            )
+        }
+    }
+
+    /// The library's PDF of the paper as the lookup's result, read in place
+    /// of a download (design §4.5), its use noted.
+    ///
+    /// Checked against the title first (§4.4: a record is a claim, not proof),
+    /// once, on the library's path: a PDF the check refuses is not served and
+    /// is the call's library failure, and it is left where it is (a cached one
+    /// would be set aside; the library's files are bmlib's).
+    ///
+    /// - Parameters:
+    ///   - lookup: The fetch's part of the library.
+    ///   - title: The article's title, or `nil` to check nothing.
+    ///   - degradation: As ``pdfTierResult(outcome:content:degradation:holdingAbstract:articleName:linkFallback:libraryFile:)``.
+    ///   - holdingAbstract: As ``pdfTierResult(outcome:content:degradation:holdingAbstract:articleName:linkFallback:libraryFile:)``.
+    ///   - articleName: How the log names the article.
+    /// - Returns: The result, or `nil` to go on down the chain.
+    /// - Throws: `CancellationError`.
+    private func libraryPDFResult(
+        lookup: LibraryLookup,
+        title: String?,
+        degradation: FullTextDegradation?,
+        holdingAbstract: Bool,
+        articleName: String
+    ) throws -> FullTextResult? {
+        guard let library = lookup.inUse else { return nil }
+        let held: LibraryHeldPDF
+        switch library.pdf(for: lookup.paper) {
+        case .success(let found?): held = found
+        case .success(nil): return nil
+        case .failure(let failure):
+            lookup.fail(failure.description, unreachable: true)
+            return nil
+        }
+        if let title, try refusesAsAnotherArticle(held.path, title: title) {
+            let url = URL(fileURLWithPath: held.path)
+            let message = BioMedLitConstants.libraryPDFAnotherArticleFailure(
+                file: "\(url.deletingLastPathComponent().lastPathComponent)/\(url.lastPathComponent)"
+            )
+            BioMedLitLib.logger?.warning(message, category: .fullText)
+            lookup.fail(message, unreachable: false)
+            return nil
+        }
+        // Judged already: read without a second check. With extraction off
+        // nothing is read, and the file is served as one without text.
+        let outcome = extractPDFText
+            ? try extractText(fromCachedPDF: held.path, title: nil)
+            : .noText(localPath: held.path, coverage: nil)
+        if case .vanished = outcome {
+            BioMedLitLib.logger?.warning(
+                BioMedLitConstants.libraryPDFGoneWarning(path: held.path), category: .fullText
+            )
+            return nil
+        }
+        if let failure = library.noteUse(held.file, paper: lookup.paper) {
+            lookup.fail(failure.description, unreachable: true)
+        }
+        BioMedLitLib.logger?.info(
+            "Using the library's PDF \(held.path) for \(articleName) in place of a download", category: .fullText
+        )
+        // A PDF in hand: no download failed, so no link
+        var noLink: FullTextResult?
+        return pdfTierResult(
+            outcome: outcome,
+            content: .libraryPDF(localPath: held.path),
+            degradation: degradation,
+            holdingAbstract: holdingAbstract,
+            articleName: articleName,
+            linkFallback: &noLink,
+            libraryFile: held.file
+        )
+    }
+
+    /// A PDF a tier read from the cache, kept in the library (design §4.5):
+    /// once the library holds it (the save returned), the cache copy is
+    /// removed and the outcome reads from the library's file. A PDF the save
+    /// refuses stays in the cache, read from there, and the failure is the
+    /// call's. Any other outcome, or no library in use, is returned as it is.
+    ///
+    /// - Parameters:
+    ///   - outcome: What the tier's read came to.
+    ///   - origin: The tier, whose display name the library records.
+    ///   - lookup: The fetch's part of the library.
+    /// - Returns: The outcome, its path the library's when kept.
+    private func keptInLibrary(
+        _ outcome: PDFTierOutcome, origin: FullTextSource, lookup: LibraryLookup
+    ) -> PDFTierOutcome {
+        guard let library = lookup.inUse else { return outcome }
+        let cachePath: String
+        switch outcome {
+        case .noText(let path, _), .extracted(let path, _, _): cachePath = path
+        case .notAttempted, .downloadFailed, .notCached, .wrongArticle, .vanished: return outcome
+        }
+        let bytes: Data
+        do {
+            bytes = try Data(contentsOf: URL(fileURLWithPath: cachePath))
+        } catch {
+            // Not the library's failure: the PDF is served from the cache
+            BioMedLitLib.logger?.warning(
+                "Could not read the cached PDF \(cachePath) to keep it in the library "
+                    + "(\(error.localizedDescription)); serving it from the cache",
+                category: .fullText
+            )
+            return outcome
+        }
+        let kept: LibraryKept
+        switch library.keep(bytes, kind: BioMedLitConstants.libraryKindPDF, paper: lookup.paper,
+                            origin: origin.displayName) {
+        case .success(let file?): kept = file
+        case .success(nil): return outcome
+        case .failure(let failure):
+            lookup.fail(failure.description, unreachable: true)
+            return outcome
+        }
+        lookup.record(kept)
+        BioMedLitLib.logger?.info(
+            "PDF from \(origin.displayName) kept in the library at \(kept.path)", category: .fullText
+        )
+        do {
+            try FileManager.default.removeItem(atPath: cachePath)
+        } catch {
+            // Only disk: the library's copy is the one read from now
+            BioMedLitLib.logger?.warning(
+                "Could not remove the cache copy \(cachePath) of a PDF the library holds: "
+                    + error.localizedDescription,
+                category: .fullText
+            )
+        }
+        switch outcome {
+        case .noText(_, let coverage): return .noText(localPath: kept.path, coverage: coverage)
+        case .extracted(_, let text, let coverage):
+            return .extracted(localPath: kept.path, text: text, coverage: coverage)
+        case .notAttempted, .downloadFailed, .notCached, .wrongArticle, .vanished: return outcome
         }
     }
 }

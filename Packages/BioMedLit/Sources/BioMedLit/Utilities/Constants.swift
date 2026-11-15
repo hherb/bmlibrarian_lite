@@ -926,6 +926,10 @@ public enum BioMedLitConstants {
     /// reached (`<cacheKey>-<sha12>.xml`), waiting to be moved in (design §4.6).
     public static let libraryWaitingJATSSuffix = ".xml"
 
+    /// How many hex digits of its SHA-256 name a waiting JATS (the `sha12` of
+    /// `<cacheKey>-<sha12>.xml`).
+    public static let libraryWaitingDigestHexChars = 12
+
     // MARK: - Shared paper library: bmlib's sentences
     //
     // The notes and failures of the fetch's library source, in bmlib's
@@ -1005,6 +1009,22 @@ public enum BioMedLitConstants {
     public static func libraryJATSWrongPaperNote(file: String, field: String, theirs: String, ours: String) -> String {
         "the library's JATS \(file) is another paper's: its own \(field) \(theirs) is not the request's \(ours), "
             + "so nothing is kept in the library in this lookup"
+    }
+
+    /// The failure for a library PDF the title check refuses (design §4.4: a
+    /// record is a claim, not proof).
+    ///
+    /// - Parameter file: The file as "folder/name".
+    public static func libraryPDFAnotherArticleFailure(file: String) -> String {
+        "the library's PDF \(file) is another article's: its first page with text does not carry the title, "
+            + "so it is not served and nothing is kept in the library in this lookup"
+    }
+
+    /// The warning for a library PDF gone between its read and its extraction.
+    ///
+    /// - Parameter path: Where it was.
+    public static func libraryPDFGoneWarning(path: String) -> String {
+        "The library's PDF \(path) went away before it was read; downloading the paper's PDF instead."
     }
 }
 
