@@ -328,12 +328,72 @@ final class LibrarySessionTests: XCTestCase {
 
         let rechecking = Task { await session.recheck() }
         await fulfillment(of: [gate.entered], timeout: 10)
-        XCTAssertTrue(session.isWorking)
         await session.recheck()
         XCTAssertEqual(gate.calls, 2, "the second re-check did not resume")
         gate.open()
         await rechecking.value
         XCTAssertFalse(session.isWorking)
+    }
+
+    /// A re-check leaves *Choose…* enabled, and a library chosen while its
+    /// resume runs wins.
+    func testChooseDuringARechecksResumeProceedsAndWins() async throws {
+        let store = MemoryStore()
+        let dir = try await chosenLibrary(in: store)
+        try FileManager.default.removeItem(at: dir)
+        let gate = Gate(holding: 2)
+        let session = LibrarySession(store: store, resume: { gate.pass(); return LibrarySetup.resume(bookmark: $0) })
+        await session.resumeAtLaunch()
+        let rechecking = Task { await session.recheck() }
+        await fulfillment(of: [gate.entered], timeout: 10)
+        XCTAssertFalse(session.isWorking, "a re-check does not disable the Library setting's buttons")
+
+        let other = try freshFolder()
+        await session.choose(other)
+        defer { session.stopAccess() }
+        gate.open()
+        await rechecking.value
+        guard case let .reachable(name, _) = session.state else { return XCTFail("\(session.state)") }
+        XCTAssertEqual(name, other.lastPathComponent)
+        XCTAssertEqual(session.access?.folderURL.lastPathComponent, other.lastPathComponent)
+    }
+
+    /// A held library found lost is resumed at once: a drive remounted
+    /// elsewhere is reached on the same activation.
+    func testAHeldLibraryFoundLostIsResumedAtOnce() async throws {
+        let store = MemoryStore()
+        let gate = Gate(holding: 0)
+        let session = LibrarySession(
+            store: store, resume: { gate.pass(); return LibrarySetup.resume(bookmark: $0) },
+            recheckFolder: { _ in "gone" })
+        await session.choose(try freshFolder())
+        await session.recheck()
+        defer { session.stopAccess() }
+        XCTAssertEqual(gate.calls, 1)
+        guard case .reachable = session.state else { return XCTFail("\(session.state)") }
+        XCTAssertNotNil(session.access)
+    }
+
+    /// The library a fetch goes through while the one set cannot be reached:
+    /// one that fails with the reason, so a source fetched waits (design §4.6).
+    func testTheUnreachableLibraryIsOnlyForAnUnreachableOne() async throws {
+        let store = MemoryStore()
+        let session = LibrarySession(store: store)
+        XCTAssertNil(session.unreachableLibrary, "none set")
+        await session.choose(try freshFolder())
+        XCTAssertNil(session.unreachableLibrary, "reachable")
+        session.stopAccess()
+
+        let dir = try await chosenLibrary(in: store)
+        try FileManager.default.removeItem(at: dir)
+        let lost = LibrarySession(store: store)
+        await lost.resumeAtLaunch()
+        guard case let .unreachable(reason) = lost.state else { return XCTFail("\(lost.state)") }
+        let paper = LibraryPaper(pmid: "1", doi: nil, pmcId: nil)
+        guard case let .failed(message) = try XCTUnwrap(lost.unreachableLibrary).jats(for: paper) else {
+            return XCTFail("not failed")
+        }
+        XCTAssertTrue(message.contains(reason))
     }
 }
 #endif

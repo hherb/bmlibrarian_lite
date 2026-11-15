@@ -395,14 +395,25 @@ final class Document {
         func ending(_ text: String) -> String { text.hasSuffix(".") ? text : text + "." }
         var notices: [String] = []
         if let why = fullTextLibraryWaiting {
-            notices.append("Kept in this app until the paper library can be reached: " + ending(why))
+            notices.append(LibraryNoticeCopy.waitingPrefix + ending(why))
         } else if let note = fullTextLibraryNote {
-            notices.append("The paper library could not be used for this paper: " + ending(note))
+            notices.append(LibraryNoticeCopy.failurePrefix + ending(note))
         }
         if case let .unreachable(reason) = libraryState, fullTextLibrarySHA256 != nil {
-            notices.append("The paper library cannot be reached: " + ending(reason))
+            notices.append(LibraryNoticeCopy.unreachablePrefix + ending(reason))
         }
         return notices
+    }
+
+    /// The sentences of ``libraryNotices(libraryState:)``, each followed by
+    /// bmlib's or the session's text.
+    private enum LibraryNoticeCopy {
+        /// Before why a source waits for the library.
+        static let waitingPrefix = "Kept in this app until the paper library can be reached: "
+        /// Before what went wrong with the library, when nothing waits.
+        static let failurePrefix = "The paper library could not be used for this paper: "
+        /// Before why the library cannot be reached.
+        static let unreachablePrefix = "The paper library cannot be reached: "
     }
 
     /// Store `path`, the PDF's file found again in the library by

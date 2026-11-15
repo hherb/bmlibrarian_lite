@@ -336,6 +336,33 @@ final class FullTextServiceLibraryTests: XCTestCase {
         XCTAssertTrue(fake.kept.isEmpty)
     }
 
+    /// A library set but unreachable (design §4.6): the download stays in the
+    /// cache, waits for the library, and the failure names the reason.
+    func testASetLibraryThatCannotBeReachedLeavesTheDownloadWaiting() async throws {
+        let reason = "the folder no longer holds the paper library"
+        stubUnpaywallPDF()
+
+        let result = try await fetchPDF(makeService(library: UnreachableLibrary(reason: reason)))
+
+        XCTAssertEqual(result.source, .unpaywall)
+        XCTAssertEqual(result.localPDFPath, cachedPDFPath)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cachedPDFPath))
+        XCTAssertTrue(result.libraryWaiting)
+        XCTAssertNil(result.libraryFile)
+        XCTAssertTrue(try XCTUnwrap(result.libraryFailure).contains(reason))
+    }
+
+    /// Like the library, a paper with no identifier it could file is not
+    /// touched: nothing fails, nothing waits.
+    func testTheUnreachableLibraryAnswersNothingForAPaperWithNoIdentifiers() {
+        let library = UnreachableLibrary(reason: "gone")
+        let paper = LibraryPaper(pmid: nil, doi: nil, pmcId: nil, title: "T")
+        guard case .none = library.jats(for: paper) else { return XCTFail("touched") }
+        XCTAssertNil(try library.pdf(for: paper).get())
+        XCTAssertNil(try library.keep(Data(), kind: BioMedLitConstants.libraryKindPDF, paper: paper, origin: "o").get())
+        XCTAssertNil(library.noteUse(LibraryFileReference(sha256: "a", kind: "pdf"), paper: paper))
+    }
+
     func testFailedPDFSaveKeepsTheCacheCopy() async throws {
         let fake = FakeLibrary()
         fake.keepAnswer = .failure(Self.unreachable)

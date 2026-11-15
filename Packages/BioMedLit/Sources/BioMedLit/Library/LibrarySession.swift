@@ -40,11 +40,16 @@ public final class LibrarySession {
     /// success.
     public private(set) var lastError: String?
 
-    /// True while a choice, a resume or a re-check is running.
+    /// True while a choice or the launch's resume is running: what disables
+    /// the Library setting's buttons. A re-check does not count (a missing
+    /// volume can be slow to resolve); a choice made during one stands.
     public var isWorking: Bool { running > 0 }
 
-    /// How many choices, resumes and re-checks are running.
+    /// How many choices and launch resumes are running.
     private var running = 0
+
+    /// How many re-checks are running.
+    @ObservationIgnored private var rechecking = 0
 
     /// Bumped by each choice made and each *Stop using*: a resume or re-check
     /// that started under an older one is out of date when it ends.
@@ -89,13 +94,19 @@ public final class LibrarySession {
     /// At launch: reach the stored library, if any. An unreachable one keeps
     /// its bookmark (a drive may be plugged back in) and shows why.
     public func resumeAtLaunch() async {
+        running += 1
+        defer { running -= 1 }
+        await resumeStored()
+    }
+
+    /// Reach the stored library, if any; an outcome out of date when it ends
+    /// is dropped.
+    private func resumeStored() async {
         guard let bookmark = store.libraryBookmark else {
             state = .notChosen
             return
         }
         let startedAt = generation
-        running += 1
-        defer { running -= 1 }
         let resume = self.resume
         let outcome = await Task.detached { resume(bookmark) }.value
         guard generation == startedAt else {
@@ -144,27 +155,37 @@ public final class LibrarySession {
 
     /// When the app becomes active (design §4.6): a held library whose folder
     /// is gone (its drive unplugged) becomes unreachable, its bookmark kept
-    /// and access stopped; an unreachable one is resumed again, as at launch;
-    /// with none set nothing happens. Skipped while another choice, resume or
-    /// re-check runs.
+    /// and access stopped, and is resumed once at once (a drive remounted
+    /// elsewhere); an unreachable one is resumed again, as at launch; with
+    /// none set nothing happens. Skipped while a choice, the launch's resume
+    /// or another re-check runs.
     public func recheck() async {
-        guard !isWorking else { return }
+        guard !isWorking, rechecking == 0 else { return }
+        rechecking += 1
+        defer { rechecking -= 1 }
         switch state {
         case .notChosen:
             return
         case .unreachable:
-            await resumeAtLaunch()
+            await resumeStored()
         case .reachable:
             guard let held = access else { return }
             let startedAt = generation
-            running += 1
-            defer { running -= 1 }
             let recheckFolder = self.recheckFolder
             let lost = await Task.detached { recheckFolder(held.folderURL) }.value
             guard generation == startedAt, access === held, let lost else { return }
             stopAccess()
             state = .unreachable(reason: lost)
+            await resumeStored()
         }
+    }
+
+    /// The library a fetch goes through while the one set cannot be reached:
+    /// one that fails with the reason, so a source fetched waits for it
+    /// (design §4.6). nil unless the state is unreachable.
+    public var unreachableLibrary: UnreachableLibrary? {
+        guard case let .unreachable(reason) = state else { return nil }
+        return UnreachableLibrary(reason: reason)
     }
 
     /// Stop access to the folder (at quit), keeping the setting.
