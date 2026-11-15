@@ -897,6 +897,10 @@ public enum BioMedLitConstants {
     /// The marker file bmlib writes at a library folder's root
     /// (`{"format": "bmlib-library", "version": 1}`).
     public static let libraryMarkerFileName = "bmlib-library.json"
+
+    /// The names of the folders macOS keeps trashed items in: the home Trash
+    /// and each volume's. A library is never kept inside one.
+    public static let trashFolderNames: Set<String> = [".Trash", ".Trashes"]
 }
 
 // MARK: - PubMed Filters

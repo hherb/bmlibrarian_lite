@@ -75,17 +75,36 @@ final class LibraryAccessTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: marker(in: dir).path))
     }
 
-    func testIsInTrashByComponentPrefix() {
-        let trash = URL(fileURLWithPath: "/Users/x/.Trash", isDirectory: true)
-        XCTAssertTrue(LibrarySetup.isInTrash(
-            URL(fileURLWithPath: "/Users/x/.Trash/lib", isDirectory: true), trash: trash))
-        XCTAssertTrue(LibrarySetup.isInTrash(trash, trash: trash))
-        XCTAssertFalse(LibrarySetup.isInTrash(
-            URL(fileURLWithPath: "/Users/x/.Trash-not/lib", isDirectory: true), trash: trash))
-        XCTAssertFalse(LibrarySetup.isInTrash(
-            URL(fileURLWithPath: "/Users/x/Papers", isDirectory: true), trash: trash))
-        XCTAssertFalse(LibrarySetup.isInTrash(
-            URL(fileURLWithPath: "/Users/x/Papers", isDirectory: true), trash: nil))
+    func testIsInTrashByPathComponent() {
+        for path in ["/Users/x/.Trash/lib", "/Users/x/.Trash", "/Volumes/Ext/.Trashes/501/Papers"] {
+            XCTAssertTrue(LibrarySetup.isInTrash(URL(fileURLWithPath: path, isDirectory: true)), path)
+        }
+        for path in ["/Users/x/.Trash-not/lib", "/Users/x/Papers", "/Volumes/Ext/Trashes/Papers"] {
+            XCTAssertFalse(LibrarySetup.isInTrash(URL(fileURLWithPath: path, isDirectory: true)), path)
+        }
+    }
+
+    func testChooseWorksWithoutStartedAccess() throws {
+        let dir = try freshFolder()
+        // The panel's grant already reaches the folder, so a start that does
+        // not happen (as StudyAnalyzer's choose allows) must not refuse it.
+        let choice = try LibrarySetup.choose(dir, startAccess: { _ in false })
+        choice.access.stop()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: marker(in: dir).path))
+    }
+
+    func testResumeOfRecreatedEmptyFolderIsLost() throws {
+        let dir = try freshFolder()
+        let choice = try LibrarySetup.choose(dir)
+        choice.access.stop()
+        try FileManager.default.removeItem(at: dir)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: false)
+
+        guard case let .lost(reason) = LibrarySetup.resume(bookmark: choice.bookmark) else {
+            return XCTFail("an empty folder in the library's place is not the library")
+        }
+        XCTAssertTrue(reason.contains("no longer holds"), reason)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker(in: dir).path))
     }
 
     func testChooseRefusesFolderInTrash() throws {

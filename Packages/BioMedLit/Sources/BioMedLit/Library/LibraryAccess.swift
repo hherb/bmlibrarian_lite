@@ -108,18 +108,23 @@ public enum LibrarySetup {
     /// - Throws: `LibrarySetupError` when the folder is in the Trash, is not a
     ///   library and not empty, cannot be written, or cannot be bookmarked.
     ///   Access is stopped again before it throws.
-    public static func choose(_ url: URL, sandboxed: Bool = LibrarySetup.isSandboxed) throws -> LibraryChoice {
+    public static func choose(_ url: URL) throws -> LibraryChoice {
+        try choose(url, startAccess: { $0.startAccessingSecurityScopedResource() })
+    }
+
+    /// ``choose(_:)`` with how access is started passed in, so a test can make
+    /// the start fail. A start that does not happen is not a refusal here: the
+    /// folder panel's grant already reaches the folder (StudyAnalyzer's choose
+    /// allows it too); `started` only says whether a stop is owed.
+    static func choose(_ url: URL, startAccess: (URL) -> Bool) throws -> LibraryChoice {
         let name = url.lastPathComponent
-        if isInTrash(url, trash: trashURL()) {
+        if isInTrash(url) {
             log(.warning, "\(url.path) is in the Trash; it is not made the library")
             throw LibrarySetupError(description:
                 "“\(name)” is in the Trash, and emptying the Trash would delete the library. Choose another folder.")
         }
-        let started = url.startAccessingSecurityScopedResource()
-        if accessRefused(started: started, sandboxed: sandboxed) {
-            log(.warning, "access to \(url.path) was not started")
-            throw LibrarySetupError(description: "macOS did not grant access to “\(name)”. Choose it again.")
-        }
+        let started = startAccess(url)
+        if !started { log(.info, "access to \(url.path) was not started; the panel's grant is used") }
         let stopIfStarted = { if started { url.stopAccessingSecurityScopedResource() } }
         let library: PaperLibrary
         do {
@@ -156,7 +161,7 @@ public enum LibrarySetup {
             return .lost(reason: "the folder could not be found (\(error.localizedDescription))")
         }
         let url = resolved.url
-        if isInTrash(url, trash: trashURL()) {
+        if isInTrash(url) {
             log(.warning, "the library \(url.path) is in the Trash")
             return .lost(reason: "the folder is in the Trash; put it back, or choose another folder")
         }
@@ -164,6 +169,15 @@ public enum LibrarySetup {
         if accessRefused(started: started, sandboxed: sandboxed) {
             log(.warning, "access to the library \(url.path) was not started")
             return .lost(reason: "macOS did not grant access to the folder; choose it again")
+        }
+        // A bookmark is stored only after bmlib made or found the library, so a
+        // folder without its marker is not the library any more (deleted and
+        // made again empty, say): opening it would make a new, empty library.
+        let marker = url.appendingPathComponent(BioMedLitConstants.libraryMarkerFileName)
+        if !FileManager.default.fileExists(atPath: marker.path) {
+            if started { url.stopAccessingSecurityScopedResource() }
+            log(.warning, "\(url.path) no longer holds the paper library")
+            return .lost(reason: "the folder no longer holds the paper library (is its drive unplugged?)")
         }
         let library: PaperLibrary
         do {
@@ -191,19 +205,13 @@ public enum LibrarySetup {
         !started && sandboxed
     }
 
-    /// Whether `url` is the Trash or inside it, compared by whole path
-    /// components after resolving links (`/var` is `/private/var`).
-    static func isInTrash(_ url: URL, trash: URL?) -> Bool {
-        guard let trash else { return false }
-        let a = url.resolvingSymlinksInPath().standardizedFileURL.pathComponents
-        let t = trash.resolvingSymlinksInPath().standardizedFileURL.pathComponents
-        return a.count >= t.count && Array(a.prefix(t.count)) == t
-    }
-
-    /// The user's Trash, or nil when the system names none.
-    private static func trashURL() -> URL? {
-        try? FileManager.default.url(
-            for: .trashDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+    /// Whether `url` is in a Trash: the home Trash (`.Trash`) or a volume's
+    /// (`.Trashes/<uid>`, where Finder moves items trashed on an external
+    /// drive), told by a whole path component after resolving links, as
+    /// StudyAnalyzer's `in_trash` does.
+    static func isInTrash(_ url: URL) -> Bool {
+        url.resolvingSymlinksInPath().standardizedFileURL.pathComponents
+            .contains { BioMedLitConstants.trashFolderNames.contains($0) }
     }
 
     private enum Level { case info, warning, error }
