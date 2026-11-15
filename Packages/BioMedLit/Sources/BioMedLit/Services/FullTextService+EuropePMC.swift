@@ -335,6 +335,8 @@ extension FullTextService {
         }
     }
 
+    // MARK: - Paced requests (every paced host's tier)
+
     /// One attempt at a request to a paced host, paced to its
     /// ``PacedHost/minimumInterval``: every attempt, a retry included, takes
     /// its own pacing slot.

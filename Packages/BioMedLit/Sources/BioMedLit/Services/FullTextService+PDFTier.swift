@@ -17,7 +17,7 @@
 import Foundation
 
 extension FullTextService {
-    // MARK: - PDF Caching
+    // MARK: - PDF tier
 
     /// Return this article's cached PDF, downloading it first if there is none.
     ///
@@ -70,7 +70,7 @@ extension FullTextService {
     /// A PDF a tier is about to read (#560): one cached earlier, which is
     /// checked against the title when it is read, or one just downloaded,
     /// waiting beside its cache name until its check lets it in.
-    enum ObtainedPDF {
+    private enum ObtainedPDF {
         /// The cache already held it, under the name it is read from.
         case cached(path: String)
 
@@ -106,7 +106,7 @@ extension FullTextService {
     /// - Throws: `FullTextError.pdfDownloadFailed` when the source did not
     ///   serve a PDF, `FullTextError.cachingFailed` when it could not be
     ///   written, `CancellationError` when cancelled.
-    func obtainPDF(from url: URL, for key: ArticleCacheKey) async throws -> ObtainedPDF {
+    private func obtainPDF(from url: URL, for key: ArticleCacheKey) async throws -> ObtainedPDF {
         if let cached = Self.cachedPDFPath(for: key, from: url) {
             BioMedLitLib.logger?.info(
                 "Serving the cached PDF for \(key.logDescription) from \(cached)",
@@ -321,14 +321,14 @@ extension FullTextService {
     /// chain.
     ///
     /// Cancellation is the one thing this does not swallow: it propagates as
-    /// `CancellationError`, matching every other guard in this file. A cancelled
-    /// download is not a dead source, and letting it fall through here would
-    /// return a normal, non-throwing result for a fetch the caller walked away
-    /// from — caching a bare link as this article's full text, the outcome
-    /// `fetchFullText`'s own doc comment promises cannot happen. The check after
-    /// extraction is what makes the extractor's own early exit safe: it stops
-    /// mid-document on cancellation, and the partial value it returns is
-    /// discarded here rather than reported as a real extraction.
+    /// `CancellationError`, matching every other guard in the service. A
+    /// cancelled download is not a dead source, and letting it fall through
+    /// here would return a normal, non-throwing result for a fetch the caller
+    /// walked away from — caching a bare link as this article's full text, the
+    /// outcome `fetchFullText`'s own doc comment promises cannot happen. The
+    /// check after extraction is what makes the extractor's own early exit
+    /// safe: it stops mid-document on cancellation, and the partial value it
+    /// returns is discarded here rather than reported as a real extraction.
     ///
     /// Every empty outcome is logged at warning level, as bmlib does, because a
     /// scan that yields nothing is invisible otherwise and a partial extraction

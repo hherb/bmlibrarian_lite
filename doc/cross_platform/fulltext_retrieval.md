@@ -2375,7 +2375,7 @@ prefix reproduces the narrower half of the same defect (#209).
 - Use `URLSession` for HTTP
 - Use `FileManager` for file operations
 - Store cache in app's Caches directory
-- See `Packages/BioMedLit/Sources/BioMedLit/Services/FullTextService.swift`
+- See `Packages/BioMedLit/Sources/BioMedLit/Services/FullTextService.swift` and its `FullTextService+*.swift` extensions
 
 ### Kotlin (Android)
 

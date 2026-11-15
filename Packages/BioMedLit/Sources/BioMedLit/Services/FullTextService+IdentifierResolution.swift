@@ -294,7 +294,7 @@ extension FullTextService {
     /// - Returns: The query, paired with how to name the identifier in a log,
     ///   or `nil` when the identifier is a PMID that is not canonical digits
     ///   (bmlib#470, bmlib#472, bmlib#478): it is logged and not sent.
-    static func primaryIdentifierQuery(
+    private static func primaryIdentifierQuery(
         for identifier: String,
         kind: ArticleIdentifierKind?
     ) -> PMCQuery? {

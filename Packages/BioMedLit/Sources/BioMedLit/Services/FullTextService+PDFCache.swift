@@ -18,6 +18,8 @@ import CryptoKit
 import Foundation
 
 extension FullTextService {
+    // MARK: - PDF cache
+
     /// The path one article's copy of one PDF is cached under.
     ///
     /// - Parameters:

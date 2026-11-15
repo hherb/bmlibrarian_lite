@@ -426,7 +426,7 @@ extension FullTextService {
 
     /// `outcome`, read from `path`: a PDF's outcome moved to where it is read
     /// from now; any other outcome unchanged.
-    static func outcome(_ outcome: PDFTierOutcome, readingFrom path: String) -> PDFTierOutcome {
+    private static func outcome(_ outcome: PDFTierOutcome, readingFrom path: String) -> PDFTierOutcome {
         switch outcome {
         case .noText(_, let coverage): return .noText(localPath: path, coverage: coverage)
         case .extracted(_, let text, let coverage):
