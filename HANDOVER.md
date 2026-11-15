@@ -51,7 +51,7 @@ I/O is synchronous on the service actor: does a hanging (iCloud dataless) read
 block its fetches? **#798** split the service verbatim into
 `FullTextService+<concern>.swift` extensions (PR #801).
 **3c, the move and the switch** (plan `2026-11-15-library-3c-macos-move.md`,
-branch `feat/library-3c-move`, PR in review). Decided 2026-11-15: the move
+lite PR #804, in review). Decided 2026-11-15: the move
 takes the cached PDFs and waiting JATS that a `Document` uses; cache entries
 no document uses stay cache. Sources waiting for the library move in by
 themselves whenever a library is held (`LibrarySession.onHeld`). *Copy back*
