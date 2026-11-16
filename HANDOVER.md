@@ -14,8 +14,6 @@ its slice has landed; add a new section when handing off new work.
 - **Task 11, desktop: published 2026-11-10** from `0641e80c` (PyPI, tag
   `0.6.0`, signed DMG; `twine` needs `packaging>=26`). **mypy is out of the
   next DMG** (#750), checked by a PyInstaller analysis, not yet a full build.
-- **medfactcheck.org** (PR #753): `website/build_privacy.py` regenerates
-  `privacy.html` from `PRIVACY.md`.
 - **Task 11, apps: the maintainer's.** Apple: the 1.6 → 1.9.0 upgrade passed
   on an iPhone 13 Pro Max (2026-11-11; the "no dSYM" warning is `BmlibFFI`,
   #752, expected). Left: archive both schemes, upload, tags `appstore_1.9` /
@@ -26,52 +24,44 @@ its slice has landed; add a new section when handing off new work.
 
 **The shared paper library** (decided 2026-11-15: every app, where its platform
 allows; #788 macOS, #789 desktop, #790 Android; design: StudyAnalyzer's
-`2026-11-13-shared-paper-library-design.md` §5.3). **3a and 3b landed
-2026-11-15.** **3a, PR #787** (the Library tab, `LibrarySession`, launch
-resume, quit stop). **3b, PR #793** (plan
-`2026-11-15-library-3b-macos-fetch.md`): FFI at bmlib `747e7a80`
-(`LibraryScan`, `libraryIds`; bmlib#784/#785). BioMedLit `Library/`: three
-types (CLAUDE.md); `LibrarySession.recheck()` on activation; `unsaved`: a stale
-bookmark not remade. `FullTextService(…, library:)`: a usable library JATS ends
-the lookup with no request; the chain's JATS and PDFs are kept in the library
-(only a PDF this fetch admitted loses its cache copy, after the save); its PDF
-is used before the PDF tiers, after the title check. A library failure never
-stops a fetch; one that `waits` (not reached, read or written; still being
-reached at launch) leaves the source in the PDF cache (JATS as
-`<cacheKey>-<sha12>.xml`, kept by a cache clear) with `libraryWaiting` set.
-Source `.library` ("Paper library"). `Document` gains
-`fullTextLibrary{SHA256,Kind,Waiting,Note}`; a moved library PDF is found again
-by digest. **Owed by the maintainer: the sandboxed click-throughs.** 3a's (plan
-Task 4 Step 5). 3b's: choose a library; fetch a PMC paper (its JATS appears in
-the library; a re-fetch reads "Paper library", no request); fetch a PDF-only
-paper (it is in the library, not `PDFCache`); unplug or rename the folder and
-switch back (the setting says unreachable; a new fetch says it is kept in this
-app); the record's label is the machine name under the sandbox; `PaperLibrary`
-I/O is synchronous on the service actor: does a hanging (iCloud dataless) read
-block its fetches? **#798** split the service verbatim into
-`FullTextService+<concern>.swift` extensions (PR #801).
-**3c, the move and the switch** (plan `2026-11-15-library-3c-macos-move.md`,
-lite PR #804, in review). Decided 2026-11-15: the move
-takes the cached PDFs and waiting JATS that a `Document` uses; cache entries
-no document uses stay cache. Sources waiting for the library move in by
-themselves whenever a library is held (`LibrarySession.onHeld`). *Copy back*
-returns PDFs and JATS to the PDF cache as `<key>-<sha12>.pdf|.xml`.
-`LibraryMove` (BioMedLit) keeps each file and reads it back through bmlib;
-the app's copy goes only after the documents are saved (`removeAppCopies`).
-`LibraryMover` (`Sources/Utilities`) maps documents to files and back.
-`LibraryController` runs the move, the settle (its outcome in
-`settleReport`), the switch's `carry` and `carryBack`. A document whose file
-was not carried keeps its digest and gets a note naming why. The offers are
-unticked toggles in the Library tab. **Owed by the maintainer: 3c's
-click-through** (plan Task 4 Step 3). The review's leftovers are **#803**.
-**Next: 3d**, the manual clear (§4.8). **Left:** an Apple archive from master lists
-`BmlibFFI.framework.dSYM` with no warning; the ledger's other library rows
-stay `owed` (#788). 3b's leftovers, lodged: **#796** (the race fallback can
-record a refused PDF), **#797** (an extraction-off library PDF asks CORE),
-**#799** (the unreachable warning on every call). For 3c: *Stop
-using*/*Choose…* mid-fetch stops the old access, so its source waits under a
-wrong reason; after *Stop using* a library PDF reads "no longer on this device"
-(3c's switch: §4.7's "unavailable").
+`2026-11-13-shared-paper-library-design.md` §5.3; one plan per step in
+`docs/superpowers/plans/2026-11-1[56]-library-3*`). **macOS 3a–3c landed**
+(PRs #787, #793, #804), **3d is this branch's PR** (`feat/library-3d-clear`).
+FFI at bmlib `747e7a80`. BioMedLit `Library/` (CLAUDE.md lists the types).
+- **3a** the Library tab, `LibrarySession` (launch resume, `recheck()` on
+  activation, quit stop; `unsaved`: a stale bookmark not remade).
+- **3b** `FullTextService(…, library:)`: a usable library JATS ends the lookup
+  with no request; the chain's JATS and PDFs are kept in the library; its PDF
+  is used before the PDF tiers, after the title check. A library failure never
+  stops a fetch; one that `waits` leaves the source in the PDF cache (JATS as
+  `<cacheKey>-<sha12>.xml`) with `libraryWaiting` set. `Document` gains
+  `fullTextLibrary{SHA256,Kind,Waiting,Note}`; a moved PDF is found again by
+  digest. #798 split the service into `FullTextService+<concern>.swift`.
+- **3c** the move (`LibraryMove`, BioMedLit; `LibraryMover`, app
+  `Sources/Utilities`): the cached PDFs and waiting JATS a `Document` uses,
+  each read back through bmlib before the app's copy goes (after the save).
+  Waiting sources move in whenever a library is held (`onHeld`). The switch
+  copies along or notes each document; *Stop using* copies back as
+  `<key>-<sha12>.pdf|.xml`. Offers are unticked toggles.
+- **3d** the manual clear (`LibraryClear`, BioMedLit; StudyAnalyzer's
+  `library_clear.rs` rules and wording): *Papers in the Library* lists each
+  paper and file with its size and users; *Remove Paper…* / *Remove File…*
+  after a confirmation naming the other apps. A fresh scan must still list it;
+  a name bmlib refuses asks for a rename. Records are left listing a removed
+  file; this app's documents reading it get `libraryRemovedNote` (unless the
+  bytes are still in the library); nothing downloads again on its own.
+- **Owed by the maintainer: the sandboxed click-throughs**: 3a's (plan Task 4
+  Step 5), 3b's (plan; also: does a hanging iCloud dataless read block the
+  service actor's fetches?), 3c's (plan Task 4 Step 3), 3d's (plan *Owed*).
+- **Left:** an Apple archive from master lists `BmlibFFI.framework.dSYM`
+  with no warning; the ledger's other library rows stay `owed` (#788).
+  Lodged: 3b's **#796** (the race fallback can record a refused PDF),
+  **#797** (an extraction-off library PDF asks CORE), **#799** (the
+  unreachable warning on every call); 3c's **#803**. *Stop using*/*Choose…*
+  mid-fetch stops the old access, so its source waits under a wrong reason.
+  3d: the scan's problems are shown in bmlib's debug form (a sentence per
+  kind before the App Store release). **Next: the desktop (#789)** or Android
+  (#790), each needing its own plan; the iOS half is phase 4.
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
@@ -157,14 +147,11 @@ git pin). Snapshot rows keep `run_status`/`run_deciding` as set-once facts.
 
 ## Recently landed (context)
 
-- **Strict service JSON** (#781, #784; PRs #783, #791): every service's JSON
-  but PubMed's esearch is read strictly (desktop
-  `search_failures.strict_response_json`, **a test double scripts `.content`,
-  never `.json()`**; Android `strictJsonElement` / `strictJsonRetrofit`).
-  **#785** (PR #794, analyser 2.8, desktop): a DOI-only study's PMID is
-  looked up (PMC's ID converter, then `find_pmid_by_doi`) before PubMed is
-  read; a lookup it cannot settle sets `pubmed_record_unreachable`, so funding
-  is not assessed.
+- **Strict service JSON** (#781, #784): every service's JSON but esearch is
+  read strictly (desktop `search_failures.strict_response_json`, **a test
+  double scripts `.content`, never `.json()`**; Android `strictJsonElement`).
+  **#785** (analyser 2.8): a DOI-only study's PMID is looked up first; an
+  unsettled lookup sets `pubmed_record_unreachable` (funding not assessed).
 - **Apple** (PRs #676, #678–#680, #682): the Mac app is sandboxed; **a run
   never waits for the Retraction Watch refresh** (#681). **Owed by the
   maintainer before the App Store**: the latest Program License Agreement,
@@ -202,8 +189,7 @@ git pin). Snapshot rows keep `run_status`/`run_deciding` as set-once facts.
   could move. **A skip is a third state** (`SourceLookupSkipped`). Never
   `findtext` a mixed-content element. Funders: `sponsor_patterns.json` (schema
   4) is the contract, never `INDUSTRY_KEYWORDS`; `NONPROFIT` = not recognised.
-- **Older rounds: the rules that still bind** (detail in git history and
-  the `doc/cross_platform/` READMEs).
+- **Older rounds: the rules that still bind** (detail: git, `doc/cross_platform/`).
   - **A source we could not reach is not a finding** (#346, #347, #344,
     PR #349). A typed fetch carries the answer *or* a `RequestFailure`
     (`served()` / `absent()` / `unreachable()`: `RecordFetch`,

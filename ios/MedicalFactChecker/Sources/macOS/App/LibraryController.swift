@@ -304,4 +304,47 @@ extension LibraryController {
         return summary
     }
 }
+
+// MARK: - The manual clear (design §4.8)
+
+extension LibraryController {
+
+    /// The papers of the library at `access`, listed off the main actor.
+    static func listLibrary(_ access: LibraryAccess) async -> Result<LibraryListing, LibraryLookupFailure> {
+        let id = session.installationID()
+        return await Task.detached(priority: .userInitiated) { LibraryClear.list(access, installationID: id) }.value
+    }
+
+    /// Remove the paper folder `folder` from the library at `access`, or with
+    /// `name` only that file of it (the user's confirmed request); then note
+    /// on each document reading a removed file that the library no longer
+    /// holds elsewhere that its file was removed.
+    ///
+    /// - Returns: Why it failed (nothing removed, or the folder only in part),
+    ///   or why the documents' notes were not saved; nil when done.
+    static func removeFromLibrary(_ access: LibraryAccess, folder: String, name: String?) async -> String? {
+        let removed = await Task.detached(priority: .userInitiated) {
+            LibraryClear.remove(access, folder: folder, name: name)
+        }.value
+        let files: [LibraryFileReference]
+        switch removed {
+        case let .failure(failure): return failure.description
+        case let .success(found): files = found
+        }
+        guard !files.isEmpty else { return nil }
+        let library = source(for: access)
+        // The same bytes may be in another folder of the paper: those still read
+        let gone = await Task.detached(priority: .userInitiated) {
+            files.filter { library?.path(of: $0) == nil }
+        }.value
+        LibraryMover.noteRemoved(documents(), gone: gone)
+        do {
+            try container?.mainContext.save()
+            return nil
+        } catch {
+            AppLogger.fullText.error("The documents' removed-file notes were not saved: \(error, privacy: .public)")
+            return BioMedLitConstants.libraryClearNotesNotSaved(reason: error.localizedDescription)
+        }
+    }
+}
 #endif

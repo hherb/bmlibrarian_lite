@@ -201,5 +201,30 @@ final class LibraryMoverTests: XCTestCase {
         XCTAssertNil(document.fullTextLibrarySHA256)
         XCTAssertNil(document.fullTextLibraryKind)
     }
+
+    /// 3d: a removed file is noted on every document reading it, and on no
+    /// other; the document keeps its digest, so the file is found again if
+    /// the same bytes come back.
+    func testRemovedFileIsNotedOnItsDocumentsOnly() {
+        let other = String(repeating: "d", count: 64)
+        func inLibrary(_ sha256: String, kind: String = BioMedLitConstants.libraryKindPDF) -> Document {
+            let document = document()
+            document.fullTextLibrarySHA256 = sha256
+            document.fullTextLibraryKind = kind
+            return document
+        }
+        let one = inLibrary(digest)
+        let two = inLibrary(digest)
+        let otherFile = inLibrary(other)
+        let sameDigestOtherKind = inLibrary(digest, kind: BioMedLitConstants.libraryKindJATS)
+        LibraryMover.noteRemoved([one, two, otherFile, sameDigestOtherKind],
+                                 gone: [LibraryFileReference(sha256: digest, kind: BioMedLitConstants.libraryKindPDF)])
+        XCTAssertEqual(one.fullTextLibraryNote, BioMedLitConstants.libraryRemovedNote)
+        XCTAssertEqual(two.fullTextLibraryNote, BioMedLitConstants.libraryRemovedNote)
+        XCTAssertNil(otherFile.fullTextLibraryNote)
+        XCTAssertNil(sameDigestOtherKind.fullTextLibraryNote)
+        XCTAssertEqual(one.fullTextLibrarySHA256, digest)
+        XCTAssertTrue(one.libraryNotices(libraryState: .notChosen)[0].contains(BioMedLitConstants.libraryRemovedNote))
+    }
 }
 #endif

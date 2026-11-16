@@ -61,6 +61,12 @@ struct LibrarySettingsTab: View {
                 }
             }
 
+            if isReachable, let access = session.access {
+                // A new folder's list starts unread
+                LibraryPapersSection(access: access, busy: busy) { await refreshCounts() }
+                    .id(ObjectIdentifier(access))
+            }
+
             Section("About the library") {
                 Text("A library is a folder you choose, kept on your own disk (or a synced folder). Papers saved there are kept once and can be read by the other apps that use it, such as StudyAnalyzer. Nothing in it is ever deleted automatically.")
                     .font(.caption)
@@ -238,6 +244,151 @@ struct LibrarySettingsTab: View {
             copyAlong = false
             await refreshCounts()
         }
+    }
+}
+
+/// The manual clear (design §4.8): on request, the library's papers, each
+/// with its size, its files and the apps that use them. The user removes a
+/// paper (its folder) or one file after a confirmation naming the other apps
+/// still using it; nothing is removed otherwise. The list is read again after
+/// every removal, a failed one too (the list may be stale).
+private struct LibraryPapersSection: View {
+    /// The held library.
+    let access: LibraryAccess
+    /// True while the setting's own change or move runs: the buttons wait.
+    let busy: Bool
+    /// Run after a removal, so the setting counts its files again.
+    let changed: () async -> Void
+
+    /// A removal waiting for the user's answer.
+    private struct Removal {
+        /// What it removes, as the list shows it.
+        let what: String
+        /// The confirmation (``LibraryClear/removeQuestion(what:usedBy:usedHere:)``).
+        let question: String
+        /// The paper's folder.
+        let folder: String
+        /// The file's name, or nil for the whole folder.
+        let name: String?
+    }
+
+    /// The library's papers, or nil until asked for (or after a failed read).
+    @State private var listing: LibraryListing?
+    /// True while the list is read or a removal runs.
+    @State private var working = false
+    /// The removal awaiting confirmation, if any.
+    @State private var pending: Removal?
+    /// What the last removal did.
+    @State private var note: String?
+    /// Why the last read or removal failed.
+    @State private var failure: String?
+
+    var body: some View {
+        Section("Papers in the Library") {
+            if let note {
+                Text(note).font(.caption).foregroundColor(.secondary)
+            }
+            if let failure {
+                Label(failure, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .textSelection(.enabled)
+            }
+            HStack {
+                Button(listing == nil ? "Show the Library's Papers" : "Read the List Again") {
+                    Task { await load() }
+                }
+                .disabled(busy || working)
+                if working { ProgressView().controlSize(.small) }
+            }
+            if let listing {
+                if listing.papers.isEmpty {
+                    Text("The library holds no papers.").foregroundColor(.secondary)
+                }
+                ForEach(listing.papers, id: \.folder) { paper in
+                    DisclosureGroup {
+                        ForEach(paper.files, id: \.name) { file in
+                            row(file.name, detail: LibraryClear.sizeText(file.size) + ", "
+                                + LibraryClear.usersText(usedBy: file.usedBy, usedHere: file.usedHere),
+                                button: "Remove File…") {
+                                ask(file.name, usedBy: file.usedBy, usedHere: file.usedHere,
+                                    folder: paper.folder, name: file.name)
+                            }
+                        }
+                    } label: {
+                        row(paper.label, detail: LibraryClear.sizeText(of: paper) + ", "
+                            + LibraryClear.usersText(usedBy: paper.usedBy, usedHere: paper.usedHere),
+                            button: "Remove Paper…") {
+                            ask(paper.label, usedBy: paper.usedBy, usedHere: paper.usedHere,
+                                folder: paper.folder, name: nil)
+                        }
+                    }
+                }
+                if let problems = LibraryClear.problemsText(listing.problems) {
+                    Text(problems)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .alert("Remove from the Paper Library",
+               isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+               presenting: pending) { removal in
+            Button("Remove", role: .destructive) { Task { await remove(removal) } }
+            Button("Keep It", role: .cancel) {}
+        } message: { removal in
+            Text(removal.question)
+        }
+    }
+
+    /// One line of the list: what it is, its size and users, and its button.
+    private func row(_ title: String, detail: String, button: String, action: @escaping () -> Void) -> some View {
+        HStack {
+            VStack(alignment: .leading) {
+                Text(title).textSelection(.enabled)
+                Text(detail).font(.caption).foregroundColor(.secondary)
+            }
+            Spacer()
+            Button(button, action: action).disabled(busy || working)
+        }
+    }
+
+    /// Ask before removing `what`, naming who else uses it.
+    private func ask(_ what: String, usedBy: [String], usedHere: Bool, folder: String, name: String?) {
+        note = nil
+        pending = Removal(what: what, question: LibraryClear.removeQuestion(what: what, usedBy: usedBy,
+                                                                            usedHere: usedHere),
+                          folder: folder, name: name)
+    }
+
+    /// Read the library's papers; on failure the list shown goes, since it
+    /// may be out of date.
+    private func load() async {
+        working = true
+        switch await LibraryController.listLibrary(access) {
+        case let .success(read):
+            listing = read
+            failure = nil
+        case let .failure(why):
+            listing = nil
+            failure = why.description
+        }
+        working = false
+    }
+
+    /// Run the confirmed removal, say what it did, then read the list again;
+    /// a failed removal's reason is shown after the reread.
+    private func remove(_ removal: Removal) async {
+        working = true
+        let why = await LibraryController.removeFromLibrary(access, folder: removal.folder, name: removal.name)
+        await load()
+        if let why {
+            failure = why
+        } else {
+            note = BioMedLitConstants.libraryClearRemoved(what: removal.what)
+        }
+        await changed()
     }
 }
 #endif

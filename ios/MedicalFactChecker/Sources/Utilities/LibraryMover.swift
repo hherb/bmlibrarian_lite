@@ -169,6 +169,15 @@ enum LibraryMover {
         }
     }
 
+    /// Note on each of `documents` whose library file is one of `gone` (removed
+    /// in the manual clear and not held elsewhere in the library) that its
+    /// file was removed (design §4.8: the app reports it, and downloads
+    /// nothing again on its own).
+    static func noteRemoved(_ documents: [Document], gone: [LibraryFileReference]) {
+        notCarried(libraryFiles(documents).filter { gone.contains($0.file) }.flatMap(\.documents),
+                   note: BioMedLitConstants.libraryRemovedNote)
+    }
+
     /// Whether `name` is `key`'s waiting JATS, exactly `<key>-<sha12>.xml`
     /// (``LibraryMove/appCopyName(key:sha256:kind:)``): a prefix alone would
     /// also take the file of a key that extends this one (`doi_10.1_a-b`).

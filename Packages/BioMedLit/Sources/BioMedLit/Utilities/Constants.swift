@@ -1005,6 +1005,90 @@ public enum BioMedLitConstants {
         "this app's copy \(path) could not be read (\(reason))"
     }
 
+    // MARK: - Shared paper library: the manual clear (design §4.8)
+    //
+    // StudyAnalyzer's wording (`src/lib/library.ts`, `library_clear.rs`),
+    // with this app's documents in place of its papers.
+
+    /// A file's size when it cannot be read.
+    public static let libraryClearSizeUnknown = "size unknown"
+
+    /// After a paper's summed size when some of its files' sizes could not be read.
+    public static let libraryClearSomeSizesUnknown = ", some sizes unknown"
+
+    /// This installation, among a file's users.
+    public static let libraryClearThisApp = "this app"
+
+    /// Before a file's or paper's users ("used by this app, StudyAnalyzer on …").
+    public static let libraryClearUsedByPrefix = "used by "
+
+    /// A file or paper no installation's record lists.
+    public static let libraryClearUsedByNoApp = "used by no app"
+
+    /// The confirmation's question, before `what` is removed.
+    public static func libraryClearQuestion(what: String) -> String {
+        "Remove “\(what)” from the paper library? It is deleted from the folder."
+    }
+
+    /// The confirmation's sentence naming the other apps still using it.
+    public static func libraryClearStillUsed(by apps: [String]) -> String {
+        "Still used by \(apps.joined(separator: ", ")): \(apps.count == 1 ? "it reports" : "they report") "
+            + "it missing and will not download it again."
+    }
+
+    /// The confirmation's sentence when no app uses it.
+    public static let libraryClearUsedByNone = "No app uses it."
+
+    /// The confirmation's sentence when this app uses it.
+    public static let libraryClearUsedHere =
+        "This app's documents that read it then say its file was removed; what they already hold "
+            + "(their text, summaries and reports) stays."
+
+    /// Why nothing was removed: a fresh scan no longer lists it.
+    public static let libraryClearStaleReason =
+        "the library no longer holds it as listed; the list now shows what it holds"
+
+    /// A removal that failed, nothing removed.
+    public static func libraryClearFailed(what: String, reason: String) -> String {
+        "“\(what)” could not be removed from the paper library: \(reason)"
+    }
+
+    /// A paper folder bmlib cannot use the name of: nothing removed.
+    public static func libraryClearRenameText(folder: String) -> String {
+        "“\(folder)” was not removed: the paper library cannot use a folder of that name. "
+            + "Rename the folder, then read the list again."
+    }
+
+    /// A paper folder whose deletion failed part-way.
+    public static func libraryClearPartlyText(folder: String, reason: String) -> String {
+        "“\(folder)” was not removed from the paper library, or only in part "
+            + "(the list now shows what is left): \(reason)"
+    }
+
+    /// A library that could not be listed.
+    public static func libraryClearListFailed(reason: String) -> String {
+        "The paper library cannot be listed: \(reason)"
+    }
+
+    /// What a removal did.
+    public static func libraryClearRemoved(what: String) -> String {
+        "“\(what)” was removed from the paper library."
+    }
+
+    /// What the scan found odd, under the list.
+    public static func libraryClearProblems(_ problems: [String]) -> String {
+        "The library scan also found \(problems.count == 1 ? "1 thing" : "\(problems.count) things") "
+            + "it did not use: \(problems.joined(separator: "; "))."
+    }
+
+    /// A document's note when its library file was removed in the manual clear.
+    public static let libraryRemovedNote = "its file was removed from the paper library"
+
+    /// A removal that was done whose documents' notes could not be saved.
+    public static func libraryClearNotesNotSaved(reason: String) -> String {
+        "It was removed, but the documents that read it could not be marked so: \(reason)"
+    }
+
     // MARK: - Shared paper library: bmlib's sentences
     //
     // The notes and failures of the fetch's library source, in bmlib's
