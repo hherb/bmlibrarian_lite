@@ -162,11 +162,20 @@ enum LibraryMover {
     }
 
     /// Note on each of `documents` with a library file that it cannot be read
-    /// after a switch, and why.
+    /// after a switch or a manual clear, and why.
     static func notCarried(_ documents: [Document], note: String) {
         for document in documents where document.fullTextLibrarySHA256 != nil {
             document.noteLibraryFileLeft(note)
         }
+    }
+
+    /// Note on each of `documents` whose library file is one of `gone` (removed
+    /// in the manual clear and not held elsewhere in the library) that its
+    /// file was removed (design §4.8: the app reports it, and downloads
+    /// nothing again on its own).
+    static func noteRemoved(_ documents: [Document], gone: [LibraryFileReference]) {
+        notCarried(libraryFiles(documents).filter { gone.contains($0.file) }.flatMap(\.documents),
+                   note: BioMedLitConstants.libraryRemovedNote)
     }
 
     /// Whether `name` is `key`'s waiting JATS, exactly `<key>-<sha12>.xml`

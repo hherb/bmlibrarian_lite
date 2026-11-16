@@ -417,9 +417,11 @@ final class Document {
     }
 
     /// Store `path`, the PDF's file found again in the library by
-    /// ``libraryPDFReference``, as this document's local PDF.
+    /// ``libraryPDFReference``, as this document's local PDF: a note that it
+    /// could not be read goes.
     func storeRefoundLibraryPDF(at path: String) {
         storePDFPath(path, isLocalFile: true)
+        fullTextLibraryNote = nil
     }
 
     /// Store `kept`, this document's file now in the library (moved in, or
@@ -452,7 +454,8 @@ final class Document {
     }
 
     /// Store `note`, why this document's library file cannot be read after a
-    /// switch (design §4.7), keeping the file's digest.
+    /// switch (design §4.7) or a manual clear (§4.8), keeping the file's
+    /// digest.
     func noteLibraryFileLeft(_ note: String) {
         fullTextLibraryNote = note
     }
