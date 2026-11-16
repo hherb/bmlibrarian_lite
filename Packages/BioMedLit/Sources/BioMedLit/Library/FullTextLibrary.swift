@@ -164,6 +164,11 @@ public protocol FullTextLibrary: Sendable {
     /// Where `file` is in the library now, or nil when the library does not
     /// hold it (or cannot be read: logged).
     func path(of file: LibraryFileReference) -> String?
+
+    /// `file`'s bytes, found by digest and read digest checked (bmlib's
+    /// `read`): how a move checks a copy before the app's goes (design §4.7).
+    /// A file the library does not hold is a failure that does not wait.
+    func read(_ file: LibraryFileReference) -> Result<Data, LibraryLookupFailure>
 }
 
 // MARK: The library's reading of a paper's ids, shared by every library

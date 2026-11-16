@@ -21,18 +21,38 @@ import BioMedLit
 
 /// The Library setting: the shared paper library folder, shared with the
 /// other bmlib-family apps (StudyAnalyzer), or none (design §4.1). Without one
-/// the app keeps its papers as before; nothing nags.
+/// the app keeps its papers as before; nothing nags. A choice offers to move
+/// this app's files in, a switch to copy them along, *Stop using* to copy
+/// them back (design §4.7); every offer starts unticked.
 struct LibrarySettingsTab: View {
     @Environment(LibrarySession.self) private var session
 
     /// True while *Stop using this library* waits for its confirmation.
     @State private var confirmingStop = false
 
+    /// How many of this app's files the move would bring in.
+    @State private var pending = 0
+    /// How many library files this app's documents use.
+    @State private var used = 0
+    /// *Choose…* moves this app's files into the new library.
+    @State private var bring = false
+    /// *Choose Another…* copies the files this app uses into the new folder.
+    @State private var copyAlong = false
+    /// *Stop Using* copies the files this app uses back into the app.
+    @State private var copyBack = false
+    /// True while *Move Into the Library* runs.
+    @State private var moving = false
+    /// What the last change did, one line each; empty before any.
+    @State private var outcome: [String] = []
+
     var body: some View {
         Form {
             Section("Paper Library") {
                 stateView
+                offers
                 buttons
+                outcomeLines(outcome)
+                outcomeLines(LibraryController.settleReport.lines)
                 if let error = session.lastError {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
@@ -49,8 +69,39 @@ struct LibrarySettingsTab: View {
         }
         .formStyle(.grouped)
         .padding()
+        .task { await refreshCounts() }
     }
 
+    /// What a change or the waiting settle did: the first line plain, a line
+    /// per file not moved in orange.
+    private func outcomeLines(_ lines: [String]) -> some View {
+        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+            Text(line)
+                .font(.caption)
+                .foregroundColor(index == 0 ? .secondary : .orange)
+                .textSelection(.enabled)
+        }
+    }
+
+    /// The unticked offers that go with the next change.
+    @ViewBuilder
+    private var offers: some View {
+        if isReachable {
+            if used > 0 {
+                Toggle("Copy the \(files(used)) this app uses into the new folder when choosing another",
+                       isOn: $copyAlong)
+            }
+            if pending > 0 {
+                HStack {
+                    Button("Move \(files(pending).capitalized) Kept in This App Into the Library") { moveIn() }
+                        .disabled(busy)
+                    if moving { ProgressView().controlSize(.small) }
+                }
+            }
+        } else if pending > 0 {
+            Toggle("Move the \(files(pending)) kept in this app into the chosen folder", isOn: $bring)
+        }
+    }
     @ViewBuilder
     private var stateView: some View {
         switch session.state {
@@ -83,7 +134,7 @@ struct LibrarySettingsTab: View {
     private var buttons: some View {
         HStack {
             Button(isReachable ? "Choose Another…" : "Choose…") { pickFolder() }
-                .disabled(session.isWorking)
+                .disabled(busy)
             if session.isWorking { ProgressView().controlSize(.small) }
             Spacer()
             if session.state != .notChosen {
@@ -91,14 +142,14 @@ struct LibrarySettingsTab: View {
                     Text("Papers already in the folder stay there.")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    Button("Cancel") { confirmingStop = false }
-                    Button("Stop Using", role: .destructive) {
-                        session.stopUsing()
-                        confirmingStop = false
+                    if isReachable && used > 0 {
+                        Toggle("Copy the \(files(used)) this app uses back into this app", isOn: $copyBack)
                     }
+                    Button("Cancel") { confirmingStop = false }
+                    Button("Stop Using", role: .destructive) { stopUsing() }
                 } else {
                     Button("Stop Using This Library…") { confirmingStop = true }
-                        .disabled(session.isWorking)
+                        .disabled(busy)
                 }
             }
         }
@@ -107,6 +158,52 @@ struct LibrarySettingsTab: View {
     private var isReachable: Bool {
         if case .reachable = session.state { return true }
         return false
+    }
+
+    /// True while a change or a move runs: the buttons wait.
+    private var busy: Bool { session.isWorking || moving }
+
+    /// "1 file" or "N files".
+    private func files(_ count: Int) -> String { count == 1 ? "1 file" : "\(count) files" }
+
+    /// Count again what the offers name.
+    private func refreshCounts() async {
+        pending = await LibraryController.pendingCount()
+        used = LibraryController.usedCount()
+    }
+
+    /// What `summary` did, worded with `done`, or nothing for no summary.
+    private func lines(_ summary: LibraryMoveSummary?, done: String) -> [String] {
+        summary?.lines(done: done) ?? []
+    }
+
+    /// *Move … Into the Library*: this app's files into the held library.
+    private func moveIn() {
+        guard let access = session.access else { return }
+        moving = true
+        Task {
+            let summary = await LibraryController.moveIn(into: access, onlyWaiting: false)
+            outcome = lines(summary, done: BioMedLitConstants.libraryMovedInDone)
+            moving = false
+            await refreshCounts()
+        }
+    }
+
+    /// *Stop Using*: the copy back first when ticked (only while reachable),
+    /// else each document with a library file is told it is left there.
+    private func stopUsing() {
+        let copying = copyBack && isReachable && used > 0
+        confirmingStop = false
+        Task {
+            var summary: LibraryMoveSummary?
+            if session.access == nil { LibraryController.noteNoLongerUsed() }
+            await session.stopUsing { access in
+                summary = await LibraryController.carryBack(from: access, copying: copying)
+            }
+            outcome = copying ? lines(summary, done: BioMedLitConstants.libraryCopiedBackDone) : []
+            copyBack = false
+            await refreshCounts()
+        }
     }
 
     /// The folder picker; a chosen folder is handed to the session.
@@ -120,7 +217,27 @@ struct LibrarySettingsTab: View {
         panel.message = "Choose an empty folder for a new library, or a folder that already holds one."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         confirmingStop = false
-        Task { await session.choose(url) }
+        let bringing = !isReachable && bring && pending > 0
+        let copying = isReachable && copyAlong && used > 0
+        let oldUnreachable: Bool
+        if case .unreachable = session.state { oldUnreachable = true } else { oldUnreachable = false }
+        Task {
+            var summary: LibraryMoveSummary?
+            var done = BioMedLitConstants.libraryMovedInDone
+            await session.choose(url) { old, new in
+                if let old {
+                    done = BioMedLitConstants.libraryCopiedAlongDone
+                    summary = await LibraryController.carry(from: old, to: new, copying: copying)
+                } else {
+                    if oldUnreachable { LibraryController.noteUnreachableLeft() }
+                    if bringing { summary = await LibraryController.moveIn(into: new, onlyWaiting: false) }
+                }
+            }
+            outcome = session.lastError == nil ? lines(summary, done: done) : []
+            bring = false
+            copyAlong = false
+            await refreshCounts()
+        }
     }
 }
 #endif

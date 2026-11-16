@@ -119,7 +119,7 @@ extension FullTextService {
     ///   - primaryKind: What the slot holds, when stated.
     ///   - title: The article's title.
     /// - Returns: The paper.
-    static func libraryPaper(
+    public static func libraryPaper(
         pmcId: String?, doi: String?, pmid: String, primaryKind: ArticleIdentifierKind?, title: String?
     ) -> LibraryPaper {
         let slot = pmid.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -222,9 +222,8 @@ extension FullTextService {
     /// - Returns: Whether it was written.
     @discardableResult
     static func writeWaitingJATS(_ xml: Data, key: ArticleCacheKey) -> Bool {
-        let digest = SHA256.hash(data: xml).map { String(format: "%02x", $0) }.joined()
-        let name = "\(key.filenameComponent)-\(digest.prefix(BioMedLitConstants.libraryWaitingDigestHexChars))"
-            + BioMedLitConstants.libraryWaitingJATSSuffix
+        let name = LibraryMove.appCopyName(key: key, sha256: LibraryMove.sha256(xml),
+                                           kind: BioMedLitConstants.libraryKindJATS)
         let url = pdfCacheDirectory.appendingPathComponent(name)
         do {
             try writeAtomically(xml, to: url)

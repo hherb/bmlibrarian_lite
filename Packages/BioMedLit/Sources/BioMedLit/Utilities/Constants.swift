@@ -941,6 +941,70 @@ public enum BioMedLitConstants {
     /// `<cacheKey>-<sha12>.xml`).
     public static let libraryWaitingDigestHexChars = 12
 
+    /// The suffix of a library PDF copied back into the PDF cache
+    /// (`<cacheKey>-<sha12>.pdf`) when the app stops using the library.
+    public static let libraryAppCopyPDFSuffix = ".pdf"
+
+    /// Why a file was not moved into the library: its paper has no identifier
+    /// the library accepts.
+    public static let libraryMoveNoIdentifierReason =
+        "the paper has no identifier the library accepts, so it was not moved"
+
+    /// Why a file was not moved into the library: the copy read back from the
+    /// library is not the file the app holds.
+    public static let libraryMoveReadBackMismatchReason =
+        "the copy read back from the library is not the file this app holds, so this app's copy is kept"
+
+    /// A document's note when its library file was not copied into the folder
+    /// chosen in place of `folderName` (design §4.7: it reads as unavailable,
+    /// naming the folder).
+    public static func libraryNotCarriedNote(folderName: String) -> String {
+        "its file was left in the paper library “\(folderName)”; choose that folder again to read it"
+    }
+
+    /// Why a move did nothing: bmlib refused this installation (logged with
+    /// bmlib's reason).
+    public static let libraryInstallationRefusedText =
+        "The paper library refused this app's installation record; see the log for why."
+
+    /// What a move says when the documents it rewrote could not be saved (their
+    /// files stay in this app too).
+    public static func libraryDocumentsNotSaved(reason: String) -> String {
+        "the documents could not be saved, so this app keeps its copies: \(reason)"
+    }
+
+    /// What a move or copy says when it did nothing.
+    public static let libraryNothingMovedText = "Nothing was copied or moved."
+
+    /// Before each file a move or copy left where it was.
+    public static let libraryNotMovedPrefix = "Not moved: "
+
+    /// What a move did, after its count ("3 files moved into the paper library.").
+    public static let libraryMovedInDone = "moved into the paper library"
+
+    /// What a switch's copy did, after its count.
+    public static let libraryCopiedAlongDone = "copied into the new folder"
+
+    /// What *Stop using*'s copy back did, after its count.
+    public static let libraryCopiedBackDone = "copied back into this app"
+
+    /// A document's note when its library file was in a library that could not
+    /// be reached as another folder was chosen.
+    public static let libraryUnreachableLeftNote =
+        "its file is in the paper library that could not be reached when another folder was chosen; "
+            + "choose that folder again to read it"
+
+    /// A document's note when its library file was not copied back into this
+    /// app as it stopped using the library.
+    public static let libraryNoLongerUsedNote =
+        "its file is in a paper library this app no longer uses; choose that folder again to read it"
+
+    /// Why a file was not moved into the library: this app's copy could not
+    /// be read.
+    public static func libraryMoveUnreadableReason(path: String, reason: String) -> String {
+        "this app's copy \(path) could not be read (\(reason))"
+    }
+
     // MARK: - Shared paper library: bmlib's sentences
     //
     // The notes and failures of the fetch's library source, in bmlib's
