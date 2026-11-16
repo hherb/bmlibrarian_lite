@@ -1025,6 +1025,9 @@ public enum BioMedLitConstants {
     /// A file or paper no installation's record lists.
     public static let libraryClearUsedByNoApp = "used by no app"
 
+    /// A file's or paper's users when some of its folder's records could not be read.
+    public static let libraryClearUsersUnknown = "other users unknown (a record could not be read)"
+
     /// The confirmation's question, before `what` is removed.
     public static func libraryClearQuestion(what: String) -> String {
         "Remove “\(what)” from the paper library? It is deleted from the folder."
@@ -1038,6 +1041,10 @@ public enum BioMedLitConstants {
 
     /// The confirmation's sentence when no app uses it.
     public static let libraryClearUsedByNone = "No app uses it."
+
+    /// The confirmation's sentence when some of its folder's records could not be read.
+    public static let libraryClearMaybeUsed =
+        "The library could not read every record of this paper, so other apps may use it too."
 
     /// The confirmation's sentence when this app uses it.
     public static let libraryClearUsedHere =
@@ -1084,9 +1091,19 @@ public enum BioMedLitConstants {
     /// A document's note when its library file was removed in the manual clear.
     public static let libraryRemovedNote = "its file was removed from the paper library"
 
-    /// A removal that was done whose documents' notes could not be saved.
+    /// A removal (done, or done in part) whose documents' notes could not be saved.
     public static func libraryClearNotesNotSaved(reason: String) -> String {
-        "It was removed, but the documents that read it could not be marked so: \(reason)"
+        "The documents that read what was removed could not be marked so: \(reason)"
+    }
+
+    /// Why the documents could not be marked: the app's store is not open.
+    public static let libraryClearNoStoreReason = "the documents' store is not open"
+
+    /// A removal whose documents were not marked: whether the library still
+    /// holds their files elsewhere could not be read.
+    public static func libraryClearGoneUnchecked(reason: String) -> String {
+        "The documents that read what was removed were not marked so: the library could not be read again "
+            + "to see whether it holds their files elsewhere (\(reason))"
     }
 
     // MARK: - Shared paper library: bmlib's sentences

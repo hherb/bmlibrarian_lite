@@ -318,28 +318,47 @@ extension LibraryController {
     /// Remove the paper folder `folder` from the library at `access`, or with
     /// `name` only that file of it (the user's confirmed request); then note
     /// on each document reading a removed file that the library no longer
-    /// holds elsewhere that its file was removed.
+    /// holds elsewhere that its file was removed. That is done after a
+    /// failed removal too, since part of it may have gone.
     ///
-    /// - Returns: Why it failed (nothing removed, or the folder only in part),
-    ///   or why the documents' notes were not saved; nil when done.
-    static func removeFromLibrary(_ access: LibraryAccess, folder: String, name: String?) async -> String? {
-        let removed = await Task.detached(priority: .userInitiated) {
+    /// - Returns: Whether it was removed, and each failure to tell the user:
+    ///   why the removal failed (nothing removed, or the folder only in
+    ///   part), and why the documents were not marked.
+    static func removeFromLibrary(_ access: LibraryAccess, folder: String, name: String?) async
+        -> (removed: Bool, failures: [String]) {
+        let outcome = await Task.detached(priority: .userInitiated) {
             LibraryClear.remove(access, folder: folder, name: name)
         }.value
-        let files: [LibraryFileReference]
-        switch removed {
-        case let .failure(failure): return failure.description
-        case let .success(found): files = found
+        let (files, failure): ([LibraryFileReference], String?) = switch outcome {
+        case let .removed(files): (files, nil)
+        case let .failed(why, mayBeGone): (mayBeGone, why.description)
         }
-        guard !files.isEmpty else { return nil }
-        let library = source(for: access)
-        // The same bytes may be in another folder of the paper: those still read
-        let gone = await Task.detached(priority: .userInitiated) {
-            files.filter { library?.path(of: $0) == nil }
-        }.value
-        LibraryMover.noteRemoved(documents(), gone: gone)
+        let removed = failure == nil
+        guard !files.isEmpty else { return (removed, failure.map { [$0] } ?? []) }
+        let notes = await noteRemoved(files, in: access)
+        return (removed, [failure, notes].compactMap { $0 })
+    }
+
+    /// Note on each document reading one of `files` that the library at
+    /// `access` now holds nowhere that its file was removed, and save them.
+    ///
+    /// - Returns: Why they were not marked, or nil when done.
+    private static func noteRemoved(_ files: [LibraryFileReference], in access: LibraryAccess) async -> String? {
+        // A file of the same digest and kind may still be on disk in another
+        // folder: its documents still read
+        let checked = await Task.detached(priority: .userInitiated) { LibraryClear.gone(files, in: access) }.value
+        let gone: [LibraryFileReference]
+        switch checked {
+        case let .failure(why): return why.description
+        case let .success(found): gone = found
+        }
+        guard !gone.isEmpty else { return nil }
+        guard let context = container?.mainContext else {
+            return BioMedLitConstants.libraryClearNotesNotSaved(reason: BioMedLitConstants.libraryClearNoStoreReason)
+        }
         do {
-            try container?.mainContext.save()
+            LibraryMover.noteRemoved(try context.fetch(FetchDescriptor<Document>()), gone: gone)
+            try context.save()
             return nil
         } catch {
             AppLogger.fullText.error("The documents' removed-file notes were not saved: \(error, privacy: .public)")

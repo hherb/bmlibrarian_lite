@@ -46,10 +46,13 @@ FFI at bmlib `747e7a80`. BioMedLit `Library/` (CLAUDE.md lists the types).
 - **3d** the manual clear (`LibraryClear`, BioMedLit; StudyAnalyzer's
   `library_clear.rs` rules and wording): *Papers in the Library* lists each
   paper and file with its size and users; *Remove Paper…* / *Remove File…*
-  after a confirmation naming the other apps. A fresh scan must still list it;
-  a name bmlib refuses asks for a rename. Records are left listing a removed
-  file; this app's documents reading it get `libraryRemovedNote` (unless the
-  bytes are still in the library); nothing downloads again on its own.
+  after a confirmation naming the other apps (or saying others may, when a
+  record could not be read). A fresh scan must still list it; a folder name
+  bmlib refuses asks for a rename. Records are left listing a removed file;
+  this app's documents reading it get `libraryRemovedNote` (unless one scan
+  after the removal, a failed one too, finds the digest elsewhere; a library
+  that cannot be read marks none and says so); a PDF found again drops the
+  note; nothing downloads again on its own.
 - **Owed by the maintainer: the sandboxed click-throughs**: 3a's (plan Task 4
   Step 5), 3b's (plan; also: does a hanging iCloud dataless read block the
   service actor's fetches?), 3c's (plan Task 4 Step 3), 3d's (plan *Owed*).
@@ -59,8 +62,11 @@ FFI at bmlib `747e7a80`. BioMedLit `Library/` (CLAUDE.md lists the types).
   **#797** (an extraction-off library PDF asks CORE), **#799** (the
   unreachable warning on every call); 3c's **#803**. *Stop using*/*Choose…*
   mid-fetch stops the old access, so its source waits under a wrong reason.
-  3d: the scan's problems are shown in bmlib's debug form (a sentence per
-  kind before the App Store release). **Next: the desktop (#789)** or Android
+  3d: the scan's problems are shown in Swift's default form of the FFI enum
+  (a sentence per kind before the App Store release). StudyAnalyzer's clear
+  still takes a paper's users from its files on disk and reads an unread
+  record as no user; lite's #805 review fixed both here (an issue there is
+  owed). **Next: the desktop (#789)** or Android
   (#790), each needing its own plan; the iOS half is phase 4.
 
 **Retraction checking, Android: done** (PRs #655, #661; design in

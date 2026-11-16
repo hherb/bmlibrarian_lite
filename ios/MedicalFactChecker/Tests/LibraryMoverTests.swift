@@ -203,8 +203,8 @@ final class LibraryMoverTests: XCTestCase {
     }
 
     /// 3d: a removed file is noted on every document reading it, and on no
-    /// other; the document keeps its digest, so the file is found again if
-    /// the same bytes come back.
+    /// other; the document keeps its digest, so a PDF is found again by it if
+    /// the same bytes come back, and the note then goes.
     func testRemovedFileIsNotedOnItsDocumentsOnly() {
         let other = String(repeating: "d", count: 64)
         func inLibrary(_ sha256: String, kind: String = BioMedLitConstants.libraryKindPDF) -> Document {
@@ -225,6 +225,9 @@ final class LibraryMoverTests: XCTestCase {
         XCTAssertNil(sameDigestOtherKind.fullTextLibraryNote)
         XCTAssertEqual(one.fullTextLibrarySHA256, digest)
         XCTAssertTrue(one.libraryNotices(libraryState: .notChosen)[0].contains(BioMedLitConstants.libraryRemovedNote))
+        one.storeRefoundLibraryPDF(at: "/tmp/library/papers/p/pdf-dddddddddddd.pdf")
+        XCTAssertNil(one.fullTextLibraryNote, "a file found again reads")
+        XCTAssertEqual(two.fullTextLibraryNote, BioMedLitConstants.libraryRemovedNote)
     }
 }
 #endif

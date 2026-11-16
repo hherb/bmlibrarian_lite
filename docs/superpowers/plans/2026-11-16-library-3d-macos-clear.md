@@ -88,9 +88,19 @@ list and the confirmation.
 
 - At the pin (`747e7a80`) the scan does not report a folder bmlib cannot
   name (`con`) as a problem; `removeFolder` still refuses it, as tested.
-- A removal whose documents' notes cannot be saved says it was removed
+- A removal whose documents' notes cannot be saved says so
   (`libraryClearNotesNotSaved`), not 3c's "this app keeps its copies".
 - The section is in `MacLibrarySettingsTab.swift` (no project-file edit).
+- After the PR #805 review:
+  - `remove` returns `LibraryRemoval`: a failed removal still gives the
+    files that may have gone, so their documents are told too.
+  - `LibraryClear.gone` decides which documents are told, from one scan
+    after the removal. A library that cannot be read marks none
+    (`libraryClearGoneUnchecked`) and is never read as "held nowhere".
+  - A paper's users come from all its records. A folder whose records the
+    scan could not all read is `usersUnknown`, and the list and the
+    confirmation say others may use it.
+  - A PDF found again by its digest drops the removed note.
 
 ## Owed: the click-through (sandboxed build)
 

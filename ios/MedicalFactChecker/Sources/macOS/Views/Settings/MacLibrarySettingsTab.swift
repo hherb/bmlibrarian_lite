@@ -264,7 +264,7 @@ private struct LibraryPapersSection: View {
     private struct Removal {
         /// What it removes, as the list shows it.
         let what: String
-        /// The confirmation (``LibraryClear/removeQuestion(what:usedBy:usedHere:)``).
+        /// The confirmation (``LibraryClear/removeQuestion(what:usedBy:usedHere:usersUnknown:)``).
         let question: String
         /// The paper's folder.
         let folder: String
@@ -308,19 +308,22 @@ private struct LibraryPapersSection: View {
                 ForEach(listing.papers, id: \.folder) { paper in
                     DisclosureGroup {
                         ForEach(paper.files, id: \.name) { file in
+                            // A record the scan could not read may list the file too
                             row(file.name, detail: LibraryClear.sizeText(file.size) + ", "
-                                + LibraryClear.usersText(usedBy: file.usedBy, usedHere: file.usedHere),
+                                + LibraryClear.usersText(usedBy: file.usedBy, usedHere: file.usedHere,
+                                                         usersUnknown: paper.usersUnknown),
                                 button: "Remove File…") {
                                 ask(file.name, usedBy: file.usedBy, usedHere: file.usedHere,
-                                    folder: paper.folder, name: file.name)
+                                    usersUnknown: paper.usersUnknown, folder: paper.folder, name: file.name)
                             }
                         }
                     } label: {
                         row(paper.label, detail: LibraryClear.sizeText(of: paper) + ", "
-                            + LibraryClear.usersText(usedBy: paper.usedBy, usedHere: paper.usedHere),
+                            + LibraryClear.usersText(usedBy: paper.usedBy, usedHere: paper.usedHere,
+                                                     usersUnknown: paper.usersUnknown),
                             button: "Remove Paper…") {
                             ask(paper.label, usedBy: paper.usedBy, usedHere: paper.usedHere,
-                                folder: paper.folder, name: nil)
+                                usersUnknown: paper.usersUnknown, folder: paper.folder, name: nil)
                         }
                     }
                 }
@@ -355,10 +358,12 @@ private struct LibraryPapersSection: View {
     }
 
     /// Ask before removing `what`, naming who else uses it.
-    private func ask(_ what: String, usedBy: [String], usedHere: Bool, folder: String, name: String?) {
+    private func ask(_ what: String, usedBy: [String], usedHere: Bool, usersUnknown: Bool,
+                     folder: String, name: String?) {
         note = nil
         pending = Removal(what: what, question: LibraryClear.removeQuestion(what: what, usedBy: usedBy,
-                                                                            usedHere: usedHere),
+                                                                            usedHere: usedHere,
+                                                                            usersUnknown: usersUnknown),
                           folder: folder, name: name)
     }
 
@@ -377,17 +382,15 @@ private struct LibraryPapersSection: View {
         working = false
     }
 
-    /// Run the confirmed removal, say what it did, then read the list again;
-    /// a failed removal's reason is shown after the reread.
+    /// Run the confirmed removal, read the list again, then say what the
+    /// removal did; its failures are shown with the reread's own, if any.
     private func remove(_ removal: Removal) async {
         working = true
-        let why = await LibraryController.removeFromLibrary(access, folder: removal.folder, name: removal.name)
+        let done = await LibraryController.removeFromLibrary(access, folder: removal.folder, name: removal.name)
         await load()
-        if let why {
-            failure = why
-        } else {
-            note = BioMedLitConstants.libraryClearRemoved(what: removal.what)
-        }
+        if done.removed { note = BioMedLitConstants.libraryClearRemoved(what: removal.what) }
+        let failures = [failure].compactMap { $0 } + done.failures
+        failure = failures.isEmpty ? nil : failures.joined(separator: "\n")
         await changed()
     }
 }

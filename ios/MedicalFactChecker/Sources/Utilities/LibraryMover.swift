@@ -162,7 +162,7 @@ enum LibraryMover {
     }
 
     /// Note on each of `documents` with a library file that it cannot be read
-    /// after a switch, and why.
+    /// after a switch or a manual clear, and why.
     static func notCarried(_ documents: [Document], note: String) {
         for document in documents where document.fullTextLibrarySHA256 != nil {
             document.noteLibraryFileLeft(note)
