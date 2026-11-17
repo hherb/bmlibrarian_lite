@@ -44,10 +44,12 @@ once.
   it builds the `.studyanalyzer` JSON (format `studyanalyzer-handoff`,
   version 1, sender `MedicalFactChecker`). Base64 via
   `Data.base64EncodedString()` with no options; blank fields omitted;
-  identifiers checked by the format's rules. Tests compare it with
-  StudyAnalyzer's fixtures (`ids_only`, `pdf`, `jats` in
-  `crates/studyanalyzer-core/tests/fixtures/handoff/`), with copies placed in
-  BioMedLit's test resources.
+  identifiers sent as stored (StudyAnalyzer checks each one and tells the
+  reader of any it drops, so the sender does not repeat its rules). A file
+  over 100 MiB (`MAX_HANDOFF_BYTES`' PDF) is not sent; the next source is.
+  Tests compare it with StudyAnalyzer's fixtures (`ids_only`, `pdf`, `jats`
+  in `crates/studyanalyzer-core/tests/fixtures/handoff/`), with copies placed
+  in BioMedLit's test resources.
 - **What it sends** (library spec §3). The library's JATS file if the
   document has one (`fullTextLibraryKind` jats, read with
   `FullTextLibrary.read`). Else, for a paper whose text came from JATS
@@ -56,11 +58,14 @@ once.
   (`localPDFFilePath`, or the library's PDF). Else the Markdown
   (`fullTextContent`), else the HTML. When offline: whatever it has, in that
   order. "Online" is an `NWPathMonitor` path status taken at the click.
-- **Sending:** the file goes into the app's temporary directory as
-  `<pmid-or-id>.studyanalyzer` and is opened with
+- **Sending:** the file goes into a `StudyAnalyzerHandoff` folder in the
+  app's temporary directory, named by a fresh UUID (`<uuid>.studyanalyzer`:
+  a DOI is no safe file name, and the clean-up then touches only its own
+  files), and is opened with
   `NSWorkspace.open(_:withApplicationAt:configuration:)`, so Launch Services
-  grants StudyAnalyzer that one file. Earlier hand-off files are deleted on
-  each send and at launch.
+  grants StudyAnalyzer that one file. Hand-off files older than a minute are
+  deleted on each send and at launch, so a quick second send never pulls the
+  first file away before StudyAnalyzer has read it.
 - **Shown** only when
   `NSWorkspace.urlForApplication(withBundleIdentifier: "com.bmlibrarian.studyanalyzer")`
   finds the app. A failure (the app gone, the open refused, the file not
