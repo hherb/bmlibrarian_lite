@@ -43,10 +43,10 @@ final class SearchQueryLogTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    private func record(
+    private func queryRun(
         _ kind: SearchQueryRecord.Kind,
         _ query: String,
-        provider: SearchProvider = .pubmed,
+        provider: MedicalFactChecker.SearchProvider = .pubmed,
         ids: [String]?,
         hits: Int? = nil
     ) -> SearchQueryRecord {
@@ -69,8 +69,8 @@ final class SearchQueryLogTests: XCTestCase {
     /// A later page of the same query adds its documents to that query, once each.
     func testALaterPageOfAQueryAddsToIt() {
         let log = SearchQueryLog.recording(
-            record(.initial, "q", ids: ["b", "c"], hits: 40),
-            into: [record(.initial, "q", ids: ["a", "b"], hits: 30)]
+            queryRun(.initial, "q", ids: ["b", "c"], hits: 40),
+            into: [queryRun(.initial, "q", ids: ["a", "b"], hits: 30)]
         )
 
         XCTAssertEqual(log.count, 1)
@@ -80,11 +80,11 @@ final class SearchQueryLogTests: XCTestCase {
 
     /// Another query, or the same one asked of another provider, is listed after.
     func testAnotherQueryIsListedAfter() {
-        var log = [record(.initial, "q", ids: ["a"])]
-        log = SearchQueryLog.recording(record(.alternative, "q2", ids: ["b"]), into: log)
-        log = SearchQueryLog.recording(record(.initial, "q", provider: .europePMC, ids: ["c"]), into: log)
+        var log = [queryRun(.initial, "q", ids: ["a"])]
+        log = SearchQueryLog.recording(queryRun(.alternative, "q2", ids: ["b"]), into: log)
+        log = SearchQueryLog.recording(queryRun(.initial, "q", provider: .europePMC, ids: ["c"]), into: log)
 
-        XCTAssertEqual(log.map(\.query), ["q", "q2", "q"])
+        XCTAssertEqual(log.map { $0.query }, ["q", "q2", "q"])
         XCTAssertEqual(
             (0..<log.count).map { SearchQueryLog.label(at: $0, in: log) },
             ["Initial query", "Alternative 1", "Initial query (2)"]
@@ -94,7 +94,7 @@ final class SearchQueryLogTests: XCTestCase {
     /// A query whose documents were not recorded is not given a partial count.
     func testAnUnrecordedQueryStaysUnrecorded() {
         let log = SearchQueryLog.recording(
-            record(.initial, "q", ids: ["b"]), into: [record(.initial, "q", ids: nil)]
+            queryRun(.initial, "q", ids: ["b"]), into: [queryRun(.initial, "q", ids: nil)]
         )
 
         XCTAssertNil(log[0].documentIDs)
@@ -106,7 +106,7 @@ final class SearchQueryLogTests: XCTestCase {
     /// Found counts every document the query added; relevant those at or above the threshold.
     func testTheCountsAreTheQuerysOwn() {
         let stats = SearchQueryLog.statistics(
-            of: record(.initial, "q", ids: ["a", "b", "c", "d"]),
+            of: queryRun(.initial, "q", ids: ["a", "b", "c", "d"]),
             scores: ["a": 5, "b": 3, "c": 2, "z": 5],
             minScore: 3
         )
@@ -136,9 +136,9 @@ final class SearchQueryLogTests: XCTestCase {
         context.insert(session)
         session.pubmedQuery = "q"
         let first = [document(in: session, score: 5), document(in: session, score: 1)]
-        session.recordSearchQuery(record(.initial, "q", ids: first.map(\.id), hits: 100))
+        session.recordSearchQuery(queryRun(.initial, "q", ids: first.map { $0.id }, hits: 100))
         let second = [document(in: session, score: 4)]
-        session.recordSearchQuery(record(.alternative, "q2", ids: second.map(\.id), hits: 9))
+        session.recordSearchQuery(queryRun(.alternative, "q2", ids: second.map { $0.id }, hits: 9))
 
         let rows = session.searchQueryStatistics(minScore: 3)
 
@@ -189,10 +189,10 @@ final class SearchQueryLogTests: XCTestCase {
         let earlier = document(in: session, score: 5)
         let found = document(in: session, score: 4)
 
-        session.recordSearchQuery(record(.alternative, "q2", ids: [found.id]))
+        session.recordSearchQuery(queryRun(.alternative, "q2", ids: [found.id]))
 
         let rows = session.searchQueries()
-        XCTAssertEqual(rows.map(\.query), ["q", "q2"])
+        XCTAssertEqual(rows.map { $0.query }, ["q", "q2"])
         XCTAssertEqual(rows[0].documentIDs, [earlier.id])
         XCTAssertEqual(rows[1].documentIDs, [found.id])
     }
@@ -204,7 +204,7 @@ final class SearchQueryLogTests: XCTestCase {
         session.pubmedQuery = "q"
         let found = document(in: session, score: 4)
 
-        session.recordSearchQuery(record(.initial, "q", provider: .europePMC, ids: [found.id]))
+        session.recordSearchQuery(queryRun(.initial, "q", provider: .europePMC, ids: [found.id]))
 
         let rows = session.searchQueries()
         XCTAssertEqual(rows.count, 1)
