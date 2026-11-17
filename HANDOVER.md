@@ -40,11 +40,11 @@ others may, when a record could not be read).
   a tree grant gives no access by path, scoped storage hides and refuses
   every file another app made, and the provider's rename onto an existing name
   makes `rec (1).json` and leaves the record unchanged. The route is a storage
-  seam in bmlib (`library/files.rs` plus `scan.rs`) with a Kotlin
-  `DocumentsContract` implementation through UniFFI. That is bmlib work first,
-  and it waits on the maintainer's decisions (the spike's four, record
-  replacement first). Still unmeasured: other providers, scan speed, a real
-  phone.
+  seam in bmlib (`library/files.rs`, plus `open.rs`'s one `root.exists()`)
+  with a Kotlin `DocumentsContract` implementation through UniFFI. That is
+  bmlib work first, and it waits on the maintainer's decisions (the spike's
+  four, record replacement first). Still unmeasured: other providers, scan
+  speed, a real phone.
 - **The desktop (#789)** waits for a bmlib release carrying `bmlib.library`
   (not in 0.13.0; the desktop pins PyPI only).
 - **Owed by the maintainer: the sandboxed click-throughs**: 3a's (plan Task 4
