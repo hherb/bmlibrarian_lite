@@ -1408,8 +1408,8 @@ final class Document {
     /// Extraction serves *analysis*: `fullTextContent` holds the recovered
     /// prose for a PDF whose ``storedContentKind`` is
     /// ``FullTextContentKind/extracted``, which is what the transparency
-    /// analyzer reads — through ``analyzableFullText``, the only consumer that
-    /// treats stored text as an article body. Display still prefers the
+    /// analyzer reads — through ``analyzableFullText``, the one way stored
+    /// text is treated as an article body. Display still prefers the
     /// document, so that case is resolved — and answered as a PDF — before
     /// the ordinary field-population fallback below gets a chance to hand
     /// back the same text as prose.
@@ -1464,7 +1464,8 @@ final class Document {
     /// `nil` when there is none.
     ///
     /// The single place the content kind is consulted for analysis, read by
-    /// `FactCheckWorkflow`, `ReportView` and `MacReportView` alike. Three
+    /// `FactCheckWorkflow`, `ReportView`, `MacReportView` and the hand-off to
+    /// StudyAnalyzer alike (with ``analyzableFullTextHTML`` beside it). Three
     /// copies of one rule is the shape this slice already had to correct twice
     /// — once across four retrieval surfaces, once across two display surfaces
     /// — so the rule is stated once and the call sites ask.
@@ -1489,6 +1490,12 @@ final class Document {
     /// either way. What it stops getting is an abstract dressed as a body.
     var analyzableFullText: String? {
         storedContentKind == .abstract ? nil : fullTextContent
+    }
+
+    /// The stored HTML an analyzer may treat as the article's body:
+    /// ``analyzableFullText``'s rule for ``fullTextHTML``.
+    var analyzableFullTextHTML: String? {
+        storedContentKind == .abstract ? nil : fullTextHTML
     }
 
     /// The cached full text, rebuilt as a result the viewers can render.

@@ -962,6 +962,14 @@ public enum BioMedLitConstants {
     /// `MAX_HTML_BYTES`); a larger one is not sent.
     public static let handoffMaxHTMLBytes = 23_068_672
 
+    /// The longest `title` StudyAnalyzer accepts, in Unicode scalars; a longer
+    /// one would refuse the whole file, so it is left out.
+    public static let handoffMaxTitleChars = 2000
+
+    /// The longest `full_text.file_name` or `full_text.source` StudyAnalyzer
+    /// accepts, in Unicode scalars; a longer one is left out.
+    public static let handoffMaxLabelChars = 200
+
     /// The suffix of a JATS kept in the PDF cache while the library cannot be
     /// reached (`<cacheKey>-<sha12>.xml`), waiting to be moved in (design §4.6).
     public static let libraryWaitingJATSSuffix = ".xml"

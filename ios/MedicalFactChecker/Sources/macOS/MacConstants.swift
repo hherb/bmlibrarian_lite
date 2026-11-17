@@ -373,22 +373,23 @@ enum MacStudyAnalyzer {
     static let systemImage = "arrow.up.forward.app"
     /// The temporary folder the hand-off files go in.
     static let handoffFolderName = "StudyAnalyzerHandoff"
-    /// How old a hand-off file must be before it is deleted (seconds): long
-    /// enough for StudyAnalyzer to have read a file sent just before.
-    static let handoffMaxAge: TimeInterval = 60
+    /// How old a hand-off file must be before it is deleted (seconds): a day,
+    /// so StudyAnalyzer still finds it after a slow first launch or a held
+    /// open, while the copy of the paper does not linger in temp.
+    static let handoffMaxAge: TimeInterval = 86_400
     /// How long to wait for the network's status at the click (seconds); no
     /// answer by then counts as offline.
     static let networkCheckTimeout: TimeInterval = 1
     /// StudyAnalyzer is not installed (or Launch Services no longer finds it).
     static let notFound = "StudyAnalyzer could not be found. Is it still installed?"
-    /// The document has no identifier and no text.
+    /// The document has no identifier, and no text that could be sent.
     static let nothingToSend = "This paper has nothing StudyAnalyzer can open."
     /// "The hand-off file could not be written: <why>"
     static let notWritten = "The hand-off file could not be written: %@"
     /// "StudyAnalyzer could not be opened: <why>"
     static let notOpened = "StudyAnalyzer could not be opened: %@"
-    /// No paper library is set, so none of its files can be read.
-    static let noLibrary = "no paper library is set"
+    /// The paper library is not set, or cannot be used now.
+    static let noLibrary = "the paper library is not available (see the Library setting)"
 }
 
 #endif // os(macOS)

@@ -28,7 +28,10 @@ public struct StudyAnalyzerHandoff: Equatable, Sendable {
         /// Where the text came from, for display (e.g. "Europe PMC"), or `nil`.
         public let source: String?
 
-        /// A full text of `format`; a blank `fileName` or `source` is left out.
+        /// A full text of `format`. A blank `fileName` or `source` is left
+        /// out, and so is one StudyAnalyzer would refuse the whole file over
+        /// (over 200 characters, or an invisible or reordering character; a
+        /// `/` or `\` in a file name): each is a label, not the paper.
         ///
         /// - Parameters:
         ///   - format: Its kind.
@@ -38,8 +41,8 @@ public struct StudyAnalyzerHandoff: Equatable, Sendable {
         public init(format: Format, data: Data, fileName: String? = nil, source: String? = nil) {
             self.format = format
             self.data = data
-            self.fileName = nonBlank(fileName)
-            self.source = nonBlank(source)
+            self.fileName = label(fileName, path: true)
+            self.source = label(source, path: false)
         }
     }
 
@@ -54,7 +57,9 @@ public struct StudyAnalyzerHandoff: Equatable, Sendable {
     /// The full text carried, or `nil` for identifiers only.
     public let fullText: FullText?
 
-    /// A hand-off of these fields; blank or whitespace-only strings are left out.
+    /// A hand-off of these fields; blank or whitespace-only strings are left
+    /// out, and so is a title over StudyAnalyzer's 2000 characters (it would
+    /// refuse the whole file; the identifiers name the paper).
     ///
     /// - Parameters:
     ///   - pmid: A PubMed ID or preprint accession.
@@ -66,7 +71,9 @@ public struct StudyAnalyzerHandoff: Equatable, Sendable {
         self.pmid = nonBlank(pmid)
         self.doi = nonBlank(doi)
         self.pmcid = nonBlank(pmcid)
-        self.title = nonBlank(title)
+        self.title = nonBlank(title).flatMap {
+            $0.unicodeScalars.count > BioMedLitConstants.handoffMaxTitleChars ? nil : $0
+        }
         self.fullText = fullText
     }
 
@@ -90,8 +97,12 @@ public struct StudyAnalyzerHandoff: Equatable, Sendable {
                 Text(format: $0.format.rawValue, data: $0.data, fileName: $0.fileName, source: $0.source)
             }
         )
-        // The default `.base64` data strategy writes one unbroken, padded string.
-        return try JSONEncoder().encode(file)
+        // The default `.base64` data strategy writes one unbroken, padded
+        // string. Unescaped slashes: `\/` would add ~2 MB to a 100 MiB PDF's
+        // base64, past StudyAnalyzer's whole-file limit.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .withoutEscapingSlashes
+        return try encoder.encode(file)
     }
 
     // The file's shape; synthesized `encodeIfPresent` leaves out each nil.
@@ -132,4 +143,28 @@ public struct StudyAnalyzerHandoff: Equatable, Sendable {
 private func nonBlank(_ value: String?) -> String? {
     guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
     return value
+}
+
+/// `value` when StudyAnalyzer accepts it as a `file_name` (`path`) or
+/// `source`: not blank, at most 200 characters, none of its refused
+/// characters (handoff-format.md, `sender`'s rules); else `nil`.
+private func label(_ value: String?, path: Bool) -> String? {
+    guard let value = nonBlank(value),
+          value.unicodeScalars.count <= BioMedLitConstants.handoffMaxLabelChars,
+          !value.unicodeScalars.contains(where: { isRefusedInLabel($0) || (path && ($0 == "/" || $0 == "\\")) })
+    else { return nil }
+    return value
+}
+
+/// A control character, or one that reorders or hides text (U+200C and
+/// U+200D, which scripts need, are allowed).
+private func isRefusedInLabel(_ scalar: Unicode.Scalar) -> Bool {
+    if scalar.properties.generalCategory == .control { return true }
+    switch scalar.value {
+    case 0x061C, 0x200B, 0x200E, 0x200F, 0x2028, 0x2029, 0x202A...0x202E,
+         0x2060...0x2064, 0x2066...0x2069, 0xFEFF:
+        return true
+    default:
+        return false
+    }
 }

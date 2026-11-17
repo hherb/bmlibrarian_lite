@@ -2,6 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Superseded in part by the review commits.** The code is the reference
+> where this plan differs. The one cap became per-format caps
+> (`handoffMaxPDFBytes`, `handoffMaxTextBytes`, `handoffMaxHTMLBytes`). The
+> choice is now `StudyAnalyzerPaper.handoff(...)`, reached through
+> `Document.studyAnalyzerPaper`. Its `handoff` is optional, so the notes
+> survive when nothing is sent. Notes end with "… was sent instead.". The
+> text sent is `analyzableFullText`: never an abstract-only record's text,
+> and sent as `text` when it was extracted from a PDF. The PMID slot holds
+> only a PubMed ID or a preprint accession. The test counts below are
+> out of date.
+
 **Goal:** An **Open in StudyAnalyzer** button in the macOS full-text viewer that hands the paper to StudyAnalyzer as a `.studyanalyzer` file.
 
 **Architecture:** Three layers. BioMedLit's pure `StudyAnalyzerHandoff` writes the JSON. A `Document` extension in the app's shared sources picks what to send (testable under SwiftPM). A macOS-only `StudyAnalyzerSender` writes the temp file, opens it with StudyAnalyzer, cleans up, and backs the button.

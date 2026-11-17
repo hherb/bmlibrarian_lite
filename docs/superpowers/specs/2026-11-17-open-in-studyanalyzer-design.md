@@ -42,17 +42,19 @@ once.
 - **`StudyAnalyzerHandoff`** in BioMedLit, pure Swift: from plain fields
   (pmid, doi, pmcid, title, an optional file of kind, bytes, name and source)
   it builds the `.studyanalyzer` JSON (format `studyanalyzer-handoff`,
-  version 1, sender `MedicalFactChecker`). Base64 via
-  `Data.base64EncodedString()` with no options; blank fields omitted;
-  identifiers sent as stored (StudyAnalyzer checks each one and tells the
-  reader of any it drops, so the sender does not repeat its rules). A file
+  version 1, sender `MedicalFactChecker`). Base64 as one unbroken padded
+  string (`JSONEncoder`'s default data strategy), slashes unescaped; blank
+  fields omitted, and so are a title, file name or source StudyAnalyzer
+  would refuse the file over. The PMID slot carries only a PubMed ID or a
+  preprint accession (`Document.pubmedID`, #212); StudyAnalyzer checks each
+  identifier and tells the reader of any it drops. A file
   over StudyAnalyzer's cap for its format (`MAX_PDF_BYTES` 100 MiB,
   `MAX_TEXT_BYTES` 20 MiB for JATS and Markdown, `MAX_HTML_BYTES` 22 MiB) is
   not sent; the next source is. An abstract-only record's text is never sent
   as the paper's body (`Document.analyzableFullText`'s rule).
   Tests compare it with StudyAnalyzer's fixtures (`ids_only`, `pdf`, `jats`
-  in `crates/studyanalyzer-core/tests/fixtures/handoff/`), with copies placed
-  in BioMedLit's test resources.
+  in `crates/studyanalyzer-core/tests/fixtures/handoff/`), with copies in
+  `Tests/BioMedLitTests/Fixtures/Handoff/`.
 - **What it sends** (library spec §3). The library's JATS file if the
   document has one (`fullTextLibraryKind` jats, read with
   `FullTextLibrary.read`). Else, for a paper whose text came from JATS

@@ -54,7 +54,7 @@ others may, when a record could not be read).
   is built (plan `docs/superpowers/plans/2026-11-17-open-in-studyanalyzer.md`);
   the paper card's button is left for later (the maintainer's call,
   2026-11-17). Owed: the plan's Task 3 Step 6 click-through.
-- **Left:** the ledger's library rows other than step 4 stay `owed` (#788).
+- **Left:** the ledger's library rows stay `owed` (#788); step 4 has none.
   An Apple archive from master lists `BmlibFFI.framework.dSYM` (confirmed
   2026-11-17, 1.9.0 DMG).
   Lodged: 3b's **#796** (the race fallback can record a refused PDF),
