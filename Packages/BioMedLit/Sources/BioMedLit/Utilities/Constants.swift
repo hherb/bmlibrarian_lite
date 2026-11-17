@@ -933,6 +933,27 @@ public enum BioMedLitConstants {
     /// bmlib's name for a plain-text source file (`SourceKind::Text`).
     public static let libraryKindText = "text"
 
+    // MARK: StudyAnalyzer hand-off (StudyAnalyzer's `docs/handoff-format.md`)
+
+    /// StudyAnalyzer's bundle identifier, by which Launch Services finds it.
+    public static let studyAnalyzerBundleID = "com.bmlibrarian.studyanalyzer"
+
+    /// The hand-off file's `format` value.
+    public static let handoffFormat = "studyanalyzer-handoff"
+
+    /// The hand-off format version this app writes.
+    public static let handoffVersion = 1
+
+    /// The hand-off file's `sender`: this app's name.
+    public static let handoffSender = "MedicalFactChecker"
+
+    /// The hand-off file's extension.
+    public static let handoffFileExtension = "studyanalyzer"
+
+    /// The largest file a hand-off carries (100 MiB, the PDF in
+    /// StudyAnalyzer's `MAX_HANDOFF_BYTES`); a larger one is not sent.
+    public static let handoffMaxFileBytes = 104_857_600
+
     /// The suffix of a JATS kept in the PDF cache while the library cannot be
     /// reached (`<cacheKey>-<sha12>.xml`), waiting to be moved in (design §4.6).
     public static let libraryWaitingJATSSuffix = ".xml"

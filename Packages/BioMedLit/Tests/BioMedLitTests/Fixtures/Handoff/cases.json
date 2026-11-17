@@ -1,0 +1,55 @@
+{
+  "cases": [
+    {
+      "file": "jats.studyanalyzer",
+      "expect": "ok",
+      "pmid": "12345678",
+      "doi": "10.1234/fixture.1",
+      "pmcid": null,
+      "kind": "jats",
+      "sender": "MedicalFactChecker",
+      "title": "A fixture trial",
+      "file_name": "article.xml",
+      "source": "Europe PMC",
+      "bytes": "article.xml"
+    },
+    {
+      "file": "pdf.studyanalyzer",
+      "expect": "ok",
+      "pmid": null,
+      "doi": null,
+      "pmcid": "PMC123",
+      "kind": "pdf",
+      "sender": "MedicalFactChecker",
+      "title": null,
+      "file_name": "paper.pdf",
+      "source": null,
+      "bytes": "paper.pdf"
+    },
+    {
+      "file": "ids_only.studyanalyzer",
+      "expect": "ok",
+      "pmid": "PPR456",
+      "doi": "10.1000/xyz",
+      "pmcid": null,
+      "kind": null,
+      "sender": "MedicalFactChecker",
+      "title": null,
+      "file_name": null,
+      "source": null,
+      "bytes": null
+    },
+    {
+      "file": "newer.studyanalyzer",
+      "expect": "Newer"
+    },
+    {
+      "file": "path_name.studyanalyzer",
+      "expect": "Malformed"
+    },
+    {
+      "file": "bidi_sender.studyanalyzer",
+      "expect": "Malformed"
+    }
+  ]
+}
