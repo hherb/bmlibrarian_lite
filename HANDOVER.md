@@ -25,34 +25,28 @@ its slice has landed; add a new section when handing off new work.
 **The shared paper library** (decided 2026-11-15: every app, where its platform
 allows; #788 macOS, #789 desktop, #790 Android; design: StudyAnalyzer's
 `2026-11-13-shared-paper-library-design.md` §5.3; one plan per step in
-`docs/superpowers/plans/2026-11-1[56]-library-3*`). **macOS 3a–3c landed**
-(PRs #787, #793, #804), **3d is this branch's PR** (`feat/library-3d-clear`).
-FFI at bmlib `747e7a80`. BioMedLit `Library/` (CLAUDE.md lists the types).
-- **3a** the Library tab, `LibrarySession` (launch resume, `recheck()` on
-  activation, quit stop; `unsaved`: a stale bookmark not remade).
-- **3b** `FullTextService(…, library:)`: a usable library JATS ends the lookup
-  with no request; the chain's JATS and PDFs are kept in the library; its PDF
-  is used before the PDF tiers, after the title check. A library failure never
-  stops a fetch; one that `waits` leaves the source in the PDF cache (JATS as
-  `<cacheKey>-<sha12>.xml`) with `libraryWaiting` set. `Document` gains
-  `fullTextLibrary{SHA256,Kind,Waiting,Note}`; a moved PDF is found again by
-  digest. #798 split the service into `FullTextService+<concern>.swift`.
-- **3c** the move (`LibraryMove`, BioMedLit; `LibraryMover`, app
-  `Sources/Utilities`): the cached PDFs and waiting JATS a `Document` uses,
-  each read back through bmlib before the app's copy goes (after the save).
-  Waiting sources move in whenever a library is held (`onHeld`). The switch
-  copies along or notes each document; *Stop using* copies back as
-  `<key>-<sha12>.pdf|.xml`. Offers are unticked toggles.
-- **3d** the manual clear (`LibraryClear`, BioMedLit; StudyAnalyzer's
-  `library_clear.rs` rules and wording): *Papers in the Library* lists each
-  paper and file with its size and users; *Remove Paper…* / *Remove File…*
-  after a confirmation naming the other apps (or saying others may, when a
-  record could not be read). A fresh scan must still list it; a folder name
-  bmlib refuses asks for a rename. Records are left listing a removed file;
-  this app's documents reading it get `libraryRemovedNote` (unless one scan
-  after the removal, a failed one too, finds the digest elsewhere; a library
-  that cannot be read marks none and says so); a PDF found again drops the
-  note; nothing downloads again on its own.
+`docs/superpowers/plans/2026-11-1[56]-library-3*`). **macOS 3a–3d landed**
+(PRs #787, #793, #804, #805). FFI at bmlib `747e7a80`. BioMedLit
+`Library/` (CLAUDE.md lists the types; each step's plan has the detail). The
+rules that bind: a library failure never stops a fetch; a source that cannot
+be saved waits in the app's cache (`libraryWaiting`) and moves in whenever a
+library is held (`onHeld`); a file is referred to by digest, never path, and
+is read back through bmlib before the app's copy goes; a library PDF still
+passes the title check; the clear names the other apps using a file (or says
+others may, when a record could not be read).
+- **Android (#790): the spike is done**
+  (`doc/cross_platform/library_android_spike.md`, measured on an API 36
+  emulator). **A picked tree URI cannot back bmlib's path-based library**:
+  a tree grant gives no access by path, scoped storage hides and refuses
+  every file another app made, and the provider's rename onto an existing name
+  makes `rec (1).json` and leaves the record unchanged. The route is a storage
+  seam in bmlib (`library/files.rs` plus `scan.rs`) with a Kotlin
+  `DocumentsContract` implementation through UniFFI. That is bmlib work first,
+  and it waits on the maintainer's decisions (the spike's four, record
+  replacement first). Still unmeasured: other providers, scan speed, a real
+  phone.
+- **The desktop (#789)** waits for a bmlib release carrying `bmlib.library`
+  (not in 0.13.0; the desktop pins PyPI only).
 - **Owed by the maintainer: the sandboxed click-throughs**: 3a's (plan Task 4
   Step 5), 3b's (plan; also: does a hanging iCloud dataless read block the
   service actor's fetches?), 3c's (plan Task 4 Step 3), 3d's (plan *Owed*).
@@ -66,8 +60,8 @@ FFI at bmlib `747e7a80`. BioMedLit `Library/` (CLAUDE.md lists the types).
   (a sentence per kind before the App Store release). StudyAnalyzer's clear
   still takes a paper's users from its files on disk and reads an unread
   record as no user; lite's #805 review fixed both here (an issue there is
-  owed). **Next: the desktop (#789)** or Android
-  (#790), each needing its own plan; the iOS half is phase 4.
+  owed). The iOS half is phase 4. **Android's instrumented tests crash on
+  API 36** (Espresso 3.5.1, **#806**; CI runs none).
 
 **Retraction checking, Android: done** (PRs #655, #661; design in
 `doc/developer/retraction_checking.md`). *Check again* names why papers stay
