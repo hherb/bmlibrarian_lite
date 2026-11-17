@@ -31,7 +31,7 @@ final class DocumentStudyAnalyzerHandoffTests: XCTestCase {
         library: Result<Data, LibraryLookupFailure> = .failure(.init(description: "no library", waits: false)),
         file: Result<Data, Error> = .failure(Gone())
     ) -> StudyAnalyzerHandoffChoice? {
-        document.studyAnalyzerHandoff(
+        document.studyAnalyzerPaper.handoff(
             online: online,
             readLibrary: { reads.library.append($0); return library },
             readFile: { reads.files.append($0); return try file.get() }
@@ -82,7 +82,7 @@ final class DocumentStudyAnalyzerHandoffTests: XCTestCase {
         let choice = choose(document, online: true, library: .success(Data("%PDF-1.4".utf8)))
         XCTAssertEqual(choice?.handoff.fullText?.format, .pdf)
         XCTAssertEqual(choice?.handoff.fullText?.data, Data("%PDF-1.4".utf8))
-        XCTAssertEqual(choice?.notes.count, 1)
+        XCTAssertEqual(choice?.notes.count, 2)
     }
 
     func testAnUnreadableLibraryJATSFallsBackWithANote() {
@@ -102,9 +102,39 @@ final class DocumentStudyAnalyzerHandoffTests: XCTestCase {
         document.fullTextPDFPathIsLocalFile = true
         document.fullTextContent = "# A trial"
         let choice = choose(document, online: true,
-                            file: .success(Data(count: BioMedLitConstants.handoffMaxFileBytes + 1)))
+                            file: .success(Data(count: BioMedLitConstants.handoffMaxPDFBytes + 1)))
         XCTAssertEqual(choice?.handoff.fullText?.format, .markdown)
-        XCTAssertEqual(choice?.notes.count, 1)
+        XCTAssertEqual(choice?.notes.count, 2)
+    }
+
+    func testAFallbackSaysWhatWasSentInstead() {
+        let document = makeDocument()
+        document.fullTextPDFPath = pdfPath
+        document.fullTextPDFPathIsLocalFile = true
+        document.fullTextLibrarySHA256 = digest
+        document.fullTextLibraryKind = BioMedLitConstants.libraryKindPDF
+        let choice = choose(document, online: true, library: .success(Data("%PDF-1.4".utf8)))
+        XCTAssertEqual(choice?.notes.last, "The library's PDF was sent instead.")
+    }
+
+    func testAnAbstractOnlyRecordIsNotSentAsItsText() {
+        let document = makeDocument()
+        document.fullTextSource = AppFullTextSource.europePMC.rawValue
+        document.fullTextContentKindRaw = FullTextContentKind.abstract.rawValue
+        document.fullTextContent = "Only the abstract."
+        document.fullTextHTML = "<p>Only the abstract.</p>"
+        let choice = choose(document, online: false)
+        XCTAssertNil(choice?.handoff.fullText)
+        XCTAssertEqual(choice?.handoff.pmid, "1")
+    }
+
+    func testATextOverTheTextCapIsPassedOver() {
+        let document = makeDocument()
+        document.fullTextContent = String(repeating: "a", count: BioMedLitConstants.handoffMaxTextBytes + 1)
+        document.fullTextHTML = "<p>A trial</p>"
+        let choice = choose(document, online: false)
+        XCTAssertEqual(choice?.handoff.fullText?.format, .html)
+        XCTAssertTrue(choice?.notes.first?.contains("20 MiB") ?? false)
     }
 
     func testNothingToSendIsNil() {

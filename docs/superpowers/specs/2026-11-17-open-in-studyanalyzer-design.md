@@ -46,7 +46,10 @@ once.
   `Data.base64EncodedString()` with no options; blank fields omitted;
   identifiers sent as stored (StudyAnalyzer checks each one and tells the
   reader of any it drops, so the sender does not repeat its rules). A file
-  over 100 MiB (`MAX_HANDOFF_BYTES`' PDF) is not sent; the next source is.
+  over StudyAnalyzer's cap for its format (`MAX_PDF_BYTES` 100 MiB,
+  `MAX_TEXT_BYTES` 20 MiB for JATS and Markdown, `MAX_HTML_BYTES` 22 MiB) is
+  not sent; the next source is. An abstract-only record's text is never sent
+  as the paper's body (`Document.analyzableFullText`'s rule).
   Tests compare it with StudyAnalyzer's fixtures (`ids_only`, `pdf`, `jats`
   in `crates/studyanalyzer-core/tests/fixtures/handoff/`), with copies placed
   in BioMedLit's test resources.

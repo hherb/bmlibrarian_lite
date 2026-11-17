@@ -950,9 +950,17 @@ public enum BioMedLitConstants {
     /// The hand-off file's extension.
     public static let handoffFileExtension = "studyanalyzer"
 
-    /// The largest file a hand-off carries (100 MiB, the PDF in
-    /// StudyAnalyzer's `MAX_HANDOFF_BYTES`); a larger one is not sent.
-    public static let handoffMaxFileBytes = 104_857_600
+    /// The largest PDF a hand-off carries (100 MiB, StudyAnalyzer's
+    /// `MAX_PDF_BYTES`); a larger one is not sent.
+    public static let handoffMaxPDFBytes = 104_857_600
+
+    /// The largest JATS, Markdown or plain text a hand-off carries (20 MiB,
+    /// StudyAnalyzer's `MAX_TEXT_BYTES`); a larger one is not sent.
+    public static let handoffMaxTextBytes = 20_971_520
+
+    /// The largest HTML a hand-off carries (22 MiB, StudyAnalyzer's
+    /// `MAX_HTML_BYTES`); a larger one is not sent.
+    public static let handoffMaxHTMLBytes = 23_068_672
 
     /// The suffix of a JATS kept in the PDF cache while the library cannot be
     /// reached (`<cacheKey>-<sha12>.xml`), waiting to be moved in (design §4.6).

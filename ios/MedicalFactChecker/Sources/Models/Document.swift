@@ -1687,7 +1687,7 @@ final class Document {
     /// An unrecognised value — a record written by a newer build — reads as
     /// `nil` rather than as a guess, so it falls back to field-population order
     /// instead of claiming a kind this build does not understand.
-    private var storedContentKind: FullTextContentKind? {
+    var storedContentKind: FullTextContentKind? {
         guard let raw = fullTextContentKindRaw else { return nil }
         if let known = FullTextContentKind(rawValue: raw) { return known }
         documentLog.error(

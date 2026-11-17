@@ -29,41 +29,79 @@ enum StudyAnalyzerSender {
     ///   notes when sources were passed over; one failure sentence when
     ///   nothing was sent.
     static func send(_ document: Document) async -> [String] {
-        guard let app = appURL() else { return [MacStudyAnalyzer.notFound] }
+        guard let app = appURL() else { return failed(MacStudyAnalyzer.notFound) }
+        // The document's fields are copied here, on the main actor; the reads
+        // (a PDF of up to 100 MiB, a library file perhaps on an external or
+        // synced folder), the encoding and the write run off it.
+        let paper = document.studyAnalyzerPaper
         let online = await isOnline()
         let library = LibraryController.library()
-        guard let choice = document.studyAnalyzerHandoff(
-            online: online,
-            readLibrary: { file in
-                library?.read(file) ?? .failure(LibraryLookupFailure(description: MacStudyAnalyzer.noLibrary, waits: false))
-            },
-            readFile: { try Data(contentsOf: URL(fileURLWithPath: $0)) }
-        ) else { return [MacStudyAnalyzer.nothingToSend] }
-
-        removeOldHandoffs()
-        let file: URL
-        do {
-            let folder = handoffFolder()
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            file = folder.appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension(BioMedLitConstants.handoffFileExtension)
-            try choice.handoff.encoded().write(to: file, options: .atomic)
-        } catch {
-            return [String(format: MacStudyAnalyzer.notWritten, error.localizedDescription)]
+        let prepared = await Task.detached(priority: .userInitiated) {
+            prepare(paper, online: online, library: library)
+        }.value
+        let file: URL, notes: [String]
+        switch prepared {
+        case .success(let written): (file, notes) = written
+        case .failure(let failure): return failed(failure.sentence)
+        }
+        for note in notes {
+            AppLogger.data.warning("Open in StudyAnalyzer: \(note, privacy: .public)")
         }
         do {
             _ = try await NSWorkspace.shared.open([file], withApplicationAt: app,
                                                   configuration: NSWorkspace.OpenConfiguration())
         } catch {
             try? FileManager.default.removeItem(at: file)
-            return [String(format: MacStudyAnalyzer.notOpened, error.localizedDescription)]
+            return failed(String(format: MacStudyAnalyzer.notOpened, error.localizedDescription))
         }
-        return choice.notes
+        return notes
+    }
+
+    /// A failure to send, as the one sentence shown.
+    private struct SendFailure: Error {
+        let sentence: String
+    }
+
+    /// Chooses, encodes and writes the hand-off of `paper`, off the main actor.
+    ///
+    /// - Parameters:
+    ///   - paper: The document's fields.
+    ///   - online: Whether the Mac was online at the click.
+    ///   - library: The shared paper library, or `nil` when none is set.
+    /// - Returns: The written file and the choice's notes, or the failure.
+    nonisolated private static func prepare(
+        _ paper: StudyAnalyzerPaper, online: Bool, library: (any FullTextLibrary)?
+    ) -> Result<(URL, [String]), SendFailure> {
+        guard let choice = paper.handoff(
+            online: online,
+            readLibrary: { file in
+                library?.read(file) ?? .failure(LibraryLookupFailure(description: MacStudyAnalyzer.noLibrary, waits: false))
+            },
+            readFile: { try Data(contentsOf: URL(fileURLWithPath: $0)) }
+        ) else { return .failure(SendFailure(sentence: MacStudyAnalyzer.nothingToSend)) }
+
+        removeOldHandoffs()
+        do {
+            let folder = handoffFolder()
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let file = folder.appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension(BioMedLitConstants.handoffFileExtension)
+            try choice.handoff.encoded().write(to: file, options: .atomic)
+            return .success((file, choice.notes))
+        } catch {
+            return .failure(SendFailure(sentence: String(format: MacStudyAnalyzer.notWritten, error.localizedDescription)))
+        }
+    }
+
+    /// `sentence`, logged, as the only sentence to show.
+    private static func failed(_ sentence: String) -> [String] {
+        AppLogger.data.error("Open in StudyAnalyzer failed: \(sentence, privacy: .public)")
+        return [sentence]
     }
 
     /// Deletes hand-off files older than `MacStudyAnalyzer.handoffMaxAge`, so
     /// a file sent moments ago stays for StudyAnalyzer to read.
-    static func removeOldHandoffs() {
+    nonisolated static func removeOldHandoffs() {
         let manager = FileManager.default
         guard let files = try? manager.contentsOfDirectory(
             at: handoffFolder(), includingPropertiesForKeys: [.contentModificationDateKey]
@@ -80,7 +118,7 @@ enum StudyAnalyzerSender {
     }
 
     /// The folder in the app's temporary directory the hand-off files go in.
-    private static func handoffFolder() -> URL {
+    nonisolated private static func handoffFolder() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(MacStudyAnalyzer.handoffFolderName)
     }
 
