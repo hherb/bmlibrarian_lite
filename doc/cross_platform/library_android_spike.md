@@ -47,20 +47,25 @@ Two answers break bmlib's write rules (design §4.3):
 
 ## What a provider-backed library needs from bmlib
 
-The library's file calls are almost all in `rust/bmlib/src/library/files.rs`
+The library's file calls are all in `rust/bmlib/src/library/files.rs`
 (listing, reading, `write_once`, `write_replace`, `create_dir_new`,
-`rename`, removal, sync), plus a few direct `fs` calls in `scan.rs`. That is
-the seam: a storage trait in bmlib, a `std::fs` implementation for today's
-platforms, and a UniFFI foreign trait implemented in Kotlin over
-`DocumentsContract`. Decisions it needs, each bmlib's:
+`rename`, removal, sync) but one: `Library::open` asks `root.exists()`
+directly (`open.rs`). That is the seam design §5.1 already owes for phase 4:
+a storage trait in bmlib, a `std::fs` implementation for today's platforms,
+and a UniFFI foreign trait implemented in Kotlin over `DocumentsContract`.
+Decisions it needs, each bmlib's:
 
 1. **Replacing a record.** Two choices. The first: write a temporary file,
    delete the old record, rename the temporary into place. That leaves a
    window with no record, so another app's manual clear could find our
    files unused; a crash then leaves only the temporary file, which a later
    open has to recover. The second: rewrite in place with `"wt"`. A crash
-   then leaves a short record, which reads as unreadable, and §4.8 already
-   says an unreadable record means "others may use it". Neither is atomic.
+   then leaves a short record, which reads as unreadable. The apps' clear
+   already says others may use a file when a record could not be read
+   (BioMedLit's `LibraryClear`), and bmlib's next save sets its own
+   unreadable record aside and writes a new one (`save.rs`, `keep_aside`),
+   but the uses the torn record listed are not carried over. Neither is
+   atomic.
 2. **A lost create race** (the suffixed name above) is an expected outcome,
    not an error.
 3. **Syncing data to disk** (`sync_dir`, `sync_name`) has no provider
