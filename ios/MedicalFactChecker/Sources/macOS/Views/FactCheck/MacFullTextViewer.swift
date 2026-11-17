@@ -44,6 +44,11 @@ struct MacFullTextViewer: View {
     @State private var pdfDocument: PDFKit.PDFDocument?
     @State private var isLoadingPDF = false
     @State private var loadError: String?
+    /// StudyAnalyzer's app, when installed: the Open in StudyAnalyzer button shows only then.
+    @State private var studyAnalyzerURL: URL?
+    @State private var isSendingToStudyAnalyzer = false
+    /// What the last send has to tell the reader (passed-over sources, a failure).
+    @State private var studyAnalyzerMessages: [String] = []
 
     // MARK: - Body
 
@@ -63,6 +68,16 @@ struct MacFullTextViewer: View {
         // A library PDF whose stored path is gone is found again by digest
         // keyed on the document: the viewer's identity outlives a change of selection
         .task(id: document.persistentModelID) { await LibraryController.refindPDF(of: document) }
+        .task { studyAnalyzerURL = StudyAnalyzerSender.appURL() }
+        .alert(
+            MacStudyAnalyzer.label,
+            isPresented: Binding(get: { !studyAnalyzerMessages.isEmpty },
+                                 set: { if !$0 { studyAnalyzerMessages = [] } })
+        ) {
+            Button("OK") { studyAnalyzerMessages = [] }
+        } message: {
+            Text(studyAnalyzerMessages.joined(separator: " "))
+        }
         .focusable()
         .onKeyPress(keys: [.init("f")], phases: .down) { _ in
             if NSEvent.modifierFlags.contains(.command) {
@@ -149,6 +164,22 @@ struct MacFullTextViewer: View {
                         .buttonStyle(.bordered)
                         .help("Search (⌘F)")
                     }
+                }
+
+                if studyAnalyzerURL != nil {
+                    Button {
+                        isSendingToStudyAnalyzer = true
+                        Task {
+                            studyAnalyzerMessages = await StudyAnalyzerSender.send(document)
+                            isSendingToStudyAnalyzer = false
+                        }
+                    } label: {
+                        Image(systemName: MacStudyAnalyzer.systemImage)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isSendingToStudyAnalyzer)
+                    .help(MacStudyAnalyzer.label)
+                    .accessibilityLabel(MacStudyAnalyzer.label)
                 }
 
                 // Share menu

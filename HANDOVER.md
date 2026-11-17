@@ -50,8 +50,13 @@ others may, when a record could not be read).
 - **Owed by the maintainer: the sandboxed click-throughs**: 3a's (plan Task 4
   Step 5), 3b's (plan; also: does a hanging iCloud dataless read block the
   service actor's fetches?), 3c's (plan Task 4 Step 3), 3d's (plan *Owed*).
-- **Left:** an Apple archive from master lists `BmlibFFI.framework.dSYM`
-  with no warning; the ledger's other library rows stay `owed` (#788).
+- **Step 4, Open in StudyAnalyzer (macOS):** the full-text viewer's button
+  is built (plan `docs/superpowers/plans/2026-11-17-open-in-studyanalyzer.md`);
+  the paper card's button is left for later (the maintainer's call,
+  2026-11-17). Owed: the plan's Task 3 Step 6 click-through.
+- **Left:** the ledger's library rows other than step 4 stay `owed` (#788).
+  An Apple archive from master lists `BmlibFFI.framework.dSYM` (confirmed
+  2026-11-17, 1.9.0 DMG).
   Lodged: 3b's **#796** (the race fallback can record a refused PDF),
   **#797** (an extraction-off library PDF asks CORE), **#799** (the
   unreachable warning on every call); 3c's **#803**. *Stop using*/*Choose…*
