@@ -46,6 +46,8 @@ import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
 import com.bmlibrarian.factchecker.domain.model.SearchFailedException
 import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
 import com.bmlibrarian.factchecker.domain.model.SearchProvider
+import com.bmlibrarian.factchecker.domain.model.SearchQueryLog
+import com.bmlibrarian.factchecker.domain.model.SearchQueryRecord
 import com.bmlibrarian.factchecker.domain.model.ShortfallQuery
 import com.bmlibrarian.factchecker.domain.model.StructuredQuery
 import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
@@ -1479,11 +1481,13 @@ class FactCheckWorkflow @Inject constructor(
             } ?: session.pubmedQuery ?: ""
         }
 
+        val pubMedQuery = getQueryForProvider(SearchProvider.PUBMED)
+        val europePMCQuery = getQueryForProvider(SearchProvider.EUROPE_PMC)
         val outcome = literatureSearch.searchPage(
             SearchPageRequest(
                 provider = config.searchProvider,
-                pubMedQuery = getQueryForProvider(SearchProvider.PUBMED),
-                europePMCQuery = getQueryForProvider(SearchProvider.EUROPE_PMC),
+                pubMedQuery = pubMedQuery,
+                europePMCQuery = europePMCQuery,
                 batchSize = config.batchSize,
                 includePreprints = config.includePreprints,
                 continuation = if (isNextBatch) {
@@ -1504,6 +1508,13 @@ class FactCheckWorkflow @Inject constructor(
         // What is missing, then the documents, then the paging: a failure before the
         // paging moves leaves the page to be asked for again, never skipped unrecorded
         keepFound(session.id, outcome.shortfalls, outcome.documents)
+        recordSearchQuery(
+            session.id,
+            SearchQueryLog.forProvider(
+                SearchQueryRecord.Kind.INITIAL, config.searchProvider, pubMedQuery, europePMCQuery,
+                documentIds = outcome.documents.map { it.id }, totalHits = totalHits(outcome)
+            )
+        )
         outcome.pubMedPaging?.let { sessionRepository.updatePubMedPagination(session.id, it.offset, it.totalResults) }
         outcome.europePMCPaging?.let {
             sessionRepository.updateEpmcPagination(session.id, it.cursor, it.totalResults, it.resultsReceived)
@@ -2577,11 +2588,13 @@ class FactCheckWorkflow @Inject constructor(
         fetchedPmids: Set<String>,
         earlierLosses: List<RetrievalShortfall>
     ): List<DocumentEntity> {
+        val pubMedQuery = QueryBuilderFactory.build(altStructuredQuery, SearchProvider.PUBMED)
+        val europePMCQuery = QueryBuilderFactory.build(altStructuredQuery, SearchProvider.EUROPE_PMC)
         val outcome = literatureSearch.searchPage(
             SearchPageRequest(
                 provider = config.searchProvider,
-                pubMedQuery = QueryBuilderFactory.build(altStructuredQuery, SearchProvider.PUBMED),
-                europePMCQuery = QueryBuilderFactory.build(altStructuredQuery, SearchProvider.EUROPE_PMC),
+                pubMedQuery = pubMedQuery,
+                europePMCQuery = europePMCQuery,
                 batchSize = config.batchSize,
                 includePreprints = config.includePreprints,
                 continuation = null,
@@ -2592,12 +2605,50 @@ class FactCheckWorkflow @Inject constructor(
                 excludedPmids = fetchedPmids
             )
         )
-        // A search that failures left with nothing threw; one that found nothing keeps nothing back
-        if (outcome.documents.isEmpty()) return emptyList()
+        fun record(documents: List<DocumentEntity>) = SearchQueryLog.forProvider(
+            SearchQueryRecord.Kind.ALTERNATIVE, config.searchProvider, pubMedQuery, europePMCQuery,
+            documentIds = documents.map { it.id }, totalHits = totalHits(outcome)
+        )
+        // A search that failures left with nothing threw; one that found nothing
+        // keeps nothing back, and is listed with what it found
+        if (outcome.documents.isEmpty()) {
+            recordSearchQuery(session.id, record(emptyList()))
+            return emptyList()
+        }
         // Recorded with the documents they were lost beside, before anything later can fail
         keepFound(session.id, earlierLosses + outcome.shortfalls, outcome.documents)
+        recordSearchQuery(session.id, record(outcome.documents))
         scoreByEmbedding(outcome.documents, session.claimText)
         return outcome.documents
+    }
+
+    /**
+     * Record a query as it was just run, with the documents it added, so the
+     * reader can see every query and what each found.
+     *
+     * @param sessionId The session
+     * @param run The query, the documents it added (saved) and its count of matches
+     */
+    private suspend fun recordSearchQuery(sessionId: String, run: SearchQueryRecord) {
+        val session = sessionRepository.getSession(sessionId) ?: return
+        if (SessionQueryLog.isUnreadable(session)) {
+            Log.e(TAG, "Query log unreadable; it starts again from the queries the session kept")
+        }
+        val documentIds = documentRepository.getDocumentsBySessionSync(sessionId).map { it.id }
+        val encoded = SearchQueryLog.encode(SessionQueryLog.recorded(session, documentIds, run))
+        if (encoded == null) {
+            Log.e(TAG, "Query log not encodable; the query is not recorded")
+            return
+        }
+        sessionRepository.updateSearchQueries(sessionId, encoded)
+    }
+
+    /**
+     * The matches a page's sources reported, together; null when none reported a count.
+     */
+    private fun totalHits(outcome: SearchPageOutcome): Int? {
+        val counts = listOfNotNull(outcome.pubMedPaging?.totalResults, outcome.europePMCPaging?.totalResults)
+        return if (counts.isEmpty()) null else counts.sum()
     }
 
     // ==================== Helper Methods ====================

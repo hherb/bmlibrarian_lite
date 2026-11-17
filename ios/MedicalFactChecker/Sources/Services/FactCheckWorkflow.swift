@@ -883,6 +883,8 @@ final class FactCheckWorkflow {
 
         let existingCount = session.documents?.count ?? 0
         var newDocumentsFound = 0
+        var addedIDs: [String] = []
+        var lastProvider: SearchProvider?
         var continuation: SearchContinuation?
         var lastPage: UnifiedSearchResult?
         var covered = 0
@@ -934,7 +936,9 @@ final class FactCheckWorkflow {
 
                 modelContext.insert(document)
                 newDocumentsFound += 1
+                addedIDs.append(document.id)
             }
+            lastProvider = options.provider
 
             covered = max(covered + result.articles.count, result.fetchedCount)
 
@@ -948,6 +952,19 @@ final class FactCheckWorkflow {
 
         if let lastPage {
             applyPaging(from: lastPage, to: session)
+        }
+        if let lastPage, let lastProvider {
+            // What the re-walk found counts for the query it re-walked
+            session.recordSearchQuery(
+                SearchQueryRecord(
+                    kind: .initial,
+                    provider: lastProvider.rawValue,
+                    query: queryString,
+                    europePMCQuery: FactCheckSession.europePMCForm(of: queryString, provider: lastProvider),
+                    documentIDs: addedIDs,
+                    totalHits: lastPage.totalCount
+                )
+            )
         }
         if newDocumentsFound > 0 {
             session.documentsFound += newDocumentsFound
@@ -2570,6 +2587,7 @@ final class FactCheckWorkflow {
         }
 
         // Create Document objects from deduplicated articles
+        var addedIDs: [String] = []
         for article in newArticles {
             let document = Document(
                 pmid: article.pmid,
@@ -2583,8 +2601,19 @@ final class FactCheckWorkflow {
             document.session = session
 
             modelContext.insert(document)
+            addedIDs.append(document.id)
         }
 
+        session.recordSearchQuery(
+            SearchQueryRecord(
+                kind: .initial,
+                provider: options.provider.rawValue,
+                query: queryString,
+                europePMCQuery: FactCheckSession.europePMCForm(of: queryString, provider: options.provider),
+                documentIDs: addedIDs,
+                totalHits: result.totalCount
+            )
+        )
         session.documentsFound += newArticles.count
         applyPaging(from: result, to: session)
         session.batchesFetched = batchNumber
@@ -3827,6 +3856,13 @@ final class FactCheckWorkflow {
         let newArticles = result.articles.filter { !fetchedPmidSet.contains($0.pmid) }
 
         guard !newArticles.isEmpty else {
+            // A query that was answered is listed with what it found, which
+            // was nothing new; one a source could not answer has not run
+            if shortfalls.isEmpty {
+                session.recordSearchQuery(
+                    alternativeQueryRecord(queryString, provider: appProvider, documentIDs: [], totalHits: result.totalCount)
+                )
+            }
             // Held back: one query failing does not end smart search
             pendingShortfalls += shortfalls
             return false
@@ -3838,6 +3874,7 @@ final class FactCheckWorkflow {
         pendingShortfalls = []
 
         // Create Document objects from UnifiedArticleMetadata
+        var addedIDs: [String] = []
         for (index, article) in newArticles.enumerated() {
             let document = Document(
                 pmid: article.pmid,
@@ -3851,7 +3888,11 @@ final class FactCheckWorkflow {
             document.session = session
 
             modelContext.insert(document)
+            addedIDs.append(document.id)
         }
+        session.recordSearchQuery(
+            alternativeQueryRecord(queryString, provider: appProvider, documentIDs: addedIDs, totalHits: result.totalCount)
+        )
 
         // Update tracking
         session.documentsFound += newArticles.count
@@ -3867,6 +3908,30 @@ final class FactCheckWorkflow {
         // Score the new documents
         try await scoreNewDocuments(newArticles.map { $0.pmid })
         return true
+    }
+
+    /// The record of an alternative query just run.
+    ///
+    /// - Parameters:
+    ///   - query: The query as sent.
+    ///   - provider: The provider(s) it was sent to.
+    ///   - documentIDs: The documents it added to the session.
+    ///   - totalHits: The matches the source(s) reported.
+    /// - Returns: The record, for ``FactCheckSession/recordSearchQuery(_:)``.
+    private func alternativeQueryRecord(
+        _ query: String,
+        provider: SearchProvider,
+        documentIDs: [String],
+        totalHits: Int
+    ) -> SearchQueryRecord {
+        SearchQueryRecord(
+            kind: .alternative,
+            provider: provider.rawValue,
+            query: query,
+            europePMCQuery: FactCheckSession.europePMCForm(of: query, provider: provider),
+            documentIDs: documentIDs,
+            totalHits: totalHits
+        )
     }
 
     /// Score only specific documents (by PMID) using checkpointed parallel processing.

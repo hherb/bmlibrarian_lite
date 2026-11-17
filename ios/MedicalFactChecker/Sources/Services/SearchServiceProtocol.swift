@@ -720,10 +720,12 @@ enum SearchServiceFactory {
 
     /// The query as Europe PMC is asked it.
     ///
+    /// Internal so the session's list of queries shows what Europe PMC was asked.
+    ///
     /// - Parameter query: The stored query, which a resumed session may hold in
     ///   PubMed syntax.
     /// - Returns: The query in Europe PMC syntax.
-    private static func europePMCQuery(from query: String) -> String {
+    static func europePMCQuery(from query: String) -> String {
         if QueryTranslator.isEuropePMCSyntax(query) {
             return query
         }

@@ -37,10 +37,13 @@ import com.bmlibrarian.factchecker.data.repository.UsageRepository
 import com.bmlibrarian.factchecker.domain.model.DocumentSortOrder
 import com.bmlibrarian.factchecker.domain.model.RetrievalShortfall
 import com.bmlibrarian.factchecker.domain.model.SearchFailureReporting
+import com.bmlibrarian.factchecker.domain.model.SearchQueryLog
+import com.bmlibrarian.factchecker.domain.model.SearchQueryRow
 import com.bmlibrarian.factchecker.domain.model.UnpaywallContact
 import com.bmlibrarian.factchecker.domain.model.WorkflowStep
 import com.bmlibrarian.factchecker.domain.workflow.FactCheckWorkflow
 import com.bmlibrarian.factchecker.domain.workflow.FullTextAutoFetch
+import com.bmlibrarian.factchecker.domain.workflow.SessionQueryLog
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowConfig
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowProgress
 import com.bmlibrarian.factchecker.domain.workflow.WorkflowState
@@ -54,6 +57,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -102,6 +106,9 @@ data class FactCheckUiState(
 
     /** Generated PubMed query (displayed once generated). */
     val generatedQuery: String? = null,
+
+    /** Every query the session ran, each with what it found; empty before the first search. */
+    val searchQueryRows: List<SearchQueryRow> = emptyList(),
 
     /** Current document sort order. */
     val sortOrder: DocumentSortOrder = DocumentSortOrder.DEFAULT,
@@ -386,7 +393,9 @@ class FactCheckViewModel @Inject constructor(
                 } else if (sessionId == null) {
                     currentSessionId = null
                     // Clear documents when session is reset
-                    _uiState.update { it.copy(documents = emptyList(), citationsByDocument = emptyMap()) }
+                    _uiState.update {
+                        it.copy(documents = emptyList(), citationsByDocument = emptyMap(), searchQueryRows = emptyList())
+                    }
                 }
             }
         }
@@ -463,7 +472,13 @@ class FactCheckViewModel @Inject constructor(
 
         // Clear previous query and documents when starting a new fact check
         _uiState.update {
-            it.copy(generatedQuery = null, documents = emptyList(), citationsByDocument = emptyMap(), searchedClaim = claim)
+            it.copy(
+                generatedQuery = null,
+                searchQueryRows = emptyList(),
+                documents = emptyList(),
+                citationsByDocument = emptyMap(),
+                searchedClaim = claim
+            )
         }
 
         viewModelScope.launch {
@@ -597,6 +612,29 @@ class FactCheckViewModel @Inject constructor(
             documentRepository.getDocumentsBySession(sessionId)
                 .collect { docs ->
                     _uiState.update { withRetryNotice(it.copy(documents = docs)) }
+                }
+        }
+
+        // Every query the session ran, each with what it found and how much was relevant
+        viewModelScope.launch {
+            combine(
+                sessionRepository.getSessionFlow(sessionId),
+                documentRepository.getDocumentsBySession(sessionId)
+            ) { session, docs ->
+                session ?: return@combine emptyList()
+                val scores = docs.mapNotNull { doc -> doc.relevanceScore?.let { doc.id to it } }.toMap()
+                SearchQueryLog.rows(
+                    SessionQueryLog.queries(session, docs.map { it.id }),
+                    scores,
+                    settingsRepository.getRelevanceThreshold()
+                )
+            }
+                .distinctUntilChanged()
+                .collect { rows ->
+                    // A collector of a session left behind does not show its queries
+                    if (sessionId == currentSessionId) {
+                        _uiState.update { it.copy(searchQueryRows = rows) }
+                    }
                 }
         }
 

@@ -152,6 +152,17 @@ final class FactCheckSession {
     /// PMIDs already fetched (to avoid duplicates across queries).
     var fetchedPmids: String?
 
+    // MARK: - Query Log
+
+    /// Every query this session ran, with the documents each added, as a
+    /// JSON-encoded `[SearchQueryRecord]`.
+    ///
+    /// `nil` before the first search, and for a session saved before queries
+    /// were logged. Private because it is only ever read through
+    /// ``searchQueries()``, which stands in what such a session kept. Optional
+    /// so no schema version is needed.
+    private var searchQueriesJSON: String?
+
     // MARK: - Progress Tracking
 
     var documentsFound: Int = 0
@@ -520,6 +531,136 @@ final class FactCheckSession {
         }
         retractionSnapshotJSON = String(data: data, encoding: .utf8)
         return checks.keys.allSatisfy { !unread.contains($0) }
+    }
+
+    // MARK: - Query Log Methods
+
+    /// Every query this session ran, in the order each first ran.
+    ///
+    /// A session saved before queries were logged stands in what it kept: its
+    /// initial query, with every document when it ran no other (so all of them
+    /// are its), and the alternative queries smart search ran, rebuilt from
+    /// their concepts, whose documents were not recorded. An unreadable log is
+    /// logged and read the same way, so the reader still sees the queries.
+    ///
+    /// - Returns: The queries, empty before the claim has become a query.
+    func searchQueries() -> [SearchQueryRecord] {
+        loggedSearchQueries() ?? legacySearchQueries()
+    }
+
+    /// The query log as stored, or `nil` when there is none or it cannot be read (logged).
+    private func loggedSearchQueries() -> [SearchQueryRecord]? {
+        guard let json = searchQueriesJSON else { return nil }
+        do {
+            return try JSONDecoder().decode([SearchQueryRecord].self, from: Data(json.utf8))
+        } catch {
+            sessionLog.error("Query log unreadable; the queries the session kept are shown instead")
+            return nil
+        }
+    }
+
+    /// Record a query as it was just run, with the documents it added.
+    ///
+    /// The first record of a session that searched before queries were logged
+    /// starts from what that session kept (``searchQueries()``), so its
+    /// earlier queries are not lost from the list.
+    ///
+    /// - Parameter run: The query, the documents it added and its count of matches.
+    func recordSearchQuery(_ run: SearchQueryRecord) {
+        let runs = Set(run.documentIDs ?? [])
+        var held: [SearchQueryRecord] = []
+        if let logged = loggedSearchQueries() {
+            held = logged
+        } else if (documents ?? []).contains(where: { !runs.contains($0.id) })
+                    || !legacyAlternativeConcepts().isEmpty {
+            // A session that searched before queries were logged. What it kept
+            // counts every document held, the run's own among them once they
+            // are saved: those are the run's, not the kept queries'. A new
+            // session's first search has nothing kept to start from.
+            held = legacySearchQueries().map { record in
+                var record = record
+                record.documentIDs = record.documentIDs?.filter { !runs.contains($0) }
+                return record
+            }
+        }
+        let log = SearchQueryLog.recording(run, into: held)
+        do {
+            searchQueriesJSON = String(decoding: try JSONEncoder().encode(log), as: UTF8.self)
+        } catch {
+            sessionLog.error("Query log not encodable; the query is not recorded")
+        }
+    }
+
+    /// Every query this session ran, each with its counts where they were recorded.
+    ///
+    /// - Parameter minScore: The lowest score that counts as relevant.
+    /// - Returns: The queries in the order each first ran.
+    func searchQueryStatistics(minScore: Int) -> [(record: SearchQueryRecord, statistics: SearchQueryStatistics?)] {
+        var scores: [String: Int] = [:]
+        for document in documents ?? [] {
+            if let score = document.relevanceScore { scores[document.id] = score }
+        }
+        return searchQueries().map { record in
+            (record: record, statistics: SearchQueryLog.statistics(of: record, scores: scores, minScore: minScore))
+        }
+    }
+
+    /// What a session saved before queries were logged kept of its queries.
+    private func legacySearchQueries() -> [SearchQueryRecord] {
+        guard let initial = pubmedQuery, !initial.isEmpty else { return [] }
+        let provider = searchProviderEnum ?? .pubmed
+        let alternatives = legacyAlternativeConcepts()
+        var log = [
+            SearchQueryRecord(
+                kind: .initial,
+                provider: provider.rawValue,
+                query: initial,
+                europePMCQuery: Self.europePMCForm(of: initial, provider: provider),
+                documentIDs: alternatives.isEmpty ? (documents ?? []).map(\.id) : nil,
+                totalHits: nil
+            ),
+        ]
+        for concepts in alternatives {
+            // The concepts are what was kept; the filters are the app's own
+            let rebuilt = StructuredQuery(concepts: concepts, excludePreprints: !includePreprints)
+            let query = BioMedLitAdapters.buildQuery(from: rebuilt, for: provider)
+            log = SearchQueryLog.recording(
+                SearchQueryRecord(
+                    kind: .alternative,
+                    provider: provider.rawValue,
+                    query: query,
+                    europePMCQuery: Self.europePMCForm(of: query, provider: provider),
+                    documentIDs: nil,
+                    totalHits: nil
+                ),
+                into: log
+            )
+        }
+        return log
+    }
+
+    /// The alternative queries smart search ran, each as its concepts.
+    private func legacyAlternativeConcepts() -> [[SearchConcept]] {
+        guard let json = alternativeQueries else { return [] }
+        do {
+            return try JSONDecoder().decode([[SearchConcept]].self, from: Data(json.utf8))
+        } catch {
+            sessionLog.error("Record of the alternative queries run unreadable; not listed")
+            return []
+        }
+    }
+
+    /// The query as Europe PMC was asked it, when that is not `query` itself.
+    ///
+    /// - Parameters:
+    ///   - query: The query as sent.
+    ///   - provider: The provider(s) it was sent to.
+    /// - Returns: Europe PMC's form when both providers were asked and it
+    ///   differs, otherwise `nil`.
+    static func europePMCForm(of query: String, provider: SearchProvider) -> String? {
+        guard provider == .both else { return nil }
+        let translated = SearchServiceFactory.europePMCQuery(from: query)
+        return translated == query ? nil : translated
     }
 
     // MARK: - Methods

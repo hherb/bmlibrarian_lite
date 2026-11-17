@@ -492,17 +492,11 @@ struct ProgressSection: View {
                 }
             }
 
-            // Generated query (show once generated, collapsed by default)
-            if let query = workflow.session?.pubmedQuery, !query.isEmpty {
-                DisclosureGroup(queryLabel, isExpanded: $isQueryExpanded) {
-                    Text(query)
-                        .font(.caption)
-                        .foregroundColor(.primary)
-                        .textSelection(.enabled)
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.secondary.opacity(0.1))
-                        .cornerRadius(6)
+            // Generated queries (shown once generated, collapsed by default):
+            // unfolded, every query run so far with what each found
+            if let session = workflow.session, !session.searchQueries().isEmpty {
+                DisclosureGroup(queryLabel(session), isExpanded: $isQueryExpanded) {
+                    SearchQueriesView(session: session, alwaysExpanded: true, showsHeader: false)
                 }
                 .font(.caption)
                 .fontWeight(.medium)
@@ -525,9 +519,14 @@ struct ProgressSection: View {
         [.convertingQuery, .searchingPubMed, .scoringDocuments, .extractingCitations, .generatingReport]
     }
 
-    /// Dynamic label for the query based on the selected search provider.
-    private var queryLabel: String {
-        guard let provider = workflow.session?.searchProviderEnum else {
+    /// Label for the queries: every query run when there is more than one,
+    /// otherwise the query, named for the selected search provider.
+    private func queryLabel(_ session: FactCheckSession) -> String {
+        let count = session.searchQueries().count
+        if count > 1 {
+            return "Search Queries (\(count)):"
+        }
+        guard let provider = session.searchProviderEnum else {
             return "PubMed Query:"
         }
         switch provider {

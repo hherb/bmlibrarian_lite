@@ -21,13 +21,11 @@ package com.bmlibrarian.factchecker.ui.factcheck
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,8 +41,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -81,6 +77,7 @@ import com.bmlibrarian.factchecker.ui.factcheck.components.DocumentCard
 import com.bmlibrarian.factchecker.ui.factcheck.components.FetchMorePrompt
 import com.bmlibrarian.factchecker.ui.factcheck.components.RetractionSavedWorkCard
 import com.bmlibrarian.factchecker.ui.factcheck.components.SearchProgress
+import com.bmlibrarian.factchecker.ui.factcheck.components.SearchQueriesCard
 import com.bmlibrarian.factchecker.ui.factcheck.components.SortingControls
 import com.bmlibrarian.factchecker.util.CostCalculator
 import com.bmlibrarian.factchecker.util.retraction.RetractionText
@@ -190,7 +187,7 @@ fun FactCheckScreen(
             uiState.generatedQuery?.let { query ->
                 if (query.isNotEmpty()) {
                     item(key = "query") {
-                        GeneratedQueryDisplay(query = query)
+                        SearchQueriesCard(query = query, rows = uiState.searchQueryRows)
                     }
                 }
             }
@@ -397,58 +394,6 @@ fun FactCheckScreen(
                 generatedQuery = uiState.generatedQuery,
                 documentCount = uiState.scoredDocuments.size
             )
-        }
-    }
-}
-
-/**
- * Display for the generated PubMed query.
- *
- * Shows the query in a collapsible card (collapsed by default).
- * Tap to expand and see the full query without truncation.
- */
-@Composable
-private fun GeneratedQueryDisplay(query: String) {
-    var expanded by remember { mutableStateOf(false) }
-
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize()
-            .clickable { expanded = !expanded }
-    ) {
-        Column(
-            modifier = Modifier.padding(Constants.UI_CARD_PADDING.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = "PubMed Query:",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f)
-                )
-                Icon(
-                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (expanded) "Collapse" else "Expand",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            AnimatedVisibility(visible = expanded) {
-                Column {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = query,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
         }
     }
 }

@@ -199,15 +199,8 @@ struct PrintableReportView: View {
                 .font(.body)
                 .italic()
 
-            if let query = session.pubmedQuery {
-                Text("PubMed Query")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.top, 4)
-                Text(query)
-                    .font(.caption)
-                    .fontDesign(.monospaced)
-            }
+            SearchQueriesView(session: session, alwaysExpanded: true)
+                .padding(.top, 4)
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -222,19 +222,7 @@ struct MacReportView: View {
                     .italic()
             }
 
-            if let query = session.pubmedQuery {
-                VStack(alignment: .leading, spacing: MacSpacing.small) {
-                    Text("PubMed Query")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .textCase(.uppercase)
-                    Text(query)
-                        .font(.body)
-                        .fontDesign(.monospaced)
-                        .foregroundColor(.accentColor)
-                        .textSelection(.enabled)
-                }
-            }
+            SearchQueriesView(session: session, headerTextCase: .uppercase)
         }
         .padding(MacSpacing.xLarge)
         .frame(maxWidth: .infinity, alignment: .leading)

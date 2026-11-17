@@ -456,10 +456,36 @@ struct PDFExporter {
                 _ = drawText(session.claim, font: .italicSystemFont(ofSize: PDFLayout.claimFontSize))
                 addSpacing(PDFLayout.itemSpacing)
 
-                if let query = session.pubmedQuery {
-                    _ = drawText("PubMed Query", font: .boldSystemFont(ofSize: PDFLayout.bodyFontSize), color: .gray)
-                    addSpacing(PDFLayout.microSpacing)
-                    _ = drawText(query, font: UIFont(name: "Menlo", size: PDFLayout.footnoteFontSize) ?? .systemFont(ofSize: PDFLayout.footnoteFontSize), color: .systemBlue)
+                // Every query run, each with what it found
+                let queries = session.searchQueryStatistics(minScore: AppSettings.shared.minScoreThreshold)
+                if !queries.isEmpty {
+                    let heading = queries.count > 1 ? "Search Queries (\(queries.count))" : "PubMed Query"
+                    _ = drawText(heading, font: .boldSystemFont(ofSize: PDFLayout.bodyFontSize), color: .gray)
+                    let records = queries.map { $0.record }
+                    let queryFont = UIFont(name: "Menlo", size: PDFLayout.footnoteFontSize)
+                        ?? .systemFont(ofSize: PDFLayout.footnoteFontSize)
+                    for (index, entry) in queries.enumerated() {
+                        addSpacing(PDFLayout.microSpacing)
+                        if queries.count > 1 {
+                            _ = drawText(
+                                SearchQueryLog.label(at: index, in: records),
+                                font: .boldSystemFont(ofSize: PDFLayout.footnoteFontSize),
+                                color: .darkGray
+                            )
+                        }
+                        _ = drawText(entry.record.query, font: queryFont, color: .systemBlue)
+                        if let europePMC = entry.record.europePMCQuery {
+                            _ = drawText("As Europe PMC was asked it:", font: .systemFont(ofSize: PDFLayout.footnoteFontSize), color: .gray)
+                            _ = drawText(europePMC, font: queryFont, color: .systemBlue)
+                        }
+                        if let statistics = entry.statistics {
+                            _ = drawText(
+                                SearchQueryLog.statisticsLine(statistics, totalHits: entry.record.totalHits),
+                                font: .systemFont(ofSize: PDFLayout.footnoteFontSize),
+                                color: .gray
+                            )
+                        }
+                    }
                 }
                 addSpacing(PDFLayout.sectionSpacing)
             }

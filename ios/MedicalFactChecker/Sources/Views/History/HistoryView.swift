@@ -521,23 +521,9 @@ struct SessionDetailView: View {
                     .textSelection(.enabled)
             }
 
-            // PubMed Query
-            if let query = session.pubmedQuery, !query.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Search Query")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.secondary)
-
-                    Text(query)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundColor(.accentColor)
-                        .textSelection(.enabled)
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.secondary.opacity(0.1))
-                        .cornerRadius(6)
-                }
+            // Search queries: the first, unfolding to every query run
+            if !session.searchQueries().isEmpty {
+                SearchQueriesView(session: session)
             }
         }
     }
