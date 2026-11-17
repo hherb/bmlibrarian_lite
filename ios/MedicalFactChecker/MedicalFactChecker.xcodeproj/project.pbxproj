@@ -27,6 +27,7 @@
 		A1000003001 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000003000 /* AppSettings.swift */; };
 		A1000004001 /* Citation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000004000 /* Citation.swift */; };
 		A1000005001 /* Document.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000005000 /* Document.swift */; };
+		5A00000000000000000000B1 /* Document+StudyAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A00000000000000000000F1 /* Document+StudyAnalyzer.swift */; };
 		A1000006001 /* Enums.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000006000 /* Enums.swift */; };
 		A1000075001 /* DocumentSorting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000075000 /* DocumentSorting.swift */; };
 		A1000007001 /* EvidenceReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000007000 /* EvidenceReport.swift */; };
@@ -151,6 +152,7 @@
 		A1000003000 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		A1000004000 /* Citation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Citation.swift; sourceTree = "<group>"; };
 		A1000005000 /* Document.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Document.swift; sourceTree = "<group>"; };
+		5A00000000000000000000F1 /* Document+StudyAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Document+StudyAnalyzer.swift"; sourceTree = "<group>"; };
 		A1000006000 /* Enums.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Enums.swift; sourceTree = "<group>"; };
 		A1000075000 /* DocumentSorting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentSorting.swift; sourceTree = "<group>"; };
 		A1000007000 /* EvidenceReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvidenceReport.swift; sourceTree = "<group>"; };
@@ -326,6 +328,7 @@
 				A1000003000 /* AppSettings.swift */,
 				A1000004000 /* Citation.swift */,
 				A1000005000 /* Document.swift */,
+				5A00000000000000000000F1 /* Document+StudyAnalyzer.swift */,
 				A1000075000 /* DocumentSorting.swift */,
 				A1000006000 /* Enums.swift */,
 				A1000062000 /* ErrorEntry.swift */,
@@ -663,6 +666,7 @@
 				A1000003001 /* AppSettings.swift in Sources */,
 				A1000004001 /* Citation.swift in Sources */,
 				A1000005001 /* Document.swift in Sources */,
+				5A00000000000000000000B1 /* Document+StudyAnalyzer.swift in Sources */,
 				A1000006001 /* Enums.swift in Sources */,
 				A1000075001 /* DocumentSorting.swift in Sources */,
 				A1000007001 /* EvidenceReport.swift in Sources */,
