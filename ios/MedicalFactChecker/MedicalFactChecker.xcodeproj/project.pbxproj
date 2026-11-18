@@ -27,6 +27,7 @@
 		A1000003001 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000003000 /* AppSettings.swift */; };
 		A1000004001 /* Citation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000004000 /* Citation.swift */; };
 		A1000005001 /* Document.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000005000 /* Document.swift */; };
+		5A00000000000000000000B1 /* Document+StudyAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A00000000000000000000F1 /* Document+StudyAnalyzer.swift */; };
 		A1000006001 /* Enums.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000006000 /* Enums.swift */; };
 		A1000075001 /* DocumentSorting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000075000 /* DocumentSorting.swift */; };
 		A1000007001 /* EvidenceReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000007000 /* EvidenceReport.swift */; };
@@ -112,6 +113,7 @@
 		A1000073001 /* ReportFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000073000 /* ReportFormatter.swift */; };
 		A5DF3C2C750F93571F536572 /* MedicalFactCheckerMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80B0502275D5E267C0701E56 /* MedicalFactCheckerMacApp.swift */; };
 		8A22079973159C1DAFC38361 /* LibraryController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4EAF503118784E1C6D368C8 /* LibraryController.swift */; };
+		5A00000000000000000000B2 /* StudyAnalyzerSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A00000000000000000000F2 /* StudyAnalyzerSender.swift */; };
 		AA20BA03F3578738656E720B /* ProgressReporting.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD93FAA95F3B79411DE7C6FB /* ProgressReporting.swift */; };
 		7072386304FC7509A187D115 /* RetractionRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10E12E24BBF84A227E6409E7 /* RetractionRun.swift */; };
 		AC7F5F9D117D0C62AB84424D /* MacUtilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B1A551C72E0132CF2D53022 /* MacUtilities.swift */; };
@@ -146,6 +148,7 @@
 		8031F196CF9CD1A5029B0F75 /* MacConstants.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MacConstants.swift; sourceTree = "<group>"; };
 		80B0502275D5E267C0701E56 /* MedicalFactCheckerMacApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MedicalFactCheckerMacApp.swift; sourceTree = "<group>"; };
 		D4EAF503118784E1C6D368C8 /* LibraryController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LibraryController.swift; sourceTree = "<group>"; };
+		5A00000000000000000000F2 /* StudyAnalyzerSender.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StudyAnalyzerSender.swift; sourceTree = "<group>"; };
 		8A5BFD2F929C0DC14907C525 /* ProcessingCheckpoint.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProcessingCheckpoint.swift; sourceTree = "<group>"; };
 		A1000000000 /* MedicalFactChecker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MedicalFactChecker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A1000001000 /* MedicalFactCheckerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicalFactCheckerApp.swift; sourceTree = "<group>"; };
@@ -153,6 +156,7 @@
 		A1000003000 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		A1000004000 /* Citation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Citation.swift; sourceTree = "<group>"; };
 		A1000005000 /* Document.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Document.swift; sourceTree = "<group>"; };
+		5A00000000000000000000F1 /* Document+StudyAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Document+StudyAnalyzer.swift"; sourceTree = "<group>"; };
 		A1000006000 /* Enums.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Enums.swift; sourceTree = "<group>"; };
 		A1000075000 /* DocumentSorting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentSorting.swift; sourceTree = "<group>"; };
 		A1000007000 /* EvidenceReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvidenceReport.swift; sourceTree = "<group>"; };
@@ -330,6 +334,7 @@
 				A1000003000 /* AppSettings.swift */,
 				A1000004000 /* Citation.swift */,
 				A1000005000 /* Document.swift */,
+				5A00000000000000000000F1 /* Document+StudyAnalyzer.swift */,
 				A1000075000 /* DocumentSorting.swift */,
 				A1000006000 /* Enums.swift */,
 				A1000062000 /* ErrorEntry.swift */,
@@ -515,6 +520,7 @@
 			children = (
 				80B0502275D5E267C0701E56 /* MedicalFactCheckerMacApp.swift */,
 				D4EAF503118784E1C6D368C8 /* LibraryController.swift */,
+				5A00000000000000000000F2 /* StudyAnalyzerSender.swift */,
 				59D3B6659F5FC046D2C99AA6 /* MacContentView.swift */,
 			);
 			path = App;
@@ -669,6 +675,7 @@
 				A1000003001 /* AppSettings.swift in Sources */,
 				A1000004001 /* Citation.swift in Sources */,
 				A1000005001 /* Document.swift in Sources */,
+				5A00000000000000000000B1 /* Document+StudyAnalyzer.swift in Sources */,
 				A1000006001 /* Enums.swift in Sources */,
 				A1000075001 /* DocumentSorting.swift in Sources */,
 				A1000007001 /* EvidenceReport.swift in Sources */,
@@ -752,6 +759,7 @@
 				A1000069001 /* SchemaVersions.swift in Sources */,
 				A5DF3C2C750F93571F536572 /* MedicalFactCheckerMacApp.swift in Sources */,
 				8A22079973159C1DAFC38361 /* LibraryController.swift in Sources */,
+				5A00000000000000000000B2 /* StudyAnalyzerSender.swift in Sources */,
 				636C1F74FBDE47D6BEFAE889 /* MacContentView.swift in Sources */,
 				375C4E85319161BF2D602D28 /* MacConstants.swift in Sources */,
 				AC7F5F9D117D0C62AB84424D /* MacUtilities.swift in Sources */,
