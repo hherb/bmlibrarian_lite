@@ -23,6 +23,7 @@ Medical Fact Checker helps you evaluate medical claims against peer-reviewed sci
 - Long articles are read in full, never cut short, and a downloaded PDF that turns out to be a different article is refused
 - New tools on saved reports: Find More Evidence, Fetch Full Text for Top Papers, and Retry Full Text
 - Cancel works on every run, and the Mac app now runs in Apple's app sandbox
+- On the Mac: keep your papers in a shared library folder that StudyAnalyzer uses too, and open any paper in StudyAnalyzer from its full text
 
 **How It Works**
 
@@ -70,7 +71,23 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
 
 ---
 
-## What's New (Version 1.9.0)
+## What's New (Version 1.9.1)
+
+**New in 1.9.1**
+- Paper Library (Mac): keep the papers you fetch in one library folder,
+  shared with StudyAnalyzer, chosen in Settings. Your existing papers can
+  be moved in, copied to another library, or copied back, and the library
+  can be cleared paper by paper
+- Open in StudyAnalyzer (Mac): a button in the full-text viewer hands the
+  paper to StudyAnalyzer, when it is installed
+- Every search query a fact check ran is shown, with what each one found,
+  on the fact-check, report and history screens and in PDF reports
+- Claude Opus 4.7 and later now answer, and retired Claude models are no
+  longer offered
+- Full text from PubMed Central's open-access collection is checked
+  against its record before it is read
+- A study known only by its DOI now has its PubMed record found for the
+  transparency assessment
 
 **Retraction Checking**
 - Every paper is checked against Retraction Watch and Crossref before it
@@ -116,6 +133,12 @@ medical,fact-check,pubmed,research,evidence,health,literature,citations,AI,scien
 ---
 
 ## Version History
+
+### Version 1.9.1 (November 2026)
+- The Mac App Store release of 1.9 (1.9.0 was not released for the Mac)
+- Paper Library and Open in StudyAnalyzer on the Mac
+- Every search query shown, with what each found
+- Fixed: Claude Opus 4.7 and later refused every request
 
 ### Version 1.9.0 (November 2026)
 - First App Store release since 1.6.0, with everything in 1.8.0
