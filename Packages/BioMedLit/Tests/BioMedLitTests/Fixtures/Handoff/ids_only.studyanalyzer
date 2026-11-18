@@ -1,0 +1,9 @@
+{
+  "format": "studyanalyzer-handoff",
+  "version": 1,
+  "sender": "MedicalFactChecker",
+  "identifiers": {
+    "pmid": "PPR456",
+    "doi": "10.1000/xyz"
+  }
+}

@@ -11,6 +11,17 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 
 ## [Unreleased]
 
+### Added
+
+- **Open in StudyAnalyzer (macOS full-text viewer).** A button in the
+  full-text viewer hands the paper to StudyAnalyzer, when it is installed,
+  as a `.studyanalyzer` file. The file carries what StudyAnalyzer cannot
+  fetch itself: the library's JATS file, else identifiers only for a paper
+  whose text came from JATS while online, else the PDF, the text or the
+  HTML, else identifiers only. An abstract-only record's text is never sent
+  as the paper. No lasting copy is kept, and a source passed over, a text
+  known to be incomplete or a failed send is named in the viewer.
+
 ### Fixed
 
 - **Claude works again on a fresh install (#758).** Claude is sent no
