@@ -299,6 +299,25 @@ interface SessionDao {
         updatedAt: Long = System.currentTimeMillis()
     )
 
+    /**
+     * Record every query the session ran.
+     *
+     * @param id Session ID
+     * @param queriesJson The queries, as a JSON-encoded `SearchQueryRecord` array
+     * @param updatedAt Timestamp for the update
+     */
+    @Query("""
+        UPDATE sessions SET
+            search_queries_json = :queriesJson,
+            updated_at = :updatedAt
+        WHERE id = :id
+    """)
+    suspend fun updateSearchQueries(
+        id: String,
+        queriesJson: String,
+        updatedAt: Long = System.currentTimeMillis()
+    )
+
     // ==================== Delete Operations ====================
 
     /**

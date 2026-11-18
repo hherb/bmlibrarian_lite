@@ -125,6 +125,15 @@ data class SessionEntity(
     @ColumnInfo(name = "fetched_pmids")
     val fetchedPmids: String? = null,
 
+    /**
+     * Every query the session ran, with the documents each added, as a
+     * JSON-encoded `SearchQueryRecord` array. Null before the first search,
+     * and for a session saved before queries were logged; read it with
+     * [com.bmlibrarian.factchecker.domain.workflow.SessionQueryLog].
+     */
+    @ColumnInfo(name = "search_queries_json")
+    val searchQueriesJson: String? = null,
+
     // ==================== HyDE (Hypothetical Document Embedding) ====================
 
     /** Generated hypothetical abstract for better embedding matching. */

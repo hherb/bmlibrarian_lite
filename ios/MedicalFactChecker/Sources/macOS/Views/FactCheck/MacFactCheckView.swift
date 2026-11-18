@@ -606,22 +606,10 @@ struct MacProgressSection: View {
                 }
             }
 
-            // Generated PubMed query (show once generated)
-            if let query = workflow.session?.pubmedQuery, !query.isEmpty {
-                VStack(alignment: .leading, spacing: MacSpacing.xSmall) {
-                    Text("PubMed Query:")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(.secondary)
-                    Text(query)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundColor(.primary)
-                        .textSelection(.enabled)
-                        .padding(MacSpacing.medium)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.secondary.opacity(MacOpacity.subtle))
-                        .cornerRadius(MacCornerRadius.small)
-                }
+            // Generated queries (shown once generated): the first, unfolding
+            // to every query run so far with what each found
+            if let session = workflow.session {
+                SearchQueriesView(session: session)
             }
         }
         .padding(MacSpacing.large)

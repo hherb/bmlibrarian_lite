@@ -455,20 +455,8 @@ struct MacSessionDetailView: View {
                         .textSelection(.enabled)
                 }
 
-                // Query
-                if let query = session.pubmedQuery {
-                    VStack(alignment: .leading, spacing: MacSpacing.small) {
-                        Text("PubMed Query")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .textCase(.uppercase)
-                        Text(query)
-                            .font(.body)
-                            .fontDesign(.monospaced)
-                            .foregroundColor(.accentColor)
-                            .textSelection(.enabled)
-                    }
-                }
+                // Queries: the first, unfolding to every query run
+                SearchQueriesView(session: session, headerTextCase: .uppercase)
 
                 Divider()
 

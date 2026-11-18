@@ -134,7 +134,7 @@ abstract class AppDatabase : RoomDatabase() {
         const val DATABASE_NAME = "medical_factchecker.db"
 
         /** The schema version; [ALL_MIGRATIONS] must reach it. */
-        const val DATABASE_VERSION = 11
+        const val DATABASE_VERSION = 12
 
         /**
          * Migration from version 1 to 2.
@@ -338,6 +338,19 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 11 to 12.
+         *
+         * Adds each session's log of the queries it ran, with the documents
+         * each added (none for existing rows: their queries are read from what
+         * they kept).
+         */
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE sessions ADD COLUMN search_queries_json TEXT")
+            }
+        }
+
+        /**
          * Every migration, in order, as the database is built with them.
          *
          * One list, so a migration added here is registered and one left out is
@@ -355,7 +368,8 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_7_8,
             MIGRATION_8_9,
             MIGRATION_9_10,
-            MIGRATION_10_11
+            MIGRATION_10_11,
+            MIGRATION_11_12
         )
     }
 }

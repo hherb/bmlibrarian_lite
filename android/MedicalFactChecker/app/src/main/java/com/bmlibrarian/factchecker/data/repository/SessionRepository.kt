@@ -197,6 +197,16 @@ class SessionRepository @Inject constructor(
     }
 
     /**
+     * Record every query the session ran.
+     *
+     * @param sessionId Session ID
+     * @param queriesJson The queries, as a JSON-encoded `SearchQueryRecord` array
+     */
+    suspend fun updateSearchQueries(sessionId: String, queriesJson: String) {
+        sessionDao.updateSearchQueries(sessionId, queriesJson)
+    }
+
+    /**
      * Add token usage to a session.
      *
      * @param sessionId Session ID

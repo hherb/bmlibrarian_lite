@@ -119,17 +119,9 @@ struct ReportContentView: View {
                             .italic()
                     }
 
-                    if let query = session.pubmedQuery {
+                    if !session.searchQueries().isEmpty {
                         Divider()
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("PubMed Query")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text(query)
-                                .font(.caption)
-                                .fontDesign(.monospaced)
-                                .foregroundColor(.accentColor)
-                        }
+                        SearchQueriesView(session: session)
                     }
                 }
                 .padding()
@@ -366,17 +358,9 @@ struct ReportView: View {
                                     .italic()
                             }
 
-                            if let query = session.pubmedQuery {
+                            if !session.searchQueries().isEmpty {
                                 Divider()
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("PubMed Query")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Text(query)
-                                        .font(.caption)
-                                        .fontDesign(.monospaced)
-                                        .foregroundColor(.accentColor)
-                                }
+                                SearchQueriesView(session: session)
                             }
                         }
                         .padding()

@@ -13,6 +13,19 @@ apps additionally carry their own store version tags (`swift_*`, `appstore_*`).
 
 ### Added
 
+- **Apps: every search query a fact check ran is shown, with what each
+  found.** The iOS/macOS and Android apps showed only the first query the
+  claim was converted to. Smart search's alternative queries, and the initial
+  query asked of another provider after *Find more evidence*, are now listed
+  too: tap the query (or *Show all*) to unfold them. Each query names how many
+  documents it added, how many of those were relevant, how many are not
+  scored yet, and how many matches its source(s) reported; when both
+  providers were searched, the form Europe PMC was asked is shown as well.
+  On iOS/macOS the list is on the fact-check, report and history screens and
+  in printed and PDF reports; on Android, on the fact-check screen. A session
+  saved before this lists its initial query and its alternatives, with counts
+  only where every document is known to be the initial query's. Android's
+  database moves to version 12 (a new `search_queries_json` session column).
 - **Open in StudyAnalyzer (macOS full-text viewer).** A button in the
   full-text viewer hands the paper to StudyAnalyzer, when it is installed,
   as a `.studyanalyzer` file. The file carries what StudyAnalyzer cannot
