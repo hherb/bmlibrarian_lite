@@ -243,6 +243,8 @@ CI_LOWER_QUANTILE = 0.025
 CI_UPPER_QUANTILE = 0.975
 ECE_BINS = 15
 WILSON_Z = 1.959964
+# A pre-filter may not drop more relevant pairs than this share.
+SCREENING_RECALL = 0.95
 LLM_WORKERS = 4
 
 
@@ -514,6 +516,34 @@ def auc(positives: Sequence[float], negatives: Sequence[float]) -> float | None:
     rank_sum = math.fsum(ranks[: len(positives)])
     n_pos, n_neg = len(positives), len(negatives)
     return (rank_sum - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
+
+
+def screening_at_recall(
+    positives: Sequence[float],
+    negatives: Sequence[float],
+    recall: float = SCREENING_RECALL,
+) -> float | None:
+    """The share of negatives a cut-off drops while it keeps ``recall`` of the positives.
+
+    The cut-off is the highest score that still keeps at least ``recall`` of
+    the positives at or above it: what a pre-filter in front of a costlier
+    scorer would save.
+
+    Args:
+        positives: Scores of the relevant items.
+        negatives: Scores of the irrelevant items.
+        recall: Share of positives that must be kept.
+
+    Returns:
+        The share of negatives below the cut-off, or None when either side is
+        empty.
+    """
+    if not positives or not negatives:
+        return None
+    ordered = sorted(positives, reverse=True)
+    keep = math.ceil(recall * len(ordered))
+    cut = ordered[keep - 1]
+    return sum(1 for v in negatives if v < cut) / len(negatives)
 
 
 def wilson_interval(successes: int, n: int) -> tuple[float, float] | None:
@@ -1218,6 +1248,11 @@ def relevance_metrics(labels: Sequence[Mapping[str, Any]], preds: Mapping[str, M
             return auc(pos, neg)
         return stat
 
+    def screening(idx: Sequence[int]) -> float | None:
+        pos = [scores[i] for i in idx if grades[i] >= 1]
+        neg = [scores[i] for i in idx if grades[i] < 1]
+        return screening_at_recall(pos, neg)
+
     def within_topic_auc(idx: Sequence[int]) -> float | None:
         per_topic = defaultdict(list)
         for i in idx:
@@ -1241,6 +1276,8 @@ def relevance_metrics(labels: Sequence[Mapping[str, Any]], preds: Mapping[str, M
         "auc_relevant_ci": cluster_bootstrap(clusters, auc_at(1)),
         "auc_fully_relevant": auc_at(2)(all_idx),
         "auc_fully_relevant_ci": cluster_bootstrap(clusters, auc_at(2)),
+        "screened_out": screening(all_idx),
+        "screened_out_ci": cluster_bootstrap(clusters, screening),
         "within_topic_auc": within_topic_auc(all_idx),
         "within_topic_auc_ci": cluster_bootstrap(clusters, within_topic_auc),
         "mean_score_by_grade": per_grade_mean,
@@ -1318,6 +1355,7 @@ def _relevance_table(results: Mapping[str, Mapping[str, Any]]) -> str:
     lines.append(line("AUC, grade ≥ 1 vs 0", "auc_relevant"))
     lines.append(line("AUC, grade 2 vs ≤ 1", "auc_fully_relevant"))
     lines.append(line("Mean within-question AUC (≥ 1 vs 0)", "within_topic_auc"))
+    lines.append(line("Grade-0 pairs dropped, keeping 95 % of grade ≥ 1", "screened_out"))
     for g in RELEVANCE_GRADES:
         lines.append(f"| Mean score, grade {g} | " + " | ".join(
             _fmt(results[n]["mean_score_by_grade"][g], 2) for n in names) + " |")

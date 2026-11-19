@@ -309,3 +309,16 @@ def test_no_ece_without_a_confidence_for_every_answer() -> None:
     """An evaluator that states no confidence gets no ECE."""
     labels = [{"id": "a", "label": "rct"}]
     assert mb.design_metrics(labels, {"a": {"id": "a", "design": "rct"}})["ece"] is None
+
+
+def test_screening_at_recall() -> None:
+    """The cut-off keeps the recall asked; negatives below it are dropped."""
+    positives = [5.0, 4.0, 3.0, 2.0]
+    negatives = [1.0, 1.5, 2.0, 3.5]
+    # 3 of 4 positives (75 %) kept at a cut-off of 3.0: 1.0, 1.5, 2.0 below it.
+    assert mb.screening_at_recall(positives, negatives, recall=0.75) == 0.75
+    # All positives kept: cut-off 2.0, so 2.0 itself is kept; 1.0, 1.5 dropped.
+    assert mb.screening_at_recall(positives, negatives, recall=1.0) == 0.5
+    # One positive kept: cut-off 5.0 drops every negative.
+    assert mb.screening_at_recall(positives, negatives, recall=0.25) == 1.0
+    assert mb.screening_at_recall([], negatives) is None
