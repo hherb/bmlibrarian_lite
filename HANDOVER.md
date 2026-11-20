@@ -21,6 +21,9 @@ its slice has landed; add a new section when handing off new work.
   sign a release AAB built at `0641e80c` (`JAVA_HOME` = Android Studio's
   `jbr`, `BMLIB_DIR` = a bmlib worktree at **`aa47a57`**), internal track,
   smoke test, tag `android_1.9.0`.
+- **Apps 1.9.1 cut for the Mac App Store** (PR #811; the Mac skips 1.9.0, so
+  `APP_STORE.md` carries both versions' What's New). Its Developer ID DMG was
+  tested on the Mac. Left: the archive, the upload, the tag.
 
 **The shared paper library** (decided 2026-11-15: every app, where its platform
 allows; #788 macOS, #789 desktop, #790 Android; design: StudyAnalyzer's
@@ -145,13 +148,24 @@ have landed):
   ScienceDirect entry, tick the check, quit; download a supplement there and
   see *Keep this PDF* offered (offscreen smoke passed bar #530's segfault).
 
-**Retraction checking, desktop: done** (PRs #594, #597, #605; spec
-`docs/superpowers/specs/2026-10-18-retraction-checking-design.md`; contract
-`doc/cross_platform/retraction_parity/`). bmlib from PyPI (`>=0.13.0`, never a
-git pin). Snapshot rows keep `run_status`/`run_deciding` as set-once facts.
+**Retraction checking, desktop: done** (PRs #594, #597, #605; contract
+`doc/cross_platform/retraction_parity/`). bmlib from PyPI (`>=0.13.0`, never
+a git pin). Snapshot rows keep `run_status`/`run_deciding` set-once.
 
 ## Recently landed (context)
 
+- **MANTA benchmark** (PR #812, Claude columns in this session's PR;
+  `doc/developer/manta_benchmark/README.md`). Study design: MANTA-4B 89 %,
+  the app's Haiku 5.5 classifier 84 %, bmlib's rules 39 %; MANTA is
+  calibrated, Haiku is overconfident. Relevance: MANTA-4B ranks as well as
+  the Sonnet 5.5 scorer (ρ 0.617 / 0.619). MANTA-27B is not run (≈ 60 GB
+  GPU). Whether to adopt MANTA is the maintainer's call. **Thinking counts
+  against `max_tokens`**: Haiku 5.5 thinks by default (empty thinking
+  blocks), so the desktop's short-answer caps are `SHORT_ANSWER_MAX_TOKENS`
+  (2048; 256 lost a third of classifications). The apps' 512 caps: **#813**.
+- **Every search query a fact check ran** (apps, PR #810): `SearchQueryLog`
+  on both apps, Android Room 11 → 12. Not yet seen running on a device or
+  simulator.
 - **Strict service JSON** (#781, #784): every service's JSON but esearch is
   read strictly (desktop `search_failures.strict_response_json`, **a test
   double scripts `.content`, never `.json()`**; Android `strictJsonElement`).
@@ -312,26 +326,14 @@ Open issues by family; each issue carries the detail. None blocks another.
 
 ### Transparency after PR #388: desktop parity and the ports
 
-- **#390** Swift + Android look trial registrations up from the title only
-  (port Python's PubMed databank-link source); **#389** a missing
-  `hasResults` reads as "results not posted"; **#391** unchecked funders are
-  not flagged on Low/Medium, and a malformed CrossRef funder array is silent;
-  **#392** document-set parity and a `StoredTransparency` type (its shared
-  explanation fixture is PR #419's contract). From PR #410: **#411**
-  provisional shown only in detail views; **#412** a newer build's provisional caveat offers no button;
-  **#413** an undecodable newer-build result is overwritten (Swift + Android);
-  **#414** Swift's PMID lookup adopts the first hit; **#415** permanent
-  lookup failures are re-analysed forever. From PR #419: **#416** the
-  limited-certainty summary is worded differently on Swift and Android;
-  **#417** a replaced `LiteConfig` never reaches the tabs (the dialog half
-  is done); **#418** stored levels are not re-rated when settings change;
-  **#422** Swift detail views truncate the industry-funding confidence
-  that the reason sentence rounds. The #420 round's leftovers are listed
-  above.
-- Android: **#384** analyse full text (every rating is "limited" until then);
-  **#387** data-availability parity, DAO/migration tests.
-- **#400** the data-availability heading rule matches ~25 body sections per
-  5,000 articles (first match wins); it lands only with a tighter rule.
+- Swift + Android: **#390** trial registrations from the title only (port
+  Python's databank-link source); **#389** missing `hasResults`; **#391**
+  unchecked funders unflagged; **#392** document-set parity,
+  `StoredTransparency`; **#411**–**#415** (provisional display, newer-build
+  rows, first PMID hit, permanent failures re-analysed); **#416**, **#417**,
+  **#418**, **#422** (PR #419's). Android **#384** full text, **#387**.
+- **#400** the data-availability heading rule is too loose (~25 body
+  sections per 5,000); it lands only with a tighter rule.
 
 ### The analysis-failure family: what is left
 
@@ -398,22 +400,15 @@ accident; `failedEuropePMCPage`'s `max(1, …)` matters most).
 
 ### Identity, citations and the report renderer (#206 and #226 rounds)
 
-Workflow maps and `CheckpointManager` still key documents by the ambiguous
-primary slot, so a resume replays one score onto every document sharing it
-(#227); an identity and a citation identifier are the same type, so
-swapping them compiles (#228, with #219, #222); rows written before #208
-keep a derived identity and a collision goes undetected (#232); a malformed
-source token warns per redraw (#223). Reporting: an unresolvable reference
-is a silent no-op on both platforms (#224); the export deletes citations and
-tells only the log (#237 — the parts exist: `RemovedCitationNotice`); a
-`doc:` target missing its `(` survives the sweep (#236, wants a decision
-under golden rule 6); BioMedLit discards diagnostics by default (#238);
-block rendering differs from export (#240 / #241). **#231** transparency
-cannot run from full text alone (needs "not assessed" — a contract change,
-with #203). Android: #234, #229, #205, #220. Python: **#207** no preprint
-routing, first rung only, PMC rung first. Also #214 / #215
-(`FullTextService` never reports what the retrieval chain learns), #216
-(nothing tests `FactCheckWorkflow`'s three document-creation paths), #210.
+Resume replays one score onto every document sharing a primary slot (#227);
+identity and citation id share a type (#228, #219, #222); pre-#208 rows keep
+a derived identity (#232); a bad source token warns per redraw (#223);
+unresolvable references are silent (#224); the export's removed citations
+reach only the log (#237, `RemovedCitationNotice` exists); `doc:` without `(`
+(#236, golden rule 6); BioMedLit drops diagnostics (#238); block rendering vs
+export (#240 / #241); **#231** transparency from full text alone (with
+#203). Android #234, #229, #205, #220. Python **#207** (no preprint routing).
+Also #214 / #215, #216, #210.
 
 ### Extracted text and the transparency analyser (#198 round)
 
