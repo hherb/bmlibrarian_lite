@@ -26,6 +26,7 @@ from typing import Optional
 
 from ..storage import LiteStorage
 from ..config import LiteConfig
+from ..constants import SHORT_ANSWER_MAX_TOKENS
 from ..data_models import LiteChunk
 from ..chunking import chunk_document_for_interrogation
 from ..embeddings import LiteEmbedder
@@ -184,7 +185,7 @@ class LiteInterrogationAgent(LiteBaseAgent):
                 messages,
                 task_id="query_expansion",
                 temperature=0.3,
-                max_tokens=200,
+                max_tokens=SHORT_ANSWER_MAX_TOKENS,
             )
             if response.stop_reason == STOP_REASON_REFUSAL:
                 logger.warning("The model %s declined to expand the question", response.model)
@@ -342,7 +343,7 @@ Provide a brief summary of what this document appears to be about. Include the m
             messages,
             task_id="document_summary",
             temperature=0.2,
-            max_tokens=500,
+            max_tokens=SHORT_ANSWER_MAX_TOKENS,
         )
 
     def clear_document(self, document_id: Optional[str] = None) -> None:
